@@ -2,6 +2,9 @@
 
 use App\Modules\Core\Http\Controllers\AuthController;
 use App\Modules\Core\Http\Controllers\UserController;
+use App\Modules\Finance\Http\Controllers\FinancialReportController;
+use App\Modules\Finance\Http\Controllers\GLAccountController;
+use App\Modules\Finance\Http\Controllers\JournalEntryController;
 use App\Modules\Inventory\Http\Controllers\ItemController;
 use App\Modules\Inventory\Http\Controllers\StockBalanceController;
 use App\Modules\Inventory\Http\Controllers\StockMovementController;
@@ -72,6 +75,18 @@ Route::prefix('v1')->group(function () {
 
             Route::apiResource('invoices', InvoiceController::class)->only(['index', 'store']);
             Route::post('invoices/{invoice}/issue', [InvoiceController::class, 'issue']);
+        });
+
+        Route::prefix('finance')->group(function () {
+            Route::apiResource('gl-accounts', GLAccountController::class)->only(['index', 'store', 'update']);
+
+            Route::apiResource('journal-entries', JournalEntryController::class)->only(['index', 'store']);
+            Route::post('journal-entries/{journal_entry}/post', [JournalEntryController::class, 'post']);
+
+            Route::get('reports/trial-balance', [FinancialReportController::class, 'trialBalance']);
+            Route::get('reports/profit-and-loss', [FinancialReportController::class, 'profitAndLoss']);
+            Route::get('reports/balance-sheet', [FinancialReportController::class, 'balanceSheet']);
+            Route::get('reports/receivables', [FinancialReportController::class, 'receivables']);
         });
     });
 });

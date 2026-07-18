@@ -36,6 +36,15 @@ const navItems = [
             { key: '/sales/invoices', label: 'Invoices' },
         ],
     },
+    {
+        key: 'finance',
+        label: 'Finance',
+        children: [
+            { key: '/finance/chart-of-accounts', label: 'Chart of Accounts' },
+            { key: '/finance/journal-entries', label: 'Journal Entries' },
+            { key: '/finance/reports', label: 'Reports' },
+        ],
+    },
 ];
 
 export default function AppLayout({ children }: PropsWithChildren) {

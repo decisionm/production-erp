@@ -7,6 +7,7 @@ use App\Modules\Sales\Models\Enums\InvoiceStatus;
 use App\Modules\Sales\Models\Invoice;
 use App\Modules\Sales\Models\SalesOrder;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class InvoiceService
@@ -17,6 +18,20 @@ class InvoiceService
             ->with(['lines.item', 'customer', 'salesOrder'])
             ->orderByDesc('id')
             ->paginate($perPage);
+    }
+
+    /**
+     * Unpaid invoices (draft or issued) — the source Finance's receivables
+     * report reads from. Not paginated: this is meant for aggregation, not
+     * a list screen.
+     */
+    public function unpaid(): Collection
+    {
+        return Invoice::query()
+            ->with(['lines', 'customer'])
+            ->where('status', '!=', InvoiceStatus::Paid)
+            ->orderBy('invoice_date')
+            ->get();
     }
 
     /**
