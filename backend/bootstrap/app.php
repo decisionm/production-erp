@@ -17,6 +17,12 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->api(prepend: [
             EnsureFrontendRequestsAreStateful::class,
         ]);
+
+        // There is no server-side named "login" route — the SPA owns /login
+        // client-side. Without this, the framework default tries route('login')
+        // for any unauthenticated request and throws RouteNotFoundException
+        // instead of a clean 401.
+        $middleware->redirectGuestsTo(fn (Request $request) => $request->is('api/*') ? null : '/login');
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

@@ -8,7 +8,7 @@ Companion to `ERP-FEATURES.md` (feature scope) and `DEVELOPMENT-PLAN.md` (build 
 
 | Layer | Choice | Notes |
 |---|---|---|
-| Frontend | React (Vite or Next.js) | SPA calling the Laravel API. Next.js only if SSR/SEO matters (unlikely for an internal ERP behind login) — plain Vite + React Router is simpler if not. |
+| Frontend | React + TypeScript (Vite) | Standalone project at `/frontend`, sibling to `/backend` — not nested inside Laravel's `resources/`. SPA calling the Laravel API. `npm run build` writes directly into `backend/public/build/`; Laravel serves that build statically for every non-API route. See §3 for why this is a separate project rather than the more common Laravel-convention `resources/js/` approach. |
 | Backend / API | Laravel (latest LTS-equivalent) | REST API, `laravel/sanctum` for auth tokens |
 | Database | MySQL | One database per company instance (see §2) |
 | Queue/cache | Redis preferred, DB-driver fallback if Redis unavailable on a given host | Needed for background jobs (payroll runs, report generation, Tally sync, email/SMS) |
@@ -76,13 +76,16 @@ app/
 - Form Request classes for validation, API Resource classes for response shaping (don't return raw Eloquent models)
 - RBAC via a permissions package (e.g. `spatie/laravel-permission`) — roles like Admin, Plant Manager, Accountant, Store Keeper, HR mapped to module-level and action-level permissions
 
-### Frontend (React)
+### Frontend (React) — `/frontend`, a standalone project
+
+**Why not nest React inside Laravel's `resources/js/`?** That's the more common Laravel-ecosystem convention (it's how the official Breeze/Jetstream React and Inertia starter kits do it), and it was the initial approach here too. Reconsidered once the app's actual shape became clear: an ERP with 8-10 large modules is a big frontend codebase in its own right, and the API is explicitly meant to be reusable by other clients later — bundling the frontend inside the backend framework's resource folder understates that separation (mixed git history, competing tooling roots, "second-class citizen" feel). Moving it to a sibling `/frontend` project costs nothing operationally: `npm run build` still writes straight into `backend/public/build/`, and Laravel's catch-all route still just serves that build's `index.html` statically — same single-deployable-unit, same shared-hosting compatibility, cleaner separation.
 
 - Feature-folder structure mirroring backend modules (`src/features/inventory`, `src/features/sales`, etc.)
-- State: server state via React Query/TanStack Query (handles caching, refetching — good fit for CRUD-heavy ERP screens); local/UI state via component state or a light store (Zustand) — avoid a heavy global Redux store for what's mostly server data
+- State: server state via React Query/TanStack Query (handles caching, refetching — good fit for CRUD-heavy ERP screens); local/UI state via a light store (Zustand) — avoid a heavy global Redux store for what's mostly server data
 - Forms: React Hook Form + schema validation (Zod) matching backend validation rules where practical
-- Component library: pick one (e.g. Ant Design or MUI) — ERP UIs are data-table/form heavy, a component library with strong table/form primitives saves significant time over building from scratch
+- Component library: **Ant Design** — ERP UIs are data-table/form heavy; Ant Design's Table/Form/DatePicker primitives are purpose-built for exactly this (it was originally built by Alibaba for admin/dashboard apps)
 - Routing: role-based route guards matching backend permissions
+- Local dev: Vite's dev server proxies `/api` and `/sanctum` to the Laravel dev server (see `frontend/vite.config.ts`), so the browser always sees same-origin requests — no CORS config needed in either environment
 
 ---
 
