@@ -2,9 +2,10 @@
 
 namespace App\Modules\Inventory\Exceptions;
 
+use App\Exceptions\DomainException;
 use RuntimeException;
 
-class InsufficientStockException extends RuntimeException
+class InsufficientStockException extends RuntimeException implements DomainException
 {
     public static function forItem(int $itemId, int $warehouseId, string $available, string $requested): self
     {

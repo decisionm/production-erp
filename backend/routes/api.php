@@ -6,6 +6,10 @@ use App\Modules\Inventory\Http\Controllers\ItemController;
 use App\Modules\Inventory\Http\Controllers\StockBalanceController;
 use App\Modules\Inventory\Http\Controllers\StockMovementController;
 use App\Modules\Inventory\Http\Controllers\WarehouseController;
+use App\Modules\Procurement\Http\Controllers\GoodsReceiptController;
+use App\Modules\Procurement\Http\Controllers\PurchaseOrderController;
+use App\Modules\Procurement\Http\Controllers\PurchaseRequisitionController;
+use App\Modules\Procurement\Http\Controllers\VendorController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -39,6 +43,19 @@ Route::prefix('v1')->group(function () {
             Route::post('stock-movements/receipts', [StockMovementController::class, 'receipt']);
             Route::post('stock-movements/issues', [StockMovementController::class, 'issue']);
             Route::post('stock-movements/transfers', [StockMovementController::class, 'transfer']);
+        });
+
+        Route::prefix('procurement')->group(function () {
+            Route::apiResource('vendors', VendorController::class)->only(['index', 'store', 'update']);
+
+            Route::apiResource('purchase-requisitions', PurchaseRequisitionController::class)->only(['index', 'store']);
+            Route::post('purchase-requisitions/{purchase_requisition}/approve', [PurchaseRequisitionController::class, 'approve']);
+            Route::post('purchase-requisitions/{purchase_requisition}/reject', [PurchaseRequisitionController::class, 'reject']);
+
+            Route::apiResource('purchase-orders', PurchaseOrderController::class)->only(['index', 'store']);
+            Route::post('purchase-orders/{purchase_order}/send', [PurchaseOrderController::class, 'send']);
+
+            Route::apiResource('goods-receipts', GoodsReceiptController::class)->only(['index', 'store']);
         });
     });
 });

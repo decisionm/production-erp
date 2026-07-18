@@ -7,9 +7,25 @@ import { useAuthStore } from '@/features/auth/store';
 
 const navItems = [
     { key: '/', label: 'Dashboard' },
-    { key: '/inventory/items', label: 'Items' },
-    { key: '/inventory/warehouses', label: 'Warehouses' },
-    { key: '/inventory/stock', label: 'Stock' },
+    {
+        key: 'inventory',
+        label: 'Inventory',
+        children: [
+            { key: '/inventory/items', label: 'Items' },
+            { key: '/inventory/warehouses', label: 'Warehouses' },
+            { key: '/inventory/stock', label: 'Stock' },
+        ],
+    },
+    {
+        key: 'procurement',
+        label: 'Procurement',
+        children: [
+            { key: '/procurement/vendors', label: 'Vendors' },
+            { key: '/procurement/purchase-requisitions', label: 'Purchase Requisitions' },
+            { key: '/procurement/purchase-orders', label: 'Purchase Orders' },
+            { key: '/procurement/goods-receipts', label: 'Goods Receipts' },
+        ],
+    },
 ];
 
 export default function AppLayout({ children }: PropsWithChildren) {

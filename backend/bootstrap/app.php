@@ -1,6 +1,6 @@
 <?php
 
-use App\Modules\Inventory\Exceptions\InsufficientStockException;
+use App\Exceptions\DomainException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -30,7 +30,9 @@ return Application::configure(basePath: dirname(__DIR__))
             fn (Request $request) => $request->is('api/*'),
         );
 
-        $exceptions->render(function (InsufficientStockException $e) {
+        // Any module's exception implementing DomainException (an expected
+        // business-rule violation, not a bug) renders as a plain 422.
+        $exceptions->render(function (DomainException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         });
     })->create();
