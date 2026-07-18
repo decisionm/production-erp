@@ -7,6 +7,8 @@ import QuotationsPage from '@/features/crm/pages/QuotationsPage';
 import ChartOfAccountsPage from '@/features/finance/pages/ChartOfAccountsPage';
 import JournalEntriesPage from '@/features/finance/pages/JournalEntriesPage';
 import ReportsPage from '@/features/finance/pages/ReportsPage';
+import IncomingInspectionsPage from '@/features/quality/pages/IncomingInspectionsPage';
+import NonConformanceReportsPage from '@/features/quality/pages/NonConformanceReportsPage';
 import ItemsPage from '@/features/inventory/pages/ItemsPage';
 import StockPage from '@/features/inventory/pages/StockPage';
 import WarehousesPage from '@/features/inventory/pages/WarehousesPage';
@@ -50,6 +52,8 @@ export default function App() {
                                     <Route path="/finance/chart-of-accounts" element={<ChartOfAccountsPage />} />
                                     <Route path="/finance/journal-entries" element={<JournalEntriesPage />} />
                                     <Route path="/finance/reports" element={<ReportsPage />} />
+                                    <Route path="/quality/incoming-inspections" element={<IncomingInspectionsPage />} />
+                                    <Route path="/quality/ncrs" element={<NonConformanceReportsPage />} />
                                     <Route path="*" element={<Navigate to="/" replace />} />
                                 </Routes>
                             </AppLayout>

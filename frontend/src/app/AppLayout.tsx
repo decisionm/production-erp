@@ -54,6 +54,14 @@ const navItems = [
             { key: '/finance/reports', label: 'Reports' },
         ],
     },
+    {
+        key: 'quality',
+        label: 'Quality',
+        children: [
+            { key: '/quality/incoming-inspections', label: 'Incoming Inspections' },
+            { key: '/quality/ncrs', label: 'Non-Conformance Reports' },
+        ],
+    },
 ];
 
 export default function AppLayout({ children }: PropsWithChildren) {

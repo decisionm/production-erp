@@ -16,6 +16,8 @@ use App\Modules\Procurement\Http\Controllers\GoodsReceiptController;
 use App\Modules\Procurement\Http\Controllers\PurchaseOrderController;
 use App\Modules\Procurement\Http\Controllers\PurchaseRequisitionController;
 use App\Modules\Procurement\Http\Controllers\VendorController;
+use App\Modules\Quality\Http\Controllers\IncomingInspectionController;
+use App\Modules\Quality\Http\Controllers\NonConformanceReportController;
 use App\Modules\Sales\Http\Controllers\CustomerController;
 use App\Modules\Sales\Http\Controllers\DeliveryController;
 use App\Modules\Sales\Http\Controllers\InvoiceController;
@@ -102,6 +104,13 @@ Route::prefix('v1')->group(function () {
             Route::post('quotations/{quotation}/send', [QuotationController::class, 'send']);
             Route::post('quotations/{quotation}/accept', [QuotationController::class, 'accept']);
             Route::post('quotations/{quotation}/reject', [QuotationController::class, 'reject']);
+        });
+
+        Route::prefix('quality')->group(function () {
+            Route::apiResource('incoming-inspections', IncomingInspectionController::class)->only(['index', 'store']);
+
+            Route::apiResource('ncrs', NonConformanceReportController::class)->only(['index', 'store']);
+            Route::post('ncrs/{ncr}/close', [NonConformanceReportController::class, 'close']);
         });
     });
 });
