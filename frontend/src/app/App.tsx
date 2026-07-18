@@ -1,6 +1,9 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import LoginPage from '@/features/auth/pages/LoginPage';
 import DashboardPage from '@/features/dashboard/pages/DashboardPage';
+import LeadsPage from '@/features/crm/pages/LeadsPage';
+import OpportunitiesPage from '@/features/crm/pages/OpportunitiesPage';
+import QuotationsPage from '@/features/crm/pages/QuotationsPage';
 import ChartOfAccountsPage from '@/features/finance/pages/ChartOfAccountsPage';
 import JournalEntriesPage from '@/features/finance/pages/JournalEntriesPage';
 import ReportsPage from '@/features/finance/pages/ReportsPage';
@@ -30,6 +33,9 @@ export default function App() {
                             <AppLayout>
                                 <Routes>
                                     <Route path="/" element={<DashboardPage />} />
+                                    <Route path="/crm/leads" element={<LeadsPage />} />
+                                    <Route path="/crm/opportunities" element={<OpportunitiesPage />} />
+                                    <Route path="/crm/quotations" element={<QuotationsPage />} />
                                     <Route path="/inventory/items" element={<ItemsPage />} />
                                     <Route path="/inventory/warehouses" element={<WarehousesPage />} />
                                     <Route path="/inventory/stock" element={<StockPage />} />

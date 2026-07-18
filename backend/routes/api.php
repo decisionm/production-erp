@@ -2,6 +2,9 @@
 
 use App\Modules\Core\Http\Controllers\AuthController;
 use App\Modules\Core\Http\Controllers\UserController;
+use App\Modules\CRM\Http\Controllers\LeadController;
+use App\Modules\CRM\Http\Controllers\OpportunityController;
+use App\Modules\CRM\Http\Controllers\QuotationController;
 use App\Modules\Finance\Http\Controllers\FinancialReportController;
 use App\Modules\Finance\Http\Controllers\GLAccountController;
 use App\Modules\Finance\Http\Controllers\JournalEntryController;
@@ -87,6 +90,18 @@ Route::prefix('v1')->group(function () {
             Route::get('reports/profit-and-loss', [FinancialReportController::class, 'profitAndLoss']);
             Route::get('reports/balance-sheet', [FinancialReportController::class, 'balanceSheet']);
             Route::get('reports/receivables', [FinancialReportController::class, 'receivables']);
+        });
+
+        Route::prefix('crm')->group(function () {
+            Route::apiResource('leads', LeadController::class)->only(['index', 'store', 'update']);
+            Route::post('leads/{lead}/convert', [LeadController::class, 'convert']);
+
+            Route::apiResource('opportunities', OpportunityController::class)->only(['index', 'store', 'update']);
+
+            Route::apiResource('quotations', QuotationController::class)->only(['index', 'store']);
+            Route::post('quotations/{quotation}/send', [QuotationController::class, 'send']);
+            Route::post('quotations/{quotation}/accept', [QuotationController::class, 'accept']);
+            Route::post('quotations/{quotation}/reject', [QuotationController::class, 'reject']);
         });
     });
 });

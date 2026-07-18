@@ -8,6 +8,15 @@ import { useAuthStore } from '@/features/auth/store';
 const navItems = [
     { key: '/', label: 'Dashboard' },
     {
+        key: 'crm',
+        label: 'CRM',
+        children: [
+            { key: '/crm/leads', label: 'Leads' },
+            { key: '/crm/opportunities', label: 'Opportunities' },
+            { key: '/crm/quotations', label: 'Quotations' },
+        ],
+    },
+    {
         key: 'inventory',
         label: 'Inventory',
         children: [
