@@ -26,6 +26,16 @@ const navItems = [
             { key: '/procurement/goods-receipts', label: 'Goods Receipts' },
         ],
     },
+    {
+        key: 'sales',
+        label: 'Sales',
+        children: [
+            { key: '/sales/customers', label: 'Customers' },
+            { key: '/sales/sales-orders', label: 'Sales Orders' },
+            { key: '/sales/deliveries', label: 'Deliveries' },
+            { key: '/sales/invoices', label: 'Invoices' },
+        ],
+    },
 ];
 
 export default function AppLayout({ children }: PropsWithChildren) {

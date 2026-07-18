@@ -2,8 +2,8 @@
 
 namespace App\Modules\Procurement\Services;
 
+use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Inventory\Services\StockMovementService;
-use App\Modules\Procurement\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Procurement\Exceptions\OverReceiptException;
 use App\Modules\Procurement\Models\Enums\PurchaseOrderStatus;
 use App\Modules\Procurement\Models\GoodsReceiptNote;

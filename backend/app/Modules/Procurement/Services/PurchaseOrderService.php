@@ -2,7 +2,7 @@
 
 namespace App\Modules\Procurement\Services;
 
-use App\Modules\Procurement\Exceptions\InvalidStatusTransitionException;
+use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Procurement\Models\Enums\PurchaseOrderStatus;
 use App\Modules\Procurement\Models\PurchaseOrder;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;

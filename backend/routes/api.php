@@ -10,6 +10,10 @@ use App\Modules\Procurement\Http\Controllers\GoodsReceiptController;
 use App\Modules\Procurement\Http\Controllers\PurchaseOrderController;
 use App\Modules\Procurement\Http\Controllers\PurchaseRequisitionController;
 use App\Modules\Procurement\Http\Controllers\VendorController;
+use App\Modules\Sales\Http\Controllers\CustomerController;
+use App\Modules\Sales\Http\Controllers\DeliveryController;
+use App\Modules\Sales\Http\Controllers\InvoiceController;
+use App\Modules\Sales\Http\Controllers\SalesOrderController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -56,6 +60,18 @@ Route::prefix('v1')->group(function () {
             Route::post('purchase-orders/{purchase_order}/send', [PurchaseOrderController::class, 'send']);
 
             Route::apiResource('goods-receipts', GoodsReceiptController::class)->only(['index', 'store']);
+        });
+
+        Route::prefix('sales')->group(function () {
+            Route::apiResource('customers', CustomerController::class)->only(['index', 'store', 'update']);
+
+            Route::apiResource('sales-orders', SalesOrderController::class)->only(['index', 'store']);
+            Route::post('sales-orders/{sales_order}/confirm', [SalesOrderController::class, 'confirm']);
+
+            Route::apiResource('deliveries', DeliveryController::class)->only(['index', 'store']);
+
+            Route::apiResource('invoices', InvoiceController::class)->only(['index', 'store']);
+            Route::post('invoices/{invoice}/issue', [InvoiceController::class, 'issue']);
         });
     });
 });

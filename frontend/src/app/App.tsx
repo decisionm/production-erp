@@ -8,6 +8,10 @@ import GoodsReceiptsPage from '@/features/procurement/pages/GoodsReceiptsPage';
 import PurchaseOrdersPage from '@/features/procurement/pages/PurchaseOrdersPage';
 import PurchaseRequisitionsPage from '@/features/procurement/pages/PurchaseRequisitionsPage';
 import VendorsPage from '@/features/procurement/pages/VendorsPage';
+import CustomersPage from '@/features/sales/pages/CustomersPage';
+import DeliveriesPage from '@/features/sales/pages/DeliveriesPage';
+import InvoicesPage from '@/features/sales/pages/InvoicesPage';
+import SalesOrdersPage from '@/features/sales/pages/SalesOrdersPage';
 import AppLayout from './AppLayout';
 import ProtectedRoute from './ProtectedRoute';
 
@@ -30,6 +34,10 @@ export default function App() {
                                     <Route path="/procurement/purchase-requisitions" element={<PurchaseRequisitionsPage />} />
                                     <Route path="/procurement/purchase-orders" element={<PurchaseOrdersPage />} />
                                     <Route path="/procurement/goods-receipts" element={<GoodsReceiptsPage />} />
+                                    <Route path="/sales/customers" element={<CustomersPage />} />
+                                    <Route path="/sales/sales-orders" element={<SalesOrdersPage />} />
+                                    <Route path="/sales/deliveries" element={<DeliveriesPage />} />
+                                    <Route path="/sales/invoices" element={<InvoicesPage />} />
                                     <Route path="*" element={<Navigate to="/" replace />} />
                                 </Routes>
                             </AppLayout>

@@ -1,8 +1,7 @@
 <?php
 
-namespace App\Modules\Procurement\Exceptions;
+namespace App\Exceptions;
 
-use App\Exceptions\DomainException;
 use RuntimeException;
 
 class InvalidStatusTransitionException extends RuntimeException implements DomainException
