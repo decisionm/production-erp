@@ -2,6 +2,10 @@
 
 use App\Modules\Core\Http\Controllers\AuthController;
 use App\Modules\Core\Http\Controllers\UserController;
+use App\Modules\Inventory\Http\Controllers\ItemController;
+use App\Modules\Inventory\Http\Controllers\StockBalanceController;
+use App\Modules\Inventory\Http\Controllers\StockMovementController;
+use App\Modules\Inventory\Http\Controllers\WarehouseController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -24,5 +28,17 @@ Route::prefix('v1')->group(function () {
         Route::get('/auth/me', [AuthController::class, 'me']);
 
         Route::apiResource('users', UserController::class)->only(['index', 'store']);
+
+        Route::prefix('inventory')->group(function () {
+            Route::apiResource('items', ItemController::class)->only(['index', 'store', 'update']);
+            Route::apiResource('warehouses', WarehouseController::class)->only(['index', 'store', 'update']);
+
+            Route::get('stock-balances', [StockBalanceController::class, 'index']);
+
+            Route::get('stock-movements', [StockMovementController::class, 'index']);
+            Route::post('stock-movements/receipts', [StockMovementController::class, 'receipt']);
+            Route::post('stock-movements/issues', [StockMovementController::class, 'issue']);
+            Route::post('stock-movements/transfers', [StockMovementController::class, 'transfer']);
+        });
     });
 });

@@ -1,0 +1,25 @@
+<?php
+
+namespace App\Modules\Inventory\Http\Requests;
+
+use Illuminate\Foundation\Http\FormRequest;
+
+class StoreItemRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
+        return true;
+    }
+
+    public function rules(): array
+    {
+        return [
+            'sku' => ['required', 'string', 'max:64', 'unique:items,sku'],
+            'name' => ['required', 'string', 'max:255'],
+            'description' => ['nullable', 'string'],
+            'uom' => ['required', 'string', 'max:16'],
+            'reorder_level' => ['nullable', 'numeric', 'min:0'],
+            'is_active' => ['boolean'],
+        ];
+    }
+}
