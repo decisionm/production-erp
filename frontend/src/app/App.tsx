@@ -1,6 +1,9 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import LoginPage from '@/features/auth/pages/LoginPage';
 import DashboardPage from '@/features/dashboard/pages/DashboardPage';
+import GstRatesPage from '@/features/compliance/pages/GstRatesPage';
+import GstRegistrationsPage from '@/features/compliance/pages/GstRegistrationsPage';
+import GstReportsPage from '@/features/compliance/pages/GstReportsPage';
 import LeadsPage from '@/features/crm/pages/LeadsPage';
 import OpportunitiesPage from '@/features/crm/pages/OpportunitiesPage';
 import QuotationsPage from '@/features/crm/pages/QuotationsPage';
@@ -54,6 +57,9 @@ export default function App() {
                                     <Route path="/finance/reports" element={<ReportsPage />} />
                                     <Route path="/quality/incoming-inspections" element={<IncomingInspectionsPage />} />
                                     <Route path="/quality/ncrs" element={<NonConformanceReportsPage />} />
+                                    <Route path="/compliance/gst-rates" element={<GstRatesPage />} />
+                                    <Route path="/compliance/gst-registrations" element={<GstRegistrationsPage />} />
+                                    <Route path="/compliance/gst-reports" element={<GstReportsPage />} />
                                     <Route path="*" element={<Navigate to="/" replace />} />
                                 </Routes>
                             </AppLayout>

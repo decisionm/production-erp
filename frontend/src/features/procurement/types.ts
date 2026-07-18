@@ -7,6 +7,8 @@ export interface Vendor {
     email: string | null;
     phone: string | null;
     address: string | null;
+    gstin: string | null;
+    state_code: string | null;
     is_active: boolean;
     created_at: string;
 }

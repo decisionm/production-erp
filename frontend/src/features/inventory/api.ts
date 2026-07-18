@@ -12,6 +12,7 @@ export interface CreateItemPayload {
     name: string;
     description?: string;
     uom: string;
+    hsn_sac_code?: string;
     reorder_level?: number;
 }
 

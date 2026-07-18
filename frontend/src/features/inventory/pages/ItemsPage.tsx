@@ -11,6 +11,7 @@ const itemSchema = z.object({
     sku: z.string().min(1, 'SKU is required').max(64),
     name: z.string().min(1, 'Name is required').max(255),
     uom: z.string().min(1, 'UOM is required').max(16),
+    hsn_sac_code: z.string().max(20).optional(),
     reorder_level: z.number().min(0).optional(),
 });
 
@@ -24,7 +25,7 @@ export default function ItemsPage() {
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<ItemFormValues>({
         resolver: zodResolver(itemSchema),
-        defaultValues: { sku: '', name: '', uom: 'PCS', reorder_level: 0 },
+        defaultValues: { sku: '', name: '', uom: 'PCS', hsn_sac_code: '', reorder_level: 0 },
     });
 
     const mutation = useMutation({
@@ -52,6 +53,7 @@ export default function ItemsPage() {
                     { title: 'SKU', dataIndex: 'sku' },
                     { title: 'Name', dataIndex: 'name' },
                     { title: 'UOM', dataIndex: 'uom' },
+                    { title: 'HSN/SAC', dataIndex: 'hsn_sac_code' },
                     { title: 'Reorder Level', dataIndex: 'reorder_level' },
                     {
                         title: 'Active',
@@ -78,6 +80,13 @@ export default function ItemsPage() {
                     </Form.Item>
                     <Form.Item label="UOM" validateStatus={errors.uom ? 'error' : ''} help={errors.uom?.message}>
                         <Controller name="uom" control={control} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item
+                        label="HSN/SAC Code"
+                        validateStatus={errors.hsn_sac_code ? 'error' : ''}
+                        help={errors.hsn_sac_code?.message}
+                    >
+                        <Controller name="hsn_sac_code" control={control} render={({ field }) => <Input {...field} />} />
                     </Form.Item>
                     <Form.Item label="Reorder Level">
                         <Controller

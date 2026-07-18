@@ -35,6 +35,20 @@ class InvoiceService
     }
 
     /**
+     * Issued or paid invoices (i.e. not draft) — a draft has no statutory
+     * effect, so this is the source Compliance's GSTR-1 report reads from.
+     * Not paginated: this is meant for aggregation, not a list screen.
+     */
+    public function issued(): Collection
+    {
+        return Invoice::query()
+            ->with(['lines.item', 'customer'])
+            ->where('status', '!=', InvoiceStatus::Draft)
+            ->orderBy('invoice_date')
+            ->get();
+    }
+
+    /**
      * @param  array{sales_order_id: int, invoice_date: string, due_date?: string, notes?: string, lines: array<int, array{sales_order_line_id: int, quantity: string, unit_price: string}>}  $data
      */
     public function create(array $data, ?int $createdBy): Invoice

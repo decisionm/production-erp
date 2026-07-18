@@ -4,6 +4,7 @@ export interface Item {
     name: string;
     description: string | null;
     uom: string;
+    hsn_sac_code: string | null;
     reorder_level: string;
     is_active: boolean;
     created_at: string;

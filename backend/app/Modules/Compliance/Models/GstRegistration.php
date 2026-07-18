@@ -1,19 +1,20 @@
 <?php
 
-namespace App\Modules\Procurement\Models;
+namespace App\Modules\Compliance\Models;
 
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['code', 'name', 'email', 'phone', 'address', 'gstin', 'state_code', 'is_active'])]
-class Vendor extends Model
+#[Fillable(['gstin', 'state_code', 'state_name', 'is_primary', 'is_active'])]
+class GstRegistration extends Model
 {
     use SoftDeletes;
 
     protected function casts(): array
     {
         return [
+            'is_primary' => 'boolean',
             'is_active' => 'boolean',
         ];
     }

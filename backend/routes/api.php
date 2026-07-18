@@ -1,5 +1,9 @@
 <?php
 
+use App\Modules\Compliance\Http\Controllers\GstComputationController;
+use App\Modules\Compliance\Http\Controllers\GstRateController;
+use App\Modules\Compliance\Http\Controllers\GstRegistrationController;
+use App\Modules\Compliance\Http\Controllers\GstReportController;
 use App\Modules\Core\Http\Controllers\AuthController;
 use App\Modules\Core\Http\Controllers\UserController;
 use App\Modules\CRM\Http\Controllers\LeadController;
@@ -111,6 +115,14 @@ Route::prefix('v1')->group(function () {
 
             Route::apiResource('ncrs', NonConformanceReportController::class)->only(['index', 'store']);
             Route::post('ncrs/{ncr}/close', [NonConformanceReportController::class, 'close']);
+        });
+
+        Route::prefix('compliance')->group(function () {
+            Route::apiResource('gst-rates', GstRateController::class)->only(['index', 'store', 'update']);
+            Route::apiResource('gst-registrations', GstRegistrationController::class)->only(['index', 'store', 'update']);
+
+            Route::get('invoices/{invoice}/gst-breakdown', [GstComputationController::class, 'invoiceBreakdown']);
+            Route::get('reports/gstr1', [GstReportController::class, 'gstr1']);
         });
     });
 });

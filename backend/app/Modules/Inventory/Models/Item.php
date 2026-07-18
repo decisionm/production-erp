@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['sku', 'name', 'description', 'uom', 'reorder_level', 'is_active'])]
+#[Fillable(['sku', 'name', 'description', 'uom', 'hsn_sac_code', 'reorder_level', 'is_active'])]
 class Item extends Model
 {
     use SoftDeletes;

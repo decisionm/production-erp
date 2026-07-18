@@ -21,6 +21,7 @@ class UpdateItemRequest extends FormRequest
             'name' => ['sometimes', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'uom' => ['sometimes', 'string', 'max:16'],
+            'hsn_sac_code' => ['nullable', 'string', 'max:20'],
             'reorder_level' => ['nullable', 'numeric', 'min:0'],
             'is_active' => ['boolean'],
         ];

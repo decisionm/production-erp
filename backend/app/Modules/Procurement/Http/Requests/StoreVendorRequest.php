@@ -19,6 +19,8 @@ class StoreVendorRequest extends FormRequest
             'email' => ['nullable', 'email', 'max:255'],
             'phone' => ['nullable', 'string', 'max:32'],
             'address' => ['nullable', 'string'],
+            'gstin' => ['nullable', 'string', 'size:15', 'regex:/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/'],
+            'state_code' => ['nullable', 'string', 'regex:/^[0-9]{2}$/'],
             'is_active' => ['boolean'],
         ];
     }

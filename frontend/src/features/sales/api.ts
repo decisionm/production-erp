@@ -18,6 +18,8 @@ export interface CreateCustomerPayload {
     email?: string;
     phone?: string;
     address?: string;
+    gstin?: string;
+    state_code?: string;
 }
 
 export async function createCustomer(payload: CreateCustomerPayload): Promise<Customer> {

@@ -18,6 +18,8 @@ export interface CreateVendorPayload {
     email?: string;
     phone?: string;
     address?: string;
+    gstin?: string;
+    state_code?: string;
 }
 
 export async function createVendor(payload: CreateVendorPayload): Promise<Vendor> {

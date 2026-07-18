@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['code', 'name', 'email', 'phone', 'address', 'is_active'])]
+#[Fillable(['code', 'name', 'email', 'phone', 'address', 'gstin', 'state_code', 'is_active'])]
 class Customer extends Model
 {
     use SoftDeletes;

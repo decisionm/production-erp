@@ -62,6 +62,15 @@ const navItems = [
             { key: '/quality/ncrs', label: 'Non-Conformance Reports' },
         ],
     },
+    {
+        key: 'compliance',
+        label: 'Compliance',
+        children: [
+            { key: '/compliance/gst-rates', label: 'GST Rates' },
+            { key: '/compliance/gst-registrations', label: 'GST Registrations' },
+            { key: '/compliance/gst-reports', label: 'GST Reports' },
+        ],
+    },
 ];
 
 export default function AppLayout({ children }: PropsWithChildren) {

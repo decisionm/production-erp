@@ -12,6 +12,12 @@ const customerSchema = z.object({
     name: z.string().min(1, 'Name is required').max(255),
     email: z.string().email('Enter a valid email').optional().or(z.literal('')),
     phone: z.string().optional(),
+    gstin: z
+        .string()
+        .regex(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/, 'Enter a valid 15-character GSTIN')
+        .optional()
+        .or(z.literal('')),
+    state_code: z.string().regex(/^[0-9]{2}$/, 'Enter a 2-digit GST state code').optional().or(z.literal('')),
 });
 
 type CustomerFormValues = z.infer<typeof customerSchema>;
@@ -24,7 +30,7 @@ export default function CustomersPage() {
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<CustomerFormValues>({
         resolver: zodResolver(customerSchema),
-        defaultValues: { code: '', name: '', email: '', phone: '' },
+        defaultValues: { code: '', name: '', email: '', phone: '', gstin: '', state_code: '' },
     });
 
     const mutation = useMutation({
@@ -53,6 +59,8 @@ export default function CustomersPage() {
                     { title: 'Name', dataIndex: 'name' },
                     { title: 'Email', dataIndex: 'email' },
                     { title: 'Phone', dataIndex: 'phone' },
+                    { title: 'GSTIN', dataIndex: 'gstin' },
+                    { title: 'State', dataIndex: 'state_code' },
                     {
                         title: 'Active',
                         dataIndex: 'is_active',
@@ -81,6 +89,16 @@ export default function CustomersPage() {
                     </Form.Item>
                     <Form.Item label="Phone">
                         <Controller name="phone" control={control} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item label="GSTIN" validateStatus={errors.gstin ? 'error' : ''} help={errors.gstin?.message}>
+                        <Controller name="gstin" control={control} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item
+                        label="GST State Code"
+                        validateStatus={errors.state_code ? 'error' : ''}
+                        help={errors.state_code?.message}
+                    >
+                        <Controller name="state_code" control={control} render={({ field }) => <Input {...field} />} />
                     </Form.Item>
                 </Form>
             </Modal>
