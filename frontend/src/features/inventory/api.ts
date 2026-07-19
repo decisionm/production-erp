@@ -56,8 +56,12 @@ export async function listStockBalances(): Promise<Paginated<StockBalance>> {
     return data;
 }
 
-export async function listStockMovements(): Promise<Paginated<StockMovement>> {
-    const { data } = await api.get<Paginated<StockMovement>>('/inventory/stock-movements');
+export async function listStockMovements(params?: {
+    item_id?: number;
+    warehouse_id?: number;
+    per_page?: number;
+}): Promise<Paginated<StockMovement>> {
+    const { data } = await api.get<Paginated<StockMovement>>('/inventory/stock-movements', { params });
     return data;
 }
 

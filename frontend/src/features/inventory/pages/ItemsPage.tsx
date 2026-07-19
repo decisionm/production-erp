@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
+import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { createItem, listItems, updateItem } from '@/features/inventory/api';
 import type { Item, ItemTrackingType } from '@/features/inventory/types';
@@ -29,6 +30,7 @@ export default function ItemsPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [editingItem, setEditingItem] = useState<Item | null>(null);
     const queryClient = useQueryClient();
+    const navigate = useNavigate();
 
     const { data, isLoading } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
 
@@ -110,22 +112,27 @@ export default function ItemsPage() {
                     {
                         title: 'Actions',
                         render: (_, row) => (
-                            <Button
-                                size="small"
-                                onClick={() => {
-                                    setEditingItem(row);
-                                    resetEdit({
-                                        sku: row.sku,
-                                        name: row.name,
-                                        uom: row.uom,
-                                        hsn_sac_code: row.hsn_sac_code ?? '',
-                                        reorder_level: Number(row.reorder_level),
-                                        tracking_type: row.tracking_type,
-                                    });
-                                }}
-                            >
-                                Edit
-                            </Button>
+                            <Space>
+                                <Button size="small" onClick={() => navigate(`/inventory/items/${row.id}`)}>
+                                    Details
+                                </Button>
+                                <Button
+                                    size="small"
+                                    onClick={() => {
+                                        setEditingItem(row);
+                                        resetEdit({
+                                            sku: row.sku,
+                                            name: row.name,
+                                            uom: row.uom,
+                                            hsn_sac_code: row.hsn_sac_code ?? '',
+                                            reorder_level: Number(row.reorder_level),
+                                            tracking_type: row.tracking_type,
+                                        });
+                                    }}
+                                >
+                                    Edit
+                                </Button>
+                            </Space>
                         ),
                     },
                 ]}

@@ -42,6 +42,7 @@ import NonConformanceReportsPage from '@/features/quality/pages/NonConformanceRe
 import SpcChartPage from '@/features/quality/pages/SpcChartPage';
 import SpcCharacteristicsPage from '@/features/quality/pages/SpcCharacteristicsPage';
 import BatchesPage from '@/features/inventory/pages/BatchesPage';
+import ItemDetailPage from '@/features/inventory/pages/ItemDetailPage';
 import ItemsPage from '@/features/inventory/pages/ItemsPage';
 import SerialNumbersPage from '@/features/inventory/pages/SerialNumbersPage';
 import StockPage from '@/features/inventory/pages/StockPage';
@@ -74,6 +75,7 @@ export default function App() {
                                     <Route path="/crm/opportunities" element={<OpportunitiesPage />} />
                                     <Route path="/crm/quotations" element={<QuotationsPage />} />
                                     <Route path="/inventory/items" element={<ItemsPage />} />
+                                    <Route path="/inventory/items/:id" element={<ItemDetailPage />} />
                                     <Route path="/inventory/warehouses" element={<WarehousesPage />} />
                                     <Route path="/inventory/stock" element={<StockPage />} />
                                     <Route path="/inventory/batches" element={<BatchesPage />} />

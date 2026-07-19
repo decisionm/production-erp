@@ -1,20 +1,29 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, Input, InputNumber, Modal, Select, Space, Table, Typography } from 'antd';
+import { Button, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
+import { Link } from 'react-router-dom';
 import { z } from 'zod';
 import {
     listBatches,
     listItems,
     listSerialNumbers,
     listStockBalances,
+    listStockMovements,
     listWarehouses,
     recordIssue,
     recordReceipt,
     recordTransfer,
 } from '@/features/inventory/api';
 import type { StockBalance } from '@/features/inventory/types';
+
+const movementTypeColor: Record<string, string> = {
+    receipt: 'green',
+    issue: 'red',
+    transfer_in: 'blue',
+    transfer_out: 'orange',
+};
 
 const receiptSchema = z.object({
     item_id: z.number({ error: 'Item is required' }),
@@ -52,11 +61,18 @@ type ActiveModal = 'receipt' | 'issue' | 'transfer' | null;
 
 export default function StockPage() {
     const [activeModal, setActiveModal] = useState<ActiveModal>(null);
+    const [historyRow, setHistoryRow] = useState<StockBalance | null>(null);
     const queryClient = useQueryClient();
 
     const { data: balances, isLoading } = useQuery({
         queryKey: ['inventory', 'stock-balances'],
         queryFn: listStockBalances,
+    });
+    const { data: history, isLoading: historyLoading } = useQuery({
+        queryKey: ['inventory', 'stock-movements', historyRow?.item.id, historyRow?.warehouse.id],
+        queryFn: () =>
+            listStockMovements({ item_id: historyRow!.item.id, warehouse_id: historyRow!.warehouse.id, per_page: 200 }),
+        enabled: historyRow !== null,
     });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
     const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses'], queryFn: listWarehouses });
@@ -144,6 +160,14 @@ export default function StockPage() {
                     { title: 'Warehouse', render: (_, row) => `${row.warehouse.code} — ${row.warehouse.name}` },
                     { title: 'Quantity', dataIndex: 'quantity' },
                     { title: 'Avg. Cost', dataIndex: 'average_cost' },
+                    {
+                        title: 'Actions',
+                        render: (_, row) => (
+                            <Button size="small" onClick={() => setHistoryRow(row)}>
+                                View History
+                            </Button>
+                        ),
+                    },
                 ]}
             />
 
@@ -355,6 +379,52 @@ export default function StockPage() {
                     </Form.Item>
                 </Form>
             </Modal>
+
+            <Drawer
+                title={
+                    historyRow
+                        ? `${historyRow.item.sku} — ${historyRow.warehouse.code} history`
+                        : 'History'
+                }
+                open={historyRow !== null}
+                onClose={() => setHistoryRow(null)}
+                width={640}
+                destroyOnHidden
+            >
+                {historyRow && (
+                    <>
+                        <Typography.Paragraph type="secondary">
+                            Every movement recorded against {historyRow.item.sku} at{' '}
+                            {historyRow.warehouse.code}, most recent first. For the full picture of what
+                            each entry means, see <Link to="/inventory/items">the item's detail page</Link>.
+                        </Typography.Paragraph>
+                        <Table
+                            rowKey="id"
+                            size="small"
+                            loading={historyLoading}
+                            pagination={false}
+                            dataSource={history?.data}
+                            scroll={{ x: 'max-content' }}
+                            columns={[
+                                {
+                                    title: 'Date',
+                                    dataIndex: 'movement_date',
+                                    render: (d: string) => d.slice(0, 10),
+                                },
+                                {
+                                    title: 'Type',
+                                    dataIndex: 'type',
+                                    render: (type: string) => <Tag color={movementTypeColor[type]}>{type}</Tag>,
+                                },
+                                { title: 'Quantity', dataIndex: 'quantity' },
+                                { title: 'Unit Cost', dataIndex: 'unit_cost' },
+                                { title: 'Reference', dataIndex: 'reference' },
+                                { title: 'Notes', dataIndex: 'notes', render: (n: string | null) => n ?? '—' },
+                            ]}
+                        />
+                    </>
+                )}
+            </Drawer>
         </>
     );
 }

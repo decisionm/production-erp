@@ -20,6 +20,7 @@ class StockMovementController extends Controller
         return StockMovementResource::collection($this->stock->paginateMovements(
             itemId: $request->integer('item_id') ?: null,
             warehouseId: $request->integer('warehouse_id') ?: null,
+            perPage: $request->integer('per_page') ?: 20,
         ));
     }
 
