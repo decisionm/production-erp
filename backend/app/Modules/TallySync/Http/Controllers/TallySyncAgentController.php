@@ -1,0 +1,49 @@
+<?php
+
+namespace App\Modules\TallySync\Http\Controllers;
+
+use App\Http\Controllers\Controller;
+use App\Modules\TallySync\Http\Requests\FailTallySyncEntryRequest;
+use App\Modules\TallySync\Http\Resources\TallySyncEntryResource;
+use App\Modules\TallySync\Models\TallySyncEntry;
+use App\Modules\TallySync\Services\TallySyncService;
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+
+/**
+ * The local sync agent's endpoints — meant to be called with a Sanctum
+ * personal access token scoped to exactly these abilities, not a
+ * general-purpose token or an admin's full session. A leaked agent token
+ * can poll and report sync status; it can't do anything else. A
+ * session-authenticated SPA user gets Sanctum's "transient token" (all
+ * abilities) automatically, so staff can still exercise these from the
+ * dashboard if needed — the restriction is what a token-only client is
+ * limited to, not what staff can do.
+ */
+class TallySyncAgentController extends Controller
+{
+    public function __construct(private readonly TallySyncService $sync) {}
+
+    public function pending(Request $request): AnonymousResourceCollection
+    {
+        abort_unless($request->user()?->tokenCan('tally-sync:poll'), 403, 'Token missing the tally-sync:poll ability.');
+
+        return TallySyncEntryResource::collection($this->sync->pending());
+    }
+
+    public function acknowledge(Request $request, TallySyncEntry $tallySyncEntry): TallySyncEntryResource
+    {
+        abort_unless($request->user()?->tokenCan('tally-sync:report'), 403, 'Token missing the tally-sync:report ability.');
+
+        return TallySyncEntryResource::make($this->sync->markSynced($tallySyncEntry));
+    }
+
+    public function fail(FailTallySyncEntryRequest $request, TallySyncEntry $tallySyncEntry): TallySyncEntryResource
+    {
+        abort_unless($request->user()?->tokenCan('tally-sync:report'), 403, 'Token missing the tally-sync:report ability.');
+
+        return TallySyncEntryResource::make(
+            $this->sync->markFailed($tallySyncEntry, $request->validated()['error_message']),
+        );
+    }
+}

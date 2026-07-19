@@ -108,15 +108,33 @@ app/
 
 ---
 
-## 6. Tally Integration (technical notes)
+## 6. Tally Integration
 
-- Tally (Prime/ERP 9) exposes a local XML-over-HTTP API on port 9000 on the machine it runs on — it is **not** cloud-reachable directly
-- Since the ERP is (eventually) cloud-hosted and Tally typically runs on-prem at the customer's office, integration needs a **local sync agent**: a small lightweight service (could be a simple scheduled script, or a minimal Laravel/Node process) installed on the customer's LAN that:
-  1. Polls the cloud ERP API for pending vouchers/masters to push to Tally
-  2. Talks to local Tally via its XML API to create/update vouchers
-  3. Reports sync status back to the cloud ERP
-- Start one-directional (ERP → Tally) to reduce conflict-resolution complexity; only build two-way sync if a real customer need justifies it
-- Store sync status/errors per voucher so failures are visible and retryable, not silent
+Tally (Prime/ERP 9) exposes a local XML-over-HTTP API on port 9000 on the machine it runs on — it is **not** cloud-reachable directly, and typically runs on-prem at the customer's office while this app is (eventually) cloud-hosted. That split forces the integration into two genuinely separate pieces, built and verified differently.
+
+### Cloud side — built in this codebase (`App\Modules\TallySync`)
+
+A sync queue, not a live connection. When a document becomes final (a Sales Invoice is issued, a Journal Entry is posted), it's automatically enqueued as a pending Tally voucher — via model-event listeners registered from `TallySync`'s own service provider, so `Sales`/`Finance` have zero code referencing `TallySync` and stay unaware it exists. The queue exposes:
+
+- `GET /api/v1/tally-sync/entries` + `POST .../retry` — an admin dashboard view (session auth, same as the rest of the SPA)
+- `GET /api/v1/tally-sync/pending`, `POST .../ack`, `POST .../fail` — the endpoints the local agent polls, authenticated by a **Sanctum personal access token scoped to specific abilities** (`tally-sync:poll`, `tally-sync:report`) rather than a full-access session or a token with blanket API access. This is exactly the scenario Sanctum's dual auth mode (session for the SPA, tokens for other clients) was set up for back in the Core module — the sync agent is the first real "other client."
+
+**Voucher types in scope now**: Sales Invoice → Tally Sales Voucher, Journal Entry → Tally Journal Voucher — the only two source documents that actually exist and are "final" (have a real posted/issued state) in the app today. **Deliberately not wired yet**: Purchase Invoice, Payment, Receipt, Credit/Debit Note vouchers — none of those source documents exist in Procurement/Sales yet (same AP-shaped gap flagged in Finance and Compliance), so there's nothing real to enqueue. Extending the sync to them is mechanical once those documents exist: another model-event listener plus an `enqueueX()` method on `TallySyncService`, no change to the queue/polling infrastructure itself.
+
+The payload stored per entry is a clean intermediate JSON shape (ledger name, amount, debit/credit, party GSTIN, narration, ...) — deliberately *not* Tally's XML format. Translating to Tally's specific XML tags is the local agent's job, not the cloud API's; keeping the cloud side XML-agnostic means it never needs to know which Tally version (Prime vs ERP 9) or XML dialect quirk a given customer is running.
+
+Direction is one-way (ERP → Tally) to avoid conflict resolution entirely for this pass — matches the original scoping note and hasn't changed. Two-way sync (pulling Tally-side edits back) is a real feature some customers will eventually want, but is a materially different, harder problem (concurrent-edit conflicts) and isn't warranted until a customer actually asks for it.
+
+### Local agent — scoped here, not built
+
+This cannot be built or verified inside this codebase: it needs to run on the customer's on-prem Windows machine and talk to a real Tally installation, neither of which exist in this environment. Documenting the spec precisely so implementation (whenever there's a real Tally instance to test against) has no ambiguity to resolve:
+
+- A small standalone process (a lightweight script — PHP, Node, or Python all work equally well; no reason to prefer one) installed on the customer's LAN, on the same machine as Tally or one that can reach `localhost:9000` / the Tally machine's LAN address.
+- Polls `GET /tally-sync/pending` on an interval (start with something simple like every 60–120 seconds; no need for push/webhooks given Tally sync is inherently not real-time-critical).
+- For each pending entry, translates the stored JSON payload into Tally's XML voucher-import format and POSTs it to Tally's local XML API (`http://localhost:9000`).
+- On success, calls `POST /tally-sync/entries/{id}/ack`. On failure (Tally rejects the XML, network error, etc.), calls `POST /tally-sync/entries/{id}/fail` with the error detail — the cloud side stores it and surfaces it in the retry dashboard, so failures are visible and retryable, never silent.
+- Authenticates to the cloud API with the scoped Sanctum token described above, configured once at agent install time (a config file or environment variable on the customer's machine, not embedded in code).
+- Needs its own minimal logging (what it sent, what Tally returned) for troubleshooting on-site, since nobody on the ERP-hosting side has visibility into the customer's local network.
 
 ---
 

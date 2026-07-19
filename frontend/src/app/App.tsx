@@ -23,6 +23,7 @@ import CustomersPage from '@/features/sales/pages/CustomersPage';
 import DeliveriesPage from '@/features/sales/pages/DeliveriesPage';
 import InvoicesPage from '@/features/sales/pages/InvoicesPage';
 import SalesOrdersPage from '@/features/sales/pages/SalesOrdersPage';
+import TallySyncPage from '@/features/tally-sync/pages/TallySyncPage';
 import AppLayout from './AppLayout';
 import ProtectedRoute from './ProtectedRoute';
 
@@ -60,6 +61,7 @@ export default function App() {
                                     <Route path="/compliance/gst-rates" element={<GstRatesPage />} />
                                     <Route path="/compliance/gst-registrations" element={<GstRegistrationsPage />} />
                                     <Route path="/compliance/gst-reports" element={<GstReportsPage />} />
+                                    <Route path="/tally-sync" element={<TallySyncPage />} />
                                     <Route path="*" element={<Navigate to="/" replace />} />
                                 </Routes>
                             </AppLayout>

@@ -71,6 +71,7 @@ const navItems = [
             { key: '/compliance/gst-reports', label: 'GST Reports' },
         ],
     },
+    { key: '/tally-sync', label: 'Tally Sync' },
 ];
 
 export default function AppLayout({ children }: PropsWithChildren) {

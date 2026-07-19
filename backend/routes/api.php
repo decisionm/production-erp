@@ -26,6 +26,8 @@ use App\Modules\Sales\Http\Controllers\CustomerController;
 use App\Modules\Sales\Http\Controllers\DeliveryController;
 use App\Modules\Sales\Http\Controllers\InvoiceController;
 use App\Modules\Sales\Http\Controllers\SalesOrderController;
+use App\Modules\TallySync\Http\Controllers\TallySyncAgentController;
+use App\Modules\TallySync\Http\Controllers\TallySyncController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -123,6 +125,19 @@ Route::prefix('v1')->group(function () {
 
             Route::get('invoices/{invoice}/gst-breakdown', [GstComputationController::class, 'invoiceBreakdown']);
             Route::get('reports/gstr1', [GstReportController::class, 'gstr1']);
+        });
+
+        Route::prefix('tally-sync')->group(function () {
+            Route::get('entries', [TallySyncController::class, 'index']);
+            Route::post('entries/{tally_sync_entry}/retry', [TallySyncController::class, 'retry']);
+
+            // Local agent endpoints — see TECHNICAL-DOCS.md §6. Gated by
+            // Sanctum token abilities inside the controller, not just
+            // auth:sanctum, since a real deployment issues the agent a
+            // token scoped to exactly these two abilities.
+            Route::get('pending', [TallySyncAgentController::class, 'pending']);
+            Route::post('entries/{tally_sync_entry}/ack', [TallySyncAgentController::class, 'acknowledge']);
+            Route::post('entries/{tally_sync_entry}/fail', [TallySyncAgentController::class, 'fail']);
         });
     });
 });
