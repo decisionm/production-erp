@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, Input, InputNumber, Modal, Select, Space, Table, Typography } from 'antd';
+import { Button, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -24,6 +24,7 @@ type RoutingFormValues = z.infer<typeof routingSchema>;
 
 export default function RoutingsPage() {
     const [modalOpen, setModalOpen] = useState(false);
+    const [detailRouting, setDetailRouting] = useState<Routing | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['production', 'routings'], queryFn: () => listRoutings() });
@@ -73,6 +74,14 @@ export default function RoutingsPage() {
                     {
                         title: 'Operations',
                         render: (_, row) => row.operations.map((o) => `${o.sequence}. ${o.name} (${o.work_center.code})`).join(', '),
+                    },
+                    {
+                        title: 'Actions',
+                        render: (_, row) => (
+                            <Button size="small" onClick={() => setDetailRouting(row)}>
+                                View
+                            </Button>
+                        ),
                     },
                 ]}
             />
@@ -149,6 +158,47 @@ export default function RoutingsPage() {
                     </Button>
                 </Form>
             </Modal>
+
+            <Drawer
+                title={`${detailRouting?.name} (${detailRouting?.item.sku})`}
+                open={detailRouting !== null}
+                onClose={() => setDetailRouting(null)}
+                width={560}
+                destroyOnHidden
+            >
+                {detailRouting && (
+                    <>
+                        <Descriptions column={1} size="small" bordered>
+                            <Descriptions.Item label="Item">
+                                {detailRouting.item.sku} — {detailRouting.item.name}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Active">
+                                {detailRouting.is_active ? 'active' : 'inactive'}
+                            </Descriptions.Item>
+                        </Descriptions>
+
+                        <Typography.Title level={5} style={{ marginTop: 24 }}>
+                            Operations
+                        </Typography.Title>
+                        <Table
+                            rowKey="id"
+                            size="small"
+                            pagination={false}
+                            dataSource={[...detailRouting.operations].sort((a, b) => a.sequence - b.sequence)}
+                            scroll={{ x: 'max-content' }}
+                            columns={[
+                                { title: 'Seq', dataIndex: 'sequence' },
+                                { title: 'Operation', dataIndex: 'name' },
+                                {
+                                    title: 'Work Center',
+                                    render: (_, op) => `${op.work_center.code} — ${op.work_center.name}`,
+                                },
+                                { title: 'Standard Time (min)', dataIndex: 'standard_time_minutes' },
+                            ]}
+                        />
+                    </>
+                )}
+            </Drawer>
         </>
     );
 }

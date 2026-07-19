@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, Descriptions, Drawer, Form, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -37,6 +37,7 @@ const statusColor: Record<SubcontractOrderStatus, string> = {
 export default function SubcontractOrdersPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [receivingId, setReceivingId] = useState<number | null>(null);
+    const [detailOrder, setDetailOrder] = useState<SubcontractOrder | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['production', 'subcontract-orders'], queryFn: listSubcontractOrders });
@@ -127,6 +128,9 @@ export default function SubcontractOrdersPage() {
                         title: 'Actions',
                         render: (_, row) => (
                             <Space>
+                                <Button size="small" onClick={() => setDetailOrder(row)}>
+                                    View
+                                </Button>
                                 {row.status === 'draft' && (
                                     <Button size="small" onClick={() => sendMutation.mutate(row.id)} loading={sendMutation.isPending}>
                                         Send Materials
@@ -229,6 +233,59 @@ export default function SubcontractOrdersPage() {
                     </Form.Item>
                 </Form>
             </Modal>
+
+            <Drawer
+                title={`Subcontract Order #${detailOrder?.id}`}
+                open={detailOrder !== null}
+                onClose={() => setDetailOrder(null)}
+                width={560}
+                destroyOnHidden
+            >
+                {detailOrder && (
+                    <>
+                        <Descriptions column={1} size="small" bordered>
+                            <Descriptions.Item label="Status">
+                                <Tag color={statusColor[detailOrder.status]}>{detailOrder.status}</Tag>
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Vendor">{detailOrder.vendor.name}</Descriptions.Item>
+                            <Descriptions.Item label="Item">
+                                {detailOrder.item.sku} — {detailOrder.item.name}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Warehouse">
+                                {detailOrder.warehouse.code} — {detailOrder.warehouse.name}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Quantity Planned">{detailOrder.quantity_planned}</Descriptions.Item>
+                            <Descriptions.Item label="Quantity Received">{detailOrder.quantity_received}</Descriptions.Item>
+                            <Descriptions.Item label="Materials Cost">{detailOrder.materials_cost}</Descriptions.Item>
+                            <Descriptions.Item label="Service Cost">{detailOrder.service_cost}</Descriptions.Item>
+                            <Descriptions.Item label="Total Cost">{detailOrder.total_cost}</Descriptions.Item>
+                        </Descriptions>
+
+                        <Typography.Title level={5} style={{ marginTop: 24 }}>
+                            Materials Sent
+                        </Typography.Title>
+                        {detailOrder.materials.length > 0 ? (
+                            <Table
+                                rowKey="id"
+                                size="small"
+                                pagination={false}
+                                dataSource={detailOrder.materials}
+                                scroll={{ x: 'max-content' }}
+                                columns={[
+                                    {
+                                        title: 'Component',
+                                        render: (_, m) => `${m.component.sku} — ${m.component.name}`,
+                                    },
+                                    { title: 'Required', dataIndex: 'quantity_required' },
+                                    { title: 'Sent', dataIndex: 'quantity_sent' },
+                                ]}
+                            />
+                        ) : (
+                            <Typography.Text type="secondary">Materials not sent yet.</Typography.Text>
+                        )}
+                    </>
+                )}
+            </Drawer>
         </>
     );
 }

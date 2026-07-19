@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -38,6 +38,7 @@ const statusColor: Record<WorkOrderStatus, string> = {
 export default function WorkOrdersPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [completingRow, setCompletingRow] = useState<WorkOrder | null>(null);
+    const [detailRow, setDetailRow] = useState<WorkOrder | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['production', 'work-orders'], queryFn: listWorkOrders });
@@ -129,6 +130,9 @@ export default function WorkOrdersPage() {
                         title: 'Actions',
                         render: (_, row) => (
                             <Space>
+                                <Button size="small" onClick={() => setDetailRow(row)}>
+                                    View
+                                </Button>
                                 {row.status === 'draft' && (
                                     <Button
                                         size="small"
@@ -286,6 +290,81 @@ export default function WorkOrdersPage() {
                     </Button>
                 </Form>
             </Modal>
+
+            <Drawer
+                title={`Work Order #${detailRow?.id}`}
+                open={detailRow !== null}
+                onClose={() => setDetailRow(null)}
+                width={600}
+                destroyOnHidden
+            >
+                {detailRow && (
+                    <>
+                        <Descriptions column={1} size="small" bordered>
+                            <Descriptions.Item label="Status">
+                                <Tag color={statusColor[detailRow.status]}>{detailRow.status}</Tag>
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Item">
+                                {detailRow.item.sku} — {detailRow.item.name}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Warehouse">
+                                {detailRow.warehouse.code} — {detailRow.warehouse.name}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Scheduled Date">{detailRow.scheduled_date ?? '—'}</Descriptions.Item>
+                            <Descriptions.Item label="Quantity Planned">{detailRow.quantity_planned}</Descriptions.Item>
+                            <Descriptions.Item label="Quantity Completed">{detailRow.quantity_completed}</Descriptions.Item>
+                            <Descriptions.Item label="Material Cost">{detailRow.material_cost}</Descriptions.Item>
+                        </Descriptions>
+
+                        <Typography.Title level={5} style={{ marginTop: 24 }}>
+                            Materials
+                        </Typography.Title>
+                        {detailRow.materials.length > 0 ? (
+                            <Table
+                                rowKey="id"
+                                size="small"
+                                pagination={false}
+                                dataSource={detailRow.materials}
+                                scroll={{ x: 'max-content' }}
+                                columns={[
+                                    {
+                                        title: 'Component',
+                                        render: (_, m) => `${m.component.sku} — ${m.component.name}`,
+                                    },
+                                    { title: 'Required', dataIndex: 'quantity_required' },
+                                    { title: 'Issued', dataIndex: 'quantity_issued' },
+                                ]}
+                            />
+                        ) : (
+                            <Typography.Text type="secondary">No materials recorded.</Typography.Text>
+                        )}
+
+                        <Typography.Title level={5} style={{ marginTop: 24 }}>
+                            Scrap
+                        </Typography.Title>
+                        {detailRow.scraps.length > 0 ? (
+                            <Table
+                                rowKey="id"
+                                size="small"
+                                pagination={false}
+                                dataSource={detailRow.scraps}
+                                scroll={{ x: 'max-content' }}
+                                columns={[
+                                    {
+                                        title: 'Reason',
+                                        render: (_, s) => `${s.reason.code} — ${s.reason.name}`,
+                                    },
+                                    { title: 'Quantity', dataIndex: 'quantity' },
+                                    { title: 'Cost Impact', dataIndex: 'cost_impact' },
+                                    { title: 'Notes', dataIndex: 'notes', render: (n: string | null) => n ?? '—' },
+                                ]}
+                            />
+                        ) : (
+                            <Typography.Text type="secondary">No scrap recorded.</Typography.Text>
+                        )}
+                    </>
+                )}
+            </Drawer>
         </>
     );
 }

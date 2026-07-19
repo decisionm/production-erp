@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useMemo, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -37,6 +37,7 @@ const statusColor: Record<JournalEntryStatus, string> = {
 
 export default function JournalEntriesPage() {
     const [modalOpen, setModalOpen] = useState(false);
+    const [detailEntry, setDetailEntry] = useState<JournalEntry | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['finance', 'journal-entries'], queryFn: listJournalEntries });
@@ -96,12 +97,22 @@ export default function JournalEntriesPage() {
                     { title: 'Lines', render: (_, row) => row.lines.length },
                     {
                         title: 'Actions',
-                        render: (_, row) =>
-                            row.status === 'draft' && (
-                                <Button size="small" onClick={() => postMutation.mutate(row.id)} loading={postMutation.isPending}>
-                                    Post
+                        render: (_, row) => (
+                            <Space>
+                                <Button size="small" onClick={() => setDetailEntry(row)}>
+                                    View
                                 </Button>
-                            ),
+                                {row.status === 'draft' && (
+                                    <Button
+                                        size="small"
+                                        onClick={() => postMutation.mutate(row.id)}
+                                        loading={postMutation.isPending}
+                                    >
+                                        Post
+                                    </Button>
+                                )}
+                            </Space>
+                        ),
                     },
                 ]}
             />
@@ -198,6 +209,65 @@ export default function JournalEntriesPage() {
                     </div>
                 </Form>
             </Modal>
+
+            <Drawer
+                title={`Journal Entry #${detailEntry?.id}`}
+                open={detailEntry !== null}
+                onClose={() => setDetailEntry(null)}
+                width={600}
+                destroyOnHidden
+            >
+                {detailEntry && (
+                    <>
+                        <Descriptions column={1} size="small" bordered>
+                            <Descriptions.Item label="Status">
+                                <Tag color={statusColor[detailEntry.status]}>{detailEntry.status}</Tag>
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Entry Date">{detailEntry.entry_date}</Descriptions.Item>
+                            <Descriptions.Item label="Reference">{detailEntry.reference ?? '—'}</Descriptions.Item>
+                            <Descriptions.Item label="Memo">{detailEntry.memo ?? '—'}</Descriptions.Item>
+                        </Descriptions>
+
+                        <Typography.Title level={5} style={{ marginTop: 24 }}>
+                            Lines
+                        </Typography.Title>
+                        <Table
+                            rowKey="id"
+                            size="small"
+                            pagination={false}
+                            dataSource={detailEntry.lines}
+                            scroll={{ x: 'max-content' }}
+                            columns={[
+                                {
+                                    title: 'Account',
+                                    render: (_, line) => `${line.gl_account.code} — ${line.gl_account.name}`,
+                                },
+                                { title: 'Debit', dataIndex: 'debit' },
+                                { title: 'Credit', dataIndex: 'credit' },
+                                { title: 'Memo', dataIndex: 'memo' },
+                            ]}
+                            summary={(lines) => {
+                                const totalDebit = lines.reduce((sum, l) => sum + Number(l.debit), 0);
+                                const totalCredit = lines.reduce((sum, l) => sum + Number(l.credit), 0);
+                                return (
+                                    <Table.Summary.Row>
+                                        <Table.Summary.Cell index={0}>
+                                            <strong>Total</strong>
+                                        </Table.Summary.Cell>
+                                        <Table.Summary.Cell index={1}>
+                                            <strong>{totalDebit.toFixed(2)}</strong>
+                                        </Table.Summary.Cell>
+                                        <Table.Summary.Cell index={2}>
+                                            <strong>{totalCredit.toFixed(2)}</strong>
+                                        </Table.Summary.Cell>
+                                        <Table.Summary.Cell index={3} />
+                                    </Table.Summary.Row>
+                                );
+                            }}
+                        />
+                    </>
+                )}
+            </Drawer>
         </>
     );
 }

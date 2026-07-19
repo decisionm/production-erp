@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -23,6 +23,7 @@ type BomFormValues = z.infer<typeof bomSchema>;
 
 export default function BomsPage() {
     const [modalOpen, setModalOpen] = useState(false);
+    const [detailBom, setDetailBom] = useState<Bom | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['production', 'boms'], queryFn: () => listBoms() });
@@ -69,6 +70,14 @@ export default function BomsPage() {
                         title: 'Active',
                         dataIndex: 'is_active',
                         render: (active: boolean) => <Tag color={active ? 'green' : 'default'}>{active ? 'active' : 'inactive'}</Tag>,
+                    },
+                    {
+                        title: 'Actions',
+                        render: (_, row) => (
+                            <Button size="small" onClick={() => setDetailBom(row)}>
+                                View
+                            </Button>
+                        ),
                     },
                 ]}
             />
@@ -131,6 +140,48 @@ export default function BomsPage() {
                     </Button>
                 </Form>
             </Modal>
+
+            <Drawer
+                title={`${detailBom?.name} (${detailBom?.item.sku})`}
+                open={detailBom !== null}
+                onClose={() => setDetailBom(null)}
+                width={520}
+                destroyOnHidden
+            >
+                {detailBom && (
+                    <>
+                        <Descriptions column={1} size="small" bordered>
+                            <Descriptions.Item label="Item">
+                                {detailBom.item.sku} — {detailBom.item.name}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Version">{detailBom.version}</Descriptions.Item>
+                            <Descriptions.Item label="Active">
+                                <Tag color={detailBom.is_active ? 'green' : 'default'}>
+                                    {detailBom.is_active ? 'active' : 'inactive'}
+                                </Tag>
+                            </Descriptions.Item>
+                        </Descriptions>
+
+                        <Typography.Title level={5} style={{ marginTop: 24 }}>
+                            Components
+                        </Typography.Title>
+                        <Table
+                            rowKey="id"
+                            size="small"
+                            pagination={false}
+                            dataSource={detailBom.lines}
+                            scroll={{ x: 'max-content' }}
+                            columns={[
+                                {
+                                    title: 'Component',
+                                    render: (_, line) => `${line.component.sku} — ${line.component.name}`,
+                                },
+                                { title: 'Quantity per Unit', dataIndex: 'quantity_per' },
+                            ]}
+                        />
+                    </>
+                )}
+            </Drawer>
         </>
     );
 }
