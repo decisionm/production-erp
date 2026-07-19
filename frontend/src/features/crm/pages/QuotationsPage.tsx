@@ -95,6 +95,7 @@ export default function QuotationsPage() {
             </Space>
 
             <Table<Quotation>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

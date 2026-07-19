@@ -134,6 +134,7 @@ export default function StockPage() {
             </Space>
 
             <Table<StockBalance>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={balances?.data}

@@ -68,6 +68,7 @@ export default function SerialNumbersPage() {
             </Typography.Paragraph>
 
             <Table<SerialNumber>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
@@ -135,6 +136,7 @@ export default function SerialNumbersPage() {
             >
                 {history && (
                     <Table
+                        scroll={{ x: 'max-content' }}
                         size="small"
                         rowKey="id"
                         dataSource={history.movements}

@@ -70,6 +70,7 @@ export default function AssetsPage() {
             </Space>
 
             <Table<Asset>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

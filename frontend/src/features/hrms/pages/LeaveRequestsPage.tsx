@@ -79,6 +79,7 @@ export default function LeaveRequestsPage() {
             </Space>
 
             <Table<LeaveRequest>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

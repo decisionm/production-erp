@@ -44,6 +44,7 @@ export default function PayslipsPage() {
             </Space>
 
             <Table<Payslip>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
@@ -57,6 +58,7 @@ export default function PayslipsPage() {
                 expandable={{
                     expandedRowRender: (row) => (
                         <Table
+                            scroll={{ x: 'max-content' }}
                             rowKey="id"
                             size="small"
                             dataSource={row.lines}

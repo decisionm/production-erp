@@ -105,6 +105,7 @@ export default function SubcontractOrdersPage() {
             </Typography.Paragraph>
 
             <Table<SubcontractOrder>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

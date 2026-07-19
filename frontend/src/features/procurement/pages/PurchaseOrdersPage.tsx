@@ -70,6 +70,7 @@ export default function PurchaseOrdersPage() {
             </Space>
 
             <Table<PurchaseOrder>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

@@ -104,6 +104,7 @@ export default function InstrumentsPage() {
             </Space>
 
             <Table<MeasuringInstrument>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
@@ -130,6 +131,7 @@ export default function InstrumentsPage() {
                 expandable={{
                     expandedRowRender: (row) => (
                         <Table<CalibrationRecord>
+                            scroll={{ x: 'max-content' }}
                             rowKey="id"
                             size="small"
                             dataSource={row.calibration_records}

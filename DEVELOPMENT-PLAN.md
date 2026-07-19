@@ -99,6 +99,39 @@ Stack: React (frontend) + Laravel (API) + MySQL. Deployment model: **single-tena
 
 ---
 
+## Status as of 2026-07-19
+
+Phases 0–4 are functionally built out (all modules listed below exist under `backend/app/Modules/` with a working API + `frontend/src/features/` UI, and are smoke-tested against the seeded Puducherry bottle-manufacturer demo dataset — see `BottleManufacturingDemoSeeder`). What's actually pending, by phase:
+
+**Phase 0 — Foundations**
+- No CI pipeline (`.github/workflows`) exists yet. Lint/test/build (`pint`, `php artisan test`, `npm run typecheck`, `npm run build`) are only run manually per the "Before committing" checklist in `CLAUDE.md`.
+- No automated feature-test suite. `backend/tests/` only has PHPUnit's default `ExampleTest.php` (2 tests). Every module has been verified via one-off manual `curl` scripts during development, not via committed, repeatable tests — this is real coverage debt, not just a nice-to-have.
+
+**Phase 2 — India Compliance + CRM + Quality**
+- GST computation/rates/registrations/GSTR-ready reports, CRM (leads/opportunities/quotations), Quality core (incoming inspection, NCR), multi-level BOM/routing/MRP, and one-directional Tally sync (ERP → Tally, vouchers) are all built.
+- **e-Invoicing (IRN/QR) and e-way bill** — not started. Needs a GSP vendor decision first (see open question in `ERP-FEATURES.md`).
+- **TDS on purchases** (vendor invoices) — not built. Only sales-side GST exists in the Compliance module.
+- **Customer portal** — not built.
+
+**Phase 3 — HRMS + Payroll**
+- HRMS core (employee master, attendance, leave) and payroll run/payslip generation with **PF and ESI** are built and verified (`PayrollRunService::calculatePf/calculateEsi`).
+- **Professional Tax, LWF, TDS on salary, Form 16** — not implemented.
+- **Employee self-service portal** — not built.
+- Recruitment/onboarding — not built (explicitly allowed to slip past Phase 3 per this doc).
+
+**Phase 4 — Advanced Manufacturing + Maintenance + Analytics**
+- Full MRP, capacity planning, subcontracting, batch/serial tracking, and scrap/rework are built (capacity/subcontracting/batch-serial/scrap-rework all added 2026-07-19).
+- CMMS (preventive maintenance schedules, asset tracking) and Quality CAPA/calibration (measuring instruments)/SPC are built.
+- Maintenance parts consumption goes through generic stock issue — there's no dedicated spare-parts module (min/max stocking levels, kitting), just plain inventory items used on maintenance work orders.
+- **Advanced Finance: standard/job costing, budgeting** — not built. Finance module currently covers GL, AP/AR, manual journal entries, and basic P&L/balance sheet only.
+- **BI dashboards, custom report builder** — not built beyond the fixed dashboards/reports already shipped per module.
+- **Vendor & customer self-service portals** — not built.
+
+**Phase 5 — Multi-Company Growth**
+- Correctly untouched — still gated on the ~8–10 instance threshold, not a fixed timeline.
+
+---
+
 ## Suggested team shape (indicative, adjust to actual headcount)
 
 | Role | Phase 0–1 | Phase 2–3 | Phase 4–5 |

@@ -62,6 +62,7 @@ export default function AttendancePage() {
             </Space>
 
             <Table<Attendance>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

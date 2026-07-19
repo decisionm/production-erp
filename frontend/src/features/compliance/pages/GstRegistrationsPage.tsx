@@ -45,6 +45,7 @@ export default function GstRegistrationsPage() {
             </Space>
 
             <Table<GstRegistration>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

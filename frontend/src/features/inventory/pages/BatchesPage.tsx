@@ -61,6 +61,7 @@ export default function BatchesPage() {
             </Typography.Paragraph>
 
             <Table<Batch>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
@@ -153,6 +154,7 @@ export default function BatchesPage() {
                     <>
                         <Typography.Text strong>On Hand</Typography.Text>
                         <Table
+                            scroll={{ x: 'max-content' }}
                             size="small"
                             rowKey="warehouse_id"
                             dataSource={ledger.on_hand}
@@ -165,6 +167,7 @@ export default function BatchesPage() {
                         />
                         <Typography.Text strong>Movements</Typography.Text>
                         <Table
+                            scroll={{ x: 'max-content' }}
                             size="small"
                             rowKey="id"
                             dataSource={ledger.movements}

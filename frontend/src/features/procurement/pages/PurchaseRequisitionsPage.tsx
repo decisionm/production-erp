@@ -72,6 +72,7 @@ export default function PurchaseRequisitionsPage() {
             </Space>
 
             <Table<PurchaseRequisition>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

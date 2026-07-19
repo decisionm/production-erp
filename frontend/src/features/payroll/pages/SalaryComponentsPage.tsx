@@ -64,6 +64,7 @@ export default function SalaryComponentsPage() {
             </Space>
 
             <Table<SalaryComponent>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

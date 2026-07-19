@@ -42,6 +42,7 @@ export default function GstRatesPage() {
             </Space>
 
             <Table<GstRate>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

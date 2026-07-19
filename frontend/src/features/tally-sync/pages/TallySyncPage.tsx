@@ -29,6 +29,7 @@ export default function TallySyncPage() {
             </Typography.Paragraph>
 
             <Table<TallySyncEntry>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

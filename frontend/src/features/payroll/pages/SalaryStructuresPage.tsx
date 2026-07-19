@@ -59,6 +59,7 @@ export default function SalaryStructuresPage() {
             </Space>
 
             <Table<SalaryStructure>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

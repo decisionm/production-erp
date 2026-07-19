@@ -53,6 +53,7 @@ export default function ItemsPage() {
             </Space>
 
             <Table<Item>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

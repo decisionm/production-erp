@@ -109,6 +109,7 @@ export default function ReworkOrdersPage() {
             </Typography.Paragraph>
 
             <Table<ReworkOrder>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

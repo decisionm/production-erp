@@ -92,6 +92,7 @@ export default function PayrollRunsPage() {
             </Space>
 
             <Table<PayrollRun>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

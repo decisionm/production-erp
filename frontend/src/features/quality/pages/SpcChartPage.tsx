@@ -143,6 +143,7 @@ export default function SpcChartPage() {
 
                     <Card title="Points" style={{ marginTop: 16 }}>
                         <Table<SpcChartPoint>
+                            scroll={{ x: 'max-content' }}
                             rowKey="id"
                             size="small"
                             dataSource={chart.points}

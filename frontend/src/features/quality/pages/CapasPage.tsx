@@ -107,6 +107,7 @@ export default function CapasPage() {
             </Space>
 
             <Table<Capa>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

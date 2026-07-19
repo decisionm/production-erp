@@ -146,6 +146,7 @@ export default function WorkOrdersPage() {
             </Space>
 
             <Table<MaintenanceWorkOrder>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

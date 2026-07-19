@@ -42,6 +42,7 @@ export default function LeaveTypesPage() {
             </Space>
 
             <Table<LeaveType>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

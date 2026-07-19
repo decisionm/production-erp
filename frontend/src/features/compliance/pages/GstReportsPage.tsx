@@ -104,6 +104,7 @@ function InvoiceBreakdownTab() {
                     </Space>
 
                     <Table<GstInvoiceLineBreakdown>
+                        scroll={{ x: 'max-content' }}
                         rowKey="item_id"
                         dataSource={data.lines}
                         pagination={false}

@@ -63,6 +63,7 @@ export default function OpportunitiesPage() {
             </Space>
 
             <Table<Opportunity>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

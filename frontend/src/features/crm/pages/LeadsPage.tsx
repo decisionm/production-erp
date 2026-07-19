@@ -80,6 +80,7 @@ export default function LeadsPage() {
             </Space>
 
             <Table<Lead>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

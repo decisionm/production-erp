@@ -50,6 +50,7 @@ export default function VendorsPage() {
             </Space>
 
             <Table<Vendor>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

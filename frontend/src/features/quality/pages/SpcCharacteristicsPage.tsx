@@ -52,6 +52,7 @@ export default function SpcCharacteristicsPage() {
             </Space>
 
             <Table<SpcCharacteristic>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

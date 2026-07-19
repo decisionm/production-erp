@@ -77,6 +77,7 @@ export default function IncomingInspectionsPage() {
             </Space>
 
             <Table<IncomingInspection>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

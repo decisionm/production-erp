@@ -8,6 +8,7 @@ function TrialBalanceTab() {
 
     return (
         <Table<TrialBalanceRow>
+            scroll={{ x: 'max-content' }}
             rowKey="account_id"
             loading={isLoading}
             dataSource={data}
@@ -83,6 +84,7 @@ function ReceivablesTab() {
 
     return (
         <Table
+            scroll={{ x: 'max-content' }}
             rowKey="invoice_id"
             loading={isLoading}
             dataSource={data}

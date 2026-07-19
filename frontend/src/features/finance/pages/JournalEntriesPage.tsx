@@ -79,6 +79,7 @@ export default function JournalEntriesPage() {
             </Space>
 
             <Table<JournalEntry>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

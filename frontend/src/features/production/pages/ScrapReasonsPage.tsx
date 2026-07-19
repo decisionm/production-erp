@@ -43,6 +43,7 @@ export default function ScrapReasonsPage() {
             </Space>
 
             <Table<ScrapReason>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

@@ -53,6 +53,7 @@ export default function LeaveBalancesPage() {
             </Space>
 
             <Table<LeaveBalance>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

@@ -99,6 +99,7 @@ export default function InvoicesPage() {
             </Space>
 
             <Table<Invoice>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

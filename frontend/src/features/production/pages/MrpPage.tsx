@@ -61,6 +61,7 @@ export default function MrpPage() {
 
             {results && (
                 <Table<MrpNetRequirement>
+                    scroll={{ x: 'max-content' }}
                     rowKey="item_id"
                     dataSource={results}
                     pagination={false}

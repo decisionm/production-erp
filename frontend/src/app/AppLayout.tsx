@@ -1,14 +1,33 @@
+import {
+    AccountBookOutlined,
+    BuildOutlined,
+    ContactsOutlined,
+    DashboardOutlined,
+    FileProtectOutlined,
+    InboxOutlined,
+    LogoutOutlined,
+    MenuFoldOutlined,
+    MenuUnfoldOutlined,
+    SafetyCertificateOutlined,
+    ShopOutlined,
+    ShoppingCartOutlined,
+    SyncOutlined,
+    TeamOutlined,
+    ToolOutlined,
+    WalletOutlined,
+} from '@ant-design/icons';
 import { useMutation } from '@tanstack/react-query';
-import { Button, Layout, Menu } from 'antd';
-import type { PropsWithChildren } from 'react';
+import { Avatar, Dropdown, Layout, Menu, Space, Typography } from 'antd';
+import { type PropsWithChildren, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { logout } from '@/features/auth/api';
 import { useAuthStore } from '@/features/auth/store';
 
 const navItems = [
-    { key: '/', label: 'Dashboard' },
+    { key: '/', icon: <DashboardOutlined />, label: 'Dashboard' },
     {
         key: 'crm',
+        icon: <ContactsOutlined />,
         label: 'CRM',
         children: [
             { key: '/crm/leads', label: 'Leads' },
@@ -18,6 +37,7 @@ const navItems = [
     },
     {
         key: 'inventory',
+        icon: <InboxOutlined />,
         label: 'Inventory',
         children: [
             { key: '/inventory/items', label: 'Items' },
@@ -29,6 +49,7 @@ const navItems = [
     },
     {
         key: 'production',
+        icon: <ToolOutlined />,
         label: 'Production',
         children: [
             { key: '/production/work-centers', label: 'Work Centers' },
@@ -44,6 +65,7 @@ const navItems = [
     },
     {
         key: 'procurement',
+        icon: <ShopOutlined />,
         label: 'Procurement',
         children: [
             { key: '/procurement/vendors', label: 'Vendors' },
@@ -54,6 +76,7 @@ const navItems = [
     },
     {
         key: 'sales',
+        icon: <ShoppingCartOutlined />,
         label: 'Sales',
         children: [
             { key: '/sales/customers', label: 'Customers' },
@@ -64,6 +87,7 @@ const navItems = [
     },
     {
         key: 'finance',
+        icon: <AccountBookOutlined />,
         label: 'Finance',
         children: [
             { key: '/finance/chart-of-accounts', label: 'Chart of Accounts' },
@@ -73,6 +97,7 @@ const navItems = [
     },
     {
         key: 'quality',
+        icon: <SafetyCertificateOutlined />,
         label: 'Quality',
         children: [
             { key: '/quality/incoming-inspections', label: 'Incoming Inspections' },
@@ -84,6 +109,7 @@ const navItems = [
     },
     {
         key: 'compliance',
+        icon: <FileProtectOutlined />,
         label: 'Compliance',
         children: [
             { key: '/compliance/gst-rates', label: 'GST Rates' },
@@ -93,6 +119,7 @@ const navItems = [
     },
     {
         key: 'hrms',
+        icon: <TeamOutlined />,
         label: 'HRMS',
         children: [
             { key: '/hrms/employees', label: 'Employees' },
@@ -104,6 +131,7 @@ const navItems = [
     },
     {
         key: 'payroll',
+        icon: <WalletOutlined />,
         label: 'Payroll',
         children: [
             { key: '/payroll/salary-components', label: 'Salary Components' },
@@ -114,6 +142,7 @@ const navItems = [
     },
     {
         key: 'maintenance',
+        icon: <BuildOutlined />,
         label: 'Maintenance',
         children: [
             { key: '/maintenance/assets', label: 'Assets' },
@@ -122,7 +151,7 @@ const navItems = [
             { key: '/maintenance/reliability', label: 'Reliability Report' },
         ],
     },
-    { key: '/tally-sync', label: 'Tally Sync' },
+    { key: '/tally-sync', icon: <SyncOutlined />, label: 'Tally Sync' },
 ];
 
 export default function AppLayout({ children }: PropsWithChildren) {
@@ -130,6 +159,8 @@ export default function AppLayout({ children }: PropsWithChildren) {
     const location = useLocation();
     const user = useAuthStore((state) => state.user);
     const setUser = useAuthStore((state) => state.setUser);
+    const [collapsed, setCollapsed] = useState(false);
+    const [isMobile, setIsMobile] = useState(false);
 
     const mutation = useMutation({
         mutationFn: logout,
@@ -139,24 +170,127 @@ export default function AppLayout({ children }: PropsWithChildren) {
         },
     });
 
+    const openKey = navItems.find((item) => item.children?.some((child) => child.key === location.pathname))?.key;
+
     return (
         <Layout style={{ minHeight: '100vh' }}>
-            <Layout.Header style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-                <span style={{ color: '#fff', fontWeight: 600, marginRight: 24 }}>ERP</span>
+            <Layout.Sider
+                theme="dark"
+                collapsible
+                collapsed={collapsed}
+                onCollapse={(value, type) => {
+                    setCollapsed(value);
+                    if (type === 'responsive') setIsMobile(value);
+                }}
+                breakpoint="lg"
+                collapsedWidth={isMobile ? 0 : 80}
+                trigger={null}
+                style={
+                    isMobile
+                        ? { position: 'fixed', top: 0, bottom: 0, left: 0, height: '100vh', overflow: 'auto', zIndex: 100 }
+                        : { position: 'sticky', top: 0, height: '100vh', overflow: 'auto', zIndex: 10 }
+                }
+            >
+                <div
+                    style={{
+                        height: 56,
+                        margin: 12,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: collapsed ? 'center' : 'flex-start',
+                        gap: 8,
+                        color: '#fff',
+                        overflow: 'hidden',
+                    }}
+                >
+                    <div
+                        style={{
+                            width: 32,
+                            height: 32,
+                            flexShrink: 0,
+                            borderRadius: 8,
+                            background: 'linear-gradient(135deg, #1677ff, #52c9ff)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: 700,
+                        }}
+                    >
+                        M
+                    </div>
+                    {!collapsed && (
+                        <Typography.Text style={{ color: '#fff', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                            Manufacturing ERP
+                        </Typography.Text>
+                    )}
+                </div>
                 <Menu
                     theme="dark"
-                    mode="horizontal"
+                    mode="inline"
                     selectedKeys={[location.pathname]}
+                    defaultOpenKeys={openKey ? [openKey] : []}
                     items={navItems}
-                    onClick={({ key }) => navigate(key)}
-                    style={{ flex: 1, minWidth: 0 }}
+                    onClick={({ key }) => {
+                        navigate(key);
+                        if (isMobile) setCollapsed(true);
+                    }}
                 />
-                <span style={{ color: '#fff' }}>{user?.name}</span>
-                <Button onClick={() => mutation.mutate()} loading={mutation.isPending}>
-                    Sign out
-                </Button>
-            </Layout.Header>
-            <Layout.Content style={{ padding: 24 }}>{children}</Layout.Content>
+            </Layout.Sider>
+            {isMobile && !collapsed && (
+                <div
+                    onClick={() => setCollapsed(true)}
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        background: 'rgba(0,0,0,0.45)',
+                        zIndex: 90,
+                    }}
+                />
+            )}
+            <Layout>
+                <Layout.Header
+                    style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '0 16px',
+                        background: '#fff',
+                        borderBottom: '1px solid #f0f0f0',
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 9,
+                    }}
+                >
+                    {collapsed ? (
+                        <MenuUnfoldOutlined style={{ fontSize: 18, cursor: 'pointer' }} onClick={() => setCollapsed(false)} />
+                    ) : (
+                        <MenuFoldOutlined style={{ fontSize: 18, cursor: 'pointer' }} onClick={() => setCollapsed(true)} />
+                    )}
+                    <Dropdown
+                        menu={{
+                            items: [
+                                {
+                                    key: 'logout',
+                                    icon: <LogoutOutlined />,
+                                    label: 'Sign out',
+                                    onClick: () => mutation.mutate(),
+                                },
+                            ],
+                        }}
+                        trigger={['click']}
+                    >
+                        <Space style={{ cursor: 'pointer' }}>
+                            <Avatar style={{ backgroundColor: '#1677ff' }}>
+                                {user?.name?.charAt(0).toUpperCase() ?? '?'}
+                            </Avatar>
+                            <Typography.Text>{user?.name}</Typography.Text>
+                        </Space>
+                    </Dropdown>
+                </Layout.Header>
+                <Layout.Content className="app-content" style={{ padding: 24, minHeight: 0 }}>
+                    <div style={{ maxWidth: 1400, margin: '0 auto' }}>{children}</div>
+                </Layout.Content>
+            </Layout>
         </Layout>
     );
 }

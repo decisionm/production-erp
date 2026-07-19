@@ -50,6 +50,7 @@ export default function CustomersPage() {
             </Space>
 
             <Table<Customer>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

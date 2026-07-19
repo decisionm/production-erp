@@ -42,6 +42,7 @@ export default function WarehousesPage() {
             </Space>
 
             <Table<Warehouse>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

@@ -1,0 +1,15 @@
+html,
+body,
+#root {
+    overflow-x: hidden;
+}
+
+@media (max-width: 768px) {
+    .login-brand-panel {
+        display: none !important;
+    }
+
+    .app-content {
+        padding: 12px !important;
+    }
+}

@@ -62,6 +62,7 @@ export default function RoutingsPage() {
             </Space>
 
             <Table<Routing>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}

@@ -56,6 +56,7 @@ export default function WorkCentersPage() {
             </Space>
 
             <Table<WorkCenter>
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
