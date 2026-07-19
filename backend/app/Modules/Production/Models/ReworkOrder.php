@@ -4,23 +4,22 @@ namespace App\Modules\Production\Models;
 
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\Warehouse;
-use App\Modules\Production\Models\Enums\WorkOrderStatus;
+use App\Modules\Production\Models\Enums\ReworkOrderStatus;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
-    'item_id', 'bom_id', 'routing_id', 'warehouse_id', 'scheduled_date', 'quantity_planned',
-    'quantity_completed', 'material_cost', 'status', 'released_at', 'completed_at', 'created_by',
+    'item_id', 'source_work_order_id', 'bom_id', 'warehouse_id', 'quantity_input', 'quantity_recovered',
+    'material_cost', 'labor_cost', 'total_cost', 'status', 'released_at', 'completed_at', 'created_by',
 ])]
-class WorkOrder extends Model
+class ReworkOrder extends Model
 {
     protected function casts(): array
     {
         return [
-            'status' => WorkOrderStatus::class,
-            'scheduled_date' => 'date',
+            'status' => ReworkOrderStatus::class,
             'released_at' => 'datetime',
             'completed_at' => 'datetime',
         ];
@@ -31,14 +30,14 @@ class WorkOrder extends Model
         return $this->belongsTo(Item::class);
     }
 
+    public function sourceWorkOrder(): BelongsTo
+    {
+        return $this->belongsTo(WorkOrder::class, 'source_work_order_id');
+    }
+
     public function bom(): BelongsTo
     {
         return $this->belongsTo(Bom::class);
-    }
-
-    public function routing(): BelongsTo
-    {
-        return $this->belongsTo(Routing::class);
     }
 
     public function warehouse(): BelongsTo
@@ -48,11 +47,6 @@ class WorkOrder extends Model
 
     public function materials(): HasMany
     {
-        return $this->hasMany(WorkOrderMaterial::class);
-    }
-
-    public function scraps(): HasMany
-    {
-        return $this->hasMany(WorkOrderScrap::class);
+        return $this->hasMany(ReworkOrderMaterial::class);
     }
 }

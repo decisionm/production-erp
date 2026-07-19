@@ -4,7 +4,9 @@ import type {
     Bom,
     CapacityWorkCenterLoad,
     MrpNetRequirement,
+    ReworkOrder,
     Routing,
+    ScrapReason,
     SubcontractOrder,
     WorkCenter,
     WorkOrder,
@@ -94,10 +96,22 @@ export async function releaseWorkOrder(id: number): Promise<WorkOrder> {
     return data.data;
 }
 
-export async function completeWorkOrder(id: number, quantityCompleted: number, batchNumber?: string): Promise<WorkOrder> {
+export interface WorkOrderScrapEntry {
+    scrap_reason_id: number;
+    quantity: number;
+    notes?: string;
+}
+
+export async function completeWorkOrder(
+    id: number,
+    quantityCompleted: number,
+    batchNumber?: string,
+    scrap?: WorkOrderScrapEntry[],
+): Promise<WorkOrder> {
     const { data } = await api.post<{ data: WorkOrder }>(`/production/work-orders/${id}/complete`, {
         quantity_completed: quantityCompleted,
         batch_number: batchNumber,
+        scrap,
     });
     return data.data;
 }
@@ -144,5 +158,51 @@ export async function receiveSubcontractOrder(
     payload: { quantity_received: number; service_cost: number },
 ): Promise<SubcontractOrder> {
     const { data } = await api.post<{ data: SubcontractOrder }>(`/production/subcontract-orders/${id}/receive`, payload);
+    return data.data;
+}
+
+export async function listScrapReasons(): Promise<Paginated<ScrapReason>> {
+    const { data } = await api.get<Paginated<ScrapReason>>('/production/scrap-reasons');
+    return data;
+}
+
+export interface CreateScrapReasonPayload {
+    code: string;
+    name: string;
+}
+
+export async function createScrapReason(payload: CreateScrapReasonPayload): Promise<ScrapReason> {
+    const { data } = await api.post<{ data: ScrapReason }>('/production/scrap-reasons', payload);
+    return data.data;
+}
+
+export async function listReworkOrders(): Promise<Paginated<ReworkOrder>> {
+    const { data } = await api.get<Paginated<ReworkOrder>>('/production/rework-orders');
+    return data;
+}
+
+export interface CreateReworkOrderPayload {
+    item_id: number;
+    source_work_order_id?: number;
+    bom_id?: number;
+    warehouse_id: number;
+    quantity_input: number;
+}
+
+export async function createReworkOrder(payload: CreateReworkOrderPayload): Promise<ReworkOrder> {
+    const { data } = await api.post<{ data: ReworkOrder }>('/production/rework-orders', payload);
+    return data.data;
+}
+
+export async function releaseReworkOrder(id: number): Promise<ReworkOrder> {
+    const { data } = await api.post<{ data: ReworkOrder }>(`/production/rework-orders/${id}/release`);
+    return data.data;
+}
+
+export async function completeReworkOrder(
+    id: number,
+    payload: { quantity_recovered: number; labor_cost: number },
+): Promise<ReworkOrder> {
+    const { data } = await api.post<{ data: ReworkOrder }>(`/production/rework-orders/${id}/complete`, payload);
     return data.data;
 }

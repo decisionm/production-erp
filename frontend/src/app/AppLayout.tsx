@@ -38,6 +38,8 @@ const navItems = [
             { key: '/production/mrp', label: 'MRP' },
             { key: '/production/capacity', label: 'Capacity Planning' },
             { key: '/production/subcontract-orders', label: 'Subcontract Orders' },
+            { key: '/production/scrap-reasons', label: 'Scrap Reasons' },
+            { key: '/production/rework-orders', label: 'Rework Orders' },
         ],
     },
     {

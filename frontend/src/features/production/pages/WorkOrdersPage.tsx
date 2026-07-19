@@ -2,10 +2,10 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
-import { Controller, useForm } from 'react-hook-form';
+import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { listItems, listWarehouses } from '@/features/inventory/api';
-import { completeWorkOrder, createWorkOrder, listWorkOrders, releaseWorkOrder } from '@/features/production/api';
+import { completeWorkOrder, createWorkOrder, listScrapReasons, listWorkOrders, releaseWorkOrder } from '@/features/production/api';
 import type { WorkOrder, WorkOrderStatus } from '@/features/production/types';
 
 const createSchema = z.object({
@@ -16,9 +16,16 @@ const createSchema = z.object({
 });
 type CreateFormValues = z.infer<typeof createSchema>;
 
+const scrapEntrySchema = z.object({
+    scrap_reason_id: z.number({ error: 'Reason is required' }),
+    quantity: z.number().gt(0, 'Quantity must be greater than 0'),
+    notes: z.string().optional(),
+});
+
 const completeSchema = z.object({
     quantity_completed: z.number().gt(0, 'Quantity must be greater than 0'),
     batch_number: z.string().optional(),
+    scrap: z.array(scrapEntrySchema).optional(),
 });
 type CompleteFormValues = z.infer<typeof completeSchema>;
 
@@ -36,9 +43,11 @@ export default function WorkOrdersPage() {
     const { data, isLoading } = useQuery({ queryKey: ['production', 'work-orders'], queryFn: listWorkOrders });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
     const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses'], queryFn: listWarehouses });
+    const { data: scrapReasons } = useQuery({ queryKey: ['production', 'scrap-reasons'], queryFn: listScrapReasons });
 
     const itemOptions = items?.data.map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];
     const warehouseOptions = warehouses?.data.map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })) ?? [];
+    const scrapReasonOptions = scrapReasons?.data.map((r) => ({ value: r.id, label: `${r.code} — ${r.name}` })) ?? [];
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['production', 'work-orders'] });
 
@@ -71,15 +80,20 @@ export default function WorkOrdersPage() {
         handleSubmit: handleCompleteSubmit,
         reset: resetComplete,
         formState: { errors: completeErrors },
-    } = useForm<CompleteFormValues>({ resolver: zodResolver(completeSchema) });
+    } = useForm<CompleteFormValues>({ resolver: zodResolver(completeSchema), defaultValues: { scrap: [] } });
+    const { fields: scrapFields, append: appendScrap, remove: removeScrap } = useFieldArray({ control: completeControl, name: 'scrap' });
 
     const completeMutation = useMutation({
-        mutationFn: ({ id, quantity, batchNumber }: { id: number; quantity: number; batchNumber?: string }) =>
-            completeWorkOrder(id, quantity, batchNumber),
+        mutationFn: ({ id, quantity, batchNumber, scrap }: {
+            id: number;
+            quantity: number;
+            batchNumber?: string;
+            scrap?: CompleteFormValues['scrap'];
+        }) => completeWorkOrder(id, quantity, batchNumber, scrap),
         onSuccess: () => {
             invalidate();
             setCompletingRow(null);
-            resetComplete();
+            resetComplete({ scrap: [] });
         },
         onError: (error: any) => {
             Modal.error({ title: 'Could not complete work order', content: error?.response?.data?.message ?? 'Unknown error' });
@@ -202,9 +216,11 @@ export default function WorkOrdersPage() {
                             id: completingRow.id,
                             quantity: values.quantity_completed,
                             batchNumber: values.batch_number,
+                            scrap: values.scrap,
                         });
                     }
                 })}
+                width={600}
                 confirmLoading={completeMutation.isPending}
                 destroyOnHidden
             >
@@ -229,6 +245,44 @@ export default function WorkOrdersPage() {
                             />
                         </Form.Item>
                     )}
+
+                    <Typography.Text strong>Scrap (optional — makes yield loss explicit)</Typography.Text>
+                    {scrapFields.map((field, index) => (
+                        <Space key={field.id} align="baseline" style={{ display: 'flex', marginTop: 8 }}>
+                            <Controller
+                                name={`scrap.${index}.scrap_reason_id`}
+                                control={completeControl}
+                                render={({ field }) => (
+                                    <Select
+                                        {...field}
+                                        options={scrapReasonOptions}
+                                        showSearch
+                                        optionFilterProp="label"
+                                        style={{ width: 200 }}
+                                        placeholder="Reason"
+                                    />
+                                )}
+                            />
+                            <Controller
+                                name={`scrap.${index}.quantity`}
+                                control={completeControl}
+                                render={({ field }) => <InputNumber {...field} min={0} placeholder="Quantity" />}
+                            />
+                            <Controller
+                                name={`scrap.${index}.notes`}
+                                control={completeControl}
+                                render={({ field }) => <Input {...field} placeholder="Notes (optional)" style={{ width: 160 }} />}
+                            />
+                            <Button danger onClick={() => removeScrap(index)}>Remove</Button>
+                        </Space>
+                    ))}
+                    <Button
+                        type="dashed"
+                        style={{ marginTop: 8 }}
+                        onClick={() => appendScrap({ scrap_reason_id: undefined as unknown as number, quantity: undefined as unknown as number })}
+                    >
+                        Add Scrap Entry
+                    </Button>
                 </Form>
             </Modal>
         </>

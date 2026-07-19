@@ -52,6 +52,22 @@ export interface WorkOrderMaterial {
     quantity_issued: string;
 }
 
+export interface ScrapReason {
+    id: number;
+    code: string;
+    name: string;
+    is_active: boolean;
+    created_at: string;
+}
+
+export interface WorkOrderScrap {
+    id: number;
+    reason: ScrapReason;
+    quantity: string;
+    cost_impact: string;
+    notes: string | null;
+}
+
 export interface WorkOrder {
     id: number;
     item: Item;
@@ -64,6 +80,7 @@ export interface WorkOrder {
     material_cost: string;
     status: WorkOrderStatus;
     materials: WorkOrderMaterial[];
+    scraps: WorkOrderScrap[];
     released_at: string | null;
     completed_at: string | null;
     created_at: string;
@@ -117,6 +134,33 @@ export interface SubcontractOrder {
     status: SubcontractOrderStatus;
     materials: SubcontractOrderMaterial[];
     materials_sent_at: string | null;
+    completed_at: string | null;
+    created_at: string;
+}
+
+export type ReworkOrderStatus = 'draft' | 'released' | 'completed';
+
+export interface ReworkOrderMaterial {
+    id: number;
+    component: Item;
+    quantity_required: string;
+    quantity_issued: string;
+}
+
+export interface ReworkOrder {
+    id: number;
+    item: Item;
+    source_work_order_id: number | null;
+    bom_id: number | null;
+    warehouse: Warehouse;
+    quantity_input: string;
+    quantity_recovered: string;
+    material_cost: string;
+    labor_cost: string;
+    total_cost: string;
+    status: ReworkOrderStatus;
+    materials: ReworkOrderMaterial[];
+    released_at: string | null;
     completed_at: string | null;
     created_at: string;
 }

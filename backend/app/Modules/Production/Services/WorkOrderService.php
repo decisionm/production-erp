@@ -7,6 +7,7 @@ use App\Modules\Inventory\Models\Enums\ItemTrackingType;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Services\BatchService;
 use App\Modules\Inventory\Services\StockMovementService;
+use App\Modules\Production\Exceptions\ExcessCompletionException;
 use App\Modules\Production\Exceptions\MissingBomException;
 use App\Modules\Production\Models\Bom;
 use App\Modules\Production\Models\Enums\WorkOrderStatus;
@@ -34,7 +35,7 @@ class WorkOrderService
     public function paginate(int $perPage = 20): LengthAwarePaginator
     {
         return WorkOrder::query()
-            ->with(['item', 'warehouse', 'materials.component'])
+            ->with(['item', 'warehouse', 'materials.component', 'scraps.reason'])
             ->orderByDesc('id')
             ->paginate($perPage);
     }
@@ -114,14 +115,31 @@ class WorkOrderService
      * this production run's output is traceable as its own lot. Ignored
      * for non-batch-tracked items rather than erroring, since most items
      * won't be batch-tracked and callers shouldn't have to know that.
+     *
+     * $scrapEntries makes yield loss explicit and auditable instead of it
+     * silently vanishing into "planned minus completed" with no record of
+     * why. Each entry gets a cost_impact for reporting — how much of the
+     * consumed material cost that reason accounts for — but this doesn't
+     * change the completed goods' unit cost formula below: material cost
+     * is still divided across whatever quantity actually came out good,
+     * the standard process-manufacturing convention where survivors
+     * absorb the cost of what didn't make it, scrap-tagged or not.
+     *
+     * @param  array<int, array{scrap_reason_id: int, quantity: string, notes?: string}>  $scrapEntries
      */
-    public function complete(WorkOrder $workOrder, string $quantityCompleted, ?string $batchNumber = null): WorkOrder
+    public function complete(WorkOrder $workOrder, string $quantityCompleted, ?string $batchNumber = null, array $scrapEntries = []): WorkOrder
     {
         if ($workOrder->status !== WorkOrderStatus::Released) {
             throw InvalidStatusTransitionException::make('work order', $workOrder->status->value, WorkOrderStatus::Completed->value);
         }
 
-        return DB::transaction(function () use ($workOrder, $quantityCompleted, $batchNumber) {
+        $totalScrap = array_reduce($scrapEntries, fn (string $carry, array $entry) => bcadd($carry, $entry['quantity'], 4), '0.0000');
+        $accountedFor = bcadd($quantityCompleted, $totalScrap, 4);
+        if (bccomp($accountedFor, $workOrder->quantity_planned, 4) > 0) {
+            throw ExcessCompletionException::forWorkOrder($workOrder->id, (string) $workOrder->quantity_planned, $accountedFor);
+        }
+
+        return DB::transaction(function () use ($workOrder, $quantityCompleted, $batchNumber, $scrapEntries) {
             $unitCost = bcdiv($workOrder->material_cost, $quantityCompleted, 4);
 
             $item = Item::findOrFail($workOrder->item_id);
@@ -143,13 +161,23 @@ class WorkOrderService
                 batchId: $batchId,
             );
 
+            $costPerPlannedUnit = bcdiv($workOrder->material_cost, $workOrder->quantity_planned, 4);
+            foreach ($scrapEntries as $entry) {
+                $workOrder->scraps()->create([
+                    'scrap_reason_id' => $entry['scrap_reason_id'],
+                    'quantity' => $entry['quantity'],
+                    'cost_impact' => bcmul($costPerPlannedUnit, $entry['quantity'], 4),
+                    'notes' => $entry['notes'] ?? null,
+                ]);
+            }
+
             $workOrder->update([
                 'status' => WorkOrderStatus::Completed,
                 'completed_at' => now(),
                 'quantity_completed' => $quantityCompleted,
             ]);
 
-            return $workOrder->fresh(['item', 'warehouse', 'materials.component']);
+            return $workOrder->fresh(['item', 'warehouse', 'materials.component', 'scraps.reason']);
         });
     }
 }

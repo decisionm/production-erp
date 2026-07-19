@@ -38,7 +38,9 @@ use App\Modules\Procurement\Http\Controllers\VendorController;
 use App\Modules\Production\Http\Controllers\BomController;
 use App\Modules\Production\Http\Controllers\CapacityPlanController;
 use App\Modules\Production\Http\Controllers\MrpController;
+use App\Modules\Production\Http\Controllers\ReworkOrderController;
 use App\Modules\Production\Http\Controllers\RoutingController;
+use App\Modules\Production\Http\Controllers\ScrapReasonController;
 use App\Modules\Production\Http\Controllers\SubcontractOrderController;
 use App\Modules\Production\Http\Controllers\WorkCenterController;
 use App\Modules\Production\Http\Controllers\WorkOrderController;
@@ -233,6 +235,12 @@ Route::prefix('v1')->group(function () {
             Route::apiResource('subcontract-orders', SubcontractOrderController::class)->only(['index', 'store']);
             Route::post('subcontract-orders/{subcontract_order}/send-materials', [SubcontractOrderController::class, 'sendMaterials']);
             Route::post('subcontract-orders/{subcontract_order}/receive', [SubcontractOrderController::class, 'receive']);
+
+            Route::apiResource('scrap-reasons', ScrapReasonController::class)->only(['index', 'store']);
+
+            Route::apiResource('rework-orders', ReworkOrderController::class)->only(['index', 'store']);
+            Route::post('rework-orders/{rework_order}/release', [ReworkOrderController::class, 'release']);
+            Route::post('rework-orders/{rework_order}/complete', [ReworkOrderController::class, 'complete']);
         });
 
         Route::prefix('maintenance')->group(function () {

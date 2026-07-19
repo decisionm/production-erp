@@ -31,11 +31,20 @@ class WorkOrderController extends Controller
 
     public function complete(CompleteWorkOrderRequest $request, WorkOrder $workOrder): WorkOrderResource
     {
+        $scrapEntries = collect($request->validated('scrap') ?? [])
+            ->map(fn (array $entry) => [
+                'scrap_reason_id' => $entry['scrap_reason_id'],
+                'quantity' => (string) $entry['quantity'],
+                'notes' => $entry['notes'] ?? null,
+            ])
+            ->all();
+
         return WorkOrderResource::make(
             $this->workOrders->complete(
                 $workOrder,
                 (string) $request->validated('quantity_completed'),
                 $request->validated('batch_number'),
+                $scrapEntries,
             ),
         );
     }
