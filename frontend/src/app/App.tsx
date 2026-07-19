@@ -6,6 +6,7 @@ import DashboardPage from '@/features/dashboard/pages/DashboardPage';
 import GstRatesPage from '@/features/compliance/pages/GstRatesPage';
 import GstRegistrationsPage from '@/features/compliance/pages/GstRegistrationsPage';
 import GstReportsPage from '@/features/compliance/pages/GstReportsPage';
+import HelpPage from '@/features/help/pages/HelpPage';
 import AttendancePage from '@/features/hrms/pages/AttendancePage';
 import EmployeesPage from '@/features/hrms/pages/EmployeesPage';
 import LeaveBalancesPage from '@/features/hrms/pages/LeaveBalancesPage';
@@ -120,6 +121,7 @@ export default function App() {
                                     <Route path="/maintenance/work-orders" element={<MaintenanceWorkOrdersPage />} />
                                     <Route path="/maintenance/reliability" element={<ReliabilityReportPage />} />
                                     <Route path="/tally-sync" element={<TallySyncPage />} />
+                                    <Route path="/help" element={<HelpPage />} />
                                     <Route path="/administration/users" element={<UsersPage />} />
                                     <Route path="/administration/roles" element={<RolesPage />} />
                                     <Route path="*" element={<Navigate to="/" replace />} />

@@ -8,6 +8,7 @@ import {
     LogoutOutlined,
     MenuFoldOutlined,
     MenuUnfoldOutlined,
+    QuestionCircleOutlined,
     SafetyCertificateOutlined,
     SettingOutlined,
     ShopOutlined,
@@ -19,7 +20,7 @@ import {
 } from '@ant-design/icons';
 import { useMutation } from '@tanstack/react-query';
 import { Avatar, Dropdown, Layout, Menu, type MenuProps, Space, Typography } from 'antd';
-import { type PropsWithChildren, type ReactNode, useMemo, useState } from 'react';
+import { type PropsWithChildren, type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { logout } from '@/features/auth/api';
 import { hasModuleAccess } from '@/features/auth/permissions';
@@ -180,6 +181,7 @@ const allNavItems: NavGroup[] = [
         ],
     },
     { key: '/tally-sync', icon: <SyncOutlined />, label: 'Tally Sync', module: 'tally-sync' },
+    { key: '/help', icon: <QuestionCircleOutlined />, label: 'Help' },
     {
         key: 'administration',
         icon: <SettingOutlined />,
@@ -228,6 +230,27 @@ export default function AppLayout({ children }: PropsWithChildren) {
 
     const navItems = useMemo(() => buildNavItems(user), [user]);
     const openKey = navItems.find((item) => item.children?.some((child) => child.key === location.pathname))?.key;
+    const rootSubmenuKeys = useMemo(() => navItems.filter((item) => item.children).map((item) => item.key), [navItems]);
+
+    // Accordion behaviour: opening one module group closes whichever else was
+    // open, so the sidebar can't stack several fully-expanded groups at once
+    // (that's what buried the Help entry between Maintenance and
+    // Administration when both happened to be open).
+    const [openKeys, setOpenKeys] = useState<string[]>(openKey ? [openKey] : []);
+    useEffect(() => {
+        setOpenKeys(openKey ? [openKey] : []);
+    }, [openKey]);
+
+    const menuItems = useMemo(() => {
+        const items: unknown[] = [];
+        navItems.forEach((item) => {
+            if (item.key === '/help') {
+                items.push({ type: 'divider', key: 'divider-utility', style: { borderColor: 'rgba(255,255,255,0.12)', margin: '8px 16px' } });
+            }
+            items.push(item);
+        });
+        return items as MenuProps['items'];
+    }, [navItems]);
 
     return (
         <Layout style={{ minHeight: '100vh' }}>
@@ -285,8 +308,12 @@ export default function AppLayout({ children }: PropsWithChildren) {
                     theme="dark"
                     mode="inline"
                     selectedKeys={[location.pathname]}
-                    defaultOpenKeys={openKey ? [openKey] : []}
-                    items={navItems as MenuProps['items']}
+                    openKeys={openKeys}
+                    onOpenChange={(keys) => {
+                        const nextOpenKey = keys.find((key) => !openKeys.includes(key));
+                        setOpenKeys(nextOpenKey && rootSubmenuKeys.includes(nextOpenKey) ? [nextOpenKey] : keys);
+                    }}
+                    items={menuItems}
                     onClick={({ key }) => {
                         navigate(key);
                         if (isMobile) setCollapsed(true);
