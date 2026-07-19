@@ -28,7 +28,9 @@ import QuotationsPage from '@/features/crm/pages/QuotationsPage';
 import ChartOfAccountsPage from '@/features/finance/pages/ChartOfAccountsPage';
 import JournalEntriesPage from '@/features/finance/pages/JournalEntriesPage';
 import ReportsPage from '@/features/finance/pages/ReportsPage';
+import CapasPage from '@/features/quality/pages/CapasPage';
 import IncomingInspectionsPage from '@/features/quality/pages/IncomingInspectionsPage';
+import InstrumentsPage from '@/features/quality/pages/InstrumentsPage';
 import NonConformanceReportsPage from '@/features/quality/pages/NonConformanceReportsPage';
 import ItemsPage from '@/features/inventory/pages/ItemsPage';
 import StockPage from '@/features/inventory/pages/StockPage';
@@ -81,6 +83,8 @@ export default function App() {
                                     <Route path="/finance/reports" element={<ReportsPage />} />
                                     <Route path="/quality/incoming-inspections" element={<IncomingInspectionsPage />} />
                                     <Route path="/quality/ncrs" element={<NonConformanceReportsPage />} />
+                                    <Route path="/quality/capas" element={<CapasPage />} />
+                                    <Route path="/quality/instruments" element={<InstrumentsPage />} />
                                     <Route path="/compliance/gst-rates" element={<GstRatesPage />} />
                                     <Route path="/compliance/gst-registrations" element={<GstRegistrationsPage />} />
                                     <Route path="/compliance/gst-reports" element={<GstReportsPage />} />

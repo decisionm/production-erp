@@ -33,3 +33,48 @@ export interface NonConformanceReport {
     closed_date: string | null;
     created_at: string;
 }
+
+export type CapaStatus = 'open' | 'in_progress' | 'closed';
+
+export interface Capa {
+    id: number;
+    non_conformance_report_id: number | null;
+    title: string;
+    problem_statement: string;
+    root_cause: string | null;
+    corrective_action: string | null;
+    preventive_action: string | null;
+    owner?: { id: number; name: string };
+    due_date: string | null;
+    status: CapaStatus;
+    verified_effective: boolean | null;
+    closed_date: string | null;
+    created_by: string | null;
+    created_at: string;
+}
+
+export type MeasuringInstrumentStatus = 'active' | 'retired';
+export type CalibrationResult = 'pass' | 'fail' | 'adjusted';
+
+export interface CalibrationRecord {
+    id: number;
+    calibrated_date: string;
+    certificate_number: string | null;
+    result: CalibrationResult;
+    performed_by: string | null;
+    notes: string | null;
+    created_at: string;
+}
+
+export interface MeasuringInstrument {
+    id: number;
+    code: string;
+    name: string;
+    location: string | null;
+    calibration_frequency_days: number;
+    last_calibrated_date: string | null;
+    next_calibration_due: string;
+    status: MeasuringInstrumentStatus;
+    calibration_records: CalibrationRecord[];
+    created_at: string;
+}

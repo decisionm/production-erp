@@ -71,6 +71,8 @@ const navItems = [
         children: [
             { key: '/quality/incoming-inspections', label: 'Incoming Inspections' },
             { key: '/quality/ncrs', label: 'Non-Conformance Reports' },
+            { key: '/quality/capas', label: 'CAPA' },
+            { key: '/quality/instruments', label: 'Measuring Instruments' },
         ],
     },
     {

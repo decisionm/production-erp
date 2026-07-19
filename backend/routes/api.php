@@ -38,7 +38,10 @@ use App\Modules\Production\Http\Controllers\MrpController;
 use App\Modules\Production\Http\Controllers\RoutingController;
 use App\Modules\Production\Http\Controllers\WorkCenterController;
 use App\Modules\Production\Http\Controllers\WorkOrderController;
+use App\Modules\Quality\Http\Controllers\CalibrationRecordController;
+use App\Modules\Quality\Http\Controllers\CapaController;
 use App\Modules\Quality\Http\Controllers\IncomingInspectionController;
+use App\Modules\Quality\Http\Controllers\MeasuringInstrumentController;
 use App\Modules\Quality\Http\Controllers\NonConformanceReportController;
 use App\Modules\Sales\Http\Controllers\CustomerController;
 use App\Modules\Sales\Http\Controllers\DeliveryController;
@@ -135,6 +138,14 @@ Route::prefix('v1')->group(function () {
 
             Route::apiResource('ncrs', NonConformanceReportController::class)->only(['index', 'store']);
             Route::post('ncrs/{ncr}/close', [NonConformanceReportController::class, 'close']);
+
+            Route::apiResource('capas', CapaController::class)->only(['index', 'store', 'update']);
+            Route::post('capas/{capa}/start', [CapaController::class, 'start']);
+            Route::post('capas/{capa}/close', [CapaController::class, 'close']);
+
+            Route::apiResource('instruments', MeasuringInstrumentController::class)->only(['index', 'store']);
+            Route::get('instruments/{instrument}/calibrations', [CalibrationRecordController::class, 'index']);
+            Route::post('instruments/{instrument}/calibrations', [CalibrationRecordController::class, 'store']);
         });
 
         Route::prefix('compliance')->group(function () {
