@@ -152,6 +152,7 @@ Route::prefix('v1')->group(function () {
             Route::post('quotations/{quotation}/send', [QuotationController::class, 'send']);
             Route::post('quotations/{quotation}/accept', [QuotationController::class, 'accept']);
             Route::post('quotations/{quotation}/reject', [QuotationController::class, 'reject']);
+            Route::get('quotations/{quotation}/pdf', [QuotationController::class, 'pdf']);
         });
 
         Route::prefix('quality')->group(function () {

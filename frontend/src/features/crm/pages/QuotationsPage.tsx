@@ -1,6 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+import { DownloadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -40,8 +41,13 @@ const statusColor: Record<QuotationStatus, string> = {
     expired: 'gold',
 };
 
+function quotationPdfUrl(id: number): string {
+    return `/api/v1/crm/quotations/${id}/pdf`;
+}
+
 export default function QuotationsPage() {
     const [modalOpen, setModalOpen] = useState(false);
+    const [detailQuotation, setDetailQuotation] = useState<Quotation | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['crm', 'quotations'], queryFn: listQuotations });
@@ -114,6 +120,18 @@ export default function QuotationsPage() {
                         title: 'Actions',
                         render: (_, row) => (
                             <Space>
+                                <Button size="small" onClick={() => setDetailQuotation(row)}>
+                                    View
+                                </Button>
+                                <Button
+                                    size="small"
+                                    icon={<DownloadOutlined />}
+                                    href={quotationPdfUrl(row.id)}
+                                    target="_blank"
+                                    rel="noopener"
+                                >
+                                    PDF
+                                </Button>
                                 {row.status === 'draft' && (
                                     <Button size="small" onClick={() => sendMutation.mutate(row.id)} loading={sendMutation.isPending}>
                                         Send
@@ -248,6 +266,76 @@ export default function QuotationsPage() {
                     </Button>
                 </Form>
             </Modal>
+
+            <Drawer
+                title={`Quotation #${detailQuotation?.id}`}
+                open={detailQuotation !== null}
+                onClose={() => setDetailQuotation(null)}
+                width={640}
+                destroyOnHidden
+                extra={
+                    detailQuotation && (
+                        <Button
+                            icon={<DownloadOutlined />}
+                            href={quotationPdfUrl(detailQuotation.id)}
+                            target="_blank"
+                            rel="noopener"
+                        >
+                            Download PDF
+                        </Button>
+                    )
+                }
+            >
+                {detailQuotation && (
+                    <>
+                        <Descriptions column={1} size="small" bordered>
+                            <Descriptions.Item label="Status">
+                                <Tag color={statusColor[detailQuotation.status]}>{detailQuotation.status}</Tag>
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Customer">{detailQuotation.customer.name}</Descriptions.Item>
+                            <Descriptions.Item label="Quotation Date">{detailQuotation.quotation_date}</Descriptions.Item>
+                            <Descriptions.Item label="Valid Until">{detailQuotation.valid_until ?? '—'}</Descriptions.Item>
+                            <Descriptions.Item label="Notes">{detailQuotation.notes ?? '—'}</Descriptions.Item>
+                        </Descriptions>
+
+                        <Typography.Title level={5} style={{ marginTop: 24 }}>
+                            Lines
+                        </Typography.Title>
+                        <Table
+                            rowKey="id"
+                            size="small"
+                            pagination={false}
+                            dataSource={detailQuotation.lines}
+                            scroll={{ x: 'max-content' }}
+                            columns={[
+                                { title: 'Item', render: (_, line) => `${line.item.sku} — ${line.item.name}` },
+                                { title: 'Quantity', dataIndex: 'quantity' },
+                                { title: 'Unit Price', dataIndex: 'unit_price' },
+                                {
+                                    title: 'Amount',
+                                    render: (_, line) => (Number(line.quantity) * Number(line.unit_price)).toFixed(2),
+                                },
+                            ]}
+                            summary={(lines) => {
+                                const total = lines.reduce(
+                                    (sum, line) => sum + Number(line.quantity) * Number(line.unit_price),
+                                    0,
+                                );
+                                return (
+                                    <Table.Summary.Row>
+                                        <Table.Summary.Cell index={0} colSpan={3}>
+                                            <strong>Total</strong>
+                                        </Table.Summary.Cell>
+                                        <Table.Summary.Cell index={1}>
+                                            <strong>{total.toFixed(2)}</strong>
+                                        </Table.Summary.Cell>
+                                    </Table.Summary.Row>
+                                );
+                            }}
+                        />
+                    </>
+                )}
+            </Drawer>
         </>
     );
 }

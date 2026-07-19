@@ -3,17 +3,23 @@
 namespace App\Modules\CRM\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Compliance\Services\GstRegistrationService;
 use App\Modules\CRM\Http\Requests\StoreQuotationRequest;
 use App\Modules\CRM\Http\Resources\QuotationResource;
 use App\Modules\CRM\Models\Quotation;
 use App\Modules\CRM\Services\QuotationService;
 use App\Modules\Sales\Http\Resources\SalesOrderResource;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Http\Response;
 
 class QuotationController extends Controller
 {
-    public function __construct(private readonly QuotationService $quotations) {}
+    public function __construct(
+        private readonly QuotationService $quotations,
+        private readonly GstRegistrationService $gstRegistrations,
+    ) {}
 
     public function index(): AnonymousResourceCollection
     {
@@ -47,5 +53,17 @@ class QuotationController extends Controller
     public function reject(Quotation $quotation): QuotationResource
     {
         return QuotationResource::make($this->quotations->reject($quotation));
+    }
+
+    public function pdf(Quotation $quotation): Response
+    {
+        $quotation = $this->quotations->withDetails($quotation);
+
+        $pdf = Pdf::loadView('pdf.quotation', [
+            'quotation' => $quotation,
+            'gstRegistration' => $this->gstRegistrations->primary(),
+        ]);
+
+        return $pdf->download("quotation-{$quotation->id}.pdf");
     }
 }

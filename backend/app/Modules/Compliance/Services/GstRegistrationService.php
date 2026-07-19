@@ -16,6 +16,16 @@ class GstRegistrationService
             ->paginate($perPage);
     }
 
+    /**
+     * The registration billing documents (like a Quotation PDF letterhead)
+     * should reference — until the app supports picking a billing branch
+     * per transaction, there's exactly one "primary" state.
+     */
+    public function primary(): ?GstRegistration
+    {
+        return GstRegistration::query()->where('is_primary', true)->first();
+    }
+
     public function create(array $data): GstRegistration
     {
         return DB::transaction(function () use ($data) {

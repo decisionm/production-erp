@@ -1,12 +1,21 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Typography } from 'antd';
+import { Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { createOpportunity, listOpportunities, updateOpportunityStage } from '@/features/crm/api';
 import type { Opportunity, OpportunityStage } from '@/features/crm/types';
 import { listCustomers } from '@/features/sales/api';
+
+const stageColor: Record<OpportunityStage, string> = {
+    prospecting: 'default',
+    qualification: 'blue',
+    proposal: 'gold',
+    negotiation: 'orange',
+    won: 'green',
+    lost: 'red',
+};
 
 const opportunitySchema = z.object({
     name: z.string().min(1, 'Name is required').max(255),
@@ -29,6 +38,7 @@ const stageOptions: { value: OpportunityStage; label: string }[] = [
 
 export default function OpportunitiesPage() {
     const [modalOpen, setModalOpen] = useState(false);
+    const [detailOpportunity, setDetailOpportunity] = useState<Opportunity | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['crm', 'opportunities'], queryFn: listOpportunities });
@@ -84,6 +94,14 @@ export default function OpportunitiesPage() {
                                 style={{ width: 160 }}
                                 onChange={(value) => stageMutation.mutate({ id: row.id, stage: value })}
                             />
+                        ),
+                    },
+                    {
+                        title: 'Actions',
+                        render: (_, row) => (
+                            <Button size="small" onClick={() => setDetailOpportunity(row)}>
+                                View
+                            </Button>
                         ),
                     },
                 ]}
@@ -145,6 +163,40 @@ export default function OpportunitiesPage() {
                     </Form.Item>
                 </Form>
             </Modal>
+
+            <Drawer
+                title={detailOpportunity?.name}
+                open={detailOpportunity !== null}
+                onClose={() => setDetailOpportunity(null)}
+                width={440}
+                destroyOnHidden
+            >
+                {detailOpportunity && (
+                    <Descriptions column={1} size="small" bordered>
+                        <Descriptions.Item label="Stage">
+                            <Tag color={stageColor[detailOpportunity.stage]}>{detailOpportunity.stage}</Tag>
+                        </Descriptions.Item>
+                        <Descriptions.Item label="Customer">{detailOpportunity.customer.name}</Descriptions.Item>
+                        <Descriptions.Item label="Estimated Value">
+                            {detailOpportunity.estimated_value ?? '—'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="Probability">
+                            {detailOpportunity.probability ? `${detailOpportunity.probability}%` : '—'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="Expected Close">
+                            {detailOpportunity.expected_close_date ?? '—'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="Source Lead">
+                            {detailOpportunity.lead_id ? `#${detailOpportunity.lead_id}` : '—'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="Assigned To">{detailOpportunity.assigned_to ?? '—'}</Descriptions.Item>
+                        <Descriptions.Item label="Notes">{detailOpportunity.notes ?? '—'}</Descriptions.Item>
+                        <Descriptions.Item label="Created">
+                            {new Date(detailOpportunity.created_at).toLocaleString()}
+                        </Descriptions.Item>
+                    </Descriptions>
+                )}
+            </Drawer>
         </>
     );
 }

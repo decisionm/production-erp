@@ -29,6 +29,11 @@ class QuotationService
             ->paginate($perPage);
     }
 
+    public function withDetails(Quotation $quotation): Quotation
+    {
+        return $quotation->load(['lines.item', 'customer', 'opportunity']);
+    }
+
     /**
      * @param  array{opportunity_id: int, quotation_date: string, valid_until?: string, notes?: string, lines: array<int, array{item_id: int, quantity: string, unit_price: string}>}  $data
      */
