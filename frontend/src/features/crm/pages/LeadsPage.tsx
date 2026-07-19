@@ -253,6 +253,7 @@ export default function LeadsPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Lead"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -293,6 +294,7 @@ export default function LeadsPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title={`Convert "${convertingLead?.name}" to a Customer`}
                 open={convertingLead !== null}
                 onCancel={() => setConvertingLead(null)}

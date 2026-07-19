@@ -146,6 +146,7 @@ export default function AssetsPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Asset"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -189,6 +190,7 @@ export default function AssetsPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title={`Edit "${editingAsset?.name}"`}
                 open={editingAsset !== null}
                 onCancel={() => setEditingAsset(null)}

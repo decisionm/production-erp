@@ -132,6 +132,7 @@ export default function EmployeesPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Employee"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -191,6 +192,7 @@ export default function EmployeesPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title={`Edit "${editingEmployee?.name}"`}
                 open={editingEmployee !== null}
                 onCancel={() => setEditingEmployee(null)}

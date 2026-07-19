@@ -145,6 +145,7 @@ export default function WorkCentersPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Work Center"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -170,6 +171,7 @@ export default function WorkCentersPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title={`Edit "${editingWorkCenter?.name}"`}
                 open={editingWorkCenter !== null}
                 onCancel={() => setEditingWorkCenter(null)}

@@ -125,6 +125,7 @@ export default function VendorsPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Vendor"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -159,6 +160,7 @@ export default function VendorsPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title={`Edit "${editingVendor?.name}"`}
                 open={editingVendor !== null}
                 onCancel={() => setEditingVendor(null)}

@@ -109,6 +109,7 @@ export default function SalesOrdersPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Sales Order"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}

@@ -146,6 +146,7 @@ export default function SubcontractOrdersPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Subcontract Order"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -199,6 +200,7 @@ export default function SubcontractOrdersPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title="Receive from Subcontractor"
                 open={receivingId !== null}
                 onCancel={() => setReceivingId(null)}

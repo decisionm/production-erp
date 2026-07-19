@@ -163,6 +163,7 @@ export default function CapasPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New CAPA"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -219,6 +220,7 @@ export default function CapasPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title={`Edit CAPA #${editing?.id} — Root Cause & Actions`}
                 open={editing !== null}
                 onCancel={() => setEditing(null)}
@@ -259,6 +261,7 @@ export default function CapasPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title={`Close CAPA #${closing?.id}`}
                 open={closing !== null}
                 onCancel={() => setClosing(null)}

@@ -69,6 +69,7 @@ export default function LeaveBalancesPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="Allocate Leave Balance"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}

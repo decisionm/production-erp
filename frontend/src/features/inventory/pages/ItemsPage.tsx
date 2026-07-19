@@ -132,6 +132,7 @@ export default function ItemsPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Item"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -176,6 +177,7 @@ export default function ItemsPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title={`Edit "${editingItem?.name}"`}
                 open={editingItem !== null}
                 onCancel={() => setEditingItem(null)}

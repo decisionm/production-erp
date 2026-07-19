@@ -127,6 +127,7 @@ export default function ChartOfAccountsPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New GL Account"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -152,6 +153,7 @@ export default function ChartOfAccountsPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title={`Edit "${editingAccount?.name}"`}
                 open={editingAccount !== null}
                 onCancel={() => setEditingAccount(null)}

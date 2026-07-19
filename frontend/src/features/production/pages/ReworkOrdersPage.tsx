@@ -152,6 +152,7 @@ export default function ReworkOrdersPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Rework Order"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -213,6 +214,7 @@ export default function ReworkOrdersPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title="Complete Rework Order"
                 open={completingId !== null}
                 onCancel={() => setCompletingId(null)}

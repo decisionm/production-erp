@@ -86,6 +86,7 @@ export default function SalaryStructuresPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Salary Structure"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}

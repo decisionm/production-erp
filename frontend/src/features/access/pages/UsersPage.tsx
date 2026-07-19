@@ -173,6 +173,7 @@ export default function UsersPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New User"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -211,6 +212,7 @@ export default function UsersPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title={`Edit "${editingUser?.name}"`}
                 open={editingUser !== null}
                 onCancel={() => setEditingUser(null)}
@@ -240,6 +242,7 @@ export default function UsersPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title={`Reset Password for "${resettingUser?.name}"`}
                 open={resettingUser !== null}
                 onCancel={() => setResettingUser(null)}

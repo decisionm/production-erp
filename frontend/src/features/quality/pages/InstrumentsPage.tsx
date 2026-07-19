@@ -153,6 +153,7 @@ export default function InstrumentsPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Measuring Instrument"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -201,6 +202,7 @@ export default function InstrumentsPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title="Record Calibration"
                 open={calibratingId !== null}
                 onCancel={() => setCalibratingId(null)}

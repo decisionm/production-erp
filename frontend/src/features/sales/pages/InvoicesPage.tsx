@@ -139,6 +139,7 @@ export default function InvoicesPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Invoice"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}

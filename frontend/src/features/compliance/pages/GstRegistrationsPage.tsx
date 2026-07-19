@@ -120,6 +120,7 @@ export default function GstRegistrationsPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New GST Registration"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -158,6 +159,7 @@ export default function GstRegistrationsPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title={`Edit "${editingRegistration?.gstin}"`}
                 open={editingRegistration !== null}
                 onCancel={() => setEditingRegistration(null)}

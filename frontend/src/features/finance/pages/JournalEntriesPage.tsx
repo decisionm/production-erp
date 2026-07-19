@@ -118,6 +118,7 @@ export default function JournalEntriesPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Journal Entry"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}

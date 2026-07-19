@@ -127,6 +127,7 @@ export default function LeaveRequestsPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Leave Request"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}

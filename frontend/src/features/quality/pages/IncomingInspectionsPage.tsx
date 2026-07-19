@@ -104,6 +104,7 @@ export default function IncomingInspectionsPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Incoming Inspection"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}

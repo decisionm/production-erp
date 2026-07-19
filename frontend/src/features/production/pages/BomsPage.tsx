@@ -83,6 +83,7 @@ export default function BomsPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New BOM"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}

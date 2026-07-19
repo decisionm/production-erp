@@ -93,6 +93,7 @@ export default function SalaryComponentsPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Salary Component"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}

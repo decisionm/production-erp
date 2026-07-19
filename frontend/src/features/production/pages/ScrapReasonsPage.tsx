@@ -60,6 +60,7 @@ export default function ScrapReasonsPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Scrap Reason"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}

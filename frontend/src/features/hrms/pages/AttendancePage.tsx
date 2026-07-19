@@ -80,6 +80,7 @@ export default function AttendancePage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="Mark Attendance"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}

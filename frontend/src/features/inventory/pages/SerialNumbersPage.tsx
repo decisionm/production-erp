@@ -101,6 +101,7 @@ export default function SerialNumbersPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="Register Serial Number"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -127,6 +128,7 @@ export default function SerialNumbersPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title={`History — ${historyItem?.serial_number}`}
                 open={historyItem !== null}
                 onCancel={() => setHistoryItem(null)}

@@ -140,6 +140,7 @@ export default function PayrollRunsPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Payroll Run"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}

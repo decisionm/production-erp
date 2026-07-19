@@ -125,6 +125,7 @@ export default function CustomersPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Customer"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -159,6 +160,7 @@ export default function CustomersPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title={`Edit "${editingCustomer?.name}"`}
                 open={editingCustomer !== null}
                 onCancel={() => setEditingCustomer(null)}

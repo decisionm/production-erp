@@ -148,6 +148,7 @@ export default function StockPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="Receive Stock"
                 open={activeModal === 'receipt'}
                 onCancel={() => setActiveModal(null)}
@@ -223,6 +224,7 @@ export default function StockPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title="Issue Stock"
                 open={activeModal === 'issue'}
                 onCancel={() => setActiveModal(null)}
@@ -285,6 +287,7 @@ export default function StockPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title="Transfer Stock"
                 open={activeModal === 'transfer'}
                 onCancel={() => setActiveModal(null)}

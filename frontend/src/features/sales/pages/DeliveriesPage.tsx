@@ -116,6 +116,7 @@ export default function DeliveriesPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Delivery"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}

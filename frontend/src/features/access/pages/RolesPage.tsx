@@ -193,6 +193,7 @@ export default function RolesPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Role"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -218,6 +219,7 @@ export default function RolesPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title={`Edit "${editingRole?.name}"`}
                 open={editingRole !== null}
                 onCancel={() => setEditingRole(null)}

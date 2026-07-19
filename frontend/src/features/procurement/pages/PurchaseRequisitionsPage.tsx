@@ -121,6 +121,7 @@ export default function PurchaseRequisitionsPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Purchase Requisition"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}

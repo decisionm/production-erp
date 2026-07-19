@@ -172,6 +172,7 @@ export default function SpcChartPage() {
             )}
 
             <Modal
+                maskClosable={false}
                 title="Record Measurement"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}

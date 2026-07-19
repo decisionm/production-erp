@@ -154,6 +154,7 @@ export default function WorkOrdersPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Work Order"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -212,6 +213,7 @@ export default function WorkOrdersPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title="Complete Work Order"
                 open={completingRow !== null}
                 onCancel={() => setCompletingRow(null)}

@@ -111,6 +111,7 @@ export default function GstRatesPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New GST Rate"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -144,6 +145,7 @@ export default function GstRatesPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title={`Edit "${editingRate?.hsn_sac_code}"`}
                 open={editingRate !== null}
                 onCancel={() => setEditingRate(null)}

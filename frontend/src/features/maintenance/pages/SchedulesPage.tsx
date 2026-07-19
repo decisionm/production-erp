@@ -87,6 +87,7 @@ export default function SchedulesPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Maintenance Schedule"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}

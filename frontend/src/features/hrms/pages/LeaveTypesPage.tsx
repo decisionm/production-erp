@@ -111,6 +111,7 @@ export default function LeaveTypesPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Leave Type"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -136,6 +137,7 @@ export default function LeaveTypesPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title={`Edit "${editingLeaveType?.name}"`}
                 open={editingLeaveType !== null}
                 onCancel={() => setEditingLeaveType(null)}

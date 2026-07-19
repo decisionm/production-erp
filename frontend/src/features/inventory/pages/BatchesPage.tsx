@@ -90,6 +90,7 @@ export default function BatchesPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Batch"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -143,6 +144,7 @@ export default function BatchesPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title={`Batch Ledger — ${ledgerBatch?.batch_number}`}
                 open={ledgerBatch !== null}
                 onCancel={() => setLedgerBatch(null)}

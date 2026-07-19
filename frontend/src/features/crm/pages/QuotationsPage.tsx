@@ -164,6 +164,7 @@ export default function QuotationsPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Quotation"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}

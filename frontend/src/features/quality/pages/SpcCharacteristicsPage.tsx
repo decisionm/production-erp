@@ -74,6 +74,7 @@ export default function SpcCharacteristicsPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New SPC Characteristic"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}

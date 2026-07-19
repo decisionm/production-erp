@@ -118,6 +118,7 @@ export default function GoodsReceiptsPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Goods Receipt"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}

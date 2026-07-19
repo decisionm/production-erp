@@ -106,6 +106,7 @@ export default function WarehousesPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Warehouse"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -124,6 +125,7 @@ export default function WarehousesPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title={`Edit "${editingWarehouse?.name}"`}
                 open={editingWarehouse !== null}
                 onCancel={() => setEditingWarehouse(null)}

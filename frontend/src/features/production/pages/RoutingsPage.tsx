@@ -87,6 +87,7 @@ export default function RoutingsPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Routing"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}

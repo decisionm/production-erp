@@ -197,6 +197,7 @@ export default function WorkOrdersPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="Report Work Order"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -231,6 +232,7 @@ export default function WorkOrdersPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title="Add Part"
                 open={partsForId !== null}
                 onCancel={() => setPartsForId(null)}
@@ -282,6 +284,7 @@ export default function WorkOrdersPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title="Complete Work Order"
                 open={completingId !== null}
                 onCancel={() => setCompletingId(null)}

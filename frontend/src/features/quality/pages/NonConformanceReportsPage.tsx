@@ -120,6 +120,7 @@ export default function NonConformanceReportsPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Non-Conformance Report"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -210,6 +211,7 @@ export default function NonConformanceReportsPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title={`Close NCR #${closingReport?.id}`}
                 open={closingReport !== null}
                 onCancel={() => setClosingReport(null)}

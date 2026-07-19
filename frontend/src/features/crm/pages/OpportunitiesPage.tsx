@@ -146,6 +146,7 @@ export default function OpportunitiesPage() {
             />
 
             <Modal
+                maskClosable={false}
                 title="New Opportunity"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
@@ -203,6 +204,7 @@ export default function OpportunitiesPage() {
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title={`Edit "${editingOpportunity?.name}"`}
                 open={editingOpportunity !== null}
                 onCancel={() => setEditingOpportunity(null)}
