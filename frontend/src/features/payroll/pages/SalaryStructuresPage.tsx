@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, DatePicker, Form, InputNumber, Modal, Select, Space, Table, Typography } from 'antd';
+import { Button, DatePicker, Descriptions, Drawer, Form, InputNumber, Modal, Select, Space, Table, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -22,6 +22,7 @@ type StructureFormValues = z.infer<typeof structureSchema>;
 
 export default function SalaryStructuresPage() {
     const [modalOpen, setModalOpen] = useState(false);
+    const [detailStructure, setDetailStructure] = useState<SalaryStructure | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['payroll', 'salary-structures'], queryFn: () => listSalaryStructures() });
@@ -74,6 +75,12 @@ export default function SalaryStructuresPage() {
                     {
                         title: 'Gross (fixed + resolved)',
                         render: (_, row) => row.lines.reduce((sum, l) => sum + Number(l.amount), 0).toFixed(2),
+                    },
+                    {
+                        title: 'Actions',
+                        render: (_, row) => (
+                            <Button size="small" onClick={() => setDetailStructure(row)}>View</Button>
+                        ),
                     },
                 ]}
             />
@@ -170,6 +177,48 @@ export default function SalaryStructuresPage() {
                     </Button>
                 </Form>
             </Modal>
+
+            <Drawer
+                title={`Salary Structure — ${detailStructure?.employee?.name}`}
+                open={detailStructure !== null}
+                onClose={() => setDetailStructure(null)}
+                width={520}
+                destroyOnHidden
+            >
+                {detailStructure && (
+                    <>
+                        <Descriptions column={1} size="small" bordered>
+                            <Descriptions.Item label="Employee">{detailStructure.employee?.name}</Descriptions.Item>
+                            <Descriptions.Item label="Effective From">{detailStructure.effective_from}</Descriptions.Item>
+                        </Descriptions>
+
+                        <Typography.Title level={5} style={{ marginTop: 24 }}>
+                            Components
+                        </Typography.Title>
+                        <Table
+                            rowKey="id"
+                            size="small"
+                            pagination={false}
+                            dataSource={detailStructure.lines}
+                            scroll={{ x: 'max-content' }}
+                            columns={[
+                                {
+                                    title: 'Component',
+                                    render: (_, line) => `${line.component.code} — ${line.component.name}`,
+                                },
+                                {
+                                    title: 'Calculation',
+                                    render: (_, line) =>
+                                        line.component.calculation_type === 'percentage_of_basic'
+                                            ? `${line.component.percentage}% of Basic`
+                                            : 'Fixed Amount',
+                                },
+                                { title: 'Amount', dataIndex: 'amount' },
+                            ]}
+                        />
+                    </>
+                )}
+            </Drawer>
         </>
     );
 }
