@@ -131,6 +131,19 @@ class StockMovementService
             ->paginate($perPage);
     }
 
+    /**
+     * Total on-hand quantity for an item across all warehouses — for other
+     * modules that need a single net figure (e.g. Production's MRP net
+     * requirements) without caring about warehouse-level detail.
+     */
+    public function totalOnHand(int $itemId): string
+    {
+        return (string) StockBalance::query()
+            ->where('item_id', $itemId)
+            ->get()
+            ->reduce(fn (string $carry, StockBalance $balance) => bcadd($carry, $balance->quantity, 4), '0.0000');
+    }
+
     public function paginateMovements(?int $itemId = null, ?int $warehouseId = null, int $perPage = 20): LengthAwarePaginator
     {
         return StockMovement::query()

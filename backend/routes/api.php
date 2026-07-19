@@ -29,6 +29,11 @@ use App\Modules\Procurement\Http\Controllers\GoodsReceiptController;
 use App\Modules\Procurement\Http\Controllers\PurchaseOrderController;
 use App\Modules\Procurement\Http\Controllers\PurchaseRequisitionController;
 use App\Modules\Procurement\Http\Controllers\VendorController;
+use App\Modules\Production\Http\Controllers\BomController;
+use App\Modules\Production\Http\Controllers\MrpController;
+use App\Modules\Production\Http\Controllers\RoutingController;
+use App\Modules\Production\Http\Controllers\WorkCenterController;
+use App\Modules\Production\Http\Controllers\WorkOrderController;
 use App\Modules\Quality\Http\Controllers\IncomingInspectionController;
 use App\Modules\Quality\Http\Controllers\NonConformanceReportController;
 use App\Modules\Sales\Http\Controllers\CustomerController;
@@ -175,6 +180,20 @@ Route::prefix('v1')->group(function () {
             Route::post('runs/{payroll_run}/mark-paid', [PayrollRunController::class, 'markPaid']);
 
             Route::apiResource('payslips', PayslipController::class)->only(['index', 'show']);
+        });
+
+        Route::prefix('production')->group(function () {
+            Route::apiResource('work-centers', WorkCenterController::class)->only(['index', 'store']);
+
+            Route::apiResource('boms', BomController::class)->only(['index', 'store']);
+
+            Route::apiResource('routings', RoutingController::class)->only(['index', 'store']);
+
+            Route::apiResource('work-orders', WorkOrderController::class)->only(['index', 'store']);
+            Route::post('work-orders/{work_order}/release', [WorkOrderController::class, 'release']);
+            Route::post('work-orders/{work_order}/complete', [WorkOrderController::class, 'complete']);
+
+            Route::get('mrp/net-requirements', [MrpController::class, 'netRequirements']);
         });
     });
 });

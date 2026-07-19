@@ -26,6 +26,17 @@ const navItems = [
         ],
     },
     {
+        key: 'production',
+        label: 'Production',
+        children: [
+            { key: '/production/work-centers', label: 'Work Centers' },
+            { key: '/production/boms', label: 'Bills of Material' },
+            { key: '/production/routings', label: 'Routings' },
+            { key: '/production/work-orders', label: 'Work Orders' },
+            { key: '/production/mrp', label: 'MRP' },
+        ],
+    },
+    {
         key: 'procurement',
         label: 'Procurement',
         children: [

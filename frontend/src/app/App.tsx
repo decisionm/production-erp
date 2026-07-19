@@ -9,6 +9,11 @@ import EmployeesPage from '@/features/hrms/pages/EmployeesPage';
 import LeaveBalancesPage from '@/features/hrms/pages/LeaveBalancesPage';
 import LeaveRequestsPage from '@/features/hrms/pages/LeaveRequestsPage';
 import LeaveTypesPage from '@/features/hrms/pages/LeaveTypesPage';
+import BomsPage from '@/features/production/pages/BomsPage';
+import MrpPage from '@/features/production/pages/MrpPage';
+import RoutingsPage from '@/features/production/pages/RoutingsPage';
+import WorkCentersPage from '@/features/production/pages/WorkCentersPage';
+import WorkOrdersPage from '@/features/production/pages/WorkOrdersPage';
 import PayrollRunsPage from '@/features/payroll/pages/PayrollRunsPage';
 import PayslipsPage from '@/features/payroll/pages/PayslipsPage';
 import SalaryComponentsPage from '@/features/payroll/pages/SalaryComponentsPage';
@@ -54,6 +59,11 @@ export default function App() {
                                     <Route path="/inventory/items" element={<ItemsPage />} />
                                     <Route path="/inventory/warehouses" element={<WarehousesPage />} />
                                     <Route path="/inventory/stock" element={<StockPage />} />
+                                    <Route path="/production/work-centers" element={<WorkCentersPage />} />
+                                    <Route path="/production/boms" element={<BomsPage />} />
+                                    <Route path="/production/routings" element={<RoutingsPage />} />
+                                    <Route path="/production/work-orders" element={<WorkOrdersPage />} />
+                                    <Route path="/production/mrp" element={<MrpPage />} />
                                     <Route path="/procurement/vendors" element={<VendorsPage />} />
                                     <Route path="/procurement/purchase-requisitions" element={<PurchaseRequisitionsPage />} />
                                     <Route path="/procurement/purchase-orders" element={<PurchaseOrdersPage />} />
