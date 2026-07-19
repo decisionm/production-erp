@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -35,6 +35,7 @@ const statusColor: Record<SalesOrderStatus, string> = {
 
 export default function SalesOrdersPage() {
     const [modalOpen, setModalOpen] = useState(false);
+    const [detailOrder, setDetailOrder] = useState<SalesOrder | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['sales', 'sales-orders'], queryFn: listSalesOrders });
@@ -87,16 +88,22 @@ export default function SalesOrdersPage() {
                     { title: 'Lines', render: (_, row) => row.lines.length },
                     {
                         title: 'Actions',
-                        render: (_, row) =>
-                            row.status === 'draft' && (
-                                <Button
-                                    size="small"
-                                    onClick={() => confirmMutation.mutate(row.id)}
-                                    loading={confirmMutation.isPending}
-                                >
-                                    Confirm
+                        render: (_, row) => (
+                            <Space>
+                                <Button size="small" onClick={() => setDetailOrder(row)}>
+                                    View
                                 </Button>
-                            ),
+                                {row.status === 'draft' && (
+                                    <Button
+                                        size="small"
+                                        onClick={() => confirmMutation.mutate(row.id)}
+                                        loading={confirmMutation.isPending}
+                                    >
+                                        Confirm
+                                    </Button>
+                                )}
+                            </Space>
+                        ),
                     },
                 ]}
             />
@@ -196,6 +203,65 @@ export default function SalesOrdersPage() {
                     </Button>
                 </Form>
             </Modal>
+
+            <Drawer
+                title={`Sales Order #${detailOrder?.id}`}
+                open={detailOrder !== null}
+                onClose={() => setDetailOrder(null)}
+                width={620}
+                destroyOnHidden
+            >
+                {detailOrder && (
+                    <>
+                        <Descriptions column={1} size="small" bordered>
+                            <Descriptions.Item label="Status">
+                                <Tag color={statusColor[detailOrder.status]}>{detailOrder.status}</Tag>
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Customer">{detailOrder.customer.name}</Descriptions.Item>
+                            <Descriptions.Item label="Order Date">{detailOrder.order_date}</Descriptions.Item>
+                            <Descriptions.Item label="Expected Date">{detailOrder.expected_date ?? '—'}</Descriptions.Item>
+                            <Descriptions.Item label="Notes">{detailOrder.notes ?? '—'}</Descriptions.Item>
+                        </Descriptions>
+
+                        <Typography.Title level={5} style={{ marginTop: 24 }}>
+                            Lines
+                        </Typography.Title>
+                        <Table
+                            rowKey="id"
+                            size="small"
+                            pagination={false}
+                            dataSource={detailOrder.lines}
+                            scroll={{ x: 'max-content' }}
+                            columns={[
+                                { title: 'Item', render: (_, line) => `${line.item.sku} — ${line.item.name}` },
+                                { title: 'Quantity', dataIndex: 'quantity' },
+                                { title: 'Delivered', dataIndex: 'quantity_delivered' },
+                                { title: 'Unit Price', dataIndex: 'unit_price' },
+                                {
+                                    title: 'Amount',
+                                    render: (_, line) => (Number(line.quantity) * Number(line.unit_price)).toFixed(2),
+                                },
+                            ]}
+                            summary={(lines) => {
+                                const total = lines.reduce(
+                                    (sum, line) => sum + Number(line.quantity) * Number(line.unit_price),
+                                    0,
+                                );
+                                return (
+                                    <Table.Summary.Row>
+                                        <Table.Summary.Cell index={0} colSpan={4}>
+                                            <strong>Total</strong>
+                                        </Table.Summary.Cell>
+                                        <Table.Summary.Cell index={1}>
+                                            <strong>{total.toFixed(2)}</strong>
+                                        </Table.Summary.Cell>
+                                    </Table.Summary.Row>
+                                );
+                            }}
+                        />
+                    </>
+                )}
+            </Drawer>
         </>
     );
 }

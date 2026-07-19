@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, Input, InputNumber, Modal, Select, Space, Table, Typography } from 'antd';
+import { Button, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Typography } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -27,6 +27,7 @@ type ReceiptFormValues = z.infer<typeof receiptSchema>;
 
 export default function GoodsReceiptsPage() {
     const [modalOpen, setModalOpen] = useState(false);
+    const [detailReceipt, setDetailReceipt] = useState<GoodsReceiptNote | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['procurement', 'goods-receipts'], queryFn: listGoodsReceipts });
@@ -102,9 +103,17 @@ export default function GoodsReceiptsPage() {
                     { title: 'ID', dataIndex: 'id' },
                     { title: 'PO', render: (_, row) => `PO #${row.purchase_order_id}` },
                     { title: 'Warehouse', render: (_, row) => `${row.warehouse.code} — ${row.warehouse.name}` },
-                    { title: 'Received', dataIndex: 'received_date' },
+                    { title: 'Received', render: (_, row) => row.received_date.slice(0, 10) },
                     { title: 'Reference', dataIndex: 'reference' },
                     { title: 'Lines', render: (_, row) => row.lines.length },
+                    {
+                        title: 'Actions',
+                        render: (_, row) => (
+                            <Button size="small" onClick={() => setDetailReceipt(row)}>
+                                View
+                            </Button>
+                        ),
+                    },
                 ]}
             />
 
@@ -185,6 +194,46 @@ export default function GoodsReceiptsPage() {
                     ))}
                 </Form>
             </Modal>
+
+            <Drawer
+                title={`Goods Receipt #${detailReceipt?.id}`}
+                open={detailReceipt !== null}
+                onClose={() => setDetailReceipt(null)}
+                width={560}
+                destroyOnHidden
+            >
+                {detailReceipt && (
+                    <>
+                        <Descriptions column={1} size="small" bordered>
+                            <Descriptions.Item label="Purchase Order">PO #{detailReceipt.purchase_order_id}</Descriptions.Item>
+                            <Descriptions.Item label="Warehouse">
+                                {detailReceipt.warehouse.code} — {detailReceipt.warehouse.name}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Received Date">
+                                {detailReceipt.received_date.slice(0, 10)}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Reference">{detailReceipt.reference ?? '—'}</Descriptions.Item>
+                            <Descriptions.Item label="Notes">{detailReceipt.notes ?? '—'}</Descriptions.Item>
+                        </Descriptions>
+
+                        <Typography.Title level={5} style={{ marginTop: 24 }}>
+                            Lines
+                        </Typography.Title>
+                        <Table
+                            rowKey="id"
+                            size="small"
+                            pagination={false}
+                            dataSource={detailReceipt.lines}
+                            scroll={{ x: 'max-content' }}
+                            columns={[
+                                { title: 'Item', render: (_, line) => `${line.item.sku} — ${line.item.name}` },
+                                { title: 'Quantity', dataIndex: 'quantity' },
+                                { title: 'Unit Cost', dataIndex: 'unit_cost' },
+                            ]}
+                        />
+                    </>
+                )}
+            </Drawer>
         </>
     );
 }

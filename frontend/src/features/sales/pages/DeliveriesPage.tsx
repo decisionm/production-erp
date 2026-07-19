@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, Input, InputNumber, Modal, Select, Space, Table, Typography } from 'antd';
+import { Button, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Typography } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -26,6 +26,7 @@ type DeliveryFormValues = z.infer<typeof deliverySchema>;
 
 export default function DeliveriesPage() {
     const [modalOpen, setModalOpen] = useState(false);
+    const [detailDelivery, setDetailDelivery] = useState<Delivery | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['sales', 'deliveries'], queryFn: listDeliveries });
@@ -103,6 +104,14 @@ export default function DeliveriesPage() {
                     { title: 'Delivered', dataIndex: 'delivered_date' },
                     { title: 'Reference', dataIndex: 'reference' },
                     { title: 'Lines', render: (_, row) => row.lines.length },
+                    {
+                        title: 'Actions',
+                        render: (_, row) => (
+                            <Button size="small" onClick={() => setDetailDelivery(row)}>
+                                View
+                            </Button>
+                        ),
+                    },
                 ]}
             />
 
@@ -177,6 +186,43 @@ export default function DeliveriesPage() {
                     ))}
                 </Form>
             </Modal>
+
+            <Drawer
+                title={`Delivery #${detailDelivery?.id}`}
+                open={detailDelivery !== null}
+                onClose={() => setDetailDelivery(null)}
+                width={560}
+                destroyOnHidden
+            >
+                {detailDelivery && (
+                    <>
+                        <Descriptions column={1} size="small" bordered>
+                            <Descriptions.Item label="Sales Order">SO #{detailDelivery.sales_order_id}</Descriptions.Item>
+                            <Descriptions.Item label="Warehouse">
+                                {detailDelivery.warehouse.code} — {detailDelivery.warehouse.name}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Delivered Date">{detailDelivery.delivered_date}</Descriptions.Item>
+                            <Descriptions.Item label="Reference">{detailDelivery.reference ?? '—'}</Descriptions.Item>
+                            <Descriptions.Item label="Notes">{detailDelivery.notes ?? '—'}</Descriptions.Item>
+                        </Descriptions>
+
+                        <Typography.Title level={5} style={{ marginTop: 24 }}>
+                            Lines
+                        </Typography.Title>
+                        <Table
+                            rowKey="id"
+                            size="small"
+                            pagination={false}
+                            dataSource={detailDelivery.lines}
+                            scroll={{ x: 'max-content' }}
+                            columns={[
+                                { title: 'Item', render: (_, line) => `${line.item.sku} — ${line.item.name}` },
+                                { title: 'Quantity', dataIndex: 'quantity' },
+                            ]}
+                        />
+                    </>
+                )}
+            </Drawer>
         </>
     );
 }

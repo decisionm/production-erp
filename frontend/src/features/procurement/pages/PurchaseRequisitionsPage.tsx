@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -36,6 +36,7 @@ const statusColor: Record<PurchaseRequisitionStatus, string> = {
 
 export default function PurchaseRequisitionsPage() {
     const [modalOpen, setModalOpen] = useState(false);
+    const [detailRequisition, setDetailRequisition] = useState<PurchaseRequisition | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({
@@ -89,26 +90,32 @@ export default function PurchaseRequisitionsPage() {
                     { title: 'Lines', render: (_, row) => row.lines.length },
                     {
                         title: 'Actions',
-                        render: (_, row) =>
-                            row.status === 'draft' && (
-                                <Space>
-                                    <Button
-                                        size="small"
-                                        onClick={() => approveMutation.mutate(row.id)}
-                                        loading={approveMutation.isPending}
-                                    >
-                                        Approve
-                                    </Button>
-                                    <Button
-                                        size="small"
-                                        danger
-                                        onClick={() => rejectMutation.mutate(row.id)}
-                                        loading={rejectMutation.isPending}
-                                    >
-                                        Reject
-                                    </Button>
-                                </Space>
-                            ),
+                        render: (_, row) => (
+                            <Space>
+                                <Button size="small" onClick={() => setDetailRequisition(row)}>
+                                    View
+                                </Button>
+                                {row.status === 'draft' && (
+                                    <>
+                                        <Button
+                                            size="small"
+                                            onClick={() => approveMutation.mutate(row.id)}
+                                            loading={approveMutation.isPending}
+                                        >
+                                            Approve
+                                        </Button>
+                                        <Button
+                                            size="small"
+                                            danger
+                                            onClick={() => rejectMutation.mutate(row.id)}
+                                            loading={rejectMutation.isPending}
+                                        >
+                                            Reject
+                                        </Button>
+                                    </>
+                                )}
+                            </Space>
+                        ),
                     },
                 ]}
             />
@@ -178,6 +185,47 @@ export default function PurchaseRequisitionsPage() {
                     </Button>
                 </Form>
             </Modal>
+
+            <Drawer
+                title={`Purchase Requisition #${detailRequisition?.id}`}
+                open={detailRequisition !== null}
+                onClose={() => setDetailRequisition(null)}
+                width={560}
+                destroyOnHidden
+            >
+                {detailRequisition && (
+                    <>
+                        <Descriptions column={1} size="small" bordered>
+                            <Descriptions.Item label="Status">
+                                <Tag color={statusColor[detailRequisition.status]}>{detailRequisition.status}</Tag>
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Requested By">
+                                {detailRequisition.requested_by ?? '—'}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Needed By">
+                                {detailRequisition.needed_by_date ?? '—'}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Notes">{detailRequisition.notes ?? '—'}</Descriptions.Item>
+                        </Descriptions>
+
+                        <Typography.Title level={5} style={{ marginTop: 24 }}>
+                            Lines
+                        </Typography.Title>
+                        <Table
+                            rowKey="id"
+                            size="small"
+                            pagination={false}
+                            dataSource={detailRequisition.lines}
+                            scroll={{ x: 'max-content' }}
+                            columns={[
+                                { title: 'Item', render: (_, line) => `${line.item.sku} — ${line.item.name}` },
+                                { title: 'Quantity', dataIndex: 'quantity' },
+                                { title: 'Notes', dataIndex: 'notes' },
+                            ]}
+                        />
+                    </>
+                )}
+            </Drawer>
         </>
     );
 }

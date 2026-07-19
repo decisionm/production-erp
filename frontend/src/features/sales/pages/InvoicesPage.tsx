@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -33,6 +33,7 @@ const statusColor: Record<InvoiceStatus, string> = {
 
 export default function InvoicesPage() {
     const [modalOpen, setModalOpen] = useState(false);
+    const [detailInvoice, setDetailInvoice] = useState<Invoice | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['sales', 'invoices'], queryFn: listInvoices });
@@ -117,16 +118,22 @@ export default function InvoicesPage() {
                     { title: 'Lines', render: (_, row) => row.lines.length },
                     {
                         title: 'Actions',
-                        render: (_, row) =>
-                            row.status === 'draft' && (
-                                <Button
-                                    size="small"
-                                    onClick={() => issueMutation.mutate(row.id)}
-                                    loading={issueMutation.isPending}
-                                >
-                                    Issue
+                        render: (_, row) => (
+                            <Space>
+                                <Button size="small" onClick={() => setDetailInvoice(row)}>
+                                    View
                                 </Button>
-                            ),
+                                {row.status === 'draft' && (
+                                    <Button
+                                        size="small"
+                                        onClick={() => issueMutation.mutate(row.id)}
+                                        loading={issueMutation.isPending}
+                                    >
+                                        Issue
+                                    </Button>
+                                )}
+                            </Space>
+                        ),
                     },
                 ]}
             />
@@ -224,6 +231,65 @@ export default function InvoicesPage() {
                     ))}
                 </Form>
             </Modal>
+
+            <Drawer
+                title={`Invoice #${detailInvoice?.id}`}
+                open={detailInvoice !== null}
+                onClose={() => setDetailInvoice(null)}
+                width={620}
+                destroyOnHidden
+            >
+                {detailInvoice && (
+                    <>
+                        <Descriptions column={1} size="small" bordered>
+                            <Descriptions.Item label="Status">
+                                <Tag color={statusColor[detailInvoice.status]}>{detailInvoice.status}</Tag>
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Customer">{detailInvoice.customer.name}</Descriptions.Item>
+                            <Descriptions.Item label="Sales Order">SO #{detailInvoice.sales_order_id}</Descriptions.Item>
+                            <Descriptions.Item label="Invoice Date">{detailInvoice.invoice_date}</Descriptions.Item>
+                            <Descriptions.Item label="Due Date">{detailInvoice.due_date ?? '—'}</Descriptions.Item>
+                            <Descriptions.Item label="Notes">{detailInvoice.notes ?? '—'}</Descriptions.Item>
+                        </Descriptions>
+
+                        <Typography.Title level={5} style={{ marginTop: 24 }}>
+                            Lines
+                        </Typography.Title>
+                        <Table
+                            rowKey="id"
+                            size="small"
+                            pagination={false}
+                            dataSource={detailInvoice.lines}
+                            scroll={{ x: 'max-content' }}
+                            columns={[
+                                { title: 'Item', render: (_, line) => `${line.item.sku} — ${line.item.name}` },
+                                { title: 'Quantity', dataIndex: 'quantity' },
+                                { title: 'Unit Price', dataIndex: 'unit_price' },
+                                {
+                                    title: 'Amount',
+                                    render: (_, line) => (Number(line.quantity) * Number(line.unit_price)).toFixed(2),
+                                },
+                            ]}
+                            summary={(lines) => {
+                                const total = lines.reduce(
+                                    (sum, line) => sum + Number(line.quantity) * Number(line.unit_price),
+                                    0,
+                                );
+                                return (
+                                    <Table.Summary.Row>
+                                        <Table.Summary.Cell index={0} colSpan={3}>
+                                            <strong>Total</strong>
+                                        </Table.Summary.Cell>
+                                        <Table.Summary.Cell index={1}>
+                                            <strong>{total.toFixed(2)}</strong>
+                                        </Table.Summary.Cell>
+                                    </Table.Summary.Row>
+                                );
+                            }}
+                        />
+                    </>
+                )}
+            </Drawer>
         </>
     );
 }
