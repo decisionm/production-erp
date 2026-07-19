@@ -18,6 +18,13 @@ class SalesOrderService
             ->paginate($perPage);
     }
 
+    public function openCount(): int
+    {
+        return SalesOrder::query()
+            ->whereIn('status', [SalesOrderStatus::Confirmed, SalesOrderStatus::PartiallyDelivered])
+            ->count();
+    }
+
     /**
      * @param  array{customer_id: int, order_date: string, expected_date?: string, notes?: string, lines: array<int, array{item_id: int, quantity: string, unit_price: string}>}  $data
      */

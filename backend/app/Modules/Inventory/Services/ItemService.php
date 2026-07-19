@@ -14,6 +14,11 @@ class ItemService
             ->paginate($perPage);
     }
 
+    public function count(): int
+    {
+        return Item::query()->count();
+    }
+
     public function create(array $data): Item
     {
         // Explicit here rather than relying on the DB column default: Eloquent's

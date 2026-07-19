@@ -21,6 +21,13 @@ class LeaveRequestService
             ->paginate($perPage);
     }
 
+    public function pendingCount(): int
+    {
+        return LeaveRequest::query()
+            ->where('status', LeaveRequestStatus::Pending)
+            ->count();
+    }
+
     /**
      * @param  array{employee_id: int, leave_type_id: int, start_date: string, end_date: string, days: string, reason?: string}  $data
      */

@@ -28,6 +28,13 @@ class CapaService
             ->paginate($perPage);
     }
 
+    public function openCount(): int
+    {
+        return Capa::query()
+            ->whereIn('status', [CapaStatus::Open, CapaStatus::InProgress])
+            ->count();
+    }
+
     /**
      * @param  array{non_conformance_report_id?: int, title: string, problem_statement: string, owner?: int, due_date?: string}  $data
      */

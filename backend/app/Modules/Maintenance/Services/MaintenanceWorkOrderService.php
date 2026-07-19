@@ -32,6 +32,13 @@ class MaintenanceWorkOrderService
             ->paginate($perPage);
     }
 
+    public function openCount(): int
+    {
+        return MaintenanceWorkOrder::query()
+            ->whereIn('status', [MaintenanceWorkOrderStatus::Open, MaintenanceWorkOrderStatus::InProgress])
+            ->count();
+    }
+
     /**
      * @param  array{asset_id: int, type: string, description?: string, reported_date?: string, assigned_to?: int}  $data
      */

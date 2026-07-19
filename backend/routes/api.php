@@ -5,6 +5,7 @@ use App\Modules\Compliance\Http\Controllers\GstRateController;
 use App\Modules\Compliance\Http\Controllers\GstRegistrationController;
 use App\Modules\Compliance\Http\Controllers\GstReportController;
 use App\Modules\Core\Http\Controllers\AuthController;
+use App\Modules\Core\Http\Controllers\DashboardController;
 use App\Modules\Core\Http\Controllers\UserController;
 use App\Modules\CRM\Http\Controllers\LeadController;
 use App\Modules\CRM\Http\Controllers\OpportunityController;
@@ -80,6 +81,8 @@ Route::prefix('v1')->group(function () {
         Route::get('/auth/me', [AuthController::class, 'me']);
 
         Route::apiResource('users', UserController::class)->only(['index', 'store']);
+
+        Route::get('dashboard/summary', [DashboardController::class, 'summary']);
 
         Route::prefix('inventory')->group(function () {
             Route::apiResource('items', ItemController::class)->only(['index', 'store', 'update']);

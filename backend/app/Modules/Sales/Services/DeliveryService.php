@@ -30,6 +30,18 @@ class DeliveryService
     }
 
     /**
+     * Open sales-order lines still awaiting delivery — Delivery itself has
+     * no status field (a Delivery row only ever represents stock that has
+     * already gone out), so "pending" is counted from the demand side.
+     */
+    public function pendingCount(): int
+    {
+        return SalesOrder::query()
+            ->whereIn('status', [SalesOrderStatus::Confirmed, SalesOrderStatus::PartiallyDelivered])
+            ->count();
+    }
+
+    /**
      * @param  array{sales_order_id: int, warehouse_id: int, reference?: string, delivered_date?: string, notes?: string, lines: array<int, array{sales_order_line_id: int, quantity: string}>}  $data
      */
     public function create(array $data, ?int $createdBy): Delivery

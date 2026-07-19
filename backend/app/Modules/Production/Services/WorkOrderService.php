@@ -40,6 +40,13 @@ class WorkOrderService
             ->paginate($perPage);
     }
 
+    public function openCount(): int
+    {
+        return WorkOrder::query()
+            ->whereIn('status', [WorkOrderStatus::Draft, WorkOrderStatus::Released])
+            ->count();
+    }
+
     /**
      * @param  array{item_id: int, bom_id?: int, routing_id?: int, warehouse_id: int, scheduled_date?: string, quantity_planned: string}  $data
      */

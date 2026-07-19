@@ -18,6 +18,13 @@ class NonConformanceReportService
             ->paginate($perPage);
     }
 
+    public function openCount(): int
+    {
+        return NonConformanceReport::query()
+            ->where('status', NonConformanceStatus::Open)
+            ->count();
+    }
+
     /**
      * @param  array{incoming_inspection_id?: int, item_id?: int, description: string, severity: string, quantity_affected?: string, raised_date: string}  $data
      */

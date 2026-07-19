@@ -18,6 +18,13 @@ class PurchaseRequisitionService
             ->paginate($perPage);
     }
 
+    public function pendingApprovalCount(): int
+    {
+        return PurchaseRequisition::query()
+            ->where('status', PurchaseRequisitionStatus::Draft)
+            ->count();
+    }
+
     /**
      * @param  array{needed_by_date?: string, notes?: string, lines: array<int, array{item_id: int, quantity: string, notes?: string}>}  $data
      */

@@ -18,6 +18,17 @@ class PurchaseOrderService
             ->paginate($perPage);
     }
 
+    public function openCount(): int
+    {
+        return PurchaseOrder::query()
+            ->whereIn('status', [
+                PurchaseOrderStatus::Draft,
+                PurchaseOrderStatus::Sent,
+                PurchaseOrderStatus::PartiallyReceived,
+            ])
+            ->count();
+    }
+
     /**
      * @param  array{vendor_id: int, purchase_requisition_id?: int, order_date: string, expected_date?: string, notes?: string, lines: array<int, array{item_id: int, quantity: string, unit_price: string}>}  $data
      */

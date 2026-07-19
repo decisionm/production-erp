@@ -14,6 +14,11 @@ class WarehouseService
             ->paginate($perPage);
     }
 
+    public function count(): int
+    {
+        return Warehouse::query()->count();
+    }
+
     public function create(array $data): Warehouse
     {
         // Explicit here rather than relying on the DB column default: Eloquent's

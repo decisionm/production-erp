@@ -42,4 +42,13 @@ class AccountsReceivableService
             ];
         })->values()->all();
     }
+
+    public function outstandingTotal(): string
+    {
+        return array_reduce(
+            $this->outstanding(),
+            fn (string $carry, array $row) => bcadd($carry, $row['amount'], 4),
+            '0.0000',
+        );
+    }
 }

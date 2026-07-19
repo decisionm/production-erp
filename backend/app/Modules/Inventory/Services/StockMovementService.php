@@ -5,6 +5,7 @@ namespace App\Modules\Inventory\Services;
 use App\Modules\Inventory\Exceptions\InsufficientStockException;
 use App\Modules\Inventory\Models\Enums\SerialNumberStatus;
 use App\Modules\Inventory\Models\Enums\StockMovementType;
+use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\SerialNumber;
 use App\Modules\Inventory\Models\StockBalance;
 use App\Modules\Inventory\Models\StockMovement;
@@ -174,6 +175,22 @@ class StockMovementService
             ->with(['item', 'warehouse'])
             ->orderBy('item_id')
             ->paginate($perPage);
+    }
+
+    /**
+     * Items whose total on-hand quantity (summed across warehouses) has
+     * fallen below their reorder_level. Items with reorder_level = 0 (the
+     * default) are never flagged — that's "no threshold set", not "reorder
+     * at zero".
+     */
+    public function lowStockCount(): int
+    {
+        return Item::query()
+            ->where('reorder_level', '>', 0)
+            ->whereRaw(
+                'reorder_level > (select coalesce(sum(quantity), 0) from stock_balances where stock_balances.item_id = items.id)'
+            )
+            ->count();
     }
 
     /**
