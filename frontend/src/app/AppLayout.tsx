@@ -27,6 +27,9 @@ import { hasModuleAccess } from '@/features/auth/permissions';
 import { useAuthStore } from '@/features/auth/store';
 import type { User } from '@/features/auth/types';
 
+const SIDER_WIDTH = 200;
+const SIDER_COLLAPSED_WIDTH = 80;
+
 interface NavLeaf {
     key: string;
     label: string;
@@ -263,13 +266,18 @@ export default function AppLayout({ children }: PropsWithChildren) {
                     if (type === 'responsive') setIsMobile(value);
                 }}
                 breakpoint="lg"
-                collapsedWidth={isMobile ? 0 : 80}
+                width={SIDER_WIDTH}
+                collapsedWidth={isMobile ? 0 : SIDER_COLLAPSED_WIDTH}
                 trigger={null}
-                style={
-                    isMobile
-                        ? { position: 'fixed', top: 0, bottom: 0, left: 0, height: '100vh', overflow: 'auto', zIndex: 100 }
-                        : { position: 'sticky', top: 0, height: '100vh', overflow: 'auto', zIndex: 10 }
-                }
+                style={{
+                    position: 'fixed',
+                    insetInlineStart: 0,
+                    top: 0,
+                    bottom: 0,
+                    height: '100vh',
+                    overflow: 'auto',
+                    zIndex: isMobile ? 100 : 10,
+                }}
             >
                 <div
                     style={{
@@ -331,7 +339,12 @@ export default function AppLayout({ children }: PropsWithChildren) {
                     }}
                 />
             )}
-            <Layout>
+            <Layout
+                style={{
+                    marginInlineStart: isMobile ? 0 : collapsed ? SIDER_COLLAPSED_WIDTH : SIDER_WIDTH,
+                    transition: 'margin-inline-start 0.2s',
+                }}
+            >
                 <Layout.Header
                     style={{
                         display: 'flex',
