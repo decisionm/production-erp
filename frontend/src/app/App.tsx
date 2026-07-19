@@ -4,6 +4,11 @@ import DashboardPage from '@/features/dashboard/pages/DashboardPage';
 import GstRatesPage from '@/features/compliance/pages/GstRatesPage';
 import GstRegistrationsPage from '@/features/compliance/pages/GstRegistrationsPage';
 import GstReportsPage from '@/features/compliance/pages/GstReportsPage';
+import AttendancePage from '@/features/hrms/pages/AttendancePage';
+import EmployeesPage from '@/features/hrms/pages/EmployeesPage';
+import LeaveBalancesPage from '@/features/hrms/pages/LeaveBalancesPage';
+import LeaveRequestsPage from '@/features/hrms/pages/LeaveRequestsPage';
+import LeaveTypesPage from '@/features/hrms/pages/LeaveTypesPage';
 import LeadsPage from '@/features/crm/pages/LeadsPage';
 import OpportunitiesPage from '@/features/crm/pages/OpportunitiesPage';
 import QuotationsPage from '@/features/crm/pages/QuotationsPage';
@@ -61,6 +66,11 @@ export default function App() {
                                     <Route path="/compliance/gst-rates" element={<GstRatesPage />} />
                                     <Route path="/compliance/gst-registrations" element={<GstRegistrationsPage />} />
                                     <Route path="/compliance/gst-reports" element={<GstReportsPage />} />
+                                    <Route path="/hrms/employees" element={<EmployeesPage />} />
+                                    <Route path="/hrms/leave-types" element={<LeaveTypesPage />} />
+                                    <Route path="/hrms/leave-balances" element={<LeaveBalancesPage />} />
+                                    <Route path="/hrms/leave-requests" element={<LeaveRequestsPage />} />
+                                    <Route path="/hrms/attendance" element={<AttendancePage />} />
                                     <Route path="/tally-sync" element={<TallySyncPage />} />
                                     <Route path="*" element={<Navigate to="/" replace />} />
                                 </Routes>

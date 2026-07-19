@@ -71,6 +71,17 @@ const navItems = [
             { key: '/compliance/gst-reports', label: 'GST Reports' },
         ],
     },
+    {
+        key: 'hrms',
+        label: 'HRMS',
+        children: [
+            { key: '/hrms/employees', label: 'Employees' },
+            { key: '/hrms/leave-types', label: 'Leave Types' },
+            { key: '/hrms/leave-balances', label: 'Leave Balances' },
+            { key: '/hrms/leave-requests', label: 'Leave Requests' },
+            { key: '/hrms/attendance', label: 'Attendance' },
+        ],
+    },
     { key: '/tally-sync', label: 'Tally Sync' },
 ];
 

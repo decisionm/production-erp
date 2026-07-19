@@ -12,6 +12,11 @@ use App\Modules\CRM\Http\Controllers\QuotationController;
 use App\Modules\Finance\Http\Controllers\FinancialReportController;
 use App\Modules\Finance\Http\Controllers\GLAccountController;
 use App\Modules\Finance\Http\Controllers\JournalEntryController;
+use App\Modules\HRMS\Http\Controllers\AttendanceController;
+use App\Modules\HRMS\Http\Controllers\EmployeeController;
+use App\Modules\HRMS\Http\Controllers\LeaveBalanceController;
+use App\Modules\HRMS\Http\Controllers\LeaveRequestController;
+use App\Modules\HRMS\Http\Controllers\LeaveTypeController;
 use App\Modules\Inventory\Http\Controllers\ItemController;
 use App\Modules\Inventory\Http\Controllers\StockBalanceController;
 use App\Modules\Inventory\Http\Controllers\StockMovementController;
@@ -138,6 +143,22 @@ Route::prefix('v1')->group(function () {
             Route::get('pending', [TallySyncAgentController::class, 'pending']);
             Route::post('entries/{tally_sync_entry}/ack', [TallySyncAgentController::class, 'acknowledge']);
             Route::post('entries/{tally_sync_entry}/fail', [TallySyncAgentController::class, 'fail']);
+        });
+
+        Route::prefix('hrms')->group(function () {
+            Route::apiResource('employees', EmployeeController::class)->only(['index', 'store', 'update']);
+
+            Route::apiResource('leave-types', LeaveTypeController::class)->only(['index', 'store', 'update']);
+
+            Route::get('leave-balances', [LeaveBalanceController::class, 'index']);
+            Route::post('leave-balances', [LeaveBalanceController::class, 'store']);
+
+            Route::apiResource('leave-requests', LeaveRequestController::class)->only(['index', 'store']);
+            Route::post('leave-requests/{leave_request}/approve', [LeaveRequestController::class, 'approve']);
+            Route::post('leave-requests/{leave_request}/reject', [LeaveRequestController::class, 'reject']);
+
+            Route::get('attendance', [AttendanceController::class, 'index']);
+            Route::post('attendance/mark', [AttendanceController::class, 'mark']);
         });
     });
 });
