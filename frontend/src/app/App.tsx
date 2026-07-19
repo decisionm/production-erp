@@ -9,6 +9,10 @@ import EmployeesPage from '@/features/hrms/pages/EmployeesPage';
 import LeaveBalancesPage from '@/features/hrms/pages/LeaveBalancesPage';
 import LeaveRequestsPage from '@/features/hrms/pages/LeaveRequestsPage';
 import LeaveTypesPage from '@/features/hrms/pages/LeaveTypesPage';
+import PayrollRunsPage from '@/features/payroll/pages/PayrollRunsPage';
+import PayslipsPage from '@/features/payroll/pages/PayslipsPage';
+import SalaryComponentsPage from '@/features/payroll/pages/SalaryComponentsPage';
+import SalaryStructuresPage from '@/features/payroll/pages/SalaryStructuresPage';
 import LeadsPage from '@/features/crm/pages/LeadsPage';
 import OpportunitiesPage from '@/features/crm/pages/OpportunitiesPage';
 import QuotationsPage from '@/features/crm/pages/QuotationsPage';
@@ -71,6 +75,10 @@ export default function App() {
                                     <Route path="/hrms/leave-balances" element={<LeaveBalancesPage />} />
                                     <Route path="/hrms/leave-requests" element={<LeaveRequestsPage />} />
                                     <Route path="/hrms/attendance" element={<AttendancePage />} />
+                                    <Route path="/payroll/salary-components" element={<SalaryComponentsPage />} />
+                                    <Route path="/payroll/salary-structures" element={<SalaryStructuresPage />} />
+                                    <Route path="/payroll/runs" element={<PayrollRunsPage />} />
+                                    <Route path="/payroll/payslips" element={<PayslipsPage />} />
                                     <Route path="/tally-sync" element={<TallySyncPage />} />
                                     <Route path="*" element={<Navigate to="/" replace />} />
                                 </Routes>

@@ -1,2 +1,5 @@
 # Local Claude Code session/tool state — not project content.
 .claude/
+
+# VSCode Local History extension — not project content.
+.history/

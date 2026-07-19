@@ -21,6 +21,10 @@ use App\Modules\Inventory\Http\Controllers\ItemController;
 use App\Modules\Inventory\Http\Controllers\StockBalanceController;
 use App\Modules\Inventory\Http\Controllers\StockMovementController;
 use App\Modules\Inventory\Http\Controllers\WarehouseController;
+use App\Modules\Payroll\Http\Controllers\PayrollRunController;
+use App\Modules\Payroll\Http\Controllers\PayslipController;
+use App\Modules\Payroll\Http\Controllers\SalaryComponentController;
+use App\Modules\Payroll\Http\Controllers\SalaryStructureController;
 use App\Modules\Procurement\Http\Controllers\GoodsReceiptController;
 use App\Modules\Procurement\Http\Controllers\PurchaseOrderController;
 use App\Modules\Procurement\Http\Controllers\PurchaseRequisitionController;
@@ -159,6 +163,18 @@ Route::prefix('v1')->group(function () {
 
             Route::get('attendance', [AttendanceController::class, 'index']);
             Route::post('attendance/mark', [AttendanceController::class, 'mark']);
+        });
+
+        Route::prefix('payroll')->group(function () {
+            Route::apiResource('salary-components', SalaryComponentController::class)->only(['index', 'store']);
+
+            Route::apiResource('salary-structures', SalaryStructureController::class)->only(['index', 'store']);
+
+            Route::apiResource('runs', PayrollRunController::class)->only(['index', 'store']);
+            Route::post('runs/{payroll_run}/process', [PayrollRunController::class, 'process']);
+            Route::post('runs/{payroll_run}/mark-paid', [PayrollRunController::class, 'markPaid']);
+
+            Route::apiResource('payslips', PayslipController::class)->only(['index', 'show']);
         });
     });
 });

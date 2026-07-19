@@ -3,7 +3,9 @@
 namespace App\Modules\HRMS\Services;
 
 use App\Modules\HRMS\Models\Employee;
+use App\Modules\HRMS\Models\Enums\EmployeeStatus;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Collection;
 
 class EmployeeService
 {
@@ -13,6 +15,19 @@ class EmployeeService
             ->with(['manager'])
             ->orderBy('name')
             ->paginate($perPage);
+    }
+
+    /**
+     * Active employees for other modules to aggregate over (e.g. Payroll
+     * run generation). Not paginated: this is meant for batch processing,
+     * not a list screen.
+     */
+    public function active(): Collection
+    {
+        return Employee::query()
+            ->where('status', EmployeeStatus::Active)
+            ->orderBy('name')
+            ->get();
     }
 
     public function create(array $data): Employee

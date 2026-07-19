@@ -82,6 +82,16 @@ const navItems = [
             { key: '/hrms/attendance', label: 'Attendance' },
         ],
     },
+    {
+        key: 'payroll',
+        label: 'Payroll',
+        children: [
+            { key: '/payroll/salary-components', label: 'Salary Components' },
+            { key: '/payroll/salary-structures', label: 'Salary Structures' },
+            { key: '/payroll/runs', label: 'Payroll Runs' },
+            { key: '/payroll/payslips', label: 'Payslips' },
+        ],
+    },
     { key: '/tally-sync', label: 'Tally Sync' },
 ];
 
