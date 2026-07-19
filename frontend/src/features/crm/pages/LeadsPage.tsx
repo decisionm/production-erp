@@ -13,6 +13,7 @@ import {
     createLeadActivity,
     listLeadActivities,
     listLeads,
+    updateLeadNotes,
     updateLeadStatus,
 } from '@/features/crm/api';
 import type { Lead, LeadActivityType, LeadStatus } from '@/features/crm/types';
@@ -23,6 +24,7 @@ const leadSchema = z.object({
     phone: z.string().optional(),
     company: z.string().optional(),
     source: z.string().optional(),
+    notes: z.string().optional(),
 });
 type LeadFormValues = z.infer<typeof leadSchema>;
 
@@ -30,6 +32,11 @@ const convertSchema = z.object({
     code: z.string().min(1, 'Customer code is required').max(32),
 });
 type ConvertFormValues = z.infer<typeof convertSchema>;
+
+const requirementSchema = z.object({
+    notes: z.string().optional(),
+});
+type RequirementFormValues = z.infer<typeof requirementSchema>;
 
 const activitySchema = z.object({
     type: z.enum(['call', 'email', 'meeting', 'note']),
@@ -87,13 +94,14 @@ export default function LeadsPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [convertingLead, setConvertingLead] = useState<Lead | null>(null);
     const [detailLead, setDetailLead] = useState<Lead | null>(null);
+    const [editingRequirement, setEditingRequirement] = useState(false);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['crm', 'leads'], queryFn: listLeads });
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<LeadFormValues>({
         resolver: zodResolver(leadSchema),
-        defaultValues: { name: '', email: '', phone: '', company: '', source: '' },
+        defaultValues: { name: '', email: '', phone: '', company: '', source: '', notes: '' },
     });
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['crm', 'leads'] });
@@ -139,6 +147,25 @@ export default function LeadsPage() {
         },
     });
 
+    const {
+        control: requirementControl,
+        handleSubmit: handleRequirementSubmit,
+        reset: resetRequirement,
+        formState: { errors: requirementErrors },
+    } = useForm<RequirementFormValues>({ resolver: zodResolver(requirementSchema), defaultValues: { notes: '' } });
+
+    const requirementMutation = useMutation({
+        mutationFn: ({ id, notes }: { id: number; notes: string }) => updateLeadNotes(id, notes),
+        onSuccess: (updated) => {
+            invalidate();
+            setDetailLead(updated);
+            setEditingRequirement(false);
+        },
+        onError: (error: any) => {
+            Modal.error({ title: 'Could not update requirement', content: error?.response?.data?.message ?? 'Unknown error' });
+        },
+    });
+
     const { data: activities, isLoading: activitiesLoading } = useQuery({
         queryKey: ['crm', 'leads', detailLead?.id, 'activities'],
         queryFn: () => listLeadActivities(detailLead!.id),
@@ -177,7 +204,13 @@ export default function LeadsPage() {
                 loading={isLoading}
                 dataSource={data?.data}
                 pagination={false}
-                onRow={(row) => ({ onClick: () => setDetailLead(row), style: { cursor: 'pointer' } })}
+                onRow={(row) => ({
+                    onClick: () => {
+                        setEditingRequirement(false);
+                        setDetailLead(row);
+                    },
+                    style: { cursor: 'pointer' },
+                })}
                 columns={[
                     { title: 'Name', dataIndex: 'name' },
                     { title: 'Company', dataIndex: 'company' },
@@ -204,7 +237,14 @@ export default function LeadsPage() {
                     {
                         title: 'Actions',
                         render: (_, row) => (
-                            <Button size="small" onClick={(e) => { e.stopPropagation(); setDetailLead(row); }}>
+                            <Button
+                                size="small"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingRequirement(false);
+                                    setDetailLead(row);
+                                }}
+                            >
                                 View
                             </Button>
                         ),
@@ -236,6 +276,19 @@ export default function LeadsPage() {
                     <Form.Item label="Source">
                         <Controller name="source" control={control} render={({ field }) => <Input {...field} />} />
                     </Form.Item>
+                    <Form.Item label="Requirement / Enquiry">
+                        <Controller
+                            name="notes"
+                            control={control}
+                            render={({ field }) => (
+                                <Input.TextArea
+                                    {...field}
+                                    rows={3}
+                                    placeholder="What are they looking for? e.g. 50,000 units/month of 500ml PET bottles for a new juice launch"
+                                />
+                            )}
+                        />
+                    </Form.Item>
                 </Form>
             </Modal>
 
@@ -263,7 +316,10 @@ export default function LeadsPage() {
             <Drawer
                 title={detailLead?.name}
                 open={detailLead !== null}
-                onClose={() => setDetailLead(null)}
+                onClose={() => {
+                    setDetailLead(null);
+                    setEditingRequirement(false);
+                }}
                 width={480}
                 destroyOnHidden
             >
@@ -278,6 +334,61 @@ export default function LeadsPage() {
                             <Descriptions.Item label="Phone">{detailLead.phone ?? '—'}</Descriptions.Item>
                             <Descriptions.Item label="Source">{detailLead.source ?? '—'}</Descriptions.Item>
                         </Descriptions>
+
+                        <div style={{ marginTop: 16 }}>
+                            <Space style={{ justifyContent: 'space-between', width: '100%' }}>
+                                <Typography.Text strong>Requirement / Enquiry</Typography.Text>
+                                {!editingRequirement && (
+                                    <Button
+                                        size="small"
+                                        type="link"
+                                        onClick={() => {
+                                            resetRequirement({ notes: detailLead.notes ?? '' });
+                                            setEditingRequirement(true);
+                                        }}
+                                    >
+                                        Edit
+                                    </Button>
+                                )}
+                            </Space>
+                            {editingRequirement ? (
+                                <Form
+                                    layout="vertical"
+                                    onFinish={handleRequirementSubmit((values) =>
+                                        requirementMutation.mutate({ id: detailLead.id, notes: values.notes ?? '' })
+                                    )}
+                                >
+                                    <Form.Item
+                                        validateStatus={requirementErrors.notes ? 'error' : ''}
+                                        help={requirementErrors.notes?.message}
+                                        style={{ marginTop: 8 }}
+                                    >
+                                        <Controller
+                                            name="notes"
+                                            control={requirementControl}
+                                            render={({ field }) => (
+                                                <Input.TextArea {...field} rows={3} placeholder="What are they looking for?" />
+                                            )}
+                                        />
+                                    </Form.Item>
+                                    <Space>
+                                        <Button type="primary" htmlType="submit" size="small" loading={requirementMutation.isPending}>
+                                            Save
+                                        </Button>
+                                        <Button size="small" onClick={() => setEditingRequirement(false)}>
+                                            Cancel
+                                        </Button>
+                                    </Space>
+                                </Form>
+                            ) : (
+                                <Typography.Paragraph
+                                    type={detailLead.notes ? undefined : 'secondary'}
+                                    style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}
+                                >
+                                    {detailLead.notes || 'No requirement captured yet.'}
+                                </Typography.Paragraph>
+                            )}
+                        </div>
 
                         <Space wrap style={{ marginTop: 16 }}>
                             {nextStatusActions[detailLead.status].map((action) => (

@@ -27,6 +27,11 @@ export async function updateLeadStatus(id: number, status: LeadStatus): Promise<
     return data.data;
 }
 
+export async function updateLeadNotes(id: number, notes: string): Promise<Lead> {
+    const { data } = await api.put<{ data: Lead }>(`/crm/leads/${id}`, { notes });
+    return data.data;
+}
+
 export async function convertLead(id: number, code: string): Promise<Lead> {
     const { data } = await api.post<{ data: Lead }>(`/crm/leads/${id}/convert`, { code });
     return data.data;
