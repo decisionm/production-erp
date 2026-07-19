@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -26,6 +26,7 @@ const resultColor: Record<InspectionResult, string> = {
 
 export default function IncomingInspectionsPage() {
     const [modalOpen, setModalOpen] = useState(false);
+    const [detailRow, setDetailRow] = useState<IncomingInspection | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['quality', 'incoming-inspections'], queryFn: listIncomingInspections });
@@ -93,6 +94,12 @@ export default function IncomingInspectionsPage() {
                         render: (result: InspectionResult) => <Tag color={resultColor[result]}>{result}</Tag>,
                     },
                     { title: 'Date', dataIndex: 'inspection_date' },
+                    {
+                        title: 'Actions',
+                        render: (_, row) => (
+                            <Button size="small" onClick={() => setDetailRow(row)}>View</Button>
+                        ),
+                    },
                 ]}
             />
 
@@ -171,6 +178,31 @@ export default function IncomingInspectionsPage() {
                     />
                 </Form>
             </Modal>
+
+            <Drawer
+                title={`Inspection #${detailRow?.id}`}
+                open={detailRow !== null}
+                onClose={() => setDetailRow(null)}
+                width={480}
+                destroyOnHidden
+            >
+                {detailRow && (
+                    <Descriptions column={1} size="small" bordered>
+                        <Descriptions.Item label="Item">
+                            {detailRow.item.sku} — {detailRow.item.name}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="Result">
+                            <Tag color={resultColor[detailRow.result]}>{detailRow.result}</Tag>
+                        </Descriptions.Item>
+                        <Descriptions.Item label="Inspected Quantity">{detailRow.inspected_quantity}</Descriptions.Item>
+                        <Descriptions.Item label="Accepted Quantity">{detailRow.accepted_quantity}</Descriptions.Item>
+                        <Descriptions.Item label="Rejected Quantity">{detailRow.rejected_quantity}</Descriptions.Item>
+                        <Descriptions.Item label="Inspection Date">{detailRow.inspection_date}</Descriptions.Item>
+                        <Descriptions.Item label="Inspected By">{detailRow.inspected_by ?? '—'}</Descriptions.Item>
+                        <Descriptions.Item label="Notes">{detailRow.notes ?? '—'}</Descriptions.Item>
+                    </Descriptions>
+                )}
+            </Drawer>
         </>
     );
 }

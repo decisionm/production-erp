@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -32,6 +32,7 @@ const statusColor: Record<LeaveRequestStatus, string> = {
 
 export default function LeaveRequestsPage() {
     const [modalOpen, setModalOpen] = useState(false);
+    const [detailRow, setDetailRow] = useState<LeaveRequest | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['hrms', 'leave-requests'], queryFn: listLeaveRequests });
@@ -97,26 +98,30 @@ export default function LeaveRequestsPage() {
                     },
                     {
                         title: 'Actions',
-                        render: (_, row) =>
-                            row.status === 'pending' && (
-                                <Space>
-                                    <Button
-                                        size="small"
-                                        onClick={() => approveMutation.mutate(row.id)}
-                                        loading={approveMutation.isPending}
-                                    >
-                                        Approve
-                                    </Button>
-                                    <Button
-                                        size="small"
-                                        danger
-                                        onClick={() => rejectMutation.mutate(row.id)}
-                                        loading={rejectMutation.isPending}
-                                    >
-                                        Reject
-                                    </Button>
-                                </Space>
-                            ),
+                        render: (_, row) => (
+                            <Space>
+                                <Button size="small" onClick={() => setDetailRow(row)}>View</Button>
+                                {row.status === 'pending' && (
+                                    <>
+                                        <Button
+                                            size="small"
+                                            onClick={() => approveMutation.mutate(row.id)}
+                                            loading={approveMutation.isPending}
+                                        >
+                                            Approve
+                                        </Button>
+                                        <Button
+                                            size="small"
+                                            danger
+                                            onClick={() => rejectMutation.mutate(row.id)}
+                                            loading={rejectMutation.isPending}
+                                        >
+                                            Reject
+                                        </Button>
+                                    </>
+                                )}
+                            </Space>
+                        ),
                     },
                 ]}
             />
@@ -196,6 +201,30 @@ export default function LeaveRequestsPage() {
                     </Form.Item>
                 </Form>
             </Modal>
+
+            <Drawer
+                title={`Leave Request #${detailRow?.id}`}
+                open={detailRow !== null}
+                onClose={() => setDetailRow(null)}
+                width={480}
+                destroyOnHidden
+            >
+                {detailRow && (
+                    <Descriptions column={1} size="small" bordered>
+                        <Descriptions.Item label="Employee">{detailRow.employee?.name ?? '—'}</Descriptions.Item>
+                        <Descriptions.Item label="Leave Type">{detailRow.leave_type.name}</Descriptions.Item>
+                        <Descriptions.Item label="Status">
+                            <Tag color={statusColor[detailRow.status]}>{detailRow.status}</Tag>
+                        </Descriptions.Item>
+                        <Descriptions.Item label="Start Date">{detailRow.start_date}</Descriptions.Item>
+                        <Descriptions.Item label="End Date">{detailRow.end_date}</Descriptions.Item>
+                        <Descriptions.Item label="Days">{detailRow.days}</Descriptions.Item>
+                        <Descriptions.Item label="Reason">{detailRow.reason ?? '—'}</Descriptions.Item>
+                        <Descriptions.Item label="Approved By">{detailRow.approved_by ?? '—'}</Descriptions.Item>
+                        <Descriptions.Item label="Decided At">{detailRow.decided_at ?? '—'}</Descriptions.Item>
+                    </Descriptions>
+                )}
+            </Drawer>
         </>
     );
 }

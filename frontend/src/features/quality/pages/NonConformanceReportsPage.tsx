@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -39,6 +39,7 @@ const statusColor: Record<NonConformanceStatus, string> = {
 export default function NonConformanceReportsPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [closingReport, setClosingReport] = useState<NonConformanceReport | null>(null);
+    const [detailReport, setDetailReport] = useState<NonConformanceReport | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['quality', 'ncrs'], queryFn: listNonConformanceReports });
@@ -106,10 +107,14 @@ export default function NonConformanceReportsPage() {
                     { title: 'Raised', dataIndex: 'raised_date' },
                     {
                         title: 'Actions',
-                        render: (_, row) =>
-                            row.status === 'open' && (
-                                <Button size="small" onClick={() => setClosingReport(row)}>Close</Button>
-                            ),
+                        render: (_, row) => (
+                            <Space>
+                                <Button size="small" onClick={() => setDetailReport(row)}>View</Button>
+                                {row.status === 'open' && (
+                                    <Button size="small" onClick={() => setClosingReport(row)}>Close</Button>
+                                )}
+                            </Space>
+                        ),
                     },
                 ]}
             />
@@ -224,6 +229,36 @@ export default function NonConformanceReportsPage() {
                     </Form.Item>
                 </Form>
             </Modal>
+
+            <Drawer
+                title={`NCR #${detailReport?.id}`}
+                open={detailReport !== null}
+                onClose={() => setDetailReport(null)}
+                width={520}
+                destroyOnHidden
+            >
+                {detailReport && (
+                    <Descriptions column={1} size="small" bordered>
+                        <Descriptions.Item label="Item">
+                            {detailReport.item.sku} — {detailReport.item.name}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="Severity">
+                            <Tag color={severityColor[detailReport.severity]}>{detailReport.severity}</Tag>
+                        </Descriptions.Item>
+                        <Descriptions.Item label="Status">
+                            <Tag color={statusColor[detailReport.status]}>{detailReport.status}</Tag>
+                        </Descriptions.Item>
+                        <Descriptions.Item label="Description">{detailReport.description}</Descriptions.Item>
+                        <Descriptions.Item label="Quantity Affected">
+                            {detailReport.quantity_affected ?? '—'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="Raised By">{detailReport.raised_by ?? '—'}</Descriptions.Item>
+                        <Descriptions.Item label="Raised Date">{detailReport.raised_date}</Descriptions.Item>
+                        <Descriptions.Item label="Resolution">{detailReport.resolution ?? '—'}</Descriptions.Item>
+                        <Descriptions.Item label="Closed Date">{detailReport.closed_date ?? '—'}</Descriptions.Item>
+                    </Descriptions>
+                )}
+            </Drawer>
         </>
     );
 }

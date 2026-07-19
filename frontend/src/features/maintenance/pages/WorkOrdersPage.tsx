@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -53,6 +53,7 @@ export default function WorkOrdersPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [partsForId, setPartsForId] = useState<number | null>(null);
     const [completingId, setCompletingId] = useState<number | null>(null);
+    const [detailRow, setDetailRow] = useState<MaintenanceWorkOrder | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['maintenance', 'work-orders'], queryFn: () => listMaintenanceWorkOrders() });
@@ -167,6 +168,7 @@ export default function WorkOrdersPage() {
                         title: 'Actions',
                         render: (_, row) => (
                             <Space>
+                                <Button size="small" onClick={() => setDetailRow(row)}>View</Button>
                                 {(row.status === 'open' || row.status === 'in_progress') && (
                                     <Button size="small" onClick={() => setPartsForId(row.id)}>Add Part</Button>
                                 )}
@@ -301,6 +303,60 @@ export default function WorkOrdersPage() {
                     </Form.Item>
                 </Form>
             </Modal>
+
+            <Drawer
+                title={`Work Order #${detailRow?.id}`}
+                open={detailRow !== null}
+                onClose={() => setDetailRow(null)}
+                width={600}
+                destroyOnHidden
+            >
+                {detailRow && (
+                    <>
+                        <Descriptions column={1} size="small" bordered>
+                            <Descriptions.Item label="Status">
+                                <Tag color={statusColor[detailRow.status]}>{detailRow.status}</Tag>
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Asset">
+                                {detailRow.asset.code} — {detailRow.asset.name}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Type">{detailRow.type}</Descriptions.Item>
+                            <Descriptions.Item label="Description">{detailRow.description ?? '—'}</Descriptions.Item>
+                            <Descriptions.Item label="Assigned To">{detailRow.assignee?.name ?? '—'}</Descriptions.Item>
+                            <Descriptions.Item label="Reported Date">{detailRow.reported_date}</Descriptions.Item>
+                            <Descriptions.Item label="Started At">{detailRow.started_at ?? '—'}</Descriptions.Item>
+                            <Descriptions.Item label="Completed At">{detailRow.completed_at ?? '—'}</Descriptions.Item>
+                            <Descriptions.Item label="Parts Cost">{detailRow.parts_cost}</Descriptions.Item>
+                            <Descriptions.Item label="Labor Cost">{detailRow.labor_cost}</Descriptions.Item>
+                            <Descriptions.Item label="Total Cost">{detailRow.total_cost}</Descriptions.Item>
+                        </Descriptions>
+
+                        <Typography.Title level={5} style={{ marginTop: 24 }}>
+                            Parts
+                        </Typography.Title>
+                        {detailRow.parts.length > 0 ? (
+                            <Table
+                                rowKey="id"
+                                size="small"
+                                pagination={false}
+                                dataSource={detailRow.parts}
+                                scroll={{ x: 'max-content' }}
+                                columns={[
+                                    {
+                                        title: 'Item',
+                                        render: (_, p) => `${p.item.sku} — ${p.item.name}`,
+                                    },
+                                    { title: 'Warehouse', render: (_, p) => p.warehouse.code },
+                                    { title: 'Quantity', dataIndex: 'quantity' },
+                                    { title: 'Unit Cost', dataIndex: 'unit_cost' },
+                                ]}
+                            />
+                        ) : (
+                            <Typography.Text type="secondary">No parts added yet.</Typography.Text>
+                        )}
+                    </>
+                )}
+            </Drawer>
         </>
     );
 }

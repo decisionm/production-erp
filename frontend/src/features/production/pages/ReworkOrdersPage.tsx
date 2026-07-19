@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, Descriptions, Drawer, Form, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -39,6 +39,7 @@ const statusColor: Record<ReworkOrderStatus, string> = {
 export default function ReworkOrdersPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [completingId, setCompletingId] = useState<number | null>(null);
+    const [detailRow, setDetailRow] = useState<ReworkOrder | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['production', 'rework-orders'], queryFn: listReworkOrders });
@@ -131,6 +132,7 @@ export default function ReworkOrdersPage() {
                         title: 'Actions',
                         render: (_, row) => (
                             <Space>
+                                <Button size="small" onClick={() => setDetailRow(row)}>View</Button>
                                 {row.status === 'draft' && (
                                     <Button
                                         size="small"
@@ -245,6 +247,61 @@ export default function ReworkOrdersPage() {
                     </Form.Item>
                 </Form>
             </Modal>
+
+            <Drawer
+                title={`Rework Order #${detailRow?.id}`}
+                open={detailRow !== null}
+                onClose={() => setDetailRow(null)}
+                width={600}
+                destroyOnHidden
+            >
+                {detailRow && (
+                    <>
+                        <Descriptions column={1} size="small" bordered>
+                            <Descriptions.Item label="Status">
+                                <Tag color={statusColor[detailRow.status]}>{detailRow.status}</Tag>
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Item">
+                                {detailRow.item.sku} — {detailRow.item.name}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Warehouse">
+                                {detailRow.warehouse.code} — {detailRow.warehouse.name}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Source Work Order">
+                                {detailRow.source_work_order_id ?? '—'}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Quantity Input">{detailRow.quantity_input}</Descriptions.Item>
+                            <Descriptions.Item label="Quantity Recovered">{detailRow.quantity_recovered}</Descriptions.Item>
+                            <Descriptions.Item label="Material Cost">{detailRow.material_cost}</Descriptions.Item>
+                            <Descriptions.Item label="Labor Cost">{detailRow.labor_cost}</Descriptions.Item>
+                            <Descriptions.Item label="Total Cost">{detailRow.total_cost}</Descriptions.Item>
+                        </Descriptions>
+
+                        <Typography.Title level={5} style={{ marginTop: 24 }}>
+                            Materials
+                        </Typography.Title>
+                        {detailRow.materials.length > 0 ? (
+                            <Table
+                                rowKey="id"
+                                size="small"
+                                pagination={false}
+                                dataSource={detailRow.materials}
+                                scroll={{ x: 'max-content' }}
+                                columns={[
+                                    {
+                                        title: 'Component',
+                                        render: (_, m) => `${m.component.sku} — ${m.component.name}`,
+                                    },
+                                    { title: 'Required', dataIndex: 'quantity_required' },
+                                    { title: 'Issued', dataIndex: 'quantity_issued' },
+                                ]}
+                            />
+                        ) : (
+                            <Typography.Text type="secondary">No materials — pure labor rework.</Typography.Text>
+                        )}
+                    </>
+                )}
+            </Drawer>
         </>
     );
 }
