@@ -14,6 +14,8 @@ class StockMovementResource extends JsonResource
             'type' => $this->type->value,
             'item' => ItemResource::make($this->whenLoaded('item')),
             'warehouse' => WarehouseResource::make($this->whenLoaded('warehouse')),
+            'batch' => BatchResource::make($this->whenLoaded('batch')),
+            'serial_number' => SerialNumberResource::make($this->whenLoaded('serialNumber')),
             'quantity' => $this->quantity,
             'unit_cost' => $this->unit_cost,
             'reference' => $this->reference,

@@ -3,6 +3,9 @@
 namespace App\Modules\Production\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
+use App\Modules\Inventory\Models\Enums\ItemTrackingType;
+use App\Modules\Inventory\Models\Item;
+use App\Modules\Inventory\Services\BatchService;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Production\Exceptions\MissingBomException;
 use App\Modules\Production\Models\Bom;
@@ -25,6 +28,7 @@ class WorkOrderService
     public function __construct(
         private readonly StockMovementService $stock,
         private readonly BomService $boms,
+        private readonly BatchService $batches,
     ) {}
 
     public function paginate(int $perPage = 20): LengthAwarePaginator
@@ -103,14 +107,32 @@ class WorkOrderService
         });
     }
 
-    public function complete(WorkOrder $workOrder, string $quantityCompleted): WorkOrder
+    /**
+     * $batchNumber is only meaningful when the finished item is batch-
+     * tracked (Item::tracking_type === batch) — when given, a Batch is
+     * created for the completed quantity and stamped onto the receipt so
+     * this production run's output is traceable as its own lot. Ignored
+     * for non-batch-tracked items rather than erroring, since most items
+     * won't be batch-tracked and callers shouldn't have to know that.
+     */
+    public function complete(WorkOrder $workOrder, string $quantityCompleted, ?string $batchNumber = null): WorkOrder
     {
         if ($workOrder->status !== WorkOrderStatus::Released) {
             throw InvalidStatusTransitionException::make('work order', $workOrder->status->value, WorkOrderStatus::Completed->value);
         }
 
-        return DB::transaction(function () use ($workOrder, $quantityCompleted) {
+        return DB::transaction(function () use ($workOrder, $quantityCompleted, $batchNumber) {
             $unitCost = bcdiv($workOrder->material_cost, $quantityCompleted, 4);
+
+            $item = Item::findOrFail($workOrder->item_id);
+            $batchId = null;
+            if ($batchNumber !== null && $item->tracking_type === ItemTrackingType::Batch) {
+                $batchId = $this->batches->create([
+                    'item_id' => $workOrder->item_id,
+                    'batch_number' => $batchNumber,
+                    'manufactured_date' => now()->toDateString(),
+                ])->id;
+            }
 
             $this->stock->recordReceipt(
                 itemId: $workOrder->item_id,
@@ -118,6 +140,7 @@ class WorkOrderService
                 quantity: $quantityCompleted,
                 unitCost: $unitCost,
                 reference: "WO #{$workOrder->id}",
+                batchId: $batchId,
             );
 
             $workOrder->update([

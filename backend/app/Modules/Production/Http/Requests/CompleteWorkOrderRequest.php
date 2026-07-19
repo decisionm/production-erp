@@ -15,6 +15,7 @@ class CompleteWorkOrderRequest extends FormRequest
     {
         return [
             'quantity_completed' => ['required', 'numeric', 'gt:0'],
+            'batch_number' => ['nullable', 'string', 'max:64'],
         ];
     }
 }

@@ -17,6 +17,8 @@ class StoreStockIssueRequest extends FormRequest
             'item_id' => ['required', 'integer', 'exists:items,id'],
             'warehouse_id' => ['required', 'integer', 'exists:warehouses,id'],
             'quantity' => ['required', 'numeric', 'gt:0'],
+            'batch_id' => ['nullable', 'integer', 'exists:batches,id'],
+            'serial_number_id' => ['nullable', 'integer', 'exists:serial_numbers,id'],
             'reference' => ['nullable', 'string', 'max:255'],
             'movement_date' => ['nullable', 'date'],
             'notes' => ['nullable', 'string'],

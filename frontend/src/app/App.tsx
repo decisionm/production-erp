@@ -36,7 +36,9 @@ import InstrumentsPage from '@/features/quality/pages/InstrumentsPage';
 import NonConformanceReportsPage from '@/features/quality/pages/NonConformanceReportsPage';
 import SpcChartPage from '@/features/quality/pages/SpcChartPage';
 import SpcCharacteristicsPage from '@/features/quality/pages/SpcCharacteristicsPage';
+import BatchesPage from '@/features/inventory/pages/BatchesPage';
 import ItemsPage from '@/features/inventory/pages/ItemsPage';
+import SerialNumbersPage from '@/features/inventory/pages/SerialNumbersPage';
 import StockPage from '@/features/inventory/pages/StockPage';
 import WarehousesPage from '@/features/inventory/pages/WarehousesPage';
 import GoodsReceiptsPage from '@/features/procurement/pages/GoodsReceiptsPage';
@@ -69,6 +71,8 @@ export default function App() {
                                     <Route path="/inventory/items" element={<ItemsPage />} />
                                     <Route path="/inventory/warehouses" element={<WarehousesPage />} />
                                     <Route path="/inventory/stock" element={<StockPage />} />
+                                    <Route path="/inventory/batches" element={<BatchesPage />} />
+                                    <Route path="/inventory/serial-numbers" element={<SerialNumbersPage />} />
                                     <Route path="/production/work-centers" element={<WorkCentersPage />} />
                                     <Route path="/production/boms" element={<BomsPage />} />
                                     <Route path="/production/routings" element={<RoutingsPage />} />

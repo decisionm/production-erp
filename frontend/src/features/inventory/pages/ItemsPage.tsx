@@ -1,11 +1,11 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, Input, InputNumber, Modal, Space, Switch, Table, Typography } from 'antd';
+import { Button, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { createItem, listItems } from '@/features/inventory/api';
-import type { Item } from '@/features/inventory/types';
+import type { Item, ItemTrackingType } from '@/features/inventory/types';
 
 const itemSchema = z.object({
     sku: z.string().min(1, 'SKU is required').max(64),
@@ -13,9 +13,17 @@ const itemSchema = z.object({
     uom: z.string().min(1, 'UOM is required').max(16),
     hsn_sac_code: z.string().max(20).optional(),
     reorder_level: z.number().min(0).optional(),
+    tracking_type: z.enum(['none', 'batch', 'serial']).optional(),
 });
 
 type ItemFormValues = z.infer<typeof itemSchema>;
+
+const trackingTypeOptions: { value: ItemTrackingType; label: string }[] = [
+    { value: 'none', label: 'None' },
+    { value: 'batch', label: 'Batch / Lot' },
+    { value: 'serial', label: 'Serial Number' },
+];
+const trackingTypeColor: Record<ItemTrackingType, string> = { none: 'default', batch: 'blue', serial: 'purple' };
 
 export default function ItemsPage() {
     const [modalOpen, setModalOpen] = useState(false);
@@ -25,7 +33,7 @@ export default function ItemsPage() {
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<ItemFormValues>({
         resolver: zodResolver(itemSchema),
-        defaultValues: { sku: '', name: '', uom: 'PCS', hsn_sac_code: '', reorder_level: 0 },
+        defaultValues: { sku: '', name: '', uom: 'PCS', hsn_sac_code: '', reorder_level: 0, tracking_type: 'none' },
     });
 
     const mutation = useMutation({
@@ -55,6 +63,11 @@ export default function ItemsPage() {
                     { title: 'UOM', dataIndex: 'uom' },
                     { title: 'HSN/SAC', dataIndex: 'hsn_sac_code' },
                     { title: 'Reorder Level', dataIndex: 'reorder_level' },
+                    {
+                        title: 'Tracking',
+                        dataIndex: 'tracking_type',
+                        render: (type: ItemTrackingType) => <Tag color={trackingTypeColor[type]}>{type}</Tag>,
+                    },
                     {
                         title: 'Active',
                         dataIndex: 'is_active',
@@ -95,6 +108,13 @@ export default function ItemsPage() {
                             render={({ field }) => (
                                 <InputNumber {...field} min={0} style={{ width: '100%' }} />
                             )}
+                        />
+                    </Form.Item>
+                    <Form.Item label="Tracking Type">
+                        <Controller
+                            name="tracking_type"
+                            control={control}
+                            render={({ field }) => <Select {...field} options={trackingTypeOptions} />}
                         />
                     </Form.Item>
                 </Form>

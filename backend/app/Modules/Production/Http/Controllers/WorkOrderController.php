@@ -32,7 +32,11 @@ class WorkOrderController extends Controller
     public function complete(CompleteWorkOrderRequest $request, WorkOrder $workOrder): WorkOrderResource
     {
         return WorkOrderResource::make(
-            $this->workOrders->complete($workOrder, (string) $request->validated('quantity_completed')),
+            $this->workOrders->complete(
+                $workOrder,
+                (string) $request->validated('quantity_completed'),
+                $request->validated('batch_number'),
+            ),
         );
     }
 }

@@ -20,6 +20,7 @@ class ItemService
         // create() doesn't re-fetch DB-applied defaults into the returned model.
         return Item::create([
             'reorder_level' => 0,
+            'tracking_type' => 'none',
             'is_active' => true,
             ...$data,
         ]);

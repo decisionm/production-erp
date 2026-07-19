@@ -18,6 +18,8 @@ class StoreStockTransferRequest extends FormRequest
             'from_warehouse_id' => ['required', 'integer', 'exists:warehouses,id', 'different:to_warehouse_id'],
             'to_warehouse_id' => ['required', 'integer', 'exists:warehouses,id'],
             'quantity' => ['required', 'numeric', 'gt:0'],
+            'batch_id' => ['nullable', 'integer', 'exists:batches,id'],
+            'serial_number_id' => ['nullable', 'integer', 'exists:serial_numbers,id'],
             'reference' => ['nullable', 'string', 'max:255'],
             'movement_date' => ['nullable', 'date'],
             'notes' => ['nullable', 'string'],

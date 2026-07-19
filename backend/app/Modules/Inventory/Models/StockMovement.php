@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 #[Fillable([
-    'item_id', 'warehouse_id', 'type', 'quantity', 'unit_cost',
+    'item_id', 'warehouse_id', 'batch_id', 'serial_number_id', 'type', 'quantity', 'unit_cost',
     'reference', 'transfer_group', 'movement_date', 'notes', 'created_by',
 ])]
 class StockMovement extends Model
@@ -32,6 +32,16 @@ class StockMovement extends Model
     public function warehouse(): BelongsTo
     {
         return $this->belongsTo(Warehouse::class);
+    }
+
+    public function batch(): BelongsTo
+    {
+        return $this->belongsTo(Batch::class);
+    }
+
+    public function serialNumber(): BelongsTo
+    {
+        return $this->belongsTo(SerialNumber::class);
     }
 
     public function createdBy(): BelongsTo

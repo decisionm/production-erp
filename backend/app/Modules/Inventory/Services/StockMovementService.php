@@ -3,7 +3,9 @@
 namespace App\Modules\Inventory\Services;
 
 use App\Modules\Inventory\Exceptions\InsufficientStockException;
+use App\Modules\Inventory\Models\Enums\SerialNumberStatus;
 use App\Modules\Inventory\Models\Enums\StockMovementType;
+use App\Modules\Inventory\Models\SerialNumber;
 use App\Modules\Inventory\Models\StockBalance;
 use App\Modules\Inventory\Models\StockMovement;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -17,6 +19,17 @@ use Illuminate\Support\Str;
  * ledger; stock_balances holds the running quantity/average cost derived
  * from it, updated transactionally with a row lock so concurrent
  * movements on the same item+warehouse can't race each other.
+ *
+ * batchId/serialNumberId are pure traceability tags on the movement, not
+ * a valuation dimension — balances stay aggregated at item+warehouse
+ * exactly as above regardless of whether a movement is tagged. "Where is
+ * batch X" / "where did it go" is answered by querying movements
+ * (BatchService::ledger), not by a running per-batch balance — batch-
+ * level FIFO/FEFO costing is a genuinely different, bigger feature this
+ * doesn't attempt. A serial-tracked item's SerialNumber row is kept in
+ * sync as a side effect (its status/warehouse reflects the last movement
+ * against it) since, unlike a batch, a serial number's current location
+ * is exactly what it's for.
  */
 class StockMovementService
 {
@@ -29,13 +42,24 @@ class StockMovementService
         ?string $movementDate = null,
         ?string $notes = null,
         ?int $createdBy = null,
+        ?int $batchId = null,
+        ?int $serialNumberId = null,
     ): StockMovement {
-        return DB::transaction(function () use ($itemId, $warehouseId, $quantity, $unitCost, $reference, $movementDate, $notes, $createdBy) {
+        return DB::transaction(function () use ($itemId, $warehouseId, $quantity, $unitCost, $reference, $movementDate, $notes, $createdBy, $batchId, $serialNumberId) {
             $this->incrementBalance($itemId, $warehouseId, $quantity, $unitCost);
+
+            if ($serialNumberId !== null) {
+                SerialNumber::whereKey($serialNumberId)->update([
+                    'status' => SerialNumberStatus::InStock,
+                    'warehouse_id' => $warehouseId,
+                ]);
+            }
 
             return StockMovement::create([
                 'item_id' => $itemId,
                 'warehouse_id' => $warehouseId,
+                'batch_id' => $batchId,
+                'serial_number_id' => $serialNumberId,
                 'type' => StockMovementType::Receipt,
                 'quantity' => $quantity,
                 'unit_cost' => $unitCost,
@@ -55,13 +79,24 @@ class StockMovementService
         ?string $movementDate = null,
         ?string $notes = null,
         ?int $createdBy = null,
+        ?int $batchId = null,
+        ?int $serialNumberId = null,
     ): StockMovement {
-        return DB::transaction(function () use ($itemId, $warehouseId, $quantity, $reference, $movementDate, $notes, $createdBy) {
+        return DB::transaction(function () use ($itemId, $warehouseId, $quantity, $reference, $movementDate, $notes, $createdBy, $batchId, $serialNumberId) {
             $costAtIssue = $this->decrementBalance($itemId, $warehouseId, $quantity);
+
+            if ($serialNumberId !== null) {
+                SerialNumber::whereKey($serialNumberId)->update([
+                    'status' => SerialNumberStatus::Consumed,
+                    'warehouse_id' => null,
+                ]);
+            }
 
             return StockMovement::create([
                 'item_id' => $itemId,
                 'warehouse_id' => $warehouseId,
+                'batch_id' => $batchId,
+                'serial_number_id' => $serialNumberId,
                 'type' => StockMovementType::Issue,
                 'quantity' => $quantity,
                 'unit_cost' => $costAtIssue,
@@ -85,10 +120,16 @@ class StockMovementService
         ?string $movementDate = null,
         ?string $notes = null,
         ?int $createdBy = null,
+        ?int $batchId = null,
+        ?int $serialNumberId = null,
     ): array {
-        return DB::transaction(function () use ($itemId, $fromWarehouseId, $toWarehouseId, $quantity, $reference, $movementDate, $notes, $createdBy) {
+        return DB::transaction(function () use ($itemId, $fromWarehouseId, $toWarehouseId, $quantity, $reference, $movementDate, $notes, $createdBy, $batchId, $serialNumberId) {
             $costAtTransfer = $this->decrementBalance($itemId, $fromWarehouseId, $quantity);
             $this->incrementBalance($itemId, $toWarehouseId, $quantity, $costAtTransfer);
+
+            if ($serialNumberId !== null) {
+                SerialNumber::whereKey($serialNumberId)->update(['warehouse_id' => $toWarehouseId]);
+            }
 
             $transferGroup = (string) Str::uuid();
             $date = $movementDate ?? now();
@@ -96,6 +137,8 @@ class StockMovementService
             $out = StockMovement::create([
                 'item_id' => $itemId,
                 'warehouse_id' => $fromWarehouseId,
+                'batch_id' => $batchId,
+                'serial_number_id' => $serialNumberId,
                 'type' => StockMovementType::TransferOut,
                 'quantity' => $quantity,
                 'unit_cost' => $costAtTransfer,
@@ -109,6 +152,8 @@ class StockMovementService
             $in = StockMovement::create([
                 'item_id' => $itemId,
                 'warehouse_id' => $toWarehouseId,
+                'batch_id' => $batchId,
+                'serial_number_id' => $serialNumberId,
                 'type' => StockMovementType::TransferIn,
                 'quantity' => $quantity,
                 'unit_cost' => $costAtTransfer,

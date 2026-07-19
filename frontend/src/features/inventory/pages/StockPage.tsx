@@ -5,7 +5,9 @@ import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import {
+    listBatches,
     listItems,
+    listSerialNumbers,
     listStockBalances,
     listWarehouses,
     recordIssue,
@@ -20,6 +22,8 @@ const receiptSchema = z.object({
     quantity: z.number().gt(0, 'Quantity must be greater than 0'),
     unit_cost: z.number().min(0),
     reference: z.string().optional(),
+    batch_id: z.number().optional(),
+    serial_number_id: z.number().optional(),
 });
 type ReceiptFormValues = z.infer<typeof receiptSchema>;
 
@@ -28,6 +32,8 @@ const issueSchema = z.object({
     warehouse_id: z.number({ error: 'Warehouse is required' }),
     quantity: z.number().gt(0, 'Quantity must be greater than 0'),
     reference: z.string().optional(),
+    batch_id: z.number().optional(),
+    serial_number_id: z.number().optional(),
 });
 type IssueFormValues = z.infer<typeof issueSchema>;
 
@@ -37,6 +43,8 @@ const transferSchema = z.object({
     to_warehouse_id: z.number({ error: 'Destination warehouse is required' }),
     quantity: z.number().gt(0, 'Quantity must be greater than 0'),
     reference: z.string().optional(),
+    batch_id: z.number().optional(),
+    serial_number_id: z.number().optional(),
 });
 type TransferFormValues = z.infer<typeof transferSchema>;
 
@@ -52,16 +60,29 @@ export default function StockPage() {
     });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
     const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses'], queryFn: listWarehouses });
+    const { data: batches } = useQuery({ queryKey: ['inventory', 'batches'], queryFn: () => listBatches() });
+    const { data: serialNumbers } = useQuery({ queryKey: ['inventory', 'serial-numbers'], queryFn: () => listSerialNumbers() });
 
     const itemOptions = items?.data.map((item) => ({ value: item.id, label: `${item.sku} — ${item.name}` })) ?? [];
     const warehouseOptions = warehouses?.data.map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })) ?? [];
 
+    const itemsById = new Map(items?.data.map((i) => [i.id, i]));
+    const batchOptionsFor = (itemId?: number) =>
+        batches?.data.filter((b) => b.item.id === itemId).map((b) => ({ value: b.id, label: b.batch_number })) ?? [];
+    const serialOptionsFor = (itemId?: number) =>
+        serialNumbers?.data
+            .filter((s) => s.item.id === itemId && s.status === 'in_stock')
+            .map((s) => ({ value: s.id, label: s.serial_number })) ?? [];
+
     const invalidateStock = () => {
         queryClient.invalidateQueries({ queryKey: ['inventory', 'stock-balances'] });
         queryClient.invalidateQueries({ queryKey: ['inventory', 'stock-movements'] });
+        queryClient.invalidateQueries({ queryKey: ['inventory', 'serial-numbers'] });
     };
 
     const receiptForm = useForm<ReceiptFormValues>({ resolver: zodResolver(receiptSchema) });
+    const receiptItemId = receiptForm.watch('item_id');
+    const receiptTrackingType = itemsById.get(receiptItemId)?.tracking_type ?? 'none';
     const receiptMutation = useMutation({
         mutationFn: recordReceipt,
         onSuccess: () => {
@@ -72,6 +93,8 @@ export default function StockPage() {
     });
 
     const issueForm = useForm<IssueFormValues>({ resolver: zodResolver(issueSchema) });
+    const issueItemId = issueForm.watch('item_id');
+    const issueTrackingType = itemsById.get(issueItemId)?.tracking_type ?? 'none';
     const issueMutation = useMutation({
         mutationFn: recordIssue,
         onSuccess: () => {
@@ -85,6 +108,8 @@ export default function StockPage() {
     });
 
     const transferForm = useForm<TransferFormValues>({ resolver: zodResolver(transferSchema) });
+    const transferItemId = transferForm.watch('item_id');
+    const transferTrackingType = itemsById.get(transferItemId)?.tracking_type ?? 'none';
     const transferMutation = useMutation({
         mutationFn: recordTransfer,
         onSuccess: () => {
@@ -158,6 +183,28 @@ export default function StockPage() {
                             render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />}
                         />
                     </Form.Item>
+                    {receiptTrackingType === 'batch' && (
+                        <Form.Item label="Batch (create one first on the Batches page if needed)">
+                            <Controller
+                                name="batch_id"
+                                control={receiptForm.control}
+                                render={({ field }) => (
+                                    <Select {...field} options={batchOptionsFor(receiptItemId)} showSearch optionFilterProp="label" allowClear />
+                                )}
+                            />
+                        </Form.Item>
+                    )}
+                    {receiptTrackingType === 'serial' && (
+                        <Form.Item label="Serial Number (register one first on the Serial Numbers page if needed)">
+                            <Controller
+                                name="serial_number_id"
+                                control={receiptForm.control}
+                                render={({ field }) => (
+                                    <Select {...field} options={serialOptionsFor(receiptItemId)} showSearch optionFilterProp="label" allowClear />
+                                )}
+                            />
+                        </Form.Item>
+                    )}
                     <Form.Item label="Reference">
                         <Controller
                             name="reference"
@@ -198,6 +245,28 @@ export default function StockPage() {
                             render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />}
                         />
                     </Form.Item>
+                    {issueTrackingType === 'batch' && (
+                        <Form.Item label="Batch">
+                            <Controller
+                                name="batch_id"
+                                control={issueForm.control}
+                                render={({ field }) => (
+                                    <Select {...field} options={batchOptionsFor(issueItemId)} showSearch optionFilterProp="label" allowClear />
+                                )}
+                            />
+                        </Form.Item>
+                    )}
+                    {issueTrackingType === 'serial' && (
+                        <Form.Item label="Serial Number">
+                            <Controller
+                                name="serial_number_id"
+                                control={issueForm.control}
+                                render={({ field }) => (
+                                    <Select {...field} options={serialOptionsFor(issueItemId)} showSearch optionFilterProp="label" allowClear />
+                                )}
+                            />
+                        </Form.Item>
+                    )}
                     <Form.Item label="Reference">
                         <Controller
                             name="reference"
@@ -245,6 +314,28 @@ export default function StockPage() {
                             render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />}
                         />
                     </Form.Item>
+                    {transferTrackingType === 'batch' && (
+                        <Form.Item label="Batch">
+                            <Controller
+                                name="batch_id"
+                                control={transferForm.control}
+                                render={({ field }) => (
+                                    <Select {...field} options={batchOptionsFor(transferItemId)} showSearch optionFilterProp="label" allowClear />
+                                )}
+                            />
+                        </Form.Item>
+                    )}
+                    {transferTrackingType === 'serial' && (
+                        <Form.Item label="Serial Number">
+                            <Controller
+                                name="serial_number_id"
+                                control={transferForm.control}
+                                render={({ field }) => (
+                                    <Select {...field} options={serialOptionsFor(transferItemId)} showSearch optionFilterProp="label" allowClear />
+                                )}
+                            />
+                        </Form.Item>
+                    )}
                     <Form.Item label="Reference">
                         <Controller
                             name="reference"

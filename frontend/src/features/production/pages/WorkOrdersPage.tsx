@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, DatePicker, Form, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -18,6 +18,7 @@ type CreateFormValues = z.infer<typeof createSchema>;
 
 const completeSchema = z.object({
     quantity_completed: z.number().gt(0, 'Quantity must be greater than 0'),
+    batch_number: z.string().optional(),
 });
 type CompleteFormValues = z.infer<typeof completeSchema>;
 
@@ -29,7 +30,7 @@ const statusColor: Record<WorkOrderStatus, string> = {
 
 export default function WorkOrdersPage() {
     const [modalOpen, setModalOpen] = useState(false);
-    const [completingId, setCompletingId] = useState<number | null>(null);
+    const [completingRow, setCompletingRow] = useState<WorkOrder | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['production', 'work-orders'], queryFn: listWorkOrders });
@@ -73,10 +74,11 @@ export default function WorkOrdersPage() {
     } = useForm<CompleteFormValues>({ resolver: zodResolver(completeSchema) });
 
     const completeMutation = useMutation({
-        mutationFn: ({ id, quantity }: { id: number; quantity: number }) => completeWorkOrder(id, quantity),
+        mutationFn: ({ id, quantity, batchNumber }: { id: number; quantity: number; batchNumber?: string }) =>
+            completeWorkOrder(id, quantity, batchNumber),
         onSuccess: () => {
             invalidate();
-            setCompletingId(null);
+            setCompletingRow(null);
             resetComplete();
         },
         onError: (error: any) => {
@@ -122,7 +124,7 @@ export default function WorkOrdersPage() {
                                     </Button>
                                 )}
                                 {row.status === 'released' && (
-                                    <Button size="small" onClick={() => setCompletingId(row.id)}>
+                                    <Button size="small" onClick={() => setCompletingRow(row)}>
                                         Complete
                                     </Button>
                                 )}
@@ -192,11 +194,15 @@ export default function WorkOrdersPage() {
 
             <Modal
                 title="Complete Work Order"
-                open={completingId !== null}
-                onCancel={() => setCompletingId(null)}
+                open={completingRow !== null}
+                onCancel={() => setCompletingRow(null)}
                 onOk={handleCompleteSubmit((values) => {
-                    if (completingId !== null) {
-                        completeMutation.mutate({ id: completingId, quantity: values.quantity_completed });
+                    if (completingRow !== null) {
+                        completeMutation.mutate({
+                            id: completingRow.id,
+                            quantity: values.quantity_completed,
+                            batchNumber: values.batch_number,
+                        });
                     }
                 })}
                 confirmLoading={completeMutation.isPending}
@@ -214,6 +220,15 @@ export default function WorkOrdersPage() {
                             render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />}
                         />
                     </Form.Item>
+                    {completingRow?.item.tracking_type === 'batch' && (
+                        <Form.Item label="Batch Number (creates a new batch for this production run)">
+                            <Controller
+                                name="batch_number"
+                                control={completeControl}
+                                render={({ field }) => <Input {...field} placeholder="e.g. LOT-2026-07-20" />}
+                            />
+                        </Form.Item>
+                    )}
                 </Form>
             </Modal>
         </>

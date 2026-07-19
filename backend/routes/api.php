@@ -17,7 +17,9 @@ use App\Modules\HRMS\Http\Controllers\EmployeeController;
 use App\Modules\HRMS\Http\Controllers\LeaveBalanceController;
 use App\Modules\HRMS\Http\Controllers\LeaveRequestController;
 use App\Modules\HRMS\Http\Controllers\LeaveTypeController;
+use App\Modules\Inventory\Http\Controllers\BatchController;
 use App\Modules\Inventory\Http\Controllers\ItemController;
+use App\Modules\Inventory\Http\Controllers\SerialNumberController;
 use App\Modules\Inventory\Http\Controllers\StockBalanceController;
 use App\Modules\Inventory\Http\Controllers\StockMovementController;
 use App\Modules\Inventory\Http\Controllers\WarehouseController;
@@ -87,6 +89,12 @@ Route::prefix('v1')->group(function () {
             Route::post('stock-movements/receipts', [StockMovementController::class, 'receipt']);
             Route::post('stock-movements/issues', [StockMovementController::class, 'issue']);
             Route::post('stock-movements/transfers', [StockMovementController::class, 'transfer']);
+
+            Route::apiResource('batches', BatchController::class)->only(['index', 'store']);
+            Route::get('batches/{batch}/ledger', [BatchController::class, 'ledger']);
+
+            Route::apiResource('serial-numbers', SerialNumberController::class)->only(['index', 'store']);
+            Route::get('serial-numbers/{serial_number}/history', [SerialNumberController::class, 'history']);
         });
 
         Route::prefix('procurement')->group(function () {

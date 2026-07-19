@@ -23,6 +23,8 @@ const navItems = [
             { key: '/inventory/items', label: 'Items' },
             { key: '/inventory/warehouses', label: 'Warehouses' },
             { key: '/inventory/stock', label: 'Stock' },
+            { key: '/inventory/batches', label: 'Batches' },
+            { key: '/inventory/serial-numbers', label: 'Serial Numbers' },
         ],
     },
     {

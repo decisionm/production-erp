@@ -36,9 +36,11 @@ class StockMovementController extends Controller
             movementDate: $data['movement_date'] ?? null,
             notes: $data['notes'] ?? null,
             createdBy: $request->user()?->id,
+            batchId: $data['batch_id'] ?? null,
+            serialNumberId: $data['serial_number_id'] ?? null,
         );
 
-        return StockMovementResource::make($movement->load(['item', 'warehouse']));
+        return StockMovementResource::make($movement->load(['item', 'warehouse', 'batch', 'serialNumber']));
     }
 
     public function issue(StoreStockIssueRequest $request): StockMovementResource
@@ -53,9 +55,11 @@ class StockMovementController extends Controller
             movementDate: $data['movement_date'] ?? null,
             notes: $data['notes'] ?? null,
             createdBy: $request->user()?->id,
+            batchId: $data['batch_id'] ?? null,
+            serialNumberId: $data['serial_number_id'] ?? null,
         );
 
-        return StockMovementResource::make($movement->load(['item', 'warehouse']));
+        return StockMovementResource::make($movement->load(['item', 'warehouse', 'batch', 'serialNumber']));
     }
 
     public function transfer(StoreStockTransferRequest $request): AnonymousResourceCollection
@@ -71,8 +75,10 @@ class StockMovementController extends Controller
             movementDate: $data['movement_date'] ?? null,
             notes: $data['notes'] ?? null,
             createdBy: $request->user()?->id,
+            batchId: $data['batch_id'] ?? null,
+            serialNumberId: $data['serial_number_id'] ?? null,
         );
 
-        return StockMovementResource::collection(collect([$out, $in])->each->load(['item', 'warehouse']));
+        return StockMovementResource::collection(collect([$out, $in])->each->load(['item', 'warehouse', 'batch', 'serialNumber']));
     }
 }

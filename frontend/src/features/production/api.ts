@@ -94,9 +94,10 @@ export async function releaseWorkOrder(id: number): Promise<WorkOrder> {
     return data.data;
 }
 
-export async function completeWorkOrder(id: number, quantityCompleted: number): Promise<WorkOrder> {
+export async function completeWorkOrder(id: number, quantityCompleted: number, batchNumber?: string): Promise<WorkOrder> {
     const { data } = await api.post<{ data: WorkOrder }>(`/production/work-orders/${id}/complete`, {
         quantity_completed: quantityCompleted,
+        batch_number: batchNumber,
     });
     return data.data;
 }
