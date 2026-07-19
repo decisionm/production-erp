@@ -21,4 +21,11 @@ class WorkCenterService
             ...$data,
         ]);
     }
+
+    public function update(WorkCenter $workCenter, array $data): WorkCenter
+    {
+        $workCenter->update($data);
+
+        return $workCenter;
+    }
 }

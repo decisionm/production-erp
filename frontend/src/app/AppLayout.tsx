@@ -34,6 +34,8 @@ const navItems = [
             { key: '/production/routings', label: 'Routings' },
             { key: '/production/work-orders', label: 'Work Orders' },
             { key: '/production/mrp', label: 'MRP' },
+            { key: '/production/capacity', label: 'Capacity Planning' },
+            { key: '/production/subcontract-orders', label: 'Subcontract Orders' },
         ],
     },
     {

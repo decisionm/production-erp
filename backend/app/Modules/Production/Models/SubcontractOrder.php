@@ -4,26 +4,31 @@ namespace App\Modules\Production\Models;
 
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\Warehouse;
-use App\Modules\Production\Models\Enums\WorkOrderStatus;
+use App\Modules\Procurement\Models\Vendor;
+use App\Modules\Production\Models\Enums\SubcontractOrderStatus;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
-    'item_id', 'bom_id', 'routing_id', 'warehouse_id', 'scheduled_date', 'quantity_planned',
-    'quantity_completed', 'material_cost', 'status', 'released_at', 'completed_at', 'created_by',
+    'vendor_id', 'item_id', 'bom_id', 'warehouse_id', 'quantity_planned', 'quantity_received',
+    'materials_cost', 'service_cost', 'total_cost', 'status', 'materials_sent_at', 'completed_at', 'created_by',
 ])]
-class WorkOrder extends Model
+class SubcontractOrder extends Model
 {
     protected function casts(): array
     {
         return [
-            'status' => WorkOrderStatus::class,
-            'scheduled_date' => 'date',
-            'released_at' => 'datetime',
+            'status' => SubcontractOrderStatus::class,
+            'materials_sent_at' => 'datetime',
             'completed_at' => 'datetime',
         ];
+    }
+
+    public function vendor(): BelongsTo
+    {
+        return $this->belongsTo(Vendor::class);
     }
 
     public function item(): BelongsTo
@@ -36,11 +41,6 @@ class WorkOrder extends Model
         return $this->belongsTo(Bom::class);
     }
 
-    public function routing(): BelongsTo
-    {
-        return $this->belongsTo(Routing::class);
-    }
-
     public function warehouse(): BelongsTo
     {
         return $this->belongsTo(Warehouse::class);
@@ -48,6 +48,6 @@ class WorkOrder extends Model
 
     public function materials(): HasMany
     {
-        return $this->hasMany(WorkOrderMaterial::class);
+        return $this->hasMany(SubcontractOrderMaterial::class);
     }
 }

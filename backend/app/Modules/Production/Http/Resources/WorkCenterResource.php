@@ -13,6 +13,7 @@ class WorkCenterResource extends JsonResource
             'id' => $this->id,
             'code' => $this->code,
             'name' => $this->name,
+            'capacity_hours_per_day' => $this->capacity_hours_per_day,
             'is_active' => $this->is_active,
             'created_at' => $this->created_at?->toIso8601String(),
         ];

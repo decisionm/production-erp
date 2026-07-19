@@ -14,8 +14,10 @@ import ReliabilityReportPage from '@/features/maintenance/pages/ReliabilityRepor
 import SchedulesPage from '@/features/maintenance/pages/SchedulesPage';
 import MaintenanceWorkOrdersPage from '@/features/maintenance/pages/WorkOrdersPage';
 import BomsPage from '@/features/production/pages/BomsPage';
+import CapacityPlanPage from '@/features/production/pages/CapacityPlanPage';
 import MrpPage from '@/features/production/pages/MrpPage';
 import RoutingsPage from '@/features/production/pages/RoutingsPage';
+import SubcontractOrdersPage from '@/features/production/pages/SubcontractOrdersPage';
 import WorkCentersPage from '@/features/production/pages/WorkCentersPage';
 import WorkOrdersPage from '@/features/production/pages/WorkOrdersPage';
 import PayrollRunsPage from '@/features/payroll/pages/PayrollRunsPage';
@@ -72,6 +74,8 @@ export default function App() {
                                     <Route path="/production/routings" element={<RoutingsPage />} />
                                     <Route path="/production/work-orders" element={<WorkOrdersPage />} />
                                     <Route path="/production/mrp" element={<MrpPage />} />
+                                    <Route path="/production/capacity" element={<CapacityPlanPage />} />
+                                    <Route path="/production/subcontract-orders" element={<SubcontractOrdersPage />} />
                                     <Route path="/procurement/vendors" element={<VendorsPage />} />
                                     <Route path="/procurement/purchase-requisitions" element={<PurchaseRequisitionsPage />} />
                                     <Route path="/procurement/purchase-orders" element={<PurchaseOrdersPage />} />

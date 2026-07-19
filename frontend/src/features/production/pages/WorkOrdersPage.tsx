@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, DatePicker, Form, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -11,6 +11,7 @@ import type { WorkOrder, WorkOrderStatus } from '@/features/production/types';
 const createSchema = z.object({
     item_id: z.number({ error: 'Item is required' }),
     warehouse_id: z.number({ error: 'Warehouse is required' }),
+    scheduled_date: z.string().optional(),
     quantity_planned: z.number().gt(0, 'Quantity must be greater than 0'),
 });
 type CreateFormValues = z.infer<typeof createSchema>;
@@ -98,6 +99,7 @@ export default function WorkOrdersPage() {
                 columns={[
                     { title: 'Item', render: (_, row) => `${row.item.sku} — ${row.item.name}` },
                     { title: 'Warehouse', render: (_, row) => row.warehouse.code },
+                    { title: 'Scheduled', dataIndex: 'scheduled_date' },
                     { title: 'Planned', dataIndex: 'quantity_planned' },
                     { title: 'Completed', dataIndex: 'quantity_completed' },
                     { title: 'Material Cost', dataIndex: 'material_cost' },
@@ -168,6 +170,18 @@ export default function WorkOrdersPage() {
                             name="quantity_planned"
                             control={control}
                             render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />}
+                        />
+                    </Form.Item>
+                    <Form.Item label="Scheduled Date (optional, for capacity planning)">
+                        <Controller
+                            name="scheduled_date"
+                            control={control}
+                            render={({ field }) => (
+                                <DatePicker
+                                    style={{ width: '100%' }}
+                                    onChange={(_, dateString) => field.onChange((dateString as string) || undefined)}
+                                />
+                            )}
                         />
                     </Form.Item>
                     <Typography.Text type="secondary">

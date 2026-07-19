@@ -36,7 +36,7 @@ class WorkOrderService
     }
 
     /**
-     * @param  array{item_id: int, bom_id?: int, routing_id?: int, warehouse_id: int, quantity_planned: string}  $data
+     * @param  array{item_id: int, bom_id?: int, routing_id?: int, warehouse_id: int, scheduled_date?: string, quantity_planned: string}  $data
      */
     public function create(array $data): WorkOrder
     {
@@ -54,6 +54,7 @@ class WorkOrderService
                 'bom_id' => $bom->id,
                 'routing_id' => $data['routing_id'] ?? null,
                 'warehouse_id' => $data['warehouse_id'],
+                'scheduled_date' => $data['scheduled_date'] ?? null,
                 'quantity_planned' => $data['quantity_planned'],
                 'quantity_completed' => 0,
                 'material_cost' => 0,

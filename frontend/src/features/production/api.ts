@@ -2,8 +2,10 @@ import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
 import type {
     Bom,
+    CapacityWorkCenterLoad,
     MrpNetRequirement,
     Routing,
+    SubcontractOrder,
     WorkCenter,
     WorkOrder,
 } from './types';
@@ -16,10 +18,16 @@ export async function listWorkCenters(): Promise<Paginated<WorkCenter>> {
 export interface CreateWorkCenterPayload {
     code: string;
     name: string;
+    capacity_hours_per_day?: number;
 }
 
 export async function createWorkCenter(payload: CreateWorkCenterPayload): Promise<WorkCenter> {
     const { data } = await api.post<{ data: WorkCenter }>('/production/work-centers', payload);
+    return data.data;
+}
+
+export async function updateWorkCenter(id: number, payload: { capacity_hours_per_day?: number }): Promise<WorkCenter> {
+    const { data } = await api.put<{ data: WorkCenter }>(`/production/work-centers/${id}`, payload);
     return data.data;
 }
 
@@ -72,6 +80,7 @@ export interface CreateWorkOrderPayload {
     bom_id?: number;
     routing_id?: number;
     warehouse_id: number;
+    scheduled_date?: string;
     quantity_planned: number;
 }
 
@@ -96,5 +105,43 @@ export async function getMrpNetRequirements(itemId: number, quantity: number): P
     const { data } = await api.get<{ data: MrpNetRequirement[] }>('/production/mrp/net-requirements', {
         params: { item_id: itemId, quantity },
     });
+    return data.data;
+}
+
+export async function getCapacityLoadReport(startDate: string, endDate: string): Promise<CapacityWorkCenterLoad[]> {
+    const { data } = await api.get<{ data: CapacityWorkCenterLoad[] }>('/production/capacity/load-report', {
+        params: { start_date: startDate, end_date: endDate },
+    });
+    return data.data;
+}
+
+export async function listSubcontractOrders(): Promise<Paginated<SubcontractOrder>> {
+    const { data } = await api.get<Paginated<SubcontractOrder>>('/production/subcontract-orders');
+    return data;
+}
+
+export interface CreateSubcontractOrderPayload {
+    vendor_id: number;
+    item_id: number;
+    bom_id?: number;
+    warehouse_id: number;
+    quantity_planned: number;
+}
+
+export async function createSubcontractOrder(payload: CreateSubcontractOrderPayload): Promise<SubcontractOrder> {
+    const { data } = await api.post<{ data: SubcontractOrder }>('/production/subcontract-orders', payload);
+    return data.data;
+}
+
+export async function sendSubcontractOrderMaterials(id: number): Promise<SubcontractOrder> {
+    const { data } = await api.post<{ data: SubcontractOrder }>(`/production/subcontract-orders/${id}/send-materials`);
+    return data.data;
+}
+
+export async function receiveSubcontractOrder(
+    id: number,
+    payload: { quantity_received: number; service_cost: number },
+): Promise<SubcontractOrder> {
+    const { data } = await api.post<{ data: SubcontractOrder }>(`/production/subcontract-orders/${id}/receive`, payload);
     return data.data;
 }

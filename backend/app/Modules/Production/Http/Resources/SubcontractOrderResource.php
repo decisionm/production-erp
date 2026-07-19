@@ -4,26 +4,28 @@ namespace App\Modules\Production\Http\Resources;
 
 use App\Modules\Inventory\Http\Resources\ItemResource;
 use App\Modules\Inventory\Http\Resources\WarehouseResource;
+use App\Modules\Procurement\Http\Resources\VendorResource;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
-class WorkOrderResource extends JsonResource
+class SubcontractOrderResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
         return [
             'id' => $this->id,
+            'vendor' => VendorResource::make($this->whenLoaded('vendor')),
             'item' => ItemResource::make($this->whenLoaded('item')),
             'bom_id' => $this->bom_id,
-            'routing_id' => $this->routing_id,
             'warehouse' => WarehouseResource::make($this->whenLoaded('warehouse')),
-            'scheduled_date' => $this->scheduled_date?->toDateString(),
             'quantity_planned' => $this->quantity_planned,
-            'quantity_completed' => $this->quantity_completed,
-            'material_cost' => $this->material_cost,
+            'quantity_received' => $this->quantity_received,
+            'materials_cost' => $this->materials_cost,
+            'service_cost' => $this->service_cost,
+            'total_cost' => $this->total_cost,
             'status' => $this->status->value,
-            'materials' => WorkOrderMaterialResource::collection($this->whenLoaded('materials')),
-            'released_at' => $this->released_at?->toIso8601String(),
+            'materials' => SubcontractOrderMaterialResource::collection($this->whenLoaded('materials')),
+            'materials_sent_at' => $this->materials_sent_at?->toIso8601String(),
             'completed_at' => $this->completed_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),
         ];
