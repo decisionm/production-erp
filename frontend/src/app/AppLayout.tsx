@@ -73,6 +73,7 @@ const navItems = [
             { key: '/quality/ncrs', label: 'Non-Conformance Reports' },
             { key: '/quality/capas', label: 'CAPA' },
             { key: '/quality/instruments', label: 'Measuring Instruments' },
+            { key: '/quality/spc-characteristics', label: 'SPC Characteristics' },
         ],
     },
     {

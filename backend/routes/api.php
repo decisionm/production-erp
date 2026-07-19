@@ -43,6 +43,9 @@ use App\Modules\Quality\Http\Controllers\CapaController;
 use App\Modules\Quality\Http\Controllers\IncomingInspectionController;
 use App\Modules\Quality\Http\Controllers\MeasuringInstrumentController;
 use App\Modules\Quality\Http\Controllers\NonConformanceReportController;
+use App\Modules\Quality\Http\Controllers\SpcCharacteristicController;
+use App\Modules\Quality\Http\Controllers\SpcChartController;
+use App\Modules\Quality\Http\Controllers\SpcMeasurementController;
 use App\Modules\Sales\Http\Controllers\CustomerController;
 use App\Modules\Sales\Http\Controllers\DeliveryController;
 use App\Modules\Sales\Http\Controllers\InvoiceController;
@@ -146,6 +149,11 @@ Route::prefix('v1')->group(function () {
             Route::apiResource('instruments', MeasuringInstrumentController::class)->only(['index', 'store']);
             Route::get('instruments/{instrument}/calibrations', [CalibrationRecordController::class, 'index']);
             Route::post('instruments/{instrument}/calibrations', [CalibrationRecordController::class, 'store']);
+
+            Route::apiResource('spc-characteristics', SpcCharacteristicController::class)->only(['index', 'store']);
+            Route::get('spc-characteristics/{spc_characteristic}/measurements', [SpcMeasurementController::class, 'index']);
+            Route::post('spc-characteristics/{spc_characteristic}/measurements', [SpcMeasurementController::class, 'store']);
+            Route::get('spc-characteristics/{spc_characteristic}/chart', [SpcChartController::class, 'show']);
         });
 
         Route::prefix('compliance')->group(function () {

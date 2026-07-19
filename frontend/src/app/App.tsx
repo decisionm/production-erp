@@ -32,6 +32,8 @@ import CapasPage from '@/features/quality/pages/CapasPage';
 import IncomingInspectionsPage from '@/features/quality/pages/IncomingInspectionsPage';
 import InstrumentsPage from '@/features/quality/pages/InstrumentsPage';
 import NonConformanceReportsPage from '@/features/quality/pages/NonConformanceReportsPage';
+import SpcChartPage from '@/features/quality/pages/SpcChartPage';
+import SpcCharacteristicsPage from '@/features/quality/pages/SpcCharacteristicsPage';
 import ItemsPage from '@/features/inventory/pages/ItemsPage';
 import StockPage from '@/features/inventory/pages/StockPage';
 import WarehousesPage from '@/features/inventory/pages/WarehousesPage';
@@ -85,6 +87,8 @@ export default function App() {
                                     <Route path="/quality/ncrs" element={<NonConformanceReportsPage />} />
                                     <Route path="/quality/capas" element={<CapasPage />} />
                                     <Route path="/quality/instruments" element={<InstrumentsPage />} />
+                                    <Route path="/quality/spc-characteristics" element={<SpcCharacteristicsPage />} />
+                                    <Route path="/quality/spc/:id" element={<SpcChartPage />} />
                                     <Route path="/compliance/gst-rates" element={<GstRatesPage />} />
                                     <Route path="/compliance/gst-registrations" element={<GstRegistrationsPage />} />
                                     <Route path="/compliance/gst-reports" element={<GstReportsPage />} />

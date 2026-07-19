@@ -78,3 +78,45 @@ export interface MeasuringInstrument {
     calibration_records: CalibrationRecord[];
     created_at: string;
 }
+
+export interface SpcCharacteristic {
+    id: number;
+    item: Item;
+    name: string;
+    unit_of_measure: string | null;
+    target_value: string | null;
+    lower_spec_limit: string | null;
+    upper_spec_limit: string | null;
+    is_active: boolean;
+    created_at: string;
+}
+
+export interface SpcMeasurement {
+    id: number;
+    value: string;
+    measured_at: string;
+    recorded_by: string | null;
+    notes: string | null;
+    created_at: string;
+}
+
+export interface SpcChartPoint {
+    id: number;
+    measured_at: string;
+    value: number;
+    moving_range: number | null;
+    beyond_limits: boolean;
+    run_violation: boolean;
+}
+
+export interface SpcChart {
+    characteristic_id: number;
+    sufficient_data: boolean;
+    points: SpcChartPoint[];
+    center_line: number | null;
+    ucl: number | null;
+    lcl: number | null;
+    mr_center_line: number | null;
+    mr_ucl: number | null;
+    mr_lcl: number | null;
+}

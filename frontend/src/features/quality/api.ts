@@ -1,6 +1,6 @@
 import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
-import type { Capa, IncomingInspection, MeasuringInstrument, NonConformanceReport } from './types';
+import type { Capa, IncomingInspection, MeasuringInstrument, NonConformanceReport, SpcChart, SpcCharacteristic, SpcMeasurement } from './types';
 
 export async function listIncomingInspections(): Promise<Paginated<IncomingInspection>> {
     const { data } = await api.get<Paginated<IncomingInspection>>('/quality/incoming-inspections');
@@ -120,5 +120,53 @@ export interface RecordCalibrationPayload {
 
 export async function recordCalibration(instrumentId: number, payload: RecordCalibrationPayload): Promise<MeasuringInstrument> {
     const { data } = await api.post<{ data: MeasuringInstrument }>(`/quality/instruments/${instrumentId}/calibrations`, payload);
+    return data.data;
+}
+
+export async function listSpcCharacteristics(itemId?: number): Promise<Paginated<SpcCharacteristic>> {
+    const { data } = await api.get<Paginated<SpcCharacteristic>>('/quality/spc-characteristics', {
+        params: itemId ? { item_id: itemId } : undefined,
+    });
+    return data;
+}
+
+export interface CreateSpcCharacteristicPayload {
+    item_id: number;
+    name: string;
+    unit_of_measure?: string;
+    target_value?: number;
+    lower_spec_limit?: number;
+    upper_spec_limit?: number;
+}
+
+export async function createSpcCharacteristic(payload: CreateSpcCharacteristicPayload): Promise<SpcCharacteristic> {
+    const { data } = await api.post<{ data: SpcCharacteristic }>('/quality/spc-characteristics', payload);
+    return data.data;
+}
+
+export async function listSpcMeasurements(characteristicId: number): Promise<Paginated<SpcMeasurement>> {
+    const { data } = await api.get<Paginated<SpcMeasurement>>(`/quality/spc-characteristics/${characteristicId}/measurements`);
+    return data;
+}
+
+export interface RecordSpcMeasurementPayload {
+    value: number;
+    measured_at?: string;
+    notes?: string;
+}
+
+export async function recordSpcMeasurement(
+    characteristicId: number,
+    payload: RecordSpcMeasurementPayload,
+): Promise<SpcMeasurement> {
+    const { data } = await api.post<{ data: SpcMeasurement }>(
+        `/quality/spc-characteristics/${characteristicId}/measurements`,
+        payload,
+    );
+    return data.data;
+}
+
+export async function getSpcChart(characteristicId: number): Promise<SpcChart> {
+    const { data } = await api.get<{ data: SpcChart }>(`/quality/spc-characteristics/${characteristicId}/chart`);
     return data.data;
 }
