@@ -9,6 +9,7 @@ import {
     MenuFoldOutlined,
     MenuUnfoldOutlined,
     SafetyCertificateOutlined,
+    SettingOutlined,
     ShopOutlined,
     ShoppingCartOutlined,
     SyncOutlined,
@@ -17,18 +18,35 @@ import {
     WalletOutlined,
 } from '@ant-design/icons';
 import { useMutation } from '@tanstack/react-query';
-import { Avatar, Dropdown, Layout, Menu, Space, Typography } from 'antd';
-import { type PropsWithChildren, useState } from 'react';
+import { Avatar, Dropdown, Layout, Menu, type MenuProps, Space, Typography } from 'antd';
+import { type PropsWithChildren, type ReactNode, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { logout } from '@/features/auth/api';
+import { hasModuleAccess } from '@/features/auth/permissions';
 import { useAuthStore } from '@/features/auth/store';
+import type { User } from '@/features/auth/types';
 
-const navItems = [
+interface NavLeaf {
+    key: string;
+    label: string;
+    module?: string;
+}
+
+interface NavGroup {
+    key: string;
+    icon: ReactNode;
+    label: string;
+    module?: string;
+    children?: NavLeaf[];
+}
+
+const allNavItems: NavGroup[] = [
     { key: '/', icon: <DashboardOutlined />, label: 'Dashboard' },
     {
         key: 'crm',
         icon: <ContactsOutlined />,
         label: 'CRM',
+        module: 'crm',
         children: [
             { key: '/crm/leads', label: 'Leads' },
             { key: '/crm/opportunities', label: 'Opportunities' },
@@ -39,6 +57,7 @@ const navItems = [
         key: 'inventory',
         icon: <InboxOutlined />,
         label: 'Inventory',
+        module: 'inventory',
         children: [
             { key: '/inventory/items', label: 'Items' },
             { key: '/inventory/warehouses', label: 'Warehouses' },
@@ -51,6 +70,7 @@ const navItems = [
         key: 'production',
         icon: <ToolOutlined />,
         label: 'Production',
+        module: 'production',
         children: [
             { key: '/production/work-centers', label: 'Work Centers' },
             { key: '/production/boms', label: 'Bills of Material' },
@@ -67,6 +87,7 @@ const navItems = [
         key: 'procurement',
         icon: <ShopOutlined />,
         label: 'Procurement',
+        module: 'procurement',
         children: [
             { key: '/procurement/vendors', label: 'Vendors' },
             { key: '/procurement/purchase-requisitions', label: 'Purchase Requisitions' },
@@ -78,6 +99,7 @@ const navItems = [
         key: 'sales',
         icon: <ShoppingCartOutlined />,
         label: 'Sales',
+        module: 'sales',
         children: [
             { key: '/sales/customers', label: 'Customers' },
             { key: '/sales/sales-orders', label: 'Sales Orders' },
@@ -89,6 +111,7 @@ const navItems = [
         key: 'finance',
         icon: <AccountBookOutlined />,
         label: 'Finance',
+        module: 'finance',
         children: [
             { key: '/finance/chart-of-accounts', label: 'Chart of Accounts' },
             { key: '/finance/journal-entries', label: 'Journal Entries' },
@@ -99,6 +122,7 @@ const navItems = [
         key: 'quality',
         icon: <SafetyCertificateOutlined />,
         label: 'Quality',
+        module: 'quality',
         children: [
             { key: '/quality/incoming-inspections', label: 'Incoming Inspections' },
             { key: '/quality/ncrs', label: 'Non-Conformance Reports' },
@@ -111,6 +135,7 @@ const navItems = [
         key: 'compliance',
         icon: <FileProtectOutlined />,
         label: 'Compliance',
+        module: 'compliance',
         children: [
             { key: '/compliance/gst-rates', label: 'GST Rates' },
             { key: '/compliance/gst-registrations', label: 'GST Registrations' },
@@ -121,6 +146,7 @@ const navItems = [
         key: 'hrms',
         icon: <TeamOutlined />,
         label: 'HRMS',
+        module: 'hrms',
         children: [
             { key: '/hrms/employees', label: 'Employees' },
             { key: '/hrms/leave-types', label: 'Leave Types' },
@@ -133,6 +159,7 @@ const navItems = [
         key: 'payroll',
         icon: <WalletOutlined />,
         label: 'Payroll',
+        module: 'payroll',
         children: [
             { key: '/payroll/salary-components', label: 'Salary Components' },
             { key: '/payroll/salary-structures', label: 'Salary Structures' },
@@ -144,6 +171,7 @@ const navItems = [
         key: 'maintenance',
         icon: <BuildOutlined />,
         label: 'Maintenance',
+        module: 'maintenance',
         children: [
             { key: '/maintenance/assets', label: 'Assets' },
             { key: '/maintenance/schedules', label: 'Schedules' },
@@ -151,8 +179,36 @@ const navItems = [
             { key: '/maintenance/reliability', label: 'Reliability Report' },
         ],
     },
-    { key: '/tally-sync', icon: <SyncOutlined />, label: 'Tally Sync' },
+    { key: '/tally-sync', icon: <SyncOutlined />, label: 'Tally Sync', module: 'tally-sync' },
+    {
+        key: 'administration',
+        icon: <SettingOutlined />,
+        label: 'Administration',
+        children: [
+            { key: '/administration/users', label: 'Users', module: 'users' },
+            { key: '/administration/roles', label: 'Roles', module: 'roles' },
+        ],
+    },
 ];
+
+function buildNavItems(user: User | null) {
+    return allNavItems
+        .map((item) => {
+            // The group's own module gates the whole group (CRM, Inventory, ...
+            // each set `module` only at this level, not per-child). Checked
+            // before the children filter below, which handles groups like
+            // Administration where individual children carry their own,
+            // more granular module instead.
+            if (item.module && !hasModuleAccess(user, item.module)) return null;
+            if (item.children) {
+                const children = item.children.filter((child) => !child.module || hasModuleAccess(user, child.module));
+                if (children.length === 0) return null;
+                return { ...item, children };
+            }
+            return item;
+        })
+        .filter((item): item is NavGroup => item !== null);
+}
 
 export default function AppLayout({ children }: PropsWithChildren) {
     const navigate = useNavigate();
@@ -170,6 +226,7 @@ export default function AppLayout({ children }: PropsWithChildren) {
         },
     });
 
+    const navItems = useMemo(() => buildNavItems(user), [user]);
     const openKey = navItems.find((item) => item.children?.some((child) => child.key === location.pathname))?.key;
 
     return (
@@ -229,7 +286,7 @@ export default function AppLayout({ children }: PropsWithChildren) {
                     mode="inline"
                     selectedKeys={[location.pathname]}
                     defaultOpenKeys={openKey ? [openKey] : []}
-                    items={navItems}
+                    items={navItems as MenuProps['items']}
                     onClick={({ key }) => {
                         navigate(key);
                         if (isMobile) setCollapsed(true);

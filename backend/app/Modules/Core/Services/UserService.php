@@ -3,23 +3,69 @@
 namespace App\Modules\Core\Services;
 
 use App\Models\User;
+use App\Modules\Core\Exceptions\SelfDeactivationException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\DB;
 
 class UserService
 {
     public function paginate(int $perPage = 20): LengthAwarePaginator
     {
         return User::query()
+            ->with('roles.permissions')
             ->orderBy('name')
             ->paginate($perPage);
     }
 
+    /**
+     * @param  array{name: string, email: string, password: string, roles?: array<int, int>}  $data
+     */
     public function create(array $data): User
     {
-        return User::create([
-            'name' => $data['name'],
-            'email' => $data['email'],
-            'password' => $data['password'],
-        ]);
+        return DB::transaction(function () use ($data) {
+            // Explicit here rather than relying on the DB column default: Eloquent's
+            // create() doesn't re-fetch DB-applied defaults into the returned model.
+            $user = User::create([
+                'name' => $data['name'],
+                'email' => $data['email'],
+                'password' => $data['password'],
+                'is_active' => true,
+            ]);
+
+            if (! empty($data['roles'])) {
+                $user->syncRoles($data['roles']);
+            }
+
+            return $user->load('roles.permissions');
+        });
+    }
+
+    /**
+     * @param  array{name?: string, email?: string, is_active?: bool, roles?: array<int, int>}  $data
+     */
+    public function update(User $user, array $data, ?int $actingUserId = null): User
+    {
+        if (($data['is_active'] ?? true) === false && $user->id === $actingUserId) {
+            throw SelfDeactivationException::make();
+        }
+
+        return DB::transaction(function () use ($user, $data) {
+            $user->update(array_intersect_key($data, array_flip(['name', 'email', 'is_active'])));
+
+            if (array_key_exists('roles', $data)) {
+                $user->syncRoles($data['roles']);
+            }
+
+            return $user->load('roles.permissions');
+        });
+    }
+
+    /**
+     * The `hashed` cast on User::password (see the model) hashes this on
+     * assignment — no need to call Hash::make() here, same as create().
+     */
+    public function resetPassword(User $user, string $password): void
+    {
+        $user->update(['password' => $password]);
     }
 }

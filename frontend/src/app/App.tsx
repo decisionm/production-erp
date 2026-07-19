@@ -1,4 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import RolesPage from '@/features/access/pages/RolesPage';
+import UsersPage from '@/features/access/pages/UsersPage';
 import LoginPage from '@/features/auth/pages/LoginPage';
 import DashboardPage from '@/features/dashboard/pages/DashboardPage';
 import GstRatesPage from '@/features/compliance/pages/GstRatesPage';
@@ -118,6 +120,8 @@ export default function App() {
                                     <Route path="/maintenance/work-orders" element={<MaintenanceWorkOrdersPage />} />
                                     <Route path="/maintenance/reliability" element={<ReliabilityReportPage />} />
                                     <Route path="/tally-sync" element={<TallySyncPage />} />
+                                    <Route path="/administration/users" element={<UsersPage />} />
+                                    <Route path="/administration/roles" element={<RolesPage />} />
                                     <Route path="*" element={<Navigate to="/" replace />} />
                                 </Routes>
                             </AppLayout>

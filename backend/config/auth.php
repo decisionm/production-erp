@@ -42,6 +42,22 @@ return [
             'driver' => 'session',
             'provider' => 'users',
         ],
+
+        // Explicit, not left to Sanctum's default (provider: null) merge.
+        // auth:sanctum middleware calls Auth::shouldUse('sanctum'), which
+        // shifts config('auth.defaults.guard') to 'sanctum' for the rest of
+        // the request. spatie/laravel-permission's Role/Permission models
+        // infer their own guard_name from that same default when one isn't
+        // explicitly hydrated (e.g. the throwaway instance Eloquent builds
+        // internally for ->withCount('users')) — without a provider here,
+        // that inference resolves to a guard with no user model attached,
+        // and any relation built from it throws "Class name must be a
+        // valid object or a string". Pointing this at the same provider as
+        // 'web' fixes it, since both guards share one user model.
+        'sanctum' => [
+            'driver' => 'sanctum',
+            'provider' => 'users',
+        ],
     ],
 
     /*

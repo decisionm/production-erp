@@ -3,9 +3,13 @@
 namespace App\Modules\Core\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\User;
+use App\Modules\Core\Http\Requests\ResetUserPasswordRequest;
 use App\Modules\Core\Http\Requests\StoreUserRequest;
+use App\Modules\Core\Http\Requests\UpdateUserRequest;
 use App\Modules\Core\Http\Resources\UserResource;
 use App\Modules\Core\Services\UserService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class UserController extends Controller
@@ -22,5 +26,17 @@ class UserController extends Controller
         $user = $this->users->create($request->validated());
 
         return UserResource::make($user);
+    }
+
+    public function update(UpdateUserRequest $request, User $user): UserResource
+    {
+        return UserResource::make($this->users->update($user, $request->validated(), $request->user()?->id));
+    }
+
+    public function resetPassword(ResetUserPasswordRequest $request, User $user): JsonResponse
+    {
+        $this->users->resetPassword($user, $request->validated('password'));
+
+        return response()->json(['message' => 'Password reset.']);
     }
 }

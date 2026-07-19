@@ -18,9 +18,17 @@ class AuthController extends Controller
             throw new AuthenticationException('Invalid credentials.');
         }
 
+        if (! Auth::user()->is_active) {
+            Auth::guard('web')->logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+
+            throw new AuthenticationException('This account has been deactivated.');
+        }
+
         $request->session()->regenerate();
 
-        return UserResource::make(Auth::user());
+        return UserResource::make(Auth::user()->load('roles.permissions'));
     }
 
     public function logout(Request $request): JsonResponse
@@ -34,6 +42,6 @@ class AuthController extends Controller
 
     public function me(Request $request): UserResource
     {
-        return UserResource::make($request->user());
+        return UserResource::make($request->user()->load('roles.permissions'));
     }
 }

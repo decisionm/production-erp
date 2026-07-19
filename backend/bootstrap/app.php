@@ -1,6 +1,8 @@
 <?php
 
 use App\Exceptions\DomainException;
+use App\Http\Middleware\EnsureModulePermission;
+use App\Http\Middleware\EnsureUserIsActive;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -17,6 +19,11 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->api(prepend: [
             EnsureFrontendRequestsAreStateful::class,
+        ]);
+
+        $middleware->alias([
+            'module' => EnsureModulePermission::class,
+            'active' => EnsureUserIsActive::class,
         ]);
 
         // There is no server-side named "login" route — the SPA owns /login

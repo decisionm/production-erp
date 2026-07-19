@@ -6,6 +6,8 @@ use App\Modules\Compliance\Http\Controllers\GstRegistrationController;
 use App\Modules\Compliance\Http\Controllers\GstReportController;
 use App\Modules\Core\Http\Controllers\AuthController;
 use App\Modules\Core\Http\Controllers\DashboardController;
+use App\Modules\Core\Http\Controllers\PermissionController;
+use App\Modules\Core\Http\Controllers\RoleController;
 use App\Modules\Core\Http\Controllers\UserController;
 use App\Modules\CRM\Http\Controllers\LeadActivityController;
 use App\Modules\CRM\Http\Controllers\LeadController;
@@ -72,20 +74,36 @@ use Illuminate\Support\Facades\Route;
 | (token auth via Sanctum personal access tokens). Never assume the SPA
 | is the only caller: validate and shape responses accordingly.
 |
+| Every module route group below is wrapped in `module:<key>` (see
+| App\Http\Middleware\EnsureModulePermission) — GET requests need either
+| "<key>.view" or "<key>.manage", everything else needs "<key>.manage".
+| Adding a route to an existing group inherits that group's check
+| automatically; adding a brand new module means adding it to
+| PermissionService::MODULES first (that's what PermissionSeeder and the
+| Roles UI's checkbox picker both read from).
+|
 */
 
 Route::prefix('v1')->group(function () {
     Route::post('/auth/login', [AuthController::class, 'login']);
 
-    Route::middleware('auth:sanctum')->group(function () {
+    Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::post('/auth/logout', [AuthController::class, 'logout']);
         Route::get('/auth/me', [AuthController::class, 'me']);
 
-        Route::apiResource('users', UserController::class)->only(['index', 'store']);
-
         Route::get('dashboard/summary', [DashboardController::class, 'summary']);
 
-        Route::prefix('inventory')->group(function () {
+        Route::middleware('module:users')->group(function () {
+            Route::apiResource('users', UserController::class)->only(['index', 'store', 'update']);
+            Route::post('users/{user}/reset-password', [UserController::class, 'resetPassword']);
+        });
+
+        Route::middleware('module:roles')->group(function () {
+            Route::apiResource('roles', RoleController::class)->only(['index', 'store', 'update', 'destroy']);
+            Route::get('permissions', [PermissionController::class, 'index']);
+        });
+
+        Route::prefix('inventory')->middleware('module:inventory')->group(function () {
             Route::apiResource('items', ItemController::class)->only(['index', 'store', 'update']);
             Route::apiResource('warehouses', WarehouseController::class)->only(['index', 'store', 'update']);
 
@@ -103,7 +121,7 @@ Route::prefix('v1')->group(function () {
             Route::get('serial-numbers/{serial_number}/history', [SerialNumberController::class, 'history']);
         });
 
-        Route::prefix('procurement')->group(function () {
+        Route::prefix('procurement')->middleware('module:procurement')->group(function () {
             Route::apiResource('vendors', VendorController::class)->only(['index', 'store', 'update']);
 
             Route::apiResource('purchase-requisitions', PurchaseRequisitionController::class)->only(['index', 'store']);
@@ -116,7 +134,7 @@ Route::prefix('v1')->group(function () {
             Route::apiResource('goods-receipts', GoodsReceiptController::class)->only(['index', 'store']);
         });
 
-        Route::prefix('sales')->group(function () {
+        Route::prefix('sales')->middleware('module:sales')->group(function () {
             Route::apiResource('customers', CustomerController::class)->only(['index', 'store', 'update']);
 
             Route::apiResource('sales-orders', SalesOrderController::class)->only(['index', 'store']);
@@ -128,7 +146,7 @@ Route::prefix('v1')->group(function () {
             Route::post('invoices/{invoice}/issue', [InvoiceController::class, 'issue']);
         });
 
-        Route::prefix('finance')->group(function () {
+        Route::prefix('finance')->middleware('module:finance')->group(function () {
             Route::apiResource('gl-accounts', GLAccountController::class)->only(['index', 'store', 'update']);
 
             Route::apiResource('journal-entries', JournalEntryController::class)->only(['index', 'store']);
@@ -140,7 +158,7 @@ Route::prefix('v1')->group(function () {
             Route::get('reports/receivables', [FinancialReportController::class, 'receivables']);
         });
 
-        Route::prefix('crm')->group(function () {
+        Route::prefix('crm')->middleware('module:crm')->group(function () {
             Route::apiResource('leads', LeadController::class)->only(['index', 'store', 'update']);
             Route::post('leads/{lead}/convert', [LeadController::class, 'convert']);
             Route::get('leads/{lead}/activities', [LeadActivityController::class, 'index']);
@@ -155,7 +173,7 @@ Route::prefix('v1')->group(function () {
             Route::get('quotations/{quotation}/pdf', [QuotationController::class, 'pdf']);
         });
 
-        Route::prefix('quality')->group(function () {
+        Route::prefix('quality')->middleware('module:quality')->group(function () {
             Route::apiResource('incoming-inspections', IncomingInspectionController::class)->only(['index', 'store']);
 
             Route::apiResource('ncrs', NonConformanceReportController::class)->only(['index', 'store']);
@@ -175,7 +193,7 @@ Route::prefix('v1')->group(function () {
             Route::get('spc-characteristics/{spc_characteristic}/chart', [SpcChartController::class, 'show']);
         });
 
-        Route::prefix('compliance')->group(function () {
+        Route::prefix('compliance')->middleware('module:compliance')->group(function () {
             Route::apiResource('gst-rates', GstRateController::class)->only(['index', 'store', 'update']);
             Route::apiResource('gst-registrations', GstRegistrationController::class)->only(['index', 'store', 'update']);
 
@@ -184,19 +202,24 @@ Route::prefix('v1')->group(function () {
         });
 
         Route::prefix('tally-sync')->group(function () {
-            Route::get('entries', [TallySyncController::class, 'index']);
-            Route::post('entries/{tally_sync_entry}/retry', [TallySyncController::class, 'retry']);
+            Route::middleware('module:tally-sync')->group(function () {
+                Route::get('entries', [TallySyncController::class, 'index']);
+                Route::post('entries/{tally_sync_entry}/retry', [TallySyncController::class, 'retry']);
+            });
 
             // Local agent endpoints — see TECHNICAL-DOCS.md §6. Gated by
-            // Sanctum token abilities inside the controller, not just
-            // auth:sanctum, since a real deployment issues the agent a
-            // token scoped to exactly these two abilities.
+            // Sanctum token abilities inside the controller, not by
+            // module:tally-sync, since a real deployment issues the agent a
+            // token scoped to exactly these two abilities (and a session-
+            // authenticated staff member's tokenCan() always passes, so
+            // staff can still exercise these from the browser regardless of
+            // their tally-sync role — same dual-auth story as before RBAC).
             Route::get('pending', [TallySyncAgentController::class, 'pending']);
             Route::post('entries/{tally_sync_entry}/ack', [TallySyncAgentController::class, 'acknowledge']);
             Route::post('entries/{tally_sync_entry}/fail', [TallySyncAgentController::class, 'fail']);
         });
 
-        Route::prefix('hrms')->group(function () {
+        Route::prefix('hrms')->middleware('module:hrms')->group(function () {
             Route::apiResource('employees', EmployeeController::class)->only(['index', 'store', 'update']);
 
             Route::apiResource('leave-types', LeaveTypeController::class)->only(['index', 'store', 'update']);
@@ -212,7 +235,7 @@ Route::prefix('v1')->group(function () {
             Route::post('attendance/mark', [AttendanceController::class, 'mark']);
         });
 
-        Route::prefix('payroll')->group(function () {
+        Route::prefix('payroll')->middleware('module:payroll')->group(function () {
             Route::apiResource('salary-components', SalaryComponentController::class)->only(['index', 'store']);
 
             Route::apiResource('salary-structures', SalaryStructureController::class)->only(['index', 'store']);
@@ -224,7 +247,7 @@ Route::prefix('v1')->group(function () {
             Route::apiResource('payslips', PayslipController::class)->only(['index', 'show']);
         });
 
-        Route::prefix('production')->group(function () {
+        Route::prefix('production')->middleware('module:production')->group(function () {
             Route::apiResource('work-centers', WorkCenterController::class)->only(['index', 'store', 'update']);
 
             Route::apiResource('boms', BomController::class)->only(['index', 'store']);
@@ -250,7 +273,7 @@ Route::prefix('v1')->group(function () {
             Route::post('rework-orders/{rework_order}/complete', [ReworkOrderController::class, 'complete']);
         });
 
-        Route::prefix('maintenance')->group(function () {
+        Route::prefix('maintenance')->middleware('module:maintenance')->group(function () {
             Route::apiResource('assets', AssetController::class)->only(['index', 'store', 'update']);
 
             Route::apiResource('schedules', MaintenanceScheduleController::class)->only(['index', 'store']);
