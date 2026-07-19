@@ -29,9 +29,12 @@ export async function createAsset(payload: CreateAssetPayload): Promise<Asset> {
 }
 
 export interface UpdateAssetPayload {
+    code?: string;
     name?: string;
     category?: string;
     location?: string;
+    purchase_date?: string;
+    purchase_cost?: number;
     status?: AssetStatus;
 }
 

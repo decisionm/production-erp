@@ -4,7 +4,7 @@ import { Button, Form, Input, Modal, Space, Switch, Table, Typography } from 'an
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { createWarehouse, listWarehouses } from '@/features/inventory/api';
+import { createWarehouse, listWarehouses, updateWarehouse } from '@/features/inventory/api';
 import type { Warehouse } from '@/features/inventory/types';
 
 const warehouseSchema = z.object({
@@ -16,9 +16,12 @@ type WarehouseFormValues = z.infer<typeof warehouseSchema>;
 
 export default function WarehousesPage() {
     const [modalOpen, setModalOpen] = useState(false);
+    const [editingWarehouse, setEditingWarehouse] = useState<Warehouse | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['inventory', 'warehouses'], queryFn: listWarehouses });
+
+    const invalidate = () => queryClient.invalidateQueries({ queryKey: ['inventory', 'warehouses'] });
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<WarehouseFormValues>({
         resolver: zodResolver(warehouseSchema),
@@ -28,10 +31,33 @@ export default function WarehousesPage() {
     const mutation = useMutation({
         mutationFn: createWarehouse,
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['inventory', 'warehouses'] });
+            invalidate();
             setModalOpen(false);
             reset();
         },
+    });
+
+    const {
+        control: editControl,
+        handleSubmit: handleEditSubmit,
+        reset: resetEdit,
+        formState: { errors: editErrors },
+    } = useForm<WarehouseFormValues>({ resolver: zodResolver(warehouseSchema) });
+
+    const editMutation = useMutation({
+        mutationFn: ({ id, ...payload }: { id: number } & WarehouseFormValues) => updateWarehouse(id, payload),
+        onSuccess: () => {
+            invalidate();
+            setEditingWarehouse(null);
+        },
+        onError: (error: any) => {
+            Modal.error({ title: 'Could not update warehouse', content: error?.response?.data?.message ?? 'Unknown error' });
+        },
+    });
+
+    const activeMutation = useMutation({
+        mutationFn: ({ id, is_active }: { id: number; is_active: boolean }) => updateWarehouse(id, { is_active }),
+        onSuccess: invalidate,
     });
 
     return (
@@ -53,7 +79,28 @@ export default function WarehousesPage() {
                     {
                         title: 'Active',
                         dataIndex: 'is_active',
-                        render: (active: boolean) => <Switch checked={active} disabled size="small" />,
+                        render: (active: boolean, row) => (
+                            <Switch
+                                checked={active}
+                                size="small"
+                                loading={activeMutation.isPending}
+                                onChange={(checked) => activeMutation.mutate({ id: row.id, is_active: checked })}
+                            />
+                        ),
+                    },
+                    {
+                        title: 'Actions',
+                        render: (_, row) => (
+                            <Button
+                                size="small"
+                                onClick={() => {
+                                    setEditingWarehouse(row);
+                                    resetEdit({ code: row.code, name: row.name });
+                                }}
+                            >
+                                Edit
+                            </Button>
+                        ),
                     },
                 ]}
             />
@@ -72,6 +119,26 @@ export default function WarehousesPage() {
                     </Form.Item>
                     <Form.Item label="Name" validateStatus={errors.name ? 'error' : ''} help={errors.name?.message}>
                         <Controller name="name" control={control} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                </Form>
+            </Modal>
+
+            <Modal
+                title={`Edit "${editingWarehouse?.name}"`}
+                open={editingWarehouse !== null}
+                onCancel={() => setEditingWarehouse(null)}
+                onOk={handleEditSubmit((values) => {
+                    if (editingWarehouse) editMutation.mutate({ id: editingWarehouse.id, ...values });
+                })}
+                confirmLoading={editMutation.isPending}
+                destroyOnHidden
+            >
+                <Form layout="vertical">
+                    <Form.Item label="Code" validateStatus={editErrors.code ? 'error' : ''} help={editErrors.code?.message}>
+                        <Controller name="code" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item label="Name" validateStatus={editErrors.name ? 'error' : ''} help={editErrors.name?.message}>
+                        <Controller name="name" control={editControl} render={({ field }) => <Input {...field} />} />
                     </Form.Item>
                 </Form>
             </Modal>

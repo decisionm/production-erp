@@ -25,6 +25,13 @@ export async function createGLAccount(payload: CreateGLAccountPayload): Promise<
     return data.data;
 }
 
+export type UpdateGLAccountPayload = Partial<CreateGLAccountPayload> & { is_active?: boolean };
+
+export async function updateGLAccount(id: number, payload: UpdateGLAccountPayload): Promise<GLAccount> {
+    const { data } = await api.put<{ data: GLAccount }>(`/finance/gl-accounts/${id}`, payload);
+    return data.data;
+}
+
 export async function listJournalEntries(): Promise<Paginated<JournalEntry>> {
     const { data } = await api.get<Paginated<JournalEntry>>('/finance/journal-entries');
     return data;

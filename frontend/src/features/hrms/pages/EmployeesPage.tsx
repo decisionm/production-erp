@@ -1,10 +1,11 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DatePicker, Button, Form, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import dayjs from 'dayjs';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { createEmployee, listEmployees } from '@/features/hrms/api';
+import { createEmployee, listEmployees, updateEmployee } from '@/features/hrms/api';
 import type { Employee, EmployeeStatus } from '@/features/hrms/types';
 
 const employeeSchema = z.object({
@@ -19,18 +20,32 @@ const employeeSchema = z.object({
 });
 type EmployeeFormValues = z.infer<typeof employeeSchema>;
 
+const editEmployeeSchema = employeeSchema.extend({
+    status: z.enum(['active', 'inactive', 'terminated']).optional(),
+});
+type EditEmployeeFormValues = z.infer<typeof editEmployeeSchema>;
+
 const statusColor: Record<EmployeeStatus, string> = {
     active: 'green',
     inactive: 'default',
     terminated: 'red',
 };
 
+const statusOptions: { value: EmployeeStatus; label: string }[] = [
+    { value: 'active', label: 'Active' },
+    { value: 'inactive', label: 'Inactive' },
+    { value: 'terminated', label: 'Terminated' },
+];
+
 export default function EmployeesPage() {
     const [modalOpen, setModalOpen] = useState(false);
+    const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['hrms', 'employees'], queryFn: listEmployees });
     const managerOptions = data?.data.map((e) => ({ value: e.id, label: `${e.employee_code} — ${e.name}` })) ?? [];
+
+    const invalidate = () => queryClient.invalidateQueries({ queryKey: ['hrms', 'employees'] });
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<EmployeeFormValues>({
         resolver: zodResolver(employeeSchema),
@@ -40,9 +55,27 @@ export default function EmployeesPage() {
     const mutation = useMutation({
         mutationFn: createEmployee,
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['hrms', 'employees'] });
+            invalidate();
             setModalOpen(false);
             reset();
+        },
+    });
+
+    const {
+        control: editControl,
+        handleSubmit: handleEditSubmit,
+        reset: resetEdit,
+        formState: { errors: editErrors },
+    } = useForm<EditEmployeeFormValues>({ resolver: zodResolver(editEmployeeSchema) });
+
+    const editMutation = useMutation({
+        mutationFn: ({ id, ...payload }: { id: number } & EditEmployeeFormValues) => updateEmployee(id, payload),
+        onSuccess: () => {
+            invalidate();
+            setEditingEmployee(null);
+        },
+        onError: (error: any) => {
+            Modal.error({ title: 'Could not update employee', content: error?.response?.data?.message ?? 'Unknown error' });
         },
     });
 
@@ -70,6 +103,30 @@ export default function EmployeesPage() {
                         title: 'Status',
                         dataIndex: 'status',
                         render: (status: EmployeeStatus) => <Tag color={statusColor[status]}>{status}</Tag>,
+                    },
+                    {
+                        title: 'Actions',
+                        render: (_, row) => (
+                            <Button
+                                size="small"
+                                onClick={() => {
+                                    setEditingEmployee(row);
+                                    resetEdit({
+                                        employee_code: row.employee_code,
+                                        name: row.name,
+                                        email: row.email ?? '',
+                                        phone: row.phone ?? '',
+                                        date_of_joining: row.date_of_joining,
+                                        designation: row.designation ?? '',
+                                        department: row.department ?? '',
+                                        manager_id: row.manager?.id,
+                                        status: row.status,
+                                    });
+                                }}
+                            >
+                                Edit
+                            </Button>
+                        ),
                     },
                 ]}
             />
@@ -128,6 +185,75 @@ export default function EmployeesPage() {
                             render={({ field }) => (
                                 <Select {...field} options={managerOptions} showSearch optionFilterProp="label" allowClear />
                             )}
+                        />
+                    </Form.Item>
+                </Form>
+            </Modal>
+
+            <Modal
+                title={`Edit "${editingEmployee?.name}"`}
+                open={editingEmployee !== null}
+                onCancel={() => setEditingEmployee(null)}
+                onOk={handleEditSubmit((values) => {
+                    if (editingEmployee) editMutation.mutate({ id: editingEmployee.id, ...values });
+                })}
+                confirmLoading={editMutation.isPending}
+                destroyOnHidden
+            >
+                <Form layout="vertical">
+                    <Form.Item
+                        label="Employee Code"
+                        validateStatus={editErrors.employee_code ? 'error' : ''}
+                        help={editErrors.employee_code?.message}
+                    >
+                        <Controller name="employee_code" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item label="Name" validateStatus={editErrors.name ? 'error' : ''} help={editErrors.name?.message}>
+                        <Controller name="name" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item label="Email" validateStatus={editErrors.email ? 'error' : ''} help={editErrors.email?.message}>
+                        <Controller name="email" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item label="Phone">
+                        <Controller name="phone" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item
+                        label="Date of Joining"
+                        validateStatus={editErrors.date_of_joining ? 'error' : ''}
+                        help={editErrors.date_of_joining?.message}
+                    >
+                        <Controller
+                            name="date_of_joining"
+                            control={editControl}
+                            render={({ field }) => (
+                                <DatePicker
+                                    style={{ width: '100%' }}
+                                    value={field.value ? dayjs(field.value) : undefined}
+                                    onChange={(_, dateString) => field.onChange((dateString as string) || undefined)}
+                                />
+                            )}
+                        />
+                    </Form.Item>
+                    <Form.Item label="Designation">
+                        <Controller name="designation" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item label="Department">
+                        <Controller name="department" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item label="Manager">
+                        <Controller
+                            name="manager_id"
+                            control={editControl}
+                            render={({ field }) => (
+                                <Select {...field} options={managerOptions} showSearch optionFilterProp="label" allowClear />
+                            )}
+                        />
+                    </Form.Item>
+                    <Form.Item label="Status">
+                        <Controller
+                            name="status"
+                            control={editControl}
+                            render={({ field }) => <Select {...field} options={statusOptions} />}
                         />
                     </Form.Item>
                 </Form>

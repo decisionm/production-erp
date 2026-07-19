@@ -1,10 +1,11 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import dayjs from 'dayjs';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { createOpportunity, listOpportunities, updateOpportunityStage } from '@/features/crm/api';
+import { createOpportunity, listOpportunities, updateOpportunity, updateOpportunityStage } from '@/features/crm/api';
 import type { Opportunity, OpportunityStage } from '@/features/crm/types';
 import { listCustomers } from '@/features/sales/api';
 
@@ -39,6 +40,7 @@ const stageOptions: { value: OpportunityStage; label: string }[] = [
 export default function OpportunitiesPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [detailOpportunity, setDetailOpportunity] = useState<Opportunity | null>(null);
+    const [editingOpportunity, setEditingOpportunity] = useState<Opportunity | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['crm', 'opportunities'], queryFn: listOpportunities });
@@ -63,6 +65,24 @@ export default function OpportunitiesPage() {
     const stageMutation = useMutation({
         mutationFn: ({ id, stage }: { id: number; stage: OpportunityStage }) => updateOpportunityStage(id, stage),
         onSuccess: invalidate,
+    });
+
+    const {
+        control: editControl,
+        handleSubmit: handleEditSubmit,
+        reset: resetEdit,
+        formState: { errors: editErrors },
+    } = useForm<OpportunityFormValues>({ resolver: zodResolver(opportunitySchema) });
+
+    const editMutation = useMutation({
+        mutationFn: ({ id, ...payload }: { id: number } & OpportunityFormValues) => updateOpportunity(id, payload),
+        onSuccess: () => {
+            invalidate();
+            setEditingOpportunity(null);
+        },
+        onError: (error: any) => {
+            Modal.error({ title: 'Could not update opportunity', content: error?.response?.data?.message ?? 'Unknown error' });
+        },
     });
 
     return (
@@ -99,9 +119,27 @@ export default function OpportunitiesPage() {
                     {
                         title: 'Actions',
                         render: (_, row) => (
-                            <Button size="small" onClick={() => setDetailOpportunity(row)}>
-                                View
-                            </Button>
+                            <Space>
+                                <Button size="small" onClick={() => setDetailOpportunity(row)}>
+                                    View
+                                </Button>
+                                <Button
+                                    size="small"
+                                    onClick={() => {
+                                        setEditingOpportunity(row);
+                                        resetEdit({
+                                            name: row.name,
+                                            customer_id: row.customer.id,
+                                            estimated_value: row.estimated_value ? Number(row.estimated_value) : undefined,
+                                            probability: row.probability ? Number(row.probability) : undefined,
+                                            expected_close_date: row.expected_close_date ?? undefined,
+                                            notes: row.notes ?? '',
+                                        });
+                                    }}
+                                >
+                                    Edit
+                                </Button>
+                            </Space>
                         ),
                     },
                 ]}
@@ -160,6 +198,66 @@ export default function OpportunitiesPage() {
                     </Form.Item>
                     <Form.Item label="Notes">
                         <Controller name="notes" control={control} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                </Form>
+            </Modal>
+
+            <Modal
+                title={`Edit "${editingOpportunity?.name}"`}
+                open={editingOpportunity !== null}
+                onCancel={() => setEditingOpportunity(null)}
+                onOk={handleEditSubmit((values) => {
+                    if (editingOpportunity) editMutation.mutate({ id: editingOpportunity.id, ...values });
+                })}
+                confirmLoading={editMutation.isPending}
+                destroyOnHidden
+            >
+                <Form layout="vertical">
+                    <Form.Item label="Name" validateStatus={editErrors.name ? 'error' : ''} help={editErrors.name?.message}>
+                        <Controller name="name" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item
+                        label="Customer"
+                        validateStatus={editErrors.customer_id ? 'error' : ''}
+                        help={editErrors.customer_id?.message}
+                    >
+                        <Controller
+                            name="customer_id"
+                            control={editControl}
+                            render={({ field }) => (
+                                <Select {...field} options={customerOptions} showSearch optionFilterProp="label" />
+                            )}
+                        />
+                    </Form.Item>
+                    <Form.Item label="Estimated Value">
+                        <Controller
+                            name="estimated_value"
+                            control={editControl}
+                            render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />}
+                        />
+                    </Form.Item>
+                    <Form.Item label="Probability %">
+                        <Controller
+                            name="probability"
+                            control={editControl}
+                            render={({ field }) => <InputNumber {...field} min={0} max={100} style={{ width: '100%' }} />}
+                        />
+                    </Form.Item>
+                    <Form.Item label="Expected Close Date">
+                        <Controller
+                            name="expected_close_date"
+                            control={editControl}
+                            render={({ field }) => (
+                                <DatePicker
+                                    style={{ width: '100%' }}
+                                    value={field.value ? dayjs(field.value) : undefined}
+                                    onChange={(_, dateString) => field.onChange((dateString as string) || undefined)}
+                                />
+                            )}
+                        />
+                    </Form.Item>
+                    <Form.Item label="Notes">
+                        <Controller name="notes" control={editControl} render={({ field }) => <Input {...field} />} />
                     </Form.Item>
                 </Form>
             </Modal>

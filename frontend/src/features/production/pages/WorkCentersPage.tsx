@@ -16,6 +16,7 @@ type WorkCenterFormValues = z.infer<typeof workCenterSchema>;
 
 export default function WorkCentersPage() {
     const [modalOpen, setModalOpen] = useState(false);
+    const [editingWorkCenter, setEditingWorkCenter] = useState<WorkCenter | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['production', 'work-centers'], queryFn: listWorkCenters });
@@ -45,6 +46,29 @@ export default function WorkCentersPage() {
         onSuccess: invalidate,
         onError: (error: any) => {
             Modal.error({ title: 'Could not update capacity', content: error?.response?.data?.message ?? 'Unknown error' });
+        },
+    });
+
+    const activeMutation = useMutation({
+        mutationFn: ({ id, is_active }: { id: number; is_active: boolean }) => updateWorkCenter(id, { is_active }),
+        onSuccess: invalidate,
+    });
+
+    const {
+        control: editControl,
+        handleSubmit: handleEditSubmit,
+        reset: resetEdit,
+        formState: { errors: editErrors },
+    } = useForm<WorkCenterFormValues>({ resolver: zodResolver(workCenterSchema) });
+
+    const editMutation = useMutation({
+        mutationFn: ({ id, ...payload }: { id: number } & WorkCenterFormValues) => updateWorkCenter(id, payload),
+        onSuccess: () => {
+            invalidate();
+            setEditingWorkCenter(null);
+        },
+        onError: (error: any) => {
+            Modal.error({ title: 'Could not update work center', content: error?.response?.data?.message ?? 'Unknown error' });
         },
     });
 
@@ -87,7 +111,35 @@ export default function WorkCentersPage() {
                     {
                         title: 'Active',
                         dataIndex: 'is_active',
-                        render: (active: boolean) => <Switch checked={active} disabled size="small" />,
+                        render: (active: boolean, row) => (
+                            <Switch
+                                checked={active}
+                                size="small"
+                                loading={activeMutation.isPending}
+                                onChange={(checked) => activeMutation.mutate({ id: row.id, is_active: checked })}
+                            />
+                        ),
+                    },
+                    {
+                        title: 'Actions',
+                        render: (_, row) => (
+                            <Button
+                                size="small"
+                                onClick={() => {
+                                    setEditingWorkCenter(row);
+                                    resetEdit({
+                                        code: row.code,
+                                        name: row.name,
+                                        capacity_hours_per_day:
+                                            row.capacity_hours_per_day !== null
+                                                ? Number(row.capacity_hours_per_day)
+                                                : undefined,
+                                    });
+                                }}
+                            >
+                                Edit
+                            </Button>
+                        ),
                     },
                 ]}
             />
@@ -111,6 +163,33 @@ export default function WorkCentersPage() {
                         <Controller
                             name="capacity_hours_per_day"
                             control={control}
+                            render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />}
+                        />
+                    </Form.Item>
+                </Form>
+            </Modal>
+
+            <Modal
+                title={`Edit "${editingWorkCenter?.name}"`}
+                open={editingWorkCenter !== null}
+                onCancel={() => setEditingWorkCenter(null)}
+                onOk={handleEditSubmit((values) => {
+                    if (editingWorkCenter) editMutation.mutate({ id: editingWorkCenter.id, ...values });
+                })}
+                confirmLoading={editMutation.isPending}
+                destroyOnHidden
+            >
+                <Form layout="vertical">
+                    <Form.Item label="Code" validateStatus={editErrors.code ? 'error' : ''} help={editErrors.code?.message}>
+                        <Controller name="code" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item label="Name" validateStatus={editErrors.name ? 'error' : ''} help={editErrors.name?.message}>
+                        <Controller name="name" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item label="Capacity (hours/day, optional)">
+                        <Controller
+                            name="capacity_hours_per_day"
+                            control={editControl}
                             render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />}
                         />
                     </Form.Item>

@@ -28,7 +28,9 @@ export async function createWorkCenter(payload: CreateWorkCenterPayload): Promis
     return data.data;
 }
 
-export async function updateWorkCenter(id: number, payload: { capacity_hours_per_day?: number }): Promise<WorkCenter> {
+export type UpdateWorkCenterPayload = Partial<CreateWorkCenterPayload> & { is_active?: boolean };
+
+export async function updateWorkCenter(id: number, payload: UpdateWorkCenterPayload): Promise<WorkCenter> {
     const { data } = await api.put<{ data: WorkCenter }>(`/production/work-centers/${id}`, payload);
     return data.data;
 }

@@ -4,7 +4,7 @@ import { Button, Form, Input, InputNumber, Modal, Space, Switch, Table, Typograp
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { createLeaveType, listLeaveTypes } from '@/features/hrms/api';
+import { createLeaveType, listLeaveTypes, updateLeaveType } from '@/features/hrms/api';
 import type { LeaveType } from '@/features/hrms/types';
 
 const leaveTypeSchema = z.object({
@@ -16,9 +16,12 @@ type LeaveTypeFormValues = z.infer<typeof leaveTypeSchema>;
 
 export default function LeaveTypesPage() {
     const [modalOpen, setModalOpen] = useState(false);
+    const [editingLeaveType, setEditingLeaveType] = useState<LeaveType | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['hrms', 'leave-types'], queryFn: listLeaveTypes });
+
+    const invalidate = () => queryClient.invalidateQueries({ queryKey: ['hrms', 'leave-types'] });
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<LeaveTypeFormValues>({
         resolver: zodResolver(leaveTypeSchema),
@@ -28,10 +31,33 @@ export default function LeaveTypesPage() {
     const mutation = useMutation({
         mutationFn: createLeaveType,
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['hrms', 'leave-types'] });
+            invalidate();
             setModalOpen(false);
             reset();
         },
+    });
+
+    const {
+        control: editControl,
+        handleSubmit: handleEditSubmit,
+        reset: resetEdit,
+        formState: { errors: editErrors },
+    } = useForm<LeaveTypeFormValues>({ resolver: zodResolver(leaveTypeSchema) });
+
+    const editMutation = useMutation({
+        mutationFn: ({ id, ...payload }: { id: number } & LeaveTypeFormValues) => updateLeaveType(id, payload),
+        onSuccess: () => {
+            invalidate();
+            setEditingLeaveType(null);
+        },
+        onError: (error: any) => {
+            Modal.error({ title: 'Could not update leave type', content: error?.response?.data?.message ?? 'Unknown error' });
+        },
+    });
+
+    const activeMutation = useMutation({
+        mutationFn: ({ id, is_active }: { id: number; is_active: boolean }) => updateLeaveType(id, { is_active }),
+        onSuccess: invalidate,
     });
 
     return (
@@ -54,7 +80,32 @@ export default function LeaveTypesPage() {
                     {
                         title: 'Active',
                         dataIndex: 'is_active',
-                        render: (active: boolean) => <Switch checked={active} disabled size="small" />,
+                        render: (active: boolean, row) => (
+                            <Switch
+                                checked={active}
+                                size="small"
+                                loading={activeMutation.isPending}
+                                onChange={(checked) => activeMutation.mutate({ id: row.id, is_active: checked })}
+                            />
+                        ),
+                    },
+                    {
+                        title: 'Actions',
+                        render: (_, row) => (
+                            <Button
+                                size="small"
+                                onClick={() => {
+                                    setEditingLeaveType(row);
+                                    resetEdit({
+                                        code: row.code,
+                                        name: row.name,
+                                        default_annual_days: Number(row.default_annual_days),
+                                    });
+                                }}
+                            >
+                                Edit
+                            </Button>
+                        ),
                     },
                 ]}
             />
@@ -78,6 +129,33 @@ export default function LeaveTypesPage() {
                         <Controller
                             name="default_annual_days"
                             control={control}
+                            render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />}
+                        />
+                    </Form.Item>
+                </Form>
+            </Modal>
+
+            <Modal
+                title={`Edit "${editingLeaveType?.name}"`}
+                open={editingLeaveType !== null}
+                onCancel={() => setEditingLeaveType(null)}
+                onOk={handleEditSubmit((values) => {
+                    if (editingLeaveType) editMutation.mutate({ id: editingLeaveType.id, ...values });
+                })}
+                confirmLoading={editMutation.isPending}
+                destroyOnHidden
+            >
+                <Form layout="vertical">
+                    <Form.Item label="Code" validateStatus={editErrors.code ? 'error' : ''} help={editErrors.code?.message}>
+                        <Controller name="code" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item label="Name" validateStatus={editErrors.name ? 'error' : ''} help={editErrors.name?.message}>
+                        <Controller name="name" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item label="Default Annual Days">
+                        <Controller
+                            name="default_annual_days"
+                            control={editControl}
                             render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />}
                         />
                     </Form.Item>

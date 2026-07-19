@@ -22,6 +22,13 @@ export async function createItem(payload: CreateItemPayload): Promise<Item> {
     return data.data;
 }
 
+export type UpdateItemPayload = Partial<CreateItemPayload> & { is_active?: boolean };
+
+export async function updateItem(id: number, payload: UpdateItemPayload): Promise<Item> {
+    const { data } = await api.put<{ data: Item }>(`/inventory/items/${id}`, payload);
+    return data.data;
+}
+
 export async function listWarehouses(): Promise<Paginated<Warehouse>> {
     const { data } = await api.get<Paginated<Warehouse>>('/inventory/warehouses');
     return data;
@@ -34,6 +41,13 @@ export interface CreateWarehousePayload {
 
 export async function createWarehouse(payload: CreateWarehousePayload): Promise<Warehouse> {
     const { data } = await api.post<{ data: Warehouse }>('/inventory/warehouses', payload);
+    return data.data;
+}
+
+export type UpdateWarehousePayload = Partial<CreateWarehousePayload> & { is_active?: boolean };
+
+export async function updateWarehouse(id: number, payload: UpdateWarehousePayload): Promise<Warehouse> {
+    const { data } = await api.put<{ data: Warehouse }>(`/inventory/warehouses/${id}`, payload);
     return data.data;
 }
 

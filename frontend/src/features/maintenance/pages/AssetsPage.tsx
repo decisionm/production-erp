@@ -1,6 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import dayjs from 'dayjs';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -17,6 +18,11 @@ const assetSchema = z.object({
 });
 type AssetFormValues = z.infer<typeof assetSchema>;
 
+const editAssetSchema = assetSchema.extend({
+    status: z.enum(['active', 'under_maintenance', 'retired']).optional(),
+});
+type EditAssetFormValues = z.infer<typeof editAssetSchema>;
+
 const statusColor: Record<AssetStatus, string> = {
     active: 'green',
     under_maintenance: 'orange',
@@ -31,6 +37,7 @@ const statusOptions: { value: AssetStatus; label: string }[] = [
 
 export default function AssetsPage() {
     const [modalOpen, setModalOpen] = useState(false);
+    const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['maintenance', 'assets'], queryFn: listAssets });
@@ -59,6 +66,24 @@ export default function AssetsPage() {
         onSuccess: invalidate,
         onError: (error: any) => {
             Modal.error({ title: 'Could not update asset status', content: error?.response?.data?.message ?? 'Unknown error' });
+        },
+    });
+
+    const {
+        control: editControl,
+        handleSubmit: handleEditSubmit,
+        reset: resetEdit,
+        formState: { errors: editErrors },
+    } = useForm<EditAssetFormValues>({ resolver: zodResolver(editAssetSchema) });
+
+    const editMutation = useMutation({
+        mutationFn: ({ id, ...payload }: { id: number } & EditAssetFormValues) => updateAsset(id, payload),
+        onSuccess: () => {
+            invalidate();
+            setEditingAsset(null);
+        },
+        onError: (error: any) => {
+            Modal.error({ title: 'Could not update asset', content: error?.response?.data?.message ?? 'Unknown error' });
         },
     });
 
@@ -93,6 +118,28 @@ export default function AssetsPage() {
                                 onChange={(value) => statusMutation.mutate({ id: row.id, status: value })}
                                 labelRender={() => <Tag color={statusColor[status]}>{status}</Tag>}
                             />
+                        ),
+                    },
+                    {
+                        title: 'Actions',
+                        render: (_, row) => (
+                            <Button
+                                size="small"
+                                onClick={() => {
+                                    setEditingAsset(row);
+                                    resetEdit({
+                                        code: row.code,
+                                        name: row.name,
+                                        category: row.category ?? '',
+                                        location: row.location ?? '',
+                                        purchase_date: row.purchase_date ?? undefined,
+                                        purchase_cost: row.purchase_cost ? Number(row.purchase_cost) : undefined,
+                                        status: row.status,
+                                    });
+                                }}
+                            >
+                                Edit
+                            </Button>
                         ),
                     },
                 ]}
@@ -136,6 +183,59 @@ export default function AssetsPage() {
                             name="purchase_cost"
                             control={control}
                             render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />}
+                        />
+                    </Form.Item>
+                </Form>
+            </Modal>
+
+            <Modal
+                title={`Edit "${editingAsset?.name}"`}
+                open={editingAsset !== null}
+                onCancel={() => setEditingAsset(null)}
+                onOk={handleEditSubmit((values) => {
+                    if (editingAsset) editMutation.mutate({ id: editingAsset.id, ...values });
+                })}
+                confirmLoading={editMutation.isPending}
+                destroyOnHidden
+            >
+                <Form layout="vertical">
+                    <Form.Item label="Code" validateStatus={editErrors.code ? 'error' : ''} help={editErrors.code?.message}>
+                        <Controller name="code" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item label="Name" validateStatus={editErrors.name ? 'error' : ''} help={editErrors.name?.message}>
+                        <Controller name="name" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item label="Category">
+                        <Controller name="category" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item label="Location">
+                        <Controller name="location" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item label="Purchase Date">
+                        <Controller
+                            name="purchase_date"
+                            control={editControl}
+                            render={({ field }) => (
+                                <DatePicker
+                                    style={{ width: '100%' }}
+                                    value={field.value ? dayjs(field.value) : undefined}
+                                    onChange={(_, dateString) => field.onChange((dateString as string) || undefined)}
+                                />
+                            )}
+                        />
+                    </Form.Item>
+                    <Form.Item label="Purchase Cost">
+                        <Controller
+                            name="purchase_cost"
+                            control={editControl}
+                            render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />}
+                        />
+                    </Form.Item>
+                    <Form.Item label="Status">
+                        <Controller
+                            name="status"
+                            control={editControl}
+                            render={({ field }) => <Select {...field} options={statusOptions} />}
                         />
                     </Form.Item>
                 </Form>

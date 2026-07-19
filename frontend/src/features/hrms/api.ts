@@ -24,6 +24,13 @@ export async function createEmployee(payload: CreateEmployeePayload): Promise<Em
     return data.data;
 }
 
+export type UpdateEmployeePayload = Partial<CreateEmployeePayload> & { status?: Employee['status'] };
+
+export async function updateEmployee(id: number, payload: UpdateEmployeePayload): Promise<Employee> {
+    const { data } = await api.put<{ data: Employee }>(`/hrms/employees/${id}`, payload);
+    return data.data;
+}
+
 export async function listLeaveTypes(): Promise<Paginated<LeaveType>> {
     const { data } = await api.get<Paginated<LeaveType>>('/hrms/leave-types');
     return data;
@@ -37,6 +44,13 @@ export interface CreateLeaveTypePayload {
 
 export async function createLeaveType(payload: CreateLeaveTypePayload): Promise<LeaveType> {
     const { data } = await api.post<{ data: LeaveType }>('/hrms/leave-types', payload);
+    return data.data;
+}
+
+export type UpdateLeaveTypePayload = Partial<CreateLeaveTypePayload> & { is_active?: boolean };
+
+export async function updateLeaveType(id: number, payload: UpdateLeaveTypePayload): Promise<LeaveType> {
+    const { data } = await api.put<{ data: LeaveType }>(`/hrms/leave-types/${id}`, payload);
     return data.data;
 }
 

@@ -18,6 +18,13 @@ export async function createGstRate(payload: CreateGstRatePayload): Promise<GstR
     return data.data;
 }
 
+export type UpdateGstRatePayload = Partial<CreateGstRatePayload> & { is_active?: boolean };
+
+export async function updateGstRate(id: number, payload: UpdateGstRatePayload): Promise<GstRate> {
+    const { data } = await api.put<{ data: GstRate }>(`/compliance/gst-rates/${id}`, payload);
+    return data.data;
+}
+
 export async function listGstRegistrations(): Promise<Paginated<GstRegistration>> {
     const { data } = await api.get<Paginated<GstRegistration>>('/compliance/gst-registrations');
     return data;
@@ -32,6 +39,16 @@ export interface CreateGstRegistrationPayload {
 
 export async function createGstRegistration(payload: CreateGstRegistrationPayload): Promise<GstRegistration> {
     const { data } = await api.post<{ data: GstRegistration }>('/compliance/gst-registrations', payload);
+    return data.data;
+}
+
+export type UpdateGstRegistrationPayload = Partial<CreateGstRegistrationPayload> & { is_active?: boolean };
+
+export async function updateGstRegistration(
+    id: number,
+    payload: UpdateGstRegistrationPayload,
+): Promise<GstRegistration> {
+    const { data } = await api.put<{ data: GstRegistration }>(`/compliance/gst-registrations/${id}`, payload);
     return data.data;
 }
 

@@ -4,7 +4,7 @@ import { Button, Form, Input, Modal, Space, Switch, Table, Tag, Typography } fro
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { createGstRegistration, listGstRegistrations } from '@/features/compliance/api';
+import { createGstRegistration, listGstRegistrations, updateGstRegistration } from '@/features/compliance/api';
 import type { GstRegistration } from '@/features/compliance/types';
 
 const registrationSchema = z.object({
@@ -19,9 +19,12 @@ type RegistrationFormValues = z.infer<typeof registrationSchema>;
 
 export default function GstRegistrationsPage() {
     const [modalOpen, setModalOpen] = useState(false);
+    const [editingRegistration, setEditingRegistration] = useState<GstRegistration | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['compliance', 'gst-registrations'], queryFn: listGstRegistrations });
+
+    const invalidate = () => queryClient.invalidateQueries({ queryKey: ['compliance', 'gst-registrations'] });
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<RegistrationFormValues>({
         resolver: zodResolver(registrationSchema),
@@ -31,10 +34,33 @@ export default function GstRegistrationsPage() {
     const mutation = useMutation({
         mutationFn: createGstRegistration,
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['compliance', 'gst-registrations'] });
+            invalidate();
             setModalOpen(false);
             reset();
         },
+    });
+
+    const {
+        control: editControl,
+        handleSubmit: handleEditSubmit,
+        reset: resetEdit,
+        formState: { errors: editErrors },
+    } = useForm<RegistrationFormValues>({ resolver: zodResolver(registrationSchema) });
+
+    const editMutation = useMutation({
+        mutationFn: ({ id, ...payload }: { id: number } & RegistrationFormValues) => updateGstRegistration(id, payload),
+        onSuccess: () => {
+            invalidate();
+            setEditingRegistration(null);
+        },
+        onError: (error: any) => {
+            Modal.error({ title: 'Could not update registration', content: error?.response?.data?.message ?? 'Unknown error' });
+        },
+    });
+
+    const activeMutation = useMutation({
+        mutationFn: ({ id, is_active }: { id: number; is_active: boolean }) => updateGstRegistration(id, { is_active }),
+        onSuccess: invalidate,
     });
 
     return (
@@ -62,7 +88,33 @@ export default function GstRegistrationsPage() {
                     {
                         title: 'Active',
                         dataIndex: 'is_active',
-                        render: (active: boolean) => <Switch checked={active} disabled size="small" />,
+                        render: (active: boolean, row) => (
+                            <Switch
+                                checked={active}
+                                size="small"
+                                loading={activeMutation.isPending}
+                                onChange={(checked) => activeMutation.mutate({ id: row.id, is_active: checked })}
+                            />
+                        ),
+                    },
+                    {
+                        title: 'Actions',
+                        render: (_, row) => (
+                            <Button
+                                size="small"
+                                onClick={() => {
+                                    setEditingRegistration(row);
+                                    resetEdit({
+                                        gstin: row.gstin,
+                                        state_code: row.state_code,
+                                        state_name: row.state_name,
+                                        is_primary: row.is_primary,
+                                    });
+                                }}
+                            >
+                                Edit
+                            </Button>
+                        ),
                     },
                 ]}
             />
@@ -97,6 +149,46 @@ export default function GstRegistrationsPage() {
                         <Controller
                             name="is_primary"
                             control={control}
+                            render={({ field: { value, onChange } }) => (
+                                <Switch checked={value} onChange={onChange} />
+                            )}
+                        />
+                    </Form.Item>
+                </Form>
+            </Modal>
+
+            <Modal
+                title={`Edit "${editingRegistration?.gstin}"`}
+                open={editingRegistration !== null}
+                onCancel={() => setEditingRegistration(null)}
+                onOk={handleEditSubmit((values) => {
+                    if (editingRegistration) editMutation.mutate({ id: editingRegistration.id, ...values });
+                })}
+                confirmLoading={editMutation.isPending}
+                destroyOnHidden
+            >
+                <Form layout="vertical">
+                    <Form.Item label="GSTIN" validateStatus={editErrors.gstin ? 'error' : ''} help={editErrors.gstin?.message}>
+                        <Controller name="gstin" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item
+                        label="State Code"
+                        validateStatus={editErrors.state_code ? 'error' : ''}
+                        help={editErrors.state_code?.message}
+                    >
+                        <Controller name="state_code" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item
+                        label="State Name"
+                        validateStatus={editErrors.state_name ? 'error' : ''}
+                        help={editErrors.state_name?.message}
+                    >
+                        <Controller name="state_name" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item label="Primary Registration">
+                        <Controller
+                            name="is_primary"
+                            control={editControl}
                             render={({ field: { value, onChange } }) => (
                                 <Switch checked={value} onChange={onChange} />
                             )}

@@ -27,6 +27,13 @@ export async function createCustomer(payload: CreateCustomerPayload): Promise<Cu
     return data.data;
 }
 
+export type UpdateCustomerPayload = Partial<CreateCustomerPayload> & { is_active?: boolean };
+
+export async function updateCustomer(id: number, payload: UpdateCustomerPayload): Promise<Customer> {
+    const { data } = await api.put<{ data: Customer }>(`/sales/customers/${id}`, payload);
+    return data.data;
+}
+
 export async function listSalesOrders(): Promise<Paginated<SalesOrder>> {
     const { data } = await api.get<Paginated<SalesOrder>>('/sales/sales-orders');
     return data;

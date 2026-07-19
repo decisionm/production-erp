@@ -79,6 +79,13 @@ export async function updateOpportunityStage(id: number, stage: Opportunity['sta
     return data.data;
 }
 
+export type UpdateOpportunityPayload = Partial<CreateOpportunityPayload>;
+
+export async function updateOpportunity(id: number, payload: UpdateOpportunityPayload): Promise<Opportunity> {
+    const { data } = await api.put<{ data: Opportunity }>(`/crm/opportunities/${id}`, payload);
+    return data.data;
+}
+
 export async function listQuotations(): Promise<Paginated<Quotation>> {
     const { data } = await api.get<Paginated<Quotation>>('/crm/quotations');
     return data;

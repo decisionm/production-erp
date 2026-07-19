@@ -4,7 +4,7 @@ import { Button, Form, Input, Modal, Select, Space, Switch, Table, Tag, Typograp
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { createGLAccount, listGLAccounts } from '@/features/finance/api';
+import { createGLAccount, listGLAccounts, updateGLAccount } from '@/features/finance/api';
 import type { GLAccount, GLAccountType } from '@/features/finance/types';
 
 const accountSchema = z.object({
@@ -32,9 +32,12 @@ const typeOptions = [
 
 export default function ChartOfAccountsPage() {
     const [modalOpen, setModalOpen] = useState(false);
+    const [editingAccount, setEditingAccount] = useState<GLAccount | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['finance', 'gl-accounts'], queryFn: listGLAccounts });
+
+    const invalidate = () => queryClient.invalidateQueries({ queryKey: ['finance', 'gl-accounts'] });
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<AccountFormValues>({
         resolver: zodResolver(accountSchema),
@@ -44,10 +47,33 @@ export default function ChartOfAccountsPage() {
     const mutation = useMutation({
         mutationFn: createGLAccount,
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['finance', 'gl-accounts'] });
+            invalidate();
             setModalOpen(false);
             reset();
         },
+    });
+
+    const {
+        control: editControl,
+        handleSubmit: handleEditSubmit,
+        reset: resetEdit,
+        formState: { errors: editErrors },
+    } = useForm<AccountFormValues>({ resolver: zodResolver(accountSchema) });
+
+    const editMutation = useMutation({
+        mutationFn: ({ id, ...payload }: { id: number } & AccountFormValues) => updateGLAccount(id, payload),
+        onSuccess: () => {
+            invalidate();
+            setEditingAccount(null);
+        },
+        onError: (error: any) => {
+            Modal.error({ title: 'Could not update account', content: error?.response?.data?.message ?? 'Unknown error' });
+        },
+    });
+
+    const activeMutation = useMutation({
+        mutationFn: ({ id, is_active }: { id: number; is_active: boolean }) => updateGLAccount(id, { is_active }),
+        onSuccess: invalidate,
     });
 
     return (
@@ -74,7 +100,28 @@ export default function ChartOfAccountsPage() {
                     {
                         title: 'Active',
                         dataIndex: 'is_active',
-                        render: (active: boolean) => <Switch checked={active} disabled size="small" />,
+                        render: (active: boolean, row) => (
+                            <Switch
+                                checked={active}
+                                size="small"
+                                loading={activeMutation.isPending}
+                                onChange={(checked) => activeMutation.mutate({ id: row.id, is_active: checked })}
+                            />
+                        ),
+                    },
+                    {
+                        title: 'Actions',
+                        render: (_, row) => (
+                            <Button
+                                size="small"
+                                onClick={() => {
+                                    setEditingAccount(row);
+                                    resetEdit({ code: row.code, name: row.name, type: row.type });
+                                }}
+                            >
+                                Edit
+                            </Button>
+                        ),
                     },
                 ]}
             />
@@ -98,6 +145,33 @@ export default function ChartOfAccountsPage() {
                         <Controller
                             name="type"
                             control={control}
+                            render={({ field }) => <Select {...field} options={typeOptions} />}
+                        />
+                    </Form.Item>
+                </Form>
+            </Modal>
+
+            <Modal
+                title={`Edit "${editingAccount?.name}"`}
+                open={editingAccount !== null}
+                onCancel={() => setEditingAccount(null)}
+                onOk={handleEditSubmit((values) => {
+                    if (editingAccount) editMutation.mutate({ id: editingAccount.id, ...values });
+                })}
+                confirmLoading={editMutation.isPending}
+                destroyOnHidden
+            >
+                <Form layout="vertical">
+                    <Form.Item label="Code" validateStatus={editErrors.code ? 'error' : ''} help={editErrors.code?.message}>
+                        <Controller name="code" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item label="Name" validateStatus={editErrors.name ? 'error' : ''} help={editErrors.name?.message}>
+                        <Controller name="name" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item label="Type" validateStatus={editErrors.type ? 'error' : ''} help={editErrors.type?.message}>
+                        <Controller
+                            name="type"
+                            control={editControl}
                             render={({ field }) => <Select {...field} options={typeOptions} />}
                         />
                     </Form.Item>

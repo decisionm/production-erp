@@ -27,6 +27,13 @@ export async function createVendor(payload: CreateVendorPayload): Promise<Vendor
     return data.data;
 }
 
+export type UpdateVendorPayload = Partial<CreateVendorPayload> & { is_active?: boolean };
+
+export async function updateVendor(id: number, payload: UpdateVendorPayload): Promise<Vendor> {
+    const { data } = await api.put<{ data: Vendor }>(`/procurement/vendors/${id}`, payload);
+    return data.data;
+}
+
 export async function listPurchaseRequisitions(): Promise<Paginated<PurchaseRequisition>> {
     const { data } = await api.get<Paginated<PurchaseRequisition>>('/procurement/purchase-requisitions');
     return data;
