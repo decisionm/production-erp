@@ -9,6 +9,10 @@ import EmployeesPage from '@/features/hrms/pages/EmployeesPage';
 import LeaveBalancesPage from '@/features/hrms/pages/LeaveBalancesPage';
 import LeaveRequestsPage from '@/features/hrms/pages/LeaveRequestsPage';
 import LeaveTypesPage from '@/features/hrms/pages/LeaveTypesPage';
+import AssetsPage from '@/features/maintenance/pages/AssetsPage';
+import ReliabilityReportPage from '@/features/maintenance/pages/ReliabilityReportPage';
+import SchedulesPage from '@/features/maintenance/pages/SchedulesPage';
+import MaintenanceWorkOrdersPage from '@/features/maintenance/pages/WorkOrdersPage';
 import BomsPage from '@/features/production/pages/BomsPage';
 import MrpPage from '@/features/production/pages/MrpPage';
 import RoutingsPage from '@/features/production/pages/RoutingsPage';
@@ -89,6 +93,10 @@ export default function App() {
                                     <Route path="/payroll/salary-structures" element={<SalaryStructuresPage />} />
                                     <Route path="/payroll/runs" element={<PayrollRunsPage />} />
                                     <Route path="/payroll/payslips" element={<PayslipsPage />} />
+                                    <Route path="/maintenance/assets" element={<AssetsPage />} />
+                                    <Route path="/maintenance/schedules" element={<SchedulesPage />} />
+                                    <Route path="/maintenance/work-orders" element={<MaintenanceWorkOrdersPage />} />
+                                    <Route path="/maintenance/reliability" element={<ReliabilityReportPage />} />
                                     <Route path="/tally-sync" element={<TallySyncPage />} />
                                     <Route path="*" element={<Navigate to="/" replace />} />
                                 </Routes>

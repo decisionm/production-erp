@@ -103,6 +103,16 @@ const navItems = [
             { key: '/payroll/payslips', label: 'Payslips' },
         ],
     },
+    {
+        key: 'maintenance',
+        label: 'Maintenance',
+        children: [
+            { key: '/maintenance/assets', label: 'Assets' },
+            { key: '/maintenance/schedules', label: 'Schedules' },
+            { key: '/maintenance/work-orders', label: 'Work Orders' },
+            { key: '/maintenance/reliability', label: 'Reliability Report' },
+        ],
+    },
     { key: '/tally-sync', label: 'Tally Sync' },
 ];
 

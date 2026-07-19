@@ -21,6 +21,10 @@ use App\Modules\Inventory\Http\Controllers\ItemController;
 use App\Modules\Inventory\Http\Controllers\StockBalanceController;
 use App\Modules\Inventory\Http\Controllers\StockMovementController;
 use App\Modules\Inventory\Http\Controllers\WarehouseController;
+use App\Modules\Maintenance\Http\Controllers\AssetController;
+use App\Modules\Maintenance\Http\Controllers\MaintenanceReportController;
+use App\Modules\Maintenance\Http\Controllers\MaintenanceScheduleController;
+use App\Modules\Maintenance\Http\Controllers\MaintenanceWorkOrderController;
 use App\Modules\Payroll\Http\Controllers\PayrollRunController;
 use App\Modules\Payroll\Http\Controllers\PayslipController;
 use App\Modules\Payroll\Http\Controllers\SalaryComponentController;
@@ -194,6 +198,21 @@ Route::prefix('v1')->group(function () {
             Route::post('work-orders/{work_order}/complete', [WorkOrderController::class, 'complete']);
 
             Route::get('mrp/net-requirements', [MrpController::class, 'netRequirements']);
+        });
+
+        Route::prefix('maintenance')->group(function () {
+            Route::apiResource('assets', AssetController::class)->only(['index', 'store', 'update']);
+
+            Route::apiResource('schedules', MaintenanceScheduleController::class)->only(['index', 'store']);
+            Route::post('schedules/generate-due', [MaintenanceScheduleController::class, 'generateDue']);
+
+            Route::apiResource('work-orders', MaintenanceWorkOrderController::class)->only(['index', 'store']);
+            Route::post('work-orders/{maintenance_work_order}/parts', [MaintenanceWorkOrderController::class, 'addPart']);
+            Route::post('work-orders/{maintenance_work_order}/start', [MaintenanceWorkOrderController::class, 'start']);
+            Route::post('work-orders/{maintenance_work_order}/complete', [MaintenanceWorkOrderController::class, 'complete']);
+            Route::post('work-orders/{maintenance_work_order}/cancel', [MaintenanceWorkOrderController::class, 'cancel']);
+
+            Route::get('reports/reliability', [MaintenanceReportController::class, 'reliability']);
         });
     });
 });
