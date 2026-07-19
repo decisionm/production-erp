@@ -29,6 +29,17 @@ class LeadResource extends JsonResource
                 $this->relationLoaded('convertedCustomer') && $this->convertedCustomer,
                 fn () => CustomerResource::make($this->convertedCustomer),
             ),
+            // Just enough of the most recent follow-up to show "last
+            // contact" / "next follow-up due" in the list view without
+            // fetching the full activity timeline for every row.
+            'latest_activity' => $this->when(
+                $this->relationLoaded('latestActivity') && $this->latestActivity,
+                fn () => [
+                    'type' => $this->latestActivity->type->value,
+                    'activity_date' => $this->latestActivity->activity_date?->toIso8601String(),
+                    'next_follow_up_date' => $this->latestActivity->next_follow_up_date?->toDateString(),
+                ],
+            ),
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }

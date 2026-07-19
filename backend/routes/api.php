@@ -7,6 +7,7 @@ use App\Modules\Compliance\Http\Controllers\GstReportController;
 use App\Modules\Core\Http\Controllers\AuthController;
 use App\Modules\Core\Http\Controllers\DashboardController;
 use App\Modules\Core\Http\Controllers\UserController;
+use App\Modules\CRM\Http\Controllers\LeadActivityController;
 use App\Modules\CRM\Http\Controllers\LeadController;
 use App\Modules\CRM\Http\Controllers\OpportunityController;
 use App\Modules\CRM\Http\Controllers\QuotationController;
@@ -142,6 +143,8 @@ Route::prefix('v1')->group(function () {
         Route::prefix('crm')->group(function () {
             Route::apiResource('leads', LeadController::class)->only(['index', 'store', 'update']);
             Route::post('leads/{lead}/convert', [LeadController::class, 'convert']);
+            Route::get('leads/{lead}/activities', [LeadActivityController::class, 'index']);
+            Route::post('leads/{lead}/activities', [LeadActivityController::class, 'store']);
 
             Route::apiResource('opportunities', OpportunityController::class)->only(['index', 'store', 'update']);
 

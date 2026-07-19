@@ -1,7 +1,7 @@
 import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
 import type { SalesOrder } from '@/features/sales/types';
-import type { Lead, Opportunity, Quotation } from './types';
+import type { Lead, LeadActivity, LeadActivityType, LeadStatus, Opportunity, Quotation } from './types';
 
 export async function listLeads(): Promise<Paginated<Lead>> {
     const { data } = await api.get<Paginated<Lead>>('/crm/leads');
@@ -22,8 +22,30 @@ export async function createLead(payload: CreateLeadPayload): Promise<Lead> {
     return data.data;
 }
 
+export async function updateLeadStatus(id: number, status: LeadStatus): Promise<Lead> {
+    const { data } = await api.put<{ data: Lead }>(`/crm/leads/${id}`, { status });
+    return data.data;
+}
+
 export async function convertLead(id: number, code: string): Promise<Lead> {
     const { data } = await api.post<{ data: Lead }>(`/crm/leads/${id}/convert`, { code });
+    return data.data;
+}
+
+export async function listLeadActivities(leadId: number): Promise<LeadActivity[]> {
+    const { data } = await api.get<{ data: LeadActivity[] }>(`/crm/leads/${leadId}/activities`);
+    return data.data;
+}
+
+export interface CreateLeadActivityPayload {
+    type: LeadActivityType;
+    notes: string;
+    activity_date?: string;
+    next_follow_up_date?: string;
+}
+
+export async function createLeadActivity(leadId: number, payload: CreateLeadActivityPayload): Promise<LeadActivity> {
+    const { data } = await api.post<{ data: LeadActivity }>(`/crm/leads/${leadId}/activities`, payload);
     return data.data;
 }
 

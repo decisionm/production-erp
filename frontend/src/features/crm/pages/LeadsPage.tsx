@@ -1,11 +1,21 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+import { MailOutlined, PhoneOutlined, PlusOutlined, TeamOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, Input, Modal, Space, Table, Tag, Typography } from 'antd';
+import { Button, DatePicker, Descriptions, Drawer, Empty, Form, Input, Modal, Select, Space, Table, Tag, Timeline, Typography } from 'antd';
+import dayjs from 'dayjs';
+import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { convertLead, createLead, listLeads } from '@/features/crm/api';
-import type { Lead, LeadStatus } from '@/features/crm/types';
+import {
+    convertLead,
+    createLead,
+    createLeadActivity,
+    listLeadActivities,
+    listLeads,
+    updateLeadStatus,
+} from '@/features/crm/api';
+import type { Lead, LeadActivityType, LeadStatus } from '@/features/crm/types';
 
 const leadSchema = z.object({
     name: z.string().min(1, 'Name is required').max(255),
@@ -21,6 +31,13 @@ const convertSchema = z.object({
 });
 type ConvertFormValues = z.infer<typeof convertSchema>;
 
+const activitySchema = z.object({
+    type: z.enum(['call', 'email', 'meeting', 'note']),
+    notes: z.string().min(1, 'Notes are required'),
+    next_follow_up_date: z.string().optional(),
+});
+type ActivityFormValues = z.infer<typeof activitySchema>;
+
 const statusColor: Record<LeadStatus, string> = {
     new: 'default',
     contacted: 'blue',
@@ -29,9 +46,47 @@ const statusColor: Record<LeadStatus, string> = {
     converted: 'green',
 };
 
+const activityIcon: Record<LeadActivityType, ReactNode> = {
+    call: <PhoneOutlined />,
+    email: <MailOutlined />,
+    meeting: <TeamOutlined />,
+    note: <PlusOutlined />,
+};
+
+const activityColor: Record<LeadActivityType, string> = {
+    call: 'blue',
+    email: 'purple',
+    meeting: 'gold',
+    note: 'gray',
+};
+
+const activityTypeOptions: { value: LeadActivityType; label: string }[] = [
+    { value: 'call', label: 'Call' },
+    { value: 'email', label: 'Email' },
+    { value: 'meeting', label: 'Meeting' },
+    { value: 'note', label: 'Note' },
+];
+
+// The next forward status each status can move to via an explicit CTA.
+// "Disqualified" and "Converted" are terminal; Convert is a separate action.
+const nextStatusActions: Record<LeadStatus, { label: string; status: LeadStatus }[]> = {
+    new: [
+        { label: 'Mark Contacted', status: 'contacted' },
+        { label: 'Disqualify', status: 'disqualified' },
+    ],
+    contacted: [
+        { label: 'Mark Qualified', status: 'qualified' },
+        { label: 'Disqualify', status: 'disqualified' },
+    ],
+    qualified: [{ label: 'Disqualify', status: 'disqualified' }],
+    disqualified: [],
+    converted: [],
+};
+
 export default function LeadsPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [convertingLead, setConvertingLead] = useState<Lead | null>(null);
+    const [detailLead, setDetailLead] = useState<Lead | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['crm', 'leads'], queryFn: listLeads });
@@ -65,10 +120,47 @@ export default function LeadsPage() {
             invalidate();
             queryClient.invalidateQueries({ queryKey: ['sales', 'customers'] });
             setConvertingLead(null);
+            setDetailLead(null);
             resetConvert();
         },
         onError: (error: any) => {
             Modal.error({ title: 'Could not convert lead', content: error?.response?.data?.message ?? 'Unknown error' });
+        },
+    });
+
+    const statusMutation = useMutation({
+        mutationFn: ({ id, status }: { id: number; status: LeadStatus }) => updateLeadStatus(id, status),
+        onSuccess: (updated) => {
+            invalidate();
+            setDetailLead(updated);
+        },
+        onError: (error: any) => {
+            Modal.error({ title: 'Could not update lead status', content: error?.response?.data?.message ?? 'Unknown error' });
+        },
+    });
+
+    const { data: activities, isLoading: activitiesLoading } = useQuery({
+        queryKey: ['crm', 'leads', detailLead?.id, 'activities'],
+        queryFn: () => listLeadActivities(detailLead!.id),
+        enabled: detailLead !== null,
+    });
+
+    const {
+        control: activityControl,
+        handleSubmit: handleActivitySubmit,
+        reset: resetActivity,
+        formState: { errors: activityErrors },
+    } = useForm<ActivityFormValues>({
+        resolver: zodResolver(activitySchema),
+        defaultValues: { type: 'call', notes: '', next_follow_up_date: undefined },
+    });
+
+    const addActivityMutation = useMutation({
+        mutationFn: (values: ActivityFormValues) => createLeadActivity(detailLead!.id, values),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['crm', 'leads', detailLead?.id, 'activities'] });
+            invalidate();
+            resetActivity({ type: 'call', notes: '', next_follow_up_date: undefined });
         },
     });
 
@@ -85,6 +177,7 @@ export default function LeadsPage() {
                 loading={isLoading}
                 dataSource={data?.data}
                 pagination={false}
+                onRow={(row) => ({ onClick: () => setDetailLead(row), style: { cursor: 'pointer' } })}
                 columns={[
                     { title: 'Name', dataIndex: 'name' },
                     { title: 'Company', dataIndex: 'company' },
@@ -95,11 +188,26 @@ export default function LeadsPage() {
                         render: (status: LeadStatus) => <Tag color={statusColor[status]}>{status}</Tag>,
                     },
                     {
-                        title: 'Actions',
+                        title: 'Last Contact',
                         render: (_, row) =>
-                            row.status !== 'converted' && (
-                                <Button size="small" onClick={() => setConvertingLead(row)}>Convert</Button>
-                            ),
+                            row.latest_activity ? dayjs(row.latest_activity.activity_date).format('DD MMM YYYY') : '—',
+                    },
+                    {
+                        title: 'Next Follow-up',
+                        render: (_, row) => {
+                            const due = row.latest_activity?.next_follow_up_date;
+                            if (!due) return '—';
+                            const overdue = dayjs(due).isBefore(dayjs(), 'day');
+                            return <Typography.Text type={overdue ? 'danger' : undefined}>{due}</Typography.Text>;
+                        },
+                    },
+                    {
+                        title: 'Actions',
+                        render: (_, row) => (
+                            <Button size="small" onClick={(e) => { e.stopPropagation(); setDetailLead(row); }}>
+                                View
+                            </Button>
+                        ),
                     },
                 ]}
             />
@@ -151,6 +259,129 @@ export default function LeadsPage() {
                     </Form.Item>
                 </Form>
             </Modal>
+
+            <Drawer
+                title={detailLead?.name}
+                open={detailLead !== null}
+                onClose={() => setDetailLead(null)}
+                width={480}
+                destroyOnHidden
+            >
+                {detailLead && (
+                    <>
+                        <Descriptions column={1} size="small" bordered>
+                            <Descriptions.Item label="Status">
+                                <Tag color={statusColor[detailLead.status]}>{detailLead.status}</Tag>
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Company">{detailLead.company ?? '—'}</Descriptions.Item>
+                            <Descriptions.Item label="Email">{detailLead.email ?? '—'}</Descriptions.Item>
+                            <Descriptions.Item label="Phone">{detailLead.phone ?? '—'}</Descriptions.Item>
+                            <Descriptions.Item label="Source">{detailLead.source ?? '—'}</Descriptions.Item>
+                        </Descriptions>
+
+                        <Space wrap style={{ marginTop: 16 }}>
+                            {nextStatusActions[detailLead.status].map((action) => (
+                                <Button
+                                    key={action.status}
+                                    danger={action.status === 'disqualified'}
+                                    loading={statusMutation.isPending}
+                                    onClick={() => statusMutation.mutate({ id: detailLead.id, status: action.status })}
+                                >
+                                    {action.label}
+                                </Button>
+                            ))}
+                            {detailLead.status !== 'converted' && (
+                                <Button type="primary" onClick={() => setConvertingLead(detailLead)}>
+                                    Convert to Customer
+                                </Button>
+                            )}
+                        </Space>
+
+                        <Typography.Title level={5} style={{ marginTop: 24 }}>
+                            Log a Follow-up
+                        </Typography.Title>
+                        <Form
+                            layout="vertical"
+                            onFinish={handleActivitySubmit((values) => addActivityMutation.mutate(values))}
+                        >
+                            <Space.Compact block>
+                                <Controller
+                                    name="type"
+                                    control={activityControl}
+                                    render={({ field }) => (
+                                        <Select {...field} options={activityTypeOptions} style={{ width: 140 }} />
+                                    )}
+                                />
+                                <Controller
+                                    name="next_follow_up_date"
+                                    control={activityControl}
+                                    render={({ field }) => (
+                                        <DatePicker
+                                            placeholder="Next follow-up"
+                                            style={{ flex: 1 }}
+                                            onChange={(_, dateString) => field.onChange((dateString as string) || undefined)}
+                                        />
+                                    )}
+                                />
+                            </Space.Compact>
+                            <Form.Item
+                                validateStatus={activityErrors.notes ? 'error' : ''}
+                                help={activityErrors.notes?.message}
+                                style={{ marginTop: 12 }}
+                            >
+                                <Controller
+                                    name="notes"
+                                    control={activityControl}
+                                    render={({ field }) => (
+                                        <Input.TextArea {...field} rows={3} placeholder="What happened / what's next?" />
+                                    )}
+                                />
+                            </Form.Item>
+                            <Button type="primary" htmlType="submit" loading={addActivityMutation.isPending}>
+                                Add Follow-up
+                            </Button>
+                        </Form>
+
+                        <Typography.Title level={5} style={{ marginTop: 24 }}>
+                            History
+                        </Typography.Title>
+                        {activitiesLoading ? (
+                            <Typography.Text type="secondary">Loading…</Typography.Text>
+                        ) : activities && activities.length > 0 ? (
+                            <Timeline
+                                style={{ marginTop: 16 }}
+                                items={activities.map((activity) => ({
+                                    color: activityColor[activity.type],
+                                    dot: activityIcon[activity.type],
+                                    children: (
+                                        <div key={activity.id}>
+                                            <Space>
+                                                <Tag color={activityColor[activity.type]}>{activity.type}</Tag>
+                                                <Typography.Text type="secondary">
+                                                    {dayjs(activity.activity_date).format('DD MMM YYYY, HH:mm')}
+                                                </Typography.Text>
+                                            </Space>
+                                            <div>{activity.notes}</div>
+                                            {activity.next_follow_up_date && (
+                                                <Typography.Text type="warning">
+                                                    Next follow-up: {activity.next_follow_up_date}
+                                                </Typography.Text>
+                                            )}
+                                            {activity.created_by && (
+                                                <div>
+                                                    <Typography.Text type="secondary">— {activity.created_by}</Typography.Text>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ),
+                                }))}
+                            />
+                        ) : (
+                            <Empty description="No follow-ups logged yet" />
+                        )}
+                    </>
+                )}
+            </Drawer>
         </>
     );
 }

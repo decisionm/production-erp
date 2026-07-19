@@ -3,6 +3,19 @@ import type { Customer } from '@/features/sales/types';
 
 export type LeadStatus = 'new' | 'contacted' | 'qualified' | 'disqualified' | 'converted';
 
+export type LeadActivityType = 'call' | 'email' | 'meeting' | 'note';
+
+export interface LeadActivity {
+    id: number;
+    lead_id: number;
+    type: LeadActivityType;
+    notes: string;
+    activity_date: string;
+    next_follow_up_date: string | null;
+    created_by: string | null;
+    created_at: string;
+}
+
 export interface Lead {
     id: number;
     name: string;
@@ -15,6 +28,11 @@ export interface Lead {
     assigned_to: string | null;
     converted_customer_id: number | null;
     converted_customer?: Customer;
+    latest_activity?: {
+        type: LeadActivityType;
+        activity_date: string;
+        next_follow_up_date: string | null;
+    } | null;
     created_at: string;
 }
 

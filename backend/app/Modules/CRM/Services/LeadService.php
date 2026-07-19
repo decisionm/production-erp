@@ -16,7 +16,7 @@ class LeadService
     public function paginate(int $perPage = 20): LengthAwarePaginator
     {
         return Lead::query()
-            ->with(['assignedTo', 'convertedCustomer'])
+            ->with(['assignedTo', 'convertedCustomer', 'latestActivity'])
             ->orderByDesc('id')
             ->paginate($perPage);
     }
