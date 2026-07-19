@@ -69,9 +69,9 @@ export default function StockPage() {
     const itemsById = new Map(items?.data.map((i) => [i.id, i]));
     const batchOptionsFor = (itemId?: number) =>
         batches?.data.filter((b) => b.item.id === itemId).map((b) => ({ value: b.id, label: b.batch_number })) ?? [];
-    const serialOptionsFor = (itemId?: number) =>
+    const serialOptionsFor = (itemId?: number, status: 'registered' | 'in_stock' = 'in_stock') =>
         serialNumbers?.data
-            .filter((s) => s.item.id === itemId && s.status === 'in_stock')
+            .filter((s) => s.item.id === itemId && s.status === status)
             .map((s) => ({ value: s.id, label: s.serial_number })) ?? [];
 
     const invalidateStock = () => {
@@ -201,7 +201,13 @@ export default function StockPage() {
                                 name="serial_number_id"
                                 control={receiptForm.control}
                                 render={({ field }) => (
-                                    <Select {...field} options={serialOptionsFor(receiptItemId)} showSearch optionFilterProp="label" allowClear />
+                                    <Select
+                                        {...field}
+                                        options={serialOptionsFor(receiptItemId, 'registered')}
+                                        showSearch
+                                        optionFilterProp="label"
+                                        allowClear
+                                    />
                                 )}
                             />
                         </Form.Item>
