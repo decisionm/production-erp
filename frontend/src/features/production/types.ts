@@ -1,3 +1,4 @@
+import type { Employee } from '@/features/hrms/types';
 import type { Item, Warehouse } from '@/features/inventory/types';
 import type { Vendor } from '@/features/procurement/types';
 
@@ -57,6 +58,29 @@ export interface ScrapReason {
     code: string;
     name: string;
     is_active: boolean;
+    created_at: string;
+}
+
+export interface Shift {
+    id: number;
+    name: string;
+    start_time: string;
+    end_time: string;
+    is_active: boolean;
+}
+
+export interface ShiftProductionEntry {
+    id: number;
+    shift: Shift;
+    work_center: WorkCenter;
+    item: Item;
+    warehouse: Warehouse;
+    production_date: string;
+    quantity_produced: string;
+    quantity_scrap: string;
+    scrap_reason: ScrapReason | null;
+    operator: Employee | null;
+    notes: string | null;
     created_at: string;
 }
 

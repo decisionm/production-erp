@@ -206,6 +206,22 @@ class StockMovementService
             ->reduce(fn (string $carry, StockBalance $balance) => bcadd($carry, $balance->quantity, 4), '0.0000');
     }
 
+    /**
+     * The current moving-average cost for an item at a specific warehouse —
+     * for callers that need to stamp a receipt with a reasonable cost
+     * without themselves knowing/tracking it (e.g. shift production entries,
+     * which don't run a costed BOM consumption like a Work Order does).
+     * '0.0000' for a combination that's never had a balance row yet, same
+     * as any first-ever movement.
+     */
+    public function currentAverageCost(int $itemId, int $warehouseId): string
+    {
+        return (string) (StockBalance::query()
+            ->where('item_id', $itemId)
+            ->where('warehouse_id', $warehouseId)
+            ->first()?->average_cost ?? '0.0000');
+    }
+
     public function paginateMovements(?int $itemId = null, ?int $warehouseId = null, int $perPage = 20): LengthAwarePaginator
     {
         return StockMovement::query()

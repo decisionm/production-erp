@@ -7,6 +7,8 @@ import type {
     ReworkOrder,
     Routing,
     ScrapReason,
+    Shift,
+    ShiftProductionEntry,
     SubcontractOrder,
     WorkCenter,
     WorkOrder,
@@ -175,6 +177,47 @@ export interface CreateScrapReasonPayload {
 
 export async function createScrapReason(payload: CreateScrapReasonPayload): Promise<ScrapReason> {
     const { data } = await api.post<{ data: ScrapReason }>('/production/scrap-reasons', payload);
+    return data.data;
+}
+
+export async function listShifts(): Promise<Paginated<Shift>> {
+    const { data } = await api.get<Paginated<Shift>>('/production/shifts');
+    return data;
+}
+
+export interface CreateShiftPayload {
+    name: string;
+    start_time: string;
+    end_time: string;
+}
+
+export async function createShift(payload: CreateShiftPayload): Promise<Shift> {
+    const { data } = await api.post<{ data: Shift }>('/production/shifts', payload);
+    return data.data;
+}
+
+export async function listShiftProductionEntries(): Promise<Paginated<ShiftProductionEntry>> {
+    const { data } = await api.get<Paginated<ShiftProductionEntry>>('/production/shift-production-entries');
+    return data;
+}
+
+export interface CreateShiftProductionEntryPayload {
+    shift_id: number;
+    work_center_id: number;
+    item_id: number;
+    warehouse_id: number;
+    production_date?: string;
+    quantity_produced: number;
+    quantity_scrap?: number;
+    scrap_reason_id?: number;
+    operator_id?: number;
+    notes?: string;
+}
+
+export async function createShiftProductionEntry(
+    payload: CreateShiftProductionEntryPayload,
+): Promise<ShiftProductionEntry> {
+    const { data } = await api.post<{ data: ShiftProductionEntry }>('/production/shift-production-entries', payload);
     return data.data;
 }
 

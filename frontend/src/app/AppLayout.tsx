@@ -76,6 +76,7 @@ const allNavItems: NavGroup[] = [
         label: 'Production',
         module: 'production',
         children: [
+            { key: '/production/shift-production', label: 'Log Production' },
             { key: '/production/work-centers', label: 'Work Centers' },
             { key: '/production/boms', label: 'Bills of Material' },
             { key: '/production/routings', label: 'Routings' },
@@ -85,6 +86,7 @@ const allNavItems: NavGroup[] = [
             { key: '/production/subcontract-orders', label: 'Subcontract Orders' },
             { key: '/production/scrap-reasons', label: 'Scrap Reasons' },
             { key: '/production/rework-orders', label: 'Rework Orders' },
+            { key: '/production/shifts', label: 'Shifts' },
         ],
     },
     {

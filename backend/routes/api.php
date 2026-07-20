@@ -45,6 +45,8 @@ use App\Modules\Production\Http\Controllers\MrpController;
 use App\Modules\Production\Http\Controllers\ReworkOrderController;
 use App\Modules\Production\Http\Controllers\RoutingController;
 use App\Modules\Production\Http\Controllers\ScrapReasonController;
+use App\Modules\Production\Http\Controllers\ShiftController;
+use App\Modules\Production\Http\Controllers\ShiftProductionEntryController;
 use App\Modules\Production\Http\Controllers\SubcontractOrderController;
 use App\Modules\Production\Http\Controllers\WorkCenterController;
 use App\Modules\Production\Http\Controllers\WorkOrderController;
@@ -267,6 +269,9 @@ Route::prefix('v1')->group(function () {
             Route::post('subcontract-orders/{subcontract_order}/receive', [SubcontractOrderController::class, 'receive']);
 
             Route::apiResource('scrap-reasons', ScrapReasonController::class)->only(['index', 'store']);
+
+            Route::apiResource('shifts', ShiftController::class)->only(['index', 'store']);
+            Route::apiResource('shift-production-entries', ShiftProductionEntryController::class)->only(['index', 'store']);
 
             Route::apiResource('rework-orders', ReworkOrderController::class)->only(['index', 'store']);
             Route::post('rework-orders/{rework_order}/release', [ReworkOrderController::class, 'release']);
