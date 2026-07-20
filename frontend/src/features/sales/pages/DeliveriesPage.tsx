@@ -1,9 +1,10 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Typography } from 'antd';
+import { Button, Descriptions, Drawer, Form, Input, InputNumber, message, Modal, Select, Space, Table, Typography } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
+import BarcodeScanInput from '@/components/barcode/BarcodeScanInput';
 import { listWarehouses } from '@/features/inventory/api';
 import { createDelivery, listDeliveries, listSalesOrders } from '@/features/sales/api';
 import type { Delivery } from '@/features/sales/types';
@@ -46,6 +47,22 @@ export default function DeliveriesPage() {
     });
     const { fields, replace } = useFieldArray({ control, name: 'lines' });
     const selectedOrderId = watch('sales_order_id');
+    const selectedOrder = deliverableOrders.find((o) => o.id === selectedOrderId);
+
+    const handleLineScan = (code: string) => {
+        const trimmed = code.trim().toLowerCase();
+        const matchedLine = selectedOrder?.lines.find((l) => l.item.sku.toLowerCase() === trimmed);
+        if (!matchedLine) {
+            message.warning(`No line on this sales order matches "${code}"`);
+            return;
+        }
+        const index = fields.findIndex((f) => f.sales_order_line_id === matchedLine.id);
+        if (index === -1) {
+            message.info(`${matchedLine.item.sku} has nothing left to deliver on this order.`);
+            return;
+        }
+        message.success(`Found line ${index + 1}: ${matchedLine.item.sku} — ${matchedLine.item.name}`);
+    };
 
     useEffect(() => {
         const order = deliverableOrders.find((o) => o.id === selectedOrderId);
@@ -167,6 +184,15 @@ export default function DeliveriesPage() {
                     </Form.Item>
 
                     <Typography.Text strong>Lines to Deliver</Typography.Text>
+                    {fields.length > 0 && (
+                        <Form.Item style={{ marginTop: 8, marginBottom: 8 }}>
+                            <BarcodeScanInput
+                                autoFocus={false}
+                                placeholder="Scan an item barcode to find its line…"
+                                onScan={handleLineScan}
+                            />
+                        </Form.Item>
+                    )}
                     {errors.lines?.root && (
                         <div style={{ color: '#ff4d4f', marginBottom: 8 }}>{errors.lines.root.message}</div>
                     )}

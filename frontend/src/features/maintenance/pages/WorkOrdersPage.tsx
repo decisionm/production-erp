@@ -1,9 +1,10 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, Descriptions, Drawer, Form, Input, InputNumber, message, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
+import BarcodeScanInput from '@/components/barcode/BarcodeScanInput';
 import { listEmployees } from '@/features/hrms/api';
 import { listItems, listWarehouses } from '@/features/inventory/api';
 import {
@@ -69,10 +70,21 @@ export default function WorkOrdersPage() {
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['maintenance', 'work-orders'] });
 
-    const { control, handleSubmit, reset, formState: { errors } } = useForm<CreateFormValues>({
+    const { control, handleSubmit, reset, setValue, formState: { errors } } = useForm<CreateFormValues>({
         resolver: zodResolver(createSchema),
         defaultValues: { type: 'corrective' },
     });
+
+    const handleAssetScan = (code: string) => {
+        const trimmed = code.trim().toLowerCase();
+        const matchedAsset = assets?.data.find((a) => a.code.toLowerCase() === trimmed);
+        if (!matchedAsset) {
+            message.warning(`No asset matches "${code}"`);
+            return;
+        }
+        setValue('asset_id', matchedAsset.id);
+        message.success(`Matched asset ${matchedAsset.code} — ${matchedAsset.name}`);
+    };
 
     const createMutation = useMutation({
         mutationFn: createMaintenanceWorkOrder,
@@ -206,6 +218,13 @@ export default function WorkOrdersPage() {
                 destroyOnHidden
             >
                 <Form layout="vertical">
+                    <Form.Item label="Scan Asset Barcode">
+                        <BarcodeScanInput
+                            autoFocus={modalOpen}
+                            placeholder="Scan an asset barcode…"
+                            onScan={handleAssetScan}
+                        />
+                    </Form.Item>
                     <Form.Item label="Asset" validateStatus={errors.asset_id ? 'error' : ''} help={errors.asset_id?.message}>
                         <Controller
                             name="asset_id"

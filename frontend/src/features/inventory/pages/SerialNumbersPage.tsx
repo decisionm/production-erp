@@ -1,9 +1,10 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, Drawer, Form, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
+import BarcodeDisplay from '@/components/barcode/BarcodeDisplay';
 import { createSerialNumber, getSerialNumberHistory, listItems, listSerialNumbers } from '@/features/inventory/api';
 import type { SerialNumber, SerialNumberStatus } from '@/features/inventory/types';
 
@@ -25,6 +26,7 @@ export default function SerialNumbersPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [historyItem, setHistoryItem] = useState<SerialNumber | null>(null);
     const [history, setHistory] = useState<SerialNumber | null>(null);
+    const [barcodeSerial, setBarcodeSerial] = useState<SerialNumber | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['inventory', 'serial-numbers'], queryFn: () => listSerialNumbers() });
@@ -85,16 +87,21 @@ export default function SerialNumbersPage() {
                     {
                         title: 'Actions',
                         render: (_, row) => (
-                            <Button
-                                size="small"
-                                onClick={() => {
-                                    setHistoryItem(row);
-                                    setHistory(null);
-                                    historyMutation.mutate(row.id);
-                                }}
-                            >
-                                View History
-                            </Button>
+                            <Space>
+                                <Button
+                                    size="small"
+                                    onClick={() => {
+                                        setHistoryItem(row);
+                                        setHistory(null);
+                                        historyMutation.mutate(row.id);
+                                    }}
+                                >
+                                    View History
+                                </Button>
+                                <Button size="small" onClick={() => setBarcodeSerial(row)}>
+                                    Barcode
+                                </Button>
+                            </Space>
                         ),
                     },
                 ]}
@@ -153,6 +160,18 @@ export default function SerialNumbersPage() {
                     />
                 )}
             </Modal>
+
+            <Drawer
+                title={`Barcode — ${barcodeSerial?.serial_number}`}
+                open={barcodeSerial !== null}
+                onClose={() => setBarcodeSerial(null)}
+                width={420}
+                destroyOnHidden
+            >
+                {barcodeSerial && (
+                    <BarcodeDisplay code={barcodeSerial.serial_number} label={barcodeSerial.item.sku} />
+                )}
+            </Drawer>
         </>
     );
 }

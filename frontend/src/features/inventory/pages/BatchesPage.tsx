@@ -1,9 +1,10 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, DatePicker, Form, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, DatePicker, Drawer, Form, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
+import BarcodeDisplay from '@/components/barcode/BarcodeDisplay';
 import { createBatch, getBatchLedger, listBatches, listItems } from '@/features/inventory/api';
 import type { Batch, BatchLedger } from '@/features/inventory/types';
 
@@ -20,6 +21,7 @@ export default function BatchesPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [ledgerBatch, setLedgerBatch] = useState<Batch | null>(null);
     const [ledger, setLedger] = useState<BatchLedger | null>(null);
+    const [barcodeBatch, setBarcodeBatch] = useState<Batch | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['inventory', 'batches'], queryFn: () => listBatches() });
@@ -74,16 +76,21 @@ export default function BatchesPage() {
                     {
                         title: 'Actions',
                         render: (_, row) => (
-                            <Button
-                                size="small"
-                                onClick={() => {
-                                    setLedgerBatch(row);
-                                    setLedger(null);
-                                    ledgerMutation.mutate(row.id);
-                                }}
-                            >
-                                View Ledger
-                            </Button>
+                            <Space>
+                                <Button
+                                    size="small"
+                                    onClick={() => {
+                                        setLedgerBatch(row);
+                                        setLedger(null);
+                                        ledgerMutation.mutate(row.id);
+                                    }}
+                                >
+                                    View Ledger
+                                </Button>
+                                <Button size="small" onClick={() => setBarcodeBatch(row)}>
+                                    Barcode
+                                </Button>
+                            </Space>
                         ),
                     },
                 ]}
@@ -185,6 +192,18 @@ export default function BatchesPage() {
                     </>
                 )}
             </Modal>
+
+            <Drawer
+                title={`Barcode — ${barcodeBatch?.batch_number}`}
+                open={barcodeBatch !== null}
+                onClose={() => setBarcodeBatch(null)}
+                width={420}
+                destroyOnHidden
+            >
+                {barcodeBatch && (
+                    <BarcodeDisplay code={barcodeBatch.batch_number} label={barcodeBatch.item.sku} />
+                )}
+            </Drawer>
         </>
     );
 }

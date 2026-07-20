@@ -1,10 +1,11 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, Drawer, Form, Input, InputNumber, message, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { z } from 'zod';
+import BarcodeScanInput from '@/components/barcode/BarcodeScanInput';
 import {
     listBatches,
     listItems,
@@ -89,6 +90,47 @@ export default function StockPage() {
         serialNumbers?.data
             .filter((s) => s.item.id === itemId && s.status === status)
             .map((s) => ({ value: s.id, label: s.serial_number })) ?? [];
+
+    // Serial numbers only count as a scan match while in the status that
+    // action can actually use — the same rule the dropdown pickers already
+    // follow (registered = receivable, in_stock = issuable/transferable).
+    // Checked in priority order most-specific first: a serial or batch
+    // match also tells us the item, but a bare SKU never tells us which
+    // batch/serial, so item-only has to be the fallback.
+    const resolveAndFillScan = (
+        code: string,
+        setValue: (name: 'item_id' | 'batch_id' | 'serial_number_id', value: number) => void,
+        serialStatus: 'registered' | 'in_stock',
+    ) => {
+        const trimmed = code.trim().toLowerCase();
+
+        const matchedSerial = serialNumbers?.data.find(
+            (s) => s.serial_number.toLowerCase() === trimmed && s.status === serialStatus,
+        );
+        if (matchedSerial) {
+            setValue('item_id', matchedSerial.item.id);
+            setValue('serial_number_id', matchedSerial.id);
+            message.success(`Matched serial ${matchedSerial.serial_number} — ${matchedSerial.item.sku}`);
+            return;
+        }
+
+        const matchedBatch = batches?.data.find((b) => b.batch_number.toLowerCase() === trimmed);
+        if (matchedBatch) {
+            setValue('item_id', matchedBatch.item.id);
+            setValue('batch_id', matchedBatch.id);
+            message.success(`Matched batch ${matchedBatch.batch_number} — ${matchedBatch.item.sku}`);
+            return;
+        }
+
+        const matchedItem = items?.data.find((i) => i.sku.toLowerCase() === trimmed);
+        if (matchedItem) {
+            setValue('item_id', matchedItem.id);
+            message.success(`Matched item ${matchedItem.sku}`);
+            return;
+        }
+
+        message.warning(`No item, batch, or serial number matches "${code}"`);
+    };
 
     const invalidateStock = () => {
         queryClient.invalidateQueries({ queryKey: ['inventory', 'stock-balances'] });
@@ -181,6 +223,12 @@ export default function StockPage() {
                 destroyOnHidden
             >
                 <Form layout="vertical">
+                    <Form.Item label="Scan Barcode (item, batch, or serial number)">
+                        <BarcodeScanInput
+                            autoFocus={activeModal === 'receipt'}
+                            onScan={(code) => resolveAndFillScan(code, receiptForm.setValue, 'registered')}
+                        />
+                    </Form.Item>
                     <Form.Item label="Item">
                         <Controller
                             name="item_id"
@@ -257,6 +305,12 @@ export default function StockPage() {
                 destroyOnHidden
             >
                 <Form layout="vertical">
+                    <Form.Item label="Scan Barcode (item, batch, or serial number)">
+                        <BarcodeScanInput
+                            autoFocus={activeModal === 'issue'}
+                            onScan={(code) => resolveAndFillScan(code, issueForm.setValue, 'in_stock')}
+                        />
+                    </Form.Item>
                     <Form.Item label="Item">
                         <Controller
                             name="item_id"
@@ -320,6 +374,12 @@ export default function StockPage() {
                 destroyOnHidden
             >
                 <Form layout="vertical">
+                    <Form.Item label="Scan Barcode (item, batch, or serial number)">
+                        <BarcodeScanInput
+                            autoFocus={activeModal === 'transfer'}
+                            onScan={(code) => resolveAndFillScan(code, transferForm.setValue, 'in_stock')}
+                        />
+                    </Form.Item>
                     <Form.Item label="Item">
                         <Controller
                             name="item_id"

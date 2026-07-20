@@ -1,10 +1,11 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Typography } from 'antd';
+import { Button, Drawer, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
+import BarcodeDisplay from '@/components/barcode/BarcodeDisplay';
 import { createItem, listItems, updateItem } from '@/features/inventory/api';
 import type { Item, ItemTrackingType } from '@/features/inventory/types';
 
@@ -29,6 +30,7 @@ const trackingTypeColor: Record<ItemTrackingType, string> = { none: 'default', b
 export default function ItemsPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [editingItem, setEditingItem] = useState<Item | null>(null);
+    const [barcodeItem, setBarcodeItem] = useState<Item | null>(null);
     const queryClient = useQueryClient();
     const navigate = useNavigate();
 
@@ -115,6 +117,9 @@ export default function ItemsPage() {
                             <Space>
                                 <Button size="small" onClick={() => navigate(`/inventory/items/${row.id}`)}>
                                     Details
+                                </Button>
+                                <Button size="small" onClick={() => setBarcodeItem(row)}>
+                                    Barcode
                                 </Button>
                                 <Button
                                     size="small"
@@ -227,6 +232,16 @@ export default function ItemsPage() {
                     </Form.Item>
                 </Form>
             </Modal>
+
+            <Drawer
+                title={`Barcode — ${barcodeItem?.sku}`}
+                open={barcodeItem !== null}
+                onClose={() => setBarcodeItem(null)}
+                width={420}
+                destroyOnHidden
+            >
+                {barcodeItem && <BarcodeDisplay code={barcodeItem.sku} label={barcodeItem.name} />}
+            </Drawer>
         </>
     );
 }

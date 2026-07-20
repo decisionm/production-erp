@@ -1,10 +1,11 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, DatePicker, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
+import BarcodeDisplay from '@/components/barcode/BarcodeDisplay';
 import { createAsset, listAssets, updateAsset } from '@/features/maintenance/api';
 import type { Asset, AssetStatus } from '@/features/maintenance/types';
 
@@ -38,6 +39,7 @@ const statusOptions: { value: AssetStatus; label: string }[] = [
 export default function AssetsPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
+    const [barcodeAsset, setBarcodeAsset] = useState<Asset | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['maintenance', 'assets'], queryFn: listAssets });
@@ -123,23 +125,28 @@ export default function AssetsPage() {
                     {
                         title: 'Actions',
                         render: (_, row) => (
-                            <Button
-                                size="small"
-                                onClick={() => {
-                                    setEditingAsset(row);
-                                    resetEdit({
-                                        code: row.code,
-                                        name: row.name,
-                                        category: row.category ?? '',
-                                        location: row.location ?? '',
-                                        purchase_date: row.purchase_date ?? undefined,
-                                        purchase_cost: row.purchase_cost ? Number(row.purchase_cost) : undefined,
-                                        status: row.status,
-                                    });
-                                }}
-                            >
-                                Edit
-                            </Button>
+                            <Space>
+                                <Button
+                                    size="small"
+                                    onClick={() => {
+                                        setEditingAsset(row);
+                                        resetEdit({
+                                            code: row.code,
+                                            name: row.name,
+                                            category: row.category ?? '',
+                                            location: row.location ?? '',
+                                            purchase_date: row.purchase_date ?? undefined,
+                                            purchase_cost: row.purchase_cost ? Number(row.purchase_cost) : undefined,
+                                            status: row.status,
+                                        });
+                                    }}
+                                >
+                                    Edit
+                                </Button>
+                                <Button size="small" onClick={() => setBarcodeAsset(row)}>
+                                    Barcode
+                                </Button>
+                            </Space>
                         ),
                     },
                 ]}
@@ -242,6 +249,16 @@ export default function AssetsPage() {
                     </Form.Item>
                 </Form>
             </Modal>
+
+            <Drawer
+                title={`Barcode — ${barcodeAsset?.code}`}
+                open={barcodeAsset !== null}
+                onClose={() => setBarcodeAsset(null)}
+                width={420}
+                destroyOnHidden
+            >
+                {barcodeAsset && <BarcodeDisplay code={barcodeAsset.code} label={barcodeAsset.name} />}
+            </Drawer>
         </>
     );
 }
