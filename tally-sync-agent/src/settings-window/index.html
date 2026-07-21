@@ -1,0 +1,75 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <title>Tally Sync Agent — Settings</title>
+    <style>
+        body {
+            font-family: -apple-system, "Segoe UI", Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+            color: #222;
+        }
+        h1 { font-size: 16px; margin: 0 0 16px; }
+        label { display: block; font-size: 12px; font-weight: 600; margin: 12px 0 4px; }
+        input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 6px 8px;
+            font-size: 13px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .hint { font-size: 11px; color: #777; margin-top: 2px; }
+        .row { display: flex; gap: 12px; }
+        .row > div { flex: 1; }
+        button {
+            margin-top: 20px;
+            padding: 8px 16px;
+            font-size: 13px;
+            background: #1677ff;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover { background: #0958d9; }
+        #status { margin-top: 10px; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <h1>Tally Sync Agent — Settings</h1>
+
+    <label for="cloudApiBaseUrl">Cloud API base URL</label>
+    <input id="cloudApiBaseUrl" placeholder="https://erpdemo.amrtech.in/api/v1" />
+    <div class="hint">Your ERP instance's API URL, ending in /api/v1</div>
+
+    <label for="cloudApiToken">Cloud API token</label>
+    <input id="cloudApiToken" type="password" placeholder="Sanctum token scoped to tally-sync:poll, tally-sync:report" />
+    <div class="hint">See the agent's README for how to issue this token</div>
+
+    <div class="row">
+        <div>
+            <label for="tallyHost">Tally host</label>
+            <input id="tallyHost" placeholder="127.0.0.1" />
+        </div>
+        <div>
+            <label for="tallyPort">Tally port</label>
+            <input id="tallyPort" type="number" placeholder="9000" />
+        </div>
+    </div>
+
+    <label for="tallyCompanyName">Tally company name</label>
+    <input id="tallyCompanyName" placeholder="Exactly as it appears in Tally" />
+    <div class="hint">Must match the company name in Tally exactly — it must also be loaded in the Tally UI</div>
+
+    <label for="pollIntervalSeconds">Poll interval (seconds)</label>
+    <input id="pollIntervalSeconds" type="number" placeholder="90" />
+
+    <button id="save">Save</button>
+    <div id="status"></div>
+
+    <script src="./renderer.js"></script>
+</body>
+</html>

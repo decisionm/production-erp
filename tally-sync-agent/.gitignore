@@ -1,0 +1,10 @@
+node_modules/
+dist/
+release/
+*.log
+
+# Real config contains the Sanctum token — never commit it. config.example.json
+# is the template; the app's actual settings live in the OS's per-user app-data
+# folder via electron-store, not in this repo at all, but guard against a
+# stray local config.json anyway.
+config.json

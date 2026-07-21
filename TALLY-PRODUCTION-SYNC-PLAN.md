@@ -1,3 +1,5 @@
+> **Superseded.** This document has been reconciled with `PET-Production-Tally-Sync-Brief.md` into **`TALLY-SYNC-MASTER-PLAN.md`**, which is now the single source of truth for this project. Kept here for history only — don't plan against this file.
+
 # Tally Production Sync — Implementation Plan
 
 Companion to `TECHNICAL-DOCS.md` §6 (Tally Integration architecture), `ERP-FEATURES.md`'s "Tally Integration (detail)" section, and `DEVELOPMENT-PLAN.md` (phase sequencing). This document plans one concrete next phase: closing the gap between when production actually happens on the shop floor and when it shows up as stock in Tally.

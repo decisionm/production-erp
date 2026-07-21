@@ -1,0 +1,79 @@
+# Tally Sync Agent
+
+The local Windows tray app from `TALLY-SYNC-MASTER-PLAN.md` §11/Phase 3 — bridges the ERP's cloud Tally sync queue to a local Tally installation's XML-HTTP gateway. Runs on-site, on the same machine as Tally (or one that can reach it on the LAN); the cloud ERP never talks to Tally directly.
+
+**Status: scaffold.** The infrastructure (tray, settings, polling loop, logging, Tally response parsing, packaging) is real and runs. The two XML voucher builders (Sales, Journal) are **best-effort templates, not yet validated against a real Tally instance** — see "What still needs a real Tally instance" below before trusting this in production.
+
+## Architecture
+
+```
+Tray app (this machine)
+  ├─ sync.ts        — poll loop: fetch pending → build XML → post to Tally → ack/fail back to cloud
+  ├─ cloudApi.ts     — GET /tally-sync/pending, POST .../ack, POST .../fail (Sanctum bearer token)
+  ├─ tally/client.ts — POST XML to http://<tallyHost>:<tallyPort>, parse response body for real result
+  ├─ tally/voucherBuilders/ — one file per Tally voucher type, dispatched by tally_voucher_type
+  ├─ tray.ts         — tray icon + menu (status, Sync Now, Pause, View Logs, Settings, Quit)
+  ├─ settings-window/ — small BrowserWindow, IPC bridge to read/write config
+  ├─ config.ts        — electron-store, persisted in the OS's per-user app-data folder
+  └─ logger.ts         — rotating file log (the audit trail the master plan's §5 requires)
+```
+
+## Setup
+
+```bash
+npm install
+npm run dev      # builds + launches in dev mode (works on macOS/Linux for development;
+                  # the app itself is Windows-only in practice, since that's where Tally runs)
+```
+
+On first launch with no config, the Settings window opens automatically. Fill in:
+
+| Field | Where it comes from |
+|---|---|
+| Cloud API base URL | Your ERP instance, e.g. `https://erpdemo.amrtech.in/api/v1` |
+| Cloud API token | A Sanctum token scoped to `tally-sync:poll` + `tally-sync:report` — see below |
+| Tally host / port | `127.0.0.1` / `9000` if the agent runs on the same machine as Tally |
+| Tally company name | Must match exactly what's shown in Tally, and that company must be loaded in the Tally UI |
+| Poll interval | Seconds between sync attempts — 90 is a reasonable default per the master plan's §3 |
+
+### Getting a Sanctum token
+
+There's no admin UI for this yet in the ERP (worth adding as a small follow-up backend task — an "Integrations" page that issues/revokes scoped tokens would remove this manual step). For now, on the ERP server:
+
+```bash
+php artisan tinker
+>>> $agent = \App\Models\User::where('email', 'agent@yourcompany.example')->first(); // create a dedicated user for this, don't reuse a real staff login
+>>> $agent->createToken('tally-sync-agent', ['tally-sync:poll', 'tally-sync:report'])->plainTextToken
+```
+
+Copy the printed token into the Settings window's "Cloud API token" field — it's shown once and can't be retrieved again.
+
+## Packaging for Windows
+
+```bash
+npm run package:win
+```
+
+Produces a signed-if-configured NSIS installer under `release/`. Code signing isn't set up in this scaffold — an unsigned installer will trigger a Windows SmartScreen warning on first run; get a code-signing certificate before real rollout if that matters to you (a self-published internal tool can often get away without one, but it's a rough first-run experience for non-technical staff).
+
+`app.setLoginItemSettings({ openAtLogin: true })` in `main.ts` handles auto-start — no separate Task Scheduler entry needed.
+
+## What still needs a real Tally instance to finish
+
+This is the honest gap — none of the following can be verified without a live Tally install, which wasn't available while scaffolding this:
+
+1. **Validate the XML voucher shape.** Per the master plan's §3 gotcha: create one real Sales voucher and one Journal voucher by hand in Tally, export each as XML (Gateway of Tally → Display/Export → the voucher → Export), and compare tag-by-tag against `src/tally/voucherBuilders/salesInvoice.ts` / `journalEntry.ts`. Fix whatever doesn't match — Tally's accepted structure varies a little by version, so treat the current builders as a starting skeleton, not a finished implementation. `salesInvoice.ts` in particular assumes a single "Sales Account" ledger and doesn't yet emit GST tax ledger entries (CGST/SGST/IGST) — those need the real ledger names from the target company's chart of accounts.
+2. **Confirm `tally/client.ts`'s response parsing is checking the right fields.** `postVoucherXml()` looks for `CREATED`/`ALTERED`/`ERRORS`/`LINEERROR` in Tally's response — log `rawResponse` on a real failure and adjust if the actual shape differs.
+3. **Add the Manufacturing Journal voucher builder** (master plan Phase 4) — once Phase 2's `ShiftProductionEntry` extension (material consumption, regrind/loss split, approval gate) ships on the cloud side, this agent needs a third builder file plus one new `case` in `voucherBuilders/index.ts`. No other agent code changes.
+4. **Masters pull (Phase 5)** — nothing here yet. Needs an AlterID-tracking poll loop (separate, slower interval than the production-sync loop) plus a new cloud-side upsert endpoint this agent posts to.
+
+## Known dependency notes
+
+`npm audit` will show a handful of high/critical advisories in `electron-builder`'s own dependency chain (`tar`/`cacache`/`node-gyp`, used only for packaging, never shipped in the built app). Electron itself is current and clean. Not fixed here since forcing `electron-builder` to a version that hasn't been verified to still produce a working Windows NSIS installer is a worse risk than the advisories themselves for build-time-only tooling — revisit if `npm audit` still flags it when you're actually preparing a real release.
+
+## Security reminders (from the master plan §5 — don't skip these)
+
+- Tally's port 9000 has **no authentication of its own**. Never expose it beyond localhost/LAN.
+- This agent should be the *only* thing that ever talks to port 9000 — the cloud app never does, and never should.
+- All real authentication lives on the agent→cloud hop (the Sanctum token above), not anywhere near Tally.
+- Keep the shift-close **approval gate** (master plan §4a) in place on the cloud side — it's the actual access-control checkpoint compensating for Tally's gateway having none.
