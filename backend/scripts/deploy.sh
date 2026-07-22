@@ -8,12 +8,14 @@
 #
 set -euo pipefail
 
-# The app requires PHP >= 8.3, but Hostinger's default CLI `php` is often an
-# older alt-php (8.2 here). Pick an 8.3/8.4 binary explicitly so composer and
-# artisan don't run under the wrong version. Override with PHP_BIN=... if needed.
+# The app's composer.lock resolves to packages requiring PHP >= 8.4.1 (symfony
+# 8.1, spatie/activitylog 5), while Hostinger's default CLI `php` is an older
+# alt-php (8.2 here). Pick an 8.4+ binary explicitly so composer and artisan
+# run under a compatible version. Override with PHP_BIN=... if needed.
 pick_php() {
   if [ -n "${PHP_BIN:-}" ]; then echo "$PHP_BIN"; return; fi
-  for c in php8.3 php8.4 /opt/alt/php83/usr/bin/php /opt/alt/php84/usr/bin/php; do
+  for c in php8.4 php8.5 /opt/alt/php84/usr/bin/php /opt/alt/php85/usr/bin/php \
+           php8.3 /opt/alt/php83/usr/bin/php; do
     if command -v "$c" >/dev/null 2>&1 || [ -x "$c" ]; then echo "$c"; return; fi
   done
   echo php   # fall back to default and let composer's platform check complain
