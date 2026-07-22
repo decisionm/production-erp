@@ -15,7 +15,10 @@ return new class extends Migration
             $table->decimal('amount', 15, 4);
             $table->timestamps();
 
-            $table->unique(['salary_structure_id', 'salary_component_id']);
+            // Explicit short name: the auto-generated
+            // "salary_structure_lines_salary_structure_id_salary_component_id_unique"
+            // exceeds MySQL's 64-char identifier limit (passes on SQLite, fails on MySQL).
+            $table->unique(['salary_structure_id', 'salary_component_id'], 'salary_structure_lines_unique');
         });
     }
 
