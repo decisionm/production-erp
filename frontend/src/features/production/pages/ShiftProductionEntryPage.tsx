@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Card, Col, Drawer, Form, Input, InputNumber, Modal, Radio, Row, Select, Space, Table, Tag, TimePicker, Typography } from 'antd';
+import { Button, Card, Checkbox, Col, Drawer, Form, Input, InputNumber, Modal, Radio, Row, Select, Space, Table, Tag, TimePicker, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { useMemo, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
@@ -14,6 +14,7 @@ import {
     createPowerInterruptionLog,
     createShiftStockCount,
     listMachineDowntimeLogs,
+    listMolds,
     listMoldChangeLogs,
     listPowerInterruptionLogs,
     listScrapReasons,
@@ -31,6 +32,14 @@ import type {
     ShiftProductionEntryStatus,
     WorkCenter,
 } from '@/features/production/types';
+
+// Combines a picked "HH:mm" with today's date into a full ISO datetime for
+// the API — shared by every backdate-capable modal below (Report Down,
+// Close Breakdown, Mold Change, Finish Mold Change). Mirrors the same
+// combine step used for Power Interruption.
+function combineWithToday(today: string, time: string): string {
+    return dayjs(`${today} ${time}`).toISOString();
+}
 
 const locationLabelOptions = [
     'Hoppers', 'Day Bin', 'Loose Bag', 'Store',
@@ -76,17 +85,35 @@ const completeBatchSchema = z.object({
 });
 type CompleteBatchFormValues = z.infer<typeof completeBatchSchema>;
 
-const reportDownSchema = z.object({ nature_of_problem: z.string().min(1, 'Describe the problem') });
+const reportDownSchema = z.object({
+    nature_of_problem: z.string().min(1, 'Describe the problem'),
+    backdate: z.boolean().optional(),
+    time: z.string().optional(),
+});
 type ReportDownFormValues = z.infer<typeof reportDownSchema>;
 
-const closeDowntimeSchema = z.object({ remedy: z.string().optional(), parts_changed: z.string().optional() });
+const closeDowntimeSchema = z.object({
+    remedy: z.string().optional(),
+    parts_changed: z.string().optional(),
+    backdate: z.boolean().optional(),
+    time: z.string().optional(),
+});
 type CloseDowntimeFormValues = z.infer<typeof closeDowntimeSchema>;
 
 const moldChangeSchema = z.object({
     changed_from_item_id: z.number().optional(),
-    changed_to_item_id: z.number({ error: 'Pick the next item' }),
+    changed_to_mold_id: z.number({ error: 'Pick the mold going in' }),
+    changed_to_item_id: z.number({ error: 'Pick the item it will produce' }),
+    backdate: z.boolean().optional(),
+    time: z.string().optional(),
 });
 type MoldChangeFormValues = z.infer<typeof moldChangeSchema>;
+
+const finishMoldChangeSchema = z.object({
+    backdate: z.boolean().optional(),
+    time: z.string().optional(),
+});
+type FinishMoldChangeFormValues = z.infer<typeof finishMoldChangeSchema>;
 
 const powerInterruptionSchema = z.object({
     from_time: z.string({ error: 'Start time is required' }),
@@ -108,6 +135,40 @@ const approvalColor: Record<ShiftProductionEntryStatus, string> = {
     synced: 'success',
     failed: 'error',
 };
+
+// Every "stopwatch" log (downtime open/close, mold change open/close)
+// defaults to stamping the current time — the common case of logging it
+// live. This is the shared override for the other real case: a supervisor
+// catching up on paperwork after the fact, where "now" would be wrong.
+function BackdateField({ control, backdateEnabled }: { control: any; backdateEnabled: boolean }) {
+    return (
+        <Form.Item style={{ marginBottom: backdateEnabled ? 8 : 0 }}>
+            <Controller
+                name="backdate"
+                control={control}
+                render={({ field }) => (
+                    <Checkbox checked={field.value ?? false} onChange={(e) => field.onChange(e.target.checked)}>
+                        This already happened — enter the actual time
+                    </Checkbox>
+                )}
+            />
+            {backdateEnabled && (
+                <Controller
+                    name="time"
+                    control={control}
+                    render={({ field }) => (
+                        <TimePicker
+                            format="HH:mm"
+                            style={{ width: '100%', marginTop: 8 }}
+                            value={field.value ? dayjs(field.value, 'HH:mm') : null}
+                            onChange={(_, timeString) => field.onChange((Array.isArray(timeString) ? timeString[0] : timeString) || undefined)}
+                        />
+                    )}
+                />
+            )}
+        </Form.Item>
+    );
+}
 
 export default function ShiftProductionEntryPage() {
     const [selectedShiftId, setSelectedShiftId] = useState<number | undefined>(undefined);
@@ -149,9 +210,12 @@ export default function ShiftProductionEntryPage() {
         queryKey: ['production', 'power-interruption-logs'],
         queryFn: listPowerInterruptionLogs,
     });
+    const { data: molds } = useQuery({ queryKey: ['production', 'molds'], queryFn: listMolds });
 
     const shiftOptions = shifts?.data.filter((s) => s.is_active).map((s) => ({ value: s.id, label: s.name })) ?? [];
     const itemOptions = items?.data.map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];
+    const moldOptions =
+        molds?.data.filter((m) => m.status === 'active').map((m) => ({ value: m.id, label: `${m.code} — ${m.name}` })) ?? [];
     const warehouseOptions = warehouses?.data.map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })) ?? [];
     const scrapReasonOptions = scrapReasons?.data.map((r) => ({ value: r.id, label: `${r.code} — ${r.name}` })) ?? [];
     const employeeOptions = employees?.data.map((e) => ({ value: e.id, label: `${e.employee_code} — ${e.name}` })) ?? [];
@@ -257,10 +321,16 @@ export default function ShiftProductionEntryPage() {
     });
 
     const reportDownForm = useForm<ReportDownFormValues>({ resolver: zodResolver(reportDownSchema) });
+    const reportDownBackdate = reportDownForm.watch('backdate');
     const reportDownMutation = useMutation({
         mutationFn: (values: ReportDownFormValues) => {
             if (!reportingDownMachine || !effectiveShiftId) throw new Error('Missing machine or shift');
-            return openDowntimeLog({ ...values, work_center_id: reportingDownMachine.id, shift_id: effectiveShiftId });
+            return openDowntimeLog({
+                nature_of_problem: values.nature_of_problem,
+                work_center_id: reportingDownMachine.id,
+                shift_id: effectiveShiftId,
+                from_time: values.backdate && values.time ? combineWithToday(today, values.time) : undefined,
+            });
         },
         onSuccess: () => {
             invalidateDowntime();
@@ -276,10 +346,15 @@ export default function ShiftProductionEntryPage() {
     });
 
     const closeDowntimeForm = useForm<CloseDowntimeFormValues>({ resolver: zodResolver(closeDowntimeSchema) });
+    const closeDowntimeBackdate = closeDowntimeForm.watch('backdate');
     const closeDowntimeMutation = useMutation({
         mutationFn: (values: CloseDowntimeFormValues) => {
             if (!closingDowntimeLog) throw new Error('No breakdown selected');
-            return closeDowntimeLog(closingDowntimeLog.id, values);
+            return closeDowntimeLog(closingDowntimeLog.id, {
+                remedy: values.remedy,
+                parts_changed: values.parts_changed,
+                to_time: values.backdate && values.time ? combineWithToday(today, values.time) : undefined,
+            });
         },
         onSuccess: () => {
             invalidateDowntime();
@@ -295,10 +370,18 @@ export default function ShiftProductionEntryPage() {
     });
 
     const moldChangeForm = useForm<MoldChangeFormValues>({ resolver: zodResolver(moldChangeSchema) });
+    const moldChangeBackdate = moldChangeForm.watch('backdate');
     const moldChangeMutation = useMutation({
         mutationFn: (values: MoldChangeFormValues) => {
             if (!startingMoldChangeMachine || !effectiveShiftId) throw new Error('Missing machine or shift');
-            return openMoldChangeLog({ ...values, work_center_id: startingMoldChangeMachine.id, shift_id: effectiveShiftId });
+            return openMoldChangeLog({
+                changed_from_item_id: values.changed_from_item_id,
+                changed_to_mold_id: values.changed_to_mold_id,
+                changed_to_item_id: values.changed_to_item_id,
+                work_center_id: startingMoldChangeMachine.id,
+                shift_id: effectiveShiftId,
+                from_time: values.backdate && values.time ? combineWithToday(today, values.time) : undefined,
+            });
         },
         onSuccess: () => {
             invalidateMoldChange();
@@ -313,11 +396,20 @@ export default function ShiftProductionEntryPage() {
         },
     });
 
+    const finishMoldChangeForm = useForm<FinishMoldChangeFormValues>({ resolver: zodResolver(finishMoldChangeSchema) });
+    const finishMoldChangeBackdate = finishMoldChangeForm.watch('backdate');
     const finishMoldChangeMutation = useMutation({
-        mutationFn: (id: number) => closeMoldChangeLog(id),
+        mutationFn: (values: FinishMoldChangeFormValues) => {
+            if (!finishingMoldChangeLog) throw new Error('No mold change selected');
+            return closeMoldChangeLog(
+                finishingMoldChangeLog.id,
+                values.backdate && values.time ? combineWithToday(today, values.time) : undefined,
+            );
+        },
         onSuccess: () => {
             invalidateMoldChange();
             setFinishingMoldChangeLog(null);
+            finishMoldChangeForm.reset();
         },
         onError: (error: any) => {
             Modal.error({
@@ -739,6 +831,7 @@ export default function ShiftProductionEntryPage() {
                             render={({ field }) => <Input {...field} size="large" placeholder="e.g. Heater fault" autoFocus />}
                         />
                     </Form.Item>
+                    <BackdateField control={reportDownForm.control} backdateEnabled={!!reportDownBackdate} />
                 </Form>
             </Modal>
 
@@ -761,6 +854,7 @@ export default function ShiftProductionEntryPage() {
                     <Form.Item label="Parts Changed (optional)">
                         <Controller name="parts_changed" control={closeDowntimeForm.control} render={({ field }) => <Input {...field} />} />
                     </Form.Item>
+                    <BackdateField control={closeDowntimeForm.control} backdateEnabled={!!closeDowntimeBackdate} />
                 </Form>
             </Modal>
 
@@ -782,28 +876,47 @@ export default function ShiftProductionEntryPage() {
                         />
                     </Form.Item>
                     <Form.Item
-                        label="Changed To"
+                        label="Mold Going In"
+                        validateStatus={moldChangeForm.formState.errors.changed_to_mold_id ? 'error' : ''}
+                        help={moldChangeForm.formState.errors.changed_to_mold_id?.message ?? (moldOptions.length === 0 ? 'No active molds — add one on the Molds page.' : undefined)}
+                    >
+                        <Controller
+                            name="changed_to_mold_id"
+                            control={moldChangeForm.control}
+                            render={({ field }) => <Select {...field} size="large" options={moldOptions} showSearch optionFilterProp="label" placeholder="Which mold…" />}
+                        />
+                    </Form.Item>
+                    <Form.Item
+                        label="Item It Will Produce"
                         validateStatus={moldChangeForm.formState.errors.changed_to_item_id ? 'error' : ''}
                         help={moldChangeForm.formState.errors.changed_to_item_id?.message}
                     >
                         <Controller
                             name="changed_to_item_id"
                             control={moldChangeForm.control}
-                            render={({ field }) => <Select {...field} size="large" options={itemOptions} showSearch optionFilterProp="label" placeholder="Next item…" />}
+                            render={({ field }) => <Select {...field} size="large" options={itemOptions} showSearch optionFilterProp="label" placeholder="Which item/colour…" />}
                         />
                     </Form.Item>
+                    <BackdateField control={moldChangeForm.control} backdateEnabled={!!moldChangeBackdate} />
                 </Form>
             </Modal>
 
             <Modal
+                maskClosable={false}
                 title={`Finish Mold Change — ${finishingMoldChangeLog?.work_center.name}`}
                 open={finishingMoldChangeLog !== null}
                 onCancel={() => setFinishingMoldChangeLog(null)}
-                onOk={() => finishingMoldChangeLog && finishMoldChangeMutation.mutate(finishingMoldChangeLog.id)}
+                onOk={finishMoldChangeForm.handleSubmit((values) => finishMoldChangeMutation.mutate(values))}
                 confirmLoading={finishMoldChangeMutation.isPending}
                 okText="Finish"
+                destroyOnHidden
             >
-                Ready to start <strong>{finishingMoldChangeLog?.changed_to_item?.sku}</strong>? This stops the mold-change clock.
+                <Typography.Paragraph>
+                    Ready to start <strong>{finishingMoldChangeLog?.changed_to_item?.sku}</strong>? This stops the mold-change clock.
+                </Typography.Paragraph>
+                <Form layout="vertical">
+                    <BackdateField control={finishMoldChangeForm.control} backdateEnabled={!!finishMoldChangeBackdate} />
+                </Form>
             </Modal>
 
             <Modal

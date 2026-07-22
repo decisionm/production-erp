@@ -18,6 +18,10 @@ class OpenDowntimeLogRequest extends FormRequest
             'shift_id' => ['required', 'integer', 'exists:shifts,id'],
             'production_date' => ['nullable', 'date'],
             'nature_of_problem' => ['required', 'string', 'max:255'],
+            // Optional — omit to stamp "now" (logging it live); provide to
+            // backdate a breakdown someone's only now getting around to
+            // reporting.
+            'from_time' => ['nullable', 'date'],
         ];
     }
 }

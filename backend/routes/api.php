@@ -43,6 +43,7 @@ use App\Modules\Production\Http\Controllers\BomController;
 use App\Modules\Production\Http\Controllers\CapacityPlanController;
 use App\Modules\Production\Http\Controllers\MachineDowntimeLogController;
 use App\Modules\Production\Http\Controllers\MoldChangeLogController;
+use App\Modules\Production\Http\Controllers\MoldController;
 use App\Modules\Production\Http\Controllers\MrpController;
 use App\Modules\Production\Http\Controllers\PowerInterruptionLogController;
 use App\Modules\Production\Http\Controllers\ReworkOrderController;
@@ -299,6 +300,8 @@ Route::prefix('v1')->group(function () {
             Route::get('machine-downtime-logs', [MachineDowntimeLogController::class, 'index']);
             Route::post('machine-downtime-logs', [MachineDowntimeLogController::class, 'open']);
             Route::post('machine-downtime-logs/{machine_downtime_log}/close', [MachineDowntimeLogController::class, 'close']);
+
+            Route::apiResource('molds', MoldController::class)->only(['index', 'store', 'update']);
 
             Route::get('mold-change-logs', [MoldChangeLogController::class, 'index']);
             Route::post('mold-change-logs', [MoldChangeLogController::class, 'open']);

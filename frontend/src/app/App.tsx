@@ -19,6 +19,7 @@ import MaintenanceWorkOrdersPage from '@/features/maintenance/pages/WorkOrdersPa
 import ApproveProductionPage from '@/features/production/pages/ApproveProductionPage';
 import BomsPage from '@/features/production/pages/BomsPage';
 import CapacityPlanPage from '@/features/production/pages/CapacityPlanPage';
+import MoldsPage from '@/features/production/pages/MoldsPage';
 import MrpPage from '@/features/production/pages/MrpPage';
 import ReworkOrdersPage from '@/features/production/pages/ReworkOrdersPage';
 import RoutingsPage from '@/features/production/pages/RoutingsPage';
@@ -93,6 +94,7 @@ export default function App() {
                                     <Route path="/production/capacity" element={<CapacityPlanPage />} />
                                     <Route path="/production/subcontract-orders" element={<SubcontractOrdersPage />} />
                                     <Route path="/production/scrap-reasons" element={<ScrapReasonsPage />} />
+                                    <Route path="/production/molds" element={<MoldsPage />} />
                                     <Route path="/production/shifts" element={<ShiftsPage />} />
                                     <Route path="/production/shift-production" element={<ShiftProductionEntryPage />} />
                                     <Route path="/production/shift-summary" element={<ShiftSummaryPage />} />

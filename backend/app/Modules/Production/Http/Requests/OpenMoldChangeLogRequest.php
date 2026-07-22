@@ -19,6 +19,8 @@ class OpenMoldChangeLogRequest extends FormRequest
             'production_date' => ['nullable', 'date'],
             'changed_from_item_id' => ['nullable', 'integer', 'exists:items,id'],
             'changed_to_item_id' => ['required', 'integer', 'exists:items,id'],
+            'changed_to_mold_id' => ['required', 'integer', 'exists:molds,id'],
+            'from_time' => ['nullable', 'date'],
         ];
     }
 }

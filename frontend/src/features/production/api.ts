@@ -4,7 +4,9 @@ import type {
     Bom,
     CapacityWorkCenterLoad,
     MachineDowntimeLog,
+    Mold,
     MoldChangeLog,
+    MoldStatus,
     MrpNetRequirement,
     PowerInterruptionLog,
     ReworkOrder,
@@ -272,7 +274,8 @@ export async function saveShiftSummary(payload: SaveShiftSummaryPayload): Promis
     return data.data;
 }
 
-export async function getShiftKpiReport(shiftId: number, productionDate: string): Promise<ShiftKpiReport> {
+// shiftId omitted means "every shift that ran this date" — the day-wide rollup.
+export async function getShiftKpiReport(shiftId: number | undefined, productionDate: string): Promise<ShiftKpiReport> {
     const { data } = await api.get<{ data: ShiftKpiReport }>('/production/shift-summaries/report', {
         params: { shift_id: shiftId, production_date: productionDate },
     });
@@ -320,6 +323,7 @@ export interface OpenDowntimeLogPayload {
     shift_id: number;
     production_date?: string;
     nature_of_problem: string;
+    from_time?: string;
 }
 
 export async function openDowntimeLog(payload: OpenDowntimeLogPayload): Promise<MachineDowntimeLog> {
@@ -329,7 +333,7 @@ export async function openDowntimeLog(payload: OpenDowntimeLogPayload): Promise<
 
 export async function closeDowntimeLog(
     id: number,
-    payload: { remedy?: string; parts_changed?: string },
+    payload: { remedy?: string; parts_changed?: string; to_time?: string },
 ): Promise<MachineDowntimeLog> {
     const { data } = await api.post<{ data: MachineDowntimeLog }>(`/production/machine-downtime-logs/${id}/close`, payload);
     return data.data;
@@ -346,6 +350,8 @@ export interface OpenMoldChangeLogPayload {
     production_date?: string;
     changed_from_item_id?: number;
     changed_to_item_id: number;
+    changed_to_mold_id: number;
+    from_time?: string;
 }
 
 export async function openMoldChangeLog(payload: OpenMoldChangeLogPayload): Promise<MoldChangeLog> {
@@ -353,8 +359,35 @@ export async function openMoldChangeLog(payload: OpenMoldChangeLogPayload): Prom
     return data.data;
 }
 
-export async function closeMoldChangeLog(id: number): Promise<MoldChangeLog> {
-    const { data } = await api.post<{ data: MoldChangeLog }>(`/production/mold-change-logs/${id}/close`);
+export async function closeMoldChangeLog(id: number, toTime?: string): Promise<MoldChangeLog> {
+    const { data } = await api.post<{ data: MoldChangeLog }>(`/production/mold-change-logs/${id}/close`, {
+        to_time: toTime,
+    });
+    return data.data;
+}
+
+export async function listMolds(): Promise<Paginated<Mold>> {
+    const { data } = await api.get<Paginated<Mold>>('/production/molds');
+    return data;
+}
+
+export interface CreateMoldPayload {
+    code: string;
+    name: string;
+    cavity_count?: number;
+    status?: MoldStatus;
+    notes?: string;
+}
+
+export async function createMold(payload: CreateMoldPayload): Promise<Mold> {
+    const { data } = await api.post<{ data: Mold }>('/production/molds', payload);
+    return data.data;
+}
+
+export type UpdateMoldPayload = Partial<CreateMoldPayload>;
+
+export async function updateMold(id: number, payload: UpdateMoldPayload): Promise<Mold> {
+    const { data } = await api.put<{ data: Mold }>(`/production/molds/${id}`, payload);
     return data.data;
 }
 

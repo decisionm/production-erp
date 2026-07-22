@@ -23,12 +23,16 @@ class ShiftSummaryController extends Controller
     public function report(Request $request): JsonResponse
     {
         $request->validate([
-            'shift_id' => ['required', 'integer', 'exists:shifts,id'],
+            // Omitted shift_id means "every shift that ran this date" —
+            // the day-wide rollup.
+            'shift_id' => ['nullable', 'integer', 'exists:shifts,id'],
             'production_date' => ['required', 'date'],
         ]);
 
+        $shiftId = $request->query('shift_id') ? (int) $request->query('shift_id') : null;
+
         return response()->json([
-            'data' => $this->summaries->report((int) $request->query('shift_id'), $request->query('production_date')),
+            'data' => $this->summaries->report($shiftId, $request->query('production_date')),
         ]);
     }
 }

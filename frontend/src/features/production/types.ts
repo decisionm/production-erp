@@ -144,6 +144,18 @@ export interface MachineDowntimeLog {
     status: LogStatus;
 }
 
+export type MoldStatus = 'active' | 'under_repair' | 'retired';
+
+export interface Mold {
+    id: number;
+    code: string;
+    name: string;
+    cavity_count: number | null;
+    status: MoldStatus;
+    notes: string | null;
+    created_at: string;
+}
+
 export interface MoldChangeLog {
     id: number;
     work_center: WorkCenter;
@@ -151,6 +163,7 @@ export interface MoldChangeLog {
     production_date: string;
     changed_from_item: Item | null;
     changed_to_item: Item;
+    changed_to_mold: Mold | null;
     from_time: string;
     to_time: string | null;
     total_minutes: string | null;
@@ -175,8 +188,55 @@ export interface ShiftStockCount {
     quantity_kg: string;
 }
 
+export interface ShiftKpiItemBreakdown {
+    item: { id: number; sku: string; name: string };
+    batches: number;
+    quantity_produced: string;
+    quantity_produced_kg: string;
+    quantity_rejected: string;
+    quantity_rejection_kg: string;
+}
+
+export interface ShiftKpiDowntimeLog {
+    id: number;
+    work_center: string;
+    nature_of_problem: string;
+    remedy: string | null;
+    parts_changed: string | null;
+    from_time: string;
+    to_time: string | null;
+    total_minutes: string | null;
+    status: LogStatus;
+}
+
+export interface ShiftKpiMoldChangeLog {
+    id: number;
+    work_center: string;
+    changed_from: string | null;
+    changed_to: string;
+    changed_to_mold: string | null;
+    from_time: string;
+    to_time: string | null;
+    total_minutes: string | null;
+    status: LogStatus;
+}
+
+export interface ShiftKpiPowerInterruptionLog {
+    id: number;
+    from_time: string;
+    to_time: string;
+    idle_hours: string;
+}
+
+export interface ShiftKpiStockCount {
+    id: number;
+    location_label: string;
+    item: { id: number; sku: string; name: string };
+    quantity_kg: string;
+}
+
 export interface ShiftKpiReport {
-    shift_id: number;
+    shift_id: number | null;
     production_date: string;
     target_production_kg: string | null;
     actual_production_kg: string;
@@ -190,8 +250,14 @@ export interface ShiftKpiReport {
     no_of_mold_changes: number;
     power_consumption_units: string | null;
     unit_per_kg: number | null;
+    power_interruption_hours: string;
     remarks: string | null;
     supervisor: Employee | null;
+    items_manufactured: ShiftKpiItemBreakdown[];
+    downtime_logs: ShiftKpiDowntimeLog[];
+    mold_change_logs: ShiftKpiMoldChangeLog[];
+    power_interruption_logs: ShiftKpiPowerInterruptionLog[];
+    stock_counts: ShiftKpiStockCount[];
 }
 
 export interface WorkOrderScrap {

@@ -3,6 +3,7 @@
 namespace App\Modules\Production\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Production\Http\Requests\CloseMoldChangeLogRequest;
 use App\Modules\Production\Http\Requests\OpenMoldChangeLogRequest;
 use App\Modules\Production\Http\Resources\MoldChangeLogResource;
 use App\Modules\Production\Models\MoldChangeLog;
@@ -25,8 +26,8 @@ class MoldChangeLogController extends Controller
         );
     }
 
-    public function close(MoldChangeLog $moldChangeLog): MoldChangeLogResource
+    public function close(CloseMoldChangeLogRequest $request, MoldChangeLog $moldChangeLog): MoldChangeLogResource
     {
-        return MoldChangeLogResource::make($this->moldChangeLogs->close($moldChangeLog));
+        return MoldChangeLogResource::make($this->moldChangeLogs->close($moldChangeLog, $request->validated()));
     }
 }

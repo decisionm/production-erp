@@ -3,8 +3,10 @@
 namespace App\Modules\Production\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
+use App\Exceptions\InvalidTimeRangeException;
 use App\Modules\Production\Models\Enums\LogStatus;
 use App\Modules\Production\Models\MachineDowntimeLog;
+use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 
@@ -15,6 +17,10 @@ use Illuminate\Support\Facades\DB;
  * way as ShiftProductionEntryService — several people can act on any of
  * the floor's machines ad hoc, so two people reporting/closing the same
  * breakdown at once must fail loudly, not double-log it.
+ *
+ * from_time/to_time default to "now" but accept an explicit override —
+ * a supervisor sometimes logs a breakdown after it's already been fixed,
+ * not live as it happens.
  */
 class MachineDowntimeLogService
 {
@@ -28,7 +34,7 @@ class MachineDowntimeLogService
     }
 
     /**
-     * @param  array{work_center_id: int, shift_id: int, production_date?: string, nature_of_problem: string}  $data
+     * @param  array{work_center_id: int, shift_id: int, production_date?: string, nature_of_problem: string, from_time?: string}  $data
      */
     public function open(array $data, ?int $createdBy): MachineDowntimeLog
     {
@@ -48,7 +54,7 @@ class MachineDowntimeLogService
                 'shift_id' => $data['shift_id'],
                 'production_date' => $data['production_date'] ?? now()->toDateString(),
                 'nature_of_problem' => $data['nature_of_problem'],
-                'from_time' => now(),
+                'from_time' => isset($data['from_time']) ? Carbon::parse($data['from_time']) : now(),
                 'status' => LogStatus::Open,
                 'created_by' => $createdBy,
             ]);
@@ -58,11 +64,16 @@ class MachineDowntimeLogService
     }
 
     /**
-     * @param  array{remedy?: string, parts_changed?: string}  $data
+     * @param  array{remedy?: string, parts_changed?: string, to_time?: string}  $data
      */
     public function close(MachineDowntimeLog $log, array $data): MachineDowntimeLog
     {
-        $toTime = now();
+        $toTime = isset($data['to_time']) ? Carbon::parse($data['to_time']) : now();
+
+        if ($toTime->lessThanOrEqualTo($log->from_time)) {
+            throw InvalidTimeRangeException::make('Fixed time');
+        }
+
         $totalMinutes = bcdiv((string) $log->from_time->diffInSeconds($toTime), '60', 2);
 
         $affected = MachineDowntimeLog::query()
