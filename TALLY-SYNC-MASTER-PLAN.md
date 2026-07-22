@@ -12,7 +12,9 @@ Companion to `TECHNICAL-DOCS.md` §6 (base Tally integration architecture alread
 |---|---|
 | Outbound Tally queue (Sales Invoice, Journal Entry → `tally_sync_entries`) | **Built** — `App\Modules\TallySync`, one-way, cloud-side only |
 | Shift / Machine master data (`Shift`, seeded Morning/Afternoon/Night) | **Built** |
-| Fast shift-floor capture (`ShiftProductionEntry`, "Log Production" page) | **Built** — see §4 for what it does and doesn't yet cover |
+| Batch-lifecycle shop-floor capture (`ShiftProductionEntry` start/complete, Shift Floor page, approval gate) | **Built** — Phase 2a, see §10 |
+| Idle Time Report (downtime, mold-change, power interruption, stock count logging) | **Built** — Phase 2b, see §10 |
+| Shift KPI Summary (computed rollup: Efficiency %, Rejection %, Machines Down, Idle Time, Mold Changes) | **Built** — Phase 2a/2b, see §10 |
 | Local agent (tray app) | **Scaffolded** — `tally-sync-agent/` (Electron/TS). Poller, cloud API client, Tally response parsing, tray/settings UI, and packaging all work end-to-end. XML voucher builders are unvalidated templates — see that project's README |
 | Production → Tally voucher sync | **Not started** — blocked on Phase 2 (real data model) and real-Tally validation of the agent's XML |
 | Masters pull from Tally (items, godowns) | **Not started** |
@@ -283,9 +285,150 @@ Interview the accountant. Document every rule: how regrind is credited back, how
 **Exit criteria:** a written spec of the wastage/regrind/valuation logic that the accountant has reviewed and signed off as matching what they currently do by hand.
 
 ### Phase 2 — Real production data model + approval gate + dashboard
-Extend `ShiftProductionEntry` per §4's schema sketch (material consumption, regrind/non-recoverable split, batch number, `pending/approved/synced` status). Build the accountant's one-click approval screen. Build the dashboard (§7) reading straight from our DB — ships value independent of whether Tally sync exists yet.
 
-**Exit criteria:** a shift's production, once approved, has a fully-computed record (resin wastage, regrind credit, cost) ready to become a Tally voucher — with nothing yet actually reaching Tally.
+Expanded after checking the actual paper forms in use (`SWAASHPET POLYMERS PVT. LTD.` Production Report + Idle Time Report) against the schema — the gap was bigger than the original sketch. Split into two sub-phases: 2a extends what's already built and is the more urgent piece; 2b is a genuinely new data domain (downtime/changeover tracking) that didn't exist in this plan until the paper forms were checked.
+
+**Companion doc:** `PRODUCTION-SUPERVISOR-UX-PLAN.md` covers the frontend shape of Phase 2 in detail — the mobile-first screen-by-screen flow, the batch lifecycle behind "production is entered once a batch completes," the read-only/computed field rules, and (§2 of that doc) how the design handles multiple supervisors/helpers working the floor ad hoc with no fixed machine assignment. The schema notes below have been updated to match its two backend-relevant conclusions: a batch-lifecycle status on `shift_production_entries`, and concurrency guards + `created_by` on every Phase 2b log.
+
+#### Phase 2a — Match the Production Report + shift KPI summary
+
+**Schema:**
+
+```
+items  (extend)
+  + nominal_weight_grams   decimal, nullable
+    — the "WT" column on the paper form; needed for the resin-wastage
+      formula (§4) and to derive Kg figures from unit counts.
+
+shift_production_entries  (extend)
+  + batch_status              in_progress | completed   (default: in_progress)
+    — the batch lifecycle, distinct from `status` below. A row is created at
+      "Start Batch" (work_center_id + item_id only, quantities null,
+      in_progress) and filled in + flipped to completed at "Complete Batch" —
+      see UX doc §1. Nothing here changes the existing fact that this table
+      already allows multiple rows per machine per shift (no unique
+      constraint forces one-row-per-machine) — that's exactly what's needed
+      now that one machine can run several different items per shift,
+      separated by mold changes (UX doc §1).
+  + batch_number              string, nullable
+  + quantity_produced_kg      decimal, nullable   — Kg alongside the existing Nos figure
+  + quantity_rejection_kg     decimal, nullable   — ditto for rejection
+  + nos_per_tray, no_of_trays, nos_per_box, no_of_box   — packing counts, all integer/nullable
+  + supervisor_signed_by      → employees, nullable, audit-trail only (see note below)
+  + supervisor_signed_at      nullable
+  + plant_manager_signed_by   → employees, nullable, audit-trail only
+  + plant_manager_signed_at   nullable
+  + status                    pending | approved | synced | failed   (default: pending)
+    — separate concern from `batch_status` above: this is the accountant's
+      Tally-sync approval workflow, not whether the batch itself is done running.
+  + approved_by               → users, nullable   — the accountant's sign-off, the real gate (§4a/§5)
+  + approved_at                nullable
+
+shift_material_consumptions   (new — one row per raw material/masterbatch issued against one entry)
+  id, shift_production_entry_id → shift_production_entries
+  item_id            → items   (resin or masterbatch — already separate Items, e.g. MB-CLEAR/MB-BLUE)
+  quantity_issued_kg  decimal
+
+shift_scraps   (new — replaces the bare quantity_scrap/scrap_reason_id pair)
+  id, shift_production_entry_id → shift_production_entries
+  type              rejected_finished_good | lumps    — see open question below, needs Phase 1.5 confirmation
+  quantity_nos       decimal, nullable
+  quantity_kg        decimal, nullable
+  scrap_reason_id    → scrap_reasons, nullable
+
+shift_summaries   (new — one row per shift, plant-wide, not per machine)
+  id, shift_id, production_date, supervisor_id → employees
+  target_production_kg      decimal, nullable   — genuinely new, no existing source (§ shift KPI analysis)
+  power_consumption_units    decimal, nullable   — genuinely new; distinct from Form 2's power *interruption* log
+  remarks                    text, nullable
+  created_by                 → users
+    — with no fixed lead supervisor per shift (confirmed: floor staff work
+      any machine ad hoc, not a zone assignment), this is whoever taps
+      "Close Shift," gated behind a permission rather than open to any
+      shift-floor login — see UX doc §2. `supervisor_id` above is a manual
+      pick at shift start, independent of who ends up closing it.
+```
+
+**Note on the two floor-level signatures:** the paper form has *three* sign-off points (Production Supervisor, Plant Manager, then implicitly the accountant before anything reaches Tally). v1 records supervisor sign-off as **implicit** — whoever is logged in and submits an entry *is* that sign-off, no separate step. Plant Manager sign-off was originally modeled as audit-trail only too, but now reads more like a real second gate: the Plant Manager is a *different* person reviewing *after* the fact, which is a genuine second approval, not just a record. Revised open question (see §12): confirm whether Plant Manager review should block a shift from reaching the accountant's queue (Supervisor submits → Plant Manager approves → Accountant approves → syncs to Tally), or stay non-blocking as originally assumed. Either way, the accountant's approval remains the one hard gate before Tally sync, per §4a/§5.
+
+**Backend:**
+- `ShiftProductionEntryService::create()` extended to accept the new fields and write the `shift_material_consumptions` / `shift_scraps` child rows in the same transaction as the entry (same pattern `WorkOrderService` already uses for its own materials/scraps).
+- New `startBatch()` / `completeBatch()` methods driving `batch_status`. Both need a **concurrency guard**, not just a status field: the write is a single atomic `UPDATE ... WHERE batch_status = 'expected_prior_value'` (or an `updated_at` check) inside the transaction, so a second simultaneous tap on the same machine (e.g. two people both hitting "Complete Batch" on the same entry) affects zero rows and the service returns a clear "already completed by X" instead of a silent double-write or a lost update. Real requirement, not a nice-to-have — confirmed multiple people work any of the 10 machines ad hoc in one shift (UX doc §2), so this isn't a rare edge case.
+- New `submitForApproval()` / `approve()` / `reject()` methods — status transitions, `approve()` is the only path that will eventually trigger Phase 4's Tally enqueue.
+- New `ShiftSummaryService` — CRUD for the once-per-shift record, plus a `report(date, shiftId)` method computing: Actual Production Kg / Rejection Kg (summed from that shift's entries), Efficiency % and Rejection % and Net Good Output (arithmetic), Machines Running/Down + Idle Time + Mold Changes (from Phase 2b's tables once they exist — `0`/empty until then), Unit/Kg (from `power_consumption_units` ÷ actual Kg). `closeShift()` gated behind a dedicated permission (e.g. `production.shift.close`) rather than open to any shift-floor login, per UX doc §2.
+- New endpoints: start batch, complete batch, pending-approval list, approve, reject, shift summary CRUD, close shift, shift KPI report.
+
+**Frontend:**
+- Items page: add "Nominal Weight (g)" field to the create/edit form.
+- "Log Production" page: add Batch Number, packing counts, a resin/masterbatch consumption line-entry section (mirrors how Work Orders' material lines already work), Lumps quantity. Kg figures can auto-compute from `quantity_produced × nominal_weight_grams`, with the operator able to override.
+- New "Approve Production" page (the accountant's queue — per-entry approve/reject, matches the master plan's original §4a design).
+- New "Shift Summary" page — supervisor enters Target Kg / Power Units / Remarks once per shift, and sees the computed KPI report (the fields from the earlier shift-KPI breakdown) for that date+shift.
+
+**Exit criteria:** a shift's production, once approved, has a fully-computed record (resin wastage, Kg-based rejection, cost) ready to become a Tally voucher; the Shift Summary page shows every field from the paper form's KPI sheet, computed rather than hand-calculated.
+
+#### Phase 2b — Idle Time / Downtime tracking (new domain, from the Idle Time Report) ✅ Built
+
+Didn't exist in this plan before the paper forms were checked — zero prior coverage. Kept separate from 2a because it's a different data domain (machine downtime, not production output) and separable enough to sequence independently if needed.
+
+**Built as designed, with three small refinements made during implementation:**
+- `mold_change_logs.changed_from`/`changed_to` shipped as real `item_id` foreign keys, not the plain strings originally sketched — consistent with how every other item reference in the app works, and makes "which items get swapped together" a queryable report instead of free text.
+- `mold_change_logs` also got the `open | closed` lifecycle (the schema note above already called this out, the original table sketch below just hadn't been updated yet) — mirrors downtime: both items are known up front, only the clock is running between "Log Mold Change" and "Finish Mold Change".
+- All `from_time`/`to_time` columns are full `datetime`, not bare `time` — the Night shift (22:00–06:00) crosses midnight, and a time-only diff would go negative for anything spanning it. `total_minutes`/`idle_hours` are always computed from the two timestamps, never a manual input, per the same read-only-when-computable rule used throughout Phase 2a.
+
+`ShiftSummaryService::report()` now pulls real numbers: **Machines Down** is a live count of currently-open breakdowns (mirrors how Machines Running counts live in-progress batches); **Idle Time** sums only *closed* downtime logs, so the total doesn't visibly jump backward once an open one finally closes; **Mold Changes** counts all logged changeovers for the shift.
+
+**Schema:**
+
+All four tables below also get a `created_by → users` and a `status: open | closed` (downtime/mold-change logs only — power interruption and stock counts are single-shot, no open/closed lifecycle). With no fixed machine assignment (floor staff work whoever's nearest, confirmed — see UX doc §2), individual attribution on every log is what keeps the data trustworthy when several people are touching the same 10 machines in one shift.
+
+```
+machine_downtime_logs
+  id, work_center_id → work_centers, shift_id, production_date
+  nature_of_problem   string
+  remedy               text, nullable
+  parts_changed        string, nullable
+  from_time, to_time    time
+  total_minutes         decimal
+  status                open | closed   (default: open — opened at "Report Down", closed once remedy is logged)
+  created_by            → users
+
+mold_change_logs
+  id, work_center_id, shift_id, production_date
+  changed_from, changed_to   string
+  from_time, to_time
+  total_minutes
+  created_by                  → users
+
+power_interruption_logs
+  id, shift_id, production_date   — plant-wide (the paper form has no M/C No column here — see open question)
+  from_time, to_time, idle_hours
+  created_by                       → users
+
+shift_stock_counts
+  id, shift_id, production_date
+  location_label   string   — "Hoppers" / "Day Bin" / "Loose Bag" / "Store" for resin, or a masterbatch colour
+  item_id           → items
+  quantity_kg
+  created_by         → users
+```
+
+Deliberately **not** touching the core `Warehouse`/bin model for the resin/masterbatch stock-by-location data — `shift_stock_counts` is a lightweight periodic physical-count log, informational, not reconciled against `StockBalance`. Building real bin-level inventory tracking would be a much bigger change to the Inventory module's core service and isn't justified by what the paper form is actually asking for (a shift-end visual count, not transactional bin tracking).
+
+"Machine-wise rejection reason" from the paper form doesn't need its own table — it's a report grouping `shift_scraps.scrap_reason_id` by `work_center_id` for a date+shift, using data Phase 2a already captures.
+
+**Backend:** `MachineDowntimeLogService`, `MoldChangeLogService`, `PowerInterruptionLogService`, `ShiftStockCountService` — straightforward CRUD, same module pattern as everything else, `created_by` stamped on every write. `MachineDowntimeLogService::open()`/`close()` need the same atomic `WHERE status = 'expected_prior_value'` concurrency guard as `ShiftProductionEntryService::completeBatch()` above — two people can just as easily both try to close the same breakdown log. `ShiftSummaryService::report()` (2a) gets extended to pull Machines Down/Idle Time/Mold Changes from these once they exist.
+
+**Frontend:** new pages — Downtime Log, Mold Change Log, Power Interruptions, Stock Count — likely worth their own "Shift Floor" nav grouping alongside Log Production and Shift Summary, since none of them belong under the existing Production sub-pages conceptually.
+
+**Exit criteria:** the Shift Summary's Machines Down/Idle Time/Mold Changes figures are real (not zero/placeholder), and a supervisor can log a breakdown or mold change in under a minute, same speed goal as Phase 1's production capture.
+
+#### Open questions before writing code (in addition to §12)
+
+1. **Lumps vs. rejection** — is "Lumps" specifically non-recoverable material (purge/burnt), with "Rejection" covering defective finished units that *might* be recoverable/regrindable? My `shift_scraps.type` enum above is a best guess — confirm during the Phase 1.5 interview, don't build against a guess.
+2. **"CT" on the Production Report** — still unconfirmed whether this is cycle time or cavity count. Affects whether it's a per-entry field or a Routing/WorkCenter-level attribute.
+3. **Power interruption** — plant-wide (one grid feed) or per-machine? Modeled as plant-wide above based on the form's layout (no M/C No column in that section) — confirm.
+4. **Floor sign-offs** — revised per UX doc §1: confirm whether Plant Manager review should be a real second gate (Supervisor → Plant Manager → Accountant, each blocking the next) or stay non-blocking/audit-trail-only as originally assumed. Supervisor sign-off itself no longer needs confirming — it's implicit in who's logged in and submitting.
+5. **Shift-close permission scope** — confirm whether "Close Shift" should be restricted to a specific role (e.g. only supervisors, not shift helpers) or is fine as "any authenticated shift-floor user" — see UX doc §2.
 
 ### Phase 3 — Build the local agent / tray app — ✅ Scaffolded, ⬜ not validated
 Framework decision: **Electron**, given the team's existing TypeScript fluency (.NET/C# `NotifyIcon` is the leaner long-term alternative if C# capacity exists later; Go/`systray` for the smallest possible footprint if that becomes a priority). Scaffolded at `tally-sync-agent/` — see that project's README for setup, packaging, and the precise list of what's unvalidated. Implements:
@@ -346,3 +489,5 @@ Merged from both source documents, deduped:
 7. **Tally BOM/Manufacturing Journal availability:** confirmed reachable via `F11 → Inventory Features` — but confirm the actual customer installation has "Enable Manufacturing Journals" available (some editions/versions may not); if not, fall back to a plain Stock Journal (no BOM auto-pull, raw material lines entered manually per voucher).
 8. **Where the agent runs:** same machine as Tally, or another LAN machine that can reach `127.0.0.1:9000` / the Tally machine's LAN address reliably.
 9. **Existing Sales/Procurement modules in this app:** stay unused since Sales/PO live in Tally, or is there a longer-term plan to migrate off Tally entirely? Doesn't block this project, but affects investment elsewhere in the app.
+
+See also §10 Phase 2's "Open questions before writing code" — four more, specific to the Production/Idle Time Report field mapping (Lumps vs. rejection, "CT", power interruption scope, floor sign-offs).

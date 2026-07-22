@@ -16,6 +16,7 @@ import AssetsPage from '@/features/maintenance/pages/AssetsPage';
 import ReliabilityReportPage from '@/features/maintenance/pages/ReliabilityReportPage';
 import SchedulesPage from '@/features/maintenance/pages/SchedulesPage';
 import MaintenanceWorkOrdersPage from '@/features/maintenance/pages/WorkOrdersPage';
+import ApproveProductionPage from '@/features/production/pages/ApproveProductionPage';
 import BomsPage from '@/features/production/pages/BomsPage';
 import CapacityPlanPage from '@/features/production/pages/CapacityPlanPage';
 import MrpPage from '@/features/production/pages/MrpPage';
@@ -24,6 +25,7 @@ import RoutingsPage from '@/features/production/pages/RoutingsPage';
 import ScrapReasonsPage from '@/features/production/pages/ScrapReasonsPage';
 import ShiftProductionEntryPage from '@/features/production/pages/ShiftProductionEntryPage';
 import ShiftsPage from '@/features/production/pages/ShiftsPage';
+import ShiftSummaryPage from '@/features/production/pages/ShiftSummaryPage';
 import SubcontractOrdersPage from '@/features/production/pages/SubcontractOrdersPage';
 import WorkCentersPage from '@/features/production/pages/WorkCentersPage';
 import WorkOrdersPage from '@/features/production/pages/WorkOrdersPage';
@@ -57,6 +59,7 @@ import CustomersPage from '@/features/sales/pages/CustomersPage';
 import DeliveriesPage from '@/features/sales/pages/DeliveriesPage';
 import InvoicesPage from '@/features/sales/pages/InvoicesPage';
 import SalesOrdersPage from '@/features/sales/pages/SalesOrdersPage';
+import AgentTokensPage from '@/features/tally-sync/pages/AgentTokensPage';
 import TallySyncPage from '@/features/tally-sync/pages/TallySyncPage';
 import AppLayout from './AppLayout';
 import ProtectedRoute from './ProtectedRoute';
@@ -92,6 +95,8 @@ export default function App() {
                                     <Route path="/production/scrap-reasons" element={<ScrapReasonsPage />} />
                                     <Route path="/production/shifts" element={<ShiftsPage />} />
                                     <Route path="/production/shift-production" element={<ShiftProductionEntryPage />} />
+                                    <Route path="/production/shift-summary" element={<ShiftSummaryPage />} />
+                                    <Route path="/production/approve-production" element={<ApproveProductionPage />} />
                                     <Route path="/production/rework-orders" element={<ReworkOrdersPage />} />
                                     <Route path="/procurement/vendors" element={<VendorsPage />} />
                                     <Route path="/procurement/purchase-requisitions" element={<PurchaseRequisitionsPage />} />
@@ -127,6 +132,7 @@ export default function App() {
                                     <Route path="/maintenance/work-orders" element={<MaintenanceWorkOrdersPage />} />
                                     <Route path="/maintenance/reliability" element={<ReliabilityReportPage />} />
                                     <Route path="/tally-sync" element={<TallySyncPage />} />
+                                    <Route path="/tally-sync/agent-tokens" element={<AgentTokensPage />} />
                                     <Route path="/help" element={<HelpPage />} />
                                     <Route path="/administration/users" element={<UsersPage />} />
                                     <Route path="/administration/roles" element={<RolesPage />} />

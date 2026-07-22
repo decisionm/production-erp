@@ -14,6 +14,7 @@ export interface CreateItemPayload {
     uom: string;
     hsn_sac_code?: string;
     reorder_level?: number;
+    nominal_weight_grams?: number;
     tracking_type?: ItemTrackingType;
 }
 

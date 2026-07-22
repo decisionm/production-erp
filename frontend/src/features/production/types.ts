@@ -69,6 +69,25 @@ export interface Shift {
     is_active: boolean;
 }
 
+export type BatchStatus = 'in_progress' | 'completed';
+export type ShiftProductionEntryStatus = 'pending' | 'approved' | 'rejected' | 'synced' | 'failed';
+export type ShiftScrapType = 'rejected_finished_good' | 'lumps';
+
+export interface ShiftMaterialConsumption {
+    id: number;
+    item: Item;
+    warehouse: Warehouse;
+    quantity_issued_kg: string;
+}
+
+export interface ShiftScrap {
+    id: number;
+    type: ShiftScrapType;
+    quantity_nos: string | null;
+    quantity_kg: string | null;
+    scrap_reason: ScrapReason | null;
+}
+
 export interface ShiftProductionEntry {
     id: number;
     shift: Shift;
@@ -76,12 +95,103 @@ export interface ShiftProductionEntry {
     item: Item;
     warehouse: Warehouse;
     production_date: string;
-    quantity_produced: string;
+    batch_status: BatchStatus;
+    batch_number: string | null;
+    quantity_produced: string | null;
+    quantity_produced_kg: string | null;
     quantity_scrap: string;
+    quantity_rejection_kg: string | null;
     scrap_reason: ScrapReason | null;
+    nos_per_tray: number | null;
+    no_of_trays: number | null;
+    nos_per_box: number | null;
+    no_of_box: number | null;
+    material_consumptions: ShiftMaterialConsumption[];
+    scraps: ShiftScrap[];
+    status: ShiftProductionEntryStatus;
+    rejection_reason: string | null;
+    approved_by: { id: number; name: string } | null;
+    approved_at: string | null;
     operator: Employee | null;
     notes: string | null;
     created_at: string;
+}
+
+export interface ShiftSummary {
+    id: number;
+    shift: Shift;
+    production_date: string;
+    supervisor: Employee | null;
+    target_production_kg: string | null;
+    power_consumption_units: string | null;
+    remarks: string | null;
+    created_at: string;
+}
+
+export type LogStatus = 'open' | 'closed';
+
+export interface MachineDowntimeLog {
+    id: number;
+    work_center: WorkCenter;
+    shift: Shift;
+    production_date: string;
+    nature_of_problem: string;
+    remedy: string | null;
+    parts_changed: string | null;
+    from_time: string;
+    to_time: string | null;
+    total_minutes: string | null;
+    status: LogStatus;
+}
+
+export interface MoldChangeLog {
+    id: number;
+    work_center: WorkCenter;
+    shift: Shift;
+    production_date: string;
+    changed_from_item: Item | null;
+    changed_to_item: Item;
+    from_time: string;
+    to_time: string | null;
+    total_minutes: string | null;
+    status: LogStatus;
+}
+
+export interface PowerInterruptionLog {
+    id: number;
+    shift: Shift;
+    production_date: string;
+    from_time: string;
+    to_time: string;
+    idle_hours: string;
+}
+
+export interface ShiftStockCount {
+    id: number;
+    shift: Shift;
+    production_date: string;
+    location_label: string;
+    item: Item;
+    quantity_kg: string;
+}
+
+export interface ShiftKpiReport {
+    shift_id: number;
+    production_date: string;
+    target_production_kg: string | null;
+    actual_production_kg: string;
+    rejection_kg: string;
+    net_good_output_kg: string;
+    efficiency_percent: number | null;
+    rejection_percent: number | null;
+    machines_running: number;
+    machines_down: number;
+    idle_time_hours: string;
+    no_of_mold_changes: number;
+    power_consumption_units: string | null;
+    unit_per_kg: number | null;
+    remarks: string | null;
+    supervisor: Employee | null;
 }
 
 export interface WorkOrderScrap {

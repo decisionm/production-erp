@@ -12,6 +12,7 @@ class UserService
     public function paginate(int $perPage = 20): LengthAwarePaginator
     {
         return User::query()
+            ->where('is_system', false)
             ->with('roles.permissions')
             ->orderBy('name')
             ->paginate($perPage);

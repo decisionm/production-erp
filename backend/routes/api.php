@@ -41,12 +41,17 @@ use App\Modules\Procurement\Http\Controllers\PurchaseRequisitionController;
 use App\Modules\Procurement\Http\Controllers\VendorController;
 use App\Modules\Production\Http\Controllers\BomController;
 use App\Modules\Production\Http\Controllers\CapacityPlanController;
+use App\Modules\Production\Http\Controllers\MachineDowntimeLogController;
+use App\Modules\Production\Http\Controllers\MoldChangeLogController;
 use App\Modules\Production\Http\Controllers\MrpController;
+use App\Modules\Production\Http\Controllers\PowerInterruptionLogController;
 use App\Modules\Production\Http\Controllers\ReworkOrderController;
 use App\Modules\Production\Http\Controllers\RoutingController;
 use App\Modules\Production\Http\Controllers\ScrapReasonController;
 use App\Modules\Production\Http\Controllers\ShiftController;
 use App\Modules\Production\Http\Controllers\ShiftProductionEntryController;
+use App\Modules\Production\Http\Controllers\ShiftStockCountController;
+use App\Modules\Production\Http\Controllers\ShiftSummaryController;
 use App\Modules\Production\Http\Controllers\SubcontractOrderController;
 use App\Modules\Production\Http\Controllers\WorkCenterController;
 use App\Modules\Production\Http\Controllers\WorkOrderController;
@@ -63,6 +68,7 @@ use App\Modules\Sales\Http\Controllers\DeliveryController;
 use App\Modules\Sales\Http\Controllers\InvoiceController;
 use App\Modules\Sales\Http\Controllers\SalesOrderController;
 use App\Modules\TallySync\Http\Controllers\TallySyncAgentController;
+use App\Modules\TallySync\Http\Controllers\TallySyncAgentTokenController;
 use App\Modules\TallySync\Http\Controllers\TallySyncController;
 use Illuminate\Support\Facades\Route;
 
@@ -207,6 +213,10 @@ Route::prefix('v1')->group(function () {
             Route::middleware('module:tally-sync')->group(function () {
                 Route::get('entries', [TallySyncController::class, 'index']);
                 Route::post('entries/{tally_sync_entry}/retry', [TallySyncController::class, 'retry']);
+
+                Route::get('agent-tokens', [TallySyncAgentTokenController::class, 'index']);
+                Route::post('agent-tokens', [TallySyncAgentTokenController::class, 'store']);
+                Route::delete('agent-tokens/{tokenId}', [TallySyncAgentTokenController::class, 'destroy']);
             });
 
             // Local agent endpoints — see TECHNICAL-DOCS.md §6. Gated by
@@ -271,7 +281,31 @@ Route::prefix('v1')->group(function () {
             Route::apiResource('scrap-reasons', ScrapReasonController::class)->only(['index', 'store']);
 
             Route::apiResource('shifts', ShiftController::class)->only(['index', 'store']);
+
+            // "store" starts a batch (machine + item, quantities unknown
+            // yet); "complete" fills in the finished numbers once the batch
+            // is done running — see PRODUCTION-SUPERVISOR-UX-PLAN.md §1.
             Route::apiResource('shift-production-entries', ShiftProductionEntryController::class)->only(['index', 'store']);
+            Route::post('shift-production-entries/{shift_production_entry}/complete', [ShiftProductionEntryController::class, 'complete']);
+            Route::post('shift-production-entries/{shift_production_entry}/approve', [ShiftProductionEntryController::class, 'approve']);
+            Route::post('shift-production-entries/{shift_production_entry}/reject', [ShiftProductionEntryController::class, 'reject']);
+
+            Route::post('shift-summaries', [ShiftSummaryController::class, 'store']);
+            Route::get('shift-summaries/report', [ShiftSummaryController::class, 'report']);
+
+            // Phase 2b — Idle Time Report. Downtime/mold-change are
+            // "stopwatch" logs (open then close); power interruption and
+            // stock counts are single-shot, logged after the fact.
+            Route::get('machine-downtime-logs', [MachineDowntimeLogController::class, 'index']);
+            Route::post('machine-downtime-logs', [MachineDowntimeLogController::class, 'open']);
+            Route::post('machine-downtime-logs/{machine_downtime_log}/close', [MachineDowntimeLogController::class, 'close']);
+
+            Route::get('mold-change-logs', [MoldChangeLogController::class, 'index']);
+            Route::post('mold-change-logs', [MoldChangeLogController::class, 'open']);
+            Route::post('mold-change-logs/{mold_change_log}/close', [MoldChangeLogController::class, 'close']);
+
+            Route::apiResource('power-interruption-logs', PowerInterruptionLogController::class)->only(['index', 'store']);
+            Route::apiResource('shift-stock-counts', ShiftStockCountController::class)->only(['index', 'store']);
 
             Route::apiResource('rework-orders', ReworkOrderController::class)->only(['index', 'store']);
             Route::post('rework-orders/{rework_order}/release', [ReworkOrderController::class, 'release']);

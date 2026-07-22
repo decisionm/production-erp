@@ -1,0 +1,4 @@
+- Will there be multiple supervisor in a single shift
+- can any supervisor can start the batch and end the batch
+- is it mandatory the supervisor will complet the batch and go stop the machines , or the production continues during shift changes
+- 

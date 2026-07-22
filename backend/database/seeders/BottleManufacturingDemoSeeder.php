@@ -118,10 +118,10 @@ class BottleManufacturingDemoSeeder extends Seeder
             ['sku' => 'CAP-28MM', 'name' => '28mm Tamper-Evident Cap', 'uom' => 'pcs', 'hsn_sac_code' => '3923', 'reorder_level' => '5000.0000'],
             ['sku' => 'LABEL-500ML', 'name' => 'Label — 500ml Bottle', 'uom' => 'pcs', 'hsn_sac_code' => '4821', 'reorder_level' => '5000.0000'],
             ['sku' => 'CARTON-24', 'name' => 'Corrugated Carton (24-Bottle)', 'uom' => 'pcs', 'hsn_sac_code' => '4819', 'reorder_level' => '200.0000'],
-            ['sku' => 'PREFORM-28G', 'name' => 'PET Preform 28g (500ml Neck)', 'uom' => 'pcs', 'hsn_sac_code' => '3923', 'reorder_level' => '1000.0000'],
-            ['sku' => 'BTL-PET-500', 'name' => '500ml PET Bottle (Round)', 'uom' => 'pcs', 'hsn_sac_code' => '3923', 'reorder_level' => '1000.0000'],
-            ['sku' => 'BTL-PET-1000', 'name' => '1 Litre PET Bottle', 'uom' => 'pcs', 'hsn_sac_code' => '3923', 'reorder_level' => '500.0000'],
-            ['sku' => 'BTL-HDPE-200', 'name' => '200ml HDPE Bottle', 'uom' => 'pcs', 'hsn_sac_code' => '3923', 'reorder_level' => '500.0000'],
+            ['sku' => 'PREFORM-28G', 'name' => 'PET Preform 28g (500ml Neck)', 'uom' => 'pcs', 'hsn_sac_code' => '3923', 'reorder_level' => '1000.0000', 'nominal_weight_grams' => '28.0000'],
+            ['sku' => 'BTL-PET-500', 'name' => '500ml PET Bottle (Round)', 'uom' => 'pcs', 'hsn_sac_code' => '3923', 'reorder_level' => '1000.0000', 'nominal_weight_grams' => '25.5000'],
+            ['sku' => 'BTL-PET-1000', 'name' => '1 Litre PET Bottle', 'uom' => 'pcs', 'hsn_sac_code' => '3923', 'reorder_level' => '500.0000', 'nominal_weight_grams' => '38.0000'],
+            ['sku' => 'BTL-HDPE-200', 'name' => '200ml HDPE Bottle', 'uom' => 'pcs', 'hsn_sac_code' => '3923', 'reorder_level' => '500.0000', 'nominal_weight_grams' => '12.0000'],
         ];
 
         $created = [];

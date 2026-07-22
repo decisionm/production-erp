@@ -15,6 +15,7 @@ const itemSchema = z.object({
     uom: z.string().min(1, 'UOM is required').max(16),
     hsn_sac_code: z.string().max(20).optional(),
     reorder_level: z.number().min(0).optional(),
+    nominal_weight_grams: z.number().gt(0).optional(),
     tracking_type: z.enum(['none', 'batch', 'serial']).optional(),
 });
 
@@ -40,7 +41,9 @@ export default function ItemsPage() {
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<ItemFormValues>({
         resolver: zodResolver(itemSchema),
-        defaultValues: { sku: '', name: '', uom: 'PCS', hsn_sac_code: '', reorder_level: 0, tracking_type: 'none' },
+        defaultValues: {
+            sku: '', name: '', uom: 'PCS', hsn_sac_code: '', reorder_level: 0, nominal_weight_grams: undefined, tracking_type: 'none',
+        },
     });
 
     const mutation = useMutation({
@@ -94,6 +97,7 @@ export default function ItemsPage() {
                     { title: 'UOM', dataIndex: 'uom' },
                     { title: 'HSN/SAC', dataIndex: 'hsn_sac_code' },
                     { title: 'Reorder Level', dataIndex: 'reorder_level' },
+                    { title: 'Nominal Wt (g)', dataIndex: 'nominal_weight_grams', render: (v: string | null) => v ?? '—' },
                     {
                         title: 'Tracking',
                         dataIndex: 'tracking_type',
@@ -131,6 +135,7 @@ export default function ItemsPage() {
                                             uom: row.uom,
                                             hsn_sac_code: row.hsn_sac_code ?? '',
                                             reorder_level: Number(row.reorder_level),
+                                            nominal_weight_grams: row.nominal_weight_grams ? Number(row.nominal_weight_grams) : undefined,
                                             tracking_type: row.tracking_type,
                                         });
                                     }}
@@ -178,6 +183,16 @@ export default function ItemsPage() {
                             )}
                         />
                     </Form.Item>
+                    <Form.Item
+                        label="Nominal Weight (g)"
+                        tooltip="Weight of a single unit — used to compute Kg figures on the shop floor from a piece count (Production Report's WT column). Leave blank for raw materials."
+                    >
+                        <Controller
+                            name="nominal_weight_grams"
+                            control={control}
+                            render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />}
+                        />
+                    </Form.Item>
                     <Form.Item label="Tracking Type">
                         <Controller
                             name="tracking_type"
@@ -219,6 +234,16 @@ export default function ItemsPage() {
                     <Form.Item label="Reorder Level">
                         <Controller
                             name="reorder_level"
+                            control={editControl}
+                            render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />}
+                        />
+                    </Form.Item>
+                    <Form.Item
+                        label="Nominal Weight (g)"
+                        tooltip="Weight of a single unit — used to compute Kg figures on the shop floor from a piece count. Leave blank for raw materials."
+                    >
+                        <Controller
+                            name="nominal_weight_grams"
                             control={editControl}
                             render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />}
                         />

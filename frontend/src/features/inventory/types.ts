@@ -8,6 +8,7 @@ export interface Item {
     uom: string;
     hsn_sac_code: string | null;
     reorder_level: string;
+    nominal_weight_grams: string | null;
     tracking_type: ItemTrackingType;
     is_active: boolean;
     created_at: string;

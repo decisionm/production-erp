@@ -3,12 +3,19 @@ import type { Paginated } from '@/lib/types';
 import type {
     Bom,
     CapacityWorkCenterLoad,
+    MachineDowntimeLog,
+    MoldChangeLog,
     MrpNetRequirement,
+    PowerInterruptionLog,
     ReworkOrder,
     Routing,
     ScrapReason,
     Shift,
+    ShiftKpiReport,
     ShiftProductionEntry,
+    ShiftProductionEntryStatus,
+    ShiftStockCount,
+    ShiftSummary,
     SubcontractOrder,
     WorkCenter,
     WorkOrder,
@@ -196,28 +203,79 @@ export async function createShift(payload: CreateShiftPayload): Promise<Shift> {
     return data.data;
 }
 
-export async function listShiftProductionEntries(): Promise<Paginated<ShiftProductionEntry>> {
-    const { data } = await api.get<Paginated<ShiftProductionEntry>>('/production/shift-production-entries');
+export async function listShiftProductionEntries(status?: ShiftProductionEntryStatus): Promise<Paginated<ShiftProductionEntry>> {
+    const { data } = await api.get<Paginated<ShiftProductionEntry>>('/production/shift-production-entries', {
+        params: status ? { status } : undefined,
+    });
     return data;
 }
 
-export interface CreateShiftProductionEntryPayload {
+export interface StartBatchPayload {
     shift_id: number;
     work_center_id: number;
     item_id: number;
     warehouse_id: number;
     production_date?: string;
+    operator_id?: number;
+}
+
+export async function startBatch(payload: StartBatchPayload): Promise<ShiftProductionEntry> {
+    const { data } = await api.post<{ data: ShiftProductionEntry }>('/production/shift-production-entries', payload);
+    return data.data;
+}
+
+export interface CompleteBatchPayload {
+    batch_number?: string;
     quantity_produced: number;
     quantity_scrap?: number;
     scrap_reason_id?: number;
-    operator_id?: number;
+    nos_per_tray?: number;
+    no_of_trays?: number;
+    nos_per_box?: number;
+    no_of_box?: number;
     notes?: string;
+    material_consumptions?: { item_id: number; warehouse_id: number; quantity_issued_kg: number }[];
+    scraps?: { type: 'rejected_finished_good' | 'lumps'; quantity_nos?: number; quantity_kg?: number; scrap_reason_id?: number }[];
 }
 
-export async function createShiftProductionEntry(
-    payload: CreateShiftProductionEntryPayload,
-): Promise<ShiftProductionEntry> {
-    const { data } = await api.post<{ data: ShiftProductionEntry }>('/production/shift-production-entries', payload);
+export async function completeBatch(id: number, payload: CompleteBatchPayload): Promise<ShiftProductionEntry> {
+    const { data } = await api.post<{ data: ShiftProductionEntry }>(
+        `/production/shift-production-entries/${id}/complete`,
+        payload,
+    );
+    return data.data;
+}
+
+export async function approveShiftProductionEntry(id: number): Promise<ShiftProductionEntry> {
+    const { data } = await api.post<{ data: ShiftProductionEntry }>(`/production/shift-production-entries/${id}/approve`);
+    return data.data;
+}
+
+export async function rejectShiftProductionEntry(id: number, reason?: string): Promise<ShiftProductionEntry> {
+    const { data } = await api.post<{ data: ShiftProductionEntry }>(`/production/shift-production-entries/${id}/reject`, {
+        reason,
+    });
+    return data.data;
+}
+
+export interface SaveShiftSummaryPayload {
+    shift_id: number;
+    production_date?: string;
+    supervisor_id?: number;
+    target_production_kg?: number;
+    power_consumption_units?: number;
+    remarks?: string;
+}
+
+export async function saveShiftSummary(payload: SaveShiftSummaryPayload): Promise<ShiftSummary> {
+    const { data } = await api.post<{ data: ShiftSummary }>('/production/shift-summaries', payload);
+    return data.data;
+}
+
+export async function getShiftKpiReport(shiftId: number, productionDate: string): Promise<ShiftKpiReport> {
+    const { data } = await api.get<{ data: ShiftKpiReport }>('/production/shift-summaries/report', {
+        params: { shift_id: shiftId, production_date: productionDate },
+    });
     return data.data;
 }
 
@@ -249,5 +307,88 @@ export async function completeReworkOrder(
     payload: { quantity_recovered: number; labor_cost: number },
 ): Promise<ReworkOrder> {
     const { data } = await api.post<{ data: ReworkOrder }>(`/production/rework-orders/${id}/complete`, payload);
+    return data.data;
+}
+
+export async function listMachineDowntimeLogs(): Promise<Paginated<MachineDowntimeLog>> {
+    const { data } = await api.get<Paginated<MachineDowntimeLog>>('/production/machine-downtime-logs');
+    return data;
+}
+
+export interface OpenDowntimeLogPayload {
+    work_center_id: number;
+    shift_id: number;
+    production_date?: string;
+    nature_of_problem: string;
+}
+
+export async function openDowntimeLog(payload: OpenDowntimeLogPayload): Promise<MachineDowntimeLog> {
+    const { data } = await api.post<{ data: MachineDowntimeLog }>('/production/machine-downtime-logs', payload);
+    return data.data;
+}
+
+export async function closeDowntimeLog(
+    id: number,
+    payload: { remedy?: string; parts_changed?: string },
+): Promise<MachineDowntimeLog> {
+    const { data } = await api.post<{ data: MachineDowntimeLog }>(`/production/machine-downtime-logs/${id}/close`, payload);
+    return data.data;
+}
+
+export async function listMoldChangeLogs(): Promise<Paginated<MoldChangeLog>> {
+    const { data } = await api.get<Paginated<MoldChangeLog>>('/production/mold-change-logs');
+    return data;
+}
+
+export interface OpenMoldChangeLogPayload {
+    work_center_id: number;
+    shift_id: number;
+    production_date?: string;
+    changed_from_item_id?: number;
+    changed_to_item_id: number;
+}
+
+export async function openMoldChangeLog(payload: OpenMoldChangeLogPayload): Promise<MoldChangeLog> {
+    const { data } = await api.post<{ data: MoldChangeLog }>('/production/mold-change-logs', payload);
+    return data.data;
+}
+
+export async function closeMoldChangeLog(id: number): Promise<MoldChangeLog> {
+    const { data } = await api.post<{ data: MoldChangeLog }>(`/production/mold-change-logs/${id}/close`);
+    return data.data;
+}
+
+export async function listPowerInterruptionLogs(): Promise<Paginated<PowerInterruptionLog>> {
+    const { data } = await api.get<Paginated<PowerInterruptionLog>>('/production/power-interruption-logs');
+    return data;
+}
+
+export interface CreatePowerInterruptionLogPayload {
+    shift_id: number;
+    production_date?: string;
+    from_time: string;
+    to_time: string;
+}
+
+export async function createPowerInterruptionLog(payload: CreatePowerInterruptionLogPayload): Promise<PowerInterruptionLog> {
+    const { data } = await api.post<{ data: PowerInterruptionLog }>('/production/power-interruption-logs', payload);
+    return data.data;
+}
+
+export async function listShiftStockCounts(): Promise<Paginated<ShiftStockCount>> {
+    const { data } = await api.get<Paginated<ShiftStockCount>>('/production/shift-stock-counts');
+    return data;
+}
+
+export interface CreateShiftStockCountPayload {
+    shift_id: number;
+    production_date?: string;
+    location_label: string;
+    item_id: number;
+    quantity_kg: number;
+}
+
+export async function createShiftStockCount(payload: CreateShiftStockCountPayload): Promise<ShiftStockCount> {
+    const { data } = await api.post<{ data: ShiftStockCount }>('/production/shift-stock-counts', payload);
     return data.data;
 }

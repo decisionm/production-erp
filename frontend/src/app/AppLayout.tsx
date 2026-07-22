@@ -76,7 +76,9 @@ const allNavItems: NavGroup[] = [
         label: 'Production',
         module: 'production',
         children: [
-            { key: '/production/shift-production', label: 'Log Production' },
+            { key: '/production/shift-production', label: 'Shift Floor' },
+            { key: '/production/shift-summary', label: 'Shift Summary' },
+            { key: '/production/approve-production', label: 'Approve Production' },
             { key: '/production/work-centers', label: 'Work Centers' },
             { key: '/production/boms', label: 'Bills of Material' },
             { key: '/production/routings', label: 'Routings' },
@@ -185,7 +187,16 @@ const allNavItems: NavGroup[] = [
             { key: '/maintenance/reliability', label: 'Reliability Report' },
         ],
     },
-    { key: '/tally-sync', icon: <SyncOutlined />, label: 'Tally Sync', module: 'tally-sync' },
+    {
+        key: 'tally-sync',
+        icon: <SyncOutlined />,
+        label: 'Tally Sync',
+        module: 'tally-sync',
+        children: [
+            { key: '/tally-sync', label: 'Sync Queue' },
+            { key: '/tally-sync/agent-tokens', label: 'Agent Tokens' },
+        ],
+    },
     { key: '/help', icon: <QuestionCircleOutlined />, label: 'Help' },
     {
         key: 'administration',

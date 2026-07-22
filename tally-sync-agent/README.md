@@ -38,15 +38,9 @@ On first launch with no config, the Settings window opens automatically. Fill in
 
 ### Getting a Sanctum token
 
-There's no admin UI for this yet in the ERP (worth adding as a small follow-up backend task — an "Integrations" page that issues/revokes scoped tokens would remove this manual step). For now, on the ERP server:
+In the ERP, go to **Tally Sync → Agent Tokens** and click **Generate Token**. Name it after the machine/installation it's for (e.g. "Agent - Puducherry Line 1") — each install should get its own token so any one of them can be revoked independently without affecting the others. The plaintext token is shown exactly once; copy it straight into this app's Settings window's "Cloud API token" field, since it can't be retrieved again afterward (only revoked and reissued).
 
-```bash
-php artisan tinker
->>> $agent = \App\Models\User::where('email', 'agent@yourcompany.example')->first(); // create a dedicated user for this, don't reuse a real staff login
->>> $agent->createToken('tally-sync-agent', ['tally-sync:poll', 'tally-sync:report'])->plainTextToken
-```
-
-Copy the printed token into the Settings window's "Cloud API token" field — it's shown once and can't be retrieved again.
+Tokens are scoped to exactly `tally-sync:poll` + `tally-sync:report` and belong to a dedicated, password-less service account (`tally-sync-agent@system.local`) that the ERP auto-provisions the first time a token is issued — it's excluded from the regular Users list and can't log in interactively.
 
 ## Packaging for Windows
 
