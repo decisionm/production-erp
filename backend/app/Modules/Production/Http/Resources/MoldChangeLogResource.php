@@ -16,6 +16,7 @@ class MoldChangeLogResource extends JsonResource
             'shift' => ShiftResource::make($this->whenLoaded('shift')),
             'production_date' => $this->production_date?->toDateString(),
             'changed_from_item' => ItemResource::make($this->whenLoaded('changedFromItem')),
+            'changed_from_mold' => MoldResource::make($this->whenLoaded('changedFromMold')),
             'changed_to_item' => ItemResource::make($this->whenLoaded('changedToItem')),
             'changed_to_mold' => MoldResource::make($this->whenLoaded('changedToMold')),
             'from_time' => $this->from_time?->toIso8601String(),

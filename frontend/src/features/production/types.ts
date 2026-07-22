@@ -162,6 +162,7 @@ export interface MoldChangeLog {
     shift: Shift;
     production_date: string;
     changed_from_item: Item | null;
+    changed_from_mold: Mold | null;
     changed_to_item: Item;
     changed_to_mold: Mold | null;
     from_time: string;
@@ -213,6 +214,7 @@ export interface ShiftKpiMoldChangeLog {
     id: number;
     work_center: string;
     changed_from: string | null;
+    changed_from_mold: string | null;
     changed_to: string;
     changed_to_mold: string | null;
     from_time: string;

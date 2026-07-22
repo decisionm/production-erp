@@ -10,7 +10,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 #[Fillable([
-    'work_center_id', 'shift_id', 'production_date', 'changed_from_item_id', 'changed_to_item_id', 'changed_to_mold_id',
+    'work_center_id', 'shift_id', 'production_date',
+    'changed_from_item_id', 'changed_from_mold_id', 'changed_to_item_id', 'changed_to_mold_id',
     'from_time', 'to_time', 'total_minutes', 'status', 'created_by',
 ])]
 class MoldChangeLog extends Model
@@ -38,6 +39,11 @@ class MoldChangeLog extends Model
     public function changedFromItem(): BelongsTo
     {
         return $this->belongsTo(Item::class, 'changed_from_item_id');
+    }
+
+    public function changedFromMold(): BelongsTo
+    {
+        return $this->belongsTo(Mold::class, 'changed_from_mold_id');
     }
 
     public function changedToItem(): BelongsTo

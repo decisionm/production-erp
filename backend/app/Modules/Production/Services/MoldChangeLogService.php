@@ -19,24 +19,31 @@ use Illuminate\Support\Facades\DB;
  * Mold and item are two independent selections, not one derived from the
  * other — a single mold is reused across an item's colour variants (each
  * colour its own Item record), so there's no fixed mold->item mapping.
+ * "Changed From" mirrors "Changed To": which mold came out, not what item
+ * it had been running.
  *
- * from_time/to_time default to "now" (the common case: logging it as it
- * happens) but accept an explicit override for a supervisor catching up
- * on paperwork after the fact — a real case, not a hypothetical one.
+ * A mold change commonly runs well over an hour, so open() supports two
+ * distinct real cases, not just "logging it live":
+ *   - from_time only (or omitted, defaulting to now) → opens in_progress,
+ *     to be finished later via close().
+ *   - both from_time and to_time given → the change already happened
+ *     start to finish; the log is created already closed in one step, so
+ *     a supervisor catching up on paperwork doesn't have to open() and
+ *     then immediately close() a change that's long since over.
  */
 class MoldChangeLogService
 {
     public function paginate(int $perPage = 20): LengthAwarePaginator
     {
         return MoldChangeLog::query()
-            ->with(['workCenter', 'shift', 'changedFromItem', 'changedToItem', 'changedToMold', 'createdBy'])
+            ->with(['workCenter', 'shift', 'changedFromItem', 'changedFromMold', 'changedToItem', 'changedToMold', 'createdBy'])
             ->orderByDesc('production_date')
             ->orderByDesc('id')
             ->paginate($perPage);
     }
 
     /**
-     * @param  array{work_center_id: int, shift_id: int, production_date?: string, changed_from_item_id?: int, changed_to_item_id: int, changed_to_mold_id: int, from_time?: string}  $data
+     * @param  array{work_center_id: int, shift_id: int, production_date?: string, changed_from_item_id?: int, changed_from_mold_id?: int, changed_to_item_id: int, changed_to_mold_id: int, from_time?: string, to_time?: string}  $data
      */
     public function open(array $data, ?int $createdBy): MoldChangeLog
     {
@@ -51,19 +58,36 @@ class MoldChangeLogService
                 throw InvalidStatusTransitionException::make('mold change log', 'idle', LogStatus::Open->value);
             }
 
-            $log = MoldChangeLog::create([
+            $fromTime = isset($data['from_time']) ? Carbon::parse($data['from_time']) : now();
+            $toTime = isset($data['to_time']) ? Carbon::parse($data['to_time']) : null;
+
+            $attributes = [
                 'work_center_id' => $data['work_center_id'],
                 'shift_id' => $data['shift_id'],
                 'production_date' => $data['production_date'] ?? now()->toDateString(),
                 'changed_from_item_id' => $data['changed_from_item_id'] ?? null,
+                'changed_from_mold_id' => $data['changed_from_mold_id'] ?? null,
                 'changed_to_item_id' => $data['changed_to_item_id'],
                 'changed_to_mold_id' => $data['changed_to_mold_id'],
-                'from_time' => isset($data['from_time']) ? Carbon::parse($data['from_time']) : now(),
-                'status' => LogStatus::Open,
+                'from_time' => $fromTime,
                 'created_by' => $createdBy,
-            ]);
+            ];
 
-            return $log->fresh(['workCenter', 'shift', 'changedFromItem', 'changedToItem', 'changedToMold']);
+            if ($toTime !== null) {
+                if ($toTime->lessThanOrEqualTo($fromTime)) {
+                    throw InvalidTimeRangeException::make('Finish time');
+                }
+
+                $attributes['to_time'] = $toTime;
+                $attributes['total_minutes'] = bcdiv((string) $fromTime->diffInSeconds($toTime), '60', 2);
+                $attributes['status'] = LogStatus::Closed;
+            } else {
+                $attributes['status'] = LogStatus::Open;
+            }
+
+            $log = MoldChangeLog::create($attributes);
+
+            return $log->fresh(['workCenter', 'shift', 'changedFromItem', 'changedFromMold', 'changedToItem', 'changedToMold']);
         });
     }
 
@@ -93,6 +117,6 @@ class MoldChangeLogService
             throw InvalidStatusTransitionException::make('mold change log', LogStatus::Open->value, LogStatus::Closed->value);
         }
 
-        return $log->fresh(['workCenter', 'shift', 'changedFromItem', 'changedToItem', 'changedToMold']);
+        return $log->fresh(['workCenter', 'shift', 'changedFromItem', 'changedFromMold', 'changedToItem', 'changedToMold']);
     }
 }

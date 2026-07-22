@@ -349,9 +349,13 @@ export interface OpenMoldChangeLogPayload {
     shift_id: number;
     production_date?: string;
     changed_from_item_id?: number;
+    changed_from_mold_id?: number;
     changed_to_item_id: number;
     changed_to_mold_id: number;
     from_time?: string;
+    // Given alongside from_time, the change is logged as already complete
+    // in one step instead of needing a separate "Finish Mold Change" call.
+    to_time?: string;
 }
 
 export async function openMoldChangeLog(payload: OpenMoldChangeLogPayload): Promise<MoldChangeLog> {

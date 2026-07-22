@@ -18,9 +18,13 @@ class OpenMoldChangeLogRequest extends FormRequest
             'shift_id' => ['required', 'integer', 'exists:shifts,id'],
             'production_date' => ['nullable', 'date'],
             'changed_from_item_id' => ['nullable', 'integer', 'exists:items,id'],
+            'changed_from_mold_id' => ['nullable', 'integer', 'exists:molds,id'],
             'changed_to_item_id' => ['required', 'integer', 'exists:items,id'],
             'changed_to_mold_id' => ['required', 'integer', 'exists:molds,id'],
-            'from_time' => ['nullable', 'date'],
+            'from_time' => ['nullable', 'date', 'required_with:to_time'],
+            // Given alongside from_time, the change is logged as already
+            // complete in one step — see MoldChangeLogService::open().
+            'to_time' => ['nullable', 'date', 'after:from_time'],
         ];
     }
 }

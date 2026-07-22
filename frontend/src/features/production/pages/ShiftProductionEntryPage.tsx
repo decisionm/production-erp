@@ -101,11 +101,12 @@ const closeDowntimeSchema = z.object({
 type CloseDowntimeFormValues = z.infer<typeof closeDowntimeSchema>;
 
 const moldChangeSchema = z.object({
-    changed_from_item_id: z.number().optional(),
+    changed_from_mold_id: z.number().optional(),
     changed_to_mold_id: z.number({ error: 'Pick the mold going in' }),
     changed_to_item_id: z.number({ error: 'Pick the item it will produce' }),
     backdate: z.boolean().optional(),
     time: z.string().optional(),
+    end_time: z.string().optional(),
 });
 type MoldChangeFormValues = z.infer<typeof moldChangeSchema>;
 
@@ -140,7 +141,21 @@ const approvalColor: Record<ShiftProductionEntryStatus, string> = {
 // defaults to stamping the current time — the common case of logging it
 // live. This is the shared override for the other real case: a supervisor
 // catching up on paperwork after the fact, where "now" would be wrong.
-function BackdateField({ control, backdateEnabled }: { control: any; backdateEnabled: boolean }) {
+function BackdateField({
+    control,
+    backdateEnabled,
+    // Mold changes commonly run well over an hour, so that modal wants
+    // both ends of the range up front: give it a second field name and
+    // this renders "From"/"To" (To optional — still-in-progress mold
+    // changes can leave it blank). Every other modal only ever needs one
+    // moment (when a breakdown was reported, when it was fixed, ...), so
+    // they omit this and get a single unlabeled time field as before.
+    rangeEndFieldName,
+}: {
+    control: any;
+    backdateEnabled: boolean;
+    rangeEndFieldName?: string;
+}) {
     return (
         <Form.Item style={{ marginBottom: backdateEnabled ? 8 : 0 }}>
             <Controller
@@ -153,18 +168,35 @@ function BackdateField({ control, backdateEnabled }: { control: any; backdateEna
                 )}
             />
             {backdateEnabled && (
-                <Controller
-                    name="time"
-                    control={control}
-                    render={({ field }) => (
-                        <TimePicker
-                            format="HH:mm"
-                            style={{ width: '100%', marginTop: 8 }}
-                            value={field.value ? dayjs(field.value, 'HH:mm') : null}
-                            onChange={(_, timeString) => field.onChange((Array.isArray(timeString) ? timeString[0] : timeString) || undefined)}
+                <Space style={{ marginTop: 8, width: '100%' }}>
+                    <Controller
+                        name="time"
+                        control={control}
+                        render={({ field }) => (
+                            <TimePicker
+                                format="HH:mm"
+                                placeholder={rangeEndFieldName ? 'From' : 'Select time'}
+                                value={field.value ? dayjs(field.value, 'HH:mm') : null}
+                                onChange={(_, timeString) => field.onChange((Array.isArray(timeString) ? timeString[0] : timeString) || undefined)}
+                            />
+                        )}
+                    />
+                    {rangeEndFieldName && (
+                        <Controller
+                            name={rangeEndFieldName}
+                            control={control}
+                            render={({ field }) => (
+                                <TimePicker
+                                    format="HH:mm"
+                                    placeholder="To (optional — still in progress?)"
+                                    style={{ width: 220 }}
+                                    value={field.value ? dayjs(field.value, 'HH:mm') : null}
+                                    onChange={(_, timeString) => field.onChange((Array.isArray(timeString) ? timeString[0] : timeString) || undefined)}
+                                />
+                            )}
                         />
                     )}
-                />
+                </Space>
             )}
         </Form.Item>
     );
@@ -216,6 +248,10 @@ export default function ShiftProductionEntryPage() {
     const itemOptions = items?.data.map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];
     const moldOptions =
         molds?.data.filter((m) => m.status === 'active').map((m) => ({ value: m.id, label: `${m.code} — ${m.name}` })) ?? [];
+    // "Changed From" is a historical record of what just came out, not a
+    // pick of something to install — it can be any mold regardless of
+    // current status (it may have gone straight to "under repair").
+    const allMoldOptions = molds?.data.map((m) => ({ value: m.id, label: `${m.code} — ${m.name}` })) ?? [];
     const warehouseOptions = warehouses?.data.map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })) ?? [];
     const scrapReasonOptions = scrapReasons?.data.map((r) => ({ value: r.id, label: `${r.code} — ${r.name}` })) ?? [];
     const employeeOptions = employees?.data.map((e) => ({ value: e.id, label: `${e.employee_code} — ${e.name}` })) ?? [];
@@ -375,12 +411,15 @@ export default function ShiftProductionEntryPage() {
         mutationFn: (values: MoldChangeFormValues) => {
             if (!startingMoldChangeMachine || !effectiveShiftId) throw new Error('Missing machine or shift');
             return openMoldChangeLog({
-                changed_from_item_id: values.changed_from_item_id,
+                changed_from_mold_id: values.changed_from_mold_id,
                 changed_to_mold_id: values.changed_to_mold_id,
                 changed_to_item_id: values.changed_to_item_id,
                 work_center_id: startingMoldChangeMachine.id,
                 shift_id: effectiveShiftId,
                 from_time: values.backdate && values.time ? combineWithToday(today, values.time) : undefined,
+                // Given alongside a From time, this logs the change as
+                // already complete — no separate Finish step needed.
+                to_time: values.backdate && values.time && values.end_time ? combineWithToday(today, values.end_time) : undefined,
             });
         },
         onSuccess: () => {
@@ -868,11 +907,11 @@ export default function ShiftProductionEntryPage() {
                 destroyOnHidden
             >
                 <Form layout="vertical">
-                    <Form.Item label="Changed From (optional)">
+                    <Form.Item label="Mold Coming Out (optional)">
                         <Controller
-                            name="changed_from_item_id"
+                            name="changed_from_mold_id"
                             control={moldChangeForm.control}
-                            render={({ field }) => <Select {...field} options={itemOptions} showSearch optionFilterProp="label" allowClear />}
+                            render={({ field }) => <Select {...field} options={allMoldOptions} showSearch optionFilterProp="label" allowClear placeholder="Which mold was running…" />}
                         />
                     </Form.Item>
                     <Form.Item
@@ -897,7 +936,7 @@ export default function ShiftProductionEntryPage() {
                             render={({ field }) => <Select {...field} size="large" options={itemOptions} showSearch optionFilterProp="label" placeholder="Which item/colour…" />}
                         />
                     </Form.Item>
-                    <BackdateField control={moldChangeForm.control} backdateEnabled={!!moldChangeBackdate} />
+                    <BackdateField control={moldChangeForm.control} backdateEnabled={!!moldChangeBackdate} rangeEndFieldName="end_time" />
                 </Form>
             </Modal>
 

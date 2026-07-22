@@ -264,9 +264,9 @@ export default function ShiftSummaryPage() {
                             locale={{ emptyText: 'None logged.' }}
                             columns={[
                                 { title: 'Machine', dataIndex: 'work_center' },
-                                { title: 'From Item', dataIndex: 'changed_from', render: (v: string | null) => v ?? '—' },
+                                { title: 'Mold Out', dataIndex: 'changed_from_mold', render: (v: string | null) => v ?? '—' },
+                                { title: 'Mold In', dataIndex: 'changed_to_mold', render: (v: string | null) => v ?? '—' },
                                 { title: 'To Item', dataIndex: 'changed_to' },
-                                { title: 'Mold', dataIndex: 'changed_to_mold', render: (v: string | null) => v ?? '—' },
                                 { title: 'Mins', dataIndex: 'total_minutes', render: (v: string | null) => v ?? '—' },
                                 {
                                     title: 'Status',

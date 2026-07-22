@@ -160,7 +160,7 @@ class ShiftSummaryService
         );
 
         $moldChangeLogs = MoldChangeLog::query()
-            ->with(['workCenter', 'changedFromItem', 'changedToItem', 'changedToMold'])
+            ->with(['workCenter', 'changedFromItem', 'changedFromMold', 'changedToItem', 'changedToMold'])
             ->when($shiftId, fn ($query) => $query->where('shift_id', $shiftId))
             ->whereDate('production_date', $productionDate)
             ->orderBy('from_time')
@@ -225,6 +225,7 @@ class ShiftSummaryService
                 'id' => $log->id,
                 'work_center' => $log->workCenter->name,
                 'changed_from' => $log->changedFromItem?->sku,
+                'changed_from_mold' => $log->changedFromMold?->code,
                 'changed_to' => $log->changedToItem->sku,
                 'changed_to_mold' => $log->changedToMold?->code,
                 'from_time' => $log->from_time->toIso8601String(),
