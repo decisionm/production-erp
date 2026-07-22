@@ -4,27 +4,39 @@
 # has been synced onto the server (by the GitHub Actions workflow, or by hand
 # over SSH). Safe to re-run — every step is idempotent.
 #
-#   Manual use:  cd ~/domains/amrtech.in/erp/backend && bash scripts/deploy.sh
+#   Manual use:  cd ~/domains/erpdemo.amrtech.in/erp/backend && bash scripts/deploy.sh
 #
 set -euo pipefail
 
-echo "==> Deploying from $(pwd)"
+# The app requires PHP >= 8.3, but Hostinger's default CLI `php` is often an
+# older alt-php (8.2 here). Pick an 8.3/8.4 binary explicitly so composer and
+# artisan don't run under the wrong version. Override with PHP_BIN=... if needed.
+pick_php() {
+  if [ -n "${PHP_BIN:-}" ]; then echo "$PHP_BIN"; return; fi
+  for c in php8.3 php8.4 /opt/alt/php83/usr/bin/php /opt/alt/php84/usr/bin/php; do
+    if command -v "$c" >/dev/null 2>&1 || [ -x "$c" ]; then echo "$c"; return; fi
+  done
+  echo php   # fall back to default and let composer's platform check complain
+}
+PHP="$(pick_php)"
+
+echo "==> Deploying from $(pwd) using $($PHP -v | head -1)"
 
 # Rebuild PHP dependencies (vendor/ is excluded from rsync and lives only on
 # the server). Bump memory in case the shared host caps composer.
-php -d memory_limit=-1 "$(command -v composer)" install --no-dev --optimize-autoloader
+$PHP -d memory_limit=-1 "$(command -v composer)" install --no-dev --optimize-autoloader
 
 # Apply any new migrations. --force is required in production (no prompt).
-php artisan migrate --force
+$PHP artisan migrate --force
 
 # Ensure the public storage symlink exists (no-op if already linked).
-php artisan storage:link || true
+$PHP artisan storage:link || true
 
 # Rebuild the cached config/routes/views against the new code + current .env.
 # clear first so stale caches from the previous release can't linger.
-php artisan optimize:clear
-php artisan config:cache
-php artisan route:cache
-php artisan view:cache
+$PHP artisan optimize:clear
+$PHP artisan config:cache
+$PHP artisan route:cache
+$PHP artisan view:cache
 
 echo "==> Deploy complete"
