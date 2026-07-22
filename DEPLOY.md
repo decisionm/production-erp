@@ -16,7 +16,7 @@ server and `composer install` + `migrate` + cache rebuild run over SSH.
 
 - **PHP Configuration** → PHP **8.3**.
 - **Subdomains** → `erpdemo.amrtech.in`, and set its **Document Root** to:
-  `domains/amrtech.in/erp/backend/public`
+  `domains/erpdemo.amrtech.in/erp/backend/public`
 - **SSL** → enable free SSL for the subdomain.
 - **SSH Access** → note the **host**, **username** (`u333512902`), and **port**
   (Hostinger is usually `65002`).
@@ -26,8 +26,8 @@ server and `composer install` + `migrate` + cache rebuild run over SSH.
 ```bash
 ssh -p 65002 u333512902@<host>
 
-mkdir -p ~/domains/amrtech.in/erp/backend
-cd ~/domains/amrtech.in/erp
+mkdir -p ~/domains/erpdemo.amrtech.in/erp
+cd ~/domains/erpdemo.amrtech.in/erp
 
 # Fastest bootstrap: clone once so composer/.env are set up, then CI takes over.
 git clone https://github.com/sendhilpalanivel/production-erp.git .
@@ -70,7 +70,7 @@ SESSION_SECURE_COOKIE=true
 
 hPanel → **Cron Jobs**, every minute:
 ```
-cd ~/domains/amrtech.in/erp/backend && php artisan schedule:run >> /dev/null 2>&1
+cd ~/domains/erpdemo.amrtech.in/erp/backend && php artisan schedule:run >> /dev/null 2>&1
 ```
 
 ---
@@ -96,7 +96,7 @@ GitHub → repo → **Settings → Secrets and variables → Actions → New rep
 | `SSH_USER` | `u333512902` |
 | `SSH_PORT` | `65002` (or your actual port) |
 | `SSH_KEY` | the full contents of the private `deploy_key` |
-| `DEPLOY_PATH` | absolute path, e.g. `/home/u333512902/domains/amrtech.in/erp` |
+| `DEPLOY_PATH` | absolute path, e.g. `/home/u333512902/domains/erpdemo.amrtech.in/erp` |
 
 > Use the **absolute** `DEPLOY_PATH` (`/home/u333512902/...`), not `~` — it's used
 > inside rsync/ssh where `~` may not expand.
@@ -115,7 +115,7 @@ change, use **Run workflow** on the `Deploy to Hostinger` workflow.
 ### Manual fallback (deploy from SSH without CI)
 
 ```bash
-cd ~/domains/amrtech.in/erp && git pull && cd backend && bash scripts/deploy.sh
+cd ~/domains/erpdemo.amrtech.in/erp && git pull && cd backend && bash scripts/deploy.sh
 # then rebuild the frontend elsewhere and copy backend/public/build up,
 # since the server has no Node.
 ```
