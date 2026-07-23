@@ -86,3 +86,9 @@ jobs:
           scp -i ~/.ssh/deploy_key -P "${{ secrets.SSH_PORT }}" \
             out/* \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:$DEST/"
+          # Keep only the 5 newest installers (+ their blockmaps) to bound
+          # storage growth; latest.yml and the metadata json always stay. A few
+          # older builds are retained as fallbacks rather than only the latest.
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '$DEST' && ls -1t tally-sync-agent-setup-*.exe 2>/dev/null | tail -n +6 | sed 's/.*/& &.blockmap/' | xargs -r rm -f; echo 'installers kept:'; ls -1 tally-sync-agent-setup-*.exe 2>/dev/null"
