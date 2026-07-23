@@ -16,6 +16,7 @@ const fieldIds: (keyof AgentConfig)[] = [
     'tallyPort',
     'tallyCompanyName',
     'pollIntervalSeconds',
+    'mastersPollIntervalSeconds',
 ];
 
 function input(id: string): HTMLInputElement {
@@ -38,6 +39,7 @@ async function save(): Promise<void> {
         tallyPort: Number(input('tallyPort').value) || 9000,
         tallyCompanyName: input('tallyCompanyName').value.trim(),
         pollIntervalSeconds: Number(input('pollIntervalSeconds').value) || 90,
+        mastersPollIntervalSeconds: Number(input('mastersPollIntervalSeconds').value) || 3600,
     };
 
     try {

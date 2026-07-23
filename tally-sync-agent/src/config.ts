@@ -15,6 +15,9 @@ export interface AgentConfig {
     tallyPort: number;
     tallyCompanyName: string;
     pollIntervalSeconds: number;
+    // Masters (items, groups, godowns, ledgers) change far less often than
+    // vouchers, so they pull on their own, slower interval — hourly by default.
+    mastersPollIntervalSeconds: number;
 }
 
 const defaults: AgentConfig = {
@@ -24,6 +27,7 @@ const defaults: AgentConfig = {
     tallyPort: 9000,
     tallyCompanyName: '',
     pollIntervalSeconds: 90,
+    mastersPollIntervalSeconds: 3600,
 };
 
 const store = new Store<AgentConfig>({ defaults });
@@ -36,6 +40,7 @@ export function getConfig(): AgentConfig {
         tallyPort: store.get('tallyPort'),
         tallyCompanyName: store.get('tallyCompanyName'),
         pollIntervalSeconds: store.get('pollIntervalSeconds'),
+        mastersPollIntervalSeconds: store.get('mastersPollIntervalSeconds'),
     };
 }
 

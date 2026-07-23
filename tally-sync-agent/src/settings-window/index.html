@@ -46,7 +46,7 @@
     <div class="hint">Your ERP instance's API URL, ending in /api/v1</div>
 
     <label for="cloudApiToken">Cloud API token</label>
-    <input id="cloudApiToken" type="password" placeholder="Sanctum token scoped to tally-sync:poll, tally-sync:report" />
+    <input id="cloudApiToken" type="password" placeholder="Sanctum token scoped to tally-sync:poll, report, masters" />
     <div class="hint">See the agent's README for how to issue this token</div>
 
     <div class="row">
@@ -64,8 +64,17 @@
     <input id="tallyCompanyName" placeholder="Exactly as it appears in Tally" />
     <div class="hint">Must match the company name in Tally exactly — it must also be loaded in the Tally UI</div>
 
-    <label for="pollIntervalSeconds">Poll interval (seconds)</label>
-    <input id="pollIntervalSeconds" type="number" placeholder="90" />
+    <div class="row">
+        <div>
+            <label for="pollIntervalSeconds">Voucher poll interval (seconds)</label>
+            <input id="pollIntervalSeconds" type="number" placeholder="90" />
+        </div>
+        <div>
+            <label for="mastersPollIntervalSeconds">Masters pull interval (seconds)</label>
+            <input id="mastersPollIntervalSeconds" type="number" placeholder="3600" />
+        </div>
+    </div>
+    <div class="hint">Masters (items, groups, godowns, ledgers) change rarely — hourly is plenty</div>
 
     <button id="save">Save</button>
     <div id="status"></div>

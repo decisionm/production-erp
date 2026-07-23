@@ -1,6 +1,7 @@
 import { Tray, Menu, nativeImage, shell, app } from 'electron';
 import path from 'path';
 import { getStatus, runSyncCycle, setPaused } from './sync';
+import { runMastersSync } from './mastersSync';
 import { logFilePath } from './logger';
 import { isConfigured } from './config';
 
@@ -27,6 +28,11 @@ function buildMenu(onOpenSettings: () => void): Menu {
             label: 'Sync Now',
             enabled: !status.running,
             click: () => void runSyncCycle().then(refresh),
+        },
+        {
+            label: 'Pull Masters from Tally',
+            enabled: isConfigured(),
+            click: () => void runMastersSync().then(refresh),
         },
         {
             label: status.paused ? 'Resume' : 'Pause',

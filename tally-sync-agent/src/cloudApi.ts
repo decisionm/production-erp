@@ -1,5 +1,6 @@
 import axios, { type AxiosInstance } from 'axios';
 import { getConfig } from './config';
+import type { MastersPayload } from './tally/masters';
 
 /**
  * Matches App\Modules\TallySync\Http\Controllers\TallySyncAgentController
@@ -43,4 +44,16 @@ export async function acknowledge(entryId: number): Promise<void> {
 
 export async function reportFailure(entryId: number, errorMessage: string): Promise<void> {
     await client().post(`/entries/${entryId}/fail`, { error_message: errorMessage });
+}
+
+export type MastersSyncSummary = Record<string, { created: number; updated: number; total: number }>;
+
+/**
+ * Push the masters pulled from Tally up to the cloud (inbound direction).
+ * Matches App\Modules\TallySync\Http\Controllers\TallySyncAgentController::masters
+ * — POST /tally-sync/masters, requiring a token with the tally-sync:masters ability.
+ */
+export async function syncMasters(payload: MastersPayload): Promise<MastersSyncSummary> {
+    const { data } = await client().post<{ data: MastersSyncSummary }>('/masters', payload);
+    return data.data;
 }

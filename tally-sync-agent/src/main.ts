@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import { getConfig, setConfig, type AgentConfig } from './config';
 import logger from './logger';
+import { startMastersLoop, stopMastersLoop } from './mastersSync';
 import { startSyncLoop, stopSyncLoop } from './sync';
 import { createTray, destroyTray } from './tray';
 
@@ -47,6 +48,8 @@ ipcMain.handle('settings:save', (_event, config: AgentConfig) => {
     // not after a manual restart.
     stopSyncLoop();
     startSyncLoop();
+    stopMastersLoop();
+    startMastersLoop();
 });
 
 app.whenReady().then(() => {
@@ -56,6 +59,7 @@ app.whenReady().then(() => {
 
     createTray(openSettingsWindow);
     startSyncLoop();
+    startMastersLoop();
 
     if (!getConfig().cloudApiBaseUrl) {
         // First run, nothing configured yet — open Settings immediately
@@ -70,5 +74,6 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
     stopSyncLoop();
+    stopMastersLoop();
     destroyTray();
 });
