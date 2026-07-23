@@ -1,17 +1,46 @@
-import type { AgentConfig } from '../config';
-import type { MastersRunUiResult, TallyTestResult, TestResult } from './preload';
+// NOTE: this file is loaded in the settings BrowserWindow via a plain <script>
+// tag (no nodeIntegration), so it must compile to a plain browser script — NOT
+// a CommonJS module. That means: no `import`, no `export`, and no
+// `declare global` (any of those make tsc emit an `exports` wrapper, which
+// throws "exports is not defined" in the browser). Types are declared locally
+// and the preload bridge is reached via a window cast.
 
-declare global {
-    interface Window {
-        settingsApi: {
-            getConfig: () => Promise<AgentConfig>;
-            saveConfig: (config: AgentConfig) => Promise<void>;
-            testTally: (host: string, port: number) => Promise<TallyTestResult>;
-            testCloud: (baseUrl: string, token: string) => Promise<TestResult>;
-            runMasters: () => Promise<MastersRunUiResult>;
-        };
-    }
+interface AgentConfig {
+    cloudApiBaseUrl: string;
+    cloudApiToken: string;
+    tallyHost: string;
+    tallyPort: number;
+    tallyCompanyName: string;
+    pollIntervalSeconds: number;
+    mastersPollIntervalSeconds: number;
 }
+
+interface TestResult {
+    ok: boolean;
+    error?: string;
+}
+
+interface TallyTestResult extends TestResult {
+    companies?: string[];
+}
+
+interface MastersRunUiResult extends TestResult {
+    result?: {
+        companies: string[];
+        pulled: Record<string, number>;
+        posted: Record<string, { created: number; updated: number; total: number }>;
+    } | null;
+}
+
+interface SettingsApi {
+    getConfig: () => Promise<AgentConfig>;
+    saveConfig: (config: AgentConfig) => Promise<void>;
+    testTally: (host: string, port: number) => Promise<TallyTestResult>;
+    testCloud: (baseUrl: string, token: string) => Promise<TestResult>;
+    runMasters: () => Promise<MastersRunUiResult>;
+}
+
+const api = (window as unknown as { settingsApi: SettingsApi }).settingsApi;
 
 const el = (id: string): HTMLElement => document.getElementById(id) as HTMLElement;
 const input = (id: string): HTMLInputElement => document.getElementById(id) as HTMLInputElement;
@@ -56,7 +85,7 @@ async function withBusy(button: HTMLButtonElement, fn: () => Promise<void>): Pro
 }
 
 async function load(): Promise<void> {
-    const cfg = await window.settingsApi.getConfig();
+    const cfg = await api.getConfig();
     input('tallyHost').value = cfg.tallyHost || '127.0.0.1';
     input('tallyPort').value = String(cfg.tallyPort || 9000);
     input('cloudApiBaseUrl').value = cfg.cloudApiBaseUrl || '';
@@ -72,7 +101,7 @@ el('testTally').addEventListener('click', () => void withBusy(el('testTally') as
     setStatus('tallyStatus', 'Connecting…', 'pending');
     const host = input('tallyHost').value.trim() || '127.0.0.1';
     const port = Number(input('tallyPort').value) || 9000;
-    const res = await window.settingsApi.testTally(host, port);
+    const res = await api.testTally(host, port);
     if (res.ok) {
         const companies = res.companies ?? [];
         fillCompanyOptions(companies, select('tallyCompanyName').value);
@@ -84,14 +113,14 @@ el('testTally').addEventListener('click', () => void withBusy(el('testTally') as
 
 el('testCloud').addEventListener('click', () => void withBusy(el('testCloud') as HTMLButtonElement, async () => {
     setStatus('cloudStatus', 'Connecting…', 'pending');
-    const res = await window.settingsApi.testCloud(input('cloudApiBaseUrl').value.trim(), input('cloudApiToken').value.trim());
+    const res = await api.testCloud(input('cloudApiBaseUrl').value.trim(), input('cloudApiToken').value.trim());
     setStatus('cloudStatus', res.ok ? 'Connected — token accepted' : `Could not connect: ${res.error}`, res.ok ? 'ok' : 'err');
 }));
 
 el('save').addEventListener('click', () => void withBusy(el('save') as HTMLButtonElement, async () => {
     setStatus('saveStatus', 'Saving…', 'pending');
     try {
-        await window.settingsApi.saveConfig(currentConfig());
+        await api.saveConfig(currentConfig());
         setStatus('saveStatus', 'Saved', 'ok');
     } catch (err) {
         setStatus('saveStatus', `Could not save: ${err instanceof Error ? err.message : String(err)}`, 'err');
@@ -101,7 +130,7 @@ el('save').addEventListener('click', () => void withBusy(el('save') as HTMLButto
 el('runMasters').addEventListener('click', () => void withBusy(el('runMasters') as HTMLButtonElement, async () => {
     setStatus('mastersStatus', 'Pulling from Tally and posting to the ERP…', 'pending');
     el('mastersResult').innerHTML = '';
-    const res = await window.settingsApi.runMasters();
+    const res = await api.runMasters();
     if (!res.ok) {
         setStatus('mastersStatus', `Failed: ${res.error}`, 'err');
         return;
