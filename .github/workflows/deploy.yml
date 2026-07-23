@@ -1,0 +1,78 @@
+name: Deploy to Hostinger
+
+# One push to `main` = full deploy of both frontend and backend.
+#
+# Why CI instead of building on the server: the Hostinger plan has no Node
+# over SSH, so the React/Vite build must happen off-server. GitHub's runner
+# has Node, builds the frontend into backend/public/build, then rsyncs the
+# whole backend/ (built frontend included) to the server. rsync --delete
+# makes the server match the repo exactly (no missed/stale files), while the
+# --exclude list protects everything that must NOT be touched on deploy:
+# .env (DB creds, APP_KEY), storage/ (logs, sessions, uploads) and vendor/
+# (rebuilt on the server by composer). CI never sees production secrets.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}   # allows manual "Run workflow" from the Actions tab
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false   # never interrupt an in-flight deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # --- Build the frontend (this is the step the server cannot do) ---
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Type-check frontend
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build   # writes into ../backend/public/build (see vite.config.ts)
+
+      # --- Ship it ---
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Rsync backend to server
+        run: |
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }}" \
+            --exclude='.env' \
+            --exclude='.git/' \
+            --exclude='vendor/' \
+            --exclude='node_modules/' \
+            --exclude='storage/' \
+            --exclude='bootstrap/cache/' \
+            --exclude='public/storage' \
+            --exclude='public/hot' \
+            backend/ \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}/backend/"
+
+      - name: Run server-side deploy tasks
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && bash scripts/deploy.sh"

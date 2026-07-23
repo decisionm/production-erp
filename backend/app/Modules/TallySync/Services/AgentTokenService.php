@@ -22,7 +22,9 @@ class AgentTokenService
 {
     private const AGENT_EMAIL = 'tally-sync-agent@system.local';
 
-    private const ABILITIES = ['tally-sync:poll', 'tally-sync:report'];
+    // poll = fetch pending vouchers, report = ack/fail them, items = push the
+    // Tally stock-item master back up (masters pull, TALLY-SYNC-MASTER-PLAN.md §3).
+    private const ABILITIES = ['tally-sync:poll', 'tally-sync:report', 'tally-sync:items'];
 
     public function listTokens(): Collection
     {

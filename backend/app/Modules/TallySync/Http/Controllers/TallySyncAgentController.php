@@ -4,9 +4,12 @@ namespace App\Modules\TallySync\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\TallySync\Http\Requests\FailTallySyncEntryRequest;
+use App\Modules\TallySync\Http\Requests\SyncItemsRequest;
 use App\Modules\TallySync\Http\Resources\TallySyncEntryResource;
 use App\Modules\TallySync\Models\TallySyncEntry;
+use App\Modules\TallySync\Services\ItemSyncService;
 use App\Modules\TallySync\Services\TallySyncService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
@@ -45,5 +48,19 @@ class TallySyncAgentController extends Controller
         return TallySyncEntryResource::make(
             $this->sync->markFailed($tallySyncEntry, $request->validated()['error_message']),
         );
+    }
+
+    /**
+     * Inbound masters pull: the agent posts the Tally stock-item list here and
+     * we upsert it into the ERP item master (matched on GUID). Idempotent — the
+     * agent re-posts the full list each cycle; re-posting is safe.
+     */
+    public function items(SyncItemsRequest $request, ItemSyncService $itemSync): JsonResponse
+    {
+        abort_unless($request->user()?->tokenCan('tally-sync:items'), 403, 'Token missing the tally-sync:items ability.');
+
+        return response()->json([
+            'data' => $itemSync->sync($request->validated()['items']),
+        ]);
     }
 }

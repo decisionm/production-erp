@@ -230,6 +230,10 @@ Route::prefix('v1')->group(function () {
             Route::get('pending', [TallySyncAgentController::class, 'pending']);
             Route::post('entries/{tally_sync_entry}/ack', [TallySyncAgentController::class, 'acknowledge']);
             Route::post('entries/{tally_sync_entry}/fail', [TallySyncAgentController::class, 'fail']);
+
+            // Inbound masters pull (agent → cloud): upsert the Tally stock-item
+            // master. Gated by the tally-sync:items token ability in the controller.
+            Route::post('items', [TallySyncAgentController::class, 'items']);
         });
 
         Route::prefix('hrms')->middleware('module:hrms')->group(function () {
@@ -321,7 +325,13 @@ Route::prefix('v1')->group(function () {
             Route::apiResource('schedules', MaintenanceScheduleController::class)->only(['index', 'store']);
             Route::post('schedules/generate-due', [MaintenanceScheduleController::class, 'generateDue']);
 
-            Route::apiResource('work-orders', MaintenanceWorkOrderController::class)->only(['index', 'store']);
+            // Distinct route-name prefix: Production also exposes a `work-orders`
+            // resource (see WorkOrderController above), so without an explicit name
+            // both generate `work-orders.index`/`.store` and route:cache fails to
+            // serialize with a duplicate-name error.
+            Route::apiResource('work-orders', MaintenanceWorkOrderController::class)
+                ->only(['index', 'store'])
+                ->names('maintenance.work-orders');
             Route::post('work-orders/{maintenance_work_order}/parts', [MaintenanceWorkOrderController::class, 'addPart']);
             Route::post('work-orders/{maintenance_work_order}/start', [MaintenanceWorkOrderController::class, 'start']);
             Route::post('work-orders/{maintenance_work_order}/complete', [MaintenanceWorkOrderController::class, 'complete']);
