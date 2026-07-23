@@ -52,7 +52,9 @@ jobs:
       - uses: shivammathur/setup-php@v2
         if: steps.check.outputs.configured == 'true'
         with:
-          php-version: '8.3'
+          # composer.lock pins Symfony v8 packages that require PHP >= 8.4.1;
+          # the server's PHP must match — see DEPLOYMENT.md
+          php-version: '8.4'
           extensions: mbstring, bcmath, zip
           coverage: none
 

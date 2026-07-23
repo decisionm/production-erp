@@ -16,6 +16,7 @@ Until the secrets below are configured, the deploy workflow skips itself cleanly
 
 ## One-time server setup (hPanel)
 
+0. **Set the site's PHP version to 8.4** (hPanel → Websites → PHP Configuration). `composer.lock` pins Symfony v8 packages that require PHP ≥ 8.4.1 — the account currently serves PHP 8.3, which will fatal on boot. If the plan doesn't offer 8.4+, that decides the hosting question: move the demo to a VPS.
 1. **Enable SSH** (hPanel → Advanced → SSH Access) and note host, port (usually `65002`), and username.
 2. **Add the deploy key:** generate a keypair (`ssh-keygen -t ed25519 -f deploy_key -N ""`), put the public half in hPanel's SSH keys, keep the private half for the GitHub secret below.
 3. **Create the MySQL database** (hPanel → Databases): note DB name, user, password. Host is `localhost`.
@@ -42,7 +43,7 @@ Until the secrets below are configured, the deploy workflow skips itself cleanly
    php /home/<user>/domains/erpdemo.amrtech.in/erp/artisan schedule:run
    php /home/<user>/domains/erpdemo.amrtech.in/erp/artisan queue:work --stop-when-empty --max-time=50
    ```
-   If the CLI `php` isn't 8.3 on the account, use the versioned binary Hostinger provides (e.g. `/usr/bin/php8.3`) in both cron lines.
+   If the CLI `php` isn't 8.4 on the account, use the versioned binary Hostinger provides (e.g. `/usr/bin/php8.4`) in both cron lines — and check the same for the deploy workflow's SSH step if `php artisan migrate` fails on version grounds.
 7. **Seed base data** after the first successful deploy: `php artisan db:seed` (or the specific seeders for users/shifts/roles).
 
 ## GitHub secrets
