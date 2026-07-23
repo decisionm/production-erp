@@ -5,6 +5,7 @@ namespace App\Modules\Production\Services;
 use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Services\StockMovementService;
+use App\Modules\Production\Events\ShiftProductionEntryApproved;
 use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
 use App\Modules\Production\Models\ShiftProductionEntry;
@@ -212,7 +213,13 @@ class ShiftProductionEntryService
             );
         }
 
-        return $entry->fresh(['shift', 'workCenter', 'item', 'warehouse', 'approvedBy']);
+        $fresh = $entry->fresh(['shift', 'workCenter', 'item', 'warehouse', 'approvedBy']);
+
+        // Only an approved entry is ever eligible to sync (§4a). Announce it;
+        // TallySync enqueues the Tally voucher, Production stays unaware.
+        event(new ShiftProductionEntryApproved($fresh));
+
+        return $fresh;
     }
 
     public function reject(ShiftProductionEntry $entry, int $rejectedBy, ?string $reason): ShiftProductionEntry

@@ -4,6 +4,7 @@ namespace App\Modules\Procurement\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Inventory\Services\StockMovementService;
+use App\Modules\Procurement\Events\GoodsReceiptNoteReceived;
 use App\Modules\Procurement\Exceptions\OverReceiptException;
 use App\Modules\Procurement\Models\Enums\PurchaseOrderStatus;
 use App\Modules\Procurement\Models\GoodsReceiptNote;
@@ -85,6 +86,11 @@ class GoodsReceiptService
             }
 
             $this->recomputeOrderStatus($order->fresh('lines'));
+
+            // Announce the receipt — TallySync (and anyone else) can react
+            // without Procurement knowing about them. Dispatched inside the
+            // transaction so a queued Tally voucher commits/rolls back with it.
+            event(new GoodsReceiptNoteReceived($grn));
 
             return $grn->load(['lines.item', 'warehouse', 'purchaseOrder']);
         });

@@ -3,6 +3,9 @@
 namespace App\Modules\TallySync\Services;
 
 use App\Modules\Finance\Models\JournalEntry;
+use App\Modules\Procurement\Models\GoodsReceiptNote;
+use App\Modules\Production\Models\ShiftProductionEntry;
+use App\Modules\Sales\Models\Delivery;
 use App\Modules\Sales\Models\Invoice;
 use App\Modules\TallySync\Models\Enums\TallySyncStatus;
 use App\Modules\TallySync\Models\TallySyncEntry;
@@ -62,6 +65,95 @@ class TallySyncService
             'voucher_number' => $entry->reference ?? "JE-{$entry->id}",
             'narration' => $entry->memo,
             'lines' => $lines,
+        ]);
+    }
+
+    /**
+     * Raw material received against a PO → Tally Receipt Note (increases RM
+     * stock). Party is the supplier; godown is the receiving warehouse. The
+     * agent translates this to the Receipt Note voucher XML.
+     */
+    public function enqueueGoodsReceiptNote(GoodsReceiptNote $note): TallySyncEntry
+    {
+        $note->loadMissing(['lines.item', 'warehouse', 'purchaseOrder.vendor']);
+
+        $lines = $note->lines->map(fn ($line) => [
+            'item' => "{$line->item->sku} - {$line->item->name}",
+            'quantity' => $line->quantity,
+            'rate' => $line->unit_cost,
+            'amount' => bcmul($line->quantity, $line->unit_cost, 4),
+        ])->all();
+
+        $totalAmount = array_reduce($lines, fn ($carry, $line) => bcadd($carry, $line['amount'], 4), '0.0000');
+
+        return $this->enqueue($note, 'Receipt Note', [
+            'voucher_type' => 'Receipt Note',
+            'voucher_date' => $note->received_date?->toDateString(),
+            'voucher_number' => "GRN-{$note->id}",
+            'party_ledger' => $note->purchaseOrder?->vendor?->name,
+            'party_gstin' => $note->purchaseOrder?->vendor?->gstin,
+            'godown' => $note->warehouse?->name,
+            'narration' => $note->notes,
+            'lines' => $lines,
+            'total_amount' => $totalAmount,
+        ]);
+    }
+
+    /**
+     * Finished goods dispatched to a customer → Tally Delivery Note (reduces FG
+     * stock). No pricing — a Delivery Note is a stock movement, not a bill.
+     */
+    public function enqueueDelivery(Delivery $delivery): TallySyncEntry
+    {
+        $delivery->loadMissing(['lines.item', 'warehouse', 'salesOrder.customer']);
+
+        $lines = $delivery->lines->map(fn ($line) => [
+            'item' => "{$line->item->sku} - {$line->item->name}",
+            'quantity' => $line->quantity,
+        ])->all();
+
+        return $this->enqueue($delivery, 'Delivery Note', [
+            'voucher_type' => 'Delivery Note',
+            'voucher_date' => $delivery->delivered_date?->toDateString(),
+            'voucher_number' => "DN-{$delivery->id}",
+            'party_ledger' => $delivery->salesOrder?->customer?->name,
+            'party_gstin' => $delivery->salesOrder?->customer?->gstin,
+            'godown' => $delivery->warehouse?->name,
+            'narration' => $delivery->notes,
+            'lines' => $lines,
+        ]);
+    }
+
+    /**
+     * An approved shift's production → Tally Manufacturing/Stock Journal:
+     * consumes the raw materials issued that shift and produces the finished
+     * item into the warehouse godown, carrying the batch number. The agent
+     * decides the exact voucher shape (Manufacturing Journal if Tally BOM is
+     * enabled, else a plain Stock Journal) — TALLY-SYNC-MASTER-PLAN.md §6.
+     */
+    public function enqueueShiftProductionEntry(ShiftProductionEntry $entry): TallySyncEntry
+    {
+        $entry->loadMissing(['item', 'warehouse', 'materialConsumptions.item']);
+
+        $consumed = $entry->materialConsumptions->map(fn ($consumption) => [
+            'item' => "{$consumption->item->sku} - {$consumption->item->name}",
+            'quantity' => $consumption->quantity_issued_kg,
+        ])->all();
+
+        $produced = [[
+            'item' => "{$entry->item->sku} - {$entry->item->name}",
+            'quantity' => $entry->quantity_produced,
+        ]];
+
+        return $this->enqueue($entry, 'Manufacturing Journal', [
+            'voucher_type' => 'Manufacturing Journal',
+            'voucher_date' => $entry->production_date?->toDateString(),
+            'voucher_number' => "SPE-{$entry->id}",
+            'batch_number' => $entry->batch_number,
+            'godown' => $entry->warehouse?->name,
+            'narration' => $entry->notes,
+            'produced' => $produced,
+            'consumed' => $consumed,
         ]);
     }
 
