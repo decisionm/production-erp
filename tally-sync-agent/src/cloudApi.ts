@@ -57,3 +57,9 @@ export async function syncMasters(payload: MastersPayload): Promise<MastersSyncS
     const { data } = await client().post<{ data: MastersSyncSummary }>('/masters', payload);
     return data.data;
 }
+
+/** Report the companies found in the local Tally so Settings can offer them. */
+export async function reportCompanies(companies: string[]): Promise<string[]> {
+    const { data } = await client().post<{ data: { companies: string[] } }>('/companies', { companies });
+    return data.data.companies;
+}

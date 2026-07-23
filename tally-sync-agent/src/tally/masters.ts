@@ -160,6 +160,38 @@ export async function exportItems(t: TallyTarget): Promise<ItemNode[]> {
         .filter((n) => n.guid && n.name);
 }
 
+/**
+ * List the companies present in the local Tally. Unlike the master exports this
+ * needs no company loaded/selected — it's what lets Settings offer a company to
+ * pick in the first place.
+ */
+export async function exportCompanies(target: Pick<TallyTarget, 'host' | 'port'>): Promise<string[]> {
+    const url = `http://${target.host}:${target.port}`;
+    const xml =
+        '<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>' +
+        '<TYPE>Collection</TYPE><ID>List of Companies</ID></HEADER><BODY><DESC>' +
+        '<STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES>' +
+        '<TDL><TDLMESSAGE><COLLECTION NAME="List of Companies" ISMODIFY="No">' +
+        '<TYPE>Company</TYPE><NATIVEMETHOD>Name</NATIVEMETHOD></COLLECTION></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>';
+
+    const { data } = await axios.post<string>(url, xml, {
+        headers: { 'Content-Type': 'text/xml' },
+        timeout: 30000,
+        responseType: 'text',
+    });
+
+    const parsed = parser.parse(data);
+    const collection = parsed?.ENVELOPE?.BODY?.DATA?.COLLECTION;
+    let nodes = collection ? collection.COMPANY : undefined;
+
+    if (!nodes) return [];
+    if (!Array.isArray(nodes)) nodes = [nodes];
+
+    return nodes
+        .map((n: any) => clean(typeof n === 'object' ? (n['@_NAME'] ?? textOf(n.NAME)) : ''))
+        .filter((name: string) => name !== '');
+}
+
 /** Pull every master type from Tally into one payload for POST /tally-sync/masters. */
 export async function exportMasters(target: TallyTarget): Promise<MastersPayload> {
     const [item_groups, godowns, ledger_groups, ledgers, items] = await Promise.all([

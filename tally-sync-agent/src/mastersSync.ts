@@ -1,7 +1,7 @@
-import { syncMasters } from './cloudApi';
+import { reportCompanies, syncMasters } from './cloudApi';
 import { getConfig, isConfigured } from './config';
 import logger from './logger';
-import { exportMasters } from './tally/masters';
+import { exportCompanies, exportMasters } from './tally/masters';
 
 /**
  * The inbound masters loop: pull item groups, godowns, ledgers and items from
@@ -26,6 +26,17 @@ export async function runMastersSync(): Promise<void> {
     running = true;
     try {
         const cfg = getConfig();
+
+        // Report the available companies first (needs no selected company), so
+        // Settings can offer them even before one is chosen.
+        try {
+            const companies = await exportCompanies({ host: cfg.tallyHost, port: cfg.tallyPort });
+            await reportCompanies(companies);
+            logger.info('Reported Tally companies', { companies });
+        } catch (err) {
+            logger.warn('Could not report companies', { message: err instanceof Error ? err.message : String(err) });
+        }
+
         const payload = await exportMasters({
             host: cfg.tallyHost,
             port: cfg.tallyPort,
