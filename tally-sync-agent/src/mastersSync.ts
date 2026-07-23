@@ -32,6 +32,11 @@ export async function runMastersSync(): Promise<MastersRunResult | null> {
     running = true;
     try {
         const cfg = getConfig();
+        logger.info('Masters pull: starting', {
+            tally: `${cfg.tallyHost}:${cfg.tallyPort}`,
+            company: cfg.tallyCompanyName,
+            cloud: cfg.cloudApiBaseUrl,
+        });
 
         // Report the available companies first (needs no selected company), so
         // Settings can offer them even before one is chosen.
@@ -39,9 +44,9 @@ export async function runMastersSync(): Promise<MastersRunResult | null> {
         try {
             companies = await exportCompanies({ host: cfg.tallyHost, port: cfg.tallyPort });
             await reportCompanies(companies);
-            logger.info('Reported Tally companies', { companies });
+            logger.info(`Masters pull: found ${companies.length} Tally compan${companies.length === 1 ? 'y' : 'ies'}`, { companies });
         } catch (err) {
-            logger.warn('Could not report companies', { message: err instanceof Error ? err.message : String(err) });
+            logger.warn('Masters pull: could not report companies', { message: err instanceof Error ? err.message : String(err) });
         }
 
         const payload = await exportMasters({
@@ -51,10 +56,13 @@ export async function runMastersSync(): Promise<MastersRunResult | null> {
         });
 
         const pulled = Object.fromEntries(Object.entries(payload).map(([key, rows]) => [key, rows.length]));
-        logger.info('Pulled masters from Tally', pulled);
+        const pulledTotal = Object.values(pulled).reduce((sum, n) => sum + n, 0);
+        logger.info(`Masters pull: fetched ${pulledTotal} records from Tally`, pulled);
 
         const posted = await syncMasters(payload);
-        logger.info('Pushed masters to cloud', posted);
+        const created = Object.values(posted).reduce((sum, s) => sum + s.created, 0);
+        const updated = Object.values(posted).reduce((sum, s) => sum + s.updated, 0);
+        logger.info(`Masters pull: posted to ERP — ${created} created, ${updated} updated`, posted);
 
         return { companies, pulled, posted };
     } catch (err) {

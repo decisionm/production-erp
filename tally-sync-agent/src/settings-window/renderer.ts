@@ -35,6 +35,7 @@ interface MastersRunUiResult extends TestResult {
 interface SettingsApi {
     getConfig: () => Promise<AgentConfig>;
     saveConfig: (config: AgentConfig) => Promise<void>;
+    getVersion: () => Promise<string>;
     testTally: (host: string, port: number) => Promise<TallyTestResult>;
     testCloud: (baseUrl: string, token: string) => Promise<TestResult>;
     runMasters: () => Promise<MastersRunUiResult>;
@@ -85,6 +86,8 @@ async function withBusy(button: HTMLButtonElement, fn: () => Promise<void>): Pro
 }
 
 async function load(): Promise<void> {
+    api.getVersion().then((v) => { el('appVersion').textContent = `v${v}`; }).catch(() => {});
+
     const cfg = await api.getConfig();
     input('tallyHost').value = cfg.tallyHost || '127.0.0.1';
     input('tallyPort').value = String(cfg.tallyPort || 9000);

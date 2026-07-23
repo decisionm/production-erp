@@ -21,7 +21,8 @@ export interface AgentConfig {
 }
 
 const defaults: AgentConfig = {
-    cloudApiBaseUrl: '',
+    // Prefilled with this instance's ERP so the operator only pastes a token.
+    cloudApiBaseUrl: 'https://erpdemo.amrtech.in/api/v1',
     cloudApiToken: '',
     tallyHost: '127.0.0.1',
     tallyPort: 9000,

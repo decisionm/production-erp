@@ -25,7 +25,7 @@ function buildMenu(onOpenSettings: () => void): Menu {
         { label: statusLabel(), enabled: false },
         { type: 'separator' },
         {
-            label: 'Sync Now',
+            label: 'Sync Vouchers Now',
             enabled: !status.running,
             click: () => void runSyncCycle().then(refresh),
         },

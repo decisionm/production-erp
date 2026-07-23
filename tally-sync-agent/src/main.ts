@@ -52,6 +52,8 @@ function openSettingsWindow(): void {
 
 ipcMain.handle('settings:get', (): AgentConfig => getConfig());
 
+ipcMain.handle('app:version', (): string => app.getVersion());
+
 // Setup-UI probes. Each returns a plain { ok, ... } result rather than throwing,
 // so the renderer can show a friendly status instead of an unhandled rejection.
 ipcMain.handle('tally:test', async (_event, host: string, port: number) => {

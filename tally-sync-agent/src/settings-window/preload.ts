@@ -26,6 +26,7 @@ export interface MastersRunUiResult extends TestResult {
 contextBridge.exposeInMainWorld('settingsApi', {
     getConfig: (): Promise<AgentConfig> => ipcRenderer.invoke('settings:get'),
     saveConfig: (config: AgentConfig): Promise<void> => ipcRenderer.invoke('settings:save', config),
+    getVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
     testTally: (host: string, port: number): Promise<TallyTestResult> => ipcRenderer.invoke('tally:test', host, port),
     testCloud: (baseUrl: string, token: string): Promise<TestResult> => ipcRenderer.invoke('cloud:test', baseUrl, token),
     runMasters: (): Promise<MastersRunUiResult> => ipcRenderer.invoke('masters:run'),
