@@ -52,21 +52,26 @@ class TallySettingsController extends Controller
     private function agentDownload(): ?array
     {
         $disk = Storage::disk('public');
-        $installer = 'agent/tally-sync-agent-setup.exe';
 
-        if (! $disk->exists($installer)) {
+        // The build workflow writes this metadata alongside the versioned
+        // installer + electron-updater's latest.yml; the filename is versioned
+        // (e.g. tally-sync-agent-setup-0.1.0.exe), so read it from here.
+        if (! $disk->exists('agent/tally-sync-agent-latest.json')) {
             return null;
         }
 
-        $meta = $disk->exists('agent/tally-sync-agent-latest.json')
-            ? (json_decode((string) $disk->get('agent/tally-sync-agent-latest.json'), true) ?: [])
-            : [];
+        $meta = json_decode((string) $disk->get('agent/tally-sync-agent-latest.json'), true) ?: [];
+        $filename = $meta['filename'] ?? null;
+
+        if (! is_string($filename) || ! $disk->exists("agent/{$filename}")) {
+            return null;
+        }
 
         return [
-            'url' => $disk->url($installer),
+            'url' => $disk->url("agent/{$filename}"),
             'version' => $meta['version'] ?? null,
             'built_at' => $meta['built_at'] ?? null,
-            'size' => $disk->size($installer),
+            'size' => $disk->size("agent/{$filename}"),
         ];
     }
 

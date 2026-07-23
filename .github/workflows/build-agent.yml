@@ -45,10 +45,14 @@ jobs:
         shell: bash
         run: |
           mkdir -p out
-          EXE="$(ls release/*.exe | head -1)"
-          echo "installer: $EXE"
-          cp "$EXE" out/tally-sync-agent-setup.exe
-          node -e "const p=require('./package.json'); require('fs').writeFileSync('out/tally-sync-agent-latest.json', JSON.stringify({ version: p.version, commit: (process.env.GITHUB_SHA || '').slice(0, 7), built_at: new Date().toISOString(), filename: 'tally-sync-agent-setup.exe' }))"
+          # Ship the raw electron-builder output so electron-updater can consume
+          # latest.yml + the versioned installer (+ blockmap for delta updates).
+          cp release/*.exe out/
+          cp release/*.blockmap out/ 2>/dev/null || true
+          cp release/latest.yml out/
+          # Metadata the Settings page reads for the download link/version.
+          node -e "const p=require('./package.json'); const filename='tally-sync-agent-setup-'+p.version+'.exe'; require('fs').writeFileSync('out/tally-sync-agent-latest.json', JSON.stringify({ version: p.version, commit: (process.env.GITHUB_SHA || '').slice(0, 7), filename, built_at: new Date().toISOString() }))"
+          ls -la out
 
       - uses: actions/upload-artifact@v4
         with:
@@ -73,11 +77,12 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
 
-      - name: Upload installer to the ERP's public storage
+      - name: Upload installer + update feed to the ERP's public storage
         run: |
           DEST="${{ secrets.DEPLOY_PATH }}/backend/storage/app/public/agent"
+          # Create the dir and drop the old stable-named installer from the first build.
           ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "mkdir -p '$DEST'"
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "mkdir -p '$DEST' && rm -f '$DEST/tally-sync-agent-setup.exe'"
           scp -i ~/.ssh/deploy_key -P "${{ secrets.SSH_PORT }}" \
-            out/tally-sync-agent-setup.exe out/tally-sync-agent-latest.json \
+            out/* \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:$DEST/"

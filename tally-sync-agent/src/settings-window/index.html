@@ -11,9 +11,19 @@
             background: #f5f5f5;
             color: #222;
         }
-        h1 { font-size: 16px; margin: 0 0 16px; }
-        label { display: block; font-size: 12px; font-weight: 600; margin: 12px 0 4px; }
-        input {
+        h1 { font-size: 16px; margin: 0 0 4px; }
+        .sub { font-size: 12px; color: #777; margin: 0 0 16px; }
+        .card {
+            background: #fff;
+            border: 1px solid #e8e8e8;
+            border-radius: 8px;
+            padding: 14px 16px;
+            margin-bottom: 14px;
+        }
+        .card h2 { font-size: 13px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+        .step { background: #1677ff; color: #fff; border-radius: 50%; width: 18px; height: 18px; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; }
+        label { display: block; font-size: 12px; font-weight: 600; margin: 10px 0 4px; }
+        input, select {
             width: 100%;
             box-sizing: border-box;
             padding: 6px 8px;
@@ -21,12 +31,12 @@
             border: 1px solid #ccc;
             border-radius: 4px;
         }
-        .hint { font-size: 11px; color: #777; margin-top: 2px; }
         .row { display: flex; gap: 12px; }
         .row > div { flex: 1; }
+        .hint { font-size: 11px; color: #888; margin-top: 3px; }
         button {
-            margin-top: 20px;
-            padding: 8px 16px;
+            margin-top: 12px;
+            padding: 7px 14px;
             font-size: 13px;
             background: #1677ff;
             color: #fff;
@@ -34,50 +44,85 @@
             border-radius: 4px;
             cursor: pointer;
         }
-        button:hover { background: #0958d9; }
-        #status { margin-top: 10px; font-size: 12px; }
+        button.secondary { background: #fff; color: #1677ff; border: 1px solid #1677ff; }
+        button:hover { filter: brightness(0.95); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .status { font-size: 12px; margin-top: 8px; min-height: 16px; }
+        .status.ok { color: #237804; }
+        .status.err { color: #cf1322; }
+        .status.pending { color: #888; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
+        th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid #f0f0f0; }
+        th { color: #888; font-weight: 600; }
+        .save-bar { position: sticky; bottom: 0; background: #f5f5f5; padding-top: 8px; }
     </style>
 </head>
 <body>
-    <h1>Tally Sync Agent — Settings</h1>
+    <h1>Tally Sync Agent</h1>
+    <p class="sub">Connect this machine's Tally to your ERP. Work top to bottom.</p>
 
-    <label for="cloudApiBaseUrl">Cloud API base URL</label>
-    <input id="cloudApiBaseUrl" placeholder="https://erpdemo.amrtech.in/api/v1" />
-    <div class="hint">Your ERP instance's API URL, ending in /api/v1</div>
-
-    <label for="cloudApiToken">Cloud API token</label>
-    <input id="cloudApiToken" type="password" placeholder="Sanctum token scoped to tally-sync:poll, report, masters" />
-    <div class="hint">See the agent's README for how to issue this token</div>
-
-    <div class="row">
-        <div>
-            <label for="tallyHost">Tally host</label>
-            <input id="tallyHost" placeholder="127.0.0.1" />
+    <div class="card">
+        <h2><span class="step">1</span> Tally connection</h2>
+        <div class="row">
+            <div>
+                <label for="tallyHost">Tally host</label>
+                <input id="tallyHost" placeholder="127.0.0.1" />
+            </div>
+            <div>
+                <label for="tallyPort">Tally port</label>
+                <input id="tallyPort" type="number" placeholder="9000" />
+            </div>
         </div>
-        <div>
-            <label for="tallyPort">Tally port</label>
-            <input id="tallyPort" type="number" placeholder="9000" />
+        <div class="hint">The machine running Tally. Tally's HTTP gateway must be on (F1 → Settings → Connectivity).</div>
+        <button id="testTally" class="secondary">Test Tally connection</button>
+        <div id="tallyStatus" class="status"></div>
+    </div>
+
+    <div class="card">
+        <h2><span class="step">2</span> Company</h2>
+        <label for="tallyCompanyName">Tally company to sync</label>
+        <select id="tallyCompanyName">
+            <option value="">— test the connection above to list companies —</option>
+        </select>
+        <div class="hint">This company must be open in the Tally window for syncing to work.</div>
+    </div>
+
+    <div class="card">
+        <h2><span class="step">3</span> ERP cloud API</h2>
+        <label for="cloudApiBaseUrl">Cloud API base URL</label>
+        <input id="cloudApiBaseUrl" placeholder="https://erpdemo.amrtech.in/api/v1" />
+        <label for="cloudApiToken">Cloud API token</label>
+        <input id="cloudApiToken" type="password" placeholder="Agent token (Tally Sync → Agent Tokens)" />
+        <button id="testCloud" class="secondary">Test cloud connection</button>
+        <div id="cloudStatus" class="status"></div>
+    </div>
+
+    <div class="card">
+        <h2>Sync intervals</h2>
+        <div class="row">
+            <div>
+                <label for="pollIntervalSeconds">Voucher poll (seconds)</label>
+                <input id="pollIntervalSeconds" type="number" placeholder="90" />
+            </div>
+            <div>
+                <label for="mastersPollIntervalSeconds">Masters pull (seconds)</label>
+                <input id="mastersPollIntervalSeconds" type="number" placeholder="3600" />
+            </div>
         </div>
     </div>
 
-    <label for="tallyCompanyName">Tally company name</label>
-    <input id="tallyCompanyName" placeholder="Exactly as it appears in Tally" />
-    <div class="hint">Must match the company name in Tally exactly — it must also be loaded in the Tally UI</div>
-
-    <div class="row">
-        <div>
-            <label for="pollIntervalSeconds">Voucher poll interval (seconds)</label>
-            <input id="pollIntervalSeconds" type="number" placeholder="90" />
-        </div>
-        <div>
-            <label for="mastersPollIntervalSeconds">Masters pull interval (seconds)</label>
-            <input id="mastersPollIntervalSeconds" type="number" placeholder="3600" />
-        </div>
+    <div class="card">
+        <h2><span class="step">4</span> Bidirectional check</h2>
+        <div class="hint">Pulls masters from Tally and posts them to the ERP — proves both directions work. Save your settings first.</div>
+        <button id="runMasters">Run sync test now</button>
+        <div id="mastersStatus" class="status"></div>
+        <div id="mastersResult"></div>
     </div>
-    <div class="hint">Masters (items, groups, godowns, ledgers) change rarely — hourly is plenty</div>
 
-    <button id="save">Save</button>
-    <div id="status"></div>
+    <div class="save-bar">
+        <button id="save">Save settings</button>
+        <span id="saveStatus" class="status" style="display:inline-block; margin-left: 10px;"></span>
+    </div>
 
     <script src="./renderer.js"></script>
 </body>

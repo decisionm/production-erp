@@ -32,7 +32,7 @@ function buildMenu(onOpenSettings: () => void): Menu {
         {
             label: 'Pull Masters from Tally',
             enabled: isConfigured(),
-            click: () => void runMastersSync().then(refresh),
+            click: () => void runMastersSync().then(refresh).catch(refresh),
         },
         {
             label: status.paused ? 'Resume' : 'Pause',

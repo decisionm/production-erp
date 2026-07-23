@@ -63,3 +63,17 @@ export async function reportCompanies(companies: string[]): Promise<string[]> {
     const { data } = await client().post<{ data: { companies: string[] } }>('/companies', { companies });
     return data.data.companies;
 }
+
+/**
+ * Connectivity probe for the setup UI — checks the given cloud URL + token can
+ * reach the API (uses the pending-vouchers endpoint as a cheap authenticated
+ * GET). Uses the passed-in values, not saved config, so it can validate what
+ * the user just typed. Throws on failure.
+ */
+export async function testCloudConnection(baseUrl: string, token: string): Promise<void> {
+    const url = `${baseUrl.replace(/\/$/, '')}/tally-sync/pending`;
+    await axios.get(url, {
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+        timeout: 15000,
+    });
+}

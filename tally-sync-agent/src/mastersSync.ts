@@ -1,7 +1,13 @@
-import { reportCompanies, syncMasters } from './cloudApi';
+import { type MastersSyncSummary, reportCompanies, syncMasters } from './cloudApi';
 import { getConfig, isConfigured } from './config';
 import logger from './logger';
 import { exportCompanies, exportMasters } from './tally/masters';
+
+export interface MastersRunResult {
+    companies: string[];
+    pulled: Record<string, number>;
+    posted: MastersSyncSummary;
+}
 
 /**
  * The inbound masters loop: pull item groups, godowns, ledgers and items from
@@ -13,14 +19,14 @@ import { exportCompanies, exportMasters } from './tally/masters';
 let running = false;
 let intervalHandle: ReturnType<typeof setInterval> | null = null;
 
-export async function runMastersSync(): Promise<void> {
+export async function runMastersSync(): Promise<MastersRunResult | null> {
     if (running) {
         logger.debug('Masters pull already in progress, skipping this tick');
-        return;
+        return null;
     }
     if (!isConfigured()) {
         logger.debug('Agent not configured yet, skipping masters pull');
-        return;
+        return null;
     }
 
     running = true;
@@ -29,8 +35,9 @@ export async function runMastersSync(): Promise<void> {
 
         // Report the available companies first (needs no selected company), so
         // Settings can offer them even before one is chosen.
+        let companies: string[] = [];
         try {
-            const companies = await exportCompanies({ host: cfg.tallyHost, port: cfg.tallyPort });
+            companies = await exportCompanies({ host: cfg.tallyHost, port: cfg.tallyPort });
             await reportCompanies(companies);
             logger.info('Reported Tally companies', { companies });
         } catch (err) {
@@ -43,13 +50,16 @@ export async function runMastersSync(): Promise<void> {
             company: cfg.tallyCompanyName,
         });
 
-        const counts = Object.fromEntries(Object.entries(payload).map(([key, rows]) => [key, rows.length]));
-        logger.info('Pulled masters from Tally', counts);
+        const pulled = Object.fromEntries(Object.entries(payload).map(([key, rows]) => [key, rows.length]));
+        logger.info('Pulled masters from Tally', pulled);
 
-        const summary = await syncMasters(payload);
-        logger.info('Pushed masters to cloud', summary);
+        const posted = await syncMasters(payload);
+        logger.info('Pushed masters to cloud', posted);
+
+        return { companies, pulled, posted };
     } catch (err) {
         logger.error('Masters pull failed', { message: err instanceof Error ? err.message : String(err) });
+        throw err;
     } finally {
         running = false;
     }
@@ -62,8 +72,11 @@ export function startMastersLoop(): void {
     const intervalMs = Math.max(cfg.mastersPollIntervalSeconds, 300) * 1000;
 
     logger.info(`Starting masters loop, pulling every ${intervalMs / 1000}s`);
-    void runMastersSync();
-    intervalHandle = setInterval(() => void runMastersSync(), intervalMs);
+    // The loop is fire-and-forget; runMastersSync already logs failures, so
+    // swallow the rejection here (it re-throws only for the setup UI's benefit).
+    const tick = () => void runMastersSync().catch(() => {});
+    tick();
+    intervalHandle = setInterval(tick, intervalMs);
 }
 
 export function stopMastersLoop(): void {
