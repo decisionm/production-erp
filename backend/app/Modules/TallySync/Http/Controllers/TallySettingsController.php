@@ -10,6 +10,7 @@ use App\Modules\TallySync\Models\Enums\TallyLedgerRole;
 use App\Modules\TallySync\Models\Ledger;
 use App\Modules\TallySync\Services\TallyLedgerMappingService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Staff-facing Tally configuration (gated by module:tally-sync): which Tally
@@ -38,8 +39,35 @@ class TallySettingsController extends Controller
                 'mappings' => $this->mappings->all(),
                 // Pulled ledger names for the mapping pick-list.
                 'ledgers' => Ledger::query()->orderBy('name')->pluck('name')->all(),
+                // The downloadable Windows installer, published by the
+                // build-agent workflow into public storage (null until built).
+                'agent' => $this->agentDownload(),
             ],
         ]);
+    }
+
+    /**
+     * @return array{url: string, version: string|null, built_at: string|null, size: int}|null
+     */
+    private function agentDownload(): ?array
+    {
+        $disk = Storage::disk('public');
+        $installer = 'agent/tally-sync-agent-setup.exe';
+
+        if (! $disk->exists($installer)) {
+            return null;
+        }
+
+        $meta = $disk->exists('agent/tally-sync-agent-latest.json')
+            ? (json_decode((string) $disk->get('agent/tally-sync-agent-latest.json'), true) ?: [])
+            : [];
+
+        return [
+            'url' => $disk->url($installer),
+            'version' => $meta['version'] ?? null,
+            'built_at' => $meta['built_at'] ?? null,
+            'size' => $disk->size($installer),
+        ];
     }
 
     public function updateCompany(UpdateTallyCompanyRequest $request): JsonResponse

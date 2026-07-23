@@ -26,6 +26,9 @@
   "build": {
     "appId": "in.amrtech.erpdemo.tallysyncagent",
     "productName": "Tally Sync Agent",
+    "directories": {
+      "output": "release"
+    },
     "files": [
       "dist/**/*",
       "assets/**/*"

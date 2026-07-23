@@ -1,0 +1,86 @@
+name: Build Tally Sync Agent
+
+# Builds the Windows installer for the local Tally Sync Agent and publishes it
+# to the ERP server's public storage, where the Tally Settings page links to it
+# as a download. Runs ONLY when the agent's own code changes (path filter) — not
+# on every push — plus a manual "Run workflow" for on-demand rebuilds.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tally-sync-agent/**'
+  workflow_dispatch: {}
+
+concurrency:
+  group: build-agent
+  cancel-in-progress: true
+
+jobs:
+  # Electron NSIS installers are built natively on Windows.
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: tally-sync-agent/package-lock.json
+
+      - name: Install deps
+        working-directory: tally-sync-agent
+        run: npm ci
+
+      - name: Build Windows installer
+        working-directory: tally-sync-agent
+        run: npm run package:win
+
+      # Normalise the output to a stable filename (electron-builder names it
+      # "Tally Sync Agent Setup <version>.exe") and emit a small metadata file
+      # the Settings page reads for version/date.
+      - name: Stage artifact
+        working-directory: tally-sync-agent
+        shell: bash
+        run: |
+          mkdir -p out
+          EXE="$(ls release/*.exe | head -1)"
+          echo "installer: $EXE"
+          cp "$EXE" out/tally-sync-agent-setup.exe
+          VERSION="$(node -p "require('./package.json').version")"
+          node -e "require('fs').writeFileSync('out/tally-sync-agent-latest.json', JSON.stringify({ version: process.env.V, built_at: new Date().toISOString(), filename: 'tally-sync-agent-setup.exe' }))"
+        env:
+          V: ${{ github.sha }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-installer
+          path: tally-sync-agent/out/
+          retention-days: 7
+
+  # Publish over SSH from Ubuntu (reuses the deploy key + proven SSH tooling).
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-installer
+          path: out
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Upload installer to the ERP's public storage
+        run: |
+          DEST="${{ secrets.DEPLOY_PATH }}/backend/storage/app/public/agent"
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "mkdir -p '$DEST'"
+          scp -i ~/.ssh/deploy_key -P "${{ secrets.SSH_PORT }}" \
+            out/tally-sync-agent-setup.exe out/tally-sync-agent-latest.json \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:$DEST/"

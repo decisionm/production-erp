@@ -26,10 +26,18 @@ export interface LedgerRoleOption {
     label: string;
 }
 
+export interface AgentDownload {
+    url: string;
+    version: string | null;
+    built_at: string | null;
+    size: number;
+}
+
 export interface TallySettings {
     company: string | null;
     companies: string[];
     roles: LedgerRoleOption[];
     mappings: Record<string, string | null>;
     ledgers: string[];
+    agent: AgentDownload | null;
 }

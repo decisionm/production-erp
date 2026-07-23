@@ -1,3 +1,4 @@
+import { DownloadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Col, Row, Select, Space, Spin, Typography, message } from 'antd';
 import { useEffect, useState } from 'react';
@@ -52,6 +53,39 @@ export default function TallySettingsPage() {
     return (
         <Space direction="vertical" size="large" style={{ width: '100%', maxWidth: 720 }}>
             <Typography.Title level={3} style={{ margin: 0 }}>Tally Settings</Typography.Title>
+
+            <Card title="Local Sync Agent">
+                <Typography.Paragraph type="secondary">
+                    Install this small Windows app on the machine that runs Tally (or one on the same
+                    network that can reach it). It bridges Tally to this ERP — pulling masters in and
+                    posting vouchers out. After installing, open its Settings and paste an agent token
+                    (generate one under <b>Agent Tokens</b>).
+                </Typography.Paragraph>
+                {data.agent ? (
+                    <Space direction="vertical" size={4}>
+                        <Button
+                            type="primary"
+                            icon={<DownloadOutlined />}
+                            href={data.agent.url}
+                            target="_blank"
+                            rel="noreferrer"
+                        >
+                            Download Tally Sync Agent (Windows)
+                        </Button>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            {(data.agent.size / (1024 * 1024)).toFixed(1)} MB
+                            {data.agent.built_at ? ` · built ${data.agent.built_at.slice(0, 10)}` : ''}
+                        </Typography.Text>
+                    </Space>
+                ) : (
+                    <Alert
+                        type="info"
+                        showIcon
+                        message="Installer not built yet"
+                        description="The agent installer is published by the Build Tally Sync Agent workflow — run it once (Actions → Run workflow), or it builds automatically when the agent's code changes."
+                    />
+                )}
+            </Card>
 
             <Card title="Tally Company">
                 <Typography.Paragraph type="secondary">
