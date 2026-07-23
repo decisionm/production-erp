@@ -1,0 +1,92 @@
+# Deploys the demo instance (erpdemo.amrtech.in, Hostinger shared hosting)
+# on every push to main. See DEPLOYMENT.md for the one-time server setup and
+# the secrets this needs. Until those secrets exist the job no-ops cleanly
+# rather than failing every push.
+#
+# Build happens entirely here in CI — composer (no-dev) and the frontend
+# build both run on the runner, and the finished backend/ tree (vendor and
+# public/build included) is rsynced up. The server only ever needs PHP.
+name: Deploy demo
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-demo
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: demo
+    steps:
+      - name: Check deploy secrets are configured
+        id: check
+        run: |
+          if [ -z "${{ secrets.DEPLOY_SSH_HOST }}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "Deploy secrets not configured — skipping (see DEPLOYMENT.md)."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.configured == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.configured == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend into backend/public/build
+        if: steps.check.outputs.configured == 'true'
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - uses: shivammathur/setup-php@v2
+        if: steps.check.outputs.configured == 'true'
+        with:
+          php-version: '8.3'
+          extensions: mbstring, bcmath, zip
+          coverage: none
+
+      - name: Install production composer dependencies
+        if: steps.check.outputs.configured == 'true'
+        working-directory: backend
+        run: composer install --prefer-dist --no-interaction --no-progress --no-dev --optimize-autoloader
+
+      - name: Set up SSH key
+        if: steps.check.outputs.configured == 'true'
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      - name: Rsync backend to server
+        if: steps.check.outputs.configured == 'true'
+        # .env and storage/ live on the server only — never overwritten or
+        # deleted by a deploy. Everything else mirrors the built tree.
+        run: |
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_SSH_PORT }} -o StrictHostKeyChecking=accept-new" \
+            --exclude='.env' \
+            --exclude='storage/' \
+            --exclude='.git/' \
+            backend/ "${{ secrets.DEPLOY_SSH_USER }}@${{ secrets.DEPLOY_SSH_HOST }}:${{ secrets.DEPLOY_PATH }}/"
+
+      - name: Migrate + rebuild caches
+        if: steps.check.outputs.configured == 'true'
+        run: |
+          ssh -i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_SSH_PORT }} -o StrictHostKeyChecking=accept-new \
+            "${{ secrets.DEPLOY_SSH_USER }}@${{ secrets.DEPLOY_SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}' \
+              && php artisan migrate --force \
+              && php artisan config:cache \
+              && php artisan route:cache \
+              && php artisan view:cache"
