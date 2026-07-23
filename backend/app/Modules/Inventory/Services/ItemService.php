@@ -3,6 +3,7 @@
 namespace App\Modules\Inventory\Services;
 
 use App\Modules\Inventory\Models\Item;
+use App\Modules\Inventory\Models\ItemGroup;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 class ItemService
@@ -43,13 +44,16 @@ class ItemService
      * name — Tally names get renamed and contain spaces/slashes). ERP-only
      * fields (tracking_type, reorder_level, description) are left untouched on
      * update, since Tally has no concept of them — see the split-ownership rule
-     * in TALLY-SYNC-MASTER-PLAN.md §3.
+     * in TALLY-SYNC-MASTER-PLAN.md §3. `parent` is the item's Tally stock-group
+     * name; it's resolved to item_group_id if that group has been pulled.
      *
-     * @param  array{guid: string, name: string, base_unit?: string|null, alter_id?: int|null}  $data
+     * @param  array{guid: string, name: string, base_unit?: string|null, alter_id?: int|null, parent?: string|null}  $data
      * @return array{item: Item, created: bool}
      */
     public function upsertFromTally(array $data): array
     {
+        $groupId = $this->resolveGroupId($data['parent'] ?? null);
+
         $item = Item::withTrashed()->where('tally_stock_item_guid', $data['guid'])->first();
 
         if ($item !== null) {
@@ -58,6 +62,7 @@ class ItemService
                 'uom' => $data['base_unit'] ?? $item->uom,
                 'tally_alter_id' => $data['alter_id'] ?? $item->tally_alter_id,
                 'tally_synced_at' => now(),
+                'item_group_id' => $groupId ?? $item->item_group_id,
             ]);
 
             // A previously deleted item reappearing in Tally means it's live
@@ -78,9 +83,22 @@ class ItemService
             'tally_stock_item_guid' => $data['guid'],
             'tally_alter_id' => $data['alter_id'] ?? null,
             'tally_synced_at' => now(),
+            'item_group_id' => $groupId,
         ]);
 
         return ['item' => $item, 'created' => true];
+    }
+
+    /** Match a Tally stock-group name to a pulled ItemGroup; null if not yet pulled. */
+    private function resolveGroupId(?string $groupName): ?int
+    {
+        $groupName = $groupName !== null ? trim($groupName) : null;
+
+        if ($groupName === null || $groupName === '' || $groupName === 'Primary') {
+            return null;
+        }
+
+        return ItemGroup::where('name', $groupName)->value('id');
     }
 
     /**

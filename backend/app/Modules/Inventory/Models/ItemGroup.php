@@ -8,17 +8,14 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['code', 'name', 'is_active', 'tally_guid', 'tally_parent_name', 'parent_id'])]
-class Warehouse extends Model
+/**
+ * A Tally stock group, mirrored into the ERP. Self-referencing (parent_id) so
+ * arbitrary nesting depth is supported with no schema assumptions.
+ */
+#[Fillable(['tally_guid', 'name', 'tally_parent_name', 'parent_id'])]
+class ItemGroup extends Model
 {
     use SoftDeletes;
-
-    protected function casts(): array
-    {
-        return [
-            'is_active' => 'boolean',
-        ];
-    }
 
     public function parent(): BelongsTo
     {
@@ -28,5 +25,10 @@ class Warehouse extends Model
     public function children(): HasMany
     {
         return $this->hasMany(self::class, 'parent_id');
+    }
+
+    public function items(): HasMany
+    {
+        return $this->hasMany(Item::class, 'item_group_id');
     }
 }

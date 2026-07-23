@@ -231,9 +231,11 @@ Route::prefix('v1')->group(function () {
             Route::post('entries/{tally_sync_entry}/ack', [TallySyncAgentController::class, 'acknowledge']);
             Route::post('entries/{tally_sync_entry}/fail', [TallySyncAgentController::class, 'fail']);
 
-            // Inbound masters pull (agent → cloud): upsert the Tally stock-item
-            // master. Gated by the tally-sync:items token ability in the controller.
+            // Inbound masters pull (agent → cloud). `items` is the stock-item-only
+            // endpoint; `masters` takes the full pull (item groups, godowns,
+            // ledgers, items). Gated by token abilities in the controller.
             Route::post('items', [TallySyncAgentController::class, 'items']);
+            Route::post('masters', [TallySyncAgentController::class, 'masters']);
         });
 
         Route::prefix('hrms')->middleware('module:hrms')->group(function () {

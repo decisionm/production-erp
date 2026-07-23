@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Modules\Inventory\Models;
+namespace App\Modules\TallySync\Models;
 
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -8,17 +8,15 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['code', 'name', 'is_active', 'tally_guid', 'tally_parent_name', 'parent_id'])]
-class Warehouse extends Model
+/**
+ * A Tally ledger group, mirrored for reference/pick-lists. Self-referencing so
+ * Tally's arbitrarily deep accounting hierarchy is preserved. Lives in the
+ * TallySync mirror, separate from the ERP's own gl_accounts.
+ */
+#[Fillable(['tally_guid', 'name', 'tally_parent_name', 'parent_id'])]
+class LedgerGroup extends Model
 {
     use SoftDeletes;
-
-    protected function casts(): array
-    {
-        return [
-            'is_active' => 'boolean',
-        ];
-    }
 
     public function parent(): BelongsTo
     {
@@ -28,5 +26,10 @@ class Warehouse extends Model
     public function children(): HasMany
     {
         return $this->hasMany(self::class, 'parent_id');
+    }
+
+    public function ledgers(): HasMany
+    {
+        return $this->hasMany(Ledger::class, 'ledger_group_id');
     }
 }

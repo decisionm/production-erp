@@ -5,9 +5,11 @@ namespace App\Modules\TallySync\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\TallySync\Http\Requests\FailTallySyncEntryRequest;
 use App\Modules\TallySync\Http\Requests\SyncItemsRequest;
+use App\Modules\TallySync\Http\Requests\SyncMastersRequest;
 use App\Modules\TallySync\Http\Resources\TallySyncEntryResource;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Services\ItemSyncService;
+use App\Modules\TallySync\Services\MasterSyncService;
 use App\Modules\TallySync\Services\TallySyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -61,6 +63,20 @@ class TallySyncAgentController extends Controller
 
         return response()->json([
             'data' => $itemSync->sync($request->validated()['items']),
+        ]);
+    }
+
+    /**
+     * Full masters pull: item groups, godowns, ledger groups, ledgers and items
+     * in one call, processed in dependency order. Every section is optional and
+     * idempotent. Returns a per-section created/updated/total summary.
+     */
+    public function masters(SyncMastersRequest $request, MasterSyncService $masterSync): JsonResponse
+    {
+        abort_unless($request->user()?->tokenCan('tally-sync:masters'), 403, 'Token missing the tally-sync:masters ability.');
+
+        return response()->json([
+            'data' => $masterSync->sync($request->validated()),
         ]);
     }
 }
