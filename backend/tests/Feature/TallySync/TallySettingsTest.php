@@ -36,7 +36,7 @@ class TallySettingsTest extends TestCase
             ->assertJsonPath('data.mappings.sales', null)
             ->assertJsonPath('data.mappings.cgst', null);
 
-        $this->assertContains('Sales - Bottles', $response->json('data.ledgers'));
+        $this->assertContains(['name' => 'Sales - Bottles', 'group' => 'Other'], $response->json('data.ledgers'));
         $this->assertContains(['value' => 'sales', 'label' => 'Sales'], $response->json('data.roles'));
     }
 

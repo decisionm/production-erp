@@ -7,6 +7,7 @@ use App\Modules\Procurement\Models\GoodsReceiptNote;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Sales\Models\Delivery;
 use App\Modules\Sales\Models\Invoice;
+use App\Modules\TallySync\Models\Enums\TallyLedgerRole;
 use App\Modules\TallySync\Models\Enums\TallySyncStatus;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -23,12 +24,17 @@ use Illuminate\Database\Eloquent\Model;
  */
 class TallySyncService
 {
+    public function __construct(private readonly TallyLedgerMappingService $ledgerMappings) {}
+
     public function enqueueSalesInvoice(Invoice $invoice): TallySyncEntry
     {
         $invoice->loadMissing(['lines.item', 'customer']);
 
         $lines = $invoice->lines->map(fn ($line) => [
-            'item' => "{$line->item->sku} - {$line->item->name}",
+            // The exact Tally stock-item name (items are pulled from Tally, so
+            // item->name IS the Tally name) — this is what a voucher's
+            // <STOCKITEMNAME> must match. Never "sku - name".
+            'item' => $line->item->name,
             'quantity' => $line->quantity,
             'rate' => $line->unit_price,
             'amount' => bcmul($line->quantity, $line->unit_price, 4),
@@ -42,6 +48,9 @@ class TallySyncService
             'voucher_number' => "INV-{$invoice->id}",
             'party_ledger' => $invoice->customer->name,
             'party_gstin' => $invoice->customer->gstin,
+            // The configured Sales ledger (Settings → Ledger Mappings) instead of
+            // a hardcoded "Sales Account", so each client posts to their own.
+            'sales_ledger' => $this->ledgerMappings->get(TallyLedgerRole::Sales),
             'narration' => $invoice->notes,
             'lines' => $lines,
             'total_amount' => $totalAmount,
@@ -78,7 +87,10 @@ class TallySyncService
         $note->loadMissing(['lines.item', 'warehouse', 'purchaseOrder.vendor']);
 
         $lines = $note->lines->map(fn ($line) => [
-            'item' => "{$line->item->sku} - {$line->item->name}",
+            // The exact Tally stock-item name (items are pulled from Tally, so
+            // item->name IS the Tally name) — this is what a voucher's
+            // <STOCKITEMNAME> must match. Never "sku - name".
+            'item' => $line->item->name,
             'quantity' => $line->quantity,
             'rate' => $line->unit_cost,
             'amount' => bcmul($line->quantity, $line->unit_cost, 4),
@@ -108,7 +120,10 @@ class TallySyncService
         $delivery->loadMissing(['lines.item', 'warehouse', 'salesOrder.customer']);
 
         $lines = $delivery->lines->map(fn ($line) => [
-            'item' => "{$line->item->sku} - {$line->item->name}",
+            // The exact Tally stock-item name (items are pulled from Tally, so
+            // item->name IS the Tally name) — this is what a voucher's
+            // <STOCKITEMNAME> must match. Never "sku - name".
+            'item' => $line->item->name,
             'quantity' => $line->quantity,
         ])->all();
 
@@ -136,12 +151,12 @@ class TallySyncService
         $entry->loadMissing(['item', 'warehouse', 'materialConsumptions.item']);
 
         $consumed = $entry->materialConsumptions->map(fn ($consumption) => [
-            'item' => "{$consumption->item->sku} - {$consumption->item->name}",
+            'item' => $consumption->item->name,
             'quantity' => $consumption->quantity_issued_kg,
         ])->all();
 
         $produced = [[
-            'item' => "{$entry->item->sku} - {$entry->item->name}",
+            'item' => $entry->item->name,
             'quantity' => $entry->quantity_produced,
         ]];
 

@@ -33,11 +33,16 @@ export interface AgentDownload {
     size: number;
 }
 
+export interface LedgerOption {
+    name: string;
+    group: string;
+}
+
 export interface TallySettings {
     company: string | null;
     companies: string[];
     roles: LedgerRoleOption[];
     mappings: Record<string, string | null>;
-    ledgers: string[];
+    ledgers: LedgerOption[];
     agent: AgentDownload | null;
 }

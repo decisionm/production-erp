@@ -50,7 +50,7 @@ class OutboundVoucherTest extends TestCase
         $this->assertSame('GRN-7', $entry->payload['voucher_number']);
         $this->assertSame('Reliance Industries', $entry->payload['party_ledger']);
         $this->assertSame('RM Store', $entry->payload['godown']);
-        $this->assertSame('RES-1 - PET Resin', $entry->payload['lines'][0]['item']);
+        $this->assertSame('PET Resin', $entry->payload['lines'][0]['item']); // exact Tally name
         $this->assertSame('8500.0000', $entry->payload['lines'][0]['amount']);
         $this->assertSame('8500.0000', $entry->payload['total_amount']);
     }
@@ -74,7 +74,7 @@ class OutboundVoucherTest extends TestCase
         $entry = TallySyncEntry::where('tally_voucher_type', 'Delivery Note')->firstOrFail();
         $this->assertSame('DN-3', $entry->payload['voucher_number']);
         $this->assertSame('Sri Aurobindo Beverages', $entry->payload['party_ledger']);
-        $this->assertSame('BTL-500 - 500ml PET Bottle', $entry->payload['lines'][0]['item']);
+        $this->assertSame('500ml PET Bottle', $entry->payload['lines'][0]['item']);
         $this->assertSame('2000.0000', $entry->payload['lines'][0]['quantity']);
     }
 
@@ -98,9 +98,9 @@ class OutboundVoucherTest extends TestCase
         $entry = TallySyncEntry::where('tally_voucher_type', 'Manufacturing Journal')->firstOrFail();
         $this->assertSame('SPE-9', $entry->payload['voucher_number']);
         $this->assertSame('L1-N-20260723-1', $entry->payload['batch_number']);
-        $this->assertSame('BTL-500 - 500ml PET Bottle', $entry->payload['produced'][0]['item']);
+        $this->assertSame('500ml PET Bottle', $entry->payload['produced'][0]['item']);
         $this->assertSame('5000.0000', $entry->payload['produced'][0]['quantity']);
-        $this->assertSame('RES-1 - PET Resin', $entry->payload['consumed'][0]['item']);
+        $this->assertSame('PET Resin', $entry->payload['consumed'][0]['item']);
         $this->assertSame('250.0000', $entry->payload['consumed'][0]['quantity']);
     }
 

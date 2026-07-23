@@ -37,8 +37,13 @@ class TallySettingsController extends Controller
                 'companies' => $this->settings->get(self::KEY_COMPANIES, []),
                 'roles' => TallyLedgerRole::options(),
                 'mappings' => $this->mappings->all(),
-                // Pulled ledger names for the mapping pick-list.
-                'ledgers' => Ledger::query()->orderBy('name')->pluck('name')->all(),
+                // Pulled ledgers for the mapping pick-list, each with its Tally
+                // ledger group so the UI can group the (long) list by group.
+                'ledgers' => Ledger::query()->with('group')->orderBy('name')->get()
+                    ->map(fn (Ledger $ledger) => [
+                        'name' => $ledger->name,
+                        'group' => $ledger->group?->name ?? 'Other',
+                    ])->all(),
                 // The downloadable Windows installer, published by the
                 // build-agent workflow into public storage (null until built).
                 'agent' => $this->agentDownload(),

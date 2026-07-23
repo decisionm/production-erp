@@ -7,6 +7,9 @@ export interface SalesInvoicePayload {
     voucher_number: string;
     party_ledger: string;
     party_gstin: string | null;
+    // The client's Sales ledger from Settings → Ledger Mappings (null if unmapped;
+    // falls back to "Sales Account"). Config, not hardcoded.
+    sales_ledger: string | null;
     narration: string | null;
     lines: { item: string; quantity: string; rate: string; amount: string }[];
     total_amount: string;
@@ -54,7 +57,7 @@ export function buildSalesInvoiceXml(payload: SalesInvoicePayload, companyName: 
               <AMOUNT>-${escapeXml(payload.total_amount)}</AMOUNT>
             </ALLLEDGERENTRIES.LIST>
             <ALLLEDGERENTRIES.LIST>
-              <LEDGERNAME>Sales Account</LEDGERNAME>
+              <LEDGERNAME>${escapeXml(payload.sales_ledger ?? 'Sales Account')}</LEDGERNAME>
               <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
               <AMOUNT>${escapeXml(payload.total_amount)}</AMOUNT>
 ${inventoryEntries}

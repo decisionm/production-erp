@@ -48,7 +48,18 @@ export default function TallySettingsPage() {
     }
 
     const companyOptions = data.companies.map((c) => ({ value: c, label: c }));
-    const ledgerOptions = data.ledgers.map((l) => ({ value: l, label: l }));
+
+    // Group the (long) ledger list by its Tally group for a clearer dropdown;
+    // showSearch still filters across all groups.
+    const ledgersByGroup = new Map<string, { value: string; label: string }[]>();
+    for (const ledger of data.ledgers) {
+        const bucket = ledgersByGroup.get(ledger.group) ?? [];
+        bucket.push({ value: ledger.name, label: ledger.name });
+        ledgersByGroup.set(ledger.group, bucket);
+    }
+    const ledgerOptions = [...ledgersByGroup.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([group, options]) => ({ label: group, options }));
 
     return (
         <Space direction="vertical" size="large" style={{ width: '100%', maxWidth: 720 }}>
@@ -137,6 +148,7 @@ export default function TallySettingsPage() {
                                 <Select
                                     showSearch
                                     allowClear
+                                    optionFilterProp="label"
                                     style={{ width: '100%' }}
                                     placeholder="Unmapped"
                                     value={mappings[role.value] ?? undefined}
