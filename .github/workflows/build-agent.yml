@@ -48,10 +48,7 @@ jobs:
           EXE="$(ls release/*.exe | head -1)"
           echo "installer: $EXE"
           cp "$EXE" out/tally-sync-agent-setup.exe
-          VERSION="$(node -p "require('./package.json').version")"
-          node -e "require('fs').writeFileSync('out/tally-sync-agent-latest.json', JSON.stringify({ version: process.env.V, built_at: new Date().toISOString(), filename: 'tally-sync-agent-setup.exe' }))"
-        env:
-          V: ${{ github.sha }}
+          node -e "const p=require('./package.json'); require('fs').writeFileSync('out/tally-sync-agent-latest.json', JSON.stringify({ version: p.version, commit: (process.env.GITHUB_SHA || '').slice(0, 7), built_at: new Date().toISOString(), filename: 'tally-sync-agent-setup.exe' }))"
 
       - uses: actions/upload-artifact@v4
         with:
