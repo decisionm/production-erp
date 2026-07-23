@@ -20,3 +20,16 @@ export interface AgentToken {
     last_used_at: string | null;
     created_at: string;
 }
+
+export interface LedgerRoleOption {
+    value: string;
+    label: string;
+}
+
+export interface TallySettings {
+    company: string | null;
+    companies: string[];
+    roles: LedgerRoleOption[];
+    mappings: Record<string, string | null>;
+    ledgers: string[];
+}

@@ -196,6 +196,7 @@ const allNavItems: NavGroup[] = [
         children: [
             { key: '/tally-sync', label: 'Sync Queue' },
             { key: '/tally-sync/agent-tokens', label: 'Agent Tokens' },
+            { key: '/tally-sync/settings', label: 'Settings' },
         ],
     },
     { key: '/help', icon: <QuestionCircleOutlined />, label: 'Help' },

@@ -61,6 +61,7 @@ import DeliveriesPage from '@/features/sales/pages/DeliveriesPage';
 import InvoicesPage from '@/features/sales/pages/InvoicesPage';
 import SalesOrdersPage from '@/features/sales/pages/SalesOrdersPage';
 import AgentTokensPage from '@/features/tally-sync/pages/AgentTokensPage';
+import TallySettingsPage from '@/features/tally-sync/pages/TallySettingsPage';
 import TallySyncPage from '@/features/tally-sync/pages/TallySyncPage';
 import AppLayout from './AppLayout';
 import ProtectedRoute from './ProtectedRoute';
@@ -135,6 +136,7 @@ export default function App() {
                                     <Route path="/maintenance/reliability" element={<ReliabilityReportPage />} />
                                     <Route path="/tally-sync" element={<TallySyncPage />} />
                                     <Route path="/tally-sync/agent-tokens" element={<AgentTokensPage />} />
+                                    <Route path="/tally-sync/settings" element={<TallySettingsPage />} />
                                     <Route path="/help" element={<HelpPage />} />
                                     <Route path="/administration/users" element={<UsersPage />} />
                                     <Route path="/administration/roles" element={<RolesPage />} />

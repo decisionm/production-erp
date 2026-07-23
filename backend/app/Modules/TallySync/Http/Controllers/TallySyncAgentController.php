@@ -3,7 +3,9 @@
 namespace App\Modules\TallySync\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Core\Services\AppSettingService;
 use App\Modules\TallySync\Http\Requests\FailTallySyncEntryRequest;
+use App\Modules\TallySync\Http\Requests\SyncCompaniesRequest;
 use App\Modules\TallySync\Http\Requests\SyncItemsRequest;
 use App\Modules\TallySync\Http\Requests\SyncMastersRequest;
 use App\Modules\TallySync\Http\Resources\TallySyncEntryResource;
@@ -78,5 +80,20 @@ class TallySyncAgentController extends Controller
         return response()->json([
             'data' => $masterSync->sync($request->validated()),
         ]);
+    }
+
+    /**
+     * The agent reports the list of companies it found in the local Tally, so
+     * staff can pick which one to sync from in Settings. Tally's company list
+     * needs no company loaded, so this can run before a company is selected.
+     */
+    public function companies(SyncCompaniesRequest $request, AppSettingService $settings): JsonResponse
+    {
+        abort_unless($request->user()?->tokenCan('tally-sync:masters'), 403, 'Token missing the tally-sync:masters ability.');
+
+        $companies = array_values(array_unique($request->validated()['companies']));
+        $settings->set(TallySettingsController::KEY_COMPANIES, $companies);
+
+        return response()->json(['data' => ['companies' => $companies]]);
     }
 }
