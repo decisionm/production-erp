@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import RolesPage from '@/features/access/pages/RolesPage';
 import UsersPage from '@/features/access/pages/UsersPage';
+import ChangePasswordPage from '@/features/auth/pages/ChangePasswordPage';
 import LoginPage from '@/features/auth/pages/LoginPage';
 import DashboardPage from '@/features/dashboard/pages/DashboardPage';
 import GstRatesPage from '@/features/compliance/pages/GstRatesPage';
@@ -78,6 +79,7 @@ export default function App() {
                             <AppLayout>
                                 <Routes>
                                     <Route path="/" element={<DashboardPage />} />
+                                    <Route path="/account/change-password" element={<ChangePasswordPage />} />
                                     <Route path="/crm/leads" element={<LeadsPage />} />
                                     <Route path="/crm/opportunities" element={<OpportunitiesPage />} />
                                     <Route path="/crm/quotations" element={<QuotationsPage />} />

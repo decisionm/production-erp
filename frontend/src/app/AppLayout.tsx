@@ -5,6 +5,7 @@ import {
     DashboardOutlined,
     FileProtectOutlined,
     InboxOutlined,
+    KeyOutlined,
     LogoutOutlined,
     MenuFoldOutlined,
     MenuUnfoldOutlined,
@@ -381,6 +382,13 @@ export default function AppLayout({ children }: PropsWithChildren) {
                     <Dropdown
                         menu={{
                             items: [
+                                {
+                                    key: 'change-password',
+                                    icon: <KeyOutlined />,
+                                    label: 'Change password',
+                                    onClick: () => navigate('/account/change-password'),
+                                },
+                                { type: 'divider' },
                                 {
                                     key: 'logout',
                                     icon: <LogoutOutlined />,

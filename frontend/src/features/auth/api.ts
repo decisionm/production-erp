@@ -20,3 +20,13 @@ export async function fetchCurrentUser(): Promise<User> {
     const { data } = await api.get<{ data: User }>('/auth/me');
     return data.data;
 }
+
+export interface ChangePasswordPayload {
+    current_password: string;
+    password: string;
+    password_confirmation: string;
+}
+
+export async function changePassword(payload: ChangePasswordPayload): Promise<void> {
+    await api.post('/auth/change-password', payload);
+}
