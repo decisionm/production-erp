@@ -1,0 +1,71 @@
+# Mirrors CLAUDE.md's "Before committing" checklist exactly — Pint, backend
+# tests, frontend typecheck + build — plus the tally-sync-agent's typecheck.
+# The frontend build runs BEFORE the backend tests on purpose: Laravel's
+# catch-all route serves backend/public/build/index.html, and the smoke test
+# that hits "/" 500s if the build output doesn't exist.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  app:
+    name: Frontend build + backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Frontend typecheck + build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          # composer.lock pins Symfony v8 packages that require PHP >= 8.4.1
+          php-version: '8.4'
+          extensions: mbstring, bcmath, pdo_sqlite, sqlite3, zip
+          coverage: none
+
+      - name: Install composer dependencies
+        working-directory: backend
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Pint (style)
+        working-directory: backend
+        run: ./vendor/bin/pint --test
+
+      - name: Backend tests
+        working-directory: backend
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+          php artisan test
+
+  tally-sync-agent:
+    name: Tally sync agent typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tally-sync-agent/package-lock.json
+
+      - name: Typecheck
+        working-directory: tally-sync-agent
+        run: |
+          npm ci
+          npx tsc --noEmit
