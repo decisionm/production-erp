@@ -68,6 +68,7 @@ use App\Modules\Sales\Http\Controllers\CustomerController;
 use App\Modules\Sales\Http\Controllers\DeliveryController;
 use App\Modules\Sales\Http\Controllers\InvoiceController;
 use App\Modules\Sales\Http\Controllers\SalesOrderController;
+use App\Modules\TallySync\Http\Controllers\TallySettingsController;
 use App\Modules\TallySync\Http\Controllers\TallySyncAgentController;
 use App\Modules\TallySync\Http\Controllers\TallySyncAgentTokenController;
 use App\Modules\TallySync\Http\Controllers\TallySyncController;
@@ -218,6 +219,11 @@ Route::prefix('v1')->group(function () {
                 Route::get('agent-tokens', [TallySyncAgentTokenController::class, 'index']);
                 Route::post('agent-tokens', [TallySyncAgentTokenController::class, 'store']);
                 Route::delete('agent-tokens/{tokenId}', [TallySyncAgentTokenController::class, 'destroy']);
+
+                // Tally configuration (company selection + ledger-role mappings).
+                Route::get('settings', [TallySettingsController::class, 'show']);
+                Route::put('settings/company', [TallySettingsController::class, 'updateCompany']);
+                Route::put('settings/ledger-mappings', [TallySettingsController::class, 'updateLedgerMappings']);
             });
 
             // Local agent endpoints — see TECHNICAL-DOCS.md §6. Gated by
@@ -231,9 +237,12 @@ Route::prefix('v1')->group(function () {
             Route::post('entries/{tally_sync_entry}/ack', [TallySyncAgentController::class, 'acknowledge']);
             Route::post('entries/{tally_sync_entry}/fail', [TallySyncAgentController::class, 'fail']);
 
-            // Inbound masters pull (agent → cloud): upsert the Tally stock-item
-            // master. Gated by the tally-sync:items token ability in the controller.
+            // Inbound masters pull (agent → cloud). `items` is the stock-item-only
+            // endpoint; `masters` takes the full pull (item groups, godowns,
+            // ledgers, items). Gated by token abilities in the controller.
             Route::post('items', [TallySyncAgentController::class, 'items']);
+            Route::post('masters', [TallySyncAgentController::class, 'masters']);
+            Route::post('companies', [TallySyncAgentController::class, 'companies']);
         });
 
         Route::prefix('hrms')->middleware('module:hrms')->group(function () {

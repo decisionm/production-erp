@@ -4,6 +4,7 @@ namespace App\Modules\Sales\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Inventory\Services\StockMovementService;
+use App\Modules\Sales\Events\DeliveryDispatched;
 use App\Modules\Sales\Exceptions\OverDeliveryException;
 use App\Modules\Sales\Models\Delivery;
 use App\Modules\Sales\Models\Enums\SalesOrderStatus;
@@ -93,6 +94,11 @@ class DeliveryService
             }
 
             $this->recomputeOrderStatus($order->fresh('lines'));
+
+            // TallySync listens and enqueues a Delivery Note voucher; Sales
+            // stays unaware. In-transaction so the queued voucher is atomic
+            // with the dispatch.
+            event(new DeliveryDispatched($delivery));
 
             return $delivery->load(['lines.item', 'warehouse', 'salesOrder']);
         });

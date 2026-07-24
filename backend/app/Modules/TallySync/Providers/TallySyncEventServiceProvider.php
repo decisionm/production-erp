@@ -4,9 +4,13 @@ namespace App\Modules\TallySync\Providers;
 
 use App\Modules\Finance\Models\Enums\JournalEntryStatus;
 use App\Modules\Finance\Models\JournalEntry;
+use App\Modules\Procurement\Events\GoodsReceiptNoteReceived;
+use App\Modules\Production\Events\ShiftProductionEntryApproved;
+use App\Modules\Sales\Events\DeliveryDispatched;
 use App\Modules\Sales\Models\Enums\InvoiceStatus;
 use App\Modules\Sales\Models\Invoice;
 use App\Modules\TallySync\Services\TallySyncService;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 
 /**
@@ -30,6 +34,22 @@ class TallySyncEventServiceProvider extends ServiceProvider
             if ($entry->wasChanged('status') && $entry->status === JournalEntryStatus::Posted) {
                 $this->app->make(TallySyncService::class)->enqueueJournalEntry($entry);
             }
+        });
+
+        // Inbound goods, outbound goods, and approved production. These use
+        // explicit domain events (not model events) because the receipt/delivery
+        // are posted at creation — after their lines exist — and production
+        // approval is an atomic query update that fires no model event.
+        Event::listen(GoodsReceiptNoteReceived::class, function (GoodsReceiptNoteReceived $event) {
+            $this->app->make(TallySyncService::class)->enqueueGoodsReceiptNote($event->note);
+        });
+
+        Event::listen(DeliveryDispatched::class, function (DeliveryDispatched $event) {
+            $this->app->make(TallySyncService::class)->enqueueDelivery($event->delivery);
+        });
+
+        Event::listen(ShiftProductionEntryApproved::class, function (ShiftProductionEntryApproved $event) {
+            $this->app->make(TallySyncService::class)->enqueueShiftProductionEntry($event->entry);
         });
     }
 }

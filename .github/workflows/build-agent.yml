@@ -1,0 +1,94 @@
+name: Build Tally Sync Agent
+
+# Builds the Windows installer for the local Tally Sync Agent and publishes it
+# to the ERP server's public storage, where the Tally Settings page links to it
+# as a download. Runs ONLY when the agent's own code changes (path filter) — not
+# on every push — plus a manual "Run workflow" for on-demand rebuilds.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tally-sync-agent/**'
+  workflow_dispatch: {}
+
+concurrency:
+  group: build-agent
+  cancel-in-progress: true
+
+jobs:
+  # Electron NSIS installers are built natively on Windows.
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: tally-sync-agent/package-lock.json
+
+      - name: Install deps
+        working-directory: tally-sync-agent
+        run: npm ci
+
+      - name: Build Windows installer
+        working-directory: tally-sync-agent
+        run: npm run package:win
+
+      # Normalise the output to a stable filename (electron-builder names it
+      # "Tally Sync Agent Setup <version>.exe") and emit a small metadata file
+      # the Settings page reads for version/date.
+      - name: Stage artifact
+        working-directory: tally-sync-agent
+        shell: bash
+        run: |
+          mkdir -p out
+          # Ship the raw electron-builder output so electron-updater can consume
+          # latest.yml + the versioned installer (+ blockmap for delta updates).
+          cp release/*.exe out/
+          cp release/*.blockmap out/ 2>/dev/null || true
+          cp release/latest.yml out/
+          # Metadata the Settings page reads for the download link/version.
+          node -e "const p=require('./package.json'); const filename='tally-sync-agent-setup-'+p.version+'.exe'; require('fs').writeFileSync('out/tally-sync-agent-latest.json', JSON.stringify({ version: p.version, commit: (process.env.GITHUB_SHA || '').slice(0, 7), filename, built_at: new Date().toISOString() }))"
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-installer
+          path: tally-sync-agent/out/
+          retention-days: 7
+
+  # Publish over SSH from Ubuntu (reuses the deploy key + proven SSH tooling).
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-installer
+          path: out
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Upload installer + update feed to the ERP's public storage
+        run: |
+          DEST="${{ secrets.DEPLOY_PATH }}/backend/storage/app/public/agent"
+          # Create the dir and drop the old stable-named installer from the first build.
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "mkdir -p '$DEST' && rm -f '$DEST/tally-sync-agent-setup.exe'"
+          scp -i ~/.ssh/deploy_key -P "${{ secrets.SSH_PORT }}" \
+            out/* \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:$DEST/"
+          # Keep only the 5 newest installers (+ their blockmaps) to bound
+          # storage growth; latest.yml and the metadata json always stay. A few
+          # older builds are retained as fallbacks rather than only the latest.
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '$DEST' && ls -1t tally-sync-agent-setup-*.exe 2>/dev/null | tail -n +6 | sed 's/.*/& &.blockmap/' | xargs -r rm -f; echo 'installers kept:'; ls -1 tally-sync-agent-setup-*.exe 2>/dev/null"

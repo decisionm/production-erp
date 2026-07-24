@@ -1,6 +1,6 @@
 import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
-import type { AgentToken, TallySyncEntry } from './types';
+import type { AgentToken, TallySettings, TallySyncEntry } from './types';
 
 export async function listTallySyncEntries(): Promise<Paginated<TallySyncEntry>> {
     const { data } = await api.get<Paginated<TallySyncEntry>>('/tally-sync/entries');
@@ -29,4 +29,24 @@ export async function createAgentToken(name: string): Promise<CreateAgentTokenRe
 
 export async function revokeAgentToken(id: number): Promise<void> {
     await api.delete(`/tally-sync/agent-tokens/${id}`);
+}
+
+export async function getTallySettings(): Promise<TallySettings> {
+    const { data } = await api.get<{ data: TallySettings }>('/tally-sync/settings');
+    return data.data;
+}
+
+export async function updateTallyCompany(company: string | null): Promise<string | null> {
+    const { data } = await api.put<{ data: { company: string | null } }>('/tally-sync/settings/company', { company });
+    return data.data.company;
+}
+
+export async function updateLedgerMappings(
+    mappings: Record<string, string | null>,
+): Promise<Record<string, string | null>> {
+    const { data } = await api.put<{ data: { mappings: Record<string, string | null> } }>(
+        '/tally-sync/settings/ledger-mappings',
+        { mappings },
+    );
+    return data.data.mappings;
 }

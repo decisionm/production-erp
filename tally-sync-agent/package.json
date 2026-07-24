@@ -1,7 +1,7 @@
 {
   "name": "tally-sync-agent",
   "productName": "Tally Sync Agent",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "description": "Local Windows tray agent — bridges the ERP's cloud Tally sync queue to a local Tally installation's XML-HTTP gateway. See ../TALLY-SYNC-MASTER-PLAN.md §11.",
   "private": true,
   "main": "dist/main.js",
@@ -15,6 +15,7 @@
     "axios": "^1.7.9",
     "electron-log": "^5.2.4",
     "electron-store": "^8.2.0",
+    "electron-updater": "^6.3.9",
     "fast-xml-parser": "^5.10.1"
   },
   "devDependencies": {
@@ -26,6 +27,16 @@
   "build": {
     "appId": "in.amrtech.erpdemo.tallysyncagent",
     "productName": "Tally Sync Agent",
+    "directories": {
+      "output": "release"
+    },
+    "artifactName": "tally-sync-agent-setup-${version}.exe",
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://erpdemo.amrtech.in/storage/agent/"
+      }
+    ],
     "files": [
       "dist/**/*",
       "assets/**/*"

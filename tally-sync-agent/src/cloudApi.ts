@@ -1,5 +1,6 @@
 import axios, { type AxiosInstance } from 'axios';
 import { getConfig } from './config';
+import type { MastersPayload } from './tally/masters';
 
 /**
  * Matches App\Modules\TallySync\Http\Controllers\TallySyncAgentController
@@ -43,4 +44,41 @@ export async function acknowledge(entryId: number): Promise<void> {
 
 export async function reportFailure(entryId: number, errorMessage: string): Promise<void> {
     await client().post(`/entries/${entryId}/fail`, { error_message: errorMessage });
+}
+
+export type MastersSyncSummary = Record<string, { created: number; updated: number; total: number }>;
+
+/**
+ * Push the masters pulled from Tally up to the cloud (inbound direction).
+ * Matches App\Modules\TallySync\Http\Controllers\TallySyncAgentController::masters
+ * — POST /tally-sync/masters, requiring a token with the tally-sync:masters ability.
+ */
+export async function syncMasters(payload: MastersPayload, company: string): Promise<MastersSyncSummary> {
+    // `company` binds the pull to one Tally company on the cloud side — the
+    // server refuses masters from a different company than the instance is
+    // bound to, preventing cross-company data corruption.
+    const { data } = await client().post<{ data: MastersSyncSummary }>('/masters', { ...payload, company });
+    return data.data;
+}
+
+/** Report the companies found in the local Tally so Settings can offer them. */
+export async function reportCompanies(companies: string[]): Promise<string[]> {
+    const { data } = await client().post<{ data: { companies: string[] } }>('/companies', { companies });
+    return data.data.companies;
+}
+
+/**
+ * Connectivity probe for the setup UI. POSTs an EMPTY masters payload — a no-op
+ * upsert that still requires the tally-sync:masters ability — so the test
+ * validates both reachability AND that the token can actually do the masters
+ * pull (catching the "token missing the masters ability" case here, up front,
+ * instead of only at the bidirectional sync test). Uses the passed-in values,
+ * not saved config. Throws on failure.
+ */
+export async function testCloudConnection(baseUrl: string, token: string): Promise<void> {
+    const url = `${baseUrl.replace(/\/$/, '')}/tally-sync/masters`;
+    await axios.post(url, {}, {
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+        timeout: 15000,
+    });
 }

@@ -5,12 +5,13 @@ namespace App\Modules\Inventory\Models;
 use App\Modules\Inventory\Models\Enums\ItemTrackingType;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable([
     'sku', 'name', 'description', 'uom', 'hsn_sac_code', 'reorder_level',
     'nominal_weight_grams', 'tracking_type', 'is_active',
-    'tally_stock_item_guid', 'tally_alter_id', 'tally_synced_at',
+    'tally_stock_item_guid', 'tally_alter_id', 'tally_synced_at', 'item_group_id',
 ])]
 class Item extends Model
 {
@@ -26,6 +27,11 @@ class Item extends Model
             'tally_alter_id' => 'integer',
             'tally_synced_at' => 'datetime',
         ];
+    }
+
+    public function group(): BelongsTo
+    {
+        return $this->belongsTo(ItemGroup::class, 'item_group_id');
     }
 
     /** True when this item originated from a Tally masters pull (§3 split-ownership). */

@@ -3,11 +3,15 @@
 namespace App\Modules\TallySync\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Core\Services\AppSettingService;
 use App\Modules\TallySync\Http\Requests\FailTallySyncEntryRequest;
+use App\Modules\TallySync\Http\Requests\SyncCompaniesRequest;
 use App\Modules\TallySync\Http\Requests\SyncItemsRequest;
+use App\Modules\TallySync\Http\Requests\SyncMastersRequest;
 use App\Modules\TallySync\Http\Resources\TallySyncEntryResource;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Services\ItemSyncService;
+use App\Modules\TallySync\Services\MasterSyncService;
 use App\Modules\TallySync\Services\TallySyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -62,5 +66,52 @@ class TallySyncAgentController extends Controller
         return response()->json([
             'data' => $itemSync->sync($request->validated()['items']),
         ]);
+    }
+
+    /**
+     * Full masters pull: item groups, godowns, ledger groups, ledgers and items
+     * in one call, processed in dependency order. Every section is optional and
+     * idempotent. Returns a per-section created/updated/total summary.
+     */
+    public function masters(SyncMastersRequest $request, MasterSyncService $masterSync, AppSettingService $settings): JsonResponse
+    {
+        abort_unless($request->user()?->tokenCan('tally-sync:masters'), 403, 'Token missing the tally-sync:masters ability.');
+
+        $data = $request->validated();
+        $incoming = $data['company'] ?? null;
+        $bound = $settings->get(TallySettingsController::KEY_COMPANY);
+
+        // Single-tenant guard: one ERP instance syncs exactly one Tally company.
+        // Once bound, refuse masters from any OTHER company so a misconfigured
+        // agent can't overwrite/mix another company's items and ledgers.
+        // Trust-on-first-use: the first pull binds the instance if nothing's set.
+        abort_if(
+            $bound !== null && $incoming !== null && $bound !== $incoming,
+            409,
+            "This ERP is bound to Tally company '{$bound}'. Refusing a masters pull from '{$incoming}' — that would mix two companies' data. Select the correct company in Settings, or reconfigure the agent to the right company.",
+        );
+
+        if ($bound === null && $incoming !== null) {
+            $settings->set(TallySettingsController::KEY_COMPANY, $incoming);
+        }
+
+        return response()->json([
+            'data' => $masterSync->sync($data),
+        ]);
+    }
+
+    /**
+     * The agent reports the list of companies it found in the local Tally, so
+     * staff can pick which one to sync from in Settings. Tally's company list
+     * needs no company loaded, so this can run before a company is selected.
+     */
+    public function companies(SyncCompaniesRequest $request, AppSettingService $settings): JsonResponse
+    {
+        abort_unless($request->user()?->tokenCan('tally-sync:masters'), 403, 'Token missing the tally-sync:masters ability.');
+
+        $companies = array_values(array_unique($request->validated()['companies']));
+        $settings->set(TallySettingsController::KEY_COMPANIES, $companies);
+
+        return response()->json(['data' => ['companies' => $companies]]);
     }
 }
