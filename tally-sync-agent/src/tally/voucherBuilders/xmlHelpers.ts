@@ -1,10 +1,17 @@
 export function escapeXml(value: string | number): string {
-    return String(value)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&apos;');
+    return (
+        String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&apos;')
+            // Non-ASCII → numeric character references. Verified against the
+            // client's TallyPrime (SPE-3 test): raw UTF-8 bytes in a narration
+            // render as mojibake ("—" became "â") because Tally doesn't treat
+            // the request body as UTF-8. Entities sidestep charset guessing.
+            .replace(/[\u0080-\uffff]/g, (ch) => `&#${ch.charCodeAt(0)};`)
+    );
 }
 
 /** Tally wants voucher dates as YYYYMMDD, no separators. */
