@@ -245,6 +245,31 @@ class ShiftProductionEntryService
         return $entry->fresh(['shift', 'workCenter', 'item', 'warehouse', 'approvedBy']);
     }
 
+    /**
+     * Sync-status write-backs from the Tally agent's ack/fail reports (via
+     * TallySyncEventServiceProvider). Deliberately quiet no-ops when the
+     * entry isn't in a matching prior state: the agent can legitimately
+     * re-report an entry after a network retry, and a repeat ack must never
+     * error — unlike the human-driven transitions above, there's no one to
+     * show an InvalidStatusTransitionException to.
+     */
+    public function markSynced(ShiftProductionEntry $entry): void
+    {
+        ShiftProductionEntry::query()
+            ->where('id', $entry->id)
+            // "failed" is included so a retried-then-successful sync recovers.
+            ->whereIn('status', [ShiftProductionEntryStatus::Approved->value, ShiftProductionEntryStatus::Failed->value])
+            ->update(['status' => ShiftProductionEntryStatus::Synced->value]);
+    }
+
+    public function markSyncFailed(ShiftProductionEntry $entry): void
+    {
+        ShiftProductionEntry::query()
+            ->where('id', $entry->id)
+            ->where('status', ShiftProductionEntryStatus::Approved->value)
+            ->update(['status' => ShiftProductionEntryStatus::Failed->value]);
+    }
+
     private function toKg(string $quantityNos, ?Item $item): ?string
     {
         if ($item === null || $item->nominal_weight_grams === null) {
