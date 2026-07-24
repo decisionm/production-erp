@@ -2,10 +2,14 @@ import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
 import type { Attendance, Employee, LeaveBalance, LeaveRequest, LeaveType } from './types';
 
-export async function listEmployees(perPage?: number): Promise<Paginated<Employee>> {
-    const { data } = await api.get<Paginated<Employee>>('/hrms/employees', {
-        params: perPage ? { per_page: perPage } : undefined,
-    });
+export async function listEmployees(): Promise<Paginated<Employee>> {
+    const { data } = await api.get<Paginated<Employee>>('/hrms/employees');
+    return data;
+}
+
+/** Full reference list for a picker (all rows, not the default first page). */
+export async function listAllEmployees(): Promise<Paginated<Employee>> {
+    const { data } = await api.get<Paginated<Employee>>('/hrms/employees', { params: { per_page: 1000 } });
     return data;
 }
 

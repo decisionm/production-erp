@@ -174,10 +174,14 @@ export async function receiveSubcontractOrder(
     return data.data;
 }
 
-export async function listScrapReasons(perPage?: number): Promise<Paginated<ScrapReason>> {
-    const { data } = await api.get<Paginated<ScrapReason>>('/production/scrap-reasons', {
-        params: perPage ? { per_page: perPage } : undefined,
-    });
+export async function listScrapReasons(): Promise<Paginated<ScrapReason>> {
+    const { data } = await api.get<Paginated<ScrapReason>>('/production/scrap-reasons');
+    return data;
+}
+
+/** Full reference list for a picker (all rows, not the default first page). */
+export async function listAllScrapReasons(): Promise<Paginated<ScrapReason>> {
+    const { data } = await api.get<Paginated<ScrapReason>>('/production/scrap-reasons', { params: { per_page: 1000 } });
     return data;
 }
 
@@ -372,10 +376,14 @@ export async function closeMoldChangeLog(id: number, toTime?: string): Promise<M
     return data.data;
 }
 
-export async function listMolds(perPage?: number): Promise<Paginated<Mold>> {
-    const { data } = await api.get<Paginated<Mold>>('/production/molds', {
-        params: perPage ? { per_page: perPage } : undefined,
-    });
+export async function listMolds(): Promise<Paginated<Mold>> {
+    const { data } = await api.get<Paginated<Mold>>('/production/molds');
+    return data;
+}
+
+/** Full reference list for a picker (all rows, not the default first page). */
+export async function listAllMolds(): Promise<Paginated<Mold>> {
+    const { data } = await api.get<Paginated<Mold>>('/production/molds', { params: { per_page: 1000 } });
     return data;
 }
 

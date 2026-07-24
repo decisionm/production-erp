@@ -5,7 +5,7 @@ import dayjs from 'dayjs';
 import { useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { listEmployees } from '@/features/hrms/api';
+import { listAllEmployees } from '@/features/hrms/api';
 import { getShiftKpiReport, listShifts, saveShiftSummary } from '@/features/production/api';
 import type {
     ShiftKpiDowntimeLog,
@@ -38,7 +38,7 @@ export default function ShiftSummaryPage() {
     const queryClient = useQueryClient();
 
     const { data: shifts } = useQuery({ queryKey: ['production', 'shifts'], queryFn: listShifts });
-    const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: () => listEmployees(1000) });
+    const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: listAllEmployees });
     const shiftOptions = shifts?.data.filter((s) => s.is_active).map((s) => ({ value: s.id, label: s.name })) ?? [];
     const employeeOptions = employees?.data.map((e) => ({ value: e.id, label: `${e.employee_code} — ${e.name}` })) ?? [];
 

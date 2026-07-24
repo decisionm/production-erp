@@ -2,10 +2,14 @@ import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
 import type { Batch, BatchLedger, Item, ItemTrackingType, SerialNumber, StockBalance, StockMovement, Warehouse } from './types';
 
-export async function listItems(perPage?: number): Promise<Paginated<Item>> {
-    const { data } = await api.get<Paginated<Item>>('/inventory/items', {
-        params: perPage ? { per_page: perPage } : undefined,
-    });
+export async function listItems(): Promise<Paginated<Item>> {
+    const { data } = await api.get<Paginated<Item>>('/inventory/items');
+    return data;
+}
+
+/** Full reference list for a picker (all rows, not the default first page). */
+export async function listAllItems(): Promise<Paginated<Item>> {
+    const { data } = await api.get<Paginated<Item>>('/inventory/items', { params: { per_page: 1000 } });
     return data;
 }
 
@@ -32,10 +36,14 @@ export async function updateItem(id: number, payload: UpdateItemPayload): Promis
     return data.data;
 }
 
-export async function listWarehouses(perPage?: number): Promise<Paginated<Warehouse>> {
-    const { data } = await api.get<Paginated<Warehouse>>('/inventory/warehouses', {
-        params: perPage ? { per_page: perPage } : undefined,
-    });
+export async function listWarehouses(): Promise<Paginated<Warehouse>> {
+    const { data } = await api.get<Paginated<Warehouse>>('/inventory/warehouses');
+    return data;
+}
+
+/** Full reference list for a picker (all rows, not the default first page). */
+export async function listAllWarehouses(): Promise<Paginated<Warehouse>> {
+    const { data } = await api.get<Paginated<Warehouse>>('/inventory/warehouses', { params: { per_page: 1000 } });
     return data;
 }
 
