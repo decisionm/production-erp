@@ -156,15 +156,17 @@ class TallySyncAgentController extends Controller
 
     /**
      * Append-only trace of everything the agent sends us, one line per call,
-     * in its own file (storage/logs/tally-agent.log) so agent traffic can be
-     * inspected without wading through the app log. Token name identifies
-     * WHICH installation sent it — one token per site by convention.
+     * in its own DAY-WISE file (storage/logs/tally-agent-YYYY-MM-DD.log) so
+     * agent traffic can be inspected per day without wading through the app
+     * log, and old days age out on their own. Token name identifies WHICH
+     * installation sent it — one token per site by convention.
      */
     private function agentLog(Request $request, string $event, array $context = []): void
     {
         Log::build([
-            'driver' => 'single',
+            'driver' => 'daily',
             'path' => storage_path('logs/tally-agent.log'),
+            'days' => 30,
         ])->info($event, [
             'token' => $request->user()?->currentAccessToken()?->name ?? 'session',
         ] + $context);
