@@ -73,9 +73,16 @@ class TallySettingsController extends Controller
         }
 
         return [
-            'url' => $disk->url("agent/{$filename}"),
+            // Cache-buster: the filename only changes on version bumps, but
+            // rebuilds of the same version replace the file in place — and the
+            // hosting CDN caches by URL, so without this a client can be handed
+            // a stale (or worse, previously half-uploaded) cached copy whose
+            // hash no longer matches this metadata. The commit (or build time)
+            // changes every build, forcing a fresh CDN cache key.
+            'url' => $disk->url("agent/{$filename}").'?v='.urlencode($meta['commit'] ?? $meta['built_at'] ?? 'unknown'),
             'version' => $meta['version'] ?? null,
             'built_at' => $meta['built_at'] ?? null,
+            'sha256' => $meta['sha256'] ?? null,
             'size' => $disk->size("agent/{$filename}"),
         ];
     }
