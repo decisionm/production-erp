@@ -1,3 +1,21 @@
+# Correct MIME types for the PWA — Apache's defaults serve .webmanifest as
+# text/plain (Chrome then ignores the manifest) and .js as
+# application/x-javascript (browsers want a standard JS type). Without these
+# the "Install app" prompt never appears.
+<IfModule mod_mime.c>
+    AddType application/manifest+json .webmanifest
+    AddType text/javascript .js .mjs
+</IfModule>
+
+# The service worker ships under /build/ but the app is served at /. This
+# header lets that worker claim the whole-app scope "/" so the PWA is
+# installable from the plain URL, not only from /build/.
+<IfModule mod_headers.c>
+    <Files "sw.js">
+        Header set Service-Worker-Allowed "/"
+    </Files>
+</IfModule>
+
 <IfModule mod_rewrite.c>
     <IfModule mod_negotiation.c>
         Options -MultiViews -Indexes
