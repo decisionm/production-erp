@@ -73,12 +73,30 @@ class TallySyncAgentController extends Controller
      * in one call, processed in dependency order. Every section is optional and
      * idempotent. Returns a per-section created/updated/total summary.
      */
-    public function masters(SyncMastersRequest $request, MasterSyncService $masterSync): JsonResponse
+    public function masters(SyncMastersRequest $request, MasterSyncService $masterSync, AppSettingService $settings): JsonResponse
     {
         abort_unless($request->user()?->tokenCan('tally-sync:masters'), 403, 'Token missing the tally-sync:masters ability.');
 
+        $data = $request->validated();
+        $incoming = $data['company'] ?? null;
+        $bound = $settings->get(TallySettingsController::KEY_COMPANY);
+
+        // Single-tenant guard: one ERP instance syncs exactly one Tally company.
+        // Once bound, refuse masters from any OTHER company so a misconfigured
+        // agent can't overwrite/mix another company's items and ledgers.
+        // Trust-on-first-use: the first pull binds the instance if nothing's set.
+        abort_if(
+            $bound !== null && $incoming !== null && $bound !== $incoming,
+            409,
+            "This ERP is bound to Tally company '{$bound}'. Refusing a masters pull from '{$incoming}' — that would mix two companies' data. Select the correct company in Settings, or reconfigure the agent to the right company.",
+        );
+
+        if ($bound === null && $incoming !== null) {
+            $settings->set(TallySettingsController::KEY_COMPANY, $incoming);
+        }
+
         return response()->json([
-            'data' => $masterSync->sync($request->validated()),
+            'data' => $masterSync->sync($data),
         ]);
     }
 

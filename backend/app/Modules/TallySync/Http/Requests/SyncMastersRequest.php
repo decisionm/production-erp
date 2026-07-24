@@ -19,6 +19,11 @@ class SyncMastersRequest extends FormRequest
     public function rules(): array
     {
         return [
+            // The Tally company this pull came from — used to bind the instance
+            // to one company and reject masters from any other (see the
+            // controller's single-tenant guard).
+            'company' => ['sometimes', 'nullable', 'string', 'max:255'],
+
             'item_groups' => ['sometimes', 'array'],
             'item_groups.*.guid' => ['required', 'string', 'max:255'],
             'item_groups.*.name' => ['required', 'string', 'max:255'],

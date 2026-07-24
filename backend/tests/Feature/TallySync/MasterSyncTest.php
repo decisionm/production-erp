@@ -120,4 +120,31 @@ class MasterSyncTest extends TestCase
 
         $this->assertDatabaseCount('item_groups', 0);
     }
+
+    public function test_it_binds_to_the_first_company_and_refuses_others(): void
+    {
+        $this->actAsAgent();
+
+        // First pull binds the instance to "Acme Co".
+        $this->postJson('/api/v1/tally-sync/masters', [
+            'company' => 'Acme Co',
+            'item_groups' => [['guid' => 'g-1', 'name' => 'Finished Goods']],
+        ])->assertOk();
+
+        // A pull from a DIFFERENT company is refused (409) and changes nothing —
+        // the single-tenant guard against mixing companies' data.
+        $this->postJson('/api/v1/tally-sync/masters', [
+            'company' => 'Other Co',
+            'item_groups' => [['guid' => 'g-2', 'name' => 'Injected']],
+        ])->assertStatus(409);
+
+        $this->assertSame(1, ItemGroup::count());
+        $this->assertDatabaseMissing('item_groups', ['tally_guid' => 'g-2']);
+
+        // The bound company still syncs fine.
+        $this->postJson('/api/v1/tally-sync/masters', [
+            'company' => 'Acme Co',
+            'items' => [['guid' => 'i-1', 'name' => 'Widget']],
+        ])->assertOk();
+    }
 }

@@ -53,8 +53,11 @@ export type MastersSyncSummary = Record<string, { created: number; updated: numb
  * Matches App\Modules\TallySync\Http\Controllers\TallySyncAgentController::masters
  * — POST /tally-sync/masters, requiring a token with the tally-sync:masters ability.
  */
-export async function syncMasters(payload: MastersPayload): Promise<MastersSyncSummary> {
-    const { data } = await client().post<{ data: MastersSyncSummary }>('/masters', payload);
+export async function syncMasters(payload: MastersPayload, company: string): Promise<MastersSyncSummary> {
+    // `company` binds the pull to one Tally company on the cloud side — the
+    // server refuses masters from a different company than the instance is
+    // bound to, preventing cross-company data corruption.
+    const { data } = await client().post<{ data: MastersSyncSummary }>('/masters', { ...payload, company });
     return data.data;
 }
 

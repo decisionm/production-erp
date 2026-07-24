@@ -59,7 +59,7 @@ export async function runMastersSync(): Promise<MastersRunResult | null> {
         const pulledTotal = Object.values(pulled).reduce((sum, n) => sum + n, 0);
         logger.info(`Masters pull: fetched ${pulledTotal} records from Tally`, pulled);
 
-        const posted = await syncMasters(payload);
+        const posted = await syncMasters(payload, cfg.tallyCompanyName);
         const created = Object.values(posted).reduce((sum, s) => sum + s.created, 0);
         const updated = Object.values(posted).reduce((sum, s) => sum + s.updated, 0);
         logger.info(`Masters pull: posted to ERP — ${created} created, ${updated} updated`, posted);
