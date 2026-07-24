@@ -167,17 +167,17 @@ export default function ShiftSummaryPage() {
                 <Col xs={24} lg={scope === 'shift' ? 14 : 24}>
                     <Card title="Computed KPI Report" loading={reportLoading}>
                         <Row gutter={[16, 16]}>
-                            <Col span={8}><Statistic title="Actual Production (Kg)" value={report?.actual_production_kg ?? '—'} /></Col>
-                            <Col span={8}><Statistic title="Rejection (Kg)" value={report?.rejection_kg ?? '—'} /></Col>
-                            <Col span={8}><Statistic title="Net Good Output (Kg)" value={report?.net_good_output_kg ?? '—'} /></Col>
-                            <Col span={8}><Statistic title="Shift Efficiency" value={formatPercent(report?.efficiency_percent ?? null)} /></Col>
-                            <Col span={8}><Statistic title="Rejection %" value={formatPercent(report?.rejection_percent ?? null)} /></Col>
-                            <Col span={8}><Statistic title="Unit / Kg" value={report?.unit_per_kg?.toFixed(2) ?? '—'} /></Col>
-                            <Col span={8}><Statistic title="Machines Running" value={report?.machines_running ?? '—'} /></Col>
-                            <Col span={8}><Statistic title="Machines Down" value={report?.machines_down ?? '—'} /></Col>
-                            <Col span={8}><Statistic title="Mold Changes" value={report?.no_of_mold_changes ?? '—'} /></Col>
-                            <Col span={8}><Statistic title="Idle Time — Machines (Hrs)" value={report?.idle_time_hours ?? '—'} /></Col>
-                            <Col span={8}><Statistic title="Idle Time — Power Cuts (Hrs)" value={report?.power_interruption_hours ?? '—'} /></Col>
+                            <Col xs={12} sm={8}><Statistic title="Actual Production (Kg)" value={report?.actual_production_kg ?? '—'} /></Col>
+                            <Col xs={12} sm={8}><Statistic title="Rejection (Kg)" value={report?.rejection_kg ?? '—'} /></Col>
+                            <Col xs={12} sm={8}><Statistic title="Net Good Output (Kg)" value={report?.net_good_output_kg ?? '—'} /></Col>
+                            <Col xs={12} sm={8}><Statistic title="Shift Efficiency" value={formatPercent(report?.efficiency_percent ?? null)} /></Col>
+                            <Col xs={12} sm={8}><Statistic title="Rejection %" value={formatPercent(report?.rejection_percent ?? null)} /></Col>
+                            <Col xs={12} sm={8}><Statistic title="Unit / Kg" value={report?.unit_per_kg?.toFixed(2) ?? '—'} /></Col>
+                            <Col xs={12} sm={8}><Statistic title="Machines Running" value={report?.machines_running ?? '—'} /></Col>
+                            <Col xs={12} sm={8}><Statistic title="Machines Down" value={report?.machines_down ?? '—'} /></Col>
+                            <Col xs={12} sm={8}><Statistic title="Mold Changes" value={report?.no_of_mold_changes ?? '—'} /></Col>
+                            <Col xs={12} sm={8}><Statistic title="Idle Time — Machines (Hrs)" value={report?.idle_time_hours ?? '—'} /></Col>
+                            <Col xs={12} sm={8}><Statistic title="Idle Time — Power Cuts (Hrs)" value={report?.power_interruption_hours ?? '—'} /></Col>
                         </Row>
                         <Typography.Paragraph type="secondary" style={{ marginTop: 16, marginBottom: 0 }}>
                             Machines Down is a live count of currently-open breakdowns; the two idle-time figures are
@@ -192,6 +192,7 @@ export default function ShiftSummaryPage() {
                 <Col xs={24} lg={12}>
                     <Card title="Items Manufactured" size="small">
                         <Table<ShiftKpiItemBreakdown>
+                            scroll={{ x: 'max-content' }}
                             size="small"
                             rowKey={(row) => row.item.id}
                             pagination={false}
@@ -213,6 +214,7 @@ export default function ShiftSummaryPage() {
                 <Col xs={24} lg={12}>
                     <Card title="Machine Downtime" size="small">
                         <Table<ShiftKpiDowntimeLog>
+                            scroll={{ x: 'max-content' }}
                             size="small"
                             rowKey="id"
                             pagination={false}
@@ -238,6 +240,7 @@ export default function ShiftSummaryPage() {
                 <Col xs={24} lg={12}>
                     <Card title="Power Interruptions" size="small">
                         <Table<ShiftKpiPowerInterruptionLog>
+                            scroll={{ x: 'max-content' }}
                             size="small"
                             rowKey="id"
                             pagination={false}
@@ -256,6 +259,7 @@ export default function ShiftSummaryPage() {
                 <Col xs={24} lg={12}>
                     <Card title="Mold Changes" size="small">
                         <Table<ShiftKpiMoldChangeLog>
+                            scroll={{ x: 'max-content' }}
                             size="small"
                             rowKey="id"
                             pagination={false}
@@ -282,6 +286,7 @@ export default function ShiftSummaryPage() {
                     <Col xs={24}>
                         <Card title="Stock Counts" size="small">
                             <Table<ShiftKpiStockCount>
+                                scroll={{ x: 'max-content' }}
                                 size="small"
                                 rowKey="id"
                                 pagination={false}

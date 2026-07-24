@@ -679,7 +679,7 @@ export default function ShiftProductionEntryPage() {
                 title={`Complete Batch — ${completingEntry?.work_center.name} · ${completingEntry?.item.sku}`}
                 open={completingEntry !== null}
                 onClose={() => setCompletingEntry(null)}
-                width={560}
+                width="min(100vw, 560px)"
                 destroyOnHidden
                 extra={
                     <Button
@@ -746,22 +746,22 @@ export default function ShiftProductionEntryPage() {
 
                     <Typography.Text strong>Packing</Typography.Text>
                     <Row gutter={16} style={{ marginTop: 8, marginBottom: 16 }}>
-                        <Col span={6}>
+                        <Col xs={12} sm={6}>
                             <Form.Item label="Nos/Tray">
                                 <Controller name="nos_per_tray" control={completeForm.control} render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />} />
                             </Form.Item>
                         </Col>
-                        <Col span={6}>
+                        <Col xs={12} sm={6}>
                             <Form.Item label="Trays">
                                 <Controller name="no_of_trays" control={completeForm.control} render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />} />
                             </Form.Item>
                         </Col>
-                        <Col span={6}>
+                        <Col xs={12} sm={6}>
                             <Form.Item label="Nos/Box">
                                 <Controller name="nos_per_box" control={completeForm.control} render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />} />
                             </Form.Item>
                         </Col>
-                        <Col span={6}>
+                        <Col xs={12} sm={6}>
                             <Form.Item label="Boxes">
                                 <Controller name="no_of_box" control={completeForm.control} render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />} />
                             </Form.Item>
@@ -784,28 +784,36 @@ export default function ShiftProductionEntryPage() {
                         </Button>
                     </Space>
                     {materialFields.fields.map((field, index) => (
-                        <Space key={field.id} align="baseline" style={{ display: 'flex', marginTop: 8, flexWrap: 'wrap' }}>
-                            <Controller
-                                name={`material_consumptions.${index}.item_id`}
-                                control={completeForm.control}
-                                render={({ field }) => (
-                                    <Select {...field} options={itemOptions} showSearch optionFilterProp="label" style={{ width: 200 }} placeholder="Resin/Masterbatch" />
-                                )}
-                            />
-                            <Controller
-                                name={`material_consumptions.${index}.warehouse_id`}
-                                control={completeForm.control}
-                                render={({ field }) => (
-                                    <Select {...field} options={warehouseOptions} showSearch optionFilterProp="label" style={{ width: 140 }} placeholder="From" />
-                                )}
-                            />
-                            <Controller
-                                name={`material_consumptions.${index}.quantity_issued_kg`}
-                                control={completeForm.control}
-                                render={({ field }) => <InputNumber {...field} min={0} placeholder="Kg" />}
-                            />
-                            <Button danger size="small" onClick={() => materialFields.remove(index)}>Remove</Button>
-                        </Space>
+                        <Row key={field.id} gutter={[8, 8]} align="middle" style={{ marginTop: 8 }}>
+                            <Col xs={24} sm={10}>
+                                <Controller
+                                    name={`material_consumptions.${index}.item_id`}
+                                    control={completeForm.control}
+                                    render={({ field }) => (
+                                        <Select {...field} size="large" options={itemOptions} showSearch optionFilterProp="label" style={{ width: '100%' }} placeholder="Resin/Masterbatch" />
+                                    )}
+                                />
+                            </Col>
+                            <Col xs={12} sm={6}>
+                                <Controller
+                                    name={`material_consumptions.${index}.warehouse_id`}
+                                    control={completeForm.control}
+                                    render={({ field }) => (
+                                        <Select {...field} size="large" options={warehouseOptions} showSearch optionFilterProp="label" style={{ width: '100%' }} placeholder="From" />
+                                    )}
+                                />
+                            </Col>
+                            <Col xs={12} sm={5}>
+                                <Controller
+                                    name={`material_consumptions.${index}.quantity_issued_kg`}
+                                    control={completeForm.control}
+                                    render={({ field }) => <InputNumber {...field} size="large" min={0} placeholder="Kg" style={{ width: '100%' }} />}
+                                />
+                            </Col>
+                            <Col xs={24} sm={3}>
+                                <Button danger block onClick={() => materialFields.remove(index)}>Remove</Button>
+                            </Col>
+                        </Row>
                     ))}
 
                     <Space style={{ justifyContent: 'space-between', width: '100%', marginTop: 16 }}>
@@ -818,33 +826,42 @@ export default function ShiftProductionEntryPage() {
                         </Button>
                     </Space>
                     {scrapFields.fields.map((field, index) => (
-                        <Space key={field.id} align="baseline" style={{ display: 'flex', marginTop: 8, flexWrap: 'wrap' }}>
-                            <Controller
-                                name={`scraps.${index}.type`}
-                                control={completeForm.control}
-                                render={({ field }) => (
-                                    <Select
-                                        {...field}
-                                        style={{ width: 160 }}
-                                        options={[
-                                            { value: 'lumps', label: 'Lumps' },
-                                            { value: 'rejected_finished_good', label: 'Rejected FG' },
-                                        ]}
-                                    />
-                                )}
-                            />
-                            <Controller
-                                name={`scraps.${index}.quantity_kg`}
-                                control={completeForm.control}
-                                render={({ field }) => <InputNumber {...field} min={0} placeholder="Kg" />}
-                            />
-                            <Controller
-                                name={`scraps.${index}.quantity_nos`}
-                                control={completeForm.control}
-                                render={({ field }) => <InputNumber {...field} min={0} placeholder="Nos" />}
-                            />
-                            <Button danger size="small" onClick={() => scrapFields.remove(index)}>Remove</Button>
-                        </Space>
+                        <Row key={field.id} gutter={[8, 8]} align="middle" style={{ marginTop: 8 }}>
+                            <Col xs={24} sm={10}>
+                                <Controller
+                                    name={`scraps.${index}.type`}
+                                    control={completeForm.control}
+                                    render={({ field }) => (
+                                        <Select
+                                            {...field}
+                                            size="large"
+                                            style={{ width: '100%' }}
+                                            options={[
+                                                { value: 'lumps', label: 'Lumps' },
+                                                { value: 'rejected_finished_good', label: 'Rejected FG' },
+                                            ]}
+                                        />
+                                    )}
+                                />
+                            </Col>
+                            <Col xs={12} sm={6}>
+                                <Controller
+                                    name={`scraps.${index}.quantity_kg`}
+                                    control={completeForm.control}
+                                    render={({ field }) => <InputNumber {...field} size="large" min={0} placeholder="Kg" style={{ width: '100%' }} />}
+                                />
+                            </Col>
+                            <Col xs={12} sm={5}>
+                                <Controller
+                                    name={`scraps.${index}.quantity_nos`}
+                                    control={completeForm.control}
+                                    render={({ field }) => <InputNumber {...field} size="large" min={0} placeholder="Nos" style={{ width: '100%' }} />}
+                                />
+                            </Col>
+                            <Col xs={24} sm={3}>
+                                <Button danger block onClick={() => scrapFields.remove(index)}>Remove</Button>
+                            </Col>
+                        </Row>
                     ))}
 
                     <Form.Item label="Notes (optional)" style={{ marginTop: 16 }}>
