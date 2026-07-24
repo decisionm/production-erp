@@ -38,7 +38,7 @@ export default function ShiftSummaryPage() {
     const queryClient = useQueryClient();
 
     const { data: shifts } = useQuery({ queryKey: ['production', 'shifts'], queryFn: listShifts });
-    const { data: employees } = useQuery({ queryKey: ['hrms', 'employees'], queryFn: listEmployees });
+    const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: () => listEmployees(1000) });
     const shiftOptions = shifts?.data.filter((s) => s.is_active).map((s) => ({ value: s.id, label: s.name })) ?? [];
     const employeeOptions = employees?.data.map((e) => ({ value: e.id, label: `${e.employee_code} — ${e.name}` })) ?? [];
 
