@@ -13,28 +13,32 @@ export interface ManufacturingJournalPayload {
 }
 
 /**
- * VALIDATED against the client's real TallyPrime (24-Jul-2026, voucher SPE-3,
- * SWAASHPET 26-27): the voucher structure imports cleanly as a plain STOCK
- * JOURNAL — emitted as such (not a BOM-driven Manufacturing Journal) so it
- * works whether or not the client has Tally's Manufacturing Journal/BOM
+ * Emitted as a plain STOCK JOURNAL (not a BOM-driven Manufacturing Journal) so
+ * it works whether or not the client has Tally's Manufacturing Journal/BOM
  * feature enabled (master plan §6 fallback).
  *
- * Direction mapping learned the hard way from that test — Tally renders:
- *   INVENTORYENTRIESIN.LIST  → the LEFT  "Source (Consumption)" column
- *   INVENTORYENTRIESOUT.LIST → the RIGHT "Destination (Production)" column
- * (i.e. the tag names read like stock direction but Tally treats them as
- * voucher-side names — the first cut had them swapped and the produced
- * bottles showed up as consumption.) So: consumed goods → IN, produced
- * goods → OUT. The produced finished goods carry the shift batch number.
- * Value (RATE/AMOUNT) is left to Tally to derive from item costs.
+ * COLUMN + STOCK DIRECTION — verified against SWAASHPET's real production
+ * voucher (Stock Journal #118) and three live test vouchers (SPE-3/4/5):
+ * TallyPrime decides which side of a Stock Journal a line lands on — and which
+ * way its stock moves — by ISDEEMEDPOSITIVE, *not* by the INVENTORYENTRIESIN/
+ * OUT.LIST tag name (a tag-only swap renders identically, which is exactly how
+ * SPE-3 and SPE-5 came out the same).
+ *
+ *   ISDEEMEDPOSITIVE=No   → Source (Consumption), LEFT  — stock DECREASES
+ *   ISDEEMEDPOSITIVE=Yes  → Destination (Production), RIGHT — stock INCREASES
+ *
+ * So consumed raw materials → No, produced finished goods → Yes. Tags are still
+ * paired conventionally (consumption in OUT.LIST, production in IN.LIST) to
+ * match a hand-made voucher, but the ISDEEMEDPOSITIVE value is what's load-
+ * bearing. Value (RATE/AMOUNT) is left for Tally to derive from item costs.
  */
 export function buildManufacturingJournalXml(payload: ManufacturingJournalPayload, companyName: string): string {
     const consumed = payload.consumed
-        .map((line) => stockEntry('IN', line, payload.godown, 'Primary Batch'))
+        .map((line) => stockEntry('consumption', line, payload.godown, 'Primary Batch'))
         .join('\n');
 
     const produced = payload.produced
-        .map((line) => stockEntry('OUT', line, payload.godown, payload.batch_number || 'Primary Batch'))
+        .map((line) => stockEntry('production', line, payload.godown, payload.batch_number || 'Primary Batch'))
         .join('\n');
 
     const message = `          <VOUCHER VCHTYPE="Stock Journal" ACTION="Create">
@@ -50,15 +54,18 @@ ${produced}
 }
 
 function stockEntry(
-    direction: 'IN' | 'OUT',
+    role: 'consumption' | 'production',
     line: { item: string; quantity: string },
     godown: string | null,
     batchName: string,
 ): string {
-    // IN = Source/Consumption (deemed positive), OUT = Destination/Production —
-    // see the direction note in the builder docblock. Godown/batch in the
-    // batch allocation; value omitted so Tally derives it from item cost.
-    const deemedPositive = direction === 'IN' ? 'Yes' : 'No';
+    // See the builder docblock: ISDEEMEDPOSITIVE (not the tag) drives both the
+    // column and the stock direction. Production = Yes (Destination, stock in),
+    // consumption = No (Source, stock out). Godown/batch in the batch
+    // allocation; value omitted so Tally derives it from item cost.
+    const isProduction = role === 'production';
+    const tag = isProduction ? 'IN' : 'OUT';
+    const deemedPositive = isProduction ? 'Yes' : 'No';
     const batch = godown
         ? `
                 <BATCHALLOCATIONS.LIST>
@@ -69,10 +76,10 @@ function stockEntry(
                 </BATCHALLOCATIONS.LIST>`
         : '';
 
-    return `            <INVENTORYENTRIES${direction}.LIST>
+    return `            <INVENTORYENTRIES${tag}.LIST>
               <STOCKITEMNAME>${escapeXml(line.item)}</STOCKITEMNAME>
               <ISDEEMEDPOSITIVE>${deemedPositive}</ISDEEMEDPOSITIVE>
               <ACTUALQTY>${escapeXml(line.quantity)}</ACTUALQTY>
               <BILLEDQTY>${escapeXml(line.quantity)}</BILLEDQTY>${batch}
-            </INVENTORYENTRIES${direction}.LIST>`;
+            </INVENTORYENTRIES${tag}.LIST>`;
 }
