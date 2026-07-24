@@ -6,9 +6,13 @@ use App\Modules\Finance\Models\Enums\JournalEntryStatus;
 use App\Modules\Finance\Models\JournalEntry;
 use App\Modules\Procurement\Events\GoodsReceiptNoteReceived;
 use App\Modules\Production\Events\ShiftProductionEntryApproved;
+use App\Modules\Production\Models\ShiftProductionEntry;
+use App\Modules\Production\Services\ShiftProductionEntryService;
 use App\Modules\Sales\Events\DeliveryDispatched;
 use App\Modules\Sales\Models\Enums\InvoiceStatus;
 use App\Modules\Sales\Models\Invoice;
+use App\Modules\TallySync\Models\Enums\TallySyncStatus;
+use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Services\TallySyncService;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
@@ -50,6 +54,36 @@ class TallySyncEventServiceProvider extends ServiceProvider
 
         Event::listen(ShiftProductionEntryApproved::class, function (ShiftProductionEntryApproved $event) {
             $this->app->make(TallySyncService::class)->enqueueShiftProductionEntry($event->entry);
+        });
+
+        // The reverse hop: when the agent acks/fails a production voucher,
+        // reflect that on the entry itself (approved → synced/failed, with
+        // failed → synced recovery on a successful retry) so the approval
+        // queue shows real sync state. Only ShiftProductionEntry carries
+        // sync state on the source row — Invoice/JournalEntry deliberately
+        // don't.
+        TallySyncEntry::updated(function (TallySyncEntry $syncEntry) {
+            if (! $syncEntry->wasChanged('status')) {
+                return;
+            }
+
+            if ($syncEntry->syncable_type !== (new ShiftProductionEntry)->getMorphClass()) {
+                return;
+            }
+
+            $entry = $syncEntry->syncable;
+
+            if (! $entry instanceof ShiftProductionEntry) {
+                return;
+            }
+
+            $service = $this->app->make(ShiftProductionEntryService::class);
+
+            match ($syncEntry->status) {
+                TallySyncStatus::Synced => $service->markSynced($entry),
+                TallySyncStatus::Failed => $service->markSyncFailed($entry),
+                default => null,
+            };
         });
     }
 }

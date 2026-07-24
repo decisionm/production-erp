@@ -148,7 +148,7 @@ class TallySyncService
      */
     public function enqueueShiftProductionEntry(ShiftProductionEntry $entry): TallySyncEntry
     {
-        $entry->loadMissing(['item', 'warehouse', 'materialConsumptions.item']);
+        $entry->loadMissing(['item', 'warehouse', 'materialConsumptions.item', 'scraps.scrapReason']);
 
         $consumed = $entry->materialConsumptions->map(fn ($consumption) => [
             'item' => $consumption->item->name,
@@ -160,15 +160,40 @@ class TallySyncService
             'quantity' => $entry->quantity_produced,
         ]];
 
+        // Scraps ride along as data and as narration text: crediting regrind
+        // back into stock as a valued item needs the accountant's valuation
+        // rules (master plan Phase 1.5), which aren't codified yet — but the
+        // figures should still reach Tally's books in human-readable form
+        // rather than silently dropping off the voucher.
+        $scraps = $entry->scraps->map(fn ($scrap) => [
+            'type' => $scrap->type->value,
+            'quantity_nos' => $scrap->quantity_nos,
+            'quantity_kg' => $scrap->quantity_kg,
+            'reason' => $scrap->scrapReason?->name,
+        ])->all();
+
+        $scrapNote = $entry->scraps
+            ->map(function ($scrap) {
+                $amounts = implode(' / ', array_filter([
+                    $scrap->quantity_nos !== null ? "{$scrap->quantity_nos} nos" : null,
+                    $scrap->quantity_kg !== null ? "{$scrap->quantity_kg} kg" : null,
+                ]));
+
+                return "{$scrap->type->value}: ".($amounts !== '' ? $amounts : '0')
+                    .($scrap->scrapReason ? " ({$scrap->scrapReason->name})" : '');
+            })
+            ->implode('; ');
+
         return $this->enqueue($entry, 'Manufacturing Journal', [
             'voucher_type' => 'Manufacturing Journal',
             'voucher_date' => $entry->production_date?->toDateString(),
             'voucher_number' => "SPE-{$entry->id}",
             'batch_number' => $entry->batch_number,
             'godown' => $entry->warehouse?->name,
-            'narration' => $entry->notes,
+            'narration' => trim(implode('. ', array_filter([$entry->notes, $scrapNote !== '' ? "Scrap — {$scrapNote}" : null]))),
             'produced' => $produced,
             'consumed' => $consumed,
+            'scraps' => $scraps,
         ]);
     }
 
