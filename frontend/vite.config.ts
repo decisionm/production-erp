@@ -15,6 +15,13 @@ export default defineConfig(({ command }) => ({
         VitePWA({
             registerType: 'autoUpdate',
             includeAssets: ['favicon.ico', 'apple-touch-icon.png'],
+            // The app is served at the site root (/login, /production/...), while
+            // its assets — and the service worker — live under /build/. The SW
+            // is registered at this root scope; the `.htaccess` sends
+            // `Service-Worker-Allowed: /` on build/sw.js so Apache permits it.
+            // This is what makes the PWA installable from the plain URL instead
+            // of only from /build/.
+            scope: '/',
             manifest: {
                 name: 'Manufacturing ERP',
                 short_name: 'ERP',
@@ -22,19 +29,15 @@ export default defineConfig(({ command }) => ({
                 theme_color: '#1677ff',
                 background_color: '#ffffff',
                 display: 'standalone',
-                // Must match where the service worker can actually register
-                // (see the comment on VitePWA's `scope` below) — not the
-                // app's own root. Laravel's catch-all route (routes/web.php)
-                // serves the exact same build/index.html for /build/ as it
-                // does for every other path, so this is a safe, real start
-                // page — React Router takes over normal in-app navigation
-                // from there same as always.
-                start_url: '/build/',
-                scope: '/build/',
+                // Root scope + start page: install is offered from anywhere in
+                // the app (all under /), and the installed icon opens the app
+                // at its real root.
+                start_url: '/',
+                scope: '/',
                 icons: [
-                    { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
-                    { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
-                    { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+                    { src: '/build/icon-192.png', sizes: '192x192', type: 'image/png' },
+                    { src: '/build/icon-512.png', sizes: '512x512', type: 'image/png' },
+                    { src: '/build/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
                 ],
             },
             workbox: {
