@@ -13,21 +13,28 @@ export interface ManufacturingJournalPayload {
 }
 
 /**
- * BEST-EFFORT TEMPLATE — NOT YET VALIDATED AGAINST A REAL TALLY INSTANCE.
- * Emitted as a plain STOCK JOURNAL (consumption OUT + production IN) rather than
- * a BOM-driven Manufacturing Journal, so it works whether or not the client has
- * Tally's Manufacturing Journal/BOM feature enabled (master plan §6 fallback).
- * The produced finished goods carry the shift batch number. Value (RATE/AMOUNT)
- * is left to Tally to derive from item costs. Validate against a real export:
- * INVENTORYENTRIESIN/OUT, ISDEEMEDPOSITIVE and batch/godown tags vary by version.
+ * VALIDATED against the client's real TallyPrime (24-Jul-2026, voucher SPE-3,
+ * SWAASHPET 26-27): the voucher structure imports cleanly as a plain STOCK
+ * JOURNAL — emitted as such (not a BOM-driven Manufacturing Journal) so it
+ * works whether or not the client has Tally's Manufacturing Journal/BOM
+ * feature enabled (master plan §6 fallback).
+ *
+ * Direction mapping learned the hard way from that test — Tally renders:
+ *   INVENTORYENTRIESIN.LIST  → the LEFT  "Source (Consumption)" column
+ *   INVENTORYENTRIESOUT.LIST → the RIGHT "Destination (Production)" column
+ * (i.e. the tag names read like stock direction but Tally treats them as
+ * voucher-side names — the first cut had them swapped and the produced
+ * bottles showed up as consumption.) So: consumed goods → IN, produced
+ * goods → OUT. The produced finished goods carry the shift batch number.
+ * Value (RATE/AMOUNT) is left to Tally to derive from item costs.
  */
 export function buildManufacturingJournalXml(payload: ManufacturingJournalPayload, companyName: string): string {
     const consumed = payload.consumed
-        .map((line) => stockEntry('OUT', line, payload.godown, 'Primary Batch'))
+        .map((line) => stockEntry('IN', line, payload.godown, 'Primary Batch'))
         .join('\n');
 
     const produced = payload.produced
-        .map((line) => stockEntry('IN', line, payload.godown, payload.batch_number || 'Primary Batch'))
+        .map((line) => stockEntry('OUT', line, payload.godown, payload.batch_number || 'Primary Batch'))
         .join('\n');
 
     const message = `          <VOUCHER VCHTYPE="Stock Journal" ACTION="Create">
@@ -48,9 +55,10 @@ function stockEntry(
     godown: string | null,
     batchName: string,
 ): string {
-    // OUT = consumption (deemed positive), IN = production. Godown/batch in the
+    // IN = Source/Consumption (deemed positive), OUT = Destination/Production —
+    // see the direction note in the builder docblock. Godown/batch in the
     // batch allocation; value omitted so Tally derives it from item cost.
-    const deemedPositive = direction === 'OUT' ? 'Yes' : 'No';
+    const deemedPositive = direction === 'IN' ? 'Yes' : 'No';
     const batch = godown
         ? `
                 <BATCHALLOCATIONS.LIST>
