@@ -16,7 +16,7 @@ Companion to `TECHNICAL-DOCS.md` §6 (base Tally integration architecture alread
 | Idle Time Report (downtime, mold-change, power interruption, stock count logging) | **Built** — Phase 2b, see §10 |
 | Shift KPI Summary (computed rollup: Efficiency %, Rejection %, Machines Down, Idle Time, Mold Changes) | **Built** — Phase 2a/2b, see §10 |
 | Local agent (tray app) | **Scaffolded** — `tally-sync-agent/` (Electron/TS). Poller, cloud API client, Tally response parsing, tray/settings UI, and packaging all work end-to-end. XML voucher builders are unvalidated templates — see that project's README |
-| Production → Tally voucher sync | **Not started** — blocked on Phase 2 (real data model) and real-Tally validation of the agent's XML |
+| Production → Tally voucher sync | **✅ Validated (2026-07-24)** — an approved `ShiftProductionEntry` posts into the client's real TallyPrime as a Stock Journal with the correct layout (raw materials on Source/Consumption, finished goods on Destination/Production), confirmed against their own voucher #118. Agent v0.1.6. See Phase 4 |
 | Masters pull from Tally (items, godowns) | **Not started** |
 | Batch/QR generation + label printing | **Not started** |
 | Dispatch scanning | **Not started** |
@@ -440,10 +440,17 @@ Framework decision: **Electron**, given the team's existing TypeScript fluency (
 
 **Exit criteria:** the agent, running against a real Tally instance, correctly syncs a Sales Invoice and a Journal Entry end to end, survives a restart, and its audit log shows exactly what was sent and what Tally returned. **Blocked on access to a real Tally instance** — everything that doesn't require one is done.
 
-### Phase 4 — Production → Tally voucher sync
+### Phase 4 — Production → Tally voucher sync — ✅ Validated (2026-07-24)
 Add the Manufacturing Journal voucher type to `TallySyncService` (cloud side) and the agent's XML translator (local side). Triggered only by an **approved** `ShiftProductionEntry` (§4a) — never automatically at shift close.
 
-**Exit criteria:** approving a shift's production in the app results in a correct Manufacturing Journal in a real Tally instance, including resin consumption, cartons produced, and regrind/loss split.
+**Done and validated against the client's real TallyPrime** (SWAASHPET 26-27): an approved entry posts as a **Stock Journal** (not a BOM Manufacturing Journal — works whether or not their Tally has Mfg Journal/BOM enabled) with raw materials on Source/Consumption and finished goods on Destination/Production, stock moving the correct way, matching their own voucher #118.
+
+Hard-won lessons, now encoded in `tally-sync-agent/src/tally/voucherBuilders/manufacturingJournal.ts`:
+- **TallyPrime places a Stock Journal line by `ISDEEMEDPOSITIVE`, not the `INVENTORYENTRIESIN/OUT.LIST` tag name.** Consumed → `No` (Source, stock out); produced → `Yes` (Destination, stock in). A tag-only swap is a no-op.
+- Non-ASCII narration must be XML numeric-entity encoded or Tally renders mojibake (it doesn't read the body as UTF-8).
+- The agent must apply updates on download + hold a single-instance lock — it never quits, so install-on-quit staged forever and stale processes kept running old code (agent v0.1.6).
+
+**Remaining (non-blocking follow-ups):** emit shift scrap/lumps as a Destination/Production byproduct line (like their #118's "Pet Scrap") — needs a scrap-type → Tally-scrap-item mapping; optionally emit Rate/Amount (their vouchers carry them, ours lets Tally derive); voucher idempotency (`REMOTEID`) to make a retried post safe; godown-name mapping (payload sends the ERP warehouse name, Tally silently auto-creates a missing godown).
 
 ### Phase 5 — Masters pull from Tally
 Agent-side AlterID-based export of stock items/godowns; new cloud upsert endpoint (`POST /tally-sync/items` from the original plan, extended for godowns too). Tally-sourced fields marked read-only in the ERP UI (§3's split-ownership rule).
