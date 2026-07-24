@@ -51,7 +51,9 @@ jobs:
           cp release/*.blockmap out/ 2>/dev/null || true
           cp release/latest.yml out/
           # Metadata the Settings page reads for the download link/version.
-          node -e "const p=require('./package.json'); const filename='tally-sync-agent-setup-'+p.version+'.exe'; require('fs').writeFileSync('out/tally-sync-agent-latest.json', JSON.stringify({ version: p.version, commit: (process.env.GITHUB_SHA || '').slice(0, 7), filename, built_at: new Date().toISOString() }))"
+          # sha256 included so a truncated/corrupted download is detectable
+          # against the published checksum.
+          node -e "const p=require('./package.json'); const fs=require('fs'); const crypto=require('crypto'); const filename='tally-sync-agent-setup-'+p.version+'.exe'; const sha256=crypto.createHash('sha256').update(fs.readFileSync('out/'+filename)).digest('hex'); fs.writeFileSync('out/tally-sync-agent-latest.json', JSON.stringify({ version: p.version, commit: (process.env.GITHUB_SHA || '').slice(0, 7), filename, sha256, built_at: new Date().toISOString() }))"
           ls -la out
 
       - uses: actions/upload-artifact@v4
@@ -78,14 +80,32 @@ jobs:
           ssh-keyscan -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
 
       - name: Upload installer + update feed to the ERP's public storage
+        # ATOMIC publish: the ~90MB scp takes minutes, and the web server
+        # serves this directory the whole time — uploading straight to the
+        # final filename hands truncated installers (NSIS "integrity check
+        # failed") to anyone downloading mid-publish. So: upload everything
+        # into a hidden staging dir on the same filesystem, then mv into
+        # place — renames are instantaneous — with the metadata json moved
+        # LAST, so the Settings page's download link never points at a file
+        # that isn't fully there yet.
         run: |
           DEST="${{ secrets.DEPLOY_PATH }}/backend/storage/app/public/agent"
-          # Create the dir and drop the old stable-named installer from the first build.
+          STAGE="$DEST/.incoming"
+          # Create the dirs and drop the old stable-named installer from the first build.
           ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "mkdir -p '$DEST' && rm -f '$DEST/tally-sync-agent-setup.exe'"
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "mkdir -p '$STAGE' && rm -f '$DEST/tally-sync-agent-setup.exe' '$STAGE'/*"
           scp -i ~/.ssh/deploy_key -P "${{ secrets.SSH_PORT }}" \
             out/* \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:$DEST/"
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:$STAGE/"
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "set -e; cd '$STAGE' \
+              && mv -f *.exe '$DEST/' \
+              && { mv -f *.blockmap '$DEST/' 2>/dev/null || true; } \
+              && { mv -f latest.yml '$DEST/' 2>/dev/null || true; } \
+              && mv -f tally-sync-agent-latest.json '$DEST/' \
+              && cd '$DEST' && rmdir '$STAGE'"
           # Keep only the 5 newest installers (+ their blockmaps) to bound
           # storage growth; latest.yml and the metadata json always stay. A few
           # older builds are retained as fallbacks rather than only the latest.
