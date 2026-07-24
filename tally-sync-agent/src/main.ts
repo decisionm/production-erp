@@ -24,6 +24,17 @@ function errorMessage(err: unknown): string {
 // app.quit() below.
 app.dock?.hide();
 
+// Single-instance lock. Without it, running the installer (or the login
+// auto-start) while an older build is still alive in the tray leaves TWO
+// agents polling the same queue at once — the exact confusion that made
+// v0.1.5 look like it hadn't taken effect (an old process kept answering).
+// If another instance already holds the lock, exit immediately.
+const hasInstanceLock = app.requestSingleInstanceLock();
+if (!hasInstanceLock) {
+    app.quit();
+}
+app.on('second-instance', () => openSettingsWindow());
+
 let settingsWindow: BrowserWindow | null = null;
 
 function openSettingsWindow(): void {
@@ -95,6 +106,12 @@ ipcMain.handle('settings:save', (_event, config: AgentConfig) => {
 });
 
 app.whenReady().then(() => {
+    // Lost the single-instance race — another agent is already running; this
+    // process is on its way out, so do nothing.
+    if (!hasInstanceLock) {
+        return;
+    }
+
     logger.info('Tally Sync Agent starting', { version: app.getVersion() });
 
     app.setLoginItemSettings({ openAtLogin: true });
@@ -109,6 +126,17 @@ app.whenReady().then(() => {
     // dev (no app-update.yml) — the caught warning is expected there.
     autoUpdater.logger = logger;
     autoUpdater.autoDownload = true;
+    // This agent is engineered never to quit (tray-only, openAtLogin, no
+    // window-all-closed quit), so electron-updater's default
+    // "install on next app quit" would stage a downloaded update forever and
+    // never apply it — which is why the factory kept running old code. Apply
+    // the update as soon as it's downloaded: quitAndInstall relaunches the new
+    // build (it auto-starts on login anyway). A brief interruption mid-sync is
+    // harmless — the cloud queue is retried.
+    autoUpdater.on('update-downloaded', (info) => {
+        logger.info('Update downloaded — installing and relaunching', { version: info.version });
+        setImmediate(() => autoUpdater.quitAndInstall(true, true));
+    });
     const checkForUpdates = () =>
         autoUpdater.checkForUpdatesAndNotify().catch((err) => logger.warn('Update check failed', { message: String(err) }));
     void checkForUpdates();
