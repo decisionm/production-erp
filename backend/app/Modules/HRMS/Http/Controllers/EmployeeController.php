@@ -8,15 +8,16 @@ use App\Modules\HRMS\Http\Requests\UpdateEmployeeRequest;
 use App\Modules\HRMS\Http\Resources\EmployeeResource;
 use App\Modules\HRMS\Models\Employee;
 use App\Modules\HRMS\Services\EmployeeService;
+use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class EmployeeController extends Controller
 {
     public function __construct(private readonly EmployeeService $employees) {}
 
-    public function index(): AnonymousResourceCollection
+    public function index(Request $request): AnonymousResourceCollection
     {
-        return EmployeeResource::collection($this->employees->paginate());
+        return EmployeeResource::collection($this->employees->paginate($this->perPage($request)));
     }
 
     public function store(StoreEmployeeRequest $request): EmployeeResource

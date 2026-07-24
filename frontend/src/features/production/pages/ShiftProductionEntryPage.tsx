@@ -216,10 +216,14 @@ export default function ShiftProductionEntryPage() {
 
     const { data: shifts } = useQuery({ queryKey: ['production', 'shifts'], queryFn: listShifts });
     const { data: workCenters } = useQuery({ queryKey: ['production', 'work-centers'], queryFn: listWorkCenters });
-    const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
-    const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses'], queryFn: listWarehouses });
-    const { data: scrapReasons } = useQuery({ queryKey: ['production', 'scrap-reasons'], queryFn: listScrapReasons });
-    const { data: employees } = useQuery({ queryKey: ['hrms', 'employees'], queryFn: listEmployees });
+    // Shop-floor pickers need the WHOLE reference list, not the default first
+    // 20 — with 642 items the type-to-search Select would otherwise only ever
+    // see page 1 and most items would be unselectable. Distinct query keys so
+    // this full-list fetch doesn't collide with the paginated list-page caches.
+    const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: () => listItems(1000) });
+    const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses', 'all'], queryFn: () => listWarehouses(1000) });
+    const { data: scrapReasons } = useQuery({ queryKey: ['production', 'scrap-reasons', 'all'], queryFn: () => listScrapReasons(1000) });
+    const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: () => listEmployees(1000) });
     const { data: entries, isLoading: entriesLoading } = useQuery({
         queryKey: ['production', 'shift-production-entries'],
         queryFn: () => listShiftProductionEntries(),
@@ -242,7 +246,7 @@ export default function ShiftProductionEntryPage() {
         queryKey: ['production', 'power-interruption-logs'],
         queryFn: listPowerInterruptionLogs,
     });
-    const { data: molds } = useQuery({ queryKey: ['production', 'molds'], queryFn: listMolds });
+    const { data: molds } = useQuery({ queryKey: ['production', 'molds', 'all'], queryFn: () => listMolds(1000) });
 
     const shiftOptions = shifts?.data.filter((s) => s.is_active).map((s) => ({ value: s.id, label: s.name })) ?? [];
     const itemOptions = items?.data.map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];

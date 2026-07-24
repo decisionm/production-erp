@@ -2,8 +2,10 @@ import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
 import type { Attendance, Employee, LeaveBalance, LeaveRequest, LeaveType } from './types';
 
-export async function listEmployees(): Promise<Paginated<Employee>> {
-    const { data } = await api.get<Paginated<Employee>>('/hrms/employees');
+export async function listEmployees(perPage?: number): Promise<Paginated<Employee>> {
+    const { data } = await api.get<Paginated<Employee>>('/hrms/employees', {
+        params: perPage ? { per_page: perPage } : undefined,
+    });
     return data;
 }
 

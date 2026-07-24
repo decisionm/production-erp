@@ -8,15 +8,16 @@ use App\Modules\Inventory\Http\Requests\UpdateItemRequest;
 use App\Modules\Inventory\Http\Resources\ItemResource;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Services\ItemService;
+use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class ItemController extends Controller
 {
     public function __construct(private readonly ItemService $items) {}
 
-    public function index(): AnonymousResourceCollection
+    public function index(Request $request): AnonymousResourceCollection
     {
-        return ItemResource::collection($this->items->paginate());
+        return ItemResource::collection($this->items->paginate($this->perPage($request)));
     }
 
     public function store(StoreItemRequest $request): ItemResource
