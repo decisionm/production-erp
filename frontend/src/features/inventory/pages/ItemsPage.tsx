@@ -6,7 +6,7 @@ import { Controller, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import BarcodeDisplay from '@/components/barcode/BarcodeDisplay';
-import { createItem, listItems, updateItem } from '@/features/inventory/api';
+import { createItem, listAllItems, updateItem } from '@/features/inventory/api';
 import type { Item, ItemTrackingType } from '@/features/inventory/types';
 
 const itemSchema = z.object({
@@ -32,12 +32,23 @@ export default function ItemsPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [editingItem, setEditingItem] = useState<Item | null>(null);
     const [barcodeItem, setBarcodeItem] = useState<Item | null>(null);
+    const [search, setSearch] = useState('');
     const queryClient = useQueryClient();
     const navigate = useNavigate();
 
-    const { data, isLoading } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
+    // Fetch the full item list (not the default first 20) and paginate/search
+    // client-side — with 600+ Tally-synced items the old page-1-only fetch hid
+    // almost everything.
+    const { data, isLoading } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['inventory', 'items'] });
+
+    const q = search.trim().toLowerCase();
+    const filteredItems = q
+        ? (data?.data ?? []).filter(
+              (i) => i.name.toLowerCase().includes(q) || i.sku.toLowerCase().includes(q),
+          )
+        : data?.data;
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<ItemFormValues>({
         resolver: zodResolver(itemSchema),
@@ -82,15 +93,24 @@ export default function ItemsPage() {
         <>
             <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
                 <Typography.Title level={3} style={{ margin: 0 }}>Items</Typography.Title>
-                <Button type="primary" onClick={() => setModalOpen(true)}>New Item</Button>
+                <Space>
+                    <Input.Search
+                        placeholder="Search by name or SKU"
+                        allowClear
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        style={{ width: 260 }}
+                    />
+                    <Button type="primary" onClick={() => setModalOpen(true)}>New Item</Button>
+                </Space>
             </Space>
 
             <Table<Item>
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
-                dataSource={data?.data}
-                pagination={false}
+                dataSource={filteredItems}
+                pagination={{ pageSize: 20, showSizeChanger: true, pageSizeOptions: [20, 50, 100], showTotal: (t) => `${t} items` }}
                 columns={[
                     { title: 'SKU', dataIndex: 'sku' },
                     { title: 'Name', dataIndex: 'name' },
