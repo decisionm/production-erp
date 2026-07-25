@@ -40,10 +40,36 @@ class ShiftProductionEntryController extends Controller
         );
     }
 
-    public function approve(Request $request, ShiftProductionEntry $shiftProductionEntry): ShiftProductionEntryResource
+    /**
+     * The three approval gates. Gated by ROLE (not just module permission):
+     * each stage belongs to a specific desk, and Administrator can act at any
+     * stage — the MD/Director accounts hold Administrator, and it also keeps
+     * a small team unblocked when someone is away.
+     */
+    public function pmApprove(Request $request, ShiftProductionEntry $shiftProductionEntry): ShiftProductionEntryResource
     {
+        abort_unless($request->user()->hasAnyRole(['Plant Manager', 'Administrator']), 403, 'Plant Manager approval requires the Plant Manager role.');
+
         return ShiftProductionEntryResource::make(
-            $this->entries->approve($shiftProductionEntry, $request->user()->id),
+            $this->entries->pmApprove($shiftProductionEntry, $request->user()->id),
+        );
+    }
+
+    public function accountantApprove(Request $request, ShiftProductionEntry $shiftProductionEntry): ShiftProductionEntryResource
+    {
+        abort_unless($request->user()->hasAnyRole(['Accounts', 'Administrator']), 403, 'Accountant approval requires the Accounts role.');
+
+        return ShiftProductionEntryResource::make(
+            $this->entries->accountantApprove($shiftProductionEntry, $request->user()->id),
+        );
+    }
+
+    public function mdApprove(Request $request, ShiftProductionEntry $shiftProductionEntry): ShiftProductionEntryResource
+    {
+        abort_unless($request->user()->hasAnyRole(['Administrator']), 403, 'Final approval requires an Administrator (MD/Director) account.');
+
+        return ShiftProductionEntryResource::make(
+            $this->entries->mdApprove($shiftProductionEntry, $request->user()->id),
         );
     }
 

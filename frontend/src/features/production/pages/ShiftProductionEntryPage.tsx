@@ -132,6 +132,8 @@ type StockCountFormValues = z.infer<typeof stockCountSchema>;
 
 const approvalColor: Record<ShiftProductionEntryStatus, string> = {
     pending: 'processing',
+    pm_approved: 'cyan',
+    accountant_approved: 'geekblue',
     approved: 'success',
     rejected: 'error',
     synced: 'success',

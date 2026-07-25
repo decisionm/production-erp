@@ -19,6 +19,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'quantity_scrap', 'quantity_rejection_kg', 'scrap_reason_id',
     'nos_per_tray', 'no_of_trays', 'nos_per_box', 'no_of_box',
     'supervisor_signed_by', 'supervisor_signed_at', 'plant_manager_signed_by', 'plant_manager_signed_at',
+    'accountant_signed_by', 'accountant_signed_at',
     'status', 'rejection_reason', 'approved_by', 'approved_at',
     'operator_id', 'notes', 'created_by',
 ])]
@@ -32,6 +33,7 @@ class ShiftProductionEntry extends Model
             'status' => ShiftProductionEntryStatus::class,
             'supervisor_signed_at' => 'datetime',
             'plant_manager_signed_at' => 'datetime',
+            'accountant_signed_at' => 'datetime',
             'approved_at' => 'datetime',
         ];
     }
@@ -83,7 +85,14 @@ class ShiftProductionEntry extends Model
 
     public function plantManagerSignedBy(): BelongsTo
     {
-        return $this->belongsTo(Employee::class, 'plant_manager_signed_by');
+        // Repointed from Employee to User when the PM stage became a real
+        // app approval (see the approval-chain migration).
+        return $this->belongsTo(User::class, 'plant_manager_signed_by');
+    }
+
+    public function accountantSignedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'accountant_signed_by');
     }
 
     public function materialConsumptions(): HasMany

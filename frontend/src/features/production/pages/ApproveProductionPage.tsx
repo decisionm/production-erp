@@ -1,20 +1,52 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Descriptions, Drawer, Input, Modal, Segmented, Space, Table, Tag, Typography } from 'antd';
+import { Button, Descriptions, Drawer, Input, Modal, Segmented, Space, Steps, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
+import { useAuthStore } from '@/features/auth/store';
 import {
-    approveShiftProductionEntry,
+    accountantApproveShiftProductionEntry,
     listShiftProductionEntries,
+    mdApproveShiftProductionEntry,
+    pmApproveShiftProductionEntry,
     rejectShiftProductionEntry,
 } from '@/features/production/api';
 import type { ShiftProductionEntry, ShiftProductionEntryStatus } from '@/features/production/types';
 
 const statusColor: Record<ShiftProductionEntryStatus, string> = {
     pending: 'processing',
+    pm_approved: 'cyan',
+    accountant_approved: 'geekblue',
     approved: 'success',
     rejected: 'error',
     synced: 'success',
     failed: 'error',
 };
+
+const statusLabel: Record<ShiftProductionEntryStatus, string> = {
+    pending: 'Awaiting Plant Manager',
+    pm_approved: 'Awaiting Accountant',
+    accountant_approved: 'Awaiting MD',
+    approved: 'Approved — syncing',
+    rejected: 'Rejected',
+    synced: 'Synced to Tally',
+    failed: 'Sync failed',
+};
+
+/**
+ * The 4-stage chain (factory answer 9): Supervisor submits → Plant Manager
+ * verifies → Accountant reconciles → MD final approval → Tally. Each row's
+ * available action depends on its stage AND the viewer's role — the stage
+ * config drives both the button and the visibility.
+ */
+const STAGES: {
+    status: ShiftProductionEntryStatus;
+    action: string;
+    roles: string[];
+    mutate: (id: number) => Promise<ShiftProductionEntry>;
+}[] = [
+    { status: 'pending', action: 'Approve (Plant Manager)', roles: ['Plant Manager', 'Administrator'], mutate: pmApproveShiftProductionEntry },
+    { status: 'pm_approved', action: 'Approve (Accountant)', roles: ['Accounts', 'Administrator'], mutate: accountantApproveShiftProductionEntry },
+    { status: 'accountant_approved', action: 'Final Approve (MD)', roles: ['Administrator'], mutate: mdApproveShiftProductionEntry },
+];
 
 export default function ApproveProductionPage() {
     const [status, setStatus] = useState<ShiftProductionEntryStatus>('pending');
@@ -22,6 +54,14 @@ export default function ApproveProductionPage() {
     const [rejectingRow, setRejectingRow] = useState<ShiftProductionEntry | null>(null);
     const [rejectReason, setRejectReason] = useState('');
     const queryClient = useQueryClient();
+    const user = useAuthStore((s) => s.user);
+    const myRoles = user?.roles?.map((r) => r.name) ?? [];
+
+    const stageFor = (s: ShiftProductionEntryStatus) => STAGES.find((st) => st.status === s);
+    const canActOn = (row: ShiftProductionEntry) => {
+        const stage = stageFor(row.status);
+        return stage !== undefined && stage.roles.some((r) => myRoles.includes(r));
+    };
 
     const { data, isLoading } = useQuery({
         queryKey: ['production', 'shift-production-entries', status],
@@ -31,7 +71,7 @@ export default function ApproveProductionPage() {
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['production', 'shift-production-entries'] });
 
     const approveMutation = useMutation({
-        mutationFn: approveShiftProductionEntry,
+        mutationFn: (row: ShiftProductionEntry) => stageFor(row.status)!.mutate(row.id),
         onSuccess: () => {
             invalidate();
             setDetailRow(null);
@@ -60,23 +100,33 @@ export default function ApproveProductionPage() {
         },
     });
 
+    const chainStep = (row: ShiftProductionEntry): number => {
+        if (row.status === 'pending') return 1;
+        if (row.status === 'pm_approved') return 2;
+        if (row.status === 'accountant_approved') return 3;
+        return 4; // approved / synced / failed — chain complete
+    };
+
     return (
         <>
             <Typography.Title level={3} style={{ marginBottom: 4 }}>Approve Production</Typography.Title>
             <Typography.Paragraph type="secondary">
-                Every completed batch waits here before it&apos;s eligible to sync to Tally — the accountant&apos;s
-                sign-off is the one hard gate in this flow.
+                Every completed batch passes the full chain — Supervisor → Plant Manager → Accountant → MD —
+                before it syncs to Tally. Rejection at any stage sends it back to the supervisor.
             </Typography.Paragraph>
 
             <Segmented
                 value={status}
                 onChange={(v) => setStatus(v as ShiftProductionEntryStatus)}
                 options={[
-                    { label: 'Pending', value: 'pending' },
+                    { label: 'Plant Manager', value: 'pending' },
+                    { label: 'Accountant', value: 'pm_approved' },
+                    { label: 'MD', value: 'accountant_approved' },
                     { label: 'Approved', value: 'approved' },
+                    { label: 'Synced', value: 'synced' },
                     { label: 'Rejected', value: 'rejected' },
                 ]}
-                style={{ marginBottom: 16 }}
+                style={{ marginBottom: 16, maxWidth: '100%', overflowX: 'auto' }}
             />
 
             <Table<ShiftProductionEntry>
@@ -85,7 +135,7 @@ export default function ApproveProductionPage() {
                 loading={isLoading}
                 dataSource={data?.data}
                 pagination={false}
-                locale={{ emptyText: `Nothing ${status}.` }}
+                locale={{ emptyText: `Nothing waiting here.` }}
                 columns={[
                     { title: 'Date', dataIndex: 'production_date' },
                     { title: 'Shift', render: (_, row) => row.shift.name },
@@ -98,22 +148,22 @@ export default function ApproveProductionPage() {
                     {
                         title: 'Status',
                         dataIndex: 'status',
-                        render: (s: ShiftProductionEntryStatus) => <Tag color={statusColor[s]}>{s}</Tag>,
+                        render: (s: ShiftProductionEntryStatus) => <Tag color={statusColor[s]}>{statusLabel[s]}</Tag>,
                     },
                     {
                         title: 'Actions',
                         render: (_, row) => (
                             <Space>
                                 <Button size="small" onClick={() => setDetailRow(row)}>View</Button>
-                                {row.status === 'pending' && (
+                                {canActOn(row) && (
                                     <>
                                         <Button
                                             size="small"
                                             type="primary"
                                             loading={approveMutation.isPending}
-                                            onClick={() => approveMutation.mutate(row.id)}
+                                            onClick={() => approveMutation.mutate(row)}
                                         >
-                                            Approve
+                                            {stageFor(row.status)!.action}
                                         </Button>
                                         <Button size="small" danger onClick={() => setRejectingRow(row)}>
                                             Reject
@@ -130,14 +180,27 @@ export default function ApproveProductionPage() {
                 title={`Batch #${detailRow?.id} — ${detailRow?.work_center.name} · ${detailRow?.item.sku}`}
                 open={detailRow !== null}
                 onClose={() => setDetailRow(null)}
-                width={480}
+                width="min(100vw, 520px)"
                 destroyOnHidden
             >
                 {detailRow && (
                     <>
+                        <Steps
+                            size="small"
+                            current={chainStep(detailRow)}
+                            status={detailRow.status === 'rejected' ? 'error' : detailRow.status === 'failed' ? 'error' : 'process'}
+                            style={{ marginBottom: 20 }}
+                            items={[
+                                { title: 'Supervisor' },
+                                { title: 'Plant Mgr' },
+                                { title: 'Accountant' },
+                                { title: 'MD' },
+                                { title: 'Tally' },
+                            ]}
+                        />
                         <Descriptions column={1} size="small" bordered>
                             <Descriptions.Item label="Status">
-                                <Tag color={statusColor[detailRow.status]}>{detailRow.status}</Tag>
+                                <Tag color={statusColor[detailRow.status]}>{statusLabel[detailRow.status]}</Tag>
                             </Descriptions.Item>
                             <Descriptions.Item label="Date">{detailRow.production_date}</Descriptions.Item>
                             <Descriptions.Item label="Shift">{detailRow.shift.name}</Descriptions.Item>
@@ -155,6 +218,19 @@ export default function ApproveProductionPage() {
                             </Descriptions.Item>
                             <Descriptions.Item label="Operator">{detailRow.operator?.name ?? '—'}</Descriptions.Item>
                             <Descriptions.Item label="Notes">{detailRow.notes ?? '—'}</Descriptions.Item>
+                            <Descriptions.Item label="Plant Manager">
+                                {detailRow.plant_manager_signed_by
+                                    ? `${detailRow.plant_manager_signed_by.name} · ${detailRow.plant_manager_signed_at?.slice(0, 16).replace('T', ' ') ?? ''}`
+                                    : '—'}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Accountant">
+                                {detailRow.accountant_signed_by
+                                    ? `${detailRow.accountant_signed_by.name} · ${detailRow.accountant_signed_at?.slice(0, 16).replace('T', ' ') ?? ''}`
+                                    : '—'}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="MD / Final">
+                                {detailRow.approved_by ? detailRow.approved_by.name : '—'}
+                            </Descriptions.Item>
                             {detailRow.rejection_reason && (
                                 <Descriptions.Item label="Rejected Because">{detailRow.rejection_reason}</Descriptions.Item>
                             )}
@@ -195,10 +271,10 @@ export default function ApproveProductionPage() {
                             </>
                         )}
 
-                        {detailRow.status === 'pending' && (
+                        {canActOn(detailRow) && (
                             <Space style={{ marginTop: 24 }}>
-                                <Button type="primary" loading={approveMutation.isPending} onClick={() => approveMutation.mutate(detailRow.id)}>
-                                    Approve
+                                <Button type="primary" loading={approveMutation.isPending} onClick={() => approveMutation.mutate(detailRow)}>
+                                    {stageFor(detailRow.status)!.action}
                                 </Button>
                                 <Button danger onClick={() => setRejectingRow(detailRow)}>Reject</Button>
                             </Space>

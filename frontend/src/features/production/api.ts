@@ -254,8 +254,20 @@ export async function completeBatch(id: number, payload: CompleteBatchPayload): 
     return data.data;
 }
 
-export async function approveShiftProductionEntry(id: number): Promise<ShiftProductionEntry> {
-    const { data } = await api.post<{ data: ShiftProductionEntry }>(`/production/shift-production-entries/${id}/approve`);
+// The 4-stage approval chain: PM verifies → Accountant reconciles → MD final
+// approval (which is what makes the entry eligible to sync to Tally).
+export async function pmApproveShiftProductionEntry(id: number): Promise<ShiftProductionEntry> {
+    const { data } = await api.post<{ data: ShiftProductionEntry }>(`/production/shift-production-entries/${id}/pm-approve`);
+    return data.data;
+}
+
+export async function accountantApproveShiftProductionEntry(id: number): Promise<ShiftProductionEntry> {
+    const { data } = await api.post<{ data: ShiftProductionEntry }>(`/production/shift-production-entries/${id}/accountant-approve`);
+    return data.data;
+}
+
+export async function mdApproveShiftProductionEntry(id: number): Promise<ShiftProductionEntry> {
+    const { data } = await api.post<{ data: ShiftProductionEntry }>(`/production/shift-production-entries/${id}/md-approve`);
     return data.data;
 }
 

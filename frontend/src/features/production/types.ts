@@ -70,7 +70,14 @@ export interface Shift {
 }
 
 export type BatchStatus = 'in_progress' | 'completed';
-export type ShiftProductionEntryStatus = 'pending' | 'approved' | 'rejected' | 'synced' | 'failed';
+export type ShiftProductionEntryStatus =
+    | 'pending'
+    | 'pm_approved'
+    | 'accountant_approved'
+    | 'approved'
+    | 'rejected'
+    | 'synced'
+    | 'failed';
 export type ShiftScrapType = 'rejected_finished_good' | 'lumps';
 
 export interface ShiftMaterialConsumption {
@@ -110,6 +117,10 @@ export interface ShiftProductionEntry {
     scraps: ShiftScrap[];
     status: ShiftProductionEntryStatus;
     rejection_reason: string | null;
+    plant_manager_signed_by?: { id: number; name: string } | null;
+    plant_manager_signed_at?: string | null;
+    accountant_signed_by?: { id: number; name: string } | null;
+    accountant_signed_at?: string | null;
     approved_by: { id: number; name: string } | null;
     approved_at: string | null;
     operator: Employee | null;
