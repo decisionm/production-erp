@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Card, Checkbox, Col, Drawer, Form, Input, InputNumber, Modal, Radio, Row, Select, Space, Table, Tag, TimePicker, Typography } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Drawer, Form, Input, InputNumber, Modal, Radio, Row, Select, Space, Table, Tag, TimePicker, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { useMemo, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
@@ -32,7 +32,7 @@ import type {
     ShiftProductionEntryStatus,
     WorkCenter,
 } from '@/features/production/types';
-import { currentShift, productionDateFor } from '@/features/production/shiftClock';
+import { currentShift, justEndedShift, productionDateFor } from '@/features/production/shiftClock';
 
 // Combines a picked "HH:mm" with today's date into a full ISO datetime for
 // the API — shared by every backdate-capable modal below (Report Down,
@@ -205,6 +205,7 @@ function BackdateField({
 
 export default function ShiftProductionEntryPage() {
     const [selectedShiftId, setSelectedShiftId] = useState<number | undefined>(undefined);
+    const [graceBannerDismissed, setGraceBannerDismissed] = useState(false);
     const [startingMachine, setStartingMachine] = useState<WorkCenter | null>(null);
     const [completingEntry, setCompletingEntry] = useState<ShiftProductionEntry | null>(null);
     const [reportingDownMachine, setReportingDownMachine] = useState<WorkCenter | null>(null);
@@ -269,6 +270,12 @@ export default function ShiftProductionEntryPage() {
     const detectedShift = currentShift(activeShifts);
     const effectiveShiftId = selectedShiftId ?? detectedShift?.id ?? shiftOptions[0]?.value;
     const effectiveShift = activeShifts.find((s) => s.id === effectiveShiftId);
+    // Shift-boundary grace: for ~30 min after a shift ends, a supervisor may
+    // still be wrapping up the OLD shift while auto-selection has moved on.
+    // Only relevant while they haven't picked a shift themselves.
+    const endedShift = selectedShiftId === undefined ? justEndedShift(activeShifts) : undefined;
+    const showGraceBanner =
+        !graceBannerDismissed && endedShift !== undefined && detectedShift !== undefined && endedShift.id !== detectedShift.id;
     // Shift-aware, LOCAL production date: at 02:00 on the Night shift this is
     // yesterday (the shift's start date), so the whole night files together.
     const today = productionDateFor(effectiveShift);
@@ -530,6 +537,22 @@ export default function ShiftProductionEntryPage() {
                 Tap a machine to start or complete a batch, close a breakdown, or finish a mold change. One machine
                 can run several items in a shift — complete the current item, change the mold, then start the next.
             </Typography.Paragraph>
+
+            {showGraceBanner && (
+                <Alert
+                    type="info"
+                    showIcon
+                    closable
+                    onClose={() => setGraceBannerDismissed(true)}
+                    style={{ marginBottom: 12, maxWidth: 560 }}
+                    message={`Auto-selected ${detectedShift?.name} (started ${detectedShift?.start_time.slice(0, 5)}). Still finishing ${endedShift?.name}?`}
+                    action={
+                        <Button size="small" onClick={() => setSelectedShiftId(endedShift!.id)}>
+                            Use {endedShift?.name}
+                        </Button>
+                    }
+                />
+            )}
 
             <Form.Item label="Shift" style={{ maxWidth: 480 }}>
                 <Radio.Group

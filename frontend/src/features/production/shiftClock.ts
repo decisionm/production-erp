@@ -41,18 +41,33 @@ function localDateString(d: Date): string {
 }
 
 /**
- * The production date an entry made now belongs to, for the given shift:
- * in the after-midnight tail of an overnight shift, that's YESTERDAY (the
- * shift's start date); otherwise it's today.
+ * The production date an entry made now belongs to, for the given shift.
+ * An overnight shift instance STARTED YESTERDAY whenever the clock is before
+ * its start time — so a Night (22:00–06:00) entry at 02:00, 06:10 (grace
+ * window) or even 10:00 (late paperwork) files under yesterday, while at
+ * 23:00 it files under today. Day shifts always file under today.
  */
 export function productionDateFor(shift: Shift | undefined, now: Date = new Date()): string {
     if (shift && isOvernight(shift)) {
         const minutes = now.getHours() * 60 + now.getMinutes();
-        if (minutes < toMinutes(shift.end_time)) {
+        if (minutes < toMinutes(shift.start_time)) {
             const yesterday = new Date(now);
             yesterday.setDate(yesterday.getDate() - 1);
             return localDateString(yesterday);
         }
     }
     return localDateString(now);
+}
+
+/**
+ * The shift whose window ENDED within the last `graceMinutes` — the shift a
+ * supervisor at 14:10 is probably still wrapping up. Drives the boundary
+ * banner: auto-selection is silent all day, explicit only in this window.
+ */
+export function justEndedShift(shifts: Shift[], now: Date = new Date(), graceMinutes = 30): Shift | undefined {
+    const minutes = now.getHours() * 60 + now.getMinutes();
+    return shifts.find((s) => {
+        const sinceEnd = (minutes - toMinutes(s.end_time) + 1440) % 1440;
+        return sinceEnd >= 0 && sinceEnd < graceMinutes;
+    });
 }

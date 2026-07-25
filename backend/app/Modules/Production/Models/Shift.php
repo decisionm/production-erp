@@ -22,10 +22,13 @@ class Shift extends Model
     /**
      * The production date an entry made at $at belongs to, for this shift.
      * Factory convention: everything an overnight shift (start > end, e.g.
-     * Night 22:00–06:00) produces is filed under the date the shift STARTED —
-     * a batch logged at 02:00 belongs to yesterday's night shift, keeping the
-     * whole night's output on one date. The frontend applies the same rule
-     * when it sends production_date explicitly (shiftClock.ts) — keep in sync.
+     * Night 22:00–06:00) produces is filed under the date the shift STARTED.
+     * An overnight instance started yesterday whenever the clock is before
+     * its start time — so a Night entry at 02:00, at 06:10 (the handover
+     * grace window) or at 10:00 (late paperwork) all file under yesterday,
+     * while at 23:00 it files under today. The frontend applies the same
+     * rule when it sends production_date explicitly (shiftClock.ts) — keep
+     * the two in sync.
      */
     public function productionDateFor(?CarbonInterface $at = null): string
     {
@@ -35,7 +38,7 @@ class Shift extends Model
         // correctly as strings.
         $overnight = $this->start_time > $this->end_time;
 
-        if ($overnight && $at->format('H:i:s') < $this->end_time) {
+        if ($overnight && $at->format('H:i:s') < $this->start_time) {
             return $at->copy()->subDay()->toDateString();
         }
 

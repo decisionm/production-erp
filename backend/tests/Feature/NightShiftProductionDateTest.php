@@ -69,6 +69,23 @@ class NightShiftProductionDateTest extends TestCase
         $this->assertSame('2026-07-24', $entry->production_date->toDateString());
     }
 
+    public function test_a_night_shift_entry_in_the_morning_grace_window_files_under_the_start_date(): void
+    {
+        $f = $this->fixtures();
+        // 06:30 — Night ended at 06:00; wrapping-up paperwork for the night
+        // shift still belongs to the date the shift started.
+        Carbon::setTestNow('2026-07-25 06:30:00');
+
+        $entry = app(ShiftProductionEntryService::class)->startBatch([
+            'shift_id' => $f['night']->id,
+            'work_center_id' => $f['machine']->id,
+            'item_id' => $f['item']->id,
+            'warehouse_id' => $f['warehouse']->id,
+        ], null);
+
+        $this->assertSame('2026-07-24', $entry->production_date->toDateString());
+    }
+
     public function test_a_morning_shift_batch_files_under_today(): void
     {
         $f = $this->fixtures();
