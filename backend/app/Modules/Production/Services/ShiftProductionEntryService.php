@@ -195,39 +195,83 @@ class ShiftProductionEntryService
         });
     }
 
-    public function approve(ShiftProductionEntry $entry, int $approvedBy): ShiftProductionEntry
+    /**
+     * The 4-stage approval chain (factory answer 9), each stage a blocking
+     * gate: Supervisor submits (completeBatch → pending) → Plant Manager
+     * verifies → Accountant reconciles → MD final approval → Tally. Every
+     * transition is the same conditional-UPDATE concurrency guard as the
+     * batch lifecycle: two approvers acting at once can't double-advance.
+     */
+    public function pmApprove(ShiftProductionEntry $entry, int $signedBy): ShiftProductionEntry
     {
-        $affected = ShiftProductionEntry::query()
-            ->where('id', $entry->id)
-            ->where('status', ShiftProductionEntryStatus::Pending->value)
-            ->update([
-                'status' => ShiftProductionEntryStatus::Approved->value,
-                'approved_by' => $approvedBy,
-                'approved_at' => now(),
-            ]);
+        return $this->advance($entry, ShiftProductionEntryStatus::Pending, ShiftProductionEntryStatus::PmApproved, [
+            'plant_manager_signed_by' => $signedBy,
+            'plant_manager_signed_at' => now(),
+        ]);
+    }
 
-        if ($affected === 0) {
-            throw InvalidStatusTransitionException::make(
-                'shift production entry',
-                $entry->status->value,
-                ShiftProductionEntryStatus::Approved->value,
-            );
-        }
+    public function accountantApprove(ShiftProductionEntry $entry, int $signedBy): ShiftProductionEntry
+    {
+        return $this->advance($entry, ShiftProductionEntryStatus::PmApproved, ShiftProductionEntryStatus::AccountantApproved, [
+            'accountant_signed_by' => $signedBy,
+            'accountant_signed_at' => now(),
+        ]);
+    }
 
-        $fresh = $entry->fresh(['shift', 'workCenter', 'item', 'warehouse', 'approvedBy']);
+    public function mdApprove(ShiftProductionEntry $entry, int $approvedBy): ShiftProductionEntry
+    {
+        $fresh = $this->advance($entry, ShiftProductionEntryStatus::AccountantApproved, ShiftProductionEntryStatus::Approved, [
+            'approved_by' => $approvedBy,
+            'approved_at' => now(),
+        ]);
 
-        // Only an approved entry is ever eligible to sync (§4a). Announce it;
-        // TallySync enqueues the Tally voucher, Production stays unaware.
+        // Only the MD's FINAL approval makes an entry eligible to sync —
+        // nothing reaches Tally before the whole chain has signed (§4a).
+        // Announce it; TallySync enqueues the voucher, Production stays
+        // unaware.
         event(new ShiftProductionEntryApproved($fresh));
 
         return $fresh;
     }
 
+    private function advance(
+        ShiftProductionEntry $entry,
+        ShiftProductionEntryStatus $from,
+        ShiftProductionEntryStatus $to,
+        array $columns,
+    ): ShiftProductionEntry {
+        $affected = ShiftProductionEntry::query()
+            ->where('id', $entry->id)
+            ->where('status', $from->value)
+            ->update(['status' => $to->value] + $columns);
+
+        if ($affected === 0) {
+            throw InvalidStatusTransitionException::make(
+                'shift production entry',
+                $entry->status->value,
+                $to->value,
+            );
+        }
+
+        return $entry->fresh([
+            'shift', 'workCenter', 'item', 'warehouse',
+            'plantManagerSignedBy', 'accountantSignedBy', 'approvedBy',
+        ]);
+    }
+
+    /**
+     * Rejection is allowed from any pre-MD stage and sends the entry back to
+     * the supervisor with a reason — it never reaches the next gate.
+     */
     public function reject(ShiftProductionEntry $entry, int $rejectedBy, ?string $reason): ShiftProductionEntry
     {
         $affected = ShiftProductionEntry::query()
             ->where('id', $entry->id)
-            ->where('status', ShiftProductionEntryStatus::Pending->value)
+            ->whereIn('status', [
+                ShiftProductionEntryStatus::Pending->value,
+                ShiftProductionEntryStatus::PmApproved->value,
+                ShiftProductionEntryStatus::AccountantApproved->value,
+            ])
             ->update([
                 'status' => ShiftProductionEntryStatus::Rejected->value,
                 'rejection_reason' => $reason,

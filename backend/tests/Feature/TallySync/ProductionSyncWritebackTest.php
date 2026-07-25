@@ -56,7 +56,13 @@ class ProductionSyncWritebackTest extends TestCase
 
         $entry->scraps()->create(['type' => 'lumps', 'quantity_kg' => '4.5000']);
 
-        return app(ShiftProductionEntryService::class)->approve($entry, User::factory()->create()->id);
+        // Walk the full 4-stage chain — only the MD's final approval enqueues.
+        $service = app(ShiftProductionEntryService::class);
+        $approver = User::factory()->create()->id;
+        $service->pmApprove($entry, $approver);
+        $service->accountantApprove($entry->fresh(), $approver);
+
+        return $service->mdApprove($entry->fresh(), $approver);
     }
 
     public function test_scraps_ride_the_voucher_payload_and_narration(): void

@@ -302,7 +302,11 @@ Route::prefix('v1')->group(function () {
             // is done running — see PRODUCTION-SUPERVISOR-UX-PLAN.md §1.
             Route::apiResource('shift-production-entries', ShiftProductionEntryController::class)->only(['index', 'store']);
             Route::post('shift-production-entries/{shift_production_entry}/complete', [ShiftProductionEntryController::class, 'complete']);
-            Route::post('shift-production-entries/{shift_production_entry}/approve', [ShiftProductionEntryController::class, 'approve']);
+            // The 4-stage approval chain (Supervisor submits at completeBatch):
+            // PM verifies → Accountant reconciles → MD final approval → Tally.
+            Route::post('shift-production-entries/{shift_production_entry}/pm-approve', [ShiftProductionEntryController::class, 'pmApprove']);
+            Route::post('shift-production-entries/{shift_production_entry}/accountant-approve', [ShiftProductionEntryController::class, 'accountantApprove']);
+            Route::post('shift-production-entries/{shift_production_entry}/md-approve', [ShiftProductionEntryController::class, 'mdApprove']);
             Route::post('shift-production-entries/{shift_production_entry}/reject', [ShiftProductionEntryController::class, 'reject']);
 
             Route::post('shift-summaries', [ShiftSummaryController::class, 'store']);
