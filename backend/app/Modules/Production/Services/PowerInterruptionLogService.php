@@ -3,6 +3,7 @@
 namespace App\Modules\Production\Services;
 
 use App\Modules\Production\Models\PowerInterruptionLog;
+use App\Modules\Production\Models\Shift;
 use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
@@ -33,7 +34,7 @@ class PowerInterruptionLogService
 
         $log = PowerInterruptionLog::create([
             'shift_id' => $data['shift_id'],
-            'production_date' => $data['production_date'] ?? now()->toDateString(),
+            'production_date' => $data['production_date'] ?? Shift::query()->find($data['shift_id'])?->productionDateFor() ?? now()->toDateString(),
             'from_time' => $fromTime,
             'to_time' => $toTime,
             'idle_hours' => $idleHours,

@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Card, Checkbox, Col, Drawer, Form, Input, InputNumber, Modal, Radio, Row, Select, Space, Table, Tag, TimePicker, Typography } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Drawer, Form, Input, InputNumber, Modal, Radio, Row, Select, Space, Table, Tag, TimePicker, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { useMemo, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
@@ -32,6 +32,7 @@ import type {
     ShiftProductionEntryStatus,
     WorkCenter,
 } from '@/features/production/types';
+import { currentShift, justEndedShift, productionDateFor } from '@/features/production/shiftClock';
 
 // Combines a picked "HH:mm" with today's date into a full ISO datetime for
 // the API — shared by every backdate-capable modal below (Report Down,
@@ -204,6 +205,7 @@ function BackdateField({
 
 export default function ShiftProductionEntryPage() {
     const [selectedShiftId, setSelectedShiftId] = useState<number | undefined>(undefined);
+    const [graceBannerDismissed, setGraceBannerDismissed] = useState(false);
     const [startingMachine, setStartingMachine] = useState<WorkCenter | null>(null);
     const [completingEntry, setCompletingEntry] = useState<ShiftProductionEntry | null>(null);
     const [reportingDownMachine, setReportingDownMachine] = useState<WorkCenter | null>(null);
@@ -260,8 +262,23 @@ export default function ShiftProductionEntryPage() {
     const scrapReasonOptions = scrapReasons?.data.map((r) => ({ value: r.id, label: `${r.code} — ${r.name}` })) ?? [];
     const employeeOptions = employees?.data.map((e) => ({ value: e.id, label: `${e.employee_code} — ${e.name}` })) ?? [];
 
-    const effectiveShiftId = selectedShiftId ?? shiftOptions[0]?.value;
-    const today = new Date().toISOString().slice(0, 10);
+    // Default to the shift whose time window contains "now" (Night handled
+    // across midnight), so a supervisor who never touches the picker still
+    // logs against the right shift. The picker stays overridable for the
+    // rare backdate.
+    const activeShifts = shifts?.data.filter((s) => s.is_active) ?? [];
+    const detectedShift = currentShift(activeShifts);
+    const effectiveShiftId = selectedShiftId ?? detectedShift?.id ?? shiftOptions[0]?.value;
+    const effectiveShift = activeShifts.find((s) => s.id === effectiveShiftId);
+    // Shift-boundary grace: for ~30 min after a shift ends, a supervisor may
+    // still be wrapping up the OLD shift while auto-selection has moved on.
+    // Only relevant while they haven't picked a shift themselves.
+    const endedShift = selectedShiftId === undefined ? justEndedShift(activeShifts) : undefined;
+    const showGraceBanner =
+        !graceBannerDismissed && endedShift !== undefined && detectedShift !== undefined && endedShift.id !== detectedShift.id;
+    // Shift-aware, LOCAL production date: at 02:00 on the Night shift this is
+    // yesterday (the shift's start date), so the whole night files together.
+    const today = productionDateFor(effectiveShift);
 
     // Last-touched-by-someone-else state for every machine, derived from the
     // shared entry list rather than a per-machine assignment — nobody owns a
@@ -314,7 +331,9 @@ export default function ShiftProductionEntryPage() {
     const startMutation = useMutation({
         mutationFn: (values: StartBatchFormValues) => {
             if (!startingMachine || !effectiveShiftId) throw new Error('Missing machine or shift');
-            return startBatch({ ...values, work_center_id: startingMachine.id, shift_id: effectiveShiftId });
+            // production_date sent explicitly (shift-aware): a batch started at
+            // 02:00 on the Night shift files under the shift's START date.
+            return startBatch({ ...values, work_center_id: startingMachine.id, shift_id: effectiveShiftId, production_date: today });
         },
         onSuccess: () => {
             invalidate();
@@ -519,6 +538,22 @@ export default function ShiftProductionEntryPage() {
                 can run several items in a shift — complete the current item, change the mold, then start the next.
             </Typography.Paragraph>
 
+            {showGraceBanner && (
+                <Alert
+                    type="info"
+                    showIcon
+                    closable
+                    onClose={() => setGraceBannerDismissed(true)}
+                    style={{ marginBottom: 12, maxWidth: 560 }}
+                    message={`Auto-selected ${detectedShift?.name} (started ${detectedShift?.start_time.slice(0, 5)}). Still finishing ${endedShift?.name}?`}
+                    action={
+                        <Button size="small" onClick={() => setSelectedShiftId(endedShift!.id)}>
+                            Use {endedShift?.name}
+                        </Button>
+                    }
+                />
+            )}
+
             <Form.Item label="Shift" style={{ maxWidth: 480 }}>
                 <Radio.Group
                     value={effectiveShiftId}
@@ -567,9 +602,12 @@ export default function ShiftProductionEntryPage() {
                                     {!down && !moldChange && !running && <Tag>Idle</Tag>}
                                 </div>
                                 {!down && !moldChange && (
-                                    <Space size={4}>
+                                    // Stacked full-width buttons: side-by-side small
+                                    // buttons overlapped on a phone-width card and
+                                    // were too small to hit with a thumb.
+                                    <Space direction="vertical" size={6} style={{ width: '100%' }}>
                                         <Button
-                                            size="small"
+                                            block
                                             danger
                                             onClick={(e) => {
                                                 e.stopPropagation();
@@ -581,7 +619,7 @@ export default function ShiftProductionEntryPage() {
                                         </Button>
                                         {!running && (
                                             <Button
-                                                size="small"
+                                                block
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     setStartingMoldChangeMachine(wc);
@@ -640,6 +678,12 @@ export default function ShiftProductionEntryPage() {
                 confirmLoading={startMutation.isPending}
                 destroyOnHidden
             >
+                {/* Confirmation of where this batch will be filed — the shift is
+                    auto-picked from the clock, so show it rather than ask again. */}
+                <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+                    Shift: <Typography.Text strong>{effectiveShift?.name ?? '—'}</Typography.Text>
+                    {' · '}Date: <Typography.Text strong>{today}</Typography.Text>
+                </Typography.Paragraph>
                 <Form layout="vertical">
                     <Form.Item
                         label="Item"

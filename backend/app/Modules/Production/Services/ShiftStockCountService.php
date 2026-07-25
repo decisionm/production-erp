@@ -2,6 +2,7 @@
 
 namespace App\Modules\Production\Services;
 
+use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftStockCount;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
@@ -23,7 +24,7 @@ class ShiftStockCountService
     {
         $count = ShiftStockCount::create([
             'shift_id' => $data['shift_id'],
-            'production_date' => $data['production_date'] ?? now()->toDateString(),
+            'production_date' => $data['production_date'] ?? Shift::query()->find($data['shift_id'])?->productionDateFor() ?? now()->toDateString(),
             'location_label' => $data['location_label'],
             'item_id' => $data['item_id'],
             'quantity_kg' => $data['quantity_kg'],
