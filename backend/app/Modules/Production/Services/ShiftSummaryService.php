@@ -7,6 +7,7 @@ use App\Modules\Production\Models\Enums\LogStatus;
 use App\Modules\Production\Models\MachineDowntimeLog;
 use App\Modules\Production\Models\MoldChangeLog;
 use App\Modules\Production\Models\PowerInterruptionLog;
+use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\ShiftStockCount;
 use App\Modules\Production\Models\ShiftSummary;
@@ -31,7 +32,7 @@ class ShiftSummaryService
      */
     public function upsert(array $data, ?int $createdBy): ShiftSummary
     {
-        $productionDate = $data['production_date'] ?? now()->toDateString();
+        $productionDate = $data['production_date'] ?? Shift::query()->find($data['shift_id'])?->productionDateFor() ?? now()->toDateString();
 
         // Not ShiftSummary::updateOrCreate() — its match query compares the
         // raw string against a `date`-cast column, which Eloquent persists

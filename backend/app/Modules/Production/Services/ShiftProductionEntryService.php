@@ -8,6 +8,7 @@ use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Production\Events\ShiftProductionEntryApproved;
 use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
+use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -84,7 +85,7 @@ class ShiftProductionEntryService
                 'work_center_id' => $data['work_center_id'],
                 'item_id' => $data['item_id'],
                 'warehouse_id' => $data['warehouse_id'],
-                'production_date' => $data['production_date'] ?? now()->toDateString(),
+                'production_date' => $data['production_date'] ?? Shift::query()->find($data['shift_id'])?->productionDateFor() ?? now()->toDateString(),
                 'batch_status' => BatchStatus::InProgress,
                 'quantity_produced' => null,
                 'quantity_scrap' => '0',

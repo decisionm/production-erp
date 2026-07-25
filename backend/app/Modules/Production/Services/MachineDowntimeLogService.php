@@ -6,6 +6,7 @@ use App\Exceptions\InvalidStatusTransitionException;
 use App\Exceptions\InvalidTimeRangeException;
 use App\Modules\Production\Models\Enums\LogStatus;
 use App\Modules\Production\Models\MachineDowntimeLog;
+use App\Modules\Production\Models\Shift;
 use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -52,7 +53,7 @@ class MachineDowntimeLogService
             $log = MachineDowntimeLog::create([
                 'work_center_id' => $data['work_center_id'],
                 'shift_id' => $data['shift_id'],
-                'production_date' => $data['production_date'] ?? now()->toDateString(),
+                'production_date' => $data['production_date'] ?? Shift::query()->find($data['shift_id'])?->productionDateFor() ?? now()->toDateString(),
                 'nature_of_problem' => $data['nature_of_problem'],
                 'from_time' => isset($data['from_time']) ? Carbon::parse($data['from_time']) : now(),
                 'status' => LogStatus::Open,

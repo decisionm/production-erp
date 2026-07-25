@@ -6,6 +6,7 @@ use App\Exceptions\InvalidStatusTransitionException;
 use App\Exceptions\InvalidTimeRangeException;
 use App\Modules\Production\Models\Enums\LogStatus;
 use App\Modules\Production\Models\MoldChangeLog;
+use App\Modules\Production\Models\Shift;
 use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -64,7 +65,7 @@ class MoldChangeLogService
             $attributes = [
                 'work_center_id' => $data['work_center_id'],
                 'shift_id' => $data['shift_id'],
-                'production_date' => $data['production_date'] ?? now()->toDateString(),
+                'production_date' => $data['production_date'] ?? Shift::query()->find($data['shift_id'])?->productionDateFor() ?? now()->toDateString(),
                 'changed_from_item_id' => $data['changed_from_item_id'] ?? null,
                 'changed_from_mold_id' => $data['changed_from_mold_id'] ?? null,
                 'changed_to_item_id' => $data['changed_to_item_id'],

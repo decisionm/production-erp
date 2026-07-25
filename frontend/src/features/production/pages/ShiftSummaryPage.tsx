@@ -2,11 +2,12 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Card, Col, DatePicker, Form, Input, InputNumber, Modal, Radio, Row, Segmented, Select, Space, Statistic, Table, Typography } from 'antd';
 import dayjs from 'dayjs';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { listAllEmployees } from '@/features/hrms/api';
 import { getShiftKpiReport, listShifts, saveShiftSummary } from '@/features/production/api';
+import { currentShift, productionDateFor } from '@/features/production/shiftClock';
 import type {
     ShiftKpiDowntimeLog,
     ShiftKpiItemBreakdown,
@@ -39,10 +40,23 @@ export default function ShiftSummaryPage() {
 
     const { data: shifts } = useQuery({ queryKey: ['production', 'shifts'], queryFn: listShifts });
     const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: listAllEmployees });
-    const shiftOptions = shifts?.data.filter((s) => s.is_active).map((s) => ({ value: s.id, label: s.name })) ?? [];
+    const activeShifts = shifts?.data.filter((s) => s.is_active) ?? [];
+    const shiftOptions = activeShifts.map((s) => ({ value: s.id, label: s.name }));
     const employeeOptions = employees?.data.map((e) => ({ value: e.id, label: `${e.employee_code} — ${e.name}` })) ?? [];
 
-    const effectiveShiftId = selectedShiftId ?? shiftOptions[0]?.value;
+    // Same clock rule as the Shift Floor: default to the shift running right
+    // now, and to ITS production date — so a Night-shift supervisor opening
+    // this at 02:00 lands on yesterday's night report, not an empty today.
+    const detectedShift = currentShift(activeShifts);
+    const effectiveShiftId = selectedShiftId ?? detectedShift?.id ?? shiftOptions[0]?.value;
+
+    const dateInitialized = useRef(false);
+    useEffect(() => {
+        if (!dateInitialized.current && detectedShift) {
+            dateInitialized.current = true;
+            setProductionDate(productionDateFor(detectedShift));
+        }
+    }, [detectedShift]);
     // Day scope means "every shift that ran this date" — the API treats a
     // missing shift_id as that rollup, not an error.
     const queryShiftId = scope === 'shift' ? effectiveShiftId : undefined;
