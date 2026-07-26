@@ -16,6 +16,7 @@ use App\Modules\TallySync\Services\TallySyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\Log;
 
 /**
  * The local sync agent's endpoints — meant to be called with a Sanctum
@@ -35,12 +36,29 @@ class TallySyncAgentController extends Controller
     {
         abort_unless($request->user()?->tokenCan('tally-sync:poll'), 403, 'Token missing the tally-sync:poll ability.');
 
-        return TallySyncEntryResource::collection($this->sync->pending());
+        $entries = $this->sync->pending();
+
+        // Polls run every ~90s; only log the interesting ones (non-empty),
+        // or the file becomes wall-to-wall no-ops.
+        if ($entries->isNotEmpty()) {
+            $this->agentLog($request, 'pending.delivered', [
+                'count' => $entries->count(),
+                'ids' => $entries->pluck('id')->all(),
+            ]);
+        }
+
+        return TallySyncEntryResource::collection($entries);
     }
 
     public function acknowledge(Request $request, TallySyncEntry $tallySyncEntry): TallySyncEntryResource
     {
         abort_unless($request->user()?->tokenCan('tally-sync:report'), 403, 'Token missing the tally-sync:report ability.');
+
+        $this->agentLog($request, 'voucher.synced', [
+            'entry_id' => $tallySyncEntry->id,
+            'voucher_type' => $tallySyncEntry->tally_voucher_type,
+            'voucher_number' => $tallySyncEntry->payload['voucher_number'] ?? null,
+        ]);
 
         return TallySyncEntryResource::make($this->sync->markSynced($tallySyncEntry));
     }
@@ -49,8 +67,17 @@ class TallySyncAgentController extends Controller
     {
         abort_unless($request->user()?->tokenCan('tally-sync:report'), 403, 'Token missing the tally-sync:report ability.');
 
+        $error = $request->validated()['error_message'];
+
+        $this->agentLog($request, 'voucher.failed', [
+            'entry_id' => $tallySyncEntry->id,
+            'voucher_type' => $tallySyncEntry->tally_voucher_type,
+            'voucher_number' => $tallySyncEntry->payload['voucher_number'] ?? null,
+            'error' => $error,
+        ]);
+
         return TallySyncEntryResource::make(
-            $this->sync->markFailed($tallySyncEntry, $request->validated()['error_message']),
+            $this->sync->markFailed($tallySyncEntry, $error),
         );
     }
 
@@ -63,8 +90,12 @@ class TallySyncAgentController extends Controller
     {
         abort_unless($request->user()?->tokenCan('tally-sync:items'), 403, 'Token missing the tally-sync:items ability.');
 
+        $summary = $itemSync->sync($request->validated()['items']);
+
+        $this->agentLog($request, 'items.received', $summary);
+
         return response()->json([
-            'data' => $itemSync->sync($request->validated()['items']),
+            'data' => $summary,
         ]);
     }
 
@@ -93,10 +124,16 @@ class TallySyncAgentController extends Controller
 
         if ($bound === null && $incoming !== null) {
             $settings->set(TallySettingsController::KEY_COMPANY, $incoming);
+
+            $this->agentLog($request, 'company.bound', ['company' => $incoming]);
         }
 
+        $summary = $masterSync->sync($data);
+
+        $this->agentLog($request, 'masters.received', ['company' => $incoming] + $summary);
+
         return response()->json([
-            'data' => $masterSync->sync($data),
+            'data' => $summary,
         ]);
     }
 
@@ -112,6 +149,26 @@ class TallySyncAgentController extends Controller
         $companies = array_values(array_unique($request->validated()['companies']));
         $settings->set(TallySettingsController::KEY_COMPANIES, $companies);
 
+        $this->agentLog($request, 'companies.received', ['companies' => $companies]);
+
         return response()->json(['data' => ['companies' => $companies]]);
+    }
+
+    /**
+     * Append-only trace of everything the agent sends us, one line per call,
+     * in its own DAY-WISE file (storage/logs/tally-agent-YYYY-MM-DD.log) so
+     * agent traffic can be inspected per day without wading through the app
+     * log, and old days age out on their own. Token name identifies WHICH
+     * installation sent it — one token per site by convention.
+     */
+    private function agentLog(Request $request, string $event, array $context = []): void
+    {
+        Log::build([
+            'driver' => 'daily',
+            'path' => storage_path('logs/tally-agent.log'),
+            'days' => 30,
+        ])->info($event, [
+            'token' => $request->user()?->currentAccessToken()?->name ?? 'session',
+        ] + $context);
     }
 }
