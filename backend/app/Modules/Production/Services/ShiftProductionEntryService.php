@@ -210,14 +210,34 @@ class ShiftProductionEntryService
         ]);
     }
 
+    /**
+     * The accountant's approval IS the posting gate (team decision 2026-07-26,
+     * matching the master plan's §4a design): Vincent/accounts verifies and
+     * reconciles, and the entry becomes eligible for Tally immediately —
+     * production quantities reach the books the same shift, with no MD wait.
+     */
     public function accountantApprove(ShiftProductionEntry $entry, int $signedBy): ShiftProductionEntry
     {
-        return $this->advance($entry, ShiftProductionEntryStatus::PmApproved, ShiftProductionEntryStatus::AccountantApproved, [
+        $fresh = $this->advance($entry, ShiftProductionEntryStatus::PmApproved, ShiftProductionEntryStatus::Approved, [
             'accountant_signed_by' => $signedBy,
             'accountant_signed_at' => now(),
+            'approved_by' => $signedBy,
+            'approved_at' => now(),
         ]);
+
+        // Announce it; TallySync enqueues the voucher, Production stays
+        // unaware.
+        event(new ShiftProductionEntryApproved($fresh));
+
+        return $fresh;
     }
 
+    /**
+     * DORMANT: reserved for a future "big approvals" flow (e.g. value-
+     * threshold entries routed MD-ward before posting). The normal path goes
+     * pm_approved → approved at the accountant, so accountant_approved is
+     * currently unreachable; this transition stays for when thresholds land.
+     */
     public function mdApprove(ShiftProductionEntry $entry, int $approvedBy): ShiftProductionEntry
     {
         $fresh = $this->advance($entry, ShiftProductionEntryStatus::AccountantApproved, ShiftProductionEntryStatus::Approved, [
@@ -225,10 +245,6 @@ class ShiftProductionEntryService
             'approved_at' => now(),
         ]);
 
-        // Only the MD's FINAL approval makes an entry eligible to sync —
-        // nothing reaches Tally before the whole chain has signed (§4a).
-        // Announce it; TallySync enqueues the voucher, Production stays
-        // unaware.
         event(new ShiftProductionEntryApproved($fresh));
 
         return $fresh;

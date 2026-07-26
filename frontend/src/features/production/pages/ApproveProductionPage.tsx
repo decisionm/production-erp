@@ -5,7 +5,6 @@ import { useAuthStore } from '@/features/auth/store';
 import {
     accountantApproveShiftProductionEntry,
     listShiftProductionEntries,
-    mdApproveShiftProductionEntry,
     pmApproveShiftProductionEntry,
     rejectShiftProductionEntry,
 } from '@/features/production/api';
@@ -24,7 +23,7 @@ const statusColor: Record<ShiftProductionEntryStatus, string> = {
 const statusLabel: Record<ShiftProductionEntryStatus, string> = {
     pending: 'Awaiting Plant Manager',
     pm_approved: 'Awaiting Accountant',
-    accountant_approved: 'Awaiting MD',
+    accountant_approved: 'Awaiting MD (reserved)',
     approved: 'Approved — syncing',
     rejected: 'Rejected',
     synced: 'Synced to Tally',
@@ -44,8 +43,9 @@ const STAGES: {
     mutate: (id: number) => Promise<ShiftProductionEntry>;
 }[] = [
     { status: 'pending', action: 'Approve (Plant Manager)', roles: ['Plant Manager', 'Administrator'], mutate: pmApproveShiftProductionEntry },
-    { status: 'pm_approved', action: 'Approve (Accountant)', roles: ['Accounts', 'Administrator'], mutate: accountantApproveShiftProductionEntry },
-    { status: 'accountant_approved', action: 'Final Approve (MD)', roles: ['Administrator'], mutate: mdApproveShiftProductionEntry },
+    // The accountant's approval posts to Tally (team decision 2026-07-26).
+    // MD approval is reserved for a future "big approvals" flow.
+    { status: 'pm_approved', action: 'Approve & Post (Accountant)', roles: ['Accounts', 'Administrator'], mutate: accountantApproveShiftProductionEntry },
 ];
 
 export default function ApproveProductionPage() {
@@ -103,8 +103,7 @@ export default function ApproveProductionPage() {
     const chainStep = (row: ShiftProductionEntry): number => {
         if (row.status === 'pending') return 1;
         if (row.status === 'pm_approved') return 2;
-        if (row.status === 'accountant_approved') return 3;
-        return 4; // approved / synced / failed — chain complete
+        return 3; // approved / synced / failed — accountant done, Tally next/done
     };
 
     return (
@@ -121,7 +120,6 @@ export default function ApproveProductionPage() {
                 options={[
                     { label: 'Plant Manager', value: 'pending' },
                     { label: 'Accountant', value: 'pm_approved' },
-                    { label: 'MD', value: 'accountant_approved' },
                     { label: 'Approved', value: 'approved' },
                     { label: 'Synced', value: 'synced' },
                     { label: 'Rejected', value: 'rejected' },
@@ -194,7 +192,6 @@ export default function ApproveProductionPage() {
                                 { title: 'Supervisor' },
                                 { title: 'Plant Mgr' },
                                 { title: 'Accountant' },
-                                { title: 'MD' },
                                 { title: 'Tally' },
                             ]}
                         />
@@ -228,7 +225,7 @@ export default function ApproveProductionPage() {
                                     ? `${detailRow.accountant_signed_by.name} · ${detailRow.accountant_signed_at?.slice(0, 16).replace('T', ' ') ?? ''}`
                                     : '—'}
                             </Descriptions.Item>
-                            <Descriptions.Item label="MD / Final">
+                            <Descriptions.Item label="Final Approval">
                                 {detailRow.approved_by ? detailRow.approved_by.name : '—'}
                             </Descriptions.Item>
                             {detailRow.rejection_reason && (
