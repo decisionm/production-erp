@@ -46,26 +46,24 @@ class ApprovalChainTest extends TestCase
         ]);
     }
 
-    public function test_the_chain_advances_in_order_and_only_md_approval_enqueues(): void
+    public function test_the_chain_advances_in_order_and_accountant_approval_posts(): void
     {
         $entry = $this->submittedEntry();
         $service = app(ShiftProductionEntryService::class);
         $pm = User::factory()->create();
         $accountant = User::factory()->create();
-        $md = User::factory()->create();
 
         $entry = $service->pmApprove($entry, $pm->id);
         $this->assertSame(ShiftProductionEntryStatus::PmApproved, $entry->status);
         $this->assertSame($pm->id, $entry->getRawOriginal('plant_manager_signed_by'));
         $this->assertSame(0, TallySyncEntry::count(), 'PM approval must not enqueue');
 
+        // The accountant's approval IS the posting gate (team decision
+        // 2026-07-26): entry goes straight to approved and enqueues.
         $entry = $service->accountantApprove($entry, $accountant->id);
-        $this->assertSame(ShiftProductionEntryStatus::AccountantApproved, $entry->status);
-        $this->assertSame(0, TallySyncEntry::count(), 'Accountant approval must not enqueue');
-
-        $entry = $service->mdApprove($entry, $md->id);
         $this->assertSame(ShiftProductionEntryStatus::Approved, $entry->status);
-        $this->assertSame(1, TallySyncEntry::count(), 'MD approval enqueues exactly one voucher');
+        $this->assertSame($accountant->id, $entry->getRawOriginal('accountant_signed_by'));
+        $this->assertSame(1, TallySyncEntry::count(), 'Accountant approval enqueues exactly one voucher');
     }
 
     public function test_stages_cannot_be_skipped(): void
@@ -74,19 +72,21 @@ class ApprovalChainTest extends TestCase
         $service = app(ShiftProductionEntryService::class);
         $user = User::factory()->create();
 
-        // Straight to MD from pending — blocked.
+        // Straight to accountant from pending (PM not done) — blocked.
         $this->expectException(InvalidStatusTransitionException::class);
-        $service->mdApprove($entry, $user->id);
+        $service->accountantApprove($entry, $user->id);
     }
 
-    public function test_accountant_cannot_approve_before_pm(): void
+    public function test_dormant_md_path_rejects_entries_not_routed_to_it(): void
     {
+        // mdApprove only accepts accountant_approved — a state the normal
+        // flow no longer produces (reserved for future "big approvals").
         $entry = $this->submittedEntry();
         $service = app(ShiftProductionEntryService::class);
         $user = User::factory()->create();
 
         $this->expectException(InvalidStatusTransitionException::class);
-        $service->accountantApprove($entry, $user->id);
+        $service->mdApprove($entry, $user->id);
     }
 
     public function test_rejection_from_a_middle_stage_sends_it_back_and_never_enqueues(): void

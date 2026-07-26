@@ -56,13 +56,12 @@ class ProductionSyncWritebackTest extends TestCase
 
         $entry->scraps()->create(['type' => 'lumps', 'quantity_kg' => '4.5000']);
 
-        // Walk the full 4-stage chain — only the MD's final approval enqueues.
+        // Walk the chain — the accountant's approval is the posting gate.
         $service = app(ShiftProductionEntryService::class);
         $approver = User::factory()->create()->id;
         $service->pmApprove($entry, $approver);
-        $service->accountantApprove($entry->fresh(), $approver);
 
-        return $service->mdApprove($entry->fresh(), $approver);
+        return $service->accountantApprove($entry->fresh(), $approver);
     }
 
     public function test_scraps_ride_the_voucher_payload_and_narration(): void
