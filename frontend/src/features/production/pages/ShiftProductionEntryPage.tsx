@@ -829,7 +829,13 @@ export default function ShiftProductionEntryPage() {
                             Add Line
                         </Button>
                     </Space>
-                    {materialFields.fields.map((field, index) => (
+                    {materialFields.fields.map((field, index) => {
+                        // Show the quantity in the selected material's own unit —
+                        // resin/masterbatch are Kg, but caps/cartons/trays are Nos
+                        // (factory answer: UOM comes from the item master).
+                        const selectedItemId = completeForm.watch(`material_consumptions.${index}.item_id`);
+                        const selectedUom = items?.data.find((i) => i.id === selectedItemId)?.uom ?? 'Kg';
+                        return (
                         <Row key={field.id} gutter={[8, 8]} align="middle" style={{ marginTop: 8 }}>
                             <Col xs={24} sm={10}>
                                 <Controller
@@ -853,14 +859,17 @@ export default function ShiftProductionEntryPage() {
                                 <Controller
                                     name={`material_consumptions.${index}.quantity_issued_kg`}
                                     control={completeForm.control}
-                                    render={({ field }) => <InputNumber {...field} size="large" min={0} placeholder="Kg" style={{ width: '100%' }} />}
+                                    render={({ field }) => (
+                                        <InputNumber {...field} size="large" min={0} placeholder={selectedUom} suffix={selectedUom} style={{ width: '100%' }} />
+                                    )}
                                 />
                             </Col>
                             <Col xs={24} sm={3}>
                                 <Button danger block onClick={() => materialFields.remove(index)}>Remove</Button>
                             </Col>
                         </Row>
-                    ))}
+                        );
+                    })}
 
                     <Space style={{ justifyContent: 'space-between', width: '100%', marginTop: 16 }}>
                         <Typography.Text strong>Lumps / Other Scrap</Typography.Text>
