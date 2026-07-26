@@ -8,7 +8,7 @@ import {
     pmApproveShiftProductionEntry,
     rejectShiftProductionEntry,
 } from '@/features/production/api';
-import type { ShiftProductionEntry, ShiftProductionEntryStatus } from '@/features/production/types';
+import type { ConsumptionVariance, ShiftProductionEntry, ShiftProductionEntryStatus } from '@/features/production/types';
 
 const statusColor: Record<ShiftProductionEntryStatus, string> = {
     pending: 'processing',
@@ -29,6 +29,90 @@ const statusLabel: Record<ShiftProductionEntryStatus, string> = {
     synced: 'Synced to Tally',
     failed: 'Sync failed',
 };
+
+/** "20.0000" → "20", "1.50" → "1.5", up to 2 decimals. "—" for null/unparseable. */
+const fmtKg = (v: string | null | undefined): string => {
+    if (v === null || v === undefined) return '—';
+    const n = parseFloat(v);
+    if (Number.isNaN(n)) return '—';
+    return String(parseFloat(n.toFixed(2)));
+};
+
+/** Same as fmtKg but with an explicit "+" on positive values (for variances). */
+const fmtSignedKg = (v: string | null | undefined): string => {
+    const s = fmtKg(v);
+    return s !== '—' && parseFloat(s) > 0 ? `+${s}` : s;
+};
+
+const varianceTag = (pct: number | null) => {
+    if (pct === null) return null;
+    const abs = Math.abs(pct);
+    if (abs <= 2) return <Tag color="green">OK</Tag>;
+    if (abs <= 5) return <Tag color="orange">Watch</Tag>;
+    return <Tag color="red">Investigate</Tag>;
+};
+
+/**
+ * Expected-vs-actual material use for a completed batch — the block the Plant
+ * Manager and Accountant scan to decide whether consumption needs questioning
+ * before it posts to Tally. `unaccounted_kg` is the number to investigate.
+ */
+function VarianceSection({ variance }: { variance: ConsumptionVariance }) {
+    if (variance.norm_source === null) {
+        return (
+            <>
+                <Typography.Title level={5} style={{ marginTop: 16 }}>Material Usage vs Norm</Typography.Title>
+                <Descriptions column={1} size="small" bordered>
+                    <Descriptions.Item label="Actual consumed">{fmtKg(variance.actual_kg)} Kg</Descriptions.Item>
+                </Descriptions>
+                <Typography.Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
+                    No norm set for this product
+                </Typography.Text>
+            </>
+        );
+    }
+
+    const unaccounted = variance.unaccounted_kg === null ? null : parseFloat(variance.unaccounted_kg);
+    const unaccountedHot = unaccounted !== null && !Number.isNaN(unaccounted) && Math.abs(unaccounted) > 0.5;
+
+    return (
+        <>
+            <Typography.Title level={5} style={{ marginTop: 16 }}>Material Usage vs Norm</Typography.Title>
+            <Descriptions column={1} size="small" bordered>
+                <Descriptions.Item label="Expected (per norm)">
+                    {variance.expected_kg === null ? '—' : `${fmtKg(variance.expected_kg)} Kg`}
+                </Descriptions.Item>
+                <Descriptions.Item label="Actual consumed">{fmtKg(variance.actual_kg)} Kg</Descriptions.Item>
+                <Descriptions.Item label="Variance">
+                    {variance.variance_kg === null ? (
+                        '—'
+                    ) : (
+                        <Space size={4} wrap>
+                            <span>
+                                {fmtSignedKg(variance.variance_kg)} Kg
+                                {variance.variance_pct !== null
+                                    ? ` (${variance.variance_pct > 0 ? '+' : ''}${variance.variance_pct}%)`
+                                    : ''}
+                            </span>
+                            {varianceTag(variance.variance_pct)}
+                        </Space>
+                    )}
+                </Descriptions.Item>
+            </Descriptions>
+            {variance.unaccounted_kg !== null && (
+                <Typography.Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
+                    of which rejection {fmtKg(variance.rejection_kg)} kg · scrap {fmtKg(variance.scrap_kg)} kg ·{' '}
+                    <Typography.Text type={unaccountedHot ? 'danger' : 'secondary'} strong={unaccountedHot}>
+                        unaccounted {fmtSignedKg(variance.unaccounted_kg)} kg
+                    </Typography.Text>
+                </Typography.Text>
+            )}
+            <Typography.Text type="secondary" style={{ display: 'block', marginTop: 4, fontSize: 12 }}>
+                norm: {variance.norm_source === 'bom' ? 'BOM' : 'product weight'}
+            </Typography.Text>
+        </>
+    );
+}
 
 /**
  * The 4-stage chain (factory answer 9): Supervisor submits → Plant Manager
@@ -232,6 +316,8 @@ export default function ApproveProductionPage() {
                                 <Descriptions.Item label="Rejected Because">{detailRow.rejection_reason}</Descriptions.Item>
                             )}
                         </Descriptions>
+
+                        {detailRow.variance && <VarianceSection variance={detailRow.variance} />}
 
                         {detailRow.material_consumptions.length > 0 && (
                             <>

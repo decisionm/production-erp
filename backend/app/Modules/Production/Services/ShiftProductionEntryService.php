@@ -6,6 +6,7 @@ use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Production\Events\ShiftProductionEntryApproved;
+use App\Modules\Production\Models\Bom;
 use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
 use App\Modules\Production\Models\Shift;
@@ -29,7 +30,10 @@ use Illuminate\Support\Facades\DB;
  */
 class ShiftProductionEntryService
 {
-    public function __construct(private readonly StockMovementService $stock) {}
+    public function __construct(
+        private readonly StockMovementService $stock,
+        private readonly BomService $boms,
+    ) {}
 
     public function paginate(int $perPage = 20, ?ShiftProductionEntryStatus $status = null): LengthAwarePaginator
     {
@@ -329,6 +333,136 @@ class ShiftProductionEntryService
             ->where('id', $entry->id)
             ->where('status', ShiftProductionEntryStatus::Approved->value)
             ->update(['status' => ShiftProductionEntryStatus::Failed->value]);
+    }
+
+    /**
+     * Expected material use per norm vs what the supervisor actually entered
+     * — the variance-investigation numbers for the approval screen. Pure
+     * computation, no writes. Returns null for a batch that hasn't completed
+     * (an in-progress batch has no consumption to compare yet).
+     *
+     * Norm resolution: the item's active BOM (kg-type component lines only —
+     * caps/cartons counted in Nos never sum into kg) wins over the item's
+     * nominal weight; no BOM and no weight means no norm, so the expected-
+     * side numbers are null while actual/rejection/scrap still report.
+     *
+     * @return array{
+     *     norm_source: ?string, expected_kg: ?string, actual_kg: string,
+     *     variance_kg: ?string, variance_pct: ?float, rejection_kg: string,
+     *     scrap_kg: string, unaccounted_kg: ?string,
+     * }|null
+     */
+    public function consumptionVariance(ShiftProductionEntry $entry): ?array
+    {
+        if ($entry->batch_status !== BatchStatus::Completed) {
+            return null;
+        }
+
+        // No-ops on the approval list, whose paginate() already eager-loads
+        // these; only ad-hoc single-entry callers trigger a load here.
+        $entry->loadMissing(['item', 'materialConsumptions', 'scraps']);
+
+        $actual = '0';
+        foreach ($entry->materialConsumptions as $consumption) {
+            $actual = bcadd($actual, (string) $consumption->quantity_issued_kg, 4);
+        }
+
+        $scrap = '0';
+        foreach ($entry->scraps as $line) {
+            if ($line->quantity_kg !== null) {
+                $scrap = bcadd($scrap, (string) $line->quantity_kg, 4);
+            }
+        }
+
+        $rejection = $entry->quantity_rejection_kg !== null
+            ? bcadd((string) $entry->quantity_rejection_kg, '0', 4)
+            : '0';
+
+        [$normSource, $expected] = $this->expectedConsumptionKg($entry);
+
+        $variancePct = null;
+        if ($expected !== null && bccomp($expected, '0', 4) !== 0) {
+            $variancePct = round((float) bcmul(bcdiv(bcsub($actual, $expected, 8), $expected, 8), '100', 8), 1);
+        }
+
+        return [
+            'norm_source' => $normSource,
+            'expected_kg' => $expected,
+            'actual_kg' => $actual,
+            'variance_kg' => $expected !== null ? bcsub($actual, $expected, 4) : null,
+            'variance_pct' => $variancePct,
+            'rejection_kg' => $rejection,
+            'scrap_kg' => $scrap,
+            'unaccounted_kg' => $expected !== null
+                ? bcsub(bcsub(bcsub($actual, $expected, 4), $rejection, 4), $scrap, 4)
+                : null,
+        ];
+    }
+
+    /**
+     * Resolve the consumption norm: [norm_source, expected_kg]. A lazy
+     * per-entry BOM lookup — approval lists are small pages, so this stays
+     * simpler than a batch preload.
+     *
+     * @return array{0: ?string, 1: ?string}
+     */
+    private function expectedConsumptionKg(ShiftProductionEntry $entry): array
+    {
+        $produced = $entry->quantity_produced !== null ? (string) $entry->quantity_produced : null;
+        $hasProduced = $produced !== null && bccomp($produced, '0', 4) !== 0;
+
+        if ($bom = $this->activeBomFor($entry->item_id)) {
+            // Soft-deleted component masters still carry their UOM — this is
+            // a read-only norm, so a trashed resin line must not zero it.
+            $bom->load(['lines.component' => fn ($query) => $query->withTrashed()]);
+
+            $kgPerUnit = '0';
+            foreach ($bom->lines as $line) {
+                if ($this->isMassUom($line->component?->uom)) {
+                    $kgPerUnit = bcadd($kgPerUnit, (string) $line->quantity_per, 4);
+                }
+            }
+
+            // A BOM with no kg-type lines (caps/cartons only) provides no
+            // mass norm — fall through to the item weight, don't claim 0.
+            if (bccomp($kgPerUnit, '0', 4) === 1) {
+                return ['bom', $hasProduced ? bcmul($produced, $kgPerUnit, 4) : null];
+            }
+        }
+
+        $weightGrams = $entry->item?->nominal_weight_grams;
+        if ($weightGrams !== null && bccomp((string) $weightGrams, '0', 4) === 1) {
+            return ['item_weight', $hasProduced ? bcdiv(bcmul($produced, (string) $weightGrams, 4), '1000', 4) : null];
+        }
+
+        return [null, null];
+    }
+
+    /**
+     * The items table's `uom` is free text (Tally-sourced masters included),
+     * so kg-type detection is by normalized name rather than a lookup table.
+     */
+    /**
+     * One active-BOM lookup per item per request — the resource computes a
+     * variance per list row, and pages repeat items (the service is scoped,
+     * so this lives exactly one request).
+     *
+     * @var array<int, ?Bom>
+     */
+    private array $activeBomCache = [];
+
+    private function activeBomFor(int $itemId): ?Bom
+    {
+        if (! array_key_exists($itemId, $this->activeBomCache)) {
+            $this->activeBomCache[$itemId] = $this->boms->activeFor($itemId);
+        }
+
+        return $this->activeBomCache[$itemId];
+    }
+
+    private function isMassUom(?string $uom): bool
+    {
+        return in_array(strtolower(trim((string) $uom)), ['kg', 'kgs', 'kilogram', 'kilograms'], true);
     }
 
     private function toKg(string $quantityNos, ?Item $item): ?string

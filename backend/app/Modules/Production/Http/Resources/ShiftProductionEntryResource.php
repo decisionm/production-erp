@@ -6,6 +6,7 @@ use App\Modules\Core\Http\Resources\UserResource;
 use App\Modules\HRMS\Http\Resources\EmployeeResource;
 use App\Modules\Inventory\Http\Resources\ItemResource;
 use App\Modules\Inventory\Http\Resources\WarehouseResource;
+use App\Modules\Production\Services\ShiftProductionEntryService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -33,6 +34,9 @@ class ShiftProductionEntryResource extends JsonResource
             'no_of_box' => $this->no_of_box,
             'material_consumptions' => ShiftMaterialConsumptionResource::collection($this->whenLoaded('materialConsumptions')),
             'scraps' => ShiftScrapResource::collection($this->whenLoaded('scraps')),
+            // Computed, never stored — shaping only, the math lives in the
+            // service (module pattern). Null until the batch completes.
+            'variance' => app(ShiftProductionEntryService::class)->consumptionVariance($this->resource),
             'status' => $this->status->value,
             'rejection_reason' => $this->rejection_reason,
             'plant_manager_signed_by' => UserResource::make($this->whenLoaded('plantManagerSignedBy')),
