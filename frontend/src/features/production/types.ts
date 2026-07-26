@@ -95,6 +95,27 @@ export interface ShiftScrap {
     scrap_reason: ScrapReason | null;
 }
 
+export type ConsumptionNormSource = 'bom' | 'item_weight';
+
+export interface ConsumptionVariance {
+    /** How expected_kg was derived; null = no norm available. */
+    norm_source: ConsumptionNormSource | null;
+    /** Numeric string, e.g. "20.0000"; null when no norm or quantity_produced is null/0. */
+    expected_kg: string | null;
+    /** Sum of material consumption quantity_issued_kg, "0" if none. */
+    actual_kg: string;
+    /** actual - expected; null when expected_kg is null. */
+    variance_kg: string | null;
+    /** (actual-expected)/expected*100 rounded to 1 decimal; null when expected null or 0. */
+    variance_pct: number | null;
+    /** Entry quantity_rejection_kg or "0". */
+    rejection_kg: string;
+    /** Sum of scraps quantity_kg, "0". */
+    scrap_kg: string;
+    /** actual - expected - rejection - scrap; null when expected_kg null. */
+    unaccounted_kg: string | null;
+}
+
 export interface ShiftProductionEntry {
     id: number;
     shift: Shift;
@@ -115,6 +136,8 @@ export interface ShiftProductionEntry {
     no_of_box: number | null;
     material_consumptions: ShiftMaterialConsumption[];
     scraps: ShiftScrap[];
+    /** Null when batch_status is not completed (no consumption yet). */
+    variance: ConsumptionVariance | null;
     status: ShiftProductionEntryStatus;
     rejection_reason: string | null;
     plant_manager_signed_by?: { id: number; name: string } | null;
