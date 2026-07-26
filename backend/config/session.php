@@ -32,7 +32,10 @@ return [
     |
     */
 
-    'lifetime' => (int) env('SESSION_LIFETIME', 120),
+    // 12h default (not Laravel's 120min): a factory shift is 8 hours and a
+    // supervisor must not be logged out mid-shift on the floor. Server .env
+    // can still override via SESSION_LIFETIME.
+    'lifetime' => (int) env('SESSION_LIFETIME', 720),
 
     'expire_on_close' => env('SESSION_EXPIRE_ON_CLOSE', false),
 
