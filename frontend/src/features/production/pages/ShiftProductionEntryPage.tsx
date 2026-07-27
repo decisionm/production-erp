@@ -891,6 +891,9 @@ export default function ShiftProductionEntryPage() {
                             completeForm.reset({
                                 material_consumptions: [],
                                 scraps: [],
+                                // Minted at Start Batch — prefilled here so nobody
+                                // types it; still editable as the exception path.
+                                batch_number: running.batch_number ?? undefined,
                                 nos_per_tray: running.item.nos_per_tray ?? undefined,
                                 nos_per_box: running.item.nos_per_box ?? undefined,
                                 running_hours: shiftLengthHours(running.shift) ?? undefined,
@@ -921,6 +924,11 @@ export default function ShiftProductionEntryPage() {
                                     {!down && !moldChange && running && <Tag color="success">Running — {running.item.sku}</Tag>}
                                     {!down && !moldChange && !running && <Tag>Idle</Tag>}
                                 </div>
+                                {running?.batch_number && (
+                                    <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
+                                        Batch {running.batch_number}
+                                    </Typography.Text>
+                                )}
                                 {liveExpected && running && (
                                     <div style={{ marginBottom: 6 }}>
                                         <Typography.Text strong style={{ fontSize: 12 }}>

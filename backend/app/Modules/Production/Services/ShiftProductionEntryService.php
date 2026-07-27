@@ -12,7 +12,9 @@ use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
 use App\Modules\Production\Models\Enums\ShiftScrapType;
 use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
+use App\Modules\Production\Models\WorkCenter;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -100,12 +102,17 @@ class ShiftProductionEntryService
 
             $item = Item::query()->find($data['item_id']);
 
+            $productionDate = $data['production_date']
+                ?? Shift::query()->find($data['shift_id'])?->productionDateFor()
+                ?? now()->toDateString();
+
             $entry = ShiftProductionEntry::create([
                 'shift_id' => $data['shift_id'],
                 'work_center_id' => $data['work_center_id'],
                 'item_id' => $data['item_id'],
                 'warehouse_id' => $data['warehouse_id'],
-                'production_date' => $data['production_date'] ?? Shift::query()->find($data['shift_id'])?->productionDateFor() ?? now()->toDateString(),
+                'production_date' => $productionDate,
+                'batch_number' => $this->generateBatchNumber($data['work_center_id'], $productionDate),
                 'batch_status' => BatchStatus::InProgress,
                 'quantity_produced' => null,
                 'quantity_scrap' => '0',
@@ -159,7 +166,9 @@ class ShiftProductionEntryService
                 ->where('id', $entry->id)
                 ->where('batch_status', BatchStatus::InProgress->value)
                 ->update([
-                    'batch_number' => $data['batch_number'] ?? null,
+                    // Auto-minted at Start Batch; an empty completion must
+                    // never wipe it — the field is exception-override only.
+                    'batch_number' => $data['batch_number'] ?? $entry->batch_number,
                     'quantity_produced' => $data['quantity_produced'],
                     'quantity_produced_kg' => $quantityProducedKg,
                     'quantity_scrap' => $data['quantity_scrap'] ?? '0',
@@ -628,6 +637,36 @@ class ShiftProductionEntryService
     private function isMassUom(?string $uom): bool
     {
         return in_array(strtolower(trim((string) $uom)), ['kg', 'kgs', 'kilogram', 'kilograms'], true);
+    }
+
+    /**
+     * {Ymd}-M{machine}-{seq}: unique, human-readable, minted at Start
+     * Batch — supervisors never type it (Complete Batch keeps an override
+     * for the exception path only). Sequence is per machine per production
+     * date; format pending Vincent's confirmation, isolated here so a
+     * format change is a one-method edit.
+     */
+    private function generateBatchNumber(int $workCenterId, string $productionDate): string
+    {
+        $machine = WorkCenter::query()->find($workCenterId);
+        $machineTag = $machine && preg_match('/(\d+)/', (string) $machine->code, $m)
+            ? 'M'.str_pad($m[1], 2, '0', STR_PAD_LEFT)
+            : 'M'.$workCenterId;
+
+        $date = Carbon::parse($productionDate)->format('Ymd');
+
+        $sequence = ShiftProductionEntry::query()
+            ->where('work_center_id', $workCenterId)
+            ->whereDate('production_date', $productionDate)
+            ->count() + 1;
+
+        do {
+            $candidate = sprintf('%s-%s-%03d', $date, $machineTag, $sequence);
+            $exists = ShiftProductionEntry::query()->where('batch_number', $candidate)->exists();
+            $sequence++;
+        } while ($exists);
+
+        return $candidate;
     }
 
     private function toKg(string $quantityNos, ?Item $item): ?string

@@ -10,6 +10,10 @@ class WorkCenterService
     public function paginate(int $perPage = 20): LengthAwarePaginator
     {
         return WorkCenter::query()
+            // Business sequence first (Machine 10 after Machine 9), rows
+            // without one last, name as the tie-break.
+            ->orderByRaw('display_sequence IS NULL')
+            ->orderBy('display_sequence')
             ->orderBy('name')
             ->paginate($perPage);
     }
