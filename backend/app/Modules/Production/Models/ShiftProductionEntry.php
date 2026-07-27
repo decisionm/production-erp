@@ -20,6 +20,8 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
     'batch_status', 'batch_number', 'quantity_produced', 'quantity_produced_kg',
     'quantity_scrap', 'quantity_rejection_kg', 'scrap_reason_id',
     'nos_per_tray', 'no_of_trays', 'nos_per_box', 'no_of_box', 'helper_name',
+    'standard_cycle_time', 'actual_cycle_time', 'standard_cavities', 'active_cavities',
+    'running_hours', 'qc_rejection_kg', 'tally_sync_entry_id',
     'supervisor_signed_by', 'supervisor_signed_at', 'plant_manager_signed_by', 'plant_manager_signed_at',
     'accountant_signed_by', 'accountant_signed_at',
     'status', 'rejection_reason', 'approved_by', 'approved_at',
@@ -33,6 +35,15 @@ class ShiftProductionEntry extends Model
             'production_date' => 'date',
             'batch_status' => BatchStatus::class,
             'status' => ShiftProductionEntryStatus::class,
+            // Expected-output engine — standard_* are Start Batch snapshots
+            // from the item master, never editable after; the rest are
+            // shop-floor actuals.
+            'standard_cycle_time' => 'decimal:2',
+            'actual_cycle_time' => 'decimal:2',
+            'standard_cavities' => 'integer',
+            'active_cavities' => 'integer',
+            'running_hours' => 'decimal:2',
+            'qc_rejection_kg' => 'decimal:4',
             'supervisor_signed_at' => 'datetime',
             'plant_manager_signed_at' => 'datetime',
             'accountant_signed_at' => 'datetime',
@@ -110,6 +121,17 @@ class ShiftProductionEntry extends Model
     public function tallySyncEntries(): MorphMany
     {
         return $this->morphMany(TallySyncEntry::class, 'syncable')->latest('id');
+    }
+
+    /**
+     * The shift-level Stock Journal voucher this entry was aggregated into
+     * (tally-sync.voucher_granularity = 'shift'). Null under the default
+     * 'batch' granularity, where the morph above tracks vouchers instead.
+     * Read-only here — all writes stay in the TallySync module.
+     */
+    public function tallyShiftVoucher(): BelongsTo
+    {
+        return $this->belongsTo(TallySyncEntry::class, 'tally_sync_entry_id');
     }
 
     public function scraps(): HasMany

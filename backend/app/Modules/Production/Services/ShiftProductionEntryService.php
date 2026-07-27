@@ -9,6 +9,7 @@ use App\Modules\Production\Events\ShiftProductionEntryApproved;
 use App\Modules\Production\Models\Bom;
 use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
+use App\Modules\Production\Models\Enums\ShiftScrapType;
 use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -58,7 +59,19 @@ class ShiftProductionEntryService
     }
 
     /**
-     * @param  array{shift_id: int, work_center_id: int, item_id: int, warehouse_id: int, production_date?: string, operator_id?: int}  $data
+     * Molding standards (standard_cycle_time / standard_cavities) are
+     * SNAPSHOTTED from the item master here and never writable through any
+     * request afterwards — the entry keeps the standard the shift actually
+     * ran against even if the item master changes later. Enforced by
+     * construction: no FormRequest carries rules for the standard_* fields
+     * (validated() strips any attempt), and this method reads them from the
+     * Item row only, never from $data.
+     *
+     * @param  array{
+     *     shift_id: int, work_center_id: int, item_id: int, warehouse_id: int,
+     *     production_date?: string, operator_id?: int,
+     *     actual_cycle_time?: ?string, active_cavities?: ?int,
+     * }  $data
      */
     public function startBatch(array $data, ?int $createdBy): ShiftProductionEntry
     {
@@ -85,6 +98,8 @@ class ShiftProductionEntryService
                 );
             }
 
+            $item = Item::query()->find($data['item_id']);
+
             $entry = ShiftProductionEntry::create([
                 'shift_id' => $data['shift_id'],
                 'work_center_id' => $data['work_center_id'],
@@ -94,6 +109,13 @@ class ShiftProductionEntryService
                 'batch_status' => BatchStatus::InProgress,
                 'quantity_produced' => null,
                 'quantity_scrap' => '0',
+                // Snapshot the item's molding standards (see method docblock);
+                // active cavities default to standard, adjustable when the
+                // machine runs with cavities blocked.
+                'standard_cycle_time' => $item?->standard_cycle_time,
+                'standard_cavities' => $item?->standard_cavities,
+                'actual_cycle_time' => $data['actual_cycle_time'] ?? null,
+                'active_cavities' => $data['active_cavities'] ?? $item?->standard_cavities,
                 'operator_id' => $data['operator_id'] ?? null,
                 'created_by' => $createdBy,
             ]);
@@ -107,6 +129,8 @@ class ShiftProductionEntryService
      *     batch_number?: string, quantity_produced: string, quantity_scrap?: string, scrap_reason_id?: int,
      *     nos_per_tray?: int, no_of_trays?: int, nos_per_box?: int, no_of_box?: int,
      *     helper_name?: string, notes?: string,
+     *     actual_cycle_time?: ?string, active_cavities?: ?int,
+     *     running_hours?: ?string, qc_rejection_kg?: ?string,
      *     material_consumptions?: array<int, array{item_id: int, warehouse_id: int, quantity_issued_kg: string}>,
      *     scraps?: array<int, array{type: string, quantity_nos?: string, quantity_kg?: string, scrap_reason_id?: int}>,
      * }  $data
@@ -146,6 +170,13 @@ class ShiftProductionEntryService
                     'nos_per_box' => $data['nos_per_box'] ?? null,
                     'no_of_box' => $data['no_of_box'] ?? null,
                     'helper_name' => $data['helper_name'] ?? null,
+                    // Run actuals: an absent key keeps whatever Start Batch
+                    // recorded (an explicit null clears it). standard_* are
+                    // intentionally NOT settable here — see startBatch().
+                    'actual_cycle_time' => array_key_exists('actual_cycle_time', $data) ? $data['actual_cycle_time'] : $entry->actual_cycle_time,
+                    'active_cavities' => array_key_exists('active_cavities', $data) ? $data['active_cavities'] : $entry->active_cavities,
+                    'running_hours' => $data['running_hours'] ?? null,
+                    'qc_rejection_kg' => $data['qc_rejection_kg'] ?? null,
                     'notes' => $data['notes'] ?? $entry->notes,
                     'batch_status' => BatchStatus::Completed->value,
                     'status' => ShiftProductionEntryStatus::Pending->value,
@@ -400,6 +431,137 @@ class ShiftProductionEntryService
                 ? bcsub(bcsub(bcsub($actual, $expected, 4), $rejection, 4), $scrap, 4)
                 : null,
         ];
+    }
+
+    /**
+     * The expected-output engine (SHIFT-REDESIGN-FORMULAS.md #22-24 and the
+     * QC/reconciliation rows #9/#10/#20) — the "did the machine produce what
+     * physics says it should" block, distinct from consumptionVariance()'s
+     * norm-based material question. Pure computation, no writes. Null for a
+     * batch that hasn't completed (the frontend duplicates the expected_*
+     * formula for the live running screen; this backend figure is the
+     * authoritative one post-completion).
+     *
+     * Null-safety rule: any output whose inputs are missing or zero is null,
+     * never a fake number — an efficiency computed against a guessed
+     * expectation would be worse than no efficiency at all.
+     *
+     * @return array{
+     *     expected_pieces: ?string, expected_boxes: ?int, actual_boxes: ?int,
+     *     actual_pieces: ?string, efficiency_pct: ?float,
+     *     rejection_kg_production: ?string, rejection_kg_qc: ?string,
+     *     rejection_diff_kg: ?string, lumps_kg: string, issued_kg: string,
+     *     good_production_kg: ?string, confirmed_rejection_kg: ?string,
+     *     reconciliation_unaccounted_kg: ?string,
+     * }|null
+     */
+    public function productionMetrics(ShiftProductionEntry $entry): ?array
+    {
+        if ($entry->batch_status !== BatchStatus::Completed) {
+            return null;
+        }
+
+        $entry->loadMissing(['item', 'materialConsumptions', 'scraps']);
+
+        // Expected pieces = 3600/CT × active cavities × running hours (WB2's
+        // EST BOX numerator, always at the STANDARD cycle time — the snapshot
+        // taken at Start Batch). Computed as one division at 8dp: chaining
+        // 4dp bc truncations loses the second decimal (144000/10.6 must
+        // round to 13584.91, not 13584.90).
+        $cycleTime = $entry->standard_cycle_time !== null ? (string) $entry->standard_cycle_time : null;
+        $cavities = $entry->active_cavities;
+        $hours = $entry->running_hours !== null ? (string) $entry->running_hours : null;
+
+        $expectedPiecesRaw = null;
+        if ($cycleTime !== null && bccomp($cycleTime, '0', 4) === 1
+            && $cavities !== null && $cavities > 0
+            && $hours !== null && bccomp($hours, '0', 4) === 1) {
+            $expectedPiecesRaw = bcdiv(bcmul(bcmul('3600', (string) $cavities, 4), $hours, 4), $cycleTime, 8);
+        }
+
+        // Expected boxes = ROUND(expected_pieces / pack, 0) — WB2 col W.
+        // The entry's own pack size wins (a run packed at a non-standard
+        // count must not be measured against the master's), and history
+        // never rewrites itself when the master changes later.
+        $nosPerBox = $entry->nos_per_box ?? $entry->item?->nos_per_box;
+        $expectedBoxes = null;
+        if ($expectedPiecesRaw !== null && $nosPerBox !== null && $nosPerBox > 0) {
+            $expectedBoxes = (int) $this->bcRoundHalfUp(bcdiv($expectedPiecesRaw, (string) $nosPerBox, 8), 0);
+        }
+
+        // Efficiency = actual boxes / expected boxes × 100 — WB2 col Y.
+        // Boxes are what the floor physically counts (box-first, Conflict
+        // C2), so the ratio is boxes-based, not pieces-based.
+        $actualBoxes = $entry->no_of_box;
+        $efficiency = null;
+        if ($expectedBoxes !== null && $expectedBoxes > 0 && $actualBoxes !== null) {
+            $efficiency = round($actualBoxes / $expectedBoxes * 100, 1);
+        }
+
+        // Rejection: production-side calculated kg vs QC's weighed kg (WB2
+        // P/Q/R). When QC weighed it, QC wins as the confirmed figure —
+        // assumption flagged in the shared contract.
+        $rejectionProduction = $entry->quantity_rejection_kg !== null
+            ? bcadd((string) $entry->quantity_rejection_kg, '0', 4)
+            : null;
+        $rejectionQc = $entry->qc_rejection_kg !== null
+            ? bcadd((string) $entry->qc_rejection_kg, '0', 4)
+            : null;
+        $confirmedRejection = $rejectionQc ?? $rejectionProduction;
+
+        $lumps = '0.0000';
+        foreach ($entry->scraps as $line) {
+            if ($line->type === ShiftScrapType::Lumps && $line->quantity_kg !== null) {
+                $lumps = bcadd($lumps, (string) $line->quantity_kg, 4);
+            }
+        }
+
+        $issued = '0.0000';
+        foreach ($entry->materialConsumptions as $consumption) {
+            $issued = bcadd($issued, (string) $consumption->quantity_issued_kg, 4);
+        }
+
+        $good = $entry->quantity_produced_kg !== null
+            ? bcadd((string) $entry->quantity_produced_kg, '0', 4)
+            : null;
+
+        // Material reconciliation: issued − good − confirmed rejection −
+        // lumps. Null (not 0) when nothing was issued or good kg is unknown
+        // — those are "can't reconcile", not "perfectly reconciled".
+        $unaccounted = null;
+        if (bccomp($issued, '0', 4) === 1 && $good !== null) {
+            $unaccounted = bcsub(bcsub(bcsub($issued, $good, 4), $confirmedRejection ?? '0', 4), $lumps, 4);
+        }
+
+        return [
+            'expected_pieces' => $expectedPiecesRaw !== null ? $this->bcRoundHalfUp($expectedPiecesRaw, 2) : null,
+            'expected_boxes' => $expectedBoxes,
+            'actual_boxes' => $actualBoxes,
+            'actual_pieces' => $entry->quantity_produced !== null ? (string) $entry->quantity_produced : null,
+            'efficiency_pct' => $efficiency,
+            'rejection_kg_production' => $rejectionProduction,
+            'rejection_kg_qc' => $rejectionQc,
+            'rejection_diff_kg' => $rejectionProduction !== null && $rejectionQc !== null
+                ? bcsub($rejectionProduction, $rejectionQc, 4)
+                : null,
+            'lumps_kg' => $lumps,
+            'issued_kg' => $issued,
+            'good_production_kg' => $good,
+            'confirmed_rejection_kg' => $confirmedRejection,
+            'reconciliation_unaccounted_kg' => $unaccounted,
+        ];
+    }
+
+    /**
+     * bcmath truncates; the workbook formulas ROUND. Half-up on the
+     * non-negative quantities this engine deals in: add 5 at the first
+     * dropped digit, then truncate.
+     */
+    private function bcRoundHalfUp(string $value, int $scale): string
+    {
+        $offset = bcdiv('5', bcpow('10', (string) ($scale + 1), 0), $scale + 1);
+
+        return bcadd($value, $offset, $scale);
     }
 
     /**

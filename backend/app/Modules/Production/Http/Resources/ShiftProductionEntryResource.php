@@ -35,9 +35,22 @@ class ShiftProductionEntryResource extends JsonResource
             'no_of_box' => $this->no_of_box,
             'material_consumptions' => ShiftMaterialConsumptionResource::collection($this->whenLoaded('materialConsumptions')),
             'scraps' => ShiftScrapResource::collection($this->whenLoaded('scraps')),
+            // Expected-output engine inputs. standard_* are Start Batch
+            // snapshots from the item master (never editable after start);
+            // the actuals are shop-floor entries.
+            'standard_cycle_time' => $this->standard_cycle_time,
+            'actual_cycle_time' => $this->actual_cycle_time,
+            'standard_cavities' => $this->standard_cavities,
+            'active_cavities' => $this->active_cavities,
+            'running_hours' => $this->running_hours,
+            'qc_rejection_kg' => $this->qc_rejection_kg,
             // Computed, never stored — shaping only, the math lives in the
             // service (module pattern). Null until the batch completes.
+            // `variance` answers the norm-based material question; `metrics`
+            // answers the cycle-time/efficiency + reconciliation question —
+            // two different blocks by design.
             'variance' => app(ShiftProductionEntryService::class)->consumptionVariance($this->resource),
+            'metrics' => app(ShiftProductionEntryService::class)->productionMetrics($this->resource),
             'sync_error' => $this->when(
                 $this->status === ShiftProductionEntryStatus::Failed && $this->relationLoaded('tallySyncEntries'),
                 fn () => $this->tallySyncEntries->first()?->error_message,

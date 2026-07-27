@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 #[Fillable([
     'sku', 'name', 'description', 'uom', 'hsn_sac_code', 'reorder_level',
     'nominal_weight_grams', 'nos_per_tray', 'trays_per_box', 'nos_per_box',
+    'colour', 'standard_cycle_time', 'standard_cavities',
     'tracking_type', 'is_active',
     'tally_stock_item_guid', 'tally_alter_id', 'tally_synced_at', 'item_group_id',
 ])]
@@ -26,6 +27,10 @@ class Item extends Model
             'nos_per_tray' => 'integer',
             'trays_per_box' => 'integer',
             'nos_per_box' => 'integer',
+            // Molding standards (expected-output engine) — seconds per shot
+            // and pieces per shot.
+            'standard_cycle_time' => 'decimal:2',
+            'standard_cavities' => 'integer',
             'tracking_type' => ItemTrackingType::class,
             'is_active' => 'boolean',
             'tally_alter_id' => 'integer',

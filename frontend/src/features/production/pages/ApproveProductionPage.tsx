@@ -8,7 +8,7 @@ import {
     pmApproveShiftProductionEntry,
     rejectShiftProductionEntry,
 } from '@/features/production/api';
-import type { ConsumptionVariance, ShiftProductionEntry, ShiftProductionEntryStatus } from '@/features/production/types';
+import type { ConsumptionVariance, ProductionMetrics, ShiftProductionEntry, ShiftProductionEntryStatus } from '@/features/production/types';
 
 const statusColor: Record<ShiftProductionEntryStatus, string> = {
     pending: 'processing',
@@ -66,6 +66,74 @@ const varianceTag = (pct: number | null) => {
     if (abs <= 5) return <Tag color="orange">Watch</Tag>;
     return <Tag color="red">Investigate</Tag>;
 };
+
+const efficiencyTag = (pct: number | null) => {
+    if (pct === null) return null;
+    if (pct >= 95) return <Tag color="green">OK</Tag>;
+    if (pct >= 85) return <Tag color="orange">Watch</Tag>;
+    return <Tag color="red">Investigate</Tag>;
+};
+
+/**
+ * The backend's expected-output block: did the machine produce what its cycle
+ * time says it should have, and do the issued kilograms reconcile. Distinct
+ * from (and rendered above) the norm-based VarianceSection — the two answer
+ * different questions. Rows whose inputs the backend nulled out are hidden,
+ * never shown as a fake 0.
+ */
+function MetricsSection({ metrics }: { metrics: ProductionMetrics }) {
+    const unaccounted = metrics.reconciliation_unaccounted_kg === null ? null : parseFloat(metrics.reconciliation_unaccounted_kg);
+    const unaccountedHot = unaccounted !== null && !Number.isNaN(unaccounted) && Math.abs(unaccounted) > 0.5;
+
+    return (
+        <>
+            <Typography.Title level={5} style={{ marginTop: 16 }}>Production Metrics</Typography.Title>
+            <Descriptions column={1} size="small" bordered>
+                {metrics.expected_pieces !== null && (
+                    <Descriptions.Item label="Expected">
+                        {fmtKg(metrics.expected_pieces)} pcs
+                        {metrics.expected_boxes !== null ? ` · ${metrics.expected_boxes} boxes` : ''}
+                    </Descriptions.Item>
+                )}
+                {(metrics.actual_pieces !== null || metrics.actual_boxes !== null) && (
+                    <Descriptions.Item label="Actual">
+                        {metrics.actual_pieces !== null ? `${fmtKg(metrics.actual_pieces)} pcs` : '—'}
+                        {metrics.actual_boxes !== null ? ` · ${metrics.actual_boxes} boxes` : ''}
+                    </Descriptions.Item>
+                )}
+                {metrics.efficiency_pct !== null && (
+                    <Descriptions.Item label="Efficiency">
+                        <Space size={6}>
+                            {`${metrics.efficiency_pct}%`}
+                            {efficiencyTag(metrics.efficiency_pct)}
+                        </Space>
+                    </Descriptions.Item>
+                )}
+                {(metrics.rejection_kg_production !== null || metrics.rejection_kg_qc !== null) && (
+                    <Descriptions.Item label="Rejection">
+                        production {fmtKg(metrics.rejection_kg_production)} kg · QC {fmtKg(metrics.rejection_kg_qc)} kg
+                        {metrics.rejection_diff_kg !== null ? ` · diff ${fmtSignedKg(metrics.rejection_diff_kg)} kg` : ''}
+                    </Descriptions.Item>
+                )}
+                <Descriptions.Item label="Issued / Good / Lumps">
+                    {fmtKg(metrics.issued_kg)} / {fmtKg(metrics.good_production_kg)} / {fmtKg(metrics.lumps_kg)} kg
+                </Descriptions.Item>
+                {metrics.reconciliation_unaccounted_kg !== null && (
+                    <Descriptions.Item label="Unaccounted">
+                        <Typography.Text type={unaccountedHot ? 'danger' : undefined} strong={unaccountedHot}>
+                            {fmtSignedKg(metrics.reconciliation_unaccounted_kg)} kg
+                        </Typography.Text>
+                        {unaccountedHot && (
+                            <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                                issued − good − rejection (QC wins) − lumps — over the 0.5 kg tolerance
+                            </Typography.Text>
+                        )}
+                    </Descriptions.Item>
+                )}
+            </Descriptions>
+        </>
+    );
+}
 
 /**
  * Expected-vs-actual material use for a completed batch — the block the Plant
@@ -355,6 +423,8 @@ export default function ApproveProductionPage() {
                                 <Descriptions.Item label="Rejected Because">{detailRow.rejection_reason}</Descriptions.Item>
                             )}
                         </Descriptions>
+
+                        {detailRow.metrics && <MetricsSection metrics={detailRow.metrics} />}
 
                         {detailRow.variance && <VarianceSection variance={detailRow.variance} />}
 

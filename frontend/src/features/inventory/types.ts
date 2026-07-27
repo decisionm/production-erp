@@ -13,6 +13,12 @@ export interface Item {
     nos_per_tray: number | null;
     trays_per_box: number | null;
     nos_per_box: number | null;
+    /** Product colour (drives masterbatch suggestion); "Clear" means no MB. */
+    colour: string | null;
+    /** Standard cycle time, seconds per shot — decimal string e.g. "10.60". */
+    standard_cycle_time: string | null;
+    /** Standard cavity count of the item's mold. */
+    standard_cavities: number | null;
     tracking_type: ItemTrackingType;
     is_active: boolean;
     created_at: string;

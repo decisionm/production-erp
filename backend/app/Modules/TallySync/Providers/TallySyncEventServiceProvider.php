@@ -67,6 +67,29 @@ class TallySyncEventServiceProvider extends ServiceProvider
                 return;
             }
 
+            // Shift-granularity vouchers (voucher_granularity = 'shift'):
+            // the morph names the Shift, and the member entries hang off
+            // shift_production_entries.tally_sync_entry_id — fan the
+            // ack/fail out to every member. A no-op (empty result) for
+            // every batch-granularity voucher.
+            $members = ShiftProductionEntry::query()
+                ->where('tally_sync_entry_id', $syncEntry->id)
+                ->get();
+
+            if ($members->isNotEmpty()) {
+                $service = $this->app->make(ShiftProductionEntryService::class);
+
+                foreach ($members as $member) {
+                    match ($syncEntry->status) {
+                        TallySyncStatus::Synced => $service->markSynced($member),
+                        TallySyncStatus::Failed => $service->markSyncFailed($member),
+                        default => null,
+                    };
+                }
+
+                return;
+            }
+
             if ($syncEntry->syncable_type !== (new ShiftProductionEntry)->getMorphClass()) {
                 return;
             }

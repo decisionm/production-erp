@@ -26,6 +26,16 @@ class CompleteBatchRequest extends FormRequest
             'helper_name' => ['sometimes', 'nullable', 'string', 'max:120'],
             'notes' => ['nullable', 'string'],
 
+            // Expected-output engine inputs. standard_cycle_time /
+            // standard_cavities are deliberately NOT in these rules — they
+            // were snapshotted from the item master at Start Batch and are
+            // never writable through any request after; validated() strips
+            // any attempt to send them.
+            'actual_cycle_time' => ['sometimes', 'nullable', 'numeric', 'min:0.1', 'max:9999.99'],
+            'active_cavities' => ['sometimes', 'nullable', 'integer', 'min:1'],
+            'running_hours' => ['sometimes', 'nullable', 'numeric', 'gt:0', 'max:24'],
+            'qc_rejection_kg' => ['sometimes', 'nullable', 'numeric', 'gte:0'],
+
             'material_consumptions' => ['nullable', 'array'],
             'material_consumptions.*.item_id' => ['required', 'integer', 'exists:items,id'],
             'material_consumptions.*.warehouse_id' => ['required', 'integer', 'exists:warehouses,id'],
