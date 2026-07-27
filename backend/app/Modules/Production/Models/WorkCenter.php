@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['code', 'name', 'capacity_hours_per_day', 'is_active'])]
+#[Fillable(['code', 'name', 'display_sequence', 'capacity_hours_per_day', 'is_active'])]
 class WorkCenter extends Model
 {
     use SoftDeletes;
