@@ -46,6 +46,7 @@ use App\Modules\Production\Http\Controllers\MoldChangeLogController;
 use App\Modules\Production\Http\Controllers\MoldController;
 use App\Modules\Production\Http\Controllers\MrpController;
 use App\Modules\Production\Http\Controllers\PowerInterruptionLogController;
+use App\Modules\Production\Http\Controllers\ProductionSettingsController;
 use App\Modules\Production\Http\Controllers\ReworkOrderController;
 use App\Modules\Production\Http\Controllers\RoutingController;
 use App\Modules\Production\Http\Controllers\ScrapReasonController;
@@ -275,6 +276,7 @@ Route::prefix('v1')->group(function () {
         });
 
         Route::prefix('production')->middleware('module:production')->group(function () {
+            Route::get('settings', [ProductionSettingsController::class, 'show']);
             Route::apiResource('work-centers', WorkCenterController::class)->only(['index', 'store', 'update']);
 
             Route::apiResource('boms', BomController::class)->only(['index', 'store']);

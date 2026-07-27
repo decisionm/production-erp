@@ -10,6 +10,7 @@ import {
     rejectShiftProductionEntry,
 } from '@/features/production/api';
 import type { ConsumptionVariance, ProductionMetrics, ShiftProductionEntry, ShiftProductionEntryStatus } from '@/features/production/types';
+import { type PackingRounding, roundPer, useProductionSettings } from '@/features/production/packing';
 
 const statusColor: Record<ShiftProductionEntryStatus, string> = {
     pending: 'processing',
@@ -46,17 +47,19 @@ const fmtSignedKg = (v: string | null | undefined): string => {
 };
 
 /**
- * "standard: 50 trays · 9 boxes" — expected packing from the item's packing
- * master (ceil of produced / nos-per-tray|box) for eyeballing the entered
- * counts. Null when nothing is computable (no standards on the item, or no
- * produced quantity), in which case the row renders exactly as before.
+ * "standard: 50 trays · 120 pouches · 9 boxes" — expected packing from the
+ * item's packing master (produced / nos-per-tray|pouch|box, rounded per the
+ * shared packing-rounding mode) for eyeballing the entered counts. Null when
+ * nothing is computable (no standards on the item, or no produced quantity),
+ * in which case the row renders exactly as before.
  */
-const packingStandardNote = (row: ShiftProductionEntry): string | null => {
+const packingStandardNote = (row: ShiftProductionEntry, mode?: PackingRounding): string | null => {
     const produced = row.quantity_produced === null ? NaN : parseFloat(row.quantity_produced);
     if (!Number.isFinite(produced) || produced <= 0) return null;
     const parts: string[] = [];
-    if (row.item.nos_per_tray && row.item.nos_per_tray >= 1) parts.push(`${Math.ceil(produced / row.item.nos_per_tray)} trays`);
-    if (row.item.nos_per_box && row.item.nos_per_box >= 1) parts.push(`${Math.ceil(produced / row.item.nos_per_box)} boxes`);
+    if (row.item.nos_per_tray && row.item.nos_per_tray >= 1) parts.push(`${roundPer(produced / row.item.nos_per_tray, mode)} trays`);
+    if (row.item.nos_per_pouch && row.item.nos_per_pouch >= 1) parts.push(`${roundPer(produced / row.item.nos_per_pouch, mode)} pouches`);
+    if (row.item.nos_per_box && row.item.nos_per_box >= 1) parts.push(`${roundPer(produced / row.item.nos_per_box, mode)} boxes`);
     return parts.length > 0 ? `standard: ${parts.join(' · ')}` : null;
 };
 
@@ -115,12 +118,14 @@ function MetricsSection({ metrics }: { metrics: ProductionMetrics }) {
                 {metrics.expected_pieces !== null && (
                     <Descriptions.Item label="Expected">
                         {fmtKg(metrics.expected_pieces)} pcs
+                        {metrics.expected_pouches != null ? ` · ${metrics.expected_pouches} pouches` : ''}
                         {metrics.expected_boxes !== null ? ` · ${metrics.expected_boxes} boxes` : ''}
                     </Descriptions.Item>
                 )}
-                {(metrics.actual_pieces !== null || metrics.actual_boxes !== null) && (
+                {(metrics.actual_pieces !== null || metrics.actual_boxes !== null || metrics.actual_pouches != null) && (
                     <Descriptions.Item label="Actual">
                         {metrics.actual_pieces !== null ? `${fmtKg(metrics.actual_pieces)} pcs` : '—'}
+                        {metrics.actual_pouches != null ? ` · ${metrics.actual_pouches} pouches` : ''}
                         {metrics.actual_boxes !== null ? ` · ${metrics.actual_boxes} boxes` : ''}
                     </Descriptions.Item>
                 )}
@@ -244,6 +249,7 @@ export default function ApproveProductionPage() {
     const [rejectingRow, setRejectingRow] = useState<ShiftProductionEntry | null>(null);
     const [rejectReason, setRejectReason] = useState('');
     const queryClient = useQueryClient();
+    const settings = useProductionSettings();
     const user = useAuthStore((s) => s.user);
     const myRoles = user?.roles?.map((r) => r.name) ?? [];
 
@@ -421,9 +427,14 @@ export default function ApproveProductionPage() {
                             <Descriptions.Item label="Packing">
                                 {detailRow.nos_per_tray ?? '—'}/tray × {detailRow.no_of_trays ?? '—'} trays,{' '}
                                 {detailRow.nos_per_box ?? '—'}/box × {detailRow.no_of_box ?? '—'} boxes
-                                {packingStandardNote(detailRow) && (
+                                {/* Pouch/loose figures only exist for pouch-packed items /
+                                    Wave A entries — appended so older rows render unchanged. */}
+                                {detailRow.no_of_pouches != null &&
+                                    `, ${detailRow.item.nos_per_pouch ?? '—'}/pouch × ${detailRow.no_of_pouches} pouches`}
+                                {detailRow.loose_pieces != null && `, ${detailRow.loose_pieces} loose`}
+                                {packingStandardNote(detailRow, settings?.packing_rounding) && (
                                     <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
-                                        {packingStandardNote(detailRow)}
+                                        {packingStandardNote(detailRow, settings?.packing_rounding)}
                                     </Typography.Text>
                                 )}
                             </Descriptions.Item>

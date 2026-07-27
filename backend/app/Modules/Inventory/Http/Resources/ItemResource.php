@@ -25,6 +25,10 @@ class ItemResource extends JsonResource
             'nos_per_tray' => $this->nos_per_tray,
             'trays_per_box' => $this->trays_per_box,
             'nos_per_box' => $this->nos_per_box,
+            // Pouch standards — presence (>= 1) is what makes the frontend
+            // show the pouch fields for an item; null keeps them hidden.
+            'nos_per_pouch' => $this->nos_per_pouch,
+            'pouches_per_box' => $this->pouches_per_box,
             // Molding standards — Start Batch snapshots these onto the shift
             // entry for the expected-output engine.
             'colour' => $this->colour,

@@ -247,6 +247,9 @@ export interface CompleteBatchPayload {
     no_of_trays?: number | null;
     nos_per_box?: number | null;
     no_of_box?: number | null;
+    no_of_pouches?: number | null;
+    // Persisted since Wave A packaging (was a frontend-only derivation helper).
+    loose_pieces?: number | null;
     running_hours?: number;
     qc_rejection_kg?: number;
     actual_cycle_time?: number;

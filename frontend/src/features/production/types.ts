@@ -129,8 +129,12 @@ export interface ProductionMetrics {
     expected_pieces: string | null;
     /** ROUND(expected_pieces / item.nos_per_box) — null if nos_per_box missing. */
     expected_boxes: number | null;
+    /** expected_pieces / item.nos_per_pouch, rounded per production.packing_rounding — null if nos_per_pouch missing. */
+    expected_pouches: number | null;
     /** = no_of_box as entered. */
     actual_boxes: number | null;
+    /** = no_of_pouches as entered. */
+    actual_pouches: number | null;
     /** = quantity_produced (box-first: frontend derives it, backend just reports). */
     actual_pieces: string | null;
     /** actual_boxes / expected_boxes × 100 rounded 1dp — null when expected_boxes null/0. */
@@ -175,6 +179,10 @@ export interface ShiftProductionEntry {
     no_of_trays: number | null;
     nos_per_box: number | null;
     no_of_box: number | null;
+    /** Pouch count entered at Complete Batch (items with a pouch standard). */
+    no_of_pouches: number | null;
+    /** Loose pieces beyond full boxes/pouches — persisted since Wave A packaging. */
+    loose_pieces: number | null;
     /** SNAPSHOT copied from the item at Start Batch — never editable after. */
     standard_cycle_time: string | null;
     actual_cycle_time: string | null;

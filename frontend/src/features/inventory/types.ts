@@ -13,6 +13,9 @@ export interface Item {
     nos_per_tray: number | null;
     trays_per_box: number | null;
     nos_per_box: number | null;
+    /** Pouch packing standards (Wave A) — null for items not pouch-packed. */
+    nos_per_pouch: number | null;
+    pouches_per_box: number | null;
     /** Product colour (drives masterbatch suggestion); "Clear" means no MB. */
     colour: string | null;
     /** Standard cycle time, seconds per shot — decimal string e.g. "10.60". */

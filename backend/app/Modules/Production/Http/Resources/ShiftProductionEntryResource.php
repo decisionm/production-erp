@@ -33,6 +33,10 @@ class ShiftProductionEntryResource extends JsonResource
             'no_of_trays' => $this->no_of_trays,
             'nos_per_box' => $this->nos_per_box,
             'no_of_box' => $this->no_of_box,
+            // Wave A packaging — pouch count and left-over loose pieces.
+            'no_of_pouches' => $this->no_of_pouches,
+            'nos_per_pouch' => $this->nos_per_pouch,
+            'loose_pieces' => $this->loose_pieces,
             'material_consumptions' => ShiftMaterialConsumptionResource::collection($this->whenLoaded('materialConsumptions')),
             'scraps' => ShiftScrapResource::collection($this->whenLoaded('scraps')),
             // Expected-output engine inputs. standard_* are Start Batch
