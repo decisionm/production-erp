@@ -1,12 +1,14 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Checkbox, Col, Drawer, Form, Input, InputNumber, Modal, Radio, Row, Select, Space, Table, Tag, TimePicker, Typography } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Descriptions, Drawer, Form, Input, InputNumber, Modal, Radio, Row, Select, Space, Table, Tag, TimePicker, Typography } from 'antd';
 import dayjs from 'dayjs';
+import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { listAllEmployees } from '@/features/hrms/api';
 import { listAllItems, listAllWarehouses } from '@/features/inventory/api';
+import type { Item } from '@/features/inventory/types';
 import {
     closeDowntimeLog,
     closeMoldChangeLog,
@@ -28,6 +30,7 @@ import {
 import type {
     MachineDowntimeLog,
     MoldChangeLog,
+    Shift,
     ShiftProductionEntry,
     ShiftProductionEntryStatus,
     WorkCenter,
@@ -42,6 +45,98 @@ function combineWithToday(today: string, time: string): string {
     return dayjs(`${today} ${time}`).toISOString();
 }
 
+/** "10.60" → 10.6; null for null/empty/unparseable — never NaN. */
+function toNum(v: string | null | undefined): number | null {
+    if (v === null || v === undefined || v === '') return null;
+    const n = parseFloat(v);
+    return Number.isNaN(n) ? null : n;
+}
+
+/** Display helper: trims trailing zeros, "—" for missing. */
+function fmtNum(n: number | null | undefined, dp = 2): string {
+    return n === null || n === undefined || Number.isNaN(n) ? '—' : String(parseFloat(n.toFixed(dp)));
+}
+
+/**
+ * Shift length in hours from the shift master's start/end times — the default
+ * "planned hours" for the live expected figures and the Running Hours prefill.
+ * A "to" earlier than "from" is the Night shift crossing midnight.
+ */
+function shiftLengthHours(shift: Shift | null | undefined): number | null {
+    if (!shift?.start_time || !shift.end_time) return null;
+    const [sh, sm] = shift.start_time.split(':').map(Number);
+    const [eh, em] = shift.end_time.split(':').map(Number);
+    if ([sh, sm, eh, em].some((n) => Number.isNaN(n))) return null;
+    let minutes = eh * 60 + em - (sh * 60 + sm);
+    if (minutes <= 0) minutes += 24 * 60;
+    return Math.round((minutes / 60) * 100) / 100;
+}
+
+/**
+ * The expected-output formula from the shared contract, duplicated here for
+ * the live (pre-completion) screens — the backend's metrics block is the
+ * authoritative figure once the batch completes.
+ * expected pieces = 3600/CT × active cavities × hours; boxes = ROUND(pieces/pack).
+ * Null (show nothing — never 0 or NaN) when any input is missing or zero.
+ */
+function expectedOutput(
+    cycleTimeSeconds: number | null,
+    cavities: number | null | undefined,
+    hours: number | null,
+    nosPerBox: number | null,
+): { pieces: number; boxes: number | null } | null {
+    if (!cycleTimeSeconds || cycleTimeSeconds <= 0 || !cavities || cavities <= 0 || !hours || hours <= 0) return null;
+    const pieces = Math.round((3600 / cycleTimeSeconds) * cavities * hours * 100) / 100;
+    const boxes = nosPerBox && nosPerBox >= 1 ? Math.round(pieces / nosPerBox) : null;
+    return { pieces, boxes };
+}
+
+const isMasterbatchItem = (item: Item): boolean => /master ?batch/i.test(`${item.sku} ${item.name}`);
+const isResinItem = (item: Item): boolean => /resin/i.test(`${item.sku} ${item.name}`);
+const isClearColour = (colour: string | null | undefined): boolean => /^clear$/i.test((colour ?? '').trim());
+
+/**
+ * Masterbatch suggested from the product's colour — matched on the MB item's
+ * own colour field first, then on its name containing the colour. Clear
+ * products get no suggestion (no masterbatch goes into Clear).
+ */
+function suggestMasterbatchId(items: Item[] | undefined, colour: string | null | undefined): number | undefined {
+    if (!items || !colour || isClearColour(colour)) return undefined;
+    const c = colour.trim().toLowerCase();
+    if (c === '') return undefined;
+    const mbs = items.filter((i) => i.is_active && isMasterbatchItem(i));
+    const match =
+        mbs.find((i) => (i.colour ?? '').trim().toLowerCase() === c) ??
+        mbs.find((i) => i.name.toLowerCase().includes(c));
+    return match?.id;
+}
+
+const efficiencyTag = (pct: number | null) => {
+    if (pct === null) return null;
+    if (pct >= 95) return <Tag color="green">OK</Tag>;
+    if (pct >= 85) return <Tag color="orange">Watch</Tag>;
+    return <Tag color="red">Investigate</Tag>;
+};
+
+/** One row of the pre-submit results panel: value + its business formula. */
+function ResultRow({ label, value, formula, danger }: { label: string; value: ReactNode; formula?: string; danger?: boolean }) {
+    return (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, padding: '6px 0' }}>
+            <div style={{ minWidth: 0 }}>
+                <Typography.Text>{label}</Typography.Text>
+                {formula && (
+                    <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                        {formula}
+                    </Typography.Text>
+                )}
+            </div>
+            <Typography.Text strong type={danger ? 'danger' : undefined} style={{ whiteSpace: 'nowrap' }}>
+                {value}
+            </Typography.Text>
+        </div>
+    );
+}
+
 const locationLabelOptions = [
     'Hoppers', 'Day Bin', 'Loose Bag', 'Store',
     'MB-Clear', 'MB-Blue', 'MB-Amber', 'MB-White', 'MB-Green', 'MB-Orange', 'MB-Black',
@@ -51,6 +146,9 @@ const startBatchSchema = z.object({
     item_id: z.number({ error: 'Pick an item' }),
     warehouse_id: z.number({ error: 'Pick a warehouse' }),
     operator_id: z.number().optional(),
+    // Prefilled with the item's standard cavity count; editable for the real
+    // case of a blocked cavity. nullish: clearing the InputNumber emits null.
+    active_cavities: z.number().int().min(1, 'At least 1').nullish(),
 });
 type StartBatchFormValues = z.infer<typeof startBatchSchema>;
 
@@ -65,6 +163,23 @@ const completeBatchSchema = z.object({
     no_of_trays: z.number().min(0).nullish(),
     nos_per_box: z.number().min(0).nullish(),
     no_of_box: z.number().min(0).nullish(),
+    // Box-first: frontend-only helper — quantity_produced derives from
+    // no_of_box × item pack + loose. Never sent to the API.
+    loose_pieces: z.number().min(0).nullish(),
+    // Expected-output engine inputs (all optional — a batch with no standards
+    // must complete exactly as before these fields existed).
+    running_hours: z.number().gt(0, 'Must be greater than 0').max(24, 'Max 24 hours').nullish(),
+    actual_cycle_time: z.number().min(0.1, 'At least 0.1 s').nullish(),
+    active_cavities: z.number().int().min(1, 'At least 1').nullish(),
+    qc_rejection_kg: z.number().min(0).nullish(),
+    // The two fixed material rows (resin + masterbatch). Only rows with a
+    // quantity are sent — merged into material_consumptions on submit.
+    resin_item_id: z.number().nullish(),
+    resin_warehouse_id: z.number().nullish(),
+    resin_kg: z.number().min(0).nullish(),
+    mb_item_id: z.number().nullish(),
+    mb_warehouse_id: z.number().nullish(),
+    mb_kg: z.number().min(0).nullish(),
     helper_name: z.string().max(120, 'Max 120 characters').optional(),
     notes: z.string().optional(),
     material_consumptions: z
@@ -86,6 +201,22 @@ const completeBatchSchema = z.object({
             }),
         )
         .optional(),
+}).superRefine((data, ctx) => {
+    // A fixed row with kg entered needs its item and source — otherwise the
+    // kilograms would be silently dropped from the payload.
+    const requireRow = (
+        kg: number | null | undefined,
+        itemId: number | null | undefined,
+        warehouseId: number | null | undefined,
+        itemPath: string,
+        warehousePath: string,
+    ) => {
+        if (!kg || kg <= 0) return;
+        if (!itemId) ctx.addIssue({ code: 'custom', path: [itemPath], message: 'Pick the item' });
+        if (!warehouseId) ctx.addIssue({ code: 'custom', path: [warehousePath], message: 'Pick the source' });
+    };
+    requireRow(data.resin_kg, data.resin_item_id, data.resin_warehouse_id, 'resin_item_id', 'resin_warehouse_id');
+    requireRow(data.mb_kg, data.mb_item_id, data.mb_warehouse_id, 'mb_item_id', 'mb_warehouse_id');
 });
 type CompleteBatchFormValues = z.infer<typeof completeBatchSchema>;
 
@@ -259,6 +390,12 @@ export default function ShiftProductionEntryPage() {
     // Inactive items (retired demo/legacy masters) must not be selectable —
     // Tally rejects vouchers for items it doesn't know.
     const itemOptions = items?.data.filter((i) => i.is_active).map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];
+    // Focused pickers for the two fixed consumption rows — a supervisor
+    // filling "Resin (kg)" should only ever see resins, not all 642 items.
+    const resinOptions =
+        items?.data.filter((i) => i.is_active && isResinItem(i)).map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];
+    const mbOptions =
+        items?.data.filter((i) => i.is_active && isMasterbatchItem(i)).map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];
     const moldOptions =
         molds?.data.filter((m) => m.status === 'active').map((m) => ({ value: m.id, label: `${m.code} — ${m.name}` })) ?? [];
     // "Changed From" is a historical record of what just came out, not a
@@ -335,12 +472,32 @@ export default function ShiftProductionEntryPage() {
     const invalidateMoldChange = () => queryClient.invalidateQueries({ queryKey: ['production', 'mold-change-logs'] });
 
     const startForm = useForm<StartBatchFormValues>({ resolver: zodResolver(startBatchSchema) });
+    // The picked item's master record — drives the read-only "Product
+    // standards" summary and the Active Cavities prefill in Start Batch.
+    const startItemId = startForm.watch('item_id');
+    const startItem = useMemo(() => items?.data.find((i) => i.id === startItemId), [items, startItemId]);
+    // Active cavities is a per-item value: every item change re-prefills it
+    // with that item's standard (an earlier edit belonged to the old item).
+    // Items without a standard leave it blank — fully manual, as before.
+    useEffect(() => {
+        if (!startingMachine) return;
+        startForm.setValue('active_cavities', startItem?.standard_cavities ?? undefined);
+    }, [startItem, startingMachine, startForm]);
     const startMutation = useMutation({
         mutationFn: (values: StartBatchFormValues) => {
             if (!startingMachine || !effectiveShiftId) throw new Error('Missing machine or shift');
+            const { active_cavities, ...rest } = values;
             // production_date sent explicitly (shift-aware): a batch started at
             // 02:00 on the Night shift files under the shift's START date.
-            return startBatch({ ...values, work_center_id: startingMachine.id, shift_id: effectiveShiftId, production_date: today });
+            return startBatch({
+                ...rest,
+                // null (cleared InputNumber) → omitted; backend then defaults
+                // active cavities to the item's standard.
+                active_cavities: active_cavities ?? undefined,
+                work_center_id: startingMachine.id,
+                shift_id: effectiveShiftId,
+                production_date: today,
+            });
         },
         onSuccess: () => {
             invalidate();
@@ -363,6 +520,15 @@ export default function ShiftProductionEntryPage() {
     const scrapFields = useFieldArray({ control: completeForm.control, name: 'scraps' });
     const quantityProduced = completeForm.watch('quantity_produced');
     const quantityScrap = completeForm.watch('quantity_scrap');
+    const goodBoxesWatch = completeForm.watch('no_of_box');
+    const loosePiecesWatch = completeForm.watch('loose_pieces');
+    const runningHoursWatch = completeForm.watch('running_hours');
+    const activeCavitiesWatch = completeForm.watch('active_cavities');
+    const qcRejectionWatch = completeForm.watch('qc_rejection_kg');
+    const resinKgWatch = completeForm.watch('resin_kg');
+    const mbKgWatch = completeForm.watch('mb_kg');
+    const scrapsWatch = completeForm.watch('scraps');
+    const consumptionsWatch = completeForm.watch('material_consumptions');
 
     // Packing auto-fill from the item's packing master (nos_per_tray /
     // nos_per_box). Auto-writes never mark the field dirty, so the dirty flag
@@ -382,14 +548,107 @@ export default function ShiftProductionEntryPage() {
         suggest('no_of_box', completingEntry.item.nos_per_box);
     }, [quantityProduced, completingEntry, completeForm]);
 
+    // Box-first (the inverse direction): Good Boxes × pcs/box + loose derives
+    // Quantity Produced. Same dirty rule as the packing auto-fill above — a
+    // quantity the user corrected by hand is theirs and never overwritten, and
+    // the derived write itself never marks the field dirty. Items without a
+    // pcs/box standard never enter this path (manual entry, exactly as today).
+    // No loop with the packing suggestion: user-typed boxes are dirty (so the
+    // ceil-suggestion skips them), derived quantity is not (so this keeps
+    // following box edits).
+    // The form's own Nos/Box (supervisor-corrected pack size) beats the
+    // master standard — a run packed at 800/box must derive with 800.
+    const nosPerBoxWatch = completeForm.watch('nos_per_box');
+    useEffect(() => {
+        if (!completingEntry) return;
+        const nosPerBox = nosPerBoxWatch ?? completingEntry.item.nos_per_box;
+        if (!nosPerBox || nosPerBox < 1) return;
+        if (goodBoxesWatch === null || goodBoxesWatch === undefined) return;
+        if (completeForm.getFieldState('quantity_produced').isDirty) return;
+        completeForm.setValue('quantity_produced', goodBoxesWatch * nosPerBox + (loosePiecesWatch ?? 0));
+    }, [goodBoxesWatch, loosePiecesWatch, nosPerBoxWatch, completingEntry, completeForm]);
+
     const nominalWeight = completingEntry?.item.nominal_weight_grams ? Number(completingEntry.item.nominal_weight_grams) : null;
     const previewProducedKg = nominalWeight && quantityProduced ? ((quantityProduced * nominalWeight) / 1000).toFixed(4) : null;
     const previewRejectionKg = nominalWeight && quantityScrap ? ((quantityScrap * nominalWeight) / 1000).toFixed(4) : null;
 
+    // Everything the pre-submit results panel shows, computed live from the
+    // form + the entry's Start Batch snapshots. Frontend duplicate of the
+    // contract formulas — the backend metrics block is authoritative once
+    // completed. Null members mean "inputs missing, show nothing".
+    const results = useMemo(() => {
+        if (!completingEntry) return null;
+        const ct = toNum(completingEntry.standard_cycle_time);
+        const cavities = activeCavitiesWatch ?? completingEntry.active_cavities ?? completingEntry.standard_cavities ?? null;
+        const hours = runningHoursWatch ?? null;
+        // Form's corrected pack size wins over the master (mirrors backend).
+        const nosPerBox = nosPerBoxWatch ?? completingEntry.item.nos_per_box ?? null;
+        const expected = expectedOutput(ct, cavities, hours, nosPerBox);
+        const goodKg = nominalWeight && quantityProduced ? (quantityProduced * nominalWeight) / 1000 : null;
+        const rejProdKg = nominalWeight && quantityScrap ? (quantityScrap * nominalWeight) / 1000 : null;
+        const qcKg = qcRejectionWatch ?? null;
+        const rejDiffKg = rejProdKg !== null && qcKg !== null ? rejProdKg - qcKg : null;
+        const lumpsKg = (scrapsWatch ?? []).reduce((sum, s) => sum + (s?.type === 'lumps' ? (s.quantity_kg ?? 0) : 0), 0);
+        const issuedKg =
+            (resinKgWatch ?? 0) + (mbKgWatch ?? 0) + (consumptionsWatch ?? []).reduce((sum, c) => sum + (c?.quantity_issued_kg ?? 0), 0);
+        const confirmedRejKg = qcKg ?? rejProdKg;
+        const unaccountedKg = issuedKg > 0 && goodKg !== null ? issuedKg - goodKg - (confirmedRejKg ?? 0) - lumpsKg : null;
+        const actualBoxes = goodBoxesWatch ?? null;
+        const efficiencyPct = expected?.boxes && actualBoxes !== null ? Math.round((actualBoxes / expected.boxes) * 1000) / 10 : null;
+        return { ct, cavities, hours, nosPerBox, expected, goodKg, rejProdKg, qcKg, rejDiffKg, lumpsKg, issuedKg, unaccountedKg, actualBoxes, efficiencyPct };
+    }, [
+        completingEntry,
+        nominalWeight,
+        quantityProduced,
+        quantityScrap,
+        goodBoxesWatch,
+        runningHoursWatch,
+        activeCavitiesWatch,
+        qcRejectionWatch,
+        resinKgWatch,
+        mbKgWatch,
+        scrapsWatch,
+        consumptionsWatch,
+    ]);
+
     const completeMutation = useMutation({
         mutationFn: (values: CompleteBatchFormValues) => {
             if (!completingEntry) throw new Error('No batch selected');
-            return completeBatch(completingEntry.id, values);
+            const {
+                loose_pieces: _loosePieces, // frontend-only derivation helper
+                resin_item_id,
+                resin_warehouse_id,
+                resin_kg,
+                mb_item_id,
+                mb_warehouse_id,
+                mb_kg,
+                running_hours,
+                qc_rejection_kg,
+                actual_cycle_time,
+                active_cavities,
+                material_consumptions,
+                ...rest
+            } = values;
+            // The fixed resin/MB rows are ordinary consumption lines on the
+            // wire — same payload shape as before, no backend change.
+            const consumptions = [
+                ...(resin_item_id && resin_warehouse_id && resin_kg && resin_kg > 0
+                    ? [{ item_id: resin_item_id, warehouse_id: resin_warehouse_id, quantity_issued_kg: resin_kg }]
+                    : []),
+                ...(mb_item_id && mb_warehouse_id && mb_kg && mb_kg > 0
+                    ? [{ item_id: mb_item_id, warehouse_id: mb_warehouse_id, quantity_issued_kg: mb_kg }]
+                    : []),
+                ...(material_consumptions ?? []),
+            ];
+            return completeBatch(completingEntry.id, {
+                ...rest,
+                material_consumptions: consumptions,
+                // Cleared InputNumbers emit null — omit rather than send null.
+                running_hours: running_hours ?? undefined,
+                qc_rejection_kg: qc_rejection_kg ?? undefined,
+                actual_cycle_time: actual_cycle_time ?? undefined,
+                active_cavities: active_cavities ?? undefined,
+            });
         },
         onSuccess: () => {
             invalidate();
@@ -600,6 +859,19 @@ export default function ShiftProductionEntryPage() {
                     // takes precedence over "Running", since those are the
                     // states that need someone's attention next.
                     const cardColor = down ? '#ff4d4f' : moldChange ? '#faad14' : running ? '#52c41a' : undefined;
+                    // Live expected output for the running card — the contract
+                    // formula at the STANDARD cycle time snapshot, active
+                    // cavities, and planned hours = the shift's full length.
+                    // Null (nothing shown) when the item has no standards.
+                    const liveExpected =
+                        !down && !moldChange && running
+                            ? expectedOutput(
+                                  toNum(running.standard_cycle_time),
+                                  running.active_cavities ?? running.standard_cavities,
+                                  shiftLengthHours(running.shift),
+                                  running.item.nos_per_box,
+                              )
+                            : null;
 
                     const primaryClick = () => {
                         if (down) {
@@ -612,11 +884,18 @@ export default function ShiftProductionEntryPage() {
                             // Prefill Nos/Tray and Nos/Box from the item's packing
                             // master when set — for items without standards both are
                             // undefined and this reset is identical to before.
+                            // Expected-output prefills: Running Hours defaults to
+                            // the shift's full length, Active Cavities to what Start
+                            // Batch recorded (itself defaulted from the standard),
+                            // and the Masterbatch row to the colour-matched MB item.
                             completeForm.reset({
                                 material_consumptions: [],
                                 scraps: [],
                                 nos_per_tray: running.item.nos_per_tray ?? undefined,
                                 nos_per_box: running.item.nos_per_box ?? undefined,
+                                running_hours: shiftLengthHours(running.shift) ?? undefined,
+                                active_cavities: running.active_cavities ?? running.standard_cavities ?? undefined,
+                                mb_item_id: suggestMasterbatchId(items?.data, running.item.colour),
                             });
                         } else {
                             setStartingMachine(wc);
@@ -642,6 +921,18 @@ export default function ShiftProductionEntryPage() {
                                     {!down && !moldChange && running && <Tag color="success">Running — {running.item.sku}</Tag>}
                                     {!down && !moldChange && !running && <Tag>Idle</Tag>}
                                 </div>
+                                {liveExpected && running && (
+                                    <div style={{ marginBottom: 6 }}>
+                                        <Typography.Text strong style={{ fontSize: 12 }}>
+                                            ≈ {Math.round(liveExpected.pieces).toLocaleString('en-IN')} pcs
+                                            {liveExpected.boxes !== null ? ` · ${liveExpected.boxes} boxes` : ''}
+                                        </Typography.Text>
+                                        <Typography.Text type="secondary" style={{ display: 'block', fontSize: 11 }}>
+                                            {fmtNum(toNum(running.standard_cycle_time))} s × {running.active_cavities ?? running.standard_cavities} cav ×{' '}
+                                            {fmtNum(shiftLengthHours(running.shift))} h
+                                        </Typography.Text>
+                                    </div>
+                                )}
                                 {!down && !moldChange && (
                                     // Stacked full-width buttons: side-by-side small
                                     // buttons overlapped on a phone-width card and
@@ -739,6 +1030,44 @@ export default function ShiftProductionEntryPage() {
                             )}
                         />
                     </Form.Item>
+                    {startItem && (
+                        <>
+                            {/* Read-only card of the item master's standards — what the
+                                expected-output engine will hold this run against. */}
+                            <Descriptions
+                                size="small"
+                                column={2}
+                                bordered
+                                style={{ marginBottom: 16 }}
+                                title={<Typography.Text strong>Product standards</Typography.Text>}
+                            >
+                                <Descriptions.Item label="Colour">{startItem.colour ?? '—'}</Descriptions.Item>
+                                <Descriptions.Item label="Weight">
+                                    {startItem.nominal_weight_grams ? `${fmtNum(toNum(startItem.nominal_weight_grams))} g` : '—'}
+                                </Descriptions.Item>
+                                <Descriptions.Item label="Std CT">
+                                    {startItem.standard_cycle_time ? `${fmtNum(toNum(startItem.standard_cycle_time))} s` : '—'}
+                                </Descriptions.Item>
+                                <Descriptions.Item label="Std cavities">{startItem.standard_cavities ?? '—'}</Descriptions.Item>
+                                <Descriptions.Item label="Pcs/box">{startItem.nos_per_box ?? '—'}</Descriptions.Item>
+                                <Descriptions.Item label="Pcs/tray">{startItem.nos_per_tray ?? '—'}</Descriptions.Item>
+                            </Descriptions>
+                            <Form.Item
+                                label="Active Cavities"
+                                validateStatus={startForm.formState.errors.active_cavities ? 'error' : ''}
+                                help={startForm.formState.errors.active_cavities?.message}
+                                extra={startItem.standard_cavities ? `std: ${startItem.standard_cavities}` : undefined}
+                            >
+                                <Controller
+                                    name="active_cavities"
+                                    control={startForm.control}
+                                    render={({ field }) => (
+                                        <InputNumber {...field} size="large" min={1} style={{ width: '100%' }} placeholder="Cavities actually running" />
+                                    )}
+                                />
+                            </Form.Item>
+                        </>
+                    )}
                     <Form.Item
                         label="Finished Goods Warehouse"
                         validateStatus={startForm.formState.errors.warehouse_id ? 'error' : ''}
@@ -781,12 +1110,45 @@ export default function ShiftProductionEntryPage() {
                         <Controller name="batch_number" control={completeForm.control} render={({ field }) => <Input {...field} />} />
                     </Form.Item>
 
+                    {/* Box-first: boxes are what the floor physically counts.
+                        Pieces derive from boxes × pcs/box + loose, and stay
+                        editable for corrections. */}
+                    <Row gutter={16}>
+                        <Col span={12}>
+                            <Form.Item
+                                label="Good Boxes"
+                                validateStatus={completeForm.formState.errors.no_of_box ? 'error' : ''}
+                                help={completeForm.formState.errors.no_of_box?.message}
+                            >
+                                <Controller
+                                    name="no_of_box"
+                                    control={completeForm.control}
+                                    render={({ field }) => <InputNumber {...field} size="large" min={0} style={{ width: '100%' }} />}
+                                />
+                            </Form.Item>
+                        </Col>
+                        <Col span={12}>
+                            <Form.Item label="Loose Pieces (optional)">
+                                <Controller
+                                    name="loose_pieces"
+                                    control={completeForm.control}
+                                    render={({ field }) => <InputNumber {...field} size="large" min={0} style={{ width: '100%' }} />}
+                                />
+                            </Form.Item>
+                        </Col>
+                    </Row>
+
                     <Row gutter={16}>
                         <Col span={12}>
                             <Form.Item
                                 label="Quantity Produced (Nos)"
                                 validateStatus={completeForm.formState.errors.quantity_produced ? 'error' : ''}
                                 help={completeForm.formState.errors.quantity_produced?.message}
+                                extra={
+                                    completingEntry?.item.nos_per_box
+                                        ? `= boxes × ${completingEntry.item.nos_per_box} pcs/box + loose — editable`
+                                        : undefined
+                                }
                             >
                                 <Controller
                                     name="quantity_produced"
@@ -829,32 +1191,190 @@ export default function ShiftProductionEntryPage() {
                         </Form.Item>
                     )}
 
-                    <Typography.Text strong>Packing</Typography.Text>
-                    <Row gutter={16} style={{ marginTop: 8, marginBottom: 16 }}>
-                        <Col xs={12} sm={6}>
-                            <Form.Item label="Nos/Tray">
-                                <Controller name="nos_per_tray" control={completeForm.control} render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />} />
+                    <Form.Item
+                        label="QC Rejection (Kg) — optional"
+                        validateStatus={completeForm.formState.errors.qc_rejection_kg ? 'error' : ''}
+                        help={completeForm.formState.errors.qc_rejection_kg?.message}
+                        extra="QC's weighed figure — overrides the calculated rejection kg when present"
+                    >
+                        <Controller
+                            name="qc_rejection_kg"
+                            control={completeForm.control}
+                            render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} suffix="Kg" />}
+                        />
+                    </Form.Item>
+
+                    <Typography.Text strong>Run Details</Typography.Text>
+                    <Row gutter={16} style={{ marginTop: 8 }}>
+                        <Col xs={12} sm={8}>
+                            <Form.Item
+                                label="Running Hours"
+                                validateStatus={completeForm.formState.errors.running_hours ? 'error' : ''}
+                                help={completeForm.formState.errors.running_hours?.message}
+                                extra="default: full shift"
+                            >
+                                <Controller
+                                    name="running_hours"
+                                    control={completeForm.control}
+                                    render={({ field }) => <InputNumber {...field} min={0} max={24} step={0.5} style={{ width: '100%' }} />}
+                                />
                             </Form.Item>
                         </Col>
-                        <Col xs={12} sm={6}>
-                            <Form.Item label="Trays">
-                                <Controller name="no_of_trays" control={completeForm.control} render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />} />
+                        <Col xs={12} sm={8}>
+                            <Form.Item
+                                label="Actual Cycle Time (s)"
+                                validateStatus={completeForm.formState.errors.actual_cycle_time ? 'error' : ''}
+                                help={completeForm.formState.errors.actual_cycle_time?.message}
+                            >
+                                <Controller
+                                    name="actual_cycle_time"
+                                    control={completeForm.control}
+                                    render={({ field }) => (
+                                        <InputNumber
+                                            {...field}
+                                            min={0}
+                                            step={0.1}
+                                            style={{ width: '100%' }}
+                                            placeholder={
+                                                completingEntry?.standard_cycle_time
+                                                    ? `std ${fmtNum(toNum(completingEntry.standard_cycle_time))}`
+                                                    : undefined
+                                            }
+                                        />
+                                    )}
+                                />
                             </Form.Item>
                         </Col>
-                        <Col xs={12} sm={6}>
-                            <Form.Item label="Nos/Box">
-                                <Controller name="nos_per_box" control={completeForm.control} render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />} />
-                            </Form.Item>
-                        </Col>
-                        <Col xs={12} sm={6}>
-                            <Form.Item label="Boxes">
-                                <Controller name="no_of_box" control={completeForm.control} render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />} />
+                        <Col xs={12} sm={8}>
+                            <Form.Item
+                                label="Active Cavities"
+                                validateStatus={completeForm.formState.errors.active_cavities ? 'error' : ''}
+                                help={completeForm.formState.errors.active_cavities?.message}
+                                extra={completingEntry?.standard_cavities ? `std: ${completingEntry.standard_cavities}` : undefined}
+                            >
+                                <Controller
+                                    name="active_cavities"
+                                    control={completeForm.control}
+                                    render={({ field }) => <InputNumber {...field} min={1} style={{ width: '100%' }} />}
+                                />
                             </Form.Item>
                         </Col>
                     </Row>
 
-                    <Space style={{ justifyContent: 'space-between', width: '100%' }}>
-                        <Typography.Text strong>Material Consumption</Typography.Text>
+                    <Typography.Text strong>Packing</Typography.Text>
+                    <Row gutter={16} style={{ marginTop: 8, marginBottom: 16 }}>
+                        <Col xs={12} sm={8}>
+                            <Form.Item label="Nos/Tray">
+                                <Controller name="nos_per_tray" control={completeForm.control} render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />} />
+                            </Form.Item>
+                        </Col>
+                        <Col xs={12} sm={8}>
+                            <Form.Item label="Trays">
+                                <Controller name="no_of_trays" control={completeForm.control} render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />} />
+                            </Form.Item>
+                        </Col>
+                        <Col xs={12} sm={8}>
+                            <Form.Item label="Nos/Box">
+                                <Controller name="nos_per_box" control={completeForm.control} render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />} />
+                            </Form.Item>
+                        </Col>
+                    </Row>
+
+                    <Typography.Text strong>Material Consumption</Typography.Text>
+
+                    {/* Fixed rows for the two materials every molding batch
+                        consumes — pickers scoped to resins / masterbatches so
+                        the right item is one tap, not a 642-item search. Rows
+                        without a quantity are simply not sent. */}
+                    <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
+                        Resin (kg)
+                    </Typography.Text>
+                    <Row gutter={[8, 8]} align="top" style={{ marginTop: 4 }}>
+                        <Col xs={24} sm={10}>
+                            <Form.Item
+                                style={{ marginBottom: 0 }}
+                                validateStatus={completeForm.formState.errors.resin_item_id ? 'error' : ''}
+                                help={completeForm.formState.errors.resin_item_id?.message}
+                            >
+                                <Controller
+                                    name="resin_item_id"
+                                    control={completeForm.control}
+                                    render={({ field }) => (
+                                        <Select {...field} size="large" options={resinOptions} showSearch optionFilterProp="label" allowClear style={{ width: '100%' }} placeholder="Resin…" />
+                                    )}
+                                />
+                            </Form.Item>
+                        </Col>
+                        <Col xs={12} sm={7}>
+                            <Form.Item
+                                style={{ marginBottom: 0 }}
+                                validateStatus={completeForm.formState.errors.resin_warehouse_id ? 'error' : ''}
+                                help={completeForm.formState.errors.resin_warehouse_id?.message}
+                            >
+                                <Controller
+                                    name="resin_warehouse_id"
+                                    control={completeForm.control}
+                                    render={({ field }) => (
+                                        <Select {...field} size="large" options={warehouseOptions} showSearch optionFilterProp="label" allowClear style={{ width: '100%' }} placeholder="From" />
+                                    )}
+                                />
+                            </Form.Item>
+                        </Col>
+                        <Col xs={12} sm={7}>
+                            <Controller
+                                name="resin_kg"
+                                control={completeForm.control}
+                                render={({ field }) => <InputNumber {...field} size="large" min={0} placeholder="Kg" suffix="Kg" style={{ width: '100%' }} />}
+                            />
+                        </Col>
+                    </Row>
+
+                    <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
+                        Masterbatch (kg)
+                        {completingEntry && isClearColour(completingEntry.item.colour) && ' — No masterbatch for Clear'}
+                    </Typography.Text>
+                    <Row gutter={[8, 8]} align="top" style={{ marginTop: 4 }}>
+                        <Col xs={24} sm={10}>
+                            <Form.Item
+                                style={{ marginBottom: 0 }}
+                                validateStatus={completeForm.formState.errors.mb_item_id ? 'error' : ''}
+                                help={completeForm.formState.errors.mb_item_id?.message}
+                            >
+                                <Controller
+                                    name="mb_item_id"
+                                    control={completeForm.control}
+                                    render={({ field }) => (
+                                        <Select {...field} size="large" options={mbOptions} showSearch optionFilterProp="label" allowClear style={{ width: '100%' }} placeholder="Masterbatch…" />
+                                    )}
+                                />
+                            </Form.Item>
+                        </Col>
+                        <Col xs={12} sm={7}>
+                            <Form.Item
+                                style={{ marginBottom: 0 }}
+                                validateStatus={completeForm.formState.errors.mb_warehouse_id ? 'error' : ''}
+                                help={completeForm.formState.errors.mb_warehouse_id?.message}
+                            >
+                                <Controller
+                                    name="mb_warehouse_id"
+                                    control={completeForm.control}
+                                    render={({ field }) => (
+                                        <Select {...field} size="large" options={warehouseOptions} showSearch optionFilterProp="label" allowClear style={{ width: '100%' }} placeholder="From" />
+                                    )}
+                                />
+                            </Form.Item>
+                        </Col>
+                        <Col xs={12} sm={7}>
+                            <Controller
+                                name="mb_kg"
+                                control={completeForm.control}
+                                render={({ field }) => <InputNumber {...field} size="large" min={0} placeholder="Kg" suffix="Kg" style={{ width: '100%' }} />}
+                            />
+                        </Col>
+                    </Row>
+
+                    <Space style={{ justifyContent: 'space-between', width: '100%', marginTop: 12 }}>
+                        <Typography.Text type="secondary">Other materials (exceptions)</Typography.Text>
                         <Button
                             size="small"
                             onClick={() =>
@@ -973,6 +1493,75 @@ export default function ShiftProductionEntryPage() {
                     <Form.Item label="Notes (optional)">
                         <Controller name="notes" control={completeForm.control} render={({ field }) => <Input {...field} />} />
                     </Form.Item>
+
+                    {/* Pre-submit results: the same numbers the approvers will
+                        see, computed live so surprises surface BEFORE the
+                        entry enters the approval chain. Rows with missing
+                        inputs are hidden — never a fake 0. */}
+                    {results && (
+                        <Card size="small" title="Results — check before you submit" style={{ marginTop: 8 }}>
+                            {results.expected && (
+                                <ResultRow
+                                    label="Expected output"
+                                    value={`${fmtNum(results.expected.pieces, 0)} pcs${results.expected.boxes !== null ? ` · ${results.expected.boxes} boxes` : ''}`}
+                                    formula={`3600 / ${fmtNum(results.ct)} s × ${results.cavities} cavities × ${fmtNum(results.hours)} h${
+                                        results.expected.boxes !== null && results.nosPerBox ? ` ÷ ${results.nosPerBox} pcs/box` : ''
+                                    }`}
+                                />
+                            )}
+                            {!!quantityProduced && quantityProduced > 0 && (
+                                <ResultRow
+                                    label="Actual output"
+                                    value={`${quantityProduced.toLocaleString('en-IN')} pcs${results.actualBoxes !== null ? ` · ${results.actualBoxes} boxes` : ''}`}
+                                    formula="good boxes × pcs/box + loose"
+                                />
+                            )}
+                            {results.efficiencyPct !== null && (
+                                <ResultRow
+                                    label="Efficiency"
+                                    value={
+                                        <Space size={6}>
+                                            {`${results.efficiencyPct}%`}
+                                            {efficiencyTag(results.efficiencyPct)}
+                                        </Space>
+                                    }
+                                    formula={`${results.actualBoxes} boxes ÷ ${results.expected?.boxes} expected × 100`}
+                                />
+                            )}
+                            {results.goodKg !== null && (
+                                <ResultRow
+                                    label="Production"
+                                    value={`${fmtNum(results.goodKg)} kg`}
+                                    formula={`${quantityProduced} pcs × ${fmtNum(nominalWeight)} g ÷ 1000`}
+                                />
+                            )}
+                            {results.rejProdKg !== null && (
+                                <ResultRow
+                                    label="Rejection (production)"
+                                    value={`${fmtNum(results.rejProdKg)} kg`}
+                                    formula={`${quantityScrap} pcs × ${fmtNum(nominalWeight)} g ÷ 1000`}
+                                />
+                            )}
+                            {results.qcKg !== null && (
+                                <ResultRow label="Rejection (QC weighed)" value={`${fmtNum(results.qcKg)} kg`} formula="QC's figure wins when present" />
+                            )}
+                            {results.rejDiffKg !== null && (
+                                <ResultRow label="Rejection difference" value={`${fmtNum(results.rejDiffKg)} kg`} formula="production − QC" />
+                            )}
+                            {results.lumpsKg > 0 && <ResultRow label="Lumps" value={`${fmtNum(results.lumpsKg)} kg`} formula="sum of lump scrap lines" />}
+                            {results.issuedKg > 0 && (
+                                <ResultRow label="Material issued" value={`${fmtNum(results.issuedKg)} kg`} formula="resin + masterbatch + other lines" />
+                            )}
+                            {results.unaccountedKg !== null && (
+                                <ResultRow
+                                    label="Unaccounted"
+                                    value={`${fmtNum(results.unaccountedKg)} kg`}
+                                    formula="issued − good − rejection (QC wins) − lumps"
+                                    danger={Math.abs(results.unaccountedKg) > 0.5}
+                                />
+                            )}
+                        </Card>
+                    )}
                 </Form>
             </Drawer>
 

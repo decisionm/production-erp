@@ -21,6 +21,10 @@ export interface CreateItemPayload {
     hsn_sac_code?: string;
     reorder_level?: number;
     nominal_weight_grams?: number;
+    // Product standards — accepted as 'sometimes','nullable' on store/update.
+    colour?: string | null;
+    standard_cycle_time?: number | null;
+    standard_cavities?: number | null;
     tracking_type?: ItemTrackingType;
 }
 

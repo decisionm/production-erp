@@ -225,6 +225,11 @@ export interface StartBatchPayload {
     warehouse_id: number;
     production_date?: string;
     operator_id?: number;
+    // Backend defaults active cavities to the item's standard at Start Batch;
+    // sent when the supervisor overrides it up front (e.g. blocked cavity).
+    // Complete Batch re-sends it, so a backend that ignores this still gets
+    // the corrected value at completion.
+    active_cavities?: number;
 }
 
 export async function startBatch(payload: StartBatchPayload): Promise<ShiftProductionEntry> {
@@ -242,6 +247,10 @@ export interface CompleteBatchPayload {
     no_of_trays?: number | null;
     nos_per_box?: number | null;
     no_of_box?: number | null;
+    running_hours?: number;
+    qc_rejection_kg?: number;
+    actual_cycle_time?: number;
+    active_cavities?: number;
     helper_name?: string;
     notes?: string;
     material_consumptions?: { item_id: number; warehouse_id: number; quantity_issued_kg: number }[];

@@ -25,6 +25,9 @@ class StoreItemRequest extends FormRequest
             'nos_per_tray' => ['sometimes', 'nullable', 'integer', 'min:1'],
             'trays_per_box' => ['sometimes', 'nullable', 'integer', 'min:1'],
             'nos_per_box' => ['sometimes', 'nullable', 'integer', 'min:1'],
+            'colour' => ['sometimes', 'nullable', 'string', 'max:32'],
+            'standard_cycle_time' => ['sometimes', 'nullable', 'numeric', 'min:0.1'],
+            'standard_cavities' => ['sometimes', 'nullable', 'integer', 'min:1'],
             'tracking_type' => ['nullable', Rule::in(['none', 'batch', 'serial'])],
             'is_active' => ['boolean'],
         ];

@@ -116,6 +116,41 @@ export interface ConsumptionVariance {
     unaccounted_kg: string | null;
 }
 
+/**
+ * Expected-output engine block, computed by the backend once a batch is
+ * completed. Answers "did this machine produce what its cycle time says it
+ * should have" — a different question from `ConsumptionVariance` (norm-based
+ * material usage), which stays unchanged alongside it.
+ */
+export interface ProductionMetrics {
+    /** (3600 / standard_cycle_time) × active_cavities × running_hours, 2dp — null if any input missing/zero. */
+    expected_pieces: string | null;
+    /** ROUND(expected_pieces / item.nos_per_box) — null if nos_per_box missing. */
+    expected_boxes: number | null;
+    /** = no_of_box as entered. */
+    actual_boxes: number | null;
+    /** = quantity_produced (box-first: frontend derives it, backend just reports). */
+    actual_pieces: string | null;
+    /** actual_boxes / expected_boxes × 100 rounded 1dp — null when expected_boxes null/0. */
+    efficiency_pct: number | null;
+    /** quantity_rejection_kg (pieces × g / 1000). */
+    rejection_kg_production: string | null;
+    /** qc_rejection_kg. */
+    rejection_kg_qc: string | null;
+    /** production − qc, null unless both present. */
+    rejection_diff_kg: string | null;
+    /** Sum of scraps type=lumps. */
+    lumps_kg: string;
+    /** Sum of material_consumptions quantity_issued_kg. */
+    issued_kg: string;
+    /** quantity_produced_kg. */
+    good_production_kg: string | null;
+    /** qc_rejection_kg ?? quantity_rejection_kg (QC wins when present). */
+    confirmed_rejection_kg: string | null;
+    /** issued − good − confirmed_rejection − lumps; null if issued==0 or good null. */
+    reconciliation_unaccounted_kg: string | null;
+}
+
 export interface ShiftProductionEntry {
     id: number;
     shift: Shift;
@@ -134,10 +169,27 @@ export interface ShiftProductionEntry {
     no_of_trays: number | null;
     nos_per_box: number | null;
     no_of_box: number | null;
+    /** SNAPSHOT copied from the item at Start Batch — never editable after. */
+    standard_cycle_time: string | null;
+    actual_cycle_time: string | null;
+    /** Snapshot from the item at Start Batch. */
+    standard_cavities: number | null;
+    /** Editable; defaults to standard. */
+    active_cavities: number | null;
+    /** Entered at Complete Batch. */
+    running_hours: string | null;
+    /** Entered at/after completion. */
+    qc_rejection_kg: string | null;
     material_consumptions: ShiftMaterialConsumption[];
     scraps: ShiftScrap[];
     /** Null when batch_status is not completed (no consumption yet). */
     variance: ConsumptionVariance | null;
+    /**
+     * Null for non-completed batches — the frontend duplicates the expected_*
+     * formula for the live running screen; backend is authoritative after
+     * completion.
+     */
+    metrics: ProductionMetrics | null;
     /** Latest Tally sync error — present only when status is "failed". */
     sync_error?: string | null;
     status: ShiftProductionEntryStatus;
