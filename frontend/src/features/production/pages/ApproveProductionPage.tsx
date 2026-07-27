@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Descriptions, Drawer, Input, Modal, Segmented, Space, Steps, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Descriptions, Drawer, Input, Modal, Segmented, Space, Steps, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { useAuthStore } from '@/features/auth/store';
 import {
@@ -194,8 +194,8 @@ export default function ApproveProductionPage() {
         <>
             <Typography.Title level={3} style={{ marginBottom: 4 }}>Approve Production</Typography.Title>
             <Typography.Paragraph type="secondary">
-                Every completed batch passes the full chain — Supervisor → Plant Manager → Accountant → MD —
-                before it syncs to Tally. Rejection at any stage sends it back to the supervisor.
+                Every completed batch passes the chain — Supervisor → Plant Manager → Accountant — and posts
+                to Tally the moment the Accountant approves. Rejection at any stage sends it back to the supervisor.
             </Typography.Paragraph>
 
             <Segmented
@@ -206,6 +206,7 @@ export default function ApproveProductionPage() {
                     { label: 'Accountant', value: 'pm_approved' },
                     { label: 'Approved', value: 'approved' },
                     { label: 'Synced', value: 'synced' },
+                    { label: 'Failed', value: 'failed' },
                     { label: 'Rejected', value: 'rejected' },
                 ]}
                 style={{ marginBottom: 16, maxWidth: '100%', overflowX: 'auto' }}
@@ -267,6 +268,24 @@ export default function ApproveProductionPage() {
             >
                 {detailRow && (
                     <>
+                        {detailRow.status === 'failed' && (
+                            <Alert
+                                type="error"
+                                showIcon
+                                style={{ marginBottom: 16 }}
+                                message="Tally rejected or could not receive this voucher"
+                                description={
+                                    <>
+                                        {detailRow.sync_error ?? 'No error detail recorded.'}
+                                        <br />
+                                        <Typography.Text type="secondary">
+                                            Fix the cause (Tally open with the right company, item names matching),
+                                            then retry it from the Tally Sync page — nothing needs re-entry here.
+                                        </Typography.Text>
+                                    </>
+                                }
+                            />
+                        )}
                         <Steps
                             size="small"
                             current={chainStep(detailRow)}
