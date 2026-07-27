@@ -684,7 +684,10 @@ class ShiftProductionEntryService
 
     private function isMassUom(?string $uom): bool
     {
-        return in_array(strtolower(trim((string) $uom)), ['kg', 'kgs', 'kilogram', 'kilograms'], true);
+        // Tally masters write "Kgs." with a trailing dot — 90+ live items
+        // carry it; without normalization they silently drop out of every
+        // kg-family sum (BOM norms, variance).
+        return in_array(rtrim(strtolower(trim((string) $uom)), '.'), ['kg', 'kgs', 'kilogram', 'kilograms'], true);
     }
 
     /**
