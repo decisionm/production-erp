@@ -34,6 +34,15 @@ $PHP artisan migrate --force
 # Ensure the public storage symlink exists (no-op if already linked).
 $PHP artisan storage:link || true
 
+# Session lifetime: a factory shift plus margin (12 h). The production .env
+# predates that decision with 120 and .env is never rsynced, so normalize it
+# here (idempotent) before the config cache is rebuilt.
+if grep -q '^SESSION_LIFETIME=' .env; then
+  sed -i 's/^SESSION_LIFETIME=.*/SESSION_LIFETIME=720/' .env
+else
+  printf '\nSESSION_LIFETIME=720\n' >> .env
+fi
+
 # Rebuild the cached config/routes/views against the new code + current .env.
 # clear first so stale caches from the previous release can't linger.
 $PHP artisan optimize:clear
