@@ -23,6 +23,12 @@ class CompleteBatchRequest extends FormRequest
             'no_of_trays' => ['nullable', 'integer', 'min:0'],
             'nos_per_box' => ['nullable', 'integer', 'min:0'],
             'no_of_box' => ['nullable', 'integer', 'min:0'],
+            // Wave A packaging: pouch count (pouch-packed products) and
+            // loose pieces left after filling whole containers — previously
+            // a frontend-only derivation helper, now persisted.
+            'no_of_pouches' => ['sometimes', 'nullable', 'integer', 'min:0'],
+            'nos_per_pouch' => ['sometimes', 'nullable', 'integer', 'min:1'],
+            'loose_pieces' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'helper_name' => ['sometimes', 'nullable', 'string', 'max:120'],
             'notes' => ['nullable', 'string'],
 

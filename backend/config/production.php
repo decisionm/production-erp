@@ -32,4 +32,13 @@ return [
         'unaccounted_blocking_kg' => env('PROD_TOL_UNACCOUNTED_BLOCKING') !== null
             ? (float) env('PROD_TOL_UNACCOUNTED_BLOCKING') : null,
     ],
+
+    // How packing suggestions and "vs standard" notes round a partial
+    // container: 'ceil' (default — a part-filled pouch/tray still needs
+    // packing, matches current behaviour), 'round', or 'floor'. Used by ALL
+    // packing suggestions, backend metrics (expected_pouches) and frontend
+    // alike. NOT applied to the WB2 expected-boxes formula, which stays
+    // half-up ROUND to keep matching the workbook — see
+    // ShiftProductionEntryService::productionMetrics().
+    'packing_rounding' => env('PROD_PACKING_ROUNDING', 'ceil'),
 ];

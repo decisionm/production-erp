@@ -19,7 +19,8 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
     'shift_id', 'work_center_id', 'item_id', 'warehouse_id', 'production_date',
     'batch_status', 'batch_number', 'quantity_produced', 'quantity_produced_kg',
     'quantity_scrap', 'quantity_rejection_kg', 'scrap_reason_id',
-    'nos_per_tray', 'no_of_trays', 'nos_per_box', 'no_of_box', 'helper_name',
+    'nos_per_tray', 'no_of_trays', 'nos_per_box', 'no_of_box',
+    'no_of_pouches', 'nos_per_pouch', 'loose_pieces', 'helper_name',
     'standard_cycle_time', 'actual_cycle_time', 'standard_cavities', 'active_cavities',
     'running_hours', 'qc_rejection_kg', 'tally_sync_entry_id',
     'supervisor_signed_by', 'supervisor_signed_at', 'plant_manager_signed_by', 'plant_manager_signed_at',
@@ -35,6 +36,10 @@ class ShiftProductionEntry extends Model
             'production_date' => 'date',
             'batch_status' => BatchStatus::class,
             'status' => ShiftProductionEntryStatus::class,
+            // Wave A packaging: pouch count and left-over loose pieces,
+            // captured at Complete Batch alongside the tray/box counts.
+            'no_of_pouches' => 'integer',
+            'loose_pieces' => 'integer',
             // Expected-output engine — standard_* are Start Batch snapshots
             // from the item master, never editable after; the rest are
             // shop-floor actuals.

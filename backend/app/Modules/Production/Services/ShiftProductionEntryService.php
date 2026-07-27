@@ -135,6 +135,7 @@ class ShiftProductionEntryService
      * @param  array{
      *     batch_number?: string, quantity_produced: string, quantity_scrap?: string, scrap_reason_id?: int,
      *     nos_per_tray?: int, no_of_trays?: int, nos_per_box?: int, no_of_box?: int,
+     *     no_of_pouches?: int, loose_pieces?: int,
      *     helper_name?: string, notes?: string,
      *     actual_cycle_time?: ?string, active_cavities?: ?int,
      *     running_hours?: ?string, qc_rejection_kg?: ?string,
@@ -178,6 +179,12 @@ class ShiftProductionEntryService
                     'no_of_trays' => $data['no_of_trays'] ?? null,
                     'nos_per_box' => $data['nos_per_box'] ?? null,
                     'no_of_box' => $data['no_of_box'] ?? null,
+                    // Wave A packaging — same one-shot semantics as the
+                    // tray/box counts above: only ever written here, so an
+                    // empty completion leaves them as they were (null).
+                    'no_of_pouches' => $data['no_of_pouches'] ?? null,
+                    'nos_per_pouch' => $data['nos_per_pouch'] ?? null,
+                    'loose_pieces' => $data['loose_pieces'] ?? null,
                     'helper_name' => $data['helper_name'] ?? null,
                     // Run actuals: an absent key keeps whatever Start Batch
                     // recorded (an explicit null clears it). standard_* are
@@ -480,8 +487,17 @@ class ShiftProductionEntryService
      * never a fake number — an efficiency computed against a guessed
      * expectation would be worse than no efficiency at all.
      *
+     * Rounding rule (two regimes, deliberately different): expected_boxes is
+     * the WB2 col W workbook formula and STAYS half-up ROUND — it must keep
+     * matching the sheet cell-for-cell, so config('production.packing_rounding')
+     * never touches it. That config governs only packing SUGGESTIONS and
+     * "vs standard" notes — expected_pouches here and the frontend's packing
+     * prefills — where ceil (default) reflects that a part-filled container
+     * still needs packing.
+     *
      * @return array{
-     *     expected_pieces: ?string, expected_boxes: ?int, actual_boxes: ?int,
+     *     expected_pieces: ?string, expected_boxes: ?int, expected_pouches: ?int,
+     *     actual_boxes: ?int, actual_pouches: ?int,
      *     actual_pieces: ?string, efficiency_pct: ?float,
      *     rejection_kg_production: ?string, rejection_kg_qc: ?string,
      *     rejection_diff_kg: ?string, lumps_kg: string, issued_kg: string,
@@ -521,6 +537,18 @@ class ShiftProductionEntryService
         $expectedBoxes = null;
         if ($expectedPiecesRaw !== null && $nosPerBox !== null && $nosPerBox > 0) {
             $expectedBoxes = (int) $this->bcRoundHalfUp(bcdiv($expectedPiecesRaw, (string) $nosPerBox, 8), 0);
+        }
+
+        // Expected pouches = expected_pieces / pouch standard — a packing
+        // suggestion, not a workbook figure, so it rounds per
+        // production.packing_rounding (see method docblock). The pouch
+        // standard lives only on the item master — the entry carries pouch
+        // COUNTS, not a per-entry pouch pack size.
+        // Entry snapshot wins — same invariant as nos_per_box above.
+        $nosPerPouch = $entry->nos_per_pouch ?? $entry->item?->nos_per_pouch;
+        $expectedPouches = null;
+        if ($expectedPiecesRaw !== null && $nosPerPouch !== null && $nosPerPouch > 0) {
+            $expectedPouches = (int) $this->applyPackingRounding(bcdiv($expectedPiecesRaw, (string) $nosPerPouch, 8), 0);
         }
 
         // Efficiency = actual boxes / expected boxes × 100 — WB2 col Y.
@@ -590,7 +618,9 @@ class ShiftProductionEntryService
         return [
             'expected_pieces' => $expectedPiecesRaw !== null ? $this->bcRoundHalfUp($expectedPiecesRaw, 2) : null,
             'expected_boxes' => $expectedBoxes,
+            'expected_pouches' => $expectedPouches,
             'actual_boxes' => $actualBoxes,
+            'actual_pouches' => $entry->no_of_pouches,
             'actual_pieces' => $entry->quantity_produced !== null ? (string) $entry->quantity_produced : null,
             'efficiency_pct' => $efficiency,
             'efficiency_band' => $efficiencyBand,
@@ -607,6 +637,40 @@ class ShiftProductionEntryService
             'unaccounted_band' => $unaccountedBand,
             'blocks_approval' => $blocksApproval,
         ];
+    }
+
+    /**
+     * The configurable rounding for packing suggestions and "vs standard"
+     * notes — production.packing_rounding: ceil (default, a part-filled
+     * container still needs packing), round (half-up, same as
+     * bcRoundHalfUp), or floor. bcmath-safe on the non-negative quantities
+     * this engine deals in. Public because it's the single rounding
+     * authority for every packing suggestion any caller derives — the WB2
+     * expected-boxes formula deliberately does NOT go through here (see
+     * productionMetrics()).
+     */
+    public function applyPackingRounding(string $value, int $scale = 0): string
+    {
+        $mode = (string) config('production.packing_rounding', 'ceil');
+
+        if ($mode === 'round') {
+            return $this->bcRoundHalfUp($value, $scale);
+        }
+
+        // bcmath's own behaviour at $scale is truncation — which IS floor
+        // for the non-negative quantities packing deals in.
+        $truncated = bcadd($value, '0', $scale);
+
+        // Compare at the value's full precision so ceil only bumps when a
+        // real remainder was dropped (an exact 136.000 must stay 136).
+        $dot = strpos($value, '.');
+        $precision = max($scale, $dot === false ? 0 : strlen($value) - $dot - 1);
+
+        if ($mode === 'floor' || bccomp($value, $truncated, $precision) === 0) {
+            return $truncated;
+        }
+
+        return bcadd($truncated, bcdiv('1', bcpow('10', (string) $scale, 0), $scale), $scale);
     }
 
     /**

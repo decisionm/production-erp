@@ -36,6 +36,7 @@ import type {
     WorkCenter,
 } from '@/features/production/types';
 import { currentShift, justEndedShift, productionDateFor } from '@/features/production/shiftClock';
+import { roundPer, useProductionSettings } from '@/features/production/packing';
 
 // Combines a picked "HH:mm" with today's date into a full ISO datetime for
 // the API — shared by every backdate-capable modal below (Report Down,
@@ -76,7 +77,9 @@ function shiftLengthHours(shift: Shift | null | undefined): number | null {
  * The expected-output formula from the shared contract, duplicated here for
  * the live (pre-completion) screens — the backend's metrics block is the
  * authoritative figure once the batch completes.
- * expected pieces = 3600/CT × active cavities × hours; boxes = ROUND(pieces/pack).
+ * expected pieces = 3600/CT × active cavities × hours; boxes = ROUND(pieces/pack);
+ * pouches = pieces/nos-per-pouch rounded per the packing-rounding config
+ * (mirrors metrics.expected_pouches).
  * Null (show nothing — never 0 or NaN) when any input is missing or zero.
  */
 function expectedOutput(
@@ -84,11 +87,19 @@ function expectedOutput(
     cavities: number | null | undefined,
     hours: number | null,
     nosPerBox: number | null,
-): { pieces: number; boxes: number | null } | null {
+    nosPerPouch: number | null,
+    mode?: import('@/features/production/packing').PackingRounding,
+): { pieces: number; boxes: number | null; pouches: number | null } | null {
     if (!cycleTimeSeconds || cycleTimeSeconds <= 0 || !cavities || cavities <= 0 || !hours || hours <= 0) return null;
     const pieces = Math.round((3600 / cycleTimeSeconds) * cavities * hours * 100) / 100;
     const boxes = nosPerBox && nosPerBox >= 1 ? Math.round(pieces / nosPerBox) : null;
-    return { pieces, boxes };
+    const pouches = nosPerPouch && nosPerPouch >= 1 ? roundPer(pieces / nosPerPouch, mode) : null;
+    return { pieces, boxes, pouches };
+}
+
+/** ">= 1" with null-safety — the shared test for "this packing standard exists". */
+function hasPackStd(v: number | null | undefined): boolean {
+    return (v ?? 0) >= 1;
 }
 
 const isMasterbatchItem = (item: Item): boolean => /master ?batch/i.test(`${item.sku} ${item.name}`);
@@ -163,8 +174,11 @@ const completeBatchSchema = z.object({
     no_of_trays: z.number().min(0).nullish(),
     nos_per_box: z.number().min(0).nullish(),
     no_of_box: z.number().min(0).nullish(),
-    // Box-first: frontend-only helper — quantity_produced derives from
-    // no_of_box × item pack + loose. Never sent to the API.
+    // Pouch count for pouch-packed items (item.nos_per_pouch set) — hidden
+    // and never populated for everything else.
+    no_of_pouches: z.number().min(0).nullish(),
+    // Loose pieces beyond full boxes/pouches — feeds the quantity_produced
+    // derivation and is persisted on the entry (formalized in Wave A packaging).
     loose_pieces: z.number().min(0).nullish(),
     // Expected-output engine inputs (all optional — a batch with no standards
     // must complete exactly as before these fields existed).
@@ -520,7 +534,9 @@ export default function ShiftProductionEntryPage() {
     const scrapFields = useFieldArray({ control: completeForm.control, name: 'scraps' });
     const quantityProduced = completeForm.watch('quantity_produced');
     const quantityScrap = completeForm.watch('quantity_scrap');
+    const settings = useProductionSettings();
     const goodBoxesWatch = completeForm.watch('no_of_box');
+    const pouchesWatch = completeForm.watch('no_of_pouches');
     const loosePiecesWatch = completeForm.watch('loose_pieces');
     const runningHoursWatch = completeForm.watch('running_hours');
     const activeCavitiesWatch = completeForm.watch('active_cavities');
@@ -537,40 +553,80 @@ export default function ShiftProductionEntryPage() {
     // manual, exactly as before the packing master existed.
     useEffect(() => {
         if (!completingEntry || !quantityProduced || quantityProduced <= 0) return;
-        const suggest = (field: 'no_of_trays' | 'no_of_box', standard: number | null) => {
+        const suggest = (field: 'no_of_trays' | 'no_of_pouches' | 'no_of_box', standard: number | null) => {
             if (!standard || standard < 1) return;
             // Auto-writes never set dirty; any user interaction does. A field the
             // user typed in (or cleared) stays theirs, even across quantity edits.
             if (completeForm.getFieldState(field).isDirty) return;
-            completeForm.setValue(field, Math.ceil(quantityProduced / standard));
+            // Rounding mode mirrors backend production.packing_rounding.
+            completeForm.setValue(field, roundPer(quantityProduced / standard, settings?.packing_rounding));
         };
         suggest('no_of_trays', completingEntry.item.nos_per_tray);
+        suggest('no_of_pouches', completingEntry.item.nos_per_pouch);
         suggest('no_of_box', completingEntry.item.nos_per_box);
     }, [quantityProduced, completingEntry, completeForm]);
 
-    // Box-first (the inverse direction): Good Boxes × pcs/box + loose derives
-    // Quantity Produced. Same dirty rule as the packing auto-fill above — a
-    // quantity the user corrected by hand is theirs and never overwritten, and
-    // the derived write itself never marks the field dirty. Items without a
-    // pcs/box standard never enter this path (manual entry, exactly as today).
-    // No loop with the packing suggestion: user-typed boxes are dirty (so the
-    // ceil-suggestion skips them), derived quantity is not (so this keeps
-    // following box edits).
+    // The inverse direction, with box-first precedence: Good Boxes × pcs/box
+    // + loose derives Quantity Produced when a pack size is known; otherwise
+    // Pouches × item pcs/pouch + loose when the item has a pouch standard;
+    // otherwise fully manual. Same dirty rule as the packing auto-fill above —
+    // a quantity the user corrected by hand is theirs and never overwritten,
+    // and the derived write itself never marks the field dirty. Items without
+    // any standard never enter either path (manual entry, exactly as today).
+    // Only USER-TYPED (dirty) counts drive a derivation — a suggestion-filled
+    // box count must not re-derive (and inflate) a pouch-derived quantity via
+    // its rounded-up value. In the box-only world this dirty requirement is
+    // behaviour-identical: a non-dirty box count with a value only ever
+    // coexists with a user-typed quantity, which already blocks this effect.
     // The form's own Nos/Box (supervisor-corrected pack size) beats the
     // master standard — a run packed at 800/box must derive with 800.
     const nosPerBoxWatch = completeForm.watch('nos_per_box');
     useEffect(() => {
         if (!completingEntry) return;
-        const nosPerBox = nosPerBoxWatch ?? completingEntry.item.nos_per_box;
-        if (!nosPerBox || nosPerBox < 1) return;
-        if (goodBoxesWatch === null || goodBoxesWatch === undefined) return;
         if (completeForm.getFieldState('quantity_produced').isDirty) return;
-        completeForm.setValue('quantity_produced', goodBoxesWatch * nosPerBox + (loosePiecesWatch ?? 0));
-    }, [goodBoxesWatch, loosePiecesWatch, nosPerBoxWatch, completingEntry, completeForm]);
+        const loose = loosePiecesWatch ?? 0;
+        const nosPerBox = nosPerBoxWatch ?? completingEntry.item.nos_per_box;
+        if (
+            hasPackStd(nosPerBox) &&
+            goodBoxesWatch !== null &&
+            goodBoxesWatch !== undefined &&
+            completeForm.getFieldState('no_of_box').isDirty
+        ) {
+            completeForm.setValue('quantity_produced', goodBoxesWatch * nosPerBox! + loose);
+            return;
+        }
+        const nosPerPouch = completingEntry.item.nos_per_pouch;
+        if (
+            hasPackStd(nosPerPouch) &&
+            pouchesWatch !== null &&
+            pouchesWatch !== undefined &&
+            completeForm.getFieldState('no_of_pouches').isDirty
+        ) {
+            completeForm.setValue('quantity_produced', pouchesWatch * nosPerPouch! + loose);
+        }
+    }, [goodBoxesWatch, pouchesWatch, loosePiecesWatch, nosPerBoxWatch, completingEntry, completeForm]);
 
     const nominalWeight = completingEntry?.item.nominal_weight_grams ? Number(completingEntry.item.nominal_weight_grams) : null;
     const previewProducedKg = nominalWeight && quantityProduced ? ((quantityProduced * nominalWeight) / 1000).toFixed(4) : null;
     const previewRejectionKg = nominalWeight && quantityScrap ? ((quantityScrap * nominalWeight) / 1000).toFixed(4) : null;
+
+    // Packaging applicability — data-driven from the item's packing master, no
+    // mode column. Boxes are the factory's universal outer and always visible;
+    // trays show when the item has a tray standard OR no packing standards at
+    // all (an item with NO standards renders exactly the pre-pouch field set);
+    // pouches show only when the item has a pouch standard.
+    const completingItem = completingEntry?.item ?? null;
+    const hasAnyPackagingStandard =
+        completingItem !== null &&
+        [
+            completingItem.nos_per_tray,
+            completingItem.trays_per_box,
+            completingItem.nos_per_box,
+            completingItem.nos_per_pouch,
+            completingItem.pouches_per_box,
+        ].some(hasPackStd);
+    const showTrayFields = hasPackStd(completingItem?.nos_per_tray) || !hasAnyPackagingStandard;
+    const showPouchFields = hasPackStd(completingItem?.nos_per_pouch);
 
     // Everything the pre-submit results panel shows, computed live from the
     // form + the entry's Start Batch snapshots. Frontend duplicate of the
@@ -583,7 +639,9 @@ export default function ShiftProductionEntryPage() {
         const hours = runningHoursWatch ?? null;
         // Form's corrected pack size wins over the master (mirrors backend).
         const nosPerBox = nosPerBoxWatch ?? completingEntry.item.nos_per_box ?? null;
-        const expected = expectedOutput(ct, cavities, hours, nosPerBox);
+        // Pouch standard has no per-run correction field — always the master's.
+        const nosPerPouch = completingEntry.item.nos_per_pouch ?? null;
+        const expected = expectedOutput(ct, cavities, hours, nosPerBox, nosPerPouch, settings?.packing_rounding);
         const goodKg = nominalWeight && quantityProduced ? (quantityProduced * nominalWeight) / 1000 : null;
         const rejProdKg = nominalWeight && quantityScrap ? (quantityScrap * nominalWeight) / 1000 : null;
         const qcKg = qcRejectionWatch ?? null;
@@ -594,14 +652,16 @@ export default function ShiftProductionEntryPage() {
         const confirmedRejKg = qcKg ?? rejProdKg;
         const unaccountedKg = issuedKg > 0 && goodKg !== null ? issuedKg - goodKg - (confirmedRejKg ?? 0) - lumpsKg : null;
         const actualBoxes = goodBoxesWatch ?? null;
+        const actualPouches = pouchesWatch ?? null;
         const efficiencyPct = expected?.boxes && actualBoxes !== null ? Math.round((actualBoxes / expected.boxes) * 1000) / 10 : null;
-        return { ct, cavities, hours, nosPerBox, expected, goodKg, rejProdKg, qcKg, rejDiffKg, lumpsKg, issuedKg, unaccountedKg, actualBoxes, efficiencyPct };
+        return { ct, cavities, hours, nosPerBox, nosPerPouch, expected, goodKg, rejProdKg, qcKg, rejDiffKg, lumpsKg, issuedKg, unaccountedKg, actualBoxes, actualPouches, efficiencyPct };
     }, [
         completingEntry,
         nominalWeight,
         quantityProduced,
         quantityScrap,
         goodBoxesWatch,
+        pouchesWatch,
         runningHoursWatch,
         activeCavitiesWatch,
         qcRejectionWatch,
@@ -614,8 +674,9 @@ export default function ShiftProductionEntryPage() {
     const completeMutation = useMutation({
         mutationFn: (values: CompleteBatchFormValues) => {
             if (!completingEntry) throw new Error('No batch selected');
+            // loose_pieces and no_of_pouches ride through in ...rest — both are
+            // real persisted fields since Wave A packaging.
             const {
-                loose_pieces: _loosePieces, // frontend-only derivation helper
                 resin_item_id,
                 resin_warehouse_id,
                 resin_kg,
@@ -870,6 +931,8 @@ export default function ShiftProductionEntryPage() {
                                   running.active_cavities ?? running.standard_cavities,
                                   shiftLengthHours(running.shift),
                                   running.item.nos_per_box,
+                                  running.item.nos_per_pouch,
+                                  settings?.packing_rounding,
                               )
                             : null;
 
@@ -933,6 +996,7 @@ export default function ShiftProductionEntryPage() {
                                     <div style={{ marginBottom: 6 }}>
                                         <Typography.Text strong style={{ fontSize: 12 }}>
                                             ≈ {Math.round(liveExpected.pieces).toLocaleString('en-IN')} pcs
+                                            {liveExpected.pouches !== null ? ` · ${liveExpected.pouches} pouches` : ''}
                                             {liveExpected.boxes !== null ? ` · ${liveExpected.boxes} boxes` : ''}
                                         </Typography.Text>
                                         <Typography.Text type="secondary" style={{ display: 'block', fontSize: 11 }}>
@@ -1155,7 +1219,9 @@ export default function ShiftProductionEntryPage() {
                                 extra={
                                     completingEntry?.item.nos_per_box
                                         ? `= boxes × ${completingEntry.item.nos_per_box} pcs/box + loose — editable`
-                                        : undefined
+                                        : showPouchFields
+                                          ? `= pouches × ${completingItem?.nos_per_pouch} pcs/pouch + loose — editable`
+                                          : undefined
                                 }
                             >
                                 <Controller
@@ -1270,17 +1336,33 @@ export default function ShiftProductionEntryPage() {
                     </Row>
 
                     <Typography.Text strong>Packing</Typography.Text>
+                    {/* Applicability is data-driven from the item's packing
+                        master: tray fields for tray-packed items (or items
+                        with no standards at all — the pre-pouch manual set),
+                        pouch count only for pouch-packed items, Nos/Box
+                        always (boxes are the universal outer). */}
                     <Row gutter={16} style={{ marginTop: 8, marginBottom: 16 }}>
-                        <Col xs={12} sm={8}>
-                            <Form.Item label="Nos/Tray">
-                                <Controller name="nos_per_tray" control={completeForm.control} render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />} />
-                            </Form.Item>
-                        </Col>
-                        <Col xs={12} sm={8}>
-                            <Form.Item label="Trays">
-                                <Controller name="no_of_trays" control={completeForm.control} render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />} />
-                            </Form.Item>
-                        </Col>
+                        {showTrayFields && (
+                            <Col xs={12} sm={8}>
+                                <Form.Item label="Nos/Tray">
+                                    <Controller name="nos_per_tray" control={completeForm.control} render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />} />
+                                </Form.Item>
+                            </Col>
+                        )}
+                        {showTrayFields && (
+                            <Col xs={12} sm={8}>
+                                <Form.Item label="Trays">
+                                    <Controller name="no_of_trays" control={completeForm.control} render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />} />
+                                </Form.Item>
+                            </Col>
+                        )}
+                        {showPouchFields && (
+                            <Col xs={12} sm={8}>
+                                <Form.Item label="Pouches" extra={`std: ${completingItem?.nos_per_pouch}/pouch`}>
+                                    <Controller name="no_of_pouches" control={completeForm.control} render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />} />
+                                </Form.Item>
+                            </Col>
+                        )}
                         <Col xs={12} sm={8}>
                             <Form.Item label="Nos/Box">
                                 <Controller name="nos_per_box" control={completeForm.control} render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />} />
@@ -1511,17 +1593,27 @@ export default function ShiftProductionEntryPage() {
                             {results.expected && (
                                 <ResultRow
                                     label="Expected output"
-                                    value={`${fmtNum(results.expected.pieces, 0)} pcs${results.expected.boxes !== null ? ` · ${results.expected.boxes} boxes` : ''}`}
+                                    value={`${fmtNum(results.expected.pieces, 0)} pcs${
+                                        results.expected.pouches !== null ? ` · ${results.expected.pouches} pouches` : ''
+                                    }${results.expected.boxes !== null ? ` · ${results.expected.boxes} boxes` : ''}`}
                                     formula={`3600 / ${fmtNum(results.ct)} s × ${results.cavities} cavities × ${fmtNum(results.hours)} h${
-                                        results.expected.boxes !== null && results.nosPerBox ? ` ÷ ${results.nosPerBox} pcs/box` : ''
-                                    }`}
+                                        results.expected.pouches !== null && results.nosPerPouch ? ` ÷ ${results.nosPerPouch} pcs/pouch` : ''
+                                    }${results.expected.boxes !== null && results.nosPerBox ? ` ÷ ${results.nosPerBox} pcs/box` : ''}`}
                                 />
                             )}
                             {!!quantityProduced && quantityProduced > 0 && (
                                 <ResultRow
                                     label="Actual output"
-                                    value={`${quantityProduced.toLocaleString('en-IN')} pcs${results.actualBoxes !== null ? ` · ${results.actualBoxes} boxes` : ''}`}
-                                    formula="good boxes × pcs/box + loose"
+                                    value={`${quantityProduced.toLocaleString('en-IN')} pcs${
+                                        results.actualPouches !== null && results.nosPerPouch ? ` · ${results.actualPouches} pouches` : ''
+                                    }${results.actualBoxes !== null ? ` · ${results.actualBoxes} boxes` : ''}`}
+                                    formula={
+                                        results.nosPerBox && results.nosPerBox >= 1
+                                            ? 'good boxes × pcs/box + loose'
+                                            : results.nosPerPouch && results.nosPerPouch >= 1
+                                              ? 'pouches × pcs/pouch + loose'
+                                              : 'good boxes × pcs/box + loose'
+                                    }
                                 />
                             )}
                             {results.efficiencyPct !== null && (
