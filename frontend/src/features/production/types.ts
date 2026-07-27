@@ -138,6 +138,8 @@ export interface ShiftProductionEntry {
     scraps: ShiftScrap[];
     /** Null when batch_status is not completed (no consumption yet). */
     variance: ConsumptionVariance | null;
+    /** Latest Tally sync error — present only when status is "failed". */
+    sync_error?: string | null;
     status: ShiftProductionEntryStatus;
     rejection_reason: string | null;
     plant_manager_signed_by?: { id: number; name: string } | null;

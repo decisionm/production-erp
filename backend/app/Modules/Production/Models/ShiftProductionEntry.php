@@ -8,10 +8,12 @@ use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
+use App\Modules\TallySync\Models\TallySyncEntry;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 #[Fillable([
     'shift_id', 'work_center_id', 'item_id', 'warehouse_id', 'production_date',
@@ -98,6 +100,16 @@ class ShiftProductionEntry extends Model
     public function materialConsumptions(): HasMany
     {
         return $this->hasMany(ShiftMaterialConsumption::class);
+    }
+
+    /**
+     * Sync attempts for this entry, newest first — read-only here; all
+     * writes stay in the TallySync module. Exists so a failed entry can
+     * surface its Tally error on the approval screen.
+     */
+    public function tallySyncEntries(): MorphMany
+    {
+        return $this->morphMany(TallySyncEntry::class, 'syncable')->latest('id');
     }
 
     public function scraps(): HasMany

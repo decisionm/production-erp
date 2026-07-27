@@ -41,6 +41,7 @@ class ShiftProductionEntryService
             ->with([
                 'shift', 'workCenter', 'item', 'warehouse', 'scrapReason', 'operator',
                 'materialConsumptions.item', 'scraps.scrapReason', 'approvedBy',
+                'tallySyncEntries',
             ])
             ->when($status, function ($query) use ($status) {
                 // The approval `status` column defaults to "pending" at row
