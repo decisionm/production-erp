@@ -108,6 +108,8 @@ export interface ConsumptionVariance {
     variance_kg: string | null;
     /** (actual-expected)/expected*100 rounded to 1 decimal; null when expected null or 0. */
     variance_pct: number | null;
+    /** Server-ruled tolerance band (config-driven); null when pct is null. */
+    variance_band?: 'ok' | 'watch' | 'investigate' | null;
     /** Entry quantity_rejection_kg or "0". */
     rejection_kg: string;
     /** Sum of scraps quantity_kg, "0". */
@@ -133,6 +135,7 @@ export interface ProductionMetrics {
     actual_pieces: string | null;
     /** actual_boxes / expected_boxes × 100 rounded 1dp — null when expected_boxes null/0. */
     efficiency_pct: number | null;
+    efficiency_band?: 'ok' | 'watch' | 'investigate' | null;
     /** quantity_rejection_kg (pieces × g / 1000). */
     rejection_kg_production: string | null;
     /** qc_rejection_kg. */
@@ -149,6 +152,9 @@ export interface ProductionMetrics {
     confirmed_rejection_kg: string | null;
     /** issued − good − confirmed_rejection − lumps; null if issued==0 or good null. */
     reconciliation_unaccounted_kg: string | null;
+    unaccounted_band?: 'ok' | 'investigate' | null;
+    /** True when the configured hard gate refuses accountant approval. */
+    blocks_approval?: boolean;
 }
 
 export interface ShiftProductionEntry {

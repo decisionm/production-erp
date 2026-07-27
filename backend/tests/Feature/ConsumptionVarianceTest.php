@@ -80,6 +80,7 @@ class ConsumptionVarianceTest extends TestCase
                 // JSON numbers carry no zero fraction — 25.0 goes over the
                 // wire as 25 and decodes as int.
                 'variance_pct' => 25,
+                'variance_band' => 'investigate',
                 'rejection_kg' => '2.0000',
                 'scrap_kg' => '1.5000',
                 'unaccounted_kg' => '1.5000',
@@ -104,6 +105,7 @@ class ConsumptionVarianceTest extends TestCase
             'actual_kg' => '10.0000',
             'variance_kg' => null,
             'variance_pct' => null,
+            'variance_band' => null,
             'rejection_kg' => '0',
             'scrap_kg' => '0.7500',
             'unaccounted_kg' => null,

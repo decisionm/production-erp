@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Descriptions, Drawer, Input, Modal, Segmented, Space, Steps, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
@@ -59,19 +60,30 @@ const packingStandardNote = (row: ShiftProductionEntry): string | null => {
     return parts.length > 0 ? `standard: ${parts.join(' · ')}` : null;
 };
 
-const varianceTag = (pct: number | null) => {
-    if (pct === null) return null;
-    const abs = Math.abs(pct);
-    if (abs <= 2) return <Tag color="green">OK</Tag>;
-    if (abs <= 5) return <Tag color="orange">Watch</Tag>;
-    return <Tag color="red">Investigate</Tag>;
+// Bands are ruled server-side from config/production.php tolerances — the
+// UI only colour-maps them. Client thresholds remain solely as a fallback
+// for rows cached before bands existed.
+const BAND_TAG: Record<string, ReactElement> = {
+    ok: <Tag color="green">OK</Tag>,
+    watch: <Tag color="orange">Watch</Tag>,
+    investigate: <Tag color="red">Investigate</Tag>,
 };
 
-const efficiencyTag = (pct: number | null) => {
+const varianceTag = (pct: number | null, band?: 'ok' | 'watch' | 'investigate' | null) => {
+    if (band) return BAND_TAG[band];
     if (pct === null) return null;
-    if (pct >= 95) return <Tag color="green">OK</Tag>;
-    if (pct >= 85) return <Tag color="orange">Watch</Tag>;
-    return <Tag color="red">Investigate</Tag>;
+    const abs = Math.abs(pct);
+    if (abs <= 2) return BAND_TAG.ok;
+    if (abs <= 5) return BAND_TAG.watch;
+    return BAND_TAG.investigate;
+};
+
+const efficiencyTag = (pct: number | null, band?: 'ok' | 'watch' | 'investigate' | null) => {
+    if (band) return BAND_TAG[band];
+    if (pct === null) return null;
+    if (pct >= 95) return BAND_TAG.ok;
+    if (pct >= 85) return BAND_TAG.watch;
+    return BAND_TAG.investigate;
 };
 
 /**
@@ -83,11 +95,22 @@ const efficiencyTag = (pct: number | null) => {
  */
 function MetricsSection({ metrics }: { metrics: ProductionMetrics }) {
     const unaccounted = metrics.reconciliation_unaccounted_kg === null ? null : parseFloat(metrics.reconciliation_unaccounted_kg);
-    const unaccountedHot = unaccounted !== null && !Number.isNaN(unaccounted) && Math.abs(unaccounted) > 0.5;
+    const unaccountedHot = metrics.unaccounted_band
+        ? metrics.unaccounted_band === 'investigate'
+        : unaccounted !== null && !Number.isNaN(unaccounted) && Math.abs(unaccounted) > 0.5;
 
     return (
         <>
             <Typography.Title level={5} style={{ marginTop: 16 }}>Production Metrics</Typography.Title>
+            {metrics.blocks_approval && (
+                <Alert
+                    type="error"
+                    showIcon
+                    style={{ marginBottom: 12 }}
+                    message="Blocks approval"
+                    description="Unaccounted material is at/over the configured blocking tolerance — the accountant cannot post this entry until it is corrected or rejected back to the floor."
+                />
+            )}
             <Descriptions column={1} size="small" bordered>
                 {metrics.expected_pieces !== null && (
                     <Descriptions.Item label="Expected">
@@ -105,7 +128,7 @@ function MetricsSection({ metrics }: { metrics: ProductionMetrics }) {
                     <Descriptions.Item label="Efficiency">
                         <Space size={6}>
                             {`${metrics.efficiency_pct}%`}
-                            {efficiencyTag(metrics.efficiency_pct)}
+                            {efficiencyTag(metrics.efficiency_pct, metrics.efficiency_band)}
                         </Space>
                     </Descriptions.Item>
                 )}
@@ -177,7 +200,7 @@ function VarianceSection({ variance }: { variance: ConsumptionVariance }) {
                                     ? ` (${variance.variance_pct > 0 ? '+' : ''}${variance.variance_pct}%)`
                                     : ''}
                             </span>
-                            {varianceTag(variance.variance_pct)}
+                            {varianceTag(variance.variance_pct, variance.variance_band)}
                         </Space>
                     )}
                 </Descriptions.Item>

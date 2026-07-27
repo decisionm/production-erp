@@ -265,6 +265,22 @@ class ShiftProductionEntryService
      */
     public function accountantApprove(ShiftProductionEntry $entry, int $signedBy): ShiftProductionEntry
     {
+        // Optional hard gate (config, default off): an unaccounted-material
+        // figure at/over the blocking threshold cannot be posted — reject it
+        // back to the floor or correct the entry first.
+        $metrics = $this->productionMetrics($entry);
+        if ($metrics !== null && ($metrics['blocks_approval'] ?? false)) {
+            throw InvalidStatusTransitionException::make(
+                'shift production entry',
+                sprintf(
+                    'unaccounted material %s kg is at/over the blocking tolerance %s kg',
+                    $metrics['reconciliation_unaccounted_kg'],
+                    config('production.tolerances.unaccounted_blocking_kg'),
+                ),
+                'approved',
+            );
+        }
+
         $fresh = $this->advance($entry, ShiftProductionEntryStatus::PmApproved, ShiftProductionEntryStatus::Approved, [
             'accountant_signed_by' => $signedBy,
             'accountant_signed_at' => now(),
@@ -434,6 +450,15 @@ class ShiftProductionEntryService
             'actual_kg' => $actual,
             'variance_kg' => $expected !== null ? bcsub($actual, $expected, 4) : null,
             'variance_pct' => $variancePct,
+            'variance_band' => $variancePct === null ? null : (function () use ($variancePct) {
+                $tolerances = config('production.tolerances');
+                $abs = abs($variancePct);
+                if ($abs <= $tolerances['variance_pct_ok']) {
+                    return 'ok';
+                }
+
+                return $abs <= $tolerances['variance_pct_watch'] ? 'watch' : 'investigate';
+            })(),
             'rejection_kg' => $rejection,
             'scrap_kg' => $scrap,
             'unaccounted_kg' => $expected !== null
@@ -542,12 +567,33 @@ class ShiftProductionEntryService
             $unaccounted = bcsub(bcsub(bcsub($issued, $good, 4), $confirmedRejection ?? '0', 4), $lumps, 4);
         }
 
+        $tolerances = config('production.tolerances');
+
+        // Bands are ruled here so every client colours the same judgement;
+        // thresholds live in config/production.php, never in code.
+        $efficiencyBand = null;
+        if ($efficiency !== null) {
+            $efficiencyBand = $efficiency >= $tolerances['efficiency_ok'] ? 'ok'
+                : ($efficiency >= $tolerances['efficiency_watch'] ? 'watch' : 'investigate');
+        }
+
+        $unaccountedBand = null;
+        if ($unaccounted !== null) {
+            $unaccountedBand = abs((float) $unaccounted) > $tolerances['unaccounted_kg'] ? 'investigate' : 'ok';
+        }
+
+        $blocking = $tolerances['unaccounted_blocking_kg'];
+        $blocksApproval = $blocking !== null
+            && $unaccounted !== null
+            && abs((float) $unaccounted) >= $blocking;
+
         return [
             'expected_pieces' => $expectedPiecesRaw !== null ? $this->bcRoundHalfUp($expectedPiecesRaw, 2) : null,
             'expected_boxes' => $expectedBoxes,
             'actual_boxes' => $actualBoxes,
             'actual_pieces' => $entry->quantity_produced !== null ? (string) $entry->quantity_produced : null,
             'efficiency_pct' => $efficiency,
+            'efficiency_band' => $efficiencyBand,
             'rejection_kg_production' => $rejectionProduction,
             'rejection_kg_qc' => $rejectionQc,
             'rejection_diff_kg' => $rejectionProduction !== null && $rejectionQc !== null
@@ -558,6 +604,8 @@ class ShiftProductionEntryService
             'good_production_kg' => $good,
             'confirmed_rejection_kg' => $confirmedRejection,
             'reconciliation_unaccounted_kg' => $unaccounted,
+            'unaccounted_band' => $unaccountedBand,
+            'blocks_approval' => $blocksApproval,
         ];
     }
 
