@@ -253,7 +253,9 @@ export default function ShiftProductionEntryPage() {
     const { data: molds } = useQuery({ queryKey: ['production', 'molds', 'all'], queryFn: listAllMolds });
 
     const shiftOptions = shifts?.data.filter((s) => s.is_active).map((s) => ({ value: s.id, label: s.name })) ?? [];
-    const itemOptions = items?.data.map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];
+    // Inactive items (retired demo/legacy masters) must not be selectable —
+    // Tally rejects vouchers for items it doesn't know.
+    const itemOptions = items?.data.filter((i) => i.is_active).map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];
     const moldOptions =
         molds?.data.filter((m) => m.status === 'active').map((m) => ({ value: m.id, label: `${m.code} — ${m.name}` })) ?? [];
     // "Changed From" is a historical record of what just came out, not a
