@@ -149,6 +149,7 @@ export interface ShiftProductionEntry {
     approved_by: { id: number; name: string } | null;
     approved_at: string | null;
     operator: Employee | null;
+    helper_name: string | null;
     notes: string | null;
     created_at: string;
 }

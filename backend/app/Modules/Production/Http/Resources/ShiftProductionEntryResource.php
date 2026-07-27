@@ -51,6 +51,8 @@ class ShiftProductionEntryResource extends JsonResource
             'approved_by' => UserResource::make($this->whenLoaded('approvedBy')),
             'approved_at' => $this->approved_at?->toIso8601String(),
             'operator' => EmployeeResource::make($this->whenLoaded('operator')),
+            // Free text — the helper isn't necessarily an Employee master.
+            'helper_name' => $this->helper_name,
             'notes' => $this->notes,
             'created_at' => $this->created_at?->toIso8601String(),
         ];

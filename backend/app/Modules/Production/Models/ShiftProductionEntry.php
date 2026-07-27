@@ -19,7 +19,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
     'shift_id', 'work_center_id', 'item_id', 'warehouse_id', 'production_date',
     'batch_status', 'batch_number', 'quantity_produced', 'quantity_produced_kg',
     'quantity_scrap', 'quantity_rejection_kg', 'scrap_reason_id',
-    'nos_per_tray', 'no_of_trays', 'nos_per_box', 'no_of_box',
+    'nos_per_tray', 'no_of_trays', 'nos_per_box', 'no_of_box', 'helper_name',
     'supervisor_signed_by', 'supervisor_signed_at', 'plant_manager_signed_by', 'plant_manager_signed_at',
     'accountant_signed_by', 'accountant_signed_at',
     'status', 'rejection_reason', 'approved_by', 'approved_at',

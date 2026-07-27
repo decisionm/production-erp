@@ -237,10 +237,12 @@ export interface CompleteBatchPayload {
     quantity_produced: number;
     quantity_scrap?: number;
     scrap_reason_id?: number;
-    nos_per_tray?: number;
-    no_of_trays?: number;
-    nos_per_box?: number;
-    no_of_box?: number;
+    // null allowed: a cleared InputNumber submits null (backend rules are nullable)
+    nos_per_tray?: number | null;
+    no_of_trays?: number | null;
+    nos_per_box?: number | null;
+    no_of_box?: number | null;
+    helper_name?: string;
     notes?: string;
     material_consumptions?: { item_id: number; warehouse_id: number; quantity_issued_kg: number }[];
     scraps?: { type: 'rejected_finished_good' | 'lumps'; quantity_nos?: number; quantity_kg?: number; scrap_reason_id?: number }[];

@@ -9,6 +9,10 @@ export interface Item {
     hsn_sac_code: string | null;
     reorder_level: string;
     nominal_weight_grams: string | null;
+    /** Product packing master — null until the standards data load arrives. */
+    nos_per_tray: number | null;
+    trays_per_box: number | null;
+    nos_per_box: number | null;
     tracking_type: ItemTrackingType;
     is_active: boolean;
     created_at: string;
@@ -19,6 +23,8 @@ export interface Warehouse {
     code: string;
     name: string;
     is_active: boolean;
+    /** Set only for godowns pulled from Tally — a safe voucher godown. */
+    tally_guid: string | null;
     created_at: string;
 }
 

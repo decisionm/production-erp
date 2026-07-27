@@ -14,6 +14,9 @@ class WarehouseResource extends JsonResource
             'code' => $this->code,
             'name' => $this->name,
             'is_active' => $this->is_active,
+            // Set only for godowns pulled from Tally — the frontend uses this
+            // to default entries to a godown Tally will actually accept.
+            'tally_guid' => $this->tally_guid,
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }

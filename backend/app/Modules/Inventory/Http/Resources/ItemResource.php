@@ -18,6 +18,10 @@ class ItemResource extends JsonResource
             'hsn_sac_code' => $this->hsn_sac_code,
             'reorder_level' => $this->reorder_level,
             'nominal_weight_grams' => $this->nominal_weight_grams,
+            // Product packing master — Complete Batch prefill standards.
+            'nos_per_tray' => $this->nos_per_tray,
+            'trays_per_box' => $this->trays_per_box,
+            'nos_per_box' => $this->nos_per_box,
             'tracking_type' => $this->tracking_type->value,
             'is_active' => $this->is_active,
             // Tally provenance — the UI uses tally_stock_item_guid to mark
