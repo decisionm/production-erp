@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Checkbox, Col, Drawer, Form, Input, InputNumber, Modal, Radio, Row, Select, Space, Table, Tag, TimePicker, Typography } from 'antd';
 import dayjs from 'dayjs';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { listAllEmployees } from '@/features/hrms/api';
@@ -59,10 +59,13 @@ const completeBatchSchema = z.object({
     quantity_produced: z.number().gt(0, 'Must be greater than 0'),
     quantity_scrap: z.number().min(0).optional(),
     scrap_reason_id: z.number().optional(),
-    nos_per_tray: z.number().min(0).optional(),
-    no_of_trays: z.number().min(0).optional(),
-    nos_per_box: z.number().min(0).optional(),
-    no_of_box: z.number().min(0).optional(),
+    // nullish, not optional: antd InputNumber emits null when cleared, and a
+    // cleared auto-suggestion must never dead-end the Complete Batch button.
+    nos_per_tray: z.number().min(0).nullish(),
+    no_of_trays: z.number().min(0).nullish(),
+    nos_per_box: z.number().min(0).nullish(),
+    no_of_box: z.number().min(0).nullish(),
+    helper_name: z.string().max(120, 'Max 120 characters').optional(),
     notes: z.string().optional(),
     material_consumptions: z
         .array(
@@ -361,6 +364,24 @@ export default function ShiftProductionEntryPage() {
     const quantityProduced = completeForm.watch('quantity_produced');
     const quantityScrap = completeForm.watch('quantity_scrap');
 
+    // Packing auto-fill from the item's packing master (nos_per_tray /
+    // nos_per_box). Auto-writes never mark the field dirty, so the dirty flag
+    // is exactly "the user touched this" — dirty fields are never overwritten.
+    // Items without standards never enter this path — the form stays fully
+    // manual, exactly as before the packing master existed.
+    useEffect(() => {
+        if (!completingEntry || !quantityProduced || quantityProduced <= 0) return;
+        const suggest = (field: 'no_of_trays' | 'no_of_box', standard: number | null) => {
+            if (!standard || standard < 1) return;
+            // Auto-writes never set dirty; any user interaction does. A field the
+            // user typed in (or cleared) stays theirs, even across quantity edits.
+            if (completeForm.getFieldState(field).isDirty) return;
+            completeForm.setValue(field, Math.ceil(quantityProduced / standard));
+        };
+        suggest('no_of_trays', completingEntry.item.nos_per_tray);
+        suggest('no_of_box', completingEntry.item.nos_per_box);
+    }, [quantityProduced, completingEntry, completeForm]);
+
     const nominalWeight = completingEntry?.item.nominal_weight_grams ? Number(completingEntry.item.nominal_weight_grams) : null;
     const previewProducedKg = nominalWeight && quantityProduced ? ((quantityProduced * nominalWeight) / 1000).toFixed(4) : null;
     const previewRejectionKg = nominalWeight && quantityScrap ? ((quantityScrap * nominalWeight) / 1000).toFixed(4) : null;
@@ -588,10 +609,26 @@ export default function ShiftProductionEntryPage() {
                             setFinishingMoldChangeLog(moldChange);
                         } else if (running) {
                             setCompletingEntry(running);
-                            completeForm.reset({ material_consumptions: [], scraps: [] });
+                            // Prefill Nos/Tray and Nos/Box from the item's packing
+                            // master when set — for items without standards both are
+                            // undefined and this reset is identical to before.
+                            completeForm.reset({
+                                material_consumptions: [],
+                                scraps: [],
+                                nos_per_tray: running.item.nos_per_tray ?? undefined,
+                                nos_per_box: running.item.nos_per_box ?? undefined,
+                            });
                         } else {
                             setStartingMachine(wc);
-                            startForm.reset();
+                            // Default the warehouse to a finished-goods godown that
+                            // Tally actually knows (tally_guid set) — the voucher's
+                            // godown is this warehouse's name, so a seeded lookalike
+                            // would fail every voucher. Still editable; with no match
+                            // the form opens empty exactly as before.
+                            const fgWarehouse = warehouses?.data.find(
+                                (w) => w.tally_guid && (/\bfg\b|\bfinished\b/i.test(w.code) || /\bfg\b|\bfinished\b/i.test(w.name)),
+                            );
+                            startForm.reset(fgWarehouse ? { warehouse_id: fgWarehouse.id } : undefined);
                         }
                     };
 
@@ -921,7 +958,19 @@ export default function ShiftProductionEntryPage() {
                         </Row>
                     ))}
 
-                    <Form.Item label="Notes (optional)" style={{ marginTop: 16 }}>
+                    <Form.Item
+                        label="Helper name (optional)"
+                        style={{ marginTop: 16 }}
+                        validateStatus={completeForm.formState.errors.helper_name ? 'error' : ''}
+                        help={completeForm.formState.errors.helper_name?.message}
+                    >
+                        <Controller
+                            name="helper_name"
+                            control={completeForm.control}
+                            render={({ field }) => <Input {...field} maxLength={120} placeholder="Who helped the operator this batch" />}
+                        />
+                    </Form.Item>
+                    <Form.Item label="Notes (optional)">
                         <Controller name="notes" control={completeForm.control} render={({ field }) => <Input {...field} />} />
                     </Form.Item>
                 </Form>

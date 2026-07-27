@@ -23,6 +23,7 @@ class CompleteBatchRequest extends FormRequest
             'no_of_trays' => ['nullable', 'integer', 'min:0'],
             'nos_per_box' => ['nullable', 'integer', 'min:0'],
             'no_of_box' => ['nullable', 'integer', 'min:0'],
+            'helper_name' => ['sometimes', 'nullable', 'string', 'max:120'],
             'notes' => ['nullable', 'string'],
 
             'material_consumptions' => ['nullable', 'array'],

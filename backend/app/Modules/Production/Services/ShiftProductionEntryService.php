@@ -105,7 +105,8 @@ class ShiftProductionEntryService
     /**
      * @param  array{
      *     batch_number?: string, quantity_produced: string, quantity_scrap?: string, scrap_reason_id?: int,
-     *     nos_per_tray?: int, no_of_trays?: int, nos_per_box?: int, no_of_box?: int, notes?: string,
+     *     nos_per_tray?: int, no_of_trays?: int, nos_per_box?: int, no_of_box?: int,
+     *     helper_name?: string, notes?: string,
      *     material_consumptions?: array<int, array{item_id: int, warehouse_id: int, quantity_issued_kg: string}>,
      *     scraps?: array<int, array{type: string, quantity_nos?: string, quantity_kg?: string, scrap_reason_id?: int}>,
      * }  $data
@@ -144,6 +145,7 @@ class ShiftProductionEntryService
                     'no_of_trays' => $data['no_of_trays'] ?? null,
                     'nos_per_box' => $data['nos_per_box'] ?? null,
                     'no_of_box' => $data['no_of_box'] ?? null,
+                    'helper_name' => $data['helper_name'] ?? null,
                     'notes' => $data['notes'] ?? $entry->notes,
                     'batch_status' => BatchStatus::Completed->value,
                     'status' => ShiftProductionEntryStatus::Pending->value,

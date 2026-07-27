@@ -44,6 +44,21 @@ const fmtSignedKg = (v: string | null | undefined): string => {
     return s !== '—' && parseFloat(s) > 0 ? `+${s}` : s;
 };
 
+/**
+ * "standard: 50 trays · 9 boxes" — expected packing from the item's packing
+ * master (ceil of produced / nos-per-tray|box) for eyeballing the entered
+ * counts. Null when nothing is computable (no standards on the item, or no
+ * produced quantity), in which case the row renders exactly as before.
+ */
+const packingStandardNote = (row: ShiftProductionEntry): string | null => {
+    const produced = row.quantity_produced === null ? NaN : parseFloat(row.quantity_produced);
+    if (!Number.isFinite(produced) || produced <= 0) return null;
+    const parts: string[] = [];
+    if (row.item.nos_per_tray && row.item.nos_per_tray >= 1) parts.push(`${Math.ceil(produced / row.item.nos_per_tray)} trays`);
+    if (row.item.nos_per_box && row.item.nos_per_box >= 1) parts.push(`${Math.ceil(produced / row.item.nos_per_box)} boxes`);
+    return parts.length > 0 ? `standard: ${parts.join(' · ')}` : null;
+};
+
 const varianceTag = (pct: number | null) => {
     if (pct === null) return null;
     const abs = Math.abs(pct);
@@ -315,6 +330,11 @@ export default function ApproveProductionPage() {
                             <Descriptions.Item label="Packing">
                                 {detailRow.nos_per_tray ?? '—'}/tray × {detailRow.no_of_trays ?? '—'} trays,{' '}
                                 {detailRow.nos_per_box ?? '—'}/box × {detailRow.no_of_box ?? '—'} boxes
+                                {packingStandardNote(detailRow) && (
+                                    <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                                        {packingStandardNote(detailRow)}
+                                    </Typography.Text>
+                                )}
                             </Descriptions.Item>
                             <Descriptions.Item label="Operator">{detailRow.operator?.name ?? '—'}</Descriptions.Item>
                             <Descriptions.Item label="Notes">{detailRow.notes ?? '—'}</Descriptions.Item>

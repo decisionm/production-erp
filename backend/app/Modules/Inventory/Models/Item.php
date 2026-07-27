@@ -10,7 +10,8 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable([
     'sku', 'name', 'description', 'uom', 'hsn_sac_code', 'reorder_level',
-    'nominal_weight_grams', 'tracking_type', 'is_active',
+    'nominal_weight_grams', 'nos_per_tray', 'trays_per_box', 'nos_per_box',
+    'tracking_type', 'is_active',
     'tally_stock_item_guid', 'tally_alter_id', 'tally_synced_at', 'item_group_id',
 ])]
 class Item extends Model
@@ -22,6 +23,9 @@ class Item extends Model
         return [
             'reorder_level' => 'decimal:4',
             'nominal_weight_grams' => 'decimal:4',
+            'nos_per_tray' => 'integer',
+            'trays_per_box' => 'integer',
+            'nos_per_box' => 'integer',
             'tracking_type' => ItemTrackingType::class,
             'is_active' => 'boolean',
             'tally_alter_id' => 'integer',
