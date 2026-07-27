@@ -82,6 +82,7 @@ class OutboundVoucherTest extends TestCase
     {
         $consumption = new ShiftMaterialConsumption(['quantity_issued_kg' => '250.0000']);
         $consumption->setRelation('item', new Item(['sku' => 'RES-1', 'name' => 'PET Resin']));
+        $consumption->setRelation('warehouse', new Warehouse(['name' => 'Raw Material Store']));
 
         $spe = $this->existing(new ShiftProductionEntry([
             'production_date' => now(),
@@ -102,6 +103,9 @@ class OutboundVoucherTest extends TestCase
         $this->assertSame('5000.0000', $entry->payload['produced'][0]['quantity']);
         $this->assertSame('PET Resin', $entry->payload['consumed'][0]['item']);
         $this->assertSame('250.0000', $entry->payload['consumed'][0]['quantity']);
+        // The line's own godown — without it the agent books resin against
+        // the FG godown and Tally deducts from the wrong store.
+        $this->assertSame('Raw Material Store', $entry->payload['consumed'][0]['godown']);
     }
 
     /** Mark an in-memory model as an existing (persisted) record without a DB write. */

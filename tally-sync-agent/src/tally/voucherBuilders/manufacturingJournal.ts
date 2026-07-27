@@ -9,7 +9,7 @@ export interface ManufacturingJournalPayload {
     godown: string | null;
     narration: string | null;
     produced: { item: string; quantity: string }[];
-    consumed: { item: string; quantity: string }[];
+    consumed: { item: string; quantity: string; godown?: string | null }[];
 }
 
 /**
@@ -33,8 +33,10 @@ export interface ManufacturingJournalPayload {
  * bearing. Value (RATE/AMOUNT) is left for Tally to derive from item costs.
  */
 export function buildManufacturingJournalXml(payload: ManufacturingJournalPayload, companyName: string): string {
+    // A consumption line may name its own godown (the RM store it was issued
+    // from); older cloud payloads omit it, so fall back to the voucher godown.
     const consumed = payload.consumed
-        .map((line) => stockEntry('consumption', line, payload.godown, 'Primary Batch'))
+        .map((line) => stockEntry('consumption', line, line.godown ?? payload.godown, 'Primary Batch'))
         .join('\n');
 
     const produced = payload.produced
@@ -55,7 +57,7 @@ ${produced}
 
 function stockEntry(
     role: 'consumption' | 'production',
-    line: { item: string; quantity: string },
+    line: { item: string; quantity: string; godown?: string | null },
     godown: string | null,
     batchName: string,
 ): string {

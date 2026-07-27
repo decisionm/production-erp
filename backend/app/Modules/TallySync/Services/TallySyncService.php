@@ -148,11 +148,15 @@ class TallySyncService
      */
     public function enqueueShiftProductionEntry(ShiftProductionEntry $entry): TallySyncEntry
     {
-        $entry->loadMissing(['item', 'warehouse', 'materialConsumptions.item', 'scraps.scrapReason']);
+        $entry->loadMissing(['item', 'warehouse', 'materialConsumptions.item', 'materialConsumptions.warehouse', 'scraps.scrapReason']);
 
+        // Each consumption line names its own godown (the RM store it was
+        // issued from) — without it the agent falls back to the voucher's
+        // FG godown and Tally deducts resin from the wrong store.
         $consumed = $entry->materialConsumptions->map(fn ($consumption) => [
             'item' => $consumption->item->name,
             'quantity' => $consumption->quantity_issued_kg,
+            'godown' => $consumption->warehouse?->name,
         ])->all();
 
         $produced = [[
