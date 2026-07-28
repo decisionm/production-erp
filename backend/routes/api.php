@@ -49,6 +49,7 @@ use App\Modules\Production\Http\Controllers\MoldChangeLogController;
 use App\Modules\Production\Http\Controllers\MoldController;
 use App\Modules\Production\Http\Controllers\MrpController;
 use App\Modules\Production\Http\Controllers\PowerInterruptionLogController;
+use App\Modules\Production\Http\Controllers\ProductionReportController;
 use App\Modules\Production\Http\Controllers\ProductionSettingsController;
 use App\Modules\Production\Http\Controllers\ReworkOrderController;
 use App\Modules\Production\Http\Controllers\RoutingController;
@@ -330,6 +331,12 @@ Route::prefix('v1')->group(function () {
             Route::post('shift-summaries', [ShiftSummaryController::class, 'store']);
             Route::get('shift-summaries/report', [ShiftSummaryController::class, 'report']);
 
+            // Reports wave — read-only aggregation over completed entries;
+            // production.view suffices (GET). The traceability report lives
+            // in the flag-gated group further down.
+            Route::get('reports/production', [ProductionReportController::class, 'production']);
+            Route::get('reports/reconciliation', [ProductionReportController::class, 'reconciliation']);
+
             // Phase 2b — Idle Time Report. Downtime/mold-change are
             // "stopwatch" logs (open then close); power interruption and
             // stock counts are single-shot, logged after the fact.
@@ -366,6 +373,10 @@ Route::prefix('v1')->group(function () {
                 Route::get('shift-production-entries/{shift_production_entry}/day-bin', [DayBinController::class, 'entryState']);
 
                 Route::post('shift-production-entries/{shift_production_entry}/handover', [ShiftProductionEntryController::class, 'handover']);
+
+                // Lot → bag → machine/segment report — only meaningful (and
+                // only visible) with traceability on.
+                Route::get('reports/traceability', [ProductionReportController::class, 'traceability']);
             });
         });
 
