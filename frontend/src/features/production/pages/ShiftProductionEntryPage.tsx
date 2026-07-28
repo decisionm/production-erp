@@ -23,6 +23,7 @@ import {
     listMoldChangeLogs,
     listPowerInterruptionLogs,
     listAllScrapReasons,
+    listActiveBatches,
     listShiftProductionEntries,
     listShifts,
     listWorkCenters,
@@ -393,6 +394,16 @@ export default function ShiftProductionEntryPage() {
         // another just did. See PRODUCTION-SUPERVISOR-UX-PLAN.md §2.
         refetchInterval: 20000,
     });
+    // Authoritative machine-running state — every in-progress batch across
+    // all shifts/dates, unpaginated. Distinct from `entries` (a paginated,
+    // today-scoped view for the completed list) so a batch left running from
+    // a past shift can never leave a machine looking idle while Start Batch
+    // is refused by the backend's global guard.
+    const { data: activeBatches } = useQuery({
+        queryKey: ['production', 'active-batches'],
+        queryFn: listActiveBatches,
+        refetchInterval: 20000,
+    });
     const { data: downtimeLogs } = useQuery({
         queryKey: ['production', 'machine-downtime-logs'],
         queryFn: listMachineDowntimeLogs,
@@ -446,21 +457,28 @@ export default function ShiftProductionEntryPage() {
     // Shift-aware, LOCAL production date: at 02:00 on the Night shift this is
     // yesterday (the shift's start date), so the whole night files together.
     const today = productionDateFor(effectiveShift);
+    // The clock's ACTUAL current context (not the shift the user is viewing) —
+    // a running batch outside it is a carryover to flag, independent of which
+    // shift tab is selected.
+    const clockProductionDate = productionDateFor(detectedShift);
 
     // Last-touched-by-someone-else state for every machine, derived from the
     // shared entry list rather than a per-machine assignment — nobody owns a
     // fixed subset of the floor here (UX doc §2).
     const runningByMachine = useMemo(() => {
         const map = new Map<number, ShiftProductionEntry>();
-        for (const entry of entries?.data ?? []) {
+        // Global, NOT filtered to today/current shift: the backend refuses a
+        // second batch on a machine that holds ANY in-progress one, so the
+        // card must reflect that same global reality (carryover batches from
+        // an earlier shift/date included) or the machine reads idle yet won't
+        // start. The list is unpaginated, so nothing can fall past a page.
+        for (const entry of activeBatches?.data ?? []) {
             if (entry.batch_status !== 'in_progress') continue;
-            if (entry.production_date !== today) continue;
-            if (effectiveShiftId && entry.shift.id !== effectiveShiftId) continue;
             const existing = map.get(entry.work_center.id);
             if (!existing || entry.id > existing.id) map.set(entry.work_center.id, entry);
         }
         return map;
-    }, [entries, today, effectiveShiftId]);
+    }, [activeBatches]);
 
     const openDowntimeByMachine = useMemo(() => {
         const map = new Map<number, MachineDowntimeLog>();
@@ -489,6 +507,7 @@ export default function ShiftProductionEntryPage() {
 
     const invalidate = () => {
         queryClient.invalidateQueries({ queryKey: ['production', 'shift-production-entries'] });
+        queryClient.invalidateQueries({ queryKey: ['production', 'active-batches'] });
         queryClient.invalidateQueries({ queryKey: ['inventory', 'stock-balances'] });
     };
     const invalidateDowntime = () => queryClient.invalidateQueries({ queryKey: ['production', 'machine-downtime-logs'] });
@@ -1040,6 +1059,18 @@ export default function ShiftProductionEntryPage() {
                                         Batch {running.batch_number}
                                     </Typography.Text>
                                 )}
+                                {running &&
+                                    (running.production_date !== clockProductionDate ||
+                                        (detectedShift !== undefined && running.shift.id !== detectedShift.id)) && (
+                                        // A batch left running from an earlier shift/date — flag it so
+                                        // it's obvious why the machine can't start a new one and needs
+                                        // completing or handing over. Compared against the clock's
+                                        // current context, so switching the shift tab never mislabels
+                                        // a genuinely-current batch.
+                                        <Tag color="gold" style={{ marginBottom: 6 }}>
+                                            Carryover · {running.production_date} {running.shift.name}
+                                        </Tag>
+                                    )}
                                 {liveExpected && running && (
                                     <div style={{ marginBottom: 6 }}>
                                         <Typography.Text strong style={{ fontSize: 12 }}>

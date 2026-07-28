@@ -319,6 +319,7 @@ Route::prefix('v1')->group(function () {
             // "store" starts a batch (machine + item, quantities unknown
             // yet); "complete" fills in the finished numbers once the batch
             // is done running — see PRODUCTION-SUPERVISOR-UX-PLAN.md §1.
+            Route::get('shift-production-entries/active', [ShiftProductionEntryController::class, 'active']);
             Route::apiResource('shift-production-entries', ShiftProductionEntryController::class)->only(['index', 'store']);
             Route::post('shift-production-entries/{shift_production_entry}/complete', [ShiftProductionEntryController::class, 'complete']);
             // The 4-stage approval chain (Supervisor submits at completeBatch):
