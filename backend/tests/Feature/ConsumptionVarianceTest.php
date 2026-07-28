@@ -152,6 +152,26 @@ class ConsumptionVarianceTest extends TestCase
         $this->assertSame('25.0000', $variance['expected_kg']);
     }
 
+    public function test_tally_kgs_trailing_dot_uom_still_counts_toward_the_bom_norm(): void
+    {
+        // Regression for the exception-report code fix (PR #33): Tally
+        // masters write "Kgs." with a trailing dot — 90+ live items carry
+        // it. The kg-family matcher must accept it, or those BOM lines
+        // silently drop out of the norm and the variance lies.
+        $entry = $this->completedEntry(itemAttributes: ['nominal_weight_grams' => '20.0000']);
+        $tallyResin = Item::create(['sku' => 'BILLION-PET', 'name' => 'Billion Pet Resin IV-0.8', 'uom' => 'Kgs.']);
+
+        $bom = Bom::create(['item_id' => $entry->item_id, 'name' => 'Bottle BOM', 'version' => '1', 'is_active' => true]);
+        $bom->lines()->create(['component_item_id' => $tallyResin->id, 'quantity_per' => '0.0250']);
+
+        $variance = app(ShiftProductionEntryService::class)->consumptionVariance($entry);
+
+        // 1000 × 0.0250 from the "Kgs." line — not the 20 kg item-weight
+        // fallback a dropped line would produce.
+        $this->assertSame('bom', $variance['norm_source']);
+        $this->assertSame('25.0000', $variance['expected_kg']);
+    }
+
     public function test_bom_with_only_nos_lines_falls_back_to_the_item_weight(): void
     {
         $entry = $this->completedEntry(itemAttributes: ['nominal_weight_grams' => '20.0000']);
