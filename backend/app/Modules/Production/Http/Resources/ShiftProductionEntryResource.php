@@ -24,6 +24,12 @@ class ShiftProductionEntryResource extends JsonResource
             'production_date' => $this->production_date?->toDateString(),
             'batch_status' => $this->batch_status->value,
             'batch_number' => $this->batch_number,
+            // Phase 6 shift segments — surfaced only while the traceability
+            // flag is on, so a flag-off deployment's API shape is untouched.
+            'parent_entry_id' => $this->when(
+                (bool) config('production.traceability_enabled'),
+                $this->parent_entry_id,
+            ),
             'quantity_produced' => $this->quantity_produced,
             'quantity_produced_kg' => $this->quantity_produced_kg,
             'quantity_scrap' => $this->quantity_scrap,

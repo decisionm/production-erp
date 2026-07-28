@@ -3,7 +3,13 @@ import type { Paginated } from '@/lib/types';
 import type {
     Bom,
     CapacityWorkCenterLoad,
+    DayBinMovement,
+    DayBinState,
+    EntryDayBinSummary,
     MachineDowntimeLog,
+    MaterialBag,
+    MaterialBagStatus,
+    MaterialLot,
     Mold,
     MoldChangeLog,
     MoldStatus,
@@ -465,5 +471,159 @@ export interface CreateShiftStockCountPayload {
 
 export async function createShiftStockCount(payload: CreateShiftStockCountPayload): Promise<ShiftStockCount> {
     const { data } = await api.post<{ data: ShiftStockCount }>('/production/shift-stock-counts', payload);
+    return data.data;
+}
+
+// ---------------------------------------------------------------------------
+// Lot/barcode traceability (Phase 6). Every endpoint below exists ONLY when
+// config('production.traceability_enabled') is on — with it off the backend
+// 404s and the UI never calls these (gated on settings.traceability_enabled).
+// Lots/bags are Inventory's surface (/inventory/*); the day-bin ledger and
+// the aggregates are Production's.
+// ---------------------------------------------------------------------------
+
+export async function listMaterialLots(itemId?: number): Promise<Paginated<MaterialLot>> {
+    const { data } = await api.get<Paginated<MaterialLot>>('/inventory/material-lots', {
+        params: itemId ? { item_id: itemId } : undefined,
+    });
+    return data;
+}
+
+/** Register one supplier lot (backend fans out one barcoded bag row per bag). */
+export interface CreateMaterialLotPayload {
+    grn_id?: number;
+    item_id: number;
+    supplier_lot_no?: string;
+    received_date: string;
+    bag_count: number;
+    /** Nominal kg per bag; omitted = total / count. */
+    bag_weight_kg?: number;
+    total_received_kg: number;
+    warehouse_id?: number;
+    notes?: string;
+    /** Supplier barcodes, one per bag; omitted = app-generated LOT{lot}-B{seq}. */
+    barcodes?: string[];
+    /** Individually weighed bags; omitted = nominal bag_weight_kg. */
+    bag_weights?: number[];
+}
+
+export async function createMaterialLot(payload: CreateMaterialLotPayload): Promise<MaterialLot> {
+    const { data } = await api.post<{ data: MaterialLot }>('/inventory/material-lots', payload);
+    return data.data;
+}
+
+export async function listMaterialBags(params?: {
+    item_id?: number;
+    status?: MaterialBagStatus;
+}): Promise<Paginated<MaterialBag>> {
+    const { data } = await api.get<Paginated<MaterialBag>>('/inventory/material-bags', { params });
+    return data;
+}
+
+/** FIFO pick list: open in-store bags for the item, oldest lot first. */
+export async function getMaterialBagPickList(itemId: number): Promise<MaterialBag[]> {
+    const { data } = await api.get<{ data: MaterialBag[] }>('/inventory/material-bags/pick-list', {
+        params: { item_id: itemId },
+    });
+    return data.data;
+}
+
+/** Live day-bin state (per-material balance + bags currently at the machine). */
+export async function getDayBin(workCenterId: number): Promise<DayBinState> {
+    const { data } = await api.get<{ data: DayBinState }>(`/production/work-centers/${workCenterId}/day-bin`);
+    return data.data;
+}
+
+export interface LoadDayBinPayload {
+    work_center_id: number;
+    /** Scanned bag barcode — the scanner-gun path. Exactly one of barcode / material_bag_id. */
+    barcode?: string;
+    /** Alternative when the bag id is already known (pick-list UI). */
+    material_bag_id?: number;
+    /** Omit for a full-bag load (the bag's whole remaining_kg); set for a weighed partial. */
+    quantity_kg?: number;
+    /** The running segment the load belongs to. */
+    shift_production_entry_id?: number;
+    /**
+     * Re-send after a FIFO refusal (422 with code 'fifo_order') — requires
+     * the `production.override-fifo` permission and records who overrode.
+     */
+    override_fifo?: boolean;
+}
+
+export async function loadDayBin(payload: LoadDayBinPayload): Promise<DayBinMovement> {
+    const { data } = await api.post<{ data: DayBinMovement }>('/production/day-bin/load', payload);
+    return data.data;
+}
+
+export interface ReturnDayBinPayload {
+    work_center_id: number;
+    item_id: number;
+    quantity_kg: number;
+    /** Named bag: the kg flows back into it; absent = ledger row only (Vincent Q4 open). */
+    material_bag_id?: number;
+    shift_production_entry_id?: number;
+}
+
+export async function returnDayBin(payload: ReturnDayBinPayload): Promise<DayBinMovement> {
+    const { data } = await api.post<{ data: DayBinMovement }>('/production/day-bin/return', payload);
+    return data.data;
+}
+
+export interface CountDayBinPayload {
+    work_center_id: number;
+    item_id: number;
+    /** The weighed/estimated absolute figure — an observation, not a delta. */
+    quantity_kg: number;
+    shift_production_entry_id?: number;
+}
+
+export async function countDayBin(payload: CountDayBinPayload): Promise<DayBinMovement> {
+    const { data } = await api.post<{ data: DayBinMovement }>('/production/day-bin/count', payload);
+    return data.data;
+}
+
+/**
+ * Backend-computed consumption per material for one entry (segment):
+ * opening + Σ loaded − closing − Σ returned. Null (rather than throwing) on a
+ * 404 so the Complete Batch drawer degrades gracefully when the backend
+ * doesn't serve traceability yet.
+ */
+export async function getEntryDayBinSummary(entryId: number): Promise<EntryDayBinSummary | null> {
+    try {
+        const { data } = await api.get<{ data: EntryDayBinSummary }>(
+            `/production/shift-production-entries/${entryId}/day-bin`,
+        );
+        return data.data;
+    } catch (error: any) {
+        if (error?.response?.status === 404) return null;
+        throw error;
+    }
+}
+
+export interface HandoverPayload {
+    /** The incoming shift taking the machine over. */
+    shift_id: number;
+    /** The incoming shift's production date (shift-aware, may differ across midnight). */
+    production_date?: string;
+    /** The incoming operator, when known. */
+    operator_id?: number;
+    /** Closing day-bin weighments for the OUTGOING segment, one per material. */
+    closing_day_bin?: { item_id: number; quantity_kg: number }[];
+    /** The outgoing segment's completion figures — mirrors CompleteBatchRequest. */
+    completion: CompleteBatchPayload;
+}
+
+/**
+ * Shift handover: records the outgoing segment's closing day-bin counts,
+ * completes it with the given figures, and opens a new entry with the same
+ * batch number, product, mold standards and machine; the closing balance
+ * carries in as the new segment's opening. Returns the NEW running segment.
+ */
+export async function handoverShiftProductionEntry(id: number, payload: HandoverPayload): Promise<ShiftProductionEntry> {
+    const { data } = await api.post<{ data: ShiftProductionEntry }>(
+        `/production/shift-production-entries/${id}/handover`,
+        payload,
+    );
     return data.data;
 }

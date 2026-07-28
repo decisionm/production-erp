@@ -26,7 +26,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
     'supervisor_signed_by', 'supervisor_signed_at', 'plant_manager_signed_by', 'plant_manager_signed_at',
     'accountant_signed_by', 'accountant_signed_at',
     'status', 'rejection_reason', 'approved_by', 'approved_at',
-    'operator_id', 'notes', 'created_by',
+    'operator_id', 'notes', 'created_by', 'parent_entry_id',
 ])]
 class ShiftProductionEntry extends Model
 {
@@ -142,5 +142,26 @@ class ShiftProductionEntry extends Model
     public function scraps(): HasMany
     {
         return $this->hasMany(ShiftScrap::class);
+    }
+
+    /**
+     * Shift continuity (Phase 6): the segment this one continued from. A
+     * run crossing the shift boundary completes the outgoing segment and
+     * opens a child inheriting batch_number/item/standards/machine — the
+     * batch number stays the run's identity, the entry row is the segment.
+     */
+    public function parentEntry(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'parent_entry_id');
+    }
+
+    public function childSegments(): HasMany
+    {
+        return $this->hasMany(self::class, 'parent_entry_id');
+    }
+
+    public function dayBinMovements(): HasMany
+    {
+        return $this->hasMany(DayBinMovement::class);
     }
 }

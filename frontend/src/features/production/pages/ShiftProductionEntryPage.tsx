@@ -9,12 +9,15 @@ import { z } from 'zod';
 import { listAllEmployees } from '@/features/hrms/api';
 import { listAllItems, listAllWarehouses } from '@/features/inventory/api';
 import type { Item } from '@/features/inventory/types';
+import DayBinDrawer from '@/features/production/components/DayBinDrawer';
+import HandoverModal from '@/features/production/components/HandoverModal';
 import {
     closeDowntimeLog,
     closeMoldChangeLog,
     completeBatch,
     createPowerInterruptionLog,
     createShiftStockCount,
+    getEntryDayBinSummary,
     listMachineDowntimeLogs,
     listAllMolds,
     listMoldChangeLogs,
@@ -102,8 +105,10 @@ function hasPackStd(v: number | null | undefined): boolean {
     return (v ?? 0) >= 1;
 }
 
-const isMasterbatchItem = (item: Item): boolean => /master ?batch/i.test(`${item.sku} ${item.name}`);
-const isResinItem = (item: Item): boolean => /resin/i.test(`${item.sku} ${item.name}`);
+// Structural (sku+name) so both full Items and the day-bin aggregates'
+// item-lite slices ({id, name, sku}) classify the same way.
+const isMasterbatchItem = (item: Pick<Item, 'sku' | 'name'>): boolean => /master ?batch/i.test(`${item.sku} ${item.name}`);
+const isResinItem = (item: Pick<Item, 'sku' | 'name'>): boolean => /resin/i.test(`${item.sku} ${item.name}`);
 const isClearColour = (colour: string | null | undefined): boolean => /^clear$/i.test((colour ?? '').trim());
 
 /**
@@ -364,6 +369,10 @@ export default function ShiftProductionEntryPage() {
     const [finishingMoldChangeLog, setFinishingMoldChangeLog] = useState<MoldChangeLog | null>(null);
     const [powerInterruptionOpen, setPowerInterruptionOpen] = useState(false);
     const [stockCountOpen, setStockCountOpen] = useState(false);
+    // Phase 6 traceability targets — only ever set from UI that itself only
+    // renders when settings.traceability_enabled is true.
+    const [dayBinTarget, setDayBinTarget] = useState<{ workCenter: WorkCenter; entry: ShiftProductionEntry } | null>(null);
+    const [handoverEntry, setHandoverEntry] = useState<ShiftProductionEntry | null>(null);
     const queryClient = useQueryClient();
 
     const { data: shifts } = useQuery({ queryKey: ['production', 'shifts'], queryFn: listShifts });
@@ -535,6 +544,10 @@ export default function ShiftProductionEntryPage() {
     const quantityProduced = completeForm.watch('quantity_produced');
     const quantityScrap = completeForm.watch('quantity_scrap');
     const settings = useProductionSettings();
+    // Phase 6 master switch: anything traceability-related renders/fetches ONLY
+    // when the backend says so — with the flag off (or an older backend that
+    // doesn't send the field) this page is byte-for-byte today's UI.
+    const traceabilityEnabled = settings?.traceability_enabled === true;
     const goodBoxesWatch = completeForm.watch('no_of_box');
     const pouchesWatch = completeForm.watch('no_of_pouches');
     const loosePiecesWatch = completeForm.watch('loose_pieces');
@@ -605,6 +618,41 @@ export default function ShiftProductionEntryPage() {
             completeForm.setValue('quantity_produced', pouchesWatch * nosPerPouch! + loose);
         }
     }, [goodBoxesWatch, pouchesWatch, loosePiecesWatch, nosPerBoxWatch, completingEntry, completeForm]);
+
+    // Day-bin consumption for the batch being completed (Phase 6): the
+    // backend-computed `opening + Σ loaded − closing − Σ returned` per
+    // material. Fetched only with the flag on; null on 404 (older backend).
+    const { data: entryDayBin } = useQuery({
+        queryKey: ['production', 'entry-day-bin', completingEntry?.id],
+        queryFn: () => getEntryDayBinSummary(completingEntry!.id),
+        enabled: traceabilityEnabled && completingEntry !== null,
+    });
+
+    // Prefill the dedicated Resin/MB rows from the day-bin figure — same
+    // dirty-guard contract as every other auto-fill in this drawer: setValue
+    // never marks the field dirty, any user-touched field is theirs and is
+    // never overwritten. Manual entry stays fully editable throughout; a
+    // floor that ignores scanning entirely (has_movements false) prefills
+    // nothing and completes exactly as before.
+    useEffect(() => {
+        if (!traceabilityEnabled || !completingEntry || !entryDayBin?.has_movements) return;
+        for (const material of entryDayBin.materials) {
+            const consumed = toNum(material.consumption_kg);
+            if (consumed === null || consumed < 0) continue;
+            const target = isResinItem(material.item) ? ('resin' as const) : isMasterbatchItem(material.item) ? ('mb' as const) : null;
+            if (!target) continue;
+            const kgField = target === 'resin' ? ('resin_kg' as const) : ('mb_kg' as const);
+            const itemField = target === 'resin' ? ('resin_item_id' as const) : ('mb_item_id' as const);
+            if (!completeForm.getFieldState(kgField).isDirty) {
+                completeForm.setValue(kgField, Math.round(consumed * 10000) / 10000);
+            }
+            // The bag actually scanned into the machine beats the colour-based
+            // MB suggestion — still only while the supervisor hasn't touched it.
+            if (!completeForm.getFieldState(itemField).isDirty) {
+                completeForm.setValue(itemField, material.item.id);
+            }
+        }
+    }, [entryDayBin, completingEntry, traceabilityEnabled, completeForm]);
 
     const nominalWeight = completingEntry?.item.nominal_weight_grams ? Number(completingEntry.item.nominal_weight_grams) : null;
     const previewProducedKg = nominalWeight && quantityProduced ? ((quantityProduced * nominalWeight) / 1000).toFixed(4) : null;
@@ -1033,6 +1081,31 @@ export default function ShiftProductionEntryPage() {
                                                 Mold Change
                                             </Button>
                                         )}
+                                        {/* Phase 6 traceability actions — invisible unless the
+                                            backend flag is on, so with it off this card is
+                                            exactly the pre-traceability UI. */}
+                                        {running && traceabilityEnabled && (
+                                            <Button
+                                                block
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setDayBinTarget({ workCenter: wc, entry: running });
+                                                }}
+                                            >
+                                                Day Bin
+                                            </Button>
+                                        )}
+                                        {running && traceabilityEnabled && (
+                                            <Button
+                                                block
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setHandoverEntry(running);
+                                                }}
+                                            >
+                                                Hand Over Shift
+                                            </Button>
+                                        )}
                                     </Space>
                                 )}
                             </Card>
@@ -1371,6 +1444,28 @@ export default function ShiftProductionEntryPage() {
                     </Row>
 
                     <Typography.Text strong>Material Consumption</Typography.Text>
+
+                    {/* Phase 6: the day-bin computed figure that prefilled the
+                        Resin/MB rows below, with its formula spelled out. The
+                        rows stay fully editable — this is a suggestion, and a
+                        supervisor-typed value is never overwritten. */}
+                    {traceabilityEnabled && entryDayBin?.has_movements && (
+                        <Alert
+                            type="info"
+                            showIcon
+                            style={{ marginTop: 8 }}
+                            message="Prefilled from day-bin weighments — correct if wrong"
+                            description={entryDayBin.materials
+                                .filter((m) => m.consumption_kg !== null)
+                                .map((m) => (
+                                    <div key={m.item.id} style={{ fontSize: 12 }}>
+                                        {m.item.sku}: <strong>{fmtNum(toNum(m.consumption_kg), 4)} kg</strong>
+                                        {' '}= opening {fmtNum(toNum(m.opening_kg), 4)} + loaded {fmtNum(toNum(m.loaded_kg), 4)} − closing{' '}
+                                        {m.closing_kg === null ? '—' : fmtNum(toNum(m.closing_kg), 4)} − returned {fmtNum(toNum(m.returned_kg), 4)}
+                                    </div>
+                                ))}
+                        />
+                    )}
 
                     {/* Fixed rows for the two materials every molding batch
                         consumes — pickers scoped to resins / masterbatches so
@@ -1896,6 +1991,32 @@ export default function ShiftProductionEntryPage() {
                     </Form.Item>
                 </Form>
             </Modal>
+
+            {/* Phase 6 traceability surfaces — mounted only when the backend
+                flag is on; with it off the tree is identical to today's. */}
+            {traceabilityEnabled && (
+                <>
+                    <DayBinDrawer
+                        workCenter={dayBinTarget?.workCenter ?? null}
+                        entry={dayBinTarget?.entry ?? null}
+                        open={dayBinTarget !== null}
+                        onClose={() => setDayBinTarget(null)}
+                    />
+                    <HandoverModal
+                        entry={handoverEntry}
+                        incomingShift={effectiveShift}
+                        productionDate={today}
+                        onClose={() => setHandoverEntry(null)}
+                        onDone={() => {
+                            // The new segment appears as the running batch via the
+                            // shared entry list (highest id per machine wins).
+                            invalidate();
+                            queryClient.invalidateQueries({ queryKey: ['production', 'day-bin'] });
+                            setHandoverEntry(null);
+                        }}
+                    />
+                </>
+            )}
         </>
     );
 }

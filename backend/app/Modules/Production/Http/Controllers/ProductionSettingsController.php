@@ -18,6 +18,9 @@ class ProductionSettingsController extends Controller
             'data' => [
                 'packing_rounding' => config('production.packing_rounding'),
                 'tolerances' => config('production.tolerances'),
+                // Phase 6 master switch — the SPA renders the traceability
+                // surfaces only when the backend says they exist.
+                'traceability_enabled' => (bool) config('production.traceability_enabled'),
             ],
         ]);
     }

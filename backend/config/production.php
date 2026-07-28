@@ -33,6 +33,23 @@ return [
             ? (float) env('PROD_TOL_UNACCOUNTED_BLOCKING') : null,
     ],
 
+    // Phase 6 — Lot/Barcode traceability & shift continuity. Master switch:
+    // with this off (the default) the entire feature is invisible and inert —
+    // every traceability route 404s and the SPA renders nothing new. Schema
+    // stays applied either way (additive, harmless). Flip per deployment via
+    // .env once the machine pilot starts (design doc "Rollout" §3).
+    'traceability_enabled' => (bool) env('PROD_TRACEABILITY', false),
+
+    'traceability' => [
+        // Vincent Q3 (FIFO mandatory vs preference) absorbed by config:
+        // true (default) = scanning a newer bag while an older one is still
+        // open in the store requires the production.override-fifo permission
+        // plus an explicit override flag (and records who); false = FIFO is
+        // a suggestion only — the pick list still sorts oldest-first but any
+        // bag loads freely.
+        'fifo_enforced' => (bool) env('PROD_TRACE_FIFO_ENFORCED', true),
+    ],
+
     // How packing suggestions and "vs standard" notes round a partial
     // container: 'ceil' (default — a part-filled pouch/tray still needs
     // packing, matches current behaviour), 'round', or 'floor'. Used by ALL

@@ -23,6 +23,8 @@ use App\Modules\HRMS\Http\Controllers\LeaveRequestController;
 use App\Modules\HRMS\Http\Controllers\LeaveTypeController;
 use App\Modules\Inventory\Http\Controllers\BatchController;
 use App\Modules\Inventory\Http\Controllers\ItemController;
+use App\Modules\Inventory\Http\Controllers\MaterialBagController;
+use App\Modules\Inventory\Http\Controllers\MaterialLotController;
 use App\Modules\Inventory\Http\Controllers\SerialNumberController;
 use App\Modules\Inventory\Http\Controllers\StockBalanceController;
 use App\Modules\Inventory\Http\Controllers\StockMovementController;
@@ -41,6 +43,7 @@ use App\Modules\Procurement\Http\Controllers\PurchaseRequisitionController;
 use App\Modules\Procurement\Http\Controllers\VendorController;
 use App\Modules\Production\Http\Controllers\BomController;
 use App\Modules\Production\Http\Controllers\CapacityPlanController;
+use App\Modules\Production\Http\Controllers\DayBinController;
 use App\Modules\Production\Http\Controllers\MachineDowntimeLogController;
 use App\Modules\Production\Http\Controllers\MoldChangeLogController;
 use App\Modules\Production\Http\Controllers\MoldController;
@@ -131,6 +134,19 @@ Route::prefix('v1')->group(function () {
 
             Route::apiResource('serial-numbers', SerialNumberController::class)->only(['index', 'store']);
             Route::get('serial-numbers/{serial_number}/history', [SerialNumberController::class, 'history']);
+
+            // Phase 6 traceability (store side): supplier lots + bags with
+            // unique barcodes, and the FIFO pick list. The whole surface
+            // 404s until production.traceability_enabled is on — with the
+            // flag off the feature does not exist.
+            Route::middleware('traceability')->group(function () {
+                Route::get('material-lots', [MaterialLotController::class, 'index']);
+                Route::post('material-lots', [MaterialLotController::class, 'store']);
+                Route::get('material-lots/{material_lot}', [MaterialLotController::class, 'show']);
+
+                Route::get('material-bags', [MaterialBagController::class, 'index']);
+                Route::get('material-bags/pick-list', [MaterialBagController::class, 'pickList']);
+            });
         });
 
         Route::prefix('procurement')->middleware('module:procurement')->group(function () {
@@ -333,6 +349,24 @@ Route::prefix('v1')->group(function () {
             Route::apiResource('rework-orders', ReworkOrderController::class)->only(['index', 'store']);
             Route::post('rework-orders/{rework_order}/release', [ReworkOrderController::class, 'release']);
             Route::post('rework-orders/{rework_order}/complete', [ReworkOrderController::class, 'complete']);
+
+            // Phase 6 traceability (machine side): the day-bin ledger and
+            // shift handover. 404 until production.traceability_enabled —
+            // same invisibility rule as the inventory half above.
+            Route::middleware('traceability')->group(function () {
+                Route::get('day-bin/movements', [DayBinController::class, 'movements']);
+                Route::get('day-bin/consumption', [DayBinController::class, 'consumption']);
+                Route::post('day-bin/load', [DayBinController::class, 'load']);
+                Route::post('day-bin/return', [DayBinController::class, 'returnMaterial']);
+                Route::post('day-bin/count', [DayBinController::class, 'count']);
+
+                // Aggregate reads the SPA consumes: live machine state and
+                // the per-segment consumption summary.
+                Route::get('work-centers/{work_center}/day-bin', [DayBinController::class, 'workCenterState']);
+                Route::get('shift-production-entries/{shift_production_entry}/day-bin', [DayBinController::class, 'entryState']);
+
+                Route::post('shift-production-entries/{shift_production_entry}/handover', [ShiftProductionEntryController::class, 'handover']);
+            });
         });
 
         Route::prefix('maintenance')->middleware('module:maintenance')->group(function () {
