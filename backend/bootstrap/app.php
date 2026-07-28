@@ -2,6 +2,7 @@
 
 use App\Exceptions\DomainException;
 use App\Http\Middleware\EnsureModulePermission;
+use App\Http\Middleware\EnsureTraceabilityEnabled;
 use App\Http\Middleware\EnsureUserIsActive;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -24,6 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'module' => EnsureModulePermission::class,
             'active' => EnsureUserIsActive::class,
+            'traceability' => EnsureTraceabilityEnabled::class,
         ]);
 
         // There is no server-side named "login" route — the SPA owns /login
@@ -38,8 +40,16 @@ return Application::configure(basePath: dirname(__DIR__))
         );
 
         // Any module's exception implementing DomainException (an expected
-        // business-rule violation, not a bug) renders as a plain 422.
+        // business-rule violation, not a bug) renders as a plain 422. An
+        // exception exposing errorCode() additionally carries a stable
+        // machine-readable `code` so clients can branch without parsing
+        // message text (e.g. FifoPolicyException → 'fifo_order').
         $exceptions->render(function (DomainException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
+            $payload = ['message' => $e->getMessage()];
+            if (method_exists($e, 'errorCode')) {
+                $payload['code'] = $e->errorCode();
+            }
+
+            return response()->json($payload, 422);
         });
     })->create();

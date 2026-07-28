@@ -95,12 +95,22 @@ export async function listGoodsReceipts(): Promise<Paginated<GoodsReceiptNote>> 
     return data;
 }
 
+/**
+ * The GRN payload is exactly what StoreGoodsReceiptRequest validates — no
+ * lot data rides along. Phase 6 supplier lots are registered separately,
+ * one POST /inventory/material-lots per lot AFTER the receipt saves (see
+ * GoodsReceiptsPage), because lots are Inventory's surface, not the GRN's.
+ */
 export interface CreateGoodsReceiptPayload {
     purchase_order_id: number;
     warehouse_id: number;
     reference?: string;
     notes?: string;
-    lines: { purchase_order_line_id: number; quantity: number; unit_cost?: number }[];
+    lines: {
+        purchase_order_line_id: number;
+        quantity: number;
+        unit_cost?: number;
+    }[];
 }
 
 export async function createGoodsReceipt(payload: CreateGoodsReceiptPayload): Promise<GoodsReceiptNote> {

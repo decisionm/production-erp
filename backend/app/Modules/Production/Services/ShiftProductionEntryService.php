@@ -36,6 +36,7 @@ class ShiftProductionEntryService
     public function __construct(
         private readonly StockMovementService $stock,
         private readonly BomService $boms,
+        private readonly DayBinLedgerService $dayBin,
     ) {}
 
     public function paginate(int $perPage = 20, ?ShiftProductionEntryStatus $status = null): LengthAwarePaginator
@@ -246,6 +247,85 @@ class ShiftProductionEntryService
                 'shift', 'workCenter', 'item', 'warehouse', 'scrapReason', 'operator',
                 'materialConsumptions.item', 'scraps.scrapReason',
             ]);
+        });
+    }
+
+    /**
+     * Shift handover / segment continuation (Phase 6 traceability):
+     * complete-and-continue in one transaction. The outgoing segment is
+     * completed exactly as completeBatch would (same math, stock movements
+     * and concurrency guard), its day-bin closing counts are recorded, and
+     * a child entry opens for the incoming shift with parent_entry_id set,
+     * INHERITING the run's identity: batch_number (deliberately NOT
+     * re-minted — the batch number is the run's identity, the entry row is
+     * the segment), item, machine, warehouse, and the mold-standards
+     * snapshot taken at the original Start Batch (never re-read from the
+     * item master — the run keeps the standard it actually started
+     * against). The closing counts become the child's opening via
+     * day_bin_movements (DayBinLedgerService::openingFor reads the
+     * parent's closing), so the balance carries without a second entry.
+     *
+     * Who confirms the handover (incoming vs outgoing supervisor —
+     * Vincent Q5) is deliberately open: whoever is authenticated records
+     * it, and recorded_by/created_by say who.
+     *
+     * @param  array{
+     *     shift_id: int, production_date?: ?string, operator_id?: ?int,
+     *     closing_day_bin?: array<int, array{item_id: int, quantity_kg: string|float}>,
+     *     completion: array<string, mixed>,
+     * }  $data
+     */
+    public function handover(ShiftProductionEntry $entry, array $data, ?int $userId): ShiftProductionEntry
+    {
+        if ($entry->batch_status !== BatchStatus::InProgress) {
+            throw InvalidStatusTransitionException::make(
+                'shift production entry batch',
+                $entry->batch_status->value,
+                BatchStatus::InProgress->value.' (handover)',
+            );
+        }
+
+        return DB::transaction(function () use ($entry, $data, $userId) {
+            // Closing counts first: their over-count guard must see only
+            // the outgoing segment's window, and a bad count aborts the
+            // whole handover before any stock movement happens.
+            foreach ($data['closing_day_bin'] ?? [] as $line) {
+                $this->dayBin->record([
+                    'work_center_id' => $entry->work_center_id,
+                    'item_id' => $line['item_id'],
+                    'shift_production_entry_id' => $entry->id,
+                    'type' => 'count',
+                    'quantity_kg' => $line['quantity_kg'],
+                    'recorded_by' => $userId,
+                ]);
+            }
+
+            $completed = $this->completeBatch($entry, $data['completion'], $userId);
+
+            $child = ShiftProductionEntry::create([
+                'shift_id' => $data['shift_id'],
+                'work_center_id' => $completed->work_center_id,
+                'item_id' => $completed->item_id,
+                'warehouse_id' => $completed->warehouse_id,
+                'production_date' => $data['production_date']
+                    ?? Shift::query()->find($data['shift_id'])?->productionDateFor()
+                    ?? now()->toDateString(),
+                // Inherited, not re-minted — see method docblock.
+                'batch_number' => $completed->batch_number,
+                'batch_status' => BatchStatus::InProgress,
+                'parent_entry_id' => $completed->id,
+                'quantity_produced' => null,
+                'quantity_scrap' => '0',
+                // The Start Batch snapshot carries through the whole run.
+                'standard_cycle_time' => $completed->standard_cycle_time,
+                'standard_cavities' => $completed->standard_cavities,
+                'actual_cycle_time' => $completed->actual_cycle_time,
+                'active_cavities' => $completed->active_cavities,
+                'operator_id' => $data['operator_id'] ?? null,
+                'created_by' => $userId,
+            ]);
+
+            return $child->fresh(['shift', 'workCenter', 'item', 'warehouse', 'operator', 'parentEntry']);
         });
     }
 

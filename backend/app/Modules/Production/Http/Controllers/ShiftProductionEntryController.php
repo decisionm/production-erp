@@ -4,6 +4,7 @@ namespace App\Modules\Production\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Production\Http\Requests\CompleteBatchRequest;
+use App\Modules\Production\Http\Requests\HandoverRequest;
 use App\Modules\Production\Http\Requests\RejectShiftProductionEntryRequest;
 use App\Modules\Production\Http\Requests\StartBatchRequest;
 use App\Modules\Production\Http\Resources\ShiftProductionEntryResource;
@@ -77,6 +78,17 @@ class ShiftProductionEntryController extends Controller
     {
         return ShiftProductionEntryResource::make(
             $this->entries->reject($shiftProductionEntry, $request->user()->id, $request->validated('reason')),
+        );
+    }
+
+    /**
+     * Shift handover (Phase 6, traceability-gated route): completes the
+     * outgoing segment and returns the freshly opened child segment.
+     */
+    public function handover(HandoverRequest $request, ShiftProductionEntry $shiftProductionEntry): ShiftProductionEntryResource
+    {
+        return ShiftProductionEntryResource::make(
+            $this->entries->handover($shiftProductionEntry, $request->validated(), $request->user()?->id),
         );
     }
 }

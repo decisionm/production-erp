@@ -168,6 +168,12 @@ export interface ShiftProductionEntry {
     item: Item;
     warehouse: Warehouse;
     production_date: string;
+    /**
+     * Traceability (Phase 6): set when this entry is a shift SEGMENT opened by
+     * a handover — same batch_number/product as the parent, day-bin balance
+     * carried in as the opening. Absent/null on pre-traceability backends.
+     */
+    parent_entry_id?: number | null;
     batch_status: BatchStatus;
     batch_number: string | null;
     quantity_produced: string | null;
@@ -468,4 +474,118 @@ export interface ReworkOrder {
     released_at: string | null;
     completed_at: string | null;
     created_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Lot/barcode traceability (Phase 6, SHIFT-REDESIGN-TRACEABILITY-DESIGN.md).
+// Everything below is served ONLY when config('production.traceability_enabled')
+// is true — with the flag off these endpoints 404 and no UI references them.
+// Shapes mirror the design doc's data model verbatim.
+// ---------------------------------------------------------------------------
+
+export type MaterialBagStatus = 'in_store' | 'in_day_bin' | 'consumed' | 'returned';
+
+/** The id/name/sku slice the day-bin aggregates embed. */
+export interface ItemLite {
+    id: number;
+    name: string;
+    sku: string;
+}
+
+/** One supplier lot on a GRN (design: material_lots) — MaterialLotResource. */
+export interface MaterialLot {
+    id: number;
+    grn_id: number | null;
+    item?: Item;
+    supplier_lot_no: string | null;
+    received_date: string | null;
+    bag_count: number;
+    /** Nominal kg per bag — decimal string. */
+    bag_weight_kg: string | null;
+    total_received_kg: string | null;
+    bags?: MaterialBag[];
+    notes: string | null;
+    created_at: string;
+}
+
+/** One physical bag with its own barcode (design: material_bags) — MaterialBagResource. */
+export interface MaterialBag {
+    id: number;
+    material_lot_id: number;
+    /** Supplier's barcode when scannable, else app-generated LOT{lot}-B{seq}. */
+    barcode: string;
+    original_kg: string;
+    remaining_kg: string;
+    status: MaterialBagStatus;
+    current_warehouse_id: number | null;
+    day_bin_work_center_id: number | null;
+    /** Lot context for pick lists / scan feedback (present when the API loads it). */
+    lot?: MaterialLot;
+    created_at?: string | null;
+}
+
+export type DayBinMovementType = 'load' | 'return' | 'count';
+
+/** One row of the per-machine day-bin ledger (design: day_bin_movements). */
+export interface DayBinMovement {
+    id: number;
+    work_center_id: number;
+    item_id: number;
+    item?: Item;
+    /** The shift SEGMENT the movement belongs to; null when logged outside a running batch. */
+    shift_production_entry_id: number | null;
+    type: DayBinMovementType;
+    material_bag_id: number | null;
+    material_bag?: MaterialBag | null;
+    quantity_kg: string;
+    recorded_by?: { id: number; name: string } | null;
+    recorded_at: string;
+}
+
+/** A bag currently sitting at the machine, as the day-bin aggregate reports it. */
+export interface DayBinLoadedBag {
+    id: number;
+    barcode: string;
+    remaining_kg: string;
+    lot: { id: number; supplier_lot_no: string | null } | null;
+}
+
+/**
+ * Per-material live state of one machine's day bin —
+ * GET /production/work-centers/{id}/day-bin (one row per item with any
+ * movements on the machine; balance from the backend ledger).
+ */
+export interface DayBinMaterialState {
+    item: ItemLite;
+    balance_kg: string;
+    /** Bags physically at this machine right now, oldest first. */
+    loaded_bags: DayBinLoadedBag[];
+}
+
+export interface DayBinState {
+    materials: DayBinMaterialState[];
+}
+
+/**
+ * Per-entry (segment) consumption summary — the backend-computed formula
+ * `actual_consumed_kg = opening + Σ loaded − closing − Σ returned` that
+ * PRE-FILLS the dedicated Resin/MB rows in Complete Batch. The supervisor
+ * confirms or corrects; manual entry always stays authoritative.
+ * GET /production/shift-production-entries/{id}/day-bin.
+ */
+export interface EntryDayBinMaterialSummary {
+    item: ItemLite;
+    opening_kg: string;
+    loaded_kg: string;
+    returned_kg: string;
+    /** Latest `count` movement for the segment; null when nothing counted yet. */
+    closing_kg: string | null;
+    /** Null until a closing count exists (not computable ≠ zero). */
+    consumption_kg: string | null;
+}
+
+export interface EntryDayBinSummary {
+    /** False = the floor ignored scanning for this segment — prefill nothing. */
+    has_movements: boolean;
+    materials: EntryDayBinMaterialSummary[];
 }
