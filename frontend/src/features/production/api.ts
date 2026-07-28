@@ -227,6 +227,16 @@ export async function listShiftProductionEntries(status?: ShiftProductionEntrySt
     return data;
 }
 
+/**
+ * Every machine's currently-running batch across ALL shifts/dates, never
+ * paginated — the authoritative source for the Shift Floor's machine state
+ * (matches the backend's global one-in-progress-per-machine guard).
+ */
+export async function listActiveBatches(): Promise<{ data: ShiftProductionEntry[] }> {
+    const { data } = await api.get<{ data: ShiftProductionEntry[] }>('/production/shift-production-entries/active');
+    return data;
+}
+
 export interface StartBatchPayload {
     shift_id: number;
     work_center_id: number;

@@ -14,6 +14,7 @@ use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\WorkCenter;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -59,6 +60,23 @@ class ShiftProductionEntryService
             ->orderByDesc('production_date')
             ->orderByDesc('id')
             ->paginate($perPage);
+    }
+
+    /**
+     * Every in-progress batch, one per machine (the startBatch guard keeps
+     * it unique), across all shifts and dates — the authoritative machine
+     * state for the Shift Floor. Deliberately unpaginated: bounded by the
+     * machine count, and a running batch must never be hidden by paging.
+     *
+     * @return Collection<int, ShiftProductionEntry>
+     */
+    public function activeBatches(): Collection
+    {
+        return ShiftProductionEntry::query()
+            ->with(['shift', 'workCenter', 'item'])
+            ->where('batch_status', BatchStatus::InProgress->value)
+            ->orderByDesc('id')
+            ->get();
     }
 
     /**

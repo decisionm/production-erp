@@ -27,6 +27,18 @@ class ShiftProductionEntryController extends Controller
         return ShiftProductionEntryResource::collection($this->entries->paginate(status: $status));
     }
 
+    /**
+     * Every machine's currently-running batch, across ALL shifts and dates
+     * and never paginated — the Shift Floor's machine state must match the
+     * backend's one-in_progress-per-machine guard, which is global. A batch
+     * left running from a past shift/date would otherwise show the machine
+     * idle while Start Batch is (correctly) refused.
+     */
+    public function active(): AnonymousResourceCollection
+    {
+        return ShiftProductionEntryResource::collection($this->entries->activeBatches());
+    }
+
     public function store(StartBatchRequest $request): ShiftProductionEntryResource
     {
         return ShiftProductionEntryResource::make(
