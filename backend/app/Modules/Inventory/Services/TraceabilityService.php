@@ -54,6 +54,28 @@ class TraceabilityService
     }
 
     /**
+     * Read-only lot+bag window for Production's traceability report
+     * (cross-module read via service, per the module pattern): lots
+     * received in the date range, bags eager-loaded, oldest first. The
+     * caller maps bags onto day-bin feeds with its own ledger — bag/lot
+     * shape stays this module's concern.
+     *
+     * @return Collection<int, MaterialLot>
+     */
+    public function lotsForReport(?int $lotId, ?int $itemId, string $dateFrom, string $dateTo): Collection
+    {
+        return MaterialLot::query()
+            ->with(['item', 'bags'])
+            ->when($lotId, fn ($query) => $query->whereKey($lotId))
+            ->when($itemId, fn ($query) => $query->where('item_id', $itemId))
+            ->whereDate('received_date', '>=', $dateFrom)
+            ->whereDate('received_date', '<=', $dateTo)
+            ->orderBy('received_date')
+            ->orderBy('id')
+            ->get();
+    }
+
+    /**
      * Create a lot and fan out its bags: n rows, barcode = the supplier's
      * when provided (scannable bags, Vincent Q1) else app-generated
      * LOT{lot}-B{seq} (printable). Per-bag weight = bag_weights[i] when

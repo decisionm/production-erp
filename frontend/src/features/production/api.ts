@@ -15,6 +15,8 @@ import type {
     MoldStatus,
     MrpNetRequirement,
     PowerInterruptionLog,
+    ProductionReport,
+    ReconciliationReportRow,
     ReworkOrder,
     Routing,
     ScrapReason,
@@ -25,6 +27,7 @@ import type {
     ShiftStockCount,
     ShiftSummary,
     SubcontractOrder,
+    TraceabilityReportRow,
     WorkCenter,
     WorkOrder,
 } from './types';
@@ -595,6 +598,66 @@ export async function getEntryDayBinSummary(entryId: number): Promise<EntryDayBi
             `/production/shift-production-entries/${entryId}/day-bin`,
         );
         return data.data;
+    } catch (error: any) {
+        if (error?.response?.status === 404) return null;
+        throw error;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Read-only reports (feat/reports-wave). Envelope rule shared with the
+// backend: production = {data: {rows, totals}}; reconciliation =
+// {data: {rows}}; traceability = {data: {lots}}.
+// ---------------------------------------------------------------------------
+
+export interface ProductionReportParams {
+    /** Production date (YYYY-MM-DD). */
+    date: string;
+    shift_id?: number;
+    work_center_id?: number;
+}
+
+export async function getProductionReport(params: ProductionReportParams): Promise<ProductionReport> {
+    const { data } = await api.get<{ data: ProductionReport }>('/production/reports/production', { params });
+    return data.data;
+}
+
+export interface ReconciliationReportParams {
+    date_from: string;
+    date_to: string;
+    shift_id?: number;
+}
+
+/** Rows come back worst-unaccounted-first — the UI keeps the server order. */
+export async function getReconciliationReport(params: ReconciliationReportParams): Promise<ReconciliationReportRow[]> {
+    const { data } = await api.get<{ data: { rows: ReconciliationReportRow[] } }>(
+        '/production/reports/reconciliation',
+        { params },
+    );
+    return data.data.rows;
+}
+
+export interface TraceabilityReportParams {
+    /** Lot received_date window — required (same ≤92-day cap as reconciliation). */
+    date_from: string;
+    date_to: string;
+    lot_id?: number;
+    item_id?: number;
+}
+
+/**
+ * Lot → bags → fed machine/segment drill-down. 404s while
+ * config('production.traceability_enabled') is off (same flag/middleware as
+ * the day-bin routes) — callers only run this with the flag on, but a null
+ * degrade keeps a stale tab from crashing on a freshly-disabled backend.
+ */
+export async function getTraceabilityReport(params: TraceabilityReportParams): Promise<TraceabilityReportRow[] | null> {
+    try {
+        const { data } = await api.get<{ data: { lots: TraceabilityReportRow[] } }>(
+            '/production/reports/traceability',
+            { params },
+        );
+        return data.data.lots;
     } catch (error: any) {
         if (error?.response?.status === 404) return null;
         throw error;

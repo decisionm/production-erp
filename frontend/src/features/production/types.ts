@@ -589,3 +589,129 @@ export interface EntryDayBinSummary {
     has_movements: boolean;
     materials: EntryDayBinMaterialSummary[];
 }
+
+// ---------------------------------------------------------------------------
+// Read-only production reports (feat/reports-wave). Pure aggregation over
+// existing data; field names deliberately reuse the ProductionMetrics /
+// ConsumptionVariance keys above so the backend resources and this file can
+// never drift apart on naming. Response envelopes (shared rule with the
+// backend): production = {data: {rows, totals}}; reconciliation =
+// {data: {rows}}; traceability = {data: {lots}}.
+// ---------------------------------------------------------------------------
+
+export interface ReportShiftRef {
+    id: number;
+    name: string;
+}
+
+export interface ReportWorkCenterRef {
+    id: number;
+    code: string;
+    name: string;
+}
+
+/** One completed entry (machine/shift/item grain) on the production report. */
+export interface ProductionReportRow {
+    entry_id: number;
+    production_date: string;
+    shift: ReportShiftRef;
+    work_center: ReportWorkCenterRef;
+    item: ItemLite;
+    batch_number: string | null;
+    running_hours: string | null;
+    /** ROUND(3600/CT × cavities × hours / pack) — formula dictionary row 22. */
+    expected_boxes: number | null;
+    actual_boxes: number | null;
+    expected_pieces: string | null;
+    actual_pieces: string | null;
+    good_production_kg: string | null;
+    rejection_kg_production: string | null;
+    rejection_kg_qc: string | null;
+    lumps_kg: string;
+    /** actual_boxes / expected_boxes × 100 — formula dictionary row 24. */
+    efficiency_pct: number | null;
+    efficiency_band?: 'ok' | 'watch' | 'investigate' | null;
+}
+
+export interface ProductionReportTotals {
+    entries: number;
+    /** Null when no row carried the figure (plain column sums otherwise). */
+    expected_boxes: number | null;
+    actual_boxes: number | null;
+    actual_pieces: string;
+    good_production_kg: string;
+    rejection_kg_production: string;
+    rejection_kg_qc: string;
+    lumps_kg: string;
+    /**
+     * Σ actual_boxes / Σ expected_boxes × 100 — RATIO OF SUMS (formula
+     * dictionary row 24, WB2 totals row), never the average of the per-row
+     * percentages. Null when Σ expected_boxes is 0 or unknown.
+     */
+    efficiency_pct: number | null;
+}
+
+export interface ProductionReport {
+    date: string;
+    rows: ProductionReportRow[];
+    totals: ProductionReportTotals;
+}
+
+/**
+ * One completed entry on the reconciliation report, served worst-first by
+ * |reconciliation_unaccounted_kg|. Field names = the ProductionMetrics
+ * reconciliation block.
+ */
+export interface ReconciliationReportRow {
+    entry_id: number;
+    production_date: string;
+    shift: ReportShiftRef;
+    work_center: ReportWorkCenterRef;
+    item: ItemLite;
+    batch_number: string | null;
+    issued_kg: string;
+    good_production_kg: string | null;
+    confirmed_rejection_kg: string | null;
+    lumps_kg: string;
+    /** issued − good − confirmed_rejection − lumps; null when not computable. */
+    reconciliation_unaccounted_kg: string | null;
+    unaccounted_band?: 'ok' | 'investigate' | null;
+    /** Issue-vs-norm variance rides along (ConsumptionVariance naming). */
+    variance_pct: number | null;
+    variance_band?: 'ok' | 'watch' | 'investigate' | null;
+}
+
+/**
+ * Traceability report (lot → bags → fed machine/segment destinations),
+ * envelope {data: {lots}}. Served ONLY when
+ * config('production.traceability_enabled') is on — same flag/middleware as
+ * the day-bin routes; the UI tab is equally invisible with the flag off.
+ */
+export interface TraceabilityReportFeed {
+    machine: ReportWorkCenterRef;
+    /** Null for a load recorded outside any batch window — machine still shows. */
+    segment: { id: number; batch_number: string | null } | null;
+    /** Σ kg this bag loaded into this machine/segment destination. */
+    loaded_kg: string;
+    /** Number of load movements collapsed into this destination. */
+    loads: number;
+}
+
+export interface TraceabilityReportBag {
+    id: number;
+    barcode: string;
+    status: MaterialBagStatus;
+    original_kg: string;
+    remaining_kg: string;
+    fed: TraceabilityReportFeed[];
+}
+
+export interface TraceabilityReportRow {
+    id: number;
+    supplier_lot_no: string | null;
+    received_date: string | null;
+    item: ItemLite;
+    bag_count: number;
+    total_received_kg: string | null;
+    bags: TraceabilityReportBag[];
+}

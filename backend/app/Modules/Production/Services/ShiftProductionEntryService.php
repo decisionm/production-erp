@@ -780,7 +780,11 @@ class ShiftProductionEntryService
         if ($bom = $this->activeBomFor($entry->item_id)) {
             // Soft-deleted component masters still carry their UOM — this is
             // a read-only norm, so a trashed resin line must not zero it.
-            $bom->load(['lines.component' => fn ($query) => $query->withTrashed()]);
+            // loadMissing, not load: the BOM instance is cached per item for
+            // the request (see activeBomFor), so report endpoints iterating
+            // hundreds of entries hydrate each BOM's components once instead
+            // of re-querying per entry.
+            $bom->loadMissing(['lines.component' => fn ($query) => $query->withTrashed()]);
 
             $kgPerUnit = '0';
             foreach ($bom->lines as $line) {

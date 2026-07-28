@@ -79,6 +79,7 @@ const allNavItems: NavGroup[] = [
         children: [
             { key: '/production/shift-production', label: 'Shift Floor' },
             { key: '/production/shift-summary', label: 'Shift Summary' },
+            { key: '/production/reports', label: 'Reports' },
             { key: '/production/approve-production', label: 'Approve Production' },
             { key: '/production/work-centers', label: 'Work Centers' },
             { key: '/production/boms', label: 'Bills of Material' },
