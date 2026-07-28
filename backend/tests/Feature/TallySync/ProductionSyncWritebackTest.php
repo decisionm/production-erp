@@ -106,4 +106,31 @@ class ProductionSyncWritebackTest extends TestCase
         $sync->markSynced($syncEntry->fresh());
         $this->assertSame(ShiftProductionEntryStatus::Synced, $entry->fresh()->status);
     }
+
+    public function test_retry_requeues_the_same_voucher_row_and_never_mints_a_duplicate(): void
+    {
+        // The QA-matrix "retry without duplicate voucher" guarantee, queue
+        // side: a failed voucher retried (even twice) stays ONE row with the
+        // same SPE-{id} voucher number and payload — the agent can therefore
+        // never receive two vouchers for one entry. (Whether Tally itself
+        // dedupes is the tracer batch's job, not this suite's.)
+        $entry = $this->approvedEntry();
+
+        $sync = app(TallySyncService::class);
+        $syncEntry = TallySyncEntry::query()->sole();
+        $voucherNumber = $syncEntry->payload['voucher_number'];
+        $this->assertSame("SPE-{$entry->id}", $voucherNumber);
+
+        $sync->markFailed($syncEntry, 'Stock Item does not exist');
+        $sync->retry($syncEntry->fresh());
+        $sync->markFailed($syncEntry->fresh(), 'Godown does not exist');
+        $sync->retry($syncEntry->fresh());
+
+        $this->assertSame(1, TallySyncEntry::count(), 'Retrying must reuse the row, not enqueue a sibling');
+        $requeued = TallySyncEntry::query()->sole();
+        $this->assertSame($syncEntry->id, $requeued->id);
+        $this->assertSame($voucherNumber, $requeued->payload['voucher_number']);
+        $this->assertSame(2, $requeued->attempts);
+        $this->assertNull($requeued->error_message, 'A retry clears the stale error');
+    }
 }
