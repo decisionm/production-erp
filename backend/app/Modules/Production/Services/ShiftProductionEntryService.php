@@ -101,6 +101,7 @@ class ShiftProductionEntryService
      *     shift_id: int, work_center_id: int, item_id: int, warehouse_id: int,
      *     production_date?: string, operator_id?: int,
      *     actual_cycle_time?: ?string, active_cavities?: ?int,
+     *     material_shortage_override_reason?: ?string,
      * }  $data
      */
     public function startBatch(array $data, ?int $createdBy): ShiftProductionEntry
@@ -205,6 +206,13 @@ class ShiftProductionEntryService
                 $data['planned_downtime'] ?? [],
             );
 
+            // The supervisor's answer to "the bin does not hold enough for
+            // this run — start anyway?". Blank is the same as absent: an
+            // empty string would read as "a reason was given" downstream.
+            $materialShortageReason = trim((string) ($data['material_shortage_override_reason'] ?? '')) !== ''
+                ? trim((string) $data['material_shortage_override_reason'])
+                : null;
+
             $entry = ShiftProductionEntry::create([
                 'shift_id' => $data['shift_id'],
                 'work_center_id' => $data['work_center_id'],
@@ -260,6 +268,16 @@ class ShiftProductionEntryService
                     // Explicitly recorded so every downstream reader can see
                     // this run had no agreed standard behind it.
                     'unconfigured' => $configuration === null,
+                    // Material-shortage override. Deliberately NOT written to
+                    // the override_reason / override_by COLUMNS: those already
+                    // carry this run's bounded cycle-time/cavity deviation
+                    // ($effective['reason'] above), and a second meaning on
+                    // them would corrupt an unrelated audit trail — and read
+                    // back as a standards override that never happened. The
+                    // snapshot is already the per-run frozen record, so the
+                    // pair lives here instead and needs no migration.
+                    'material_shortage_override_reason' => $materialShortageReason,
+                    'material_shortage_override_by' => $materialShortageReason !== null ? $createdBy : null,
                 ],
                 'operator_id' => $data['operator_id'] ?? null,
                 'created_by' => $createdBy,

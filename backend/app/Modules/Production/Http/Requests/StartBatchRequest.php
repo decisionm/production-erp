@@ -42,6 +42,14 @@ class StartBatchRequest extends FormRequest
             'override_reason' => ['sometimes', 'nullable', 'string', 'max:500'],
             'scheduled_hours' => ['sometimes', 'nullable', 'numeric', 'gt:0', 'max:24'],
 
+            // Why this run is starting with less material in the machine's
+            // bin than its recipe needs. Deliberately optional and never a
+            // gate: the bin bay may be mid-load, and refusing the start
+            // would stop a machine the floor can legitimately run. The
+            // shortage is a UI-side prompt; the server's job is to RECORD
+            // the supervisor's answer, not to arbitrate it.
+            'material_shortage_override_reason' => ['sometimes', 'nullable', 'string', 'max:500'],
+
             // Planned downtime known before the run — lowers the adjusted
             // target at Start rather than explaining the gap afterwards.
             'planned_downtime' => ['sometimes', 'array'],

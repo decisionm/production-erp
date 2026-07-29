@@ -275,6 +275,11 @@ export interface StartBatchPayload {
     // Complete Batch re-sends it, so a backend that ignores this still gets
     // the corrected value at completion.
     active_cavities?: number;
+    // Why this run is starting with less material in the machine's bin than
+    // its recipe needs. Sent only when the supervisor explicitly waved the
+    // shortage through — the server records it and refuses nothing, so the
+    // tick-box in the dialog is the guard, not this field.
+    material_shortage_override_reason?: string;
 }
 
 export interface BatchPreviewParams {

@@ -148,13 +148,73 @@ class DayBinLedgerService
      */
     public function openingFor(ShiftProductionEntry $segment, int $itemId): string
     {
-        if ($segment->parent_entry_id === null) {
-            return '0.0000';
+        // A handover child inherits the outgoing segment's counted closing —
+        // that IS the physical handover, and it stays authoritative.
+        if ($segment->parent_entry_id !== null) {
+            $parent = ShiftProductionEntry::query()->find($segment->parent_entry_id);
+
+            return $parent !== null ? ($this->closingFor($parent, $itemId) ?? '0.0000') : '0.0000';
         }
 
-        $parent = ShiftProductionEntry::query()->find($segment->parent_entry_id);
+        // No parent does NOT mean an empty bin. A machine whose previous
+        // batch completed normally usually still holds material, and
+        // returning 0 here silently understated consumption by exactly that
+        // carry-over: consumed = opening + loaded - closing - returned, so a
+        // missing opening is subtracted from the answer, with no error and
+        // no flag. It also made segmentHeadroom() refuse an honest closing
+        // count that merely reflected the leftover.
+        //
+        // The truthful opening is what the ledger already held for this
+        // machine and material immediately BEFORE this segment's own first
+        // movement.
+        return $this->balanceBeforeSegment($segment, $itemId);
+    }
 
-        return $parent !== null ? ($this->closingFor($parent, $itemId) ?? '0.0000') : '0.0000';
+    /**
+     * Bin balance for a machine+material as at the moment a segment began —
+     * every movement recorded before this segment's first one.
+     *
+     * Same anchor rule as balanceFor(): a count is an absolute observation
+     * that re-anchors the figure, loads and returns after it are deltas.
+     */
+    private function balanceBeforeSegment(ShiftProductionEntry $segment, int $itemId): string
+    {
+        $firstOwn = DayBinMovement::query()
+            ->where('shift_production_entry_id', $segment->id)
+            ->where('item_id', $itemId)
+            ->orderBy('id')
+            ->first();
+
+        $priorScope = fn ($query) => $query
+            ->where('work_center_id', $segment->work_center_id)
+            ->where('item_id', $itemId)
+            // Movements this segment has not yet made, and any belonging to
+            // it, are excluded — this is the state it inherited.
+            ->when($firstOwn, fn ($q) => $q->where('id', '<', $firstOwn->id))
+            ->where(fn ($q) => $q->whereNull('shift_production_entry_id')
+                ->orWhere('shift_production_entry_id', '!=', $segment->id));
+
+        $anchor = DayBinMovement::query()
+            ->tap($priorScope)
+            ->where('type', DayBinMovementType::Count->value)
+            ->orderByDesc('id')
+            ->first();
+
+        $balance = $anchor !== null ? bcadd((string) $anchor->quantity_kg, '0', 4) : '0.0000';
+
+        $subsequent = DayBinMovement::query()
+            ->tap($priorScope)
+            ->when($anchor, fn ($query) => $query->where('id', '>', $anchor->id))
+            ->whereIn('type', [DayBinMovementType::Load->value, DayBinMovementType::Return->value])
+            ->get();
+
+        foreach ($subsequent as $movement) {
+            $balance = $movement->type === DayBinMovementType::Load
+                ? bcadd($balance, (string) $movement->quantity_kg, 4)
+                : bcsub($balance, (string) $movement->quantity_kg, 4);
+        }
+
+        return bccomp($balance, '0', 4) === -1 ? '0.0000' : $balance;
     }
 
     /**
