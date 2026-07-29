@@ -2,11 +2,22 @@
 
 namespace App\Modules\Production\Http\Requests;
 
+use App\Modules\Production\Models\ProductionStandardPackaging;
+use App\Modules\Production\Models\ShiftProductionEntry;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class CompleteBatchRequest extends FormRequest
 {
+    /**
+     * How much two piece counts may differ and still be called equal.
+     * quantity_produced arrives as a numeric string ("420", "420.0") while
+     * line pieces are integers — a strict comparison would fail on the
+     * representation rather than on the arithmetic.
+     */
+    private const PIECE_EPSILON = 0.001;
+
     public function authorize(): bool
     {
         return true;
@@ -47,11 +58,169 @@ class CompleteBatchRequest extends FormRequest
             'material_consumptions.*.warehouse_id' => ['required', 'integer', 'exists:warehouses,id'],
             'material_consumptions.*.quantity_issued_kg' => ['required', 'numeric', 'gt:0'],
 
+            // Day-bin closing weight per material, same contract as
+            // HandoverRequest. This is what makes automatic consumption
+            // (opening + loaded − closing − returned) computable on a
+            // normal completion instead of only on a handover.
+            'closing_day_bin' => ['nullable', 'array'],
+            'closing_day_bin.*.item_id' => ['required', 'integer', 'exists:items,id'],
+            'closing_day_bin.*.quantity_kg' => ['required', 'numeric', 'gte:0'],
+
             'scraps' => ['nullable', 'array'],
             'scraps.*.type' => ['required', Rule::in(['rejected_finished_good', 'lumps'])],
             'scraps.*.quantity_nos' => ['nullable', 'numeric', 'gte:0'],
             'scraps.*.quantity_kg' => ['nullable', 'numeric', 'gte:0'],
             'scraps.*.scrap_reason_id' => ['nullable', 'integer', 'exists:scrap_reasons,id'],
+
+            // Multi-mode packing lines. A product's standard exposes only the
+            // packaging modes its Excel row actually carries, and a run may
+            // genuinely use more than one of them (part of the shift packed
+            // in trays, part in pouches) — so packing is a LIST, one line per
+            // mode, not a single set of tray/pouch columns.
+            //
+            // The carton/box is the OUTER package in every mode; tray and
+            // pouch are the inner ones. Pieces therefore derive as
+            //     boxes × nos_per_box + loose_inner × nos_per_inner
+            // straight from the imported pack sizes — never from
+            // trays_per_box/pouches_per_box, and never from an assumed 5.
+            'packing_lines' => ['sometimes', 'nullable', 'array'],
+            'packing_lines.*.mode' => ['required', Rule::in([
+                ProductionStandardPackaging::MODE_POUCH,
+                ProductionStandardPackaging::MODE_TRAY,
+                ProductionStandardPackaging::MODE_DIRECT_BOX,
+            ])],
+            'packing_lines.*.production_standard_packaging_id' => [
+                'nullable', 'integer', 'exists:production_standard_packagings,id',
+            ],
+            'packing_lines.*.boxes' => ['required', 'integer', 'min:0'],
+            'packing_lines.*.nos_per_box' => ['required', 'integer', 'min:1'],
+            // Inner containers not yet packed into a box (loose trays /
+            // loose pouches). Direct-box lines have no inner container.
+            'packing_lines.*.loose_inner' => ['sometimes', 'nullable', 'integer', 'min:0'],
+            'packing_lines.*.nos_per_inner' => ['sometimes', 'nullable', 'integer', 'min:1'],
+            'packing_lines.*.derived_pieces' => ['required', 'integer', 'min:0'],
+            // Editable: the counted figure may differ from the derived one
+            // (a short box, a miscount) — but then it needs a reason.
+            'packing_lines.*.actual_pieces' => ['required', 'integer', 'min:0'],
+            'packing_lines.*.override_reason' => ['nullable', 'string', 'max:255'],
         ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator) {
+            $lines = $this->input('packing_lines');
+
+            if (! is_array($lines) || $lines === []) {
+                return;
+            }
+
+            $this->validatePackingLines($validator, $lines);
+        });
+    }
+
+    /**
+     * Cross-line rules. Every message names the fix, not just the fault —
+     * a supervisor holding a clipboard has to know what to change, and the
+     * SPA keeps every entered value on a 422 so nothing is retyped.
+     *
+     * @param  array<int, array<string, mixed>>  $lines
+     */
+    private function validatePackingLines(Validator $validator, array $lines): void
+    {
+        $entry = $this->route('shift_production_entry');
+        $standardId = $entry instanceof ShiftProductionEntry ? $entry->production_standard_id : null;
+
+        $seenModes = [];
+        $totalBoxes = 0;
+        $totalActual = 0;
+
+        foreach ($lines as $index => $line) {
+            $mode = $line['mode'] ?? null;
+            $boxes = (int) ($line['boxes'] ?? 0);
+            $nosPerBox = (int) ($line['nos_per_box'] ?? 0);
+            $looseInner = (int) ($line['loose_inner'] ?? 0);
+            $nosPerInner = (int) ($line['nos_per_inner'] ?? 0);
+            $derived = (int) ($line['derived_pieces'] ?? 0);
+            $actual = (int) ($line['actual_pieces'] ?? 0);
+
+            $totalBoxes += $boxes;
+            $totalActual += $actual;
+
+            // One line per mode. Two tray lines are either a duplicate or an
+            // attempt to count the same cartons twice; either way the total
+            // would be wrong and nobody could tell which line was real.
+            if ($mode !== null) {
+                if (isset($seenModes[$mode])) {
+                    $validator->errors()->add(
+                        "packing_lines.{$index}.mode",
+                        "This run already has a {$mode} line. Put all {$mode} cartons on that one line instead of adding a second.",
+                    );
+                } else {
+                    $seenModes[$mode] = $index;
+                }
+            }
+
+            // A line may only cite a packaging option belonging to the
+            // standard this batch actually started against — the server half
+            // of "never offer a mode the product does not have".
+            $packagingId = $line['production_standard_packaging_id'] ?? null;
+            if ($packagingId !== null && $standardId !== null) {
+                $packaging = ProductionStandardPackaging::query()->find($packagingId);
+                if ($packaging !== null && (int) $packaging->production_standard_id !== (int) $standardId) {
+                    $validator->errors()->add(
+                        "packing_lines.{$index}.production_standard_packaging_id",
+                        'That packing option belongs to a different product standard. Pick one of the modes offered for this batch.',
+                    );
+                }
+            }
+
+            // The derived figure is recomputed here rather than trusted:
+            // otherwise a client could send derived == actual and slip an
+            // unexplained override past the reason requirement.
+            $recomputed = $boxes * $nosPerBox + $looseInner * $nosPerInner;
+            if ($recomputed !== $derived) {
+                $validator->errors()->add(
+                    "packing_lines.{$index}.derived_pieces",
+                    "Derived pieces should be {$recomputed} (boxes × pcs/box + loose inner × pcs/inner), not {$derived}. Re-check the pack sizes on this line.",
+                );
+            }
+
+            if ($actual !== $derived && trim((string) ($line['override_reason'] ?? '')) === '') {
+                $validator->errors()->add(
+                    "packing_lines.{$index}.override_reason",
+                    "Counted {$actual} pieces but the pack sizes give {$derived}. Say why they differ (short box, miscount, part carton) or correct the count.",
+                );
+            }
+        }
+
+        // The outer carton count must be stated ONCE and add up. Without
+        // this, two modes each claiming the same 10 boxes would post 20
+        // cartons' worth of production off 10 physical cartons.
+        $noOfBox = $this->input('no_of_box');
+        if ($noOfBox === null || $noOfBox === '') {
+            $validator->errors()->add(
+                'no_of_box',
+                "Enter the total number of cartons for this batch — it must equal the {$totalBoxes} across the packing lines.",
+            );
+        } elseif ((int) $noOfBox !== $totalBoxes) {
+            $validator->errors()->add(
+                'no_of_box',
+                "The packing lines add up to {$totalBoxes} cartons but the batch total says {$noOfBox}. Every carton belongs to exactly one mode — split them, don't count the same cartons under both.",
+            );
+        }
+
+        // Total pieces = sum of the lines, plus pieces loose in no container
+        // at all. loose_pieces is deliberately batch-level (not per line):
+        // a stray piece belongs to no packing mode.
+        $expectedTotal = $totalActual + (int) ($this->input('loose_pieces') ?? 0);
+        $quantityProduced = (float) $this->input('quantity_produced');
+
+        if (abs($quantityProduced - $expectedTotal) > self::PIECE_EPSILON) {
+            $validator->errors()->add(
+                'quantity_produced',
+                "Quantity produced must be the packing lines' {$totalActual} pieces plus any loose pieces — that is {$expectedTotal}, not {$quantityProduced}. Correct a line count or the loose pieces.",
+            );
+        }
     }
 }

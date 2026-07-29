@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Checkbox, Col, Descriptions, Drawer, Form, Input, InputNumber, Modal, Radio, Row, Select, Space, Table, Tag, TimePicker, Typography } from 'antd';
 import dayjs from 'dayjs';
 import type { ReactNode } from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { listAllEmployees } from '@/features/hrms/api';
@@ -33,11 +33,13 @@ import {
     startBatch,
 } from '@/features/production/api';
 import type {
+    EntryDayBinMaterialSummary,
     MachineDowntimeLog,
     MoldChangeLog,
     Shift,
     ShiftProductionEntry,
     ShiftProductionEntryStatus,
+    StandardPackaging,
     WorkCenter,
 } from '@/features/production/types';
 import { currentShift, justEndedShift, productionDateFor } from '@/features/production/shiftClock';
@@ -105,6 +107,81 @@ function expectedOutput(
 /** ">= 1" with null-safety — the shared test for "this packing standard exists". */
 function hasPackStd(v: number | null | undefined): boolean {
     return (v ?? 0) >= 1;
+}
+
+// ---------------------------------------------------------------------------
+// Multi-mode packing
+//
+// A product standard exposes ONLY the packaging modes its imported row
+// carries — pouch is never offered universally. A run may genuinely use more
+// than one of them (part of the shift trayed, part pouched), so packing is a
+// LIST of lines, one per mode, and the batch's pieces are the sum of them.
+//
+// The carton/box is the OUTER package in every mode; tray and pouch are the
+// inner ones. Every figure comes from the imported nos_per_box /
+// nos_per_tray / nos_per_pouch — never from an assumed 5 per box.
+// ---------------------------------------------------------------------------
+
+type PackingMode = StandardPackaging['mode'];
+
+const MODE_LABEL: Record<PackingMode, string> = {
+    pouch: 'Pouch → box',
+    tray: 'Tray → box',
+    direct_box: 'Straight into the box',
+};
+
+/** The inner container's plural, or null for direct-to-box (no inner). */
+function innerNoun(mode: PackingMode): string | null {
+    return mode === 'pouch' ? 'pouches' : mode === 'tray' ? 'trays' : null;
+}
+
+/** Pieces per inner container for a mode, straight from the imported standard. */
+function innerPackSize(packaging: StandardPackaging): number | null {
+    if (packaging.mode === 'pouch') return packaging.nos_per_pouch;
+    if (packaging.mode === 'tray') return packaging.nos_per_tray;
+    return null;
+}
+
+/** Inner containers per carton — used for the tray/pouch COUNT, never for pieces. */
+function innersPerBox(packaging: StandardPackaging): number | null {
+    if (packaging.mode === 'pouch') return packaging.pouches_per_box;
+    if (packaging.mode === 'tray') return packaging.trays_per_box;
+    return null;
+}
+
+interface PackingLineValues {
+    mode: PackingMode;
+    production_standard_packaging_id?: number | null;
+    boxes?: number | null;
+    loose_inner?: number | null;
+    nos_per_box?: number | null;
+    nos_per_inner?: number | null;
+    actual_pieces?: number | null;
+    override_reason?: string;
+}
+
+/**
+ * What one line's counts SHOULD come to:
+ *     boxes × pcs/box + loose inner containers × pcs/inner
+ * The backend recomputes this identically and refuses a line that disagrees.
+ */
+function linePieces(line: PackingLineValues | undefined): number {
+    if (!line) return 0;
+    return (line.boxes ?? 0) * (line.nos_per_box ?? 0) + (line.loose_inner ?? 0) * (line.nos_per_inner ?? 0);
+}
+
+/** A fresh line for a mode, pre-loaded with that mode's imported pack sizes. */
+function blankPackingLine(packaging: StandardPackaging): PackingLineValues {
+    return {
+        mode: packaging.mode,
+        production_standard_packaging_id: packaging.id,
+        boxes: null,
+        loose_inner: null,
+        nos_per_box: packaging.nos_per_box,
+        nos_per_inner: innerPackSize(packaging),
+        actual_pieces: null,
+        override_reason: undefined,
+    };
 }
 
 // Structural (sku+name) so both full Items and the day-bin aggregates'
@@ -212,6 +289,17 @@ const completeBatchSchema = z.object({
             }),
         )
         .optional(),
+    // Day-bin closing weight per material — what is left in the bin at the
+    // end of the run. Without it, consumed kg (opening + loaded − closing
+    // − returned) is unknowable and reports null.
+    closing_day_bin: z
+        .array(
+            z.object({
+                item_id: z.number(),
+                quantity_kg: z.number().min(0, 'Cannot be negative').nullish(),
+            }),
+        )
+        .optional(),
     scraps: z
         .array(
             z.object({
@@ -219,6 +307,23 @@ const completeBatchSchema = z.object({
                 quantity_nos: z.number().min(0).optional(),
                 quantity_kg: z.number().min(0).optional(),
                 scrap_reason_id: z.number().optional(),
+            }),
+        )
+        .optional(),
+    // One line per packaging mode actually used this run. Empty for products
+    // with no imported standard — those complete through the plain tray/box
+    // fields exactly as they did before packing lines existed.
+    packing_lines: z
+        .array(
+            z.object({
+                mode: z.enum(['pouch', 'tray', 'direct_box']),
+                production_standard_packaging_id: z.number().nullish(),
+                boxes: z.number().int().min(0, 'Cannot be negative').nullish(),
+                loose_inner: z.number().int().min(0, 'Cannot be negative').nullish(),
+                nos_per_box: z.number().int().min(1, 'At least 1').nullish(),
+                nos_per_inner: z.number().int().min(1, 'At least 1').nullish(),
+                actual_pieces: z.number().int().min(0, 'Cannot be negative').nullish(),
+                override_reason: z.string().max(255, 'Max 255 characters').optional(),
             }),
         )
         .optional(),
@@ -238,6 +343,42 @@ const completeBatchSchema = z.object({
     };
     requireRow(data.resin_kg, data.resin_item_id, data.resin_warehouse_id, 'resin_item_id', 'resin_warehouse_id');
     requireRow(data.mb_kg, data.mb_item_id, data.mb_warehouse_id, 'mb_item_id', 'mb_warehouse_id');
+
+    // Packing lines. Errors land on the offending FIELD, so the drawer stays
+    // open with every entered value intact and the message says what to do —
+    // a supervisor mid-count must never have to retype the shift.
+    const seenModes = new Map<string, number>();
+    (data.packing_lines ?? []).forEach((line, index) => {
+        if (seenModes.has(line.mode)) {
+            ctx.addIssue({
+                code: 'custom',
+                path: ['packing_lines', index, 'mode'],
+                message: `This run already has a ${MODE_LABEL[line.mode].toLowerCase()} line. Put every carton of that kind on the one line — the same cartons counted twice would double the batch.`,
+            });
+        } else {
+            seenModes.set(line.mode, index);
+        }
+
+        // Without a carton size no line total is computable — surfaced on
+        // the field rather than as a bare backend rejection.
+        if ((line.nos_per_box ?? 0) < 1) {
+            ctx.addIssue({
+                code: 'custom',
+                path: ['packing_lines', index, 'nos_per_box'],
+                message: 'Enter how many pieces go in one carton — this product standard does not say.',
+            });
+        }
+
+        const derived = linePieces(line);
+        const actual = line.actual_pieces ?? null;
+        if (actual !== null && actual !== derived && (line.override_reason ?? '').trim() === '') {
+            ctx.addIssue({
+                code: 'custom',
+                path: ['packing_lines', index, 'override_reason'],
+                message: `Counted ${actual} but the pack sizes give ${derived}. Say why they differ (short box, part carton, miscount) or correct the count.`,
+            });
+        }
+    });
 });
 type CompleteBatchFormValues = z.infer<typeof completeBatchSchema>;
 
@@ -588,6 +729,13 @@ export default function ShiftProductionEntryPage() {
             invalidate();
             setStartingMachine(null);
             startForm.reset();
+            // Loading material is deliberately NOT part of Start Batch any
+            // more. Bags are scanned into the bins once, for the whole bay,
+            // on the Bin Bay page — a per-batch material form here asked the
+            // same question a second time and let the two disagree. The
+            // "Materials" button on the running card stays: it is a
+            // read-only look at what is in this machine's bin, not a load
+            // form.
         },
         onError: (error: any) => {
             const body = error?.response?.data;
@@ -627,6 +775,13 @@ export default function ShiftProductionEntryPage() {
     });
     const materialFields = useFieldArray({ control: completeForm.control, name: 'material_consumptions' });
     const scrapFields = useFieldArray({ control: completeForm.control, name: 'scraps' });
+    const packingFields = useFieldArray({ control: completeForm.control, name: 'packing_lines' });
+    // Bumped whenever a packing figure changes, purely to force the derived
+    // read-outs below to re-render. Deliberately NOT a watch of
+    // 'packing_lines': react-hook-form hands back the same array reference
+    // after a nested write (see applyDayBinConsumption), so anything keyed on
+    // that identity is stale by construction.
+    const [packingRevision, setPackingRevision] = useState(0);
     const quantityProduced = completeForm.watch('quantity_produced');
     const quantityScrap = completeForm.watch('quantity_scrap');
     const settings = useProductionSettings();
@@ -652,6 +807,10 @@ export default function ShiftProductionEntryPage() {
     // manual, exactly as before the packing master existed.
     useEffect(() => {
         if (!completingEntry || !quantityProduced || quantityProduced <= 0) return;
+        // Superseded by the packing lines whenever the product's standard
+        // declares its modes — those own the counts and derive the total the
+        // other way round.
+        if (packingModes.length > 0) return;
         const suggest = (field: 'no_of_trays' | 'no_of_pouches' | 'no_of_box', standard: number | null) => {
             if (!standard || standard < 1) return;
             // Auto-writes never set dirty; any user interaction does. A field the
@@ -682,6 +841,9 @@ export default function ShiftProductionEntryPage() {
     const nosPerBoxWatch = completeForm.watch('nos_per_box');
     useEffect(() => {
         if (!completingEntry) return;
+        // Same hand-off as above: with packing lines in play the total comes
+        // from the lines, not from a single box count.
+        if (packingModes.length > 0) return;
         if (completeForm.getFieldState('quantity_produced').isDirty) return;
         const loose = loosePiecesWatch ?? 0;
         const nosPerBox = nosPerBoxWatch ?? completingEntry.item.nos_per_box;
@@ -705,6 +867,120 @@ export default function ShiftProductionEntryPage() {
         }
     }, [goodBoxesWatch, pouchesWatch, loosePiecesWatch, nosPerBoxWatch, completingEntry, completeForm]);
 
+    // ------------------------------------------------------------------
+    // Packing lines: which modes this batch's standard actually offers, and
+    // the totals they add up to.
+    // ------------------------------------------------------------------
+
+    // The entry Resource sends production_standard_id; the shared TS type
+    // does not declare it yet, so read it narrowly rather than widening a
+    // type this page does not own.
+    const completingStandardId =
+        (completingEntry as unknown as { production_standard_id?: number | null } | null)?.production_standard_id ?? null;
+    const completingPackagingMode =
+        (completingEntry as unknown as { packaging_mode?: string | null } | null)?.packaging_mode ?? null;
+
+    // Reuses the Start Batch preview endpoint (read-only GET) — the standard's
+    // packaging rows are the only place the real modes and pack sizes live.
+    const { data: completePreview } = useQuery({
+        queryKey: ['production', 'batch-preview', 'complete', completingEntry?.id, completingStandardId],
+        queryFn: () =>
+            getBatchPreview({
+                item_id: completingEntry!.item.id,
+                work_center_id: completingEntry!.work_center.id,
+                production_standard_id: completingStandardId ?? undefined,
+            }),
+        enabled: completingEntry !== null,
+    });
+
+    const packingModes = useMemo<StandardPackaging[]>(() => {
+        const variants = completePreview?.variants ?? [];
+        if (variants.length === 0) return [];
+        // The variant this batch actually started against; with only one
+        // variant there was never a choice to record.
+        const chosen =
+            (completingStandardId !== null ? variants.find((v) => v.id === completingStandardId) : undefined) ??
+            (variants.length === 1 ? variants[0] : undefined);
+        return chosen?.packagings ?? [];
+    }, [completePreview, completingStandardId]);
+
+    const packagingForLine = useCallback(
+        (line: PackingLineValues): StandardPackaging | undefined =>
+            packingModes.find((p) => p.id === line.production_standard_packaging_id) ??
+            packingModes.find((p) => p.mode === line.mode),
+        [packingModes],
+    );
+
+    /**
+     * Totals across the lines, written back into the fields the rest of the
+     * drawer (and the API) already speak: quantity produced, cartons, and the
+     * tray/pouch counts. Called from every packing input's onChange rather
+     * than from an effect, for the same react-hook-form identity reason as
+     * the day-bin prefill.
+     *
+     * Cartons are summed ONCE across modes — a carton belongs to exactly one
+     * mode, and the backend refuses a batch whose lines don't add up to the
+     * carton total, so the same boxes can never be counted twice.
+     */
+    const recomputePackingTotals = useCallback(() => {
+        const lines = (completeForm.getValues('packing_lines') ?? []) as PackingLineValues[];
+        setPackingRevision((r) => r + 1);
+        if (lines.length === 0) return;
+
+        let boxes = 0;
+        let pieces = 0;
+        let trays = 0;
+        let pouches = 0;
+
+        for (const line of lines) {
+            const derived = linePieces(line);
+            // The counted figure rules; it simply defaults to the derived one
+            // until the supervisor types over it.
+            pieces += line.actual_pieces ?? derived;
+            boxes += line.boxes ?? 0;
+
+            const packaging = packagingForLine(line);
+            const perBox = packaging ? innersPerBox(packaging) : null;
+            const inners = (line.boxes ?? 0) * (perBox ?? 0) + (line.loose_inner ?? 0);
+            if (line.mode === 'tray') trays += inners;
+            if (line.mode === 'pouch') pouches += inners;
+        }
+
+        completeForm.setValue('no_of_box', boxes);
+        completeForm.setValue('quantity_produced', pieces + (completeForm.getValues('loose_pieces') ?? 0));
+        completeForm.setValue('no_of_trays', trays > 0 ? trays : null);
+        completeForm.setValue('no_of_pouches', pouches > 0 ? pouches : null);
+        // Only meaningful with a single mode — two modes have two different
+        // pieces-per-carton, and no single value would be true.
+        completeForm.setValue('nos_per_box', lines.length === 1 ? (lines[0].nos_per_box ?? null) : null);
+    }, [completeForm, packagingForLine]);
+
+    // Seed the first line. One mode means no question is asked; several means
+    // start on the one the batch was started against (or the standard's
+    // default) and let the supervisor add the other if the run used both.
+    useEffect(() => {
+        if (!completingEntry || packingModes.length === 0) return;
+        if (((completeForm.getValues('packing_lines') ?? []) as PackingLineValues[]).length > 0) return;
+        const initial =
+            packingModes.length === 1
+                ? packingModes[0]
+                : (packingModes.find((p) => p.mode === completingPackagingMode) ??
+                   packingModes.find((p) => p.is_default) ??
+                   packingModes[0]);
+        packingFields.replace([blankPackingLine(initial)]);
+        recomputePackingTotals();
+        // Deliberately keyed on the modes and the batch only: packingFields
+        // and recomputePackingTotals are rebuilt every render, and listing
+        // them would re-seed the line on every keystroke.
+    }, [packingModes, completingEntry, completingPackagingMode, completeForm]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    /** Modes not yet on a line — what "Add packing line" may still offer. */
+    const unusedPackingModes = useMemo(() => {
+        void packingRevision;
+        const used = new Set(((completeForm.getValues('packing_lines') ?? []) as PackingLineValues[]).map((l) => l.mode));
+        return packingModes.filter((p) => !used.has(p.mode));
+    }, [packingModes, completeForm, packingRevision]);
+
     // Day-bin consumption for the batch being completed (Phase 6): the
     // backend-computed `opening + Σ loaded − closing − Σ returned` per
     // material. Fetched only with the flag on; null on 404 (older backend).
@@ -720,25 +996,84 @@ export default function ShiftProductionEntryPage() {
     // never overwritten. Manual entry stays fully editable throughout; a
     // floor that ignores scanning entirely (has_movements false) prefills
     // nothing and completes exactly as before.
+    // One closing-weight row per material that actually moved through this
+    // batch — the supervisor is asked about exactly what they used, nothing
+    // more.
     useEffect(() => {
         if (!traceabilityEnabled || !completingEntry || !entryDayBin?.has_movements) return;
-        for (const material of entryDayBin.materials) {
-            const consumed = toNum(material.consumption_kg);
-            if (consumed === null || consumed < 0) continue;
+        if (!completeForm.getFieldState('closing_day_bin').isDirty) {
+            completeForm.setValue(
+                'closing_day_bin',
+                entryDayBin.materials.map((m) => ({ item_id: m.item.id, quantity_kg: null })),
+            );
+        }
+    }, [entryDayBin, completingEntry, traceabilityEnabled, completeForm]);
+
+    /**
+     * Write one material's day-bin consumption into whichever fixed row it
+     * belongs to (Resin or Masterbatch), from either the server's figure or
+     * the closing weight being typed right now:
+     *     consumed = opening + loaded − closing − returned
+     * `consumption_kg` is the SERVER's figure and stays null until a closing
+     * count exists — which only happens AFTER this form is submitted — so
+     * during completion the same formula is applied to the supervisor's
+     * live closing weight instead.
+     *
+     * This is called from the closing field's own onChange and NOT from a
+     * useEffect keyed on the watched array, because that effect could never
+     * fire: react-hook-form's `watch('closing_day_bin')` shallow-spreads
+     * only the TOP level of _formValues, and setValue on a nested path
+     * mutates the existing row object in place — so the array AND the row
+     * keep their identity across an edit and the dependency never changes.
+     * (Verified against react-hook-form 7.82: after
+     * setValue('closing_day_bin.0.quantity_kg', 4.25) the value is written
+     * but `before === after` is true for both the array and the row.)
+     *
+     * setValue never marks a field dirty, so a supervisor-typed kg is
+     * still never overwritten — the same contract as every other auto-fill
+     * in this drawer.
+     */
+    const applyDayBinConsumption = useCallback(
+        (material: EntryDayBinMaterialSummary, typedClosingKg: number | null) => {
             const target = isResinItem(material.item) ? ('resin' as const) : isMasterbatchItem(material.item) ? ('mb' as const) : null;
-            if (!target) continue;
+            if (!target) return;
             const kgField = target === 'resin' ? ('resin_kg' as const) : ('mb_kg' as const);
             const itemField = target === 'resin' ? ('resin_item_id' as const) : ('mb_item_id' as const);
-            if (!completeForm.getFieldState(kgField).isDirty) {
-                completeForm.setValue(kgField, Math.round(consumed * 10000) / 10000);
-            }
+
             // The bag actually scanned into the machine beats the colour-based
             // MB suggestion — still only while the supervisor hasn't touched it.
             if (!completeForm.getFieldState(itemField).isDirty) {
                 completeForm.setValue(itemField, material.item.id);
             }
+
+            const serverConsumed = toNum(material.consumption_kg);
+            const derived =
+                typedClosingKg === null
+                    ? null
+                    : (toNum(material.opening_kg) ?? 0) +
+                      (toNum(material.loaded_kg) ?? 0) -
+                      typedClosingKg -
+                      (toNum(material.returned_kg) ?? 0);
+            const consumed = serverConsumed ?? derived;
+            // A negative result means the closing weight is more than what
+            // went in — a real data problem, not a consumption figure.
+            if (consumed === null || consumed < 0) return;
+            if (completeForm.getFieldState(kgField).isDirty) return;
+            completeForm.setValue(kgField, Math.round(consumed * 10000) / 10000);
+        },
+        [completeForm],
+    );
+
+    // The server-figure pass, on load. `entryDayBin` is a fresh object each
+    // time the query resolves, so this dependency genuinely changes — unlike
+    // the watched closing array, which is why the typed case lives in
+    // onChange instead.
+    useEffect(() => {
+        if (!traceabilityEnabled || !completingEntry || !entryDayBin?.has_movements) return;
+        for (const material of entryDayBin.materials) {
+            applyDayBinConsumption(material, null);
         }
-    }, [entryDayBin, completingEntry, traceabilityEnabled, completeForm]);
+    }, [entryDayBin, completingEntry, traceabilityEnabled, applyDayBinConsumption]);
 
     const nominalWeight = completingEntry?.item.nominal_weight_grams ? Number(completingEntry.item.nominal_weight_grams) : null;
     const previewProducedKg = nominalWeight && quantityProduced ? ((quantityProduced * nominalWeight) / 1000).toFixed(4) : null;
@@ -761,6 +1096,10 @@ export default function ShiftProductionEntryPage() {
         ].some(hasPackStd);
     const showTrayFields = hasPackStd(completingItem?.nos_per_tray) || !hasAnyPackagingStandard;
     const showPouchFields = hasPackStd(completingItem?.nos_per_pouch);
+    // The standard's packaging rows win when they exist: they are the only
+    // source that knows which modes this product genuinely has. Without them
+    // the drawer stays exactly as it was.
+    const usePackingLines = packingModes.length > 0;
 
     // Everything the pre-submit results panel shows, computed live from the
     // form + the entry's Start Batch snapshots. Frontend duplicate of the
@@ -822,6 +1161,8 @@ export default function ShiftProductionEntryPage() {
                 actual_cycle_time,
                 active_cavities,
                 material_consumptions,
+                closing_day_bin,
+                packing_lines,
                 ...rest
             } = values;
             // The fixed resin/MB rows are ordinary consumption lines on the
@@ -835,25 +1176,73 @@ export default function ShiftProductionEntryPage() {
                     : []),
                 ...(material_consumptions ?? []),
             ];
-            return completeBatch(completingEntry.id, {
+            // Only rows the supervisor actually weighed. A blank closing
+            // weight is "not counted", which must stay null downstream —
+            // sending 0 would assert an empty bin nobody looked in.
+            const closing = (closing_day_bin ?? [])
+                .filter((row) => row.quantity_kg !== null && row.quantity_kg !== undefined)
+                .map((row) => ({ item_id: row.item_id, quantity_kg: row.quantity_kg as number }));
+
+            // One line per packaging mode used. derived_pieces is sent
+            // explicitly and re-derived server-side, so an unexplained
+            // override cannot be disguised by claiming they matched.
+            const packingLines = (packing_lines ?? []).map((line) => ({
+                mode: line.mode,
+                production_standard_packaging_id: line.production_standard_packaging_id ?? undefined,
+                boxes: line.boxes ?? 0,
+                nos_per_box: line.nos_per_box ?? 0,
+                loose_inner: line.loose_inner ?? 0,
+                nos_per_inner: line.nos_per_inner ?? undefined,
+                derived_pieces: linePieces(line),
+                actual_pieces: line.actual_pieces ?? linePieces(line),
+                override_reason: (line.override_reason ?? '').trim() || undefined,
+            }));
+
+            // Built as a variable, not an inline literal: packing_lines is a
+            // real part of the wire contract that the shared
+            // CompleteBatchPayload type has not been widened for yet.
+            const payload = {
                 ...rest,
                 material_consumptions: consumptions,
+                closing_day_bin: closing.length > 0 ? closing : undefined,
+                packing_lines: packingLines.length > 0 ? packingLines : undefined,
                 // Cleared InputNumbers emit null — omit rather than send null.
                 running_hours: running_hours ?? undefined,
                 qc_rejection_kg: qc_rejection_kg ?? undefined,
                 actual_cycle_time: actual_cycle_time ?? undefined,
                 active_cavities: active_cavities ?? undefined,
-            });
+            };
+
+            return completeBatch(completingEntry.id, payload);
         },
         onSuccess: () => {
             invalidate();
             setCompletingEntry(null);
-            completeForm.reset({ material_consumptions: [], scraps: [] });
+            completeForm.reset({ material_consumptions: [], scraps: [], packing_lines: [] });
         },
         onError: (error: any) => {
+            const body = error?.response?.data;
+            // A refused submission changes nothing: the drawer stays open with
+            // every entered figure intact, and the message says what to fix
+            // rather than just what was wrong.
+            const fieldMessages: string[] = body?.errors ? (Object.values(body.errors).flat() as string[]) : [];
             Modal.error({
                 title: 'Could not complete batch',
-                content: error?.response?.data?.message ?? 'Someone may have already completed this batch — refresh and try again.',
+                content:
+                    fieldMessages.length > 0 ? (
+                        <>
+                            <Typography.Paragraph style={{ marginBottom: 8 }}>
+                                Nothing was submitted and nothing you typed was lost. Fix these, then press Complete Batch again:
+                            </Typography.Paragraph>
+                            <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                {fieldMessages.map((message) => (
+                                    <li key={message}>{message}</li>
+                                ))}
+                            </ul>
+                        </>
+                    ) : (
+                        (body?.message ?? 'Someone may have already completed this batch — refresh and try again.')
+                    ),
             });
         },
     });
@@ -1091,6 +1480,9 @@ export default function ShiftProductionEntryPage() {
                             completeForm.reset({
                                 material_consumptions: [],
                                 scraps: [],
+                                // Cleared per batch — the modes are re-read from
+                                // THIS batch's standard once its preview lands.
+                                packing_lines: [],
                                 // Minted at Start Batch — prefilled here so nobody
                                 // types it; still editable as the exception path.
                                 batch_number: running.batch_number ?? undefined,
@@ -1193,7 +1585,7 @@ export default function ShiftProductionEntryPage() {
                                                     setDayBinTarget({ workCenter: wc, entry: running });
                                                 }}
                                             >
-                                                Day Bin
+                                                Materials
                                             </Button>
                                         )}
                                         {running && traceabilityEnabled && (
@@ -1538,20 +1930,38 @@ export default function ShiftProductionEntryPage() {
                                 label="Good Boxes"
                                 validateStatus={completeForm.formState.errors.no_of_box ? 'error' : ''}
                                 help={completeForm.formState.errors.no_of_box?.message}
+                                extra={usePackingLines ? 'total cartons across the packing lines' : undefined}
                             >
                                 <Controller
                                     name="no_of_box"
                                     control={completeForm.control}
-                                    render={({ field }) => <InputNumber {...field} size="large" min={0} style={{ width: '100%' }} />}
+                                    render={({ field }) => (
+                                        // With packing lines the carton total is the sum of
+                                        // the lines and is not separately typeable — that is
+                                        // exactly how the same cartons would get counted
+                                        // under two modes.
+                                        <InputNumber {...field} size="large" min={0} disabled={usePackingLines} style={{ width: '100%' }} />
+                                    )}
                                 />
                             </Form.Item>
                         </Col>
                         <Col span={12}>
-                            <Form.Item label="Loose Pieces (optional)">
+                            <Form.Item label="Loose Pieces (optional)" extra={usePackingLines ? 'pieces in no container at all' : undefined}>
                                 <Controller
                                     name="loose_pieces"
                                     control={completeForm.control}
-                                    render={({ field }) => <InputNumber {...field} size="large" min={0} style={{ width: '100%' }} />}
+                                    render={({ field }) => (
+                                        <InputNumber
+                                            {...field}
+                                            size="large"
+                                            min={0}
+                                            style={{ width: '100%' }}
+                                            onChange={(value) => {
+                                                field.onChange(value);
+                                                if (usePackingLines) recomputePackingTotals();
+                                            }}
+                                        />
+                                    )}
                                 />
                             </Form.Item>
                         </Col>
@@ -1564,17 +1974,24 @@ export default function ShiftProductionEntryPage() {
                                 validateStatus={completeForm.formState.errors.quantity_produced ? 'error' : ''}
                                 help={completeForm.formState.errors.quantity_produced?.message}
                                 extra={
-                                    completingEntry?.item.nos_per_box
-                                        ? `= boxes × ${completingEntry.item.nos_per_box} pcs/box + loose — editable`
-                                        : showPouchFields
-                                          ? `= pouches × ${completingItem?.nos_per_pouch} pcs/pouch + loose — editable`
-                                          : undefined
+                                    usePackingLines
+                                        ? 'sum of the packing lines + loose pieces'
+                                        : completingEntry?.item.nos_per_box
+                                          ? `= boxes × ${completingEntry.item.nos_per_box} pcs/box + loose — editable`
+                                          : showPouchFields
+                                            ? `= pouches × ${completingItem?.nos_per_pouch} pcs/pouch + loose — editable`
+                                            : undefined
                                 }
                             >
                                 <Controller
                                     name="quantity_produced"
                                     control={completeForm.control}
-                                    render={({ field }) => <InputNumber {...field} size="large" min={0} style={{ width: '100%' }} />}
+                                    render={({ field }) => (
+                                        // Derived from the lines when they exist — a
+                                        // separately-typed total is the one figure that
+                                        // could silently disagree with what was packed.
+                                        <InputNumber {...field} size="large" min={0} disabled={usePackingLines} style={{ width: '100%' }} />
+                                    )}
                                 />
                             </Form.Item>
                         </Col>
@@ -1683,12 +2100,256 @@ export default function ShiftProductionEntryPage() {
                     </Row>
 
                     <Typography.Text strong>Packing</Typography.Text>
-                    {/* Applicability is data-driven from the item's packing
-                        master: tray fields for tray-packed items (or items
-                        with no standards at all — the pre-pouch manual set),
-                        pouch count only for pouch-packed items, Nos/Box
+
+                    {/* Multi-mode packing lines. The modes come from THIS
+                        batch's standard, so a tray-only product is never
+                        asked about pouches. One mode is auto-selected with no
+                        picker; a standard carrying both lets the supervisor
+                        add the second as its own line when the run used it. */}
+                    {usePackingLines && (
+                        <>
+                            <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
+                                {packingModes.length === 1
+                                    ? `Packed ${MODE_LABEL[packingModes[0].mode].toLowerCase()} — the only way this product is packed.`
+                                    : 'This product is packed more than one way. Add a line for each way this run actually used — every carton belongs to exactly one line.'}
+                            </Typography.Text>
+
+                            {packingFields.fields.map((field, index) => {
+                                const line = ((completeForm.getValues('packing_lines') ?? []) as PackingLineValues[])[index];
+                                if (!line) return null;
+                                const packaging = packagingForLine(line);
+                                const inner = innerNoun(line.mode);
+                                const derived = linePieces(line);
+                                const actual = line.actual_pieces ?? derived;
+                                const lineErrors = completeForm.formState.errors.packing_lines?.[index];
+                                return (
+                                    <Card
+                                        key={field.id}
+                                        size="small"
+                                        style={{ marginTop: 8 }}
+                                        title={
+                                            <Space>
+                                                <Tag color="blue">{MODE_LABEL[line.mode]}</Tag>
+                                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                                    {line.nos_per_box ?? '—'} pcs/carton
+                                                    {inner && line.nos_per_inner ? ` · ${line.nos_per_inner} pcs/${inner.slice(0, -1)}` : ''}
+                                                </Typography.Text>
+                                            </Space>
+                                        }
+                                        extra={
+                                            packingFields.fields.length > 1 ? (
+                                                <Button
+                                                    size="small"
+                                                    danger
+                                                    onClick={() => {
+                                                        packingFields.remove(index);
+                                                        recomputePackingTotals();
+                                                    }}
+                                                >
+                                                    Remove
+                                                </Button>
+                                            ) : undefined
+                                        }
+                                    >
+                                        {lineErrors?.mode?.message && (
+                                            <Alert type="error" showIcon style={{ marginBottom: 8 }} message={lineErrors.mode.message} />
+                                        )}
+                                        <Row gutter={[8, 8]}>
+                                            <Col xs={12} sm={8}>
+                                                <Form.Item
+                                                    label="Cartons"
+                                                    style={{ marginBottom: 0 }}
+                                                    validateStatus={lineErrors?.boxes ? 'error' : ''}
+                                                    help={lineErrors?.boxes?.message}
+                                                >
+                                                    <Controller
+                                                        name={`packing_lines.${index}.boxes`}
+                                                        control={completeForm.control}
+                                                        render={({ field: boxField }) => (
+                                                            <InputNumber
+                                                                {...boxField}
+                                                                size="large"
+                                                                min={0}
+                                                                style={{ width: '100%' }}
+                                                                onChange={(value) => {
+                                                                    boxField.onChange(value);
+                                                                    recomputePackingTotals();
+                                                                }}
+                                                            />
+                                                        )}
+                                                    />
+                                                </Form.Item>
+                                            </Col>
+                                            <Col xs={12} sm={8}>
+                                                {/* Prefilled from the imported standard and still
+                                                    editable: a run genuinely packed at a different
+                                                    carton size must be recordable, and a standard
+                                                    that never carried the figure must not dead-end
+                                                    the completion. */}
+                                                <Form.Item
+                                                    label="Pcs/carton"
+                                                    style={{ marginBottom: 0 }}
+                                                    extra={packaging?.nos_per_box ? `standard: ${packaging.nos_per_box}` : 'not on the standard — enter it'}
+                                                    validateStatus={lineErrors?.nos_per_box ? 'error' : ''}
+                                                    help={lineErrors?.nos_per_box?.message}
+                                                >
+                                                    <Controller
+                                                        name={`packing_lines.${index}.nos_per_box`}
+                                                        control={completeForm.control}
+                                                        render={({ field: perBoxField }) => (
+                                                            <InputNumber
+                                                                {...perBoxField}
+                                                                size="large"
+                                                                min={1}
+                                                                style={{ width: '100%' }}
+                                                                onChange={(value) => {
+                                                                    perBoxField.onChange(value);
+                                                                    recomputePackingTotals();
+                                                                }}
+                                                            />
+                                                        )}
+                                                    />
+                                                </Form.Item>
+                                            </Col>
+                                            {inner !== null && (line.nos_per_inner ?? null) === null && (
+                                                <Col xs={24}>
+                                                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                                        This standard has no pieces-per-{inner.slice(0, -1)}, so loose {inner} cannot be
+                                                        converted to pieces — count them into the cartons or correct the pieces below.
+                                                    </Typography.Text>
+                                                </Col>
+                                            )}
+                                            {inner !== null && (line.nos_per_inner ?? null) !== null && (
+                                                <Col xs={12} sm={8}>
+                                                    <Form.Item
+                                                        label={`Loose ${inner}`}
+                                                        style={{ marginBottom: 0 }}
+                                                        extra="not yet in a carton"
+                                                        validateStatus={lineErrors?.loose_inner ? 'error' : ''}
+                                                        help={lineErrors?.loose_inner?.message}
+                                                    >
+                                                        <Controller
+                                                            name={`packing_lines.${index}.loose_inner`}
+                                                            control={completeForm.control}
+                                                            render={({ field: innerField }) => (
+                                                                <InputNumber
+                                                                    {...innerField}
+                                                                    size="large"
+                                                                    min={0}
+                                                                    style={{ width: '100%' }}
+                                                                    onChange={(value) => {
+                                                                        innerField.onChange(value);
+                                                                        recomputePackingTotals();
+                                                                    }}
+                                                                />
+                                                            )}
+                                                        />
+                                                    </Form.Item>
+                                                </Col>
+                                            )}
+                                            <Col xs={12} sm={8}>
+                                                <Form.Item
+                                                    label="Pieces counted"
+                                                    style={{ marginBottom: 0 }}
+                                                    extra={`standard: ${derived}`}
+                                                    validateStatus={lineErrors?.actual_pieces ? 'error' : ''}
+                                                    help={lineErrors?.actual_pieces?.message}
+                                                >
+                                                    <Controller
+                                                        name={`packing_lines.${index}.actual_pieces`}
+                                                        control={completeForm.control}
+                                                        render={({ field: pieceField }) => (
+                                                            <InputNumber
+                                                                {...pieceField}
+                                                                size="large"
+                                                                min={0}
+                                                                style={{ width: '100%' }}
+                                                                placeholder={String(derived)}
+                                                                onChange={(value) => {
+                                                                    pieceField.onChange(value);
+                                                                    recomputePackingTotals();
+                                                                }}
+                                                            />
+                                                        )}
+                                                    />
+                                                </Form.Item>
+                                            </Col>
+                                        </Row>
+                                        <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
+                                            {line.boxes ?? 0} cartons × {line.nos_per_box ?? 0}
+                                            {inner && line.nos_per_inner
+                                                ? ` + ${line.loose_inner ?? 0} loose ${inner} × ${line.nos_per_inner}`
+                                                : ''}{' '}
+                                            = <strong>{derived}</strong> pcs
+                                            {actual !== derived ? ` · counted ${actual}` : ''}
+                                            {packaging && innersPerBox(packaging)
+                                                ? ` · ${innersPerBox(packaging)} ${inner}/carton`
+                                                : ''}
+                                        </Typography.Text>
+                                        {/* A counted figure that differs from the pack-size
+                                            arithmetic is a real event (short box, part carton)
+                                            — recorded, not silently accepted. */}
+                                        {actual !== derived && (
+                                            <Form.Item
+                                                label="Why does the count differ?"
+                                                style={{ marginTop: 8, marginBottom: 0 }}
+                                                validateStatus={lineErrors?.override_reason ? 'error' : ''}
+                                                help={lineErrors?.override_reason?.message}
+                                            >
+                                                <Controller
+                                                    name={`packing_lines.${index}.override_reason`}
+                                                    control={completeForm.control}
+                                                    render={({ field: reasonField }) => (
+                                                        <Input {...reasonField} maxLength={255} placeholder="Short box, part carton, miscount…" />
+                                                    )}
+                                                />
+                                            </Form.Item>
+                                        )}
+                                    </Card>
+                                );
+                            })}
+
+                            {unusedPackingModes.length > 0 && (
+                                <Space wrap style={{ marginTop: 8 }}>
+                                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                        Also packed some in:
+                                    </Typography.Text>
+                                    {unusedPackingModes.map((packaging) => (
+                                        <Button
+                                            key={packaging.id}
+                                            size="small"
+                                            onClick={() => {
+                                                packingFields.append(blankPackingLine(packaging));
+                                                recomputePackingTotals();
+                                            }}
+                                        >
+                                            Add {MODE_LABEL[packaging.mode].toLowerCase()} line
+                                        </Button>
+                                    ))}
+                                </Space>
+                            )}
+
+                            <Card size="small" style={{ marginTop: 12, marginBottom: 16 }}>
+                                <ResultRow
+                                    label="Total pieces"
+                                    value={(quantityProduced ?? 0).toLocaleString('en-IN')}
+                                    formula="every packing line + loose pieces"
+                                />
+                                <ResultRow
+                                    label="Total cartons"
+                                    value={String(goodBoxesWatch ?? 0)}
+                                    formula="each carton counted once, under one mode only"
+                                />
+                            </Card>
+                        </>
+                    )}
+
+                    {/* Legacy path — products with no imported standard. Byte
+                        for byte the pre-packing-lines field set: tray fields
+                        for tray-packed items (or items with no standards at
+                        all), pouch count only for pouch-packed items, Nos/Box
                         always (boxes are the universal outer). */}
-                    <Row gutter={16} style={{ marginTop: 8, marginBottom: 16 }}>
+                    <Row gutter={16} style={{ marginTop: 8, marginBottom: 16, display: usePackingLines ? 'none' : undefined }}>
                         {showTrayFields && (
                             <Col xs={12} sm={8}>
                                 <Form.Item label="Nos/Tray">
@@ -1723,6 +2384,58 @@ export default function ShiftProductionEntryPage() {
                         Resin/MB rows below, with its formula spelled out. The
                         rows stay fully editable — this is a suggestion, and a
                         supervisor-typed value is never overwritten. */}
+                    {/* Closing day-bin weights. Without these the consumption
+                        formula has no closing term and consumed kg stays null,
+                        which is why automatic consumption used to be blank on
+                        every batch that did not hand over. */}
+                    {traceabilityEnabled && entryDayBin?.has_movements && (
+                        <>
+                            <Typography.Text strong style={{ display: 'block', marginTop: 16 }}>
+                                Left in the day bin at end of run
+                            </Typography.Text>
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                Weigh what is still in the bin. Leave blank if it was not counted — a blank
+                                stays &ldquo;not counted&rdquo; rather than becoming zero.
+                            </Typography.Text>
+                            {entryDayBin.materials.map((material, index) => (
+                                <Row key={material.item.id} gutter={[8, 8]} align="middle" style={{ marginTop: 8 }}>
+                                    <Col xs={14}>
+                                        <Typography.Text>{material.item.name}</Typography.Text>
+                                        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
+                                            loaded {fmtNum(toNum(material.loaded_kg), 4)} kg
+                                        </Typography.Text>
+                                    </Col>
+                                    <Col xs={10}>
+                                        <Controller
+                                            name={`closing_day_bin.${index}.quantity_kg`}
+                                            control={completeForm.control}
+                                            render={({ field }) => (
+                                                <InputNumber
+                                                    {...field}
+                                                    size="large"
+                                                    min={0}
+                                                    style={{ width: '100%' }}
+                                                    placeholder="Closing kg"
+                                                    suffix="kg"
+                                                    onChange={(value) => {
+                                                        field.onChange(value);
+                                                        // The consumed-kg prefill fires HERE — see
+                                                        // applyDayBinConsumption for why an effect on
+                                                        // the watched array cannot.
+                                                        applyDayBinConsumption(
+                                                            material,
+                                                            value === null || value === undefined ? null : Number(value),
+                                                        );
+                                                    }}
+                                                />
+                                            )}
+                                        />
+                                    </Col>
+                                </Row>
+                            ))}
+                        </>
+                    )}
+
                     {traceabilityEnabled && entryDayBin?.has_movements && (
                         <Alert
                             type="info"

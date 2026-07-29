@@ -1,15 +1,27 @@
-import type { ReactElement } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Descriptions, Drawer, Input, Modal, Segmented, Space, Steps, Table, Tag, Typography } from 'antd';
+import dayjs from 'dayjs';
 import { useState } from 'react';
 import { useAuthStore } from '@/features/auth/store';
 import {
     accountantApproveShiftProductionEntry,
+    getTraceabilityReport,
+    getVoucherPreview,
+    listMachineDowntimeLogs,
     listShiftProductionEntries,
     pmApproveShiftProductionEntry,
     rejectShiftProductionEntry,
 } from '@/features/production/api';
-import type { ConsumptionVariance, ProductionMetrics, ShiftProductionEntry, ShiftProductionEntryStatus } from '@/features/production/types';
+import type {
+    ConsumptionVariance,
+    MachineDowntimeLog,
+    ProductionMetrics,
+    ShiftProductionEntry,
+    ShiftProductionEntryStatus,
+    TraceabilityReportRow,
+    VoucherPreview,
+} from '@/features/production/types';
 import { type PackingRounding, roundPer, useProductionSettings } from '@/features/production/packing';
 
 const statusColor: Record<ShiftProductionEntryStatus, string> = {
@@ -90,80 +102,6 @@ const efficiencyTag = (pct: number | null, band?: 'ok' | 'watch' | 'investigate'
 };
 
 /**
- * The backend's expected-output block: did the machine produce what its cycle
- * time says it should have, and do the issued kilograms reconcile. Distinct
- * from (and rendered above) the norm-based VarianceSection — the two answer
- * different questions. Rows whose inputs the backend nulled out are hidden,
- * never shown as a fake 0.
- */
-function MetricsSection({ metrics }: { metrics: ProductionMetrics }) {
-    const unaccounted = metrics.reconciliation_unaccounted_kg === null ? null : parseFloat(metrics.reconciliation_unaccounted_kg);
-    const unaccountedHot = metrics.unaccounted_band
-        ? metrics.unaccounted_band === 'investigate'
-        : unaccounted !== null && !Number.isNaN(unaccounted) && Math.abs(unaccounted) > 0.5;
-
-    return (
-        <>
-            <Typography.Title level={5} style={{ marginTop: 16 }}>Production Metrics</Typography.Title>
-            {metrics.blocks_approval && (
-                <Alert
-                    type="error"
-                    showIcon
-                    style={{ marginBottom: 12 }}
-                    message="Blocks approval"
-                    description="Unaccounted material is at/over the configured blocking tolerance — the accountant cannot post this entry until it is corrected or rejected back to the floor."
-                />
-            )}
-            <Descriptions column={1} size="small" bordered>
-                {metrics.expected_pieces !== null && (
-                    <Descriptions.Item label="Expected">
-                        {fmtKg(metrics.expected_pieces)} pcs
-                        {metrics.expected_pouches != null ? ` · ${metrics.expected_pouches} pouches` : ''}
-                        {metrics.expected_boxes !== null ? ` · ${metrics.expected_boxes} boxes` : ''}
-                    </Descriptions.Item>
-                )}
-                {(metrics.actual_pieces !== null || metrics.actual_boxes !== null || metrics.actual_pouches != null) && (
-                    <Descriptions.Item label="Actual">
-                        {metrics.actual_pieces !== null ? `${fmtKg(metrics.actual_pieces)} pcs` : '—'}
-                        {metrics.actual_pouches != null ? ` · ${metrics.actual_pouches} pouches` : ''}
-                        {metrics.actual_boxes !== null ? ` · ${metrics.actual_boxes} boxes` : ''}
-                    </Descriptions.Item>
-                )}
-                {metrics.efficiency_pct !== null && (
-                    <Descriptions.Item label="Efficiency">
-                        <Space size={6}>
-                            {`${metrics.efficiency_pct}%`}
-                            {efficiencyTag(metrics.efficiency_pct, metrics.efficiency_band)}
-                        </Space>
-                    </Descriptions.Item>
-                )}
-                {(metrics.rejection_kg_production !== null || metrics.rejection_kg_qc !== null) && (
-                    <Descriptions.Item label="Rejection">
-                        production {fmtKg(metrics.rejection_kg_production)} kg · QC {fmtKg(metrics.rejection_kg_qc)} kg
-                        {metrics.rejection_diff_kg !== null ? ` · diff ${fmtSignedKg(metrics.rejection_diff_kg)} kg` : ''}
-                    </Descriptions.Item>
-                )}
-                <Descriptions.Item label="Issued / Good / Lumps">
-                    {fmtKg(metrics.issued_kg)} / {fmtKg(metrics.good_production_kg)} / {fmtKg(metrics.lumps_kg)} kg
-                </Descriptions.Item>
-                {metrics.reconciliation_unaccounted_kg !== null && (
-                    <Descriptions.Item label="Unaccounted">
-                        <Typography.Text type={unaccountedHot ? 'danger' : undefined} strong={unaccountedHot}>
-                            {fmtSignedKg(metrics.reconciliation_unaccounted_kg)} kg
-                        </Typography.Text>
-                        {unaccountedHot && (
-                            <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
-                                issued − good − rejection (QC wins) − lumps — over the 0.5 kg tolerance
-                            </Typography.Text>
-                        )}
-                    </Descriptions.Item>
-                )}
-            </Descriptions>
-        </>
-    );
-}
-
-/**
  * Expected-vs-actual material use for a completed batch — the block the Plant
  * Manager and Accountant scan to decide whether consumption needs questioning
  * before it posts to Tally. `unaccounted_kg` is the number to investigate.
@@ -226,6 +164,379 @@ function VarianceSection({ variance }: { variance: ConsumptionVariance }) {
 }
 
 /**
+ * A figure that could not be computed. The approver's next question is
+ * always "why is this blank" — so the section stays visible and names the
+ * input that is missing, instead of quietly disappearing.
+ */
+function MissingInput({ what, inputs }: { what: string; inputs: string[] }) {
+    return (
+        <Alert
+            type="warning"
+            showIcon
+            style={{ marginTop: 8 }}
+            message={`${what} cannot be calculated`}
+            description={
+                <>
+                    <Typography.Text type="secondary">Missing:</Typography.Text>
+                    <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                        {inputs.map((input) => (
+                            <li key={input}>{input}</li>
+                        ))}
+                    </ul>
+                </>
+            }
+        />
+    );
+}
+
+/** Which expected-output inputs this entry is short of (empty = computable). */
+function missingExpectedInputs(row: ShiftProductionEntry): string[] {
+    const missing: string[] = [];
+    const ct = row.standard_cycle_time === null ? NaN : parseFloat(row.standard_cycle_time);
+    if (!Number.isFinite(ct) || ct <= 0) missing.push('standard cycle time — snapshotted from the item master at Start Batch');
+    if (!(row.active_cavities ?? row.standard_cavities)) missing.push('active cavities — recorded at Start Batch');
+    const hours = row.running_hours === null ? NaN : parseFloat(row.running_hours);
+    if (!Number.isFinite(hours) || hours <= 0) missing.push('running hours — entered by the supervisor at Complete Batch');
+    return missing;
+}
+
+/** pieces × nominal weight ÷ 1000, or null when the item carries no weight. */
+function piecesToKg(pieces: string | number | null, nominalWeightGrams: string | null | undefined): number | null {
+    const p = typeof pieces === 'number' ? pieces : pieces === null ? NaN : parseFloat(pieces);
+    const g = nominalWeightGrams === null || nominalWeightGrams === undefined ? NaN : parseFloat(nominalWeightGrams);
+    if (!Number.isFinite(p) || !Number.isFinite(g) || g <= 0) return null;
+    return (p * g) / 1000;
+}
+
+/**
+ * The CONTENT of one expected/actual row — deliberately not a component
+ * wrapping Descriptions.Item: antd reads its children's own props, so a
+ * custom element in that position is not reliably rendered.
+ */
+function comparison(expected: ReactNode, actual: ReactNode, note?: string): ReactNode {
+    return (
+        <>
+            <Space size={16} wrap>
+                <span>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>expected </Typography.Text>
+                    {expected}
+                </span>
+                <span>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>actual </Typography.Text>
+                    <Typography.Text strong>{actual}</Typography.Text>
+                </span>
+            </Space>
+            {note && (
+                <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                    {note}
+                </Typography.Text>
+            )}
+        </>
+    );
+}
+
+/**
+ * Expected vs actual, side by side: pieces, cartons and kilograms, plus the
+ * efficiency, rejection and lump figures the Plant Manager and Accountant
+ * decide on. Where a figure is missing this says which input is absent
+ * rather than hiding the row.
+ */
+function ExpectedVsActualSection({ row, metrics }: { row: ShiftProductionEntry; metrics: ProductionMetrics | null }) {
+    const missing = missingExpectedInputs(row);
+    const weight = row.item.nominal_weight_grams;
+    const expectedKg = metrics ? piecesToKg(metrics.expected_pieces, weight) : null;
+    const actualKg = row.quantity_produced_kg === null ? null : parseFloat(row.quantity_produced_kg);
+
+    return (
+        <>
+            <Typography.Title level={5} style={{ marginTop: 16 }}>Expected vs Actual</Typography.Title>
+            {metrics?.blocks_approval && (
+                <Alert
+                    type="error"
+                    showIcon
+                    style={{ marginBottom: 12 }}
+                    message="Blocks approval"
+                    description="Unaccounted material is at/over the configured blocking tolerance — the accountant cannot post this entry until it is corrected or rejected back to the floor."
+                />
+            )}
+            <Descriptions column={1} size="small" bordered>
+                <Descriptions.Item label="Pieces">
+                    {comparison(
+                        metrics?.expected_pieces != null ? `${fmtKg(metrics.expected_pieces)} pcs` : '—',
+                        metrics?.actual_pieces != null ? `${fmtKg(metrics.actual_pieces)} pcs` : `${row.quantity_produced ?? '—'} pcs`,
+                    )}
+                </Descriptions.Item>
+                <Descriptions.Item label="Cartons">
+                    {comparison(
+                        metrics?.expected_boxes != null ? `${metrics.expected_boxes} boxes` : '—',
+                        metrics?.actual_boxes != null ? `${metrics.actual_boxes} boxes` : (row.no_of_box ?? '—'),
+                        metrics?.expected_boxes == null && row.item.nos_per_box === null
+                            ? 'expected cartons need pieces-per-box on the product standard'
+                            : undefined,
+                    )}
+                </Descriptions.Item>
+                {(metrics?.expected_pouches != null || metrics?.actual_pouches != null) && (
+                    <Descriptions.Item label="Pouches">
+                        {comparison(
+                            metrics?.expected_pouches != null ? `${metrics.expected_pouches}` : '—',
+                            metrics?.actual_pouches != null ? `${metrics.actual_pouches}` : '—',
+                        )}
+                    </Descriptions.Item>
+                )}
+                <Descriptions.Item label="Kilograms">
+                    {comparison(
+                        expectedKg === null ? '—' : `${expectedKg.toFixed(2)} kg`,
+                        actualKg === null ? '—' : `${actualKg.toFixed(2)} kg`,
+                        expectedKg === null && !weight
+                            ? 'kg needs a nominal weight (grams) on the item master'
+                            : 'pieces × nominal weight ÷ 1000',
+                    )}
+                </Descriptions.Item>
+                <Descriptions.Item label="Efficiency">
+                    {metrics?.efficiency_pct !== null && metrics !== null ? (
+                        <Space size={6}>
+                            {`${metrics.efficiency_pct}%`}
+                            {efficiencyTag(metrics.efficiency_pct, metrics.efficiency_band)}
+                        </Space>
+                    ) : (
+                        <Typography.Text type="secondary">— actual cartons ÷ expected cartons</Typography.Text>
+                    )}
+                </Descriptions.Item>
+                <Descriptions.Item label="Rejection">
+                    {metrics === null || (metrics.rejection_kg_production === null && metrics.rejection_kg_qc === null) ? (
+                        <Typography.Text type="secondary">none recorded</Typography.Text>
+                    ) : (
+                        <>
+                            production {fmtKg(metrics.rejection_kg_production)} kg · QC {fmtKg(metrics.rejection_kg_qc)} kg
+                            {metrics.rejection_diff_kg !== null ? ` · diff ${fmtSignedKg(metrics.rejection_diff_kg)} kg` : ''}
+                        </>
+                    )}
+                </Descriptions.Item>
+                <Descriptions.Item label="Lumps">{metrics ? `${fmtKg(metrics.lumps_kg)} kg` : '—'}</Descriptions.Item>
+            </Descriptions>
+            {missing.length > 0 && <MissingInput what="Expected output" inputs={missing} />}
+        </>
+    );
+}
+
+/**
+ * Material expected vs actual and the unaccounted figure — the number the
+ * accountant investigates before it posts.
+ */
+function MaterialVarianceSection({ metrics }: { metrics: ProductionMetrics | null }) {
+    if (metrics === null) return null;
+    const unaccounted = metrics.reconciliation_unaccounted_kg === null ? null : parseFloat(metrics.reconciliation_unaccounted_kg);
+    const hot = metrics.unaccounted_band
+        ? metrics.unaccounted_band === 'investigate'
+        : unaccounted !== null && !Number.isNaN(unaccounted) && Math.abs(unaccounted) > 0.5;
+
+    return (
+        <>
+            <Typography.Title level={5} style={{ marginTop: 16 }}>Material Reconciliation</Typography.Title>
+            <Descriptions column={1} size="small" bordered>
+                <Descriptions.Item label="Issued / Good / Lumps">
+                    {fmtKg(metrics.issued_kg)} / {fmtKg(metrics.good_production_kg)} / {fmtKg(metrics.lumps_kg)} kg
+                </Descriptions.Item>
+                <Descriptions.Item label="Unaccounted">
+                    {metrics.reconciliation_unaccounted_kg === null ? (
+                        <Typography.Text type="secondary">
+                            — needs both issued material lines and a produced quantity in kg
+                        </Typography.Text>
+                    ) : (
+                        <>
+                            <Typography.Text type={hot ? 'danger' : undefined} strong={hot}>
+                                {fmtSignedKg(metrics.reconciliation_unaccounted_kg)} kg
+                            </Typography.Text>
+                            <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                                issued − good − rejection (QC wins) − lumps
+                            </Typography.Text>
+                        </>
+                    )}
+                </Descriptions.Item>
+            </Descriptions>
+        </>
+    );
+}
+
+/**
+ * Breakdowns logged on this machine on this production date. The log list is
+ * paginated with no server-side filter, so when the page does not reach back
+ * as far as the entry, this says so rather than claiming there were none.
+ */
+function DowntimeSection({ row, logs, loading }: { row: ShiftProductionEntry; logs: MachineDowntimeLog[] | undefined; loading: boolean }) {
+    const mine = (logs ?? []).filter((log) => log.work_center.id === row.work_center.id && log.production_date === row.production_date);
+    const oldestLoaded = (logs ?? []).reduce<string | null>(
+        (oldest, log) => (oldest === null || log.production_date < oldest ? log.production_date : oldest),
+        null,
+    );
+    // The window genuinely may not reach this entry — an old batch with an
+    // empty list is "not loaded", not "no breakdowns".
+    const outsideWindow = mine.length === 0 && oldestLoaded !== null && row.production_date < oldestLoaded;
+    const totalMinutes = mine.reduce((sum, log) => sum + (log.total_minutes === null ? 0 : parseFloat(log.total_minutes)), 0);
+
+    return (
+        <>
+            <Typography.Title level={5} style={{ marginTop: 16 }}>Downtime</Typography.Title>
+            {loading && <Typography.Text type="secondary">Loading breakdown logs…</Typography.Text>}
+            {!loading && outsideWindow && (
+                <MissingInput
+                    what="Downtime for this batch"
+                    inputs={[`breakdown logs are only loaded back to ${oldestLoaded} — this batch is ${row.production_date}`]}
+                />
+            )}
+            {!loading && !outsideWindow && mine.length === 0 && (
+                <Typography.Text type="secondary">No breakdown logged on {row.work_center.name} on {row.production_date}.</Typography.Text>
+            )}
+            {!loading && mine.length > 0 && (
+                <>
+                    <Typography.Paragraph style={{ marginBottom: 8 }}>
+                        <Typography.Text strong>{mine.length}</Typography.Text> breakdown{mine.length > 1 ? 's' : ''} ·{' '}
+                        <Typography.Text strong>{Math.round(totalMinutes)}</Typography.Text> minutes
+                        {mine.some((log) => log.total_minutes === null) && (
+                            <Typography.Text type="secondary"> (still-open breakdowns count as 0 until closed)</Typography.Text>
+                        )}
+                    </Typography.Paragraph>
+                    <Table
+                        size="small"
+                        rowKey="id"
+                        pagination={false}
+                        dataSource={mine}
+                        columns={[
+                            { title: 'Problem', dataIndex: 'nature_of_problem' },
+                            { title: 'From', render: (_, log: MachineDowntimeLog) => dayjs(log.from_time).format('HH:mm') },
+                            { title: 'To', render: (_, log: MachineDowntimeLog) => (log.to_time ? dayjs(log.to_time).format('HH:mm') : 'open') },
+                            { title: 'Minutes', render: (_, log: MachineDowntimeLog) => log.total_minutes ?? '—' },
+                            { title: 'Remedy', render: (_, log: MachineDowntimeLog) => log.remedy ?? '—' },
+                        ]}
+                    />
+                </>
+            )}
+        </>
+    );
+}
+
+/**
+ * Which supplier lot and which physical bags fed this batch — the answer a
+ * customer complaint needs. Derived from the traceability report's
+ * lot → bag → fed-segment chain, matched on this entry's id.
+ */
+function SourceMaterialSection({
+    row,
+    lots,
+    loading,
+    windowFrom,
+    windowTo,
+}: {
+    row: ShiftProductionEntry;
+    lots: TraceabilityReportRow[] | null | undefined;
+    loading: boolean;
+    windowFrom: string;
+    windowTo: string;
+}) {
+    const fedRows = (lots ?? []).flatMap((lot) =>
+        lot.bags
+            .filter((bag) => bag.fed.some((feed) => feed.segment?.id === row.id))
+            .map((bag) => ({
+                key: `${lot.id}-${bag.id}`,
+                lot: lot.supplier_lot_no ?? `Lot #${lot.id}`,
+                material: `${lot.item.sku} — ${lot.item.name}`,
+                barcode: bag.barcode,
+                loaded_kg: bag.fed.filter((feed) => feed.segment?.id === row.id).reduce((sum, feed) => sum + parseFloat(feed.loaded_kg), 0),
+            })),
+    );
+
+    return (
+        <>
+            <Typography.Title level={5} style={{ marginTop: 16 }}>Source Material</Typography.Title>
+            {loading && <Typography.Text type="secondary">Loading scanned bags…</Typography.Text>}
+            {!loading && lots === null && (
+                <MissingInput
+                    what="The lot and bag barcodes behind this batch"
+                    inputs={['traceability is switched off on this server, so no bag scans are recorded']}
+                />
+            )}
+            {!loading && lots !== null && fedRows.length === 0 && (
+                <MissingInput
+                    what="The lot and bag barcodes behind this batch"
+                    inputs={[
+                        `no scanned bag fed this batch from any lot received between ${windowFrom} and ${windowTo}`,
+                        'either the bags were not scanned into the day bin, or they came from an older lot than that window',
+                    ]}
+                />
+            )}
+            {!loading && fedRows.length > 0 && (
+                <Table
+                    size="small"
+                    rowKey="key"
+                    pagination={false}
+                    dataSource={fedRows}
+                    columns={[
+                        { title: 'Material', dataIndex: 'material' },
+                        { title: 'Supplier Lot', dataIndex: 'lot' },
+                        { title: 'Bag Barcode', dataIndex: 'barcode' },
+                        { title: 'Loaded (kg)', render: (_, r) => r.loaded_kg.toFixed(4) },
+                    ]}
+                />
+            )}
+        </>
+    );
+}
+
+/**
+ * The voucher Tally WILL receive, resolved against real masters. Strictly a
+ * preview: this endpoint is read-only and posts nothing — the accountant's
+ * approval is the only thing that may.
+ */
+function VoucherPreviewSection({ preview, loading }: { preview: VoucherPreview | undefined; loading: boolean }) {
+    return (
+        <>
+            <Typography.Title level={5} style={{ marginTop: 16 }}>Tally Voucher — preview only</Typography.Title>
+            {loading && <Typography.Text type="secondary">Resolving the voucher…</Typography.Text>}
+            {!loading && preview === undefined && (
+                <MissingInput what="The Tally voucher" inputs={['the voucher preview could not be loaded for this entry']} />
+            )}
+            {!loading && preview !== undefined && (
+                <>
+                    <Alert
+                        type={preview.postable ? 'success' : 'warning'}
+                        showIcon
+                        style={{ marginBottom: 8 }}
+                        message={preview.postable ? 'Resolves cleanly — nothing posted yet' : 'Tally would reject this voucher as it stands'}
+                        description={
+                            preview.problems.length > 0 ? (
+                                <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                                    {preview.problems.map((problem) => (
+                                        <li key={problem}>{problem}</li>
+                                    ))}
+                                </ul>
+                            ) : (
+                                'Nothing is sent to Tally until the Accountant approves.'
+                            )
+                        }
+                    />
+                    <Table
+                        size="small"
+                        rowKey={(line) => `${line.side}-${line.item}-${line.godown}`}
+                        pagination={false}
+                        dataSource={preview.lines}
+                        columns={[
+                            { title: 'Side', dataIndex: 'side' },
+                            { title: 'Item', render: (_, line) => line.item ?? '—' },
+                            { title: 'Qty', render: (_, line) => `${line.quantity ?? '—'} ${line.uom ?? ''}` },
+                            { title: 'Godown', render: (_, line) => line.godown ?? '—' },
+                            {
+                                title: 'Problems',
+                                render: (_, line) => (line.problems.length === 0 ? '—' : line.problems.join('; ')),
+                            },
+                        ]}
+                    />
+                </>
+            )}
+        </>
+    );
+}
+
+/**
  * The 4-stage chain (factory answer 9): Supervisor submits → Plant Manager
  * verifies → Accountant reconciles → MD final approval → Tally. Each row's
  * available action depends on its stage AND the viewer's role — the stage
@@ -265,6 +576,33 @@ export default function ApproveProductionPage() {
     });
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['production', 'shift-production-entries'] });
+
+    // ------------------------------------------------------------------
+    // Detail-drawer context. All three are READ-ONLY endpoints — opening the
+    // drawer must never move an entry a step closer to Tally.
+    // ------------------------------------------------------------------
+    const { data: voucherPreview, isFetching: voucherLoading } = useQuery({
+        queryKey: ['production', 'voucher-preview', detailRow?.id],
+        queryFn: () => getVoucherPreview(detailRow!.id),
+        enabled: detailRow !== null,
+    });
+
+    const { data: downtimeLogs, isFetching: downtimeLoading } = useQuery({
+        queryKey: ['production', 'machine-downtime-logs'],
+        queryFn: listMachineDowntimeLogs,
+        enabled: detailRow !== null,
+    });
+
+    // The traceability report keys off the LOT's received date, not the
+    // batch's, so the window reaches back the report's full 92-day cap —
+    // and the section says so when nothing matches.
+    const traceFrom = detailRow ? dayjs(detailRow.production_date).subtract(92, 'day').format('YYYY-MM-DD') : '';
+    const traceTo = detailRow ? detailRow.production_date : '';
+    const { data: traceLots, isFetching: traceLoading } = useQuery({
+        queryKey: ['production', 'traceability-report', traceFrom, traceTo],
+        queryFn: () => getTraceabilityReport({ date_from: traceFrom, date_to: traceTo }),
+        enabled: detailRow !== null,
+    });
 
     const approveMutation = useMutation({
         mutationFn: (row: ShiftProductionEntry) => stageFor(row.status)!.mutate(row.id),
@@ -458,7 +796,14 @@ export default function ApproveProductionPage() {
                             )}
                         </Descriptions>
 
-                        {detailRow.metrics && <MetricsSection metrics={detailRow.metrics} />}
+                        {/* Expected vs actual first: it is the question both
+                            approvers are actually answering. The sections
+                            below explain any gap it shows. */}
+                        <ExpectedVsActualSection row={detailRow} metrics={detailRow.metrics} />
+
+                        <DowntimeSection row={detailRow} logs={downtimeLogs?.data} loading={downtimeLoading} />
+
+                        <MaterialVarianceSection metrics={detailRow.metrics} />
 
                         {detailRow.variance && <VarianceSection variance={detailRow.variance} />}
 
@@ -496,6 +841,16 @@ export default function ApproveProductionPage() {
                                 />
                             </>
                         )}
+
+                        <SourceMaterialSection
+                            row={detailRow}
+                            lots={traceLots}
+                            loading={traceLoading}
+                            windowFrom={traceFrom}
+                            windowTo={traceTo}
+                        />
+
+                        <VoucherPreviewSection preview={voucherPreview} loading={voucherLoading} />
 
                         {canActOn(detailRow) && (
                             <Space style={{ marginTop: 24 }}>

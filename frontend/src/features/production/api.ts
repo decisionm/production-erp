@@ -2,6 +2,8 @@ import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
 import type {
     BatchPreview,
+    BinBayAvailabilityResponse,
+    BinBayHistoryRow,
     Bom,
     DowntimeReason,
     FactorySetting,
@@ -330,6 +332,12 @@ export interface CompleteBatchPayload {
     notes?: string;
     material_consumptions?: { item_id: number; warehouse_id: number; quantity_issued_kg: number }[];
     scraps?: { type: 'rejected_finished_good' | 'lumps'; quantity_nos?: number; quantity_kg?: number; scrap_reason_id?: number }[];
+    /**
+     * Day-bin closing weight per material. Same contract as handover — it
+     * is what makes automatic consumption (opening + loaded − closing −
+     * returned) computable on a normal completion.
+     */
+    closing_day_bin?: { item_id: number; quantity_kg: number }[];
 }
 
 export async function completeBatch(id: number, payload: CompleteBatchPayload): Promise<ShiftProductionEntry> {
@@ -875,5 +883,69 @@ export async function updateWorkCenterCapability(
     },
 ): Promise<WorkCenter> {
     const { data } = await api.put<{ data: WorkCenter }>(`/production/work-centers/${id}`, payload);
+    return data.data;
+}
+
+// ---------------------------------------------------------------------------
+// The CENTRAL bin bay. Material is loaded into a machine's day bin once, at
+// the bay — the batch screens then read the bin instead of asking for the
+// same declaration again.
+//
+// A load is an inventory LOCATION movement (store → machine day bin): not
+// consumption, and never a Tally post. Traceability-gated, same as the
+// day-bin endpoints above.
+// ---------------------------------------------------------------------------
+
+export interface BinBayAvailabilityParams {
+    work_center_id: number;
+    /** The MATERIAL whose bin stock is being inspected. */
+    item_id?: number;
+    /** The PRODUCT about to run — pair with expected_pieces for the recipe block. */
+    product_item_id?: number;
+    expected_pieces?: number;
+}
+
+export async function getBinBayAvailability(
+    params: BinBayAvailabilityParams,
+): Promise<BinBayAvailabilityResponse> {
+    const { data } = await api.get<{ data: BinBayAvailabilityResponse }>('/production/bin-bay/availability', {
+        params,
+    });
+    return data.data;
+}
+
+export async function getBinBayHistory(
+    workCenterId: number,
+    itemId?: number,
+    limit?: number,
+): Promise<BinBayHistoryRow[]> {
+    const { data } = await api.get<{ data: { rows: BinBayHistoryRow[] } }>('/production/bin-bay/history', {
+        params: { work_center_id: workCenterId, item_id: itemId, limit },
+    });
+    return data.data.rows;
+}
+
+export interface BinBayLoadPayload {
+    work_center_id: number;
+    /** The code on the bag — typed, gun-scanned or read by the camera. */
+    barcode: string;
+    /** Omit for a full-bag load (its whole remaining_kg); set for a weighed partial pour. */
+    quantity_kg?: number;
+    /** Optional: loading is central and normally not tied to a batch. */
+    shift_production_entry_id?: number;
+    /**
+     * Re-send after a FIFO refusal (422 with code 'fifo_order') — requires
+     * the `production.override-fifo` permission and records who overrode.
+     */
+    override_fifo?: boolean;
+    /**
+     * Credit the load to someone else (a users row, not an employee).
+     * Defaults to the authenticated user; naming another needs production.manage.
+     */
+    loaded_by?: number;
+}
+
+export async function loadBinBay(payload: BinBayLoadPayload): Promise<DayBinMovement> {
+    const { data } = await api.post<{ data: DayBinMovement }>('/production/bin-bay/load', payload);
     return data.data;
 }

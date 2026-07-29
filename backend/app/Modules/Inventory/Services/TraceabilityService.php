@@ -352,8 +352,25 @@ class TraceabilityService
     {
         $itemIds = $this->dayBin->itemIdsWithMovements($workCenterId);
 
+        // Every bag that has FED this machine, taken from the ledger rather
+        // than from MaterialBag.day_bin_work_center_id.
+        //
+        // That column is only set on a FULL load — a partial load pours off
+        // the weighed kg and leaves the bag in the store — so keying off it
+        // made a partially-loaded bag invisible in the machine's Materials
+        // view even though its material is in the bin. The load movements
+        // name their bag, so they are the truthful source of "what fed this
+        // machine".
+        $bagIds = DayBinMovement::query()
+            ->where('work_center_id', $workCenterId)
+            ->where('type', DayBinMovementType::Load->value)
+            ->whereNotNull('material_bag_id')
+            ->distinct()
+            ->pluck('material_bag_id')
+            ->all();
+
         $bagsByItem = MaterialBag::query()
-            ->where('day_bin_work_center_id', $workCenterId)
+            ->whereIn('id', $bagIds)
             ->with('lot')
             ->orderBy('id')
             ->get()
@@ -374,7 +391,16 @@ class TraceabilityService
                 'loaded_bags' => $bagsByItem->get($itemId, collect())->map(fn (MaterialBag $bag) => [
                     'id' => $bag->id,
                     'barcode' => $bag->barcode,
+                    'original_kg' => (string) $bag->original_kg,
                     'remaining_kg' => (string) $bag->remaining_kg,
+                    // How much of this bag went into THIS machine's bin —
+                    // the figure the supervisor is looking for when they
+                    // ask "what did I load off that bag?".
+                    'loaded_kg' => (string) DayBinMovement::query()
+                        ->where('work_center_id', $workCenterId)
+                        ->where('material_bag_id', $bag->id)
+                        ->where('type', DayBinMovementType::Load->value)
+                        ->sum('quantity_kg'),
                     'lot' => $bag->lot !== null
                         ? ['id' => $bag->lot->id, 'supplier_lot_no' => $bag->lot->supplier_lot_no]
                         : null,

@@ -43,6 +43,17 @@ class ShiftProductionEntryResource extends JsonResource
             'no_of_pouches' => $this->no_of_pouches,
             'nos_per_pouch' => $this->nos_per_pouch,
             'loose_pieces' => $this->loose_pieces,
+            // Configurable-production provenance: which standard and
+            // packaging drove this run, where the effective values came
+            // from, and which formula set produced its figures. Approval
+            // cannot show "default vs effective" without these.
+            'production_standard_id' => $this->production_standard_id,
+            'production_configuration_id' => $this->production_configuration_id,
+            'packaging_mode' => $this->packaging_mode,
+            'cycle_time_source' => $this->cycle_time_source,
+            'cavities_source' => $this->cavities_source,
+            'override_reason' => $this->override_reason,
+            'calculation_version' => $this->calculation_version,
             'material_consumptions' => ShiftMaterialConsumptionResource::collection($this->whenLoaded('materialConsumptions')),
             'scraps' => ShiftScrapResource::collection($this->whenLoaded('scraps')),
             // Expected-output engine inputs. standard_* are Start Batch
