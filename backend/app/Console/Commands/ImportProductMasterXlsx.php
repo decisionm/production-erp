@@ -67,6 +67,28 @@ class ImportProductMasterXlsx extends Command
 {
     public const DEFAULT_ROW_FILE = 'app/product-master-rows.json';
 
+    /**
+     * Committed copy of the converted rows. storage/app is gitignored, so a
+     * fresh clone (and CI) has nothing there — this is the path that makes
+     * the real-file tests actually run on the server instead of skipping.
+     */
+    public const FIXTURE_ROW_FILE = 'tests/fixtures/product-master-rows.json';
+
+    /**
+     * Where the converted rows actually live.
+     *
+     * storage/app wins when present (it is what the python conversion
+     * writes), otherwise the committed fixture. Without the fallback a
+     * clean checkout — which is every CI run — has no rows at all, and the
+     * real-file tests skip while reporting green.
+     */
+    public static function resolveRowFile(): string
+    {
+        $storage = storage_path(self::DEFAULT_ROW_FILE);
+
+        return is_file($storage) ? $storage : base_path(self::FIXTURE_ROW_FILE);
+    }
+
     protected $signature = 'production:import-product-master
         {--json= : JSON row file (default: storage/'.self::DEFAULT_ROW_FILE.')}
         {--write : Actually write (default is a dry run)}
@@ -77,7 +99,7 @@ class ImportProductMasterXlsx extends Command
 
     public function handle(ProductionStandardImportService $import): int
     {
-        $path = $this->option('json') ?: storage_path(self::DEFAULT_ROW_FILE);
+        $path = $this->option('json') ?: self::resolveRowFile();
 
         if (! is_file($path)) {
             $this->error("No such file: {$path}");

@@ -43,7 +43,7 @@ class LocalFactoryFixtureSeeder extends Seeder
 
         $this->call(CanonicalMachineSeeder::class);
 
-        $path = storage_path(ImportProductMasterXlsx::DEFAULT_ROW_FILE);
+        $path = ImportProductMasterXlsx::resolveRowFile();
 
         if (! is_file($path)) {
             // Loud, not silent: seeding nothing while reporting success is

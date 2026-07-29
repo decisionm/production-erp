@@ -54,7 +54,15 @@ class ProductMasterImportTest extends TestCase
      */
     private function realRows(): array
     {
-        $path = storage_path(ImportProductMasterXlsx::DEFAULT_ROW_FILE);
+        // Prefer the committed fixture so CI actually RUNS these tests. The
+        // storage/app copy is gitignored, so relying on it alone meant every
+        // real-file assertion silently skipped on the server while passing
+        // locally — coverage that looks green and proves nothing.
+        $path = base_path('tests/fixtures/product-master-rows.json');
+
+        if (! is_file($path)) {
+            $path = storage_path(ImportProductMasterXlsx::DEFAULT_ROW_FILE);
+        }
 
         if (! is_file($path)) {
             // The workbook is not in the repository, so this file cannot be
@@ -416,7 +424,10 @@ class ProductMasterImportTest extends TestCase
         $this->realRows(); // Skips the test if the converted rows are absent.
 
         $this->artisan('production:import-product-master', [
-            '--json' => storage_path(ImportProductMasterXlsx::DEFAULT_ROW_FILE),
+            // Resolver, not the raw storage path: on a clean checkout (every
+            // CI run) storage/app is empty and only the committed fixture
+            // exists.
+            '--json' => ImportProductMasterXlsx::resolveRowFile(),
             '--write' => true,
         ])->assertExitCode(0);
 
