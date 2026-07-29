@@ -81,9 +81,22 @@ return [
      *
      * Raise each to 'block' as the corresponding masters get loaded. That
      * progression is the intended operating procedure, not a workaround.
+     *
+     * `enforced` DEFAULTS TO FALSE — watch-only — and that default is a
+     * safety property of the deployment, not a preference. Roughly 364 of
+     * ~410 finished-good items still lack cycle time and cavities. A
+     * deployment that reached a server whose .env had not been edited yet
+     * would, with a `true` default, refuse every batch for those products
+     * on the next shift. Watch-only cannot cause that: the gate evaluates,
+     * displays every finding, and refuses nothing.
+     *
+     * Flip to true (PROD_READINESS_ENFORCED=true) once master coverage is
+     * good enough that blocking is what the factory wants. That is a
+     * deliberate decision made against real data, which is exactly why it
+     * should not be arrived at by forgetting to set an .env line.
      */
     'readiness' => [
-        'enforced' => (bool) env('PROD_READINESS_ENFORCED', true),
+        'enforced' => (bool) env('PROD_READINESS_ENFORCED', false),
 
         'checks' => [
             'item_active' => env('PROD_READINESS_ITEM_ACTIVE', 'block'),

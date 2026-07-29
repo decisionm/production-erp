@@ -44,6 +44,13 @@ class ProductReadinessGateTest extends TestCase
             'code' => 'FG', 'name' => 'FG Store', 'is_active' => true,
             'tally_guid' => 'gd-fg-0001',
         ]);
+
+        // Enforcement is OFF by default (watch-only) so that a deployment
+        // reaching an un-edited .env cannot refuse every under-configured
+        // product. These tests are about what the gate does WHEN enforcing,
+        // so they opt in explicitly; the default itself is covered by
+        // test_the_shipped_default_is_watch_only below.
+        config()->set('production.readiness.enforced', true);
     }
 
     /** A product with every master present — the control for every other case. */
@@ -195,6 +202,24 @@ class ProductReadinessGateTest extends TestCase
         $this->postJson('/api/v1/production/shift-production-entries', $this->startPayload($item))
             ->assertStatus(422)
             ->assertJsonPath('blocking.0.code', 'consumption_recipe');
+    }
+
+    public function test_the_shipped_default_is_watch_only(): void
+    {
+        // Deployment-safety property, asserted against the real config file
+        // rather than a value set in a test: ~364 of ~410 finished goods
+        // still lack cycle time and cavities, so a `true` default would
+        // refuse them all on the next shift if a server's .env had not been
+        // edited yet. Watch-only cannot cause that.
+        // Read the shipped config file directly — setUp() above overrides
+        // the runtime value, and what matters here is the default a fresh
+        // deployment gets.
+        $shipped = require config_path('production.php');
+
+        $this->assertFalse(
+            (bool) $shipped['readiness']['enforced'],
+            'production.readiness.enforced must default to false — see the config comment.',
+        );
     }
 
     public function test_the_master_switch_turns_enforcement_off_without_hiding_findings(): void
