@@ -212,6 +212,17 @@ const completeBatchSchema = z.object({
             }),
         )
         .optional(),
+    // Day-bin closing weight per material — what is left in the bin at the
+    // end of the run. Without it, consumed kg (opening + loaded − closing
+    // − returned) is unknowable and reports null.
+    closing_day_bin: z
+        .array(
+            z.object({
+                item_id: z.number(),
+                quantity_kg: z.number().min(0, 'Cannot be negative').nullish(),
+            }),
+        )
+        .optional(),
     scraps: z
         .array(
             z.object({
@@ -584,10 +595,19 @@ export default function ShiftProductionEntryPage() {
                 production_standard_packaging_id: selectedPackagingId,
             });
         },
-        onSuccess: () => {
+        onSuccess: (entry) => {
             invalidate();
+            const machine = startingMachine;
             setStartingMachine(null);
             startForm.reset();
+
+            // Start Batch and loading material are one job, not two pages.
+            // A day-bin movement needs a running entry, so the entry is
+            // created first and the material step opens immediately —
+            // the supervisor never goes looking for it.
+            if (traceabilityEnabled && machine && entry) {
+                setDayBinTarget({ workCenter: machine, entry });
+            }
         },
         onError: (error: any) => {
             const body = error?.response?.data;
@@ -720,6 +740,19 @@ export default function ShiftProductionEntryPage() {
     // never overwritten. Manual entry stays fully editable throughout; a
     // floor that ignores scanning entirely (has_movements false) prefills
     // nothing and completes exactly as before.
+    // One closing-weight row per material that actually moved through this
+    // batch — the supervisor is asked about exactly what they used, nothing
+    // more.
+    useEffect(() => {
+        if (!traceabilityEnabled || !completingEntry || !entryDayBin?.has_movements) return;
+        if (!completeForm.getFieldState('closing_day_bin').isDirty) {
+            completeForm.setValue(
+                'closing_day_bin',
+                entryDayBin.materials.map((m) => ({ item_id: m.item.id, quantity_kg: null })),
+            );
+        }
+    }, [entryDayBin, completingEntry, traceabilityEnabled, completeForm]);
+
     useEffect(() => {
         if (!traceabilityEnabled || !completingEntry || !entryDayBin?.has_movements) return;
         for (const material of entryDayBin.materials) {
@@ -822,6 +855,7 @@ export default function ShiftProductionEntryPage() {
                 actual_cycle_time,
                 active_cavities,
                 material_consumptions,
+                closing_day_bin,
                 ...rest
             } = values;
             // The fixed resin/MB rows are ordinary consumption lines on the
@@ -835,9 +869,17 @@ export default function ShiftProductionEntryPage() {
                     : []),
                 ...(material_consumptions ?? []),
             ];
+            // Only rows the supervisor actually weighed. A blank closing
+            // weight is "not counted", which must stay null downstream —
+            // sending 0 would assert an empty bin nobody looked in.
+            const closing = (closing_day_bin ?? [])
+                .filter((row) => row.quantity_kg !== null && row.quantity_kg !== undefined)
+                .map((row) => ({ item_id: row.item_id, quantity_kg: row.quantity_kg as number }));
+
             return completeBatch(completingEntry.id, {
                 ...rest,
                 material_consumptions: consumptions,
+                closing_day_bin: closing.length > 0 ? closing : undefined,
                 // Cleared InputNumbers emit null — omit rather than send null.
                 running_hours: running_hours ?? undefined,
                 qc_rejection_kg: qc_rejection_kg ?? undefined,
@@ -1193,7 +1235,7 @@ export default function ShiftProductionEntryPage() {
                                                     setDayBinTarget({ workCenter: wc, entry: running });
                                                 }}
                                             >
-                                                Day Bin
+                                                Materials
                                             </Button>
                                         )}
                                         {running && traceabilityEnabled && (
@@ -1723,6 +1765,48 @@ export default function ShiftProductionEntryPage() {
                         Resin/MB rows below, with its formula spelled out. The
                         rows stay fully editable — this is a suggestion, and a
                         supervisor-typed value is never overwritten. */}
+                    {/* Closing day-bin weights. Without these the consumption
+                        formula has no closing term and consumed kg stays null,
+                        which is why automatic consumption used to be blank on
+                        every batch that did not hand over. */}
+                    {traceabilityEnabled && entryDayBin?.has_movements && (
+                        <>
+                            <Typography.Text strong style={{ display: 'block', marginTop: 16 }}>
+                                Left in the day bin at end of run
+                            </Typography.Text>
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                Weigh what is still in the bin. Leave blank if it was not counted — a blank
+                                stays &ldquo;not counted&rdquo; rather than becoming zero.
+                            </Typography.Text>
+                            {entryDayBin.materials.map((material, index) => (
+                                <Row key={material.item.id} gutter={[8, 8]} align="middle" style={{ marginTop: 8 }}>
+                                    <Col xs={14}>
+                                        <Typography.Text>{material.item.name}</Typography.Text>
+                                        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
+                                            loaded {fmtNum(toNum(material.loaded_kg), 4)} kg
+                                        </Typography.Text>
+                                    </Col>
+                                    <Col xs={10}>
+                                        <Controller
+                                            name={`closing_day_bin.${index}.quantity_kg`}
+                                            control={completeForm.control}
+                                            render={({ field }) => (
+                                                <InputNumber
+                                                    {...field}
+                                                    size="large"
+                                                    min={0}
+                                                    style={{ width: '100%' }}
+                                                    placeholder="Closing kg"
+                                                    suffix="kg"
+                                                />
+                                            )}
+                                        />
+                                    </Col>
+                                </Row>
+                            ))}
+                        </>
+                    )}
+
                     {traceabilityEnabled && entryDayBin?.has_movements && (
                         <Alert
                             type="info"

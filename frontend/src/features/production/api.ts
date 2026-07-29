@@ -330,6 +330,12 @@ export interface CompleteBatchPayload {
     notes?: string;
     material_consumptions?: { item_id: number; warehouse_id: number; quantity_issued_kg: number }[];
     scraps?: { type: 'rejected_finished_good' | 'lumps'; quantity_nos?: number; quantity_kg?: number; scrap_reason_id?: number }[];
+    /**
+     * Day-bin closing weight per material. Same contract as handover — it
+     * is what makes automatic consumption (opening + loaded − closing −
+     * returned) computable on a normal completion.
+     */
+    closing_day_bin?: { item_id: number; quantity_kg: number }[];
 }
 
 export async function completeBatch(id: number, payload: CompleteBatchPayload): Promise<ShiftProductionEntry> {
