@@ -275,11 +275,32 @@ export interface StartBatchPayload {
     // Complete Batch re-sends it, so a backend that ignores this still gets
     // the corrected value at completion.
     active_cavities?: number;
+    // Which colour actually ran. Asked at Start Batch whenever the masters
+    // don't already fix one (the factory workbook has no reliable colour
+    // column), and snapshotted onto the entry. Never defaulted client-side.
+    colour?: string;
     // Why this run is starting with less material in the machine's bin than
     // its recipe needs. Sent only when the supervisor explicitly waved the
     // shortage through — the server records it and refuses nothing, so the
     // tick-box in the dialog is the guard, not this field.
     material_shortage_override_reason?: string;
+}
+
+/**
+ * One product the factory's standards cover, and the product name they cover
+ * it under. The slim projection behind the Start Batch picker's split into
+ * "Production ready" and "Unconfigured" — see the backend's
+ * ProductionStandardController::coverage for why it isn't the full standards
+ * read.
+ */
+export interface StandardCoverageRow {
+    item_id: number;
+    source_product_name: string | null;
+}
+
+export async function listStandardCoverage(): Promise<{ data: StandardCoverageRow[] }> {
+    const { data } = await api.get<{ data: StandardCoverageRow[] }>('/production/standards/coverage');
+    return data;
 }
 
 export interface BatchPreviewParams {

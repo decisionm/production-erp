@@ -3,6 +3,7 @@
 namespace App\Modules\TallySync\Services;
 
 use App\Modules\Finance\Models\JournalEntry;
+use App\Modules\Inventory\Models\Item;
 use App\Modules\Procurement\Models\GoodsReceiptNote;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
 use App\Modules\Production\Models\Shift;
@@ -149,13 +150,41 @@ class TallySyncService
      * decides the exact voucher shape (Manufacturing Journal if Tally BOM is
      * enabled, else a plain Stock Journal) — TALLY-SYNC-MASTER-PLAN.md §6.
      */
-    public function enqueueShiftProductionEntry(ShiftProductionEntry $entry): TallySyncEntry
+    public function enqueueShiftProductionEntry(ShiftProductionEntry $entry): ?TallySyncEntry
     {
+        // A LOCAL- fixture product exists in this database and nowhere in
+        // Tally. A voucher naming it cannot be accepted — Tally answers
+        // "Stock Item does not exist" — so queueing one buys nothing and
+        // costs the accountant a permanently failing row they must decide
+        // what to do with. The batch itself is real and stays fully
+        // recorded; only the posting is declined, and loudly, in the log.
+        if ($this->isLocalFixtureEntry($entry)) {
+            logger()->info('Tally voucher skipped: local-only fixture product.', [
+                'shift_production_entry_id' => $entry->id,
+                'item_sku' => $entry->item?->sku,
+            ]);
+
+            return null;
+        }
+
         if (config('tally-sync.voucher_granularity') === 'shift') {
             return $this->enqueueShiftVoucher($entry);
         }
 
         return $this->enqueue($entry, 'Manufacturing Journal', $this->buildBatchVoucherPayload($entry));
+    }
+
+    /**
+     * Whether this entry's produced item is a local-only fixture. Used both
+     * as the top-level guard and inside the shift-granularity sweep, so a
+     * real item's approval can never drag a fixture's quantities into a
+     * shared voucher through the back door.
+     */
+    private function isLocalFixtureEntry(ShiftProductionEntry $entry): bool
+    {
+        $entry->loadMissing('item');
+
+        return $entry->item?->isLocalFixture() ?? false;
     }
 
     /**
@@ -266,6 +295,21 @@ class TallySyncService
                 ->whereDoesntHave('tallySyncEntries', fn ($query) => $query->whereIn(
                     'status',
                     [TallySyncStatus::Pending->value, TallySyncStatus::Synced->value],
+                ))
+                // Local-only fixtures never join a voucher. Without this the
+                // top-level guard would be bypassed sideways: a REAL item's
+                // approval sweeps its approved shift-mates, and a fixture
+                // sitting in the same shift would have its quantities posted
+                // to Tally under someone else's approval.
+                //
+                // Written as "doesn't have a LOCAL item" rather than "has a
+                // non-LOCAL item" because Item soft-deletes: an entry whose
+                // product was retired after the run has NO visible item row,
+                // and the positive form would silently drop its quantities
+                // from the voucher. Absence of a LOCAL match is the correct
+                // test — it includes exactly what the old code included.
+                ->whereDoesntHave('item', fn ($query) => $query->where(
+                    'sku', 'like', Item::LOCAL_FIXTURE_SKU_PREFIX.'%',
                 ))
                 ->orderBy('id')
                 ->lockForUpdate()
