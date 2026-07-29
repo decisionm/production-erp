@@ -46,7 +46,10 @@ class BatchPreviewController extends Controller
 
         return response()->json([
             'data' => [
-                'readiness' => $this->readiness->assess($item, $warehouse, $workCenter),
+                // Assessed against the SAME resolved standard/packaging the
+                // estimation below uses, so the two halves of this response
+                // can never contradict each other.
+                'readiness' => $this->readiness->assess($item, $warehouse, $workCenter, $standard, $packaging),
                 'estimation' => $this->estimation->estimate(
                     $item,
                     $shift,

@@ -340,6 +340,10 @@ Route::prefix('v1')->group(function () {
 
             // Factory product-level standards (ERPPRO master import).
             Route::get('standards', [ProductionStandardController::class, 'index']);
+            // The slim projection of the same read: which products the
+            // standards cover. Declared before nothing wildcard-shaped, so
+            // ordering is irrelevant — it is a sibling, not an override.
+            Route::get('standards/coverage', [ProductionStandardController::class, 'coverage']);
             Route::post('standards/import', [ProductionStandardController::class, 'import']);
 
             Route::get('downtime-reasons', [DowntimeReasonController::class, 'index']);

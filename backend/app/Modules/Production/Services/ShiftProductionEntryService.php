@@ -101,6 +101,7 @@ class ShiftProductionEntryService
      *     shift_id: int, work_center_id: int, item_id: int, warehouse_id: int,
      *     production_date?: string, operator_id?: int,
      *     actual_cycle_time?: ?string, active_cavities?: ?int,
+     *     colour?: ?string,
      *     material_shortage_override_reason?: ?string,
      * }  $data
      */
@@ -133,6 +134,18 @@ class ShiftProductionEntryService
 
             $item = Item::query()->find($data['item_id']);
 
+            // The product-level standard from the factory master. In watch
+            // mode this is what a run uses when no machine-product
+            // configuration is approved — which is every product today.
+            //
+            // Resolved BEFORE the readiness gate, not after: the gate has to
+            // judge the figures this run will actually use, and for almost
+            // every product those live on the standard rather than the item
+            // master. Assessed without them, the gate refuses products whose
+            // weight and cycle time it is about to snapshot two lines below.
+            $standard = $this->standards->resolve($data['item_id'], $data['production_standard_id'] ?? null);
+            $packaging = $this->standards->resolvePackaging($standard, $data['production_standard_packaging_id'] ?? null);
+
             // The readiness gate, fail-closed: a product whose masters are
             // incomplete must not start, because every downstream figure it
             // would produce (expected output, efficiency, reconciliation,
@@ -143,6 +156,8 @@ class ShiftProductionEntryService
                 $item ?? new Item,
                 Warehouse::query()->find($data['warehouse_id']),
                 WorkCenter::query()->find($data['work_center_id']),
+                $standard,
+                $packaging,
             );
 
             if (! $readiness['ready']) {
@@ -165,12 +180,6 @@ class ShiftProductionEntryService
                 colour: $data['colour'] ?? null,
                 on: $productionDate,
             );
-
-            // The product-level standard from the factory master. In watch
-            // mode this is what a run uses when no machine-product
-            // configuration is approved — which is every product today.
-            $standard = $this->standards->resolve($data['item_id'], $data['production_standard_id'] ?? null);
-            $packaging = $this->standards->resolvePackaging($standard, $data['production_standard_packaging_id'] ?? null);
 
             // Bounded override: a supervisor may deviate from the approved
             // standard only within its declared limits, and only with a
@@ -213,6 +222,22 @@ class ShiftProductionEntryService
                 ? trim((string) $data['material_shortage_override_reason'])
                 : null;
 
+            // Which colour actually ran. The factory workbook carries no
+            // reliable colour column, so for most products the masters
+            // cannot answer this and the supervisor is asked at Start —
+            // their answer wins, because they are looking at the machine.
+            // Order: what the supervisor said, then the approved
+            // configuration, then the item master. Never defaulted to a
+            // colour nobody chose: a wrong colour silently picks the wrong
+            // masterbatch and the wrong amber/clear scrap item downstream,
+            // and null ("not known") is recoverable where a confident wrong
+            // answer is not.
+            $colour = $this->firstNonBlank([
+                $data['colour'] ?? null,
+                $configuration?->colour,
+                $item?->colour,
+            ]);
+
             $entry = ShiftProductionEntry::create([
                 'shift_id' => $data['shift_id'],
                 'work_center_id' => $data['work_center_id'],
@@ -250,6 +275,9 @@ class ShiftProductionEntryService
                 'config_snapshot' => [
                     'configuration_id' => $configuration?->id,
                     'configuration_status' => $configuration?->status?->value,
+                    // Frozen here so a later item-master edit can never
+                    // rewrite what this run was.
+                    'colour' => $colour,
                     'effective_cycle_time' => $effective['cycle_time'],
                     'effective_cavities' => $effective['cavities'],
                     'cycle_time_source' => $effective['cycle_time_source'],
@@ -1066,6 +1094,24 @@ class ShiftProductionEntryService
         // carry it; without normalization they silently drop out of every
         // kg-family sum (BOM norms, variance).
         return in_array(rtrim(strtolower(trim((string) $uom)), '.'), ['kg', 'kgs', 'kilogram', 'kilograms'], true);
+    }
+
+    /**
+     * The first candidate that carries an actual value. Whitespace and the
+     * empty string are "no answer", not answers — a blank colour stored as
+     * "" reads downstream as a colour that was chosen and is empty.
+     *
+     * @param  list<?string>  $candidates
+     */
+    private function firstNonBlank(array $candidates): ?string
+    {
+        foreach ($candidates as $candidate) {
+            if (trim((string) $candidate) !== '') {
+                return trim((string) $candidate);
+            }
+        }
+
+        return null;
     }
 
     /**

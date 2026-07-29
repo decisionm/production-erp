@@ -57,8 +57,11 @@ class ProductionStandardImportService
      * Every locally fabricated item carries this SKU prefix. It is the
      * unmistakable marker: nothing that came from Tally can start with it,
      * so one glance at a SKU says whether a row is real master data.
+     *
+     * Defined on the Item model — the readers (readiness gate, Tally voucher
+     * queue) must not depend on this importer to learn the convention.
      */
-    public const LOCAL_FIXTURE_SKU_PREFIX = 'LOCAL-';
+    public const LOCAL_FIXTURE_SKU_PREFIX = Item::LOCAL_FIXTURE_SKU_PREFIX;
 
     /** Appended to the item name so the marker survives into every picker. */
     public const LOCAL_FIXTURE_NAME_SUFFIX = '(LOCAL FIXTURE)';

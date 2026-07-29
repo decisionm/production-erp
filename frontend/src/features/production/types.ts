@@ -744,6 +744,14 @@ export interface ProductReadiness {
     blocking: ReadinessFinding[];
     warnings: ReadinessFinding[];
     summary: string | null;
+    /**
+     * A LOCAL- fixture product: it exists in this database and in no Tally
+     * company. Its missing Tally GUID is intentional, so the `tally_item`
+     * check is skipped rather than failed — and the UI must say plainly what
+     * that costs (no voucher will be posted) instead of staying silent.
+     * Optional so an older backend that doesn't send it reads as false.
+     */
+    is_local_fixture?: boolean;
 }
 
 /** Expected consumption for one recipe line, in that material's own unit. */

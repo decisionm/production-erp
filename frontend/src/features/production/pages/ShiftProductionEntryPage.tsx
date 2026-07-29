@@ -5,6 +5,7 @@ import dayjs from 'dayjs';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
+import { Link } from 'react-router-dom';
 import { z } from 'zod';
 import { listAllEmployees } from '@/features/hrms/api';
 import { listAllItems, listAllWarehouses } from '@/features/inventory/api';
@@ -25,6 +26,7 @@ import {
     listPowerInterruptionLogs,
     listAllScrapReasons,
     listActiveBatches,
+    listStandardCoverage,
     listShiftProductionEntries,
     listShifts,
     listWorkCenters,
@@ -194,6 +196,24 @@ const isResinItem = (item: Pick<Item, 'sku' | 'name'>): boolean => /resin/i.test
 const isClearColour = (colour: string | null | undefined): boolean => /^clear$/i.test((colour ?? '').trim());
 
 /**
+ * A product name reduced to what a human would call "the same product":
+ * case and every separator dropped, so "200 ML ROUND", "200ml round" and
+ * "200ML-ROUND" collapse together. The trailing "(LOCAL FIXTURE)" marker is
+ * stripped first — it names the item's provenance, not the product.
+ *
+ * Deliberately NOT fuzzy. This is the whole basis on which Start Batch may
+ * offer to swap the supervisor's chosen product for a different one, and a
+ * near-miss there puts the wrong bottle on the machine for a whole shift.
+ * Equal-after-normalising or no suggestion at all — nothing in between.
+ */
+function normaliseProductName(name: string | null | undefined): string {
+    return (name ?? '')
+        .replace(/\(LOCAL FIXTURE\)/gi, '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '');
+}
+
+/**
  * Masterbatch suggested from the product's colour — matched on the MB item's
  * own colour field first, then on its name containing the colour. Clear
  * products get no suggestion (no masterbatch goes into Clear).
@@ -247,6 +267,12 @@ const startBatchSchema = z.object({
     // Prefilled with the item's standard cavity count; editable for the real
     // case of a blocked cavity. nullish: clearing the InputNumber emits null.
     active_cavities: z.number().int().min(1, 'At least 1').nullish(),
+    // Which colour is running. Optional in the schema and required in the
+    // dialog only when the masters don't already fix one — most products
+    // carry no colour, a few do, and asking a supervisor to re-state a
+    // colour the master already knows is how a form starts getting
+    // click-through answers.
+    colour: z.string().min(1).nullish(),
 });
 type StartBatchFormValues = z.infer<typeof startBatchSchema>;
 
@@ -564,11 +590,56 @@ export default function ShiftProductionEntryPage() {
         queryFn: listPowerInterruptionLogs,
     });
     const { data: molds } = useQuery({ queryKey: ['production', 'molds', 'all'], queryFn: listAllMolds });
+    // Which products the factory's standards actually cover. Two scalars per
+    // row, so it costs almost nothing to hold — and without it the Start
+    // Batch picker cannot tell a set-up product from a legacy master, which
+    // is precisely how a supervisor ends up staring at a wall of missing
+    // masters after choosing.
+    const { data: standardCoverage } = useQuery({
+        queryKey: ['production', 'standards', 'coverage'],
+        queryFn: listStandardCoverage,
+    });
 
     const shiftOptions = shifts?.data.filter((s) => s.is_active).map((s) => ({ value: s.id, label: s.name })) ?? [];
     // Inactive items (retired demo/legacy masters) must not be selectable —
     // Tally rejects vouchers for items it doesn't know.
     const itemOptions = items?.data.filter((i) => i.is_active).map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];
+    // Which items the factory standards cover. Undefined coverage (still in
+    // flight, or an older backend) is deliberately distinguished from empty
+    // coverage below — see startItemOptions.
+    const configuredItemIds = useMemo(
+        () => (standardCoverage ? new Set(standardCoverage.data.map((row) => row.item_id)) : undefined),
+        [standardCoverage],
+    );
+    // The PRODUCT picker for Start Batch, split into "set up" and "not set
+    // up". Separate from itemOptions on purpose: that list is also the
+    // resin/masterbatch/stock-count picker, and those choose MATERIALS,
+    // which no production standard covers — grouping them by standards
+    // coverage would file every resin under "Unconfigured".
+    //
+    // The leaf label stays "{sku} — {name}", so optionFilterProp="label"
+    // search by natural product name keeps working inside the groups.
+    const startItemOptions = useMemo(() => {
+        const active = items?.data.filter((i) => i.is_active) ?? [];
+        const toOption = (i: Item) => ({ value: i.id, label: `${i.sku} — ${i.name}` });
+
+        // Coverage not answered yet: show the flat list rather than filing
+        // every product under "Unconfigured — setup required" for a beat.
+        // A wrong answer that corrects itself a moment later is worse than
+        // no answer: the supervisor may already have read it.
+        if (!configuredItemIds) return active.map(toOption);
+
+        const ready = active.filter((i) => configuredItemIds.has(i.id)).map(toOption);
+        const unconfigured = active.filter((i) => !configuredItemIds.has(i.id)).map(toOption);
+
+        return [
+            // Production ready first — the common case must be what the
+            // supervisor's eye lands on, and the legacy masters that caused
+            // this whole problem must be somewhere they have to scroll to.
+            ...(ready.length > 0 ? [{ label: 'Production ready', options: ready }] : []),
+            ...(unconfigured.length > 0 ? [{ label: 'Unconfigured — setup required', options: unconfigured }] : []),
+        ];
+    }, [items, configuredItemIds]);
     // Focused pickers for the two fixed consumption rows — a supervisor
     // filling "Resin (kg)" should only ever see resins, not all 642 items.
     const resinOptions =
@@ -672,12 +743,68 @@ export default function ShiftProductionEntryPage() {
     // standards" summary and the Active Cavities prefill in Start Batch.
     const startItemId = startForm.watch('item_id');
     const startItem = useMemo(() => items?.data.find((i) => i.id === startItemId), [items, startItemId]);
+    // The chosen product has no factory standard at all. Only ever true once
+    // coverage has actually answered — an unanswered read must not accuse a
+    // product of being unconfigured.
+    const startItemUnconfigured = !!startItemId && !!configuredItemIds && !configuredItemIds.has(startItemId);
+    /**
+     * A configured product carrying the SAME name as the unconfigured one the
+     * supervisor just picked — the legacy-master case this whole panel exists
+     * for, where the factory does have standards, filed under a different
+     * item row.
+     *
+     * Offered only on an exact match after normalisation, and only when that
+     * match is unambiguous: two configured products sharing a normalised name
+     * means nobody can say which one is meant, so nothing is suggested. A
+     * suggestion here changes what physically runs, so silence is the correct
+     * answer to any doubt.
+     */
+    const replacementSuggestion = useMemo(() => {
+        if (!startItemUnconfigured || !startItem || !standardCoverage) return undefined;
+        const target = normaliseProductName(startItem.name);
+        if (target === '') return undefined;
+
+        const matchedIds = new Set(
+            standardCoverage.data
+                .filter((row) => row.item_id !== startItem.id && normaliseProductName(row.source_product_name) === target)
+                .map((row) => row.item_id),
+        );
+        // Ambiguous (or nothing) — say nothing.
+        if (matchedIds.size !== 1) return undefined;
+
+        const [matchedId] = [...matchedIds];
+        return items?.data.find((i) => i.id === matchedId && i.is_active);
+    }, [startItemUnconfigured, startItem, standardCoverage, items]);
+    /**
+     * The colours the catalogue actually knows about, derived from the item
+     * masters rather than hardcoded — the factory adds a colour by giving an
+     * item one, and this list follows without a deploy.
+     */
+    const colourOptions = useMemo(() => {
+        const seen = new Map<string, string>();
+        for (const item of items?.data ?? []) {
+            const colour = (item.colour ?? '').trim();
+            if (colour !== '' && !seen.has(colour.toLowerCase())) seen.set(colour.toLowerCase(), colour);
+        }
+        return [...seen.values()].sort((a, b) => a.localeCompare(b)).map((c) => ({ value: c, label: c }));
+    }, [items]);
+    // Whether the masters already fix this run's colour. When they don't, the
+    // supervisor must say — the factory workbook has no reliable colour
+    // column, and colour picks the masterbatch and the amber/clear scrap item
+    // downstream. Never defaulted: a wrong colour nobody chose is worse than
+    // a question nobody likes being asked.
+    const startColourFixed = (startItem?.colour ?? '').trim() !== '';
+    const startColourRequired = !!startItemId && !startColourFixed;
     // Active cavities is a per-item value: every item change re-prefills it
     // with that item's standard (an earlier edit belonged to the old item).
     // Items without a standard leave it blank — fully manual, as before.
     useEffect(() => {
         if (!startingMachine) return;
         startForm.setValue('active_cavities', startItem?.standard_cavities ?? undefined);
+        // Colour is per-item too. Cleared on every product change so a colour
+        // chosen for the last product can never ride along onto this one —
+        // and left cleared, never pre-filled with a guess.
+        startForm.setValue('colour', undefined);
     }, [startItem, startingMachine, startForm]);
     // Readiness + estimation for the run being set up. Fetched from the
     // backend rather than recomputed here: the gate that REFUSES the start
@@ -694,6 +821,7 @@ export default function ShiftProductionEntryPage() {
 
     const startWarehouseId = startForm.watch('warehouse_id');
     const startActiveCavities = startForm.watch('active_cavities');
+    const startColour = startForm.watch('colour');
     const { data: batchPreview, isFetching: previewLoading } = useQuery({
         queryKey: [
             'production',
@@ -805,7 +933,7 @@ export default function ShiftProductionEntryPage() {
     const startMutation = useMutation({
         mutationFn: (values: StartBatchFormValues) => {
             if (!startingMachine || !effectiveShiftId) throw new Error('Missing machine or shift');
-            const { active_cavities, ...rest } = values;
+            const { active_cavities, colour, ...rest } = values;
             // production_date sent explicitly (shift-aware): a batch started at
             // 02:00 on the Night shift files under the shift's START date.
             return startBatch({
@@ -813,6 +941,11 @@ export default function ShiftProductionEntryPage() {
                 // null (cleared InputNumber) → omitted; backend then defaults
                 // active cavities to the item's standard.
                 active_cavities: active_cavities ?? undefined,
+                // Sent only when the supervisor was actually asked. When the
+                // masters already fix the colour, the backend resolves it
+                // from them — echoing it back from the screen would let a
+                // stale render overwrite the master.
+                colour: startColourRequired ? (colour ?? undefined) : undefined,
                 work_center_id: startingMachine.id,
                 shift_id: effectiveShiftId,
                 production_date: today,
@@ -1766,7 +1899,13 @@ export default function ShiftProductionEntryPage() {
                         // recorded reason. Milliseconds, and self-clearing:
                         // on error isFetching drops with data still undefined,
                         // so a failed read leaves the button live.
-                        || (binAvailabilityLoading && !binAvailability),
+                        || (binAvailabilityLoading && !binAvailability)
+                        // Colour, when the masters don't fix one, is a real
+                        // answer this run needs — not an optional extra. The
+                        // backend accepts a start without it (and existing
+                        // integrations still may), so this dialog is where
+                        // the question is actually put.
+                        || (startColourRequired && !startColour),
                 }}
                 okText="Start Batch"
                 destroyOnHidden
@@ -1787,10 +1926,75 @@ export default function ShiftProductionEntryPage() {
                             name="item_id"
                             control={startForm.control}
                             render={({ field }) => (
-                                <Select {...field} size="large" options={itemOptions} showSearch optionFilterProp="label" placeholder="Search item…" />
+                                <Select
+                                    {...field}
+                                    size="large"
+                                    // Grouped: products the factory has
+                                    // standards for come first, legacy and
+                                    // demo masters are behind a heading that
+                                    // says what they are. Search still
+                                    // matches the leaf labels, so typing a
+                                    // product name works exactly as before.
+                                    options={startItemOptions}
+                                    showSearch
+                                    optionFilterProp="label"
+                                    placeholder="Search item…"
+                                />
                             )}
                         />
                     </Form.Item>
+                    {/* The unconfigured verdict. An actionable panel rather
+                        than a sentence, because "this product has no
+                        standards" is not information the supervisor can use
+                        on its own — they need somewhere to go, and where a
+                        configured product of the same name exists, a way to
+                        simply take it. */}
+                    {startItemUnconfigured && (
+                        <Alert
+                            type="warning"
+                            showIcon
+                            style={{ marginBottom: 16 }}
+                            message="This product is not set up for production yet"
+                            description={
+                                <>
+                                    <Typography.Paragraph style={{ marginBottom: 12 }}>
+                                        No factory standard covers it, so there is no agreed weight, cycle time, cavity count or
+                                        packing for this run — every expected figure below will be a dash, and nothing can check
+                                        what the shift actually produced.
+                                    </Typography.Paragraph>
+                                    <Space wrap>
+                                        <Link to="/production/configuration">
+                                            <Button type="primary">Open Master Mapping</Button>
+                                        </Link>
+                                        {replacementSuggestion && (
+                                            <Button
+                                                onClick={() =>
+                                                    startForm.setValue('item_id', replacementSuggestion.id, {
+                                                        shouldValidate: true,
+                                                    })
+                                                }
+                                            >
+                                                Use configured replacement: {replacementSuggestion.name}
+                                            </Button>
+                                        )}
+                                    </Space>
+                                </>
+                            }
+                        />
+                    )}
+                    {/* Local fixtures are fully runnable and deliberately
+                        absent from Tally. Said plainly here so the accountant
+                        is never surprised by a shift that produced real
+                        numbers and no voucher. */}
+                    {startItemId && batchPreview?.readiness.is_local_fixture && (
+                        <Alert
+                            type="info"
+                            showIcon
+                            style={{ marginBottom: 16 }}
+                            message="Local-only fixture — voucher posting disabled"
+                            description="This product exists in the ERP but not in Tally. The batch will be recorded and approved normally; no Tally voucher will be queued for it."
+                        />
+                    )}
                     {/* The readiness verdict, straight from the backend gate that
                         will refuse the start — never a second opinion computed
                         here. Blocking findings name every missing master field so
@@ -1893,6 +2097,39 @@ export default function ShiftProductionEntryPage() {
                         />
                     )}
 
+                    {/* Colour, asked only when the masters cannot answer it.
+                        The options are the colours the catalogue actually
+                        uses — derived, not a hardcoded list, so a colour the
+                        factory adds to an item shows up here by itself. No
+                        default: the supervisor states what is in the machine. */}
+                    {startColourRequired && (
+                        <Form.Item
+                            label="Colour"
+                            required
+                            validateStatus={!startColour ? 'warning' : ''}
+                            help={
+                                !startColour
+                                    ? 'The masters do not record a colour for this product — say which one is running.'
+                                    : undefined
+                            }
+                        >
+                            <Controller
+                                name="colour"
+                                control={startForm.control}
+                                render={({ field }) => (
+                                    <Select
+                                        {...field}
+                                        value={field.value ?? undefined}
+                                        size="large"
+                                        options={colourOptions}
+                                        placeholder="Which colour is running?"
+                                        style={{ width: '100%' }}
+                                    />
+                                )}
+                            />
+                        </Form.Item>
+                    )}
+
                     {startItem && (
                         <>
                             {/* Read-only card of the item master's standards — what the
@@ -1904,16 +2141,37 @@ export default function ShiftProductionEntryPage() {
                                 style={{ marginBottom: 16 }}
                                 title={<Typography.Text strong>Product standards</Typography.Text>}
                             >
-                                <Descriptions.Item label="Colour">{startItem.colour ?? '—'}</Descriptions.Item>
+                                {/* Same precedence the estimate and Start Batch already
+                                    use: the factory product standard outranks the item
+                                    master. Reading the item alone made this card show
+                                    dashes for a product whose estimate underneath was
+                                    computing correctly from the standard — the screen
+                                    calculated from the right numbers and displayed none
+                                    of them. */}
+                                <Descriptions.Item label="Colour">
+                                    {startItem.colour ?? startColour ?? '—'}
+                                </Descriptions.Item>
                                 <Descriptions.Item label="Weight">
-                                    {startItem.nominal_weight_grams ? `${fmtNum(toNum(startItem.nominal_weight_grams))} g` : '—'}
+                                    {(() => {
+                                        const w = batchPreview?.standard?.unit_weight_grams ?? startItem.nominal_weight_grams;
+                                        return w ? `${fmtNum(toNum(w))} g` : '—';
+                                    })()}
                                 </Descriptions.Item>
                                 <Descriptions.Item label="Std CT">
-                                    {startItem.standard_cycle_time ? `${fmtNum(toNum(startItem.standard_cycle_time))} s` : '—'}
+                                    {(() => {
+                                        const ct = batchPreview?.standard?.cycle_time ?? startItem.standard_cycle_time;
+                                        return ct ? `${fmtNum(toNum(ct))} s` : '—';
+                                    })()}
                                 </Descriptions.Item>
-                                <Descriptions.Item label="Std cavities">{startItem.standard_cavities ?? '—'}</Descriptions.Item>
-                                <Descriptions.Item label="Pcs/box">{startItem.nos_per_box ?? '—'}</Descriptions.Item>
-                                <Descriptions.Item label="Pcs/tray">{startItem.nos_per_tray ?? '—'}</Descriptions.Item>
+                                <Descriptions.Item label="Std cavities">
+                                    {batchPreview?.standard?.cavities ?? startItem.standard_cavities ?? '—'}
+                                </Descriptions.Item>
+                                <Descriptions.Item label="Pcs/box">
+                                    {batchPreview?.estimation?.nos_per_box ?? startItem.nos_per_box ?? '—'}
+                                </Descriptions.Item>
+                                <Descriptions.Item label="Pcs/tray">
+                                    {batchPreview?.estimation?.nos_per_tray ?? startItem.nos_per_tray ?? '—'}
+                                </Descriptions.Item>
                             </Descriptions>
                             <Form.Item
                                 label="Active Cavities"

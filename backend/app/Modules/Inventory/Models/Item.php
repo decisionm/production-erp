@@ -20,6 +20,29 @@ class Item extends Model
 {
     use SoftDeletes;
 
+    /**
+     * SKU prefix of a LOCAL-ONLY fixture item — one fabricated by the product
+     * master import for a product the Tally catalogue does not carry, so the
+     * factory's own standards can be loaded and exercised before the item is
+     * created in Tally.
+     *
+     * The convention lives here, on the item, rather than on the importer that
+     * writes it: the readiness gate and the Tally voucher queue both have to
+     * READ it, and neither should have to reach into Production's importer to
+     * ask what a local item looks like.
+     */
+    public const LOCAL_FIXTURE_SKU_PREFIX = 'LOCAL-';
+
+    /**
+     * A local-only fixture: it exists in this database and nowhere in Tally.
+     * Its missing Tally GUID is intentional, not a gap in the masters — so
+     * readiness must not report it as one, and no voucher may ever name it.
+     */
+    public function isLocalFixture(): bool
+    {
+        return str_starts_with((string) $this->sku, self::LOCAL_FIXTURE_SKU_PREFIX);
+    }
+
     protected function casts(): array
     {
         return [
