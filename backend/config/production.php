@@ -60,6 +60,48 @@ return [
     'packing_rounding' => env('PROD_PACKING_ROUNDING', 'ceil'),
 
     /*
+     * EST BOX rounding — the factory's estimated-box target.
+     *
+     * Separate from packing_rounding on purpose. packing_rounding governs
+     * how many containers you need to PACK a quantity (a part-filled box
+     * still needs packing, so ceil). This governs the TARGET a shift is
+     * measured against, which the factory workbook rounds to nearest.
+     *
+     * Do not set this to 'floor' unless the factory rules that only
+     * completely filled boxes count toward the target — flooring lowers
+     * every target by up to a box and inflates efficiency accordingly.
+     */
+    'est_box_rounding' => env('PROD_EST_BOX_ROUNDING', 'round'),
+
+    /*
+     * Which rejection figure feeds total rejection when both exist.
+     *
+     * 'qc' (default, matches the workbook) — QC weighed it on a scale.
+     * 'production' — the piece count multiplied by the nominal weight.
+     *
+     * NEEDS VINCENT. The workbook also excludes its separate QC-lumps
+     * column from this sum; that is mirrored rather than "fixed", because
+     * it may be deliberate.
+     */
+    'rejection_precedence' => env('PROD_REJECTION_PRECEDENCE', 'qc'),
+
+    /*
+     * How the masterbatch percentage relates to polymer weight.
+     *
+     * 'included'   — MB is part of the finished polymer weight. Expected
+     *                resin = polymer weight − MB, and showing both as
+     *                additive would DOUBLE-COUNT the MB.
+     * 'additional' — MB is added on top of the resin weight.
+     * 'unconfirmed' (default) — the honest state today. Expected resin and
+     *                MB are shown with a warning that their basis is
+     *                unconfirmed, rather than presenting a total that may
+     *                be overstated by the MB.
+     *
+     * NEEDS VINCENT — see PHASE0 audit and the factory question sheet.
+     */
+    'masterbatch_basis' => env('PROD_MASTERBATCH_BASIS', 'unconfirmed'),
+
+    /*
      * The production-readiness gate (ProductReadinessService). Master switch
      * first: with `enforced` false the gate still evaluates and still shows
      * every finding, it just never refuses a Start Batch — the way to watch

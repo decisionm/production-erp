@@ -26,6 +26,7 @@ import ProductionReportsPage from '@/features/production/pages/ReportsPage';
 import ReworkOrdersPage from '@/features/production/pages/ReworkOrdersPage';
 import RoutingsPage from '@/features/production/pages/RoutingsPage';
 import ScrapReasonsPage from '@/features/production/pages/ScrapReasonsPage';
+import ProductionConfigurationPage from '@/features/production/pages/ProductionConfigurationPage';
 import ShiftProductionEntryPage from '@/features/production/pages/ShiftProductionEntryPage';
 import ShiftsPage from '@/features/production/pages/ShiftsPage';
 import ShiftSummaryPage from '@/features/production/pages/ShiftSummaryPage';
@@ -91,6 +92,7 @@ export default function App() {
                                     <Route path="/inventory/batches" element={<BatchesPage />} />
                                     <Route path="/inventory/serial-numbers" element={<SerialNumbersPage />} />
                                     <Route path="/production/work-centers" element={<WorkCentersPage />} />
+                                    <Route path="/production/configuration" element={<ProductionConfigurationPage />} />
                                     <Route path="/production/boms" element={<BomsPage />} />
                                     <Route path="/production/routings" element={<RoutingsPage />} />
                                     <Route path="/production/work-orders" element={<WorkOrdersPage />} />

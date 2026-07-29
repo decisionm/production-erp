@@ -82,6 +82,7 @@ const allNavItems: NavGroup[] = [
             { key: '/production/reports', label: 'Reports' },
             { key: '/production/approve-production', label: 'Approve Production' },
             { key: '/production/work-centers', label: 'Work Centers' },
+            { key: '/production/configuration', label: 'Configuration' },
             { key: '/production/boms', label: 'Bills of Material' },
             { key: '/production/routings', label: 'Routings' },
             { key: '/production/work-orders', label: 'Work Orders' },

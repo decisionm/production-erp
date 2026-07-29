@@ -66,7 +66,12 @@ function ProductionTab() {
     const [workCenterId, setWorkCenterId] = useState<number | undefined>(undefined);
 
     const shiftOptions = useShiftOptions();
-    const { data: workCenters } = useQuery({ queryKey: ['production', 'work-centers'], queryFn: listWorkCenters });
+    // Reports filter HISTORY, so retired machines must stay listed —
+    // otherwise past shifts on a decommissioned machine become unfindable.
+    const { data: workCenters } = useQuery({
+        queryKey: ['production', 'work-centers'],
+        queryFn: () => listWorkCenters(),
+    });
     const machineOptions = (workCenters?.data ?? []).map((wc) => ({ value: wc.id, label: `${wc.code} — ${wc.name}` }));
 
     const { data: report, isLoading } = useQuery({

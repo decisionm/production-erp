@@ -45,13 +45,17 @@ use App\Modules\Production\Http\Controllers\BatchPreviewController;
 use App\Modules\Production\Http\Controllers\BomController;
 use App\Modules\Production\Http\Controllers\CapacityPlanController;
 use App\Modules\Production\Http\Controllers\DayBinController;
+use App\Modules\Production\Http\Controllers\DowntimeReasonController;
+use App\Modules\Production\Http\Controllers\FactorySettingController;
 use App\Modules\Production\Http\Controllers\MachineDowntimeLogController;
 use App\Modules\Production\Http\Controllers\MoldChangeLogController;
 use App\Modules\Production\Http\Controllers\MoldController;
 use App\Modules\Production\Http\Controllers\MrpController;
 use App\Modules\Production\Http\Controllers\PowerInterruptionLogController;
+use App\Modules\Production\Http\Controllers\ProductionConfigurationController;
 use App\Modules\Production\Http\Controllers\ProductionReportController;
 use App\Modules\Production\Http\Controllers\ProductionSettingsController;
+use App\Modules\Production\Http\Controllers\ProductionStandardController;
 use App\Modules\Production\Http\Controllers\ReworkOrderController;
 use App\Modules\Production\Http\Controllers\RoutingController;
 use App\Modules\Production\Http\Controllers\ScrapReasonController;
@@ -321,6 +325,29 @@ Route::prefix('v1')->group(function () {
             // "store" starts a batch (machine + item, quantities unknown
             // yet); "complete" fills in the finished numbers once the batch
             // is done running — see PRODUCTION-SUPERVISOR-UX-PLAN.md §1.
+            // ---- Production configuration (the master data an authorized
+            // user maintains without a deploy). Grouped under the existing
+            // production module permission.
+            Route::get('configurations', [ProductionConfigurationController::class, 'index']);
+            Route::post('configurations', [ProductionConfigurationController::class, 'store']);
+            Route::put('configurations/{production_configuration}', [ProductionConfigurationController::class, 'update']);
+            Route::post('configurations/{production_configuration}/approve', [ProductionConfigurationController::class, 'approve']);
+            Route::post('configurations/{production_configuration}/deactivate', [ProductionConfigurationController::class, 'deactivate']);
+            Route::post('configurations/{production_configuration}/copy', [ProductionConfigurationController::class, 'copy']);
+            Route::get('work-centers/{work_center}/configurations', [ProductionConfigurationController::class, 'forMachine']);
+            Route::post('configurations/import', [ProductionConfigurationController::class, 'importRows']);
+
+            // Factory product-level standards (ERPPRO master import).
+            Route::get('standards', [ProductionStandardController::class, 'index']);
+            Route::post('standards/import', [ProductionStandardController::class, 'import']);
+
+            Route::get('downtime-reasons', [DowntimeReasonController::class, 'index']);
+            Route::post('downtime-reasons', [DowntimeReasonController::class, 'store']);
+            Route::put('downtime-reasons/{downtime_reason}', [DowntimeReasonController::class, 'update']);
+
+            Route::get('factory-settings', [FactorySettingController::class, 'index']);
+            Route::post('factory-settings', [FactorySettingController::class, 'upsert']);
+
             Route::get('shift-production-entries/active', [ShiftProductionEntryController::class, 'active']);
             // Readiness + estimation for an intended run, before it starts.
             // GET and side-effect free: the SPA calls it on every product or

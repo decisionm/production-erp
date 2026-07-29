@@ -9,6 +9,17 @@ export interface WorkCenter {
     capacity_hours_per_day: string | null;
     is_active: boolean;
     created_at: string;
+    // Machine capabilities. Null means "no limit known" — it never blocks;
+    // only a stated limit constrains a configuration.
+    capacity_class?: string | null;
+    min_cavities?: number | null;
+    max_cavities?: number | null;
+    /** Explicit set for machines whose options are not a continuous range. */
+    permitted_cavities?: number[] | null;
+    cycle_time_min?: string | null;
+    cycle_time_max?: string | null;
+    default_shift_hours?: string | null;
+    confirmation_status?: string | null;
 }
 
 export interface BomLine {
@@ -765,11 +776,17 @@ export interface BatchEstimation {
     expected_pouches: number | null;
     expected_materials: EstimatedMaterial[];
     recipe_source: string | null;
+    packaging_mode?: string | null;
 }
 
 export interface BatchPreview {
     readiness: ProductReadiness;
     estimation: BatchEstimation;
+    /** The resolved variant, or null when the product offers a choice. */
+    standard: (Omit<StandardVariant, 'packagings' | 'label'> & { label: string; unresolved_reason: string | null }) | null;
+    variants: StandardVariant[];
+    packaging: { id: number; mode: string; label: string; nos_per_box: number | null } | null;
+    warnings: StandardWarning[];
 }
 
 export interface VoucherPreviewLine {
@@ -786,4 +803,123 @@ export interface VoucherPreview {
     lines: VoucherPreviewLine[];
     problems: string[];
     postable: boolean;
+}
+
+// ---------------------------------------------------------------------
+// Configurable production
+// ---------------------------------------------------------------------
+
+/**
+ * Machine + Product + Mould + Colour — the controlling production standard.
+ * Only an `approved` configuration, effective today, drives a batch; drafts
+ * exist to be reviewed and are invisible to the shop floor.
+ */
+export type ConfigurationStatus = 'draft' | 'approved' | 'inactive';
+
+export interface ProductionConfiguration {
+    id: number;
+    work_center: { id: number; name?: string };
+    item: { id: number; name?: string; sku?: string };
+    mold: { id: number; name?: string } | null;
+    colour: string | null;
+    unit_weight_grams: string | null;
+    default_cycle_time: string | null;
+    cycle_time_min: string | null;
+    cycle_time_max: string | null;
+    default_cavities: number | null;
+    cavities_min: number | null;
+    cavities_max: number | null;
+    permitted_cavities: number[] | null;
+    bom_id: number | null;
+    status: ConfigurationStatus;
+    effective_from: string | null;
+    effective_to: string | null;
+    approved_at: string | null;
+    approved_by?: string | null;
+    source: string | null;
+    source_reference: string | null;
+    /** The factory's own wording, e.g. "To Confirm" — shown, never acted on. */
+    confirmation_status: string | null;
+    notes: string | null;
+}
+
+export interface DowntimeReason {
+    id: number;
+    code: string;
+    category: string | null;
+    description: string;
+    planning_type: 'planned' | 'unplanned';
+    reduces_runtime: boolean;
+    requires_note: boolean;
+    selectable_at_start: boolean;
+    is_active: boolean;
+    confirmation_status: string | null;
+}
+
+export interface FactorySetting {
+    id: number;
+    key: string;
+    value: string | null;
+    typed_value: unknown;
+    data_type: string;
+    scope: string;
+    label: string | null;
+    description: string | null;
+    confirmation_status: string | null;
+    is_active: boolean;
+    effective_from: string | null;
+    change_reason: string | null;
+    changed_by?: string | null;
+    updated_at: string | null;
+}
+
+/** One row's verdict from an import dry run. */
+export interface ImportRowResult {
+    row: number;
+    action: 'create' | 'conflict' | 'rejected';
+    reason: string | null;
+    resolved: Record<string, unknown>;
+    source_row: Record<string, unknown>;
+    created_id?: number;
+}
+
+export interface ImportResult {
+    dry_run: boolean;
+    summary: { create: number; conflict: number; rejected: number };
+    rows: ImportRowResult[];
+}
+
+/** A packaging option on a product standard: how pieces reach a box. */
+export interface StandardPackaging {
+    id: number;
+    mode: 'pouch' | 'tray' | 'direct_box';
+    label: string;
+    nos_per_pouch: number | null;
+    pouches_per_box: number | null;
+    nos_per_tray: number | null;
+    trays_per_box: number | null;
+    nos_per_box: number | null;
+    is_default: boolean;
+}
+
+/**
+ * One product-level standard variant from the factory master: cavities +
+ * weight + cycle time, with its packaging options. A product may have
+ * several genuinely different variants; the supervisor picks one only when
+ * there is more than one.
+ */
+export interface StandardVariant {
+    id: number;
+    label: string;
+    cavities: number | null;
+    unit_weight_grams: string | null;
+    cycle_time: string | null;
+    status: 'draft' | 'approved' | 'unresolved';
+    packagings: StandardPackaging[];
+}
+
+/** Advisory only — watch mode never blocks a start. */
+export interface StandardWarning {
+    code: string;
+    message: string;
 }

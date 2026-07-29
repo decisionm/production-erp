@@ -27,6 +27,27 @@ class StartBatchRequest extends FormRequest
             // send them.
             'actual_cycle_time' => ['sometimes', 'nullable', 'numeric', 'min:0.1', 'max:9999.99'],
             'active_cavities' => ['sometimes', 'nullable', 'integer', 'min:1'],
+
+            // Configurable-production fields. mold/colour narrow which
+            // approved configuration governs the run; the *_override pair
+            // is the bounded, reasoned deviation from it.
+            'mold_id' => ['sometimes', 'nullable', 'integer', 'exists:molds,id'],
+            // Which product standard variant and packaging this run uses —
+            // asked only when the product genuinely offers a choice.
+            'production_standard_id' => ['sometimes', 'nullable', 'integer', 'exists:production_standards,id'],
+            'production_standard_packaging_id' => ['sometimes', 'nullable', 'integer', 'exists:production_standard_packagings,id'],
+            'colour' => ['sometimes', 'nullable', 'string', 'max:64'],
+            'cycle_time_override' => ['sometimes', 'nullable', 'numeric', 'min:0.1', 'max:9999.99'],
+            'cavities_override' => ['sometimes', 'nullable', 'integer', 'min:1'],
+            'override_reason' => ['sometimes', 'nullable', 'string', 'max:500'],
+            'scheduled_hours' => ['sometimes', 'nullable', 'numeric', 'gt:0', 'max:24'],
+
+            // Planned downtime known before the run — lowers the adjusted
+            // target at Start rather than explaining the gap afterwards.
+            'planned_downtime' => ['sometimes', 'array'],
+            'planned_downtime.*.downtime_reason_id' => ['required', 'integer', 'exists:downtime_reasons,id'],
+            'planned_downtime.*.minutes' => ['required', 'numeric', 'gt:0', 'max:1440'],
+            'planned_downtime.*.note' => ['sometimes', 'nullable', 'string', 'max:500'],
         ];
     }
 }
