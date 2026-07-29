@@ -54,7 +54,18 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          # ssh-keyscan's stderr says WHY the host did not answer (refused,
+          # timed out, no route). It used to go to /dev/null, so the whole
+          # deploy failed as a bare "exit code 1" with nothing to act on.
+          # Exit status alone is not a sufficient check either — ssh-keyscan
+          # can exit 0 having collected no key at all, which would then fail
+          # later and more confusingly at the rsync step.
+          keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+          if [ -z "$keys" ]; then
+            echo "::error::The deploy host returned no SSH host key. The website itself can be perfectly healthy while this fails — this step only proves the SSH service answered. Check hPanel → Advanced → SSH Access (it can be turned off or IP-restricted) and whether the host's brute-force protection has banned the runner."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
 
       - name: Rsync backend to server
         run: |

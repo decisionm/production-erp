@@ -1,8 +1,9 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
+import { useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import { listItems } from '@/features/inventory/api';
 import { createBom, listBoms } from '@/features/production/api';
@@ -25,6 +26,12 @@ export default function BomsPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [detailBom, setDetailBom] = useState<Bom | null>(null);
     const queryClient = useQueryClient();
+    // Arrived here from a "Configure recipe" prompt on the shift floor, which
+    // names the product it was complaining about. Carrying the id through means
+    // the supervisor never re-picks it — picking again is how a recipe lands on
+    // the wrong product.
+    const [searchParams, setSearchParams] = useSearchParams();
+    const prefillItemId = Number(searchParams.get('item_id')) || null;
 
     const { data, isLoading } = useQuery({ queryKey: ['production', 'boms'], queryFn: () => listBoms() });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
@@ -35,6 +42,22 @@ export default function BomsPage() {
         defaultValues: { name: '', lines: [{ component_item_id: undefined, quantity_per: undefined }] },
     });
     const { fields, append, remove } = useFieldArray({ control, name: 'lines' });
+
+    useEffect(() => {
+        // Wait for the item list — prefilling an id the Select cannot render
+        // would show a bare number where a product name belongs.
+        if (prefillItemId === null || !items) return;
+        const item = items.data.find((i) => i.id === prefillItemId);
+        reset({
+            item_id: item?.id as number,
+            name: item ? `${item.name} recipe` : '',
+            lines: [{ component_item_id: undefined, quantity_per: undefined }],
+        });
+        setModalOpen(true);
+        // Consume the parameter so closing and reopening the form is not
+        // hijacked by a stale link, and a refresh does not reopen it.
+        setSearchParams({}, { replace: true });
+    }, [prefillItemId, items, reset, setSearchParams]);
 
     const mutation = useMutation({
         mutationFn: createBom,
