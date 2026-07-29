@@ -47,6 +47,14 @@ class CompleteBatchRequest extends FormRequest
             'material_consumptions.*.warehouse_id' => ['required', 'integer', 'exists:warehouses,id'],
             'material_consumptions.*.quantity_issued_kg' => ['required', 'numeric', 'gt:0'],
 
+            // Day-bin closing weight per material, same contract as
+            // HandoverRequest. This is what makes automatic consumption
+            // (opening + loaded − closing − returned) computable on a
+            // normal completion instead of only on a handover.
+            'closing_day_bin' => ['nullable', 'array'],
+            'closing_day_bin.*.item_id' => ['required', 'integer', 'exists:items,id'],
+            'closing_day_bin.*.quantity_kg' => ['required', 'numeric', 'gte:0'],
+
             'scraps' => ['nullable', 'array'],
             'scraps.*.type' => ['required', Rule::in(['rejected_finished_good', 'lumps'])],
             'scraps.*.quantity_nos' => ['nullable', 'numeric', 'gte:0'],

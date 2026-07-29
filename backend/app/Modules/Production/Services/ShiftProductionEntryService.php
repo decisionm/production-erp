@@ -295,6 +295,17 @@ class ShiftProductionEntryService
         }
 
         return DB::transaction(function () use ($entry, $data, $completedBy) {
+            // Closing counts BEFORE the completion write, inside the same
+            // transaction. Their over-count guard must see this segment's
+            // window, and a rejected closing weight has to abort the whole
+            // completion — a batch completed against a bad closing count
+            // would report consumption that never happened.
+            //
+            // Normal completion and handover now share this one path: until
+            // it existed, only handover captured a closing weight, so every
+            // normally-completed batch left automatic consumed kg null.
+            $this->recordClosingDayBin($entry, $data['closing_day_bin'] ?? [], $completedBy);
+
             $item = Item::query()->find($entry->item_id);
             $quantityProducedKg = $this->toKg($data['quantity_produced'], $item);
             $quantityRejectionKg = isset($data['quantity_scrap'])
@@ -430,16 +441,7 @@ class ShiftProductionEntryService
             // Closing counts first: their over-count guard must see only
             // the outgoing segment's window, and a bad count aborts the
             // whole handover before any stock movement happens.
-            foreach ($data['closing_day_bin'] ?? [] as $line) {
-                $this->dayBin->record([
-                    'work_center_id' => $entry->work_center_id,
-                    'item_id' => $line['item_id'],
-                    'shift_production_entry_id' => $entry->id,
-                    'type' => 'count',
-                    'quantity_kg' => $line['quantity_kg'],
-                    'recorded_by' => $userId,
-                ]);
-            }
+            $this->recordClosingDayBin($entry, $data['closing_day_bin'] ?? [], $userId);
 
             $completed = $this->completeBatch($entry, $data['completion'], $userId);
 
@@ -919,6 +921,38 @@ class ShiftProductionEntryService
      *
      * @return array{0: ?string, 1: ?string}
      */
+    /**
+     * Record the day-bin closing weights for a segment.
+     *
+     * The single path for BOTH normal completion and handover. Consumption is
+     *
+     *     consumed = opening + loaded − closing − returned
+     *
+     * so with no closing count the app cannot know what was consumed and
+     * honestly reports null. Handover captured it from the start; normal
+     * completion did not, which is exactly why automatic consumed kg was
+     * blank for every batch that did not hand over.
+     *
+     * Callers must already be inside a transaction — a rejected closing
+     * weight has to roll the completion back with it, never leaving a batch
+     * completed against a count the ledger refused.
+     *
+     * @param  list<array{item_id: int, quantity_kg: string|float|int}>  $lines
+     */
+    private function recordClosingDayBin(ShiftProductionEntry $entry, array $lines, ?int $userId): void
+    {
+        foreach ($lines as $line) {
+            $this->dayBin->record([
+                'work_center_id' => $entry->work_center_id,
+                'item_id' => $line['item_id'],
+                'shift_production_entry_id' => $entry->id,
+                'type' => 'count',
+                'quantity_kg' => $line['quantity_kg'],
+                'recorded_by' => $userId,
+            ]);
+        }
+    }
+
     private function expectedConsumptionKg(ShiftProductionEntry $entry): array
     {
         $produced = $entry->quantity_produced !== null ? (string) $entry->quantity_produced : null;
