@@ -19,8 +19,12 @@ return new class extends Migration
         Schema::table('shift_production_entries', function (Blueprint $table) {
             $table->foreignId('production_standard_id')->nullable()->after('production_configuration_id')
                 ->constrained('production_standards')->nullOnDelete();
+            // Explicit FK name: the generated
+            // shift_production_entries_production_standard_packaging_id_foreign
+            // is 65 characters, one over MySQL's identifier limit.
             $table->foreignId('production_standard_packaging_id')->nullable()->after('production_standard_id')
-                ->constrained('production_standard_packagings')->nullOnDelete();
+                ->constrained('production_standard_packagings', indexName: 'spe_standard_packaging_foreign')
+                ->nullOnDelete();
             $table->string('packaging_mode', 16)->nullable()->after('production_standard_packaging_id');
         });
     }
@@ -29,7 +33,8 @@ return new class extends Migration
     {
         Schema::table('shift_production_entries', function (Blueprint $table) {
             $table->dropConstrainedForeignId('production_standard_id');
-            $table->dropConstrainedForeignId('production_standard_packaging_id');
+            $table->dropForeign('spe_standard_packaging_foreign');
+            $table->dropColumn('production_standard_packaging_id');
             $table->dropColumn('packaging_mode');
         });
     }
