@@ -715,3 +715,75 @@ export interface TraceabilityReportRow {
     total_received_kg: string | null;
     bags: TraceabilityReportBag[];
 }
+
+/**
+ * The production-readiness gate (backend ProductReadinessService). A
+ * `blocking` entry refuses Start Batch; a `warning` is shown but allows it.
+ * Severity per check is backend config, so the same check can move between
+ * the two lists as the factory's master data fills in.
+ */
+export interface ReadinessFinding {
+    code: string;
+    label: string;
+    detail: string;
+}
+
+export interface ProductReadiness {
+    ready: boolean;
+    blocking: ReadinessFinding[];
+    warnings: ReadinessFinding[];
+    summary: string | null;
+}
+
+/** Expected consumption for one recipe line, in that material's own unit. */
+export interface EstimatedMaterial {
+    item_id: number;
+    name: string;
+    uom: string | null;
+    quantity: string;
+    is_mass: boolean;
+}
+
+/**
+ * The Start Batch estimation card. Every figure is null when its inputs are
+ * missing — nothing here invents a number, because the point of showing it
+ * before the run is that the supervisor can object to a wrong one.
+ */
+export interface BatchEstimation {
+    planned_hours: string | null;
+    standard_cycle_time: string | null;
+    standard_cavities: number | null;
+    active_cavities: number | null;
+    expected_cycles: number | null;
+    expected_pieces: number | null;
+    expected_kg: string | null;
+    nos_per_tray: number | null;
+    nos_per_box: number | null;
+    nos_per_pouch: number | null;
+    expected_trays: number | null;
+    expected_boxes: number | null;
+    expected_pouches: number | null;
+    expected_materials: EstimatedMaterial[];
+    recipe_source: string | null;
+}
+
+export interface BatchPreview {
+    readiness: ProductReadiness;
+    estimation: BatchEstimation;
+}
+
+export interface VoucherPreviewLine {
+    side: 'consumption' | 'production';
+    item: string | null;
+    quantity: string | number | null;
+    uom: string | null;
+    godown: string | null;
+    problems: string[];
+}
+
+export interface VoucherPreview {
+    voucher: Record<string, unknown>;
+    lines: VoucherPreviewLine[];
+    problems: string[];
+    postable: boolean;
+}

@@ -29,6 +29,7 @@ import {
     listWorkCenters,
     openDowntimeLog,
     openMoldChangeLog,
+    getBatchPreview,
     startBatch,
 } from '@/features/production/api';
 import type {
@@ -525,6 +526,33 @@ export default function ShiftProductionEntryPage() {
         if (!startingMachine) return;
         startForm.setValue('active_cavities', startItem?.standard_cavities ?? undefined);
     }, [startItem, startingMachine, startForm]);
+    // Readiness + estimation for the run being set up. Fetched from the
+    // backend rather than recomputed here: the gate that REFUSES the start
+    // is server-side, so the screen must show that same verdict, not a
+    // second opinion that could disagree with it.
+    const startWarehouseId = startForm.watch('warehouse_id');
+    const startActiveCavities = startForm.watch('active_cavities');
+    const { data: batchPreview, isFetching: previewLoading } = useQuery({
+        queryKey: [
+            'production',
+            'batch-preview',
+            startItemId,
+            startingMachine?.id,
+            startWarehouseId,
+            effectiveShiftId,
+            startActiveCavities,
+        ],
+        queryFn: () =>
+            getBatchPreview({
+                item_id: startItemId!,
+                work_center_id: startingMachine?.id,
+                warehouse_id: startWarehouseId,
+                shift_id: effectiveShiftId ?? undefined,
+                active_cavities: startActiveCavities ?? undefined,
+            }),
+        enabled: startingMachine !== null && !!startItemId,
+    });
+
     const startMutation = useMutation({
         mutationFn: (values: StartBatchFormValues) => {
             if (!startingMachine || !effectiveShiftId) throw new Error('Missing machine or shift');
@@ -547,9 +575,33 @@ export default function ShiftProductionEntryPage() {
             startForm.reset();
         },
         onError: (error: any) => {
+            const body = error?.response?.data;
+            // machine_busy carries the batch that is actually running — the
+            // usual cause is one the supervisor cannot see (previous shift,
+            // someone else's start), so name it instead of saying "refresh".
+            if (body?.code === 'machine_busy' && body?.active_batch) {
+                const running = body.active_batch;
+                Modal.info({
+                    title: 'This machine is already running',
+                    content: (
+                        <>
+                            <Typography.Paragraph style={{ marginBottom: 8 }}>{body.message}</Typography.Paragraph>
+                            <Typography.Text type="secondary">
+                                Batch {running.batch_number} · {running.item ?? '—'} · {running.shift ?? '—'} ·{' '}
+                                {String(running.production_date ?? '').slice(0, 10)}
+                            </Typography.Text>
+                        </>
+                    ),
+                    onOk: () => {
+                        invalidate();
+                        setStartingMachine(null);
+                    },
+                });
+                return;
+            }
             Modal.error({
                 title: 'Could not start batch',
-                content: error?.response?.data?.message ?? 'Someone may have just started this machine — refresh and try again.',
+                content: body?.message ?? 'Someone may have just started this machine — refresh and try again.',
             });
         },
     });
@@ -1184,6 +1236,13 @@ export default function ShiftProductionEntryPage() {
                 onCancel={() => setStartingMachine(null)}
                 onOk={startForm.handleSubmit((values) => startMutation.mutate(values))}
                 confirmLoading={startMutation.isPending}
+                // Fail-closed in the UI too: the button is dead until the
+                // backend says the product is ready. The server refuses it
+                // regardless — this only stops the supervisor wasting a tap.
+                okButtonProps={{
+                    disabled: previewLoading || (!!startItemId && !!batchPreview && !batchPreview.readiness.ready),
+                }}
+                okText="Start Batch"
                 destroyOnHidden
             >
                 {/* Confirmation of where this batch will be filed — the shift is
@@ -1206,6 +1265,45 @@ export default function ShiftProductionEntryPage() {
                             )}
                         />
                     </Form.Item>
+                    {/* The readiness verdict, straight from the backend gate that
+                        will refuse the start — never a second opinion computed
+                        here. Blocking findings name every missing master field so
+                        the supervisor knows what to ask for, rather than seeing a
+                        bare "not ready". */}
+                    {startItemId && batchPreview && !batchPreview.readiness.ready && (
+                        <Alert
+                            type="error"
+                            showIcon
+                            style={{ marginBottom: 16 }}
+                            message={batchPreview.readiness.summary ?? 'This product is not production-ready.'}
+                            description={
+                                <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+                                    {batchPreview.readiness.blocking.map((f) => (
+                                        <li key={f.code}>
+                                            <Typography.Text strong>{f.label}</Typography.Text> — {f.detail}
+                                        </li>
+                                    ))}
+                                </ul>
+                            }
+                        />
+                    )}
+                    {startItemId && batchPreview && batchPreview.readiness.warnings.length > 0 && (
+                        <Alert
+                            type="warning"
+                            showIcon
+                            style={{ marginBottom: 16 }}
+                            message="Incomplete masters — the batch can still run"
+                            description={
+                                <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+                                    {batchPreview.readiness.warnings.map((f) => (
+                                        <li key={f.code}>
+                                            <Typography.Text strong>{f.label}</Typography.Text> — {f.detail}
+                                        </li>
+                                    ))}
+                                </ul>
+                            }
+                        />
+                    )}
                     {startItem && (
                         <>
                             {/* Read-only card of the item master's standards — what the
@@ -1242,6 +1340,70 @@ export default function ShiftProductionEntryPage() {
                                     )}
                                 />
                             </Form.Item>
+                            {/* What this run SHOULD produce and consume, from the
+                                product's standards — shown before confirming, so a
+                                wrong standard is caught by the person who knows the
+                                machine. A null figure stays a dash: never a guess. */}
+                            {batchPreview && (
+                                <Descriptions
+                                    size="small"
+                                    column={2}
+                                    bordered
+                                    style={{ marginBottom: 16 }}
+                                    title={<Typography.Text strong>Estimated for this shift</Typography.Text>}
+                                >
+                                    <Descriptions.Item label="Planned hours">
+                                        {batchPreview.estimation.planned_hours ? fmtNum(toNum(batchPreview.estimation.planned_hours)) : '—'}
+                                    </Descriptions.Item>
+                                    <Descriptions.Item label="Expected cycles">
+                                        {batchPreview.estimation.expected_cycles ?? '—'}
+                                    </Descriptions.Item>
+                                    <Descriptions.Item label="Expected pieces">
+                                        {batchPreview.estimation.expected_pieces ?? '—'}
+                                    </Descriptions.Item>
+                                    <Descriptions.Item label="Expected kg">
+                                        {batchPreview.estimation.expected_kg ? fmtNum(toNum(batchPreview.estimation.expected_kg)) : '—'}
+                                    </Descriptions.Item>
+                                    <Descriptions.Item label="Expected boxes">
+                                        {batchPreview.estimation.expected_boxes ?? '—'}
+                                    </Descriptions.Item>
+                                    <Descriptions.Item label="Expected trays">
+                                        {batchPreview.estimation.expected_trays ?? '—'}
+                                    </Descriptions.Item>
+                                    {/* Pouch row appears only for pouch-packed products
+                                        — no product carries a pouch standard today, so
+                                        for every current product this row is absent
+                                        rather than showing a misleading dash. */}
+                                    {batchPreview.estimation.nos_per_pouch !== null && (
+                                        <Descriptions.Item label="Expected pouches" span={2}>
+                                            {batchPreview.estimation.expected_pouches ?? '—'}
+                                        </Descriptions.Item>
+                                    )}
+                                </Descriptions>
+                            )}
+                            {batchPreview && batchPreview.estimation.expected_materials.length > 0 && (
+                                <Descriptions
+                                    size="small"
+                                    column={1}
+                                    bordered
+                                    style={{ marginBottom: 16 }}
+                                    title={<Typography.Text strong>Expected materials</Typography.Text>}
+                                >
+                                    {batchPreview.estimation.expected_materials.map((m) => (
+                                        <Descriptions.Item key={m.item_id} label={m.name}>
+                                            {fmtNum(toNum(m.quantity))} {m.uom ?? ''}
+                                        </Descriptions.Item>
+                                    ))}
+                                </Descriptions>
+                            )}
+                            {batchPreview && batchPreview.estimation.recipe_source === null && (
+                                <Alert
+                                    type="info"
+                                    showIcon
+                                    style={{ marginBottom: 16 }}
+                                    message="No consumption recipe for this product — resin, masterbatch and consumables cannot be estimated."
+                                />
+                            )}
                         </>
                     )}
                     <Form.Item

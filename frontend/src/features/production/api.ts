@@ -1,6 +1,7 @@
 import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
 import type {
+    BatchPreview,
     Bom,
     CapacityWorkCenterLoad,
     DayBinMovement,
@@ -28,6 +29,7 @@ import type {
     ShiftSummary,
     SubcontractOrder,
     TraceabilityReportRow,
+    VoucherPreview,
     WorkCenter,
     WorkOrder,
 } from './types';
@@ -249,6 +251,33 @@ export interface StartBatchPayload {
     // Complete Batch re-sends it, so a backend that ignores this still gets
     // the corrected value at completion.
     active_cavities?: number;
+}
+
+export interface BatchPreviewParams {
+    item_id: number;
+    work_center_id?: number;
+    warehouse_id?: number;
+    shift_id?: number;
+    planned_hours?: number;
+    active_cavities?: number;
+}
+
+/**
+ * Readiness + estimation for an intended run, before it starts. Read-only,
+ * so it is safe to call on every product/machine change while the
+ * supervisor fills the form.
+ */
+export async function getBatchPreview(params: BatchPreviewParams): Promise<BatchPreview> {
+    const { data } = await api.get<{ data: BatchPreview }>('/production/shift-production-entries/preview', { params });
+    return data.data;
+}
+
+/** What Tally is about to receive for an entry, resolved against real masters. */
+export async function getVoucherPreview(entryId: number): Promise<VoucherPreview> {
+    const { data } = await api.get<{ data: VoucherPreview }>(
+        `/production/shift-production-entries/${entryId}/voucher-preview`,
+    );
+    return data.data;
 }
 
 export async function startBatch(payload: StartBatchPayload): Promise<ShiftProductionEntry> {
