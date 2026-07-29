@@ -10,6 +10,14 @@ class WorkCenterResource extends JsonResource
     public function toArray(Request $request): array
     {
         return [
+            'capacity_class' => $this->capacity_class,
+            'min_cavities' => $this->min_cavities,
+            'max_cavities' => $this->max_cavities,
+            'permitted_cavities' => $this->permitted_cavities,
+            'cycle_time_min' => $this->cycle_time_min,
+            'cycle_time_max' => $this->cycle_time_max,
+            'default_shift_hours' => $this->default_shift_hours,
+            'confirmation_status' => $this->confirmation_status,
             'id' => $this->id,
             'code' => $this->code,
             'name' => $this->name,

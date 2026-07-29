@@ -19,6 +19,10 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'default_cavities', 'cavities_min', 'cavities_max', 'permitted_cavities',
     'bom_id', 'status', 'effective_from', 'effective_to',
     'source', 'source_reference', 'confirmation_status', 'notes', 'created_by',
+    // Who approved and when. Without these on the fillable list the
+    // approve() update silently drops them and the audit trail — the whole
+    // point of approval being an act rather than a flag — is lost.
+    'approved_by', 'approved_at',
 ])]
 class ProductionConfiguration extends Model
 {

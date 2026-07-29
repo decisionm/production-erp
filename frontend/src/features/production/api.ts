@@ -3,6 +3,10 @@ import type { Paginated } from '@/lib/types';
 import type {
     BatchPreview,
     Bom,
+    DowntimeReason,
+    FactorySetting,
+    ImportResult,
+    ProductionConfiguration,
     CapacityWorkCenterLoad,
     DayBinMovement,
     DayBinState,
@@ -727,5 +731,129 @@ export async function handoverShiftProductionEntry(id: number, payload: Handover
         `/production/shift-production-entries/${id}/handover`,
         payload,
     );
+    return data.data;
+}
+
+// ---------------------------------------------------------------------
+// Configurable production
+// ---------------------------------------------------------------------
+
+export async function listProductionConfigurations(params?: {
+    work_center_id?: number;
+    item_id?: number;
+    status?: string;
+    search?: string;
+}): Promise<Paginated<ProductionConfiguration>> {
+    const { data } = await api.get<Paginated<ProductionConfiguration>>('/production/configurations', { params });
+    return data;
+}
+
+export async function listMachineConfigurations(workCenterId: number): Promise<{ data: ProductionConfiguration[] }> {
+    const { data } = await api.get<{ data: ProductionConfiguration[] }>(
+        `/production/work-centers/${workCenterId}/configurations`,
+    );
+    return data;
+}
+
+export interface ProductionConfigurationPayload {
+    work_center_id: number;
+    item_id: number;
+    mold_id?: number | null;
+    colour?: string | null;
+    unit_weight_grams?: number | null;
+    default_cycle_time?: number | null;
+    cycle_time_min?: number | null;
+    cycle_time_max?: number | null;
+    default_cavities?: number | null;
+    permitted_cavities?: number[] | null;
+    effective_from?: string | null;
+    notes?: string | null;
+}
+
+export async function createProductionConfiguration(payload: ProductionConfigurationPayload): Promise<ProductionConfiguration> {
+    const { data } = await api.post<{ data: ProductionConfiguration }>('/production/configurations', payload);
+    return data.data;
+}
+
+export async function updateProductionConfiguration(
+    id: number,
+    payload: ProductionConfigurationPayload,
+): Promise<ProductionConfiguration> {
+    const { data } = await api.put<{ data: ProductionConfiguration }>(`/production/configurations/${id}`, payload);
+    return data.data;
+}
+
+/** Approval is an act with an actor, not a status field — hence its own call. */
+export async function approveProductionConfiguration(id: number): Promise<ProductionConfiguration> {
+    const { data } = await api.post<{ data: ProductionConfiguration }>(`/production/configurations/${id}/approve`);
+    return data.data;
+}
+
+export async function deactivateProductionConfiguration(id: number): Promise<ProductionConfiguration> {
+    const { data } = await api.post<{ data: ProductionConfiguration }>(`/production/configurations/${id}/deactivate`);
+    return data.data;
+}
+
+export async function copyProductionConfiguration(id: number): Promise<ProductionConfiguration> {
+    const { data } = await api.post<{ data: ProductionConfiguration }>(`/production/configurations/${id}/copy`);
+    return data.data;
+}
+
+export async function importProductionConfigurations(
+    rows: Record<string, unknown>[],
+    dryRun: boolean,
+): Promise<ImportResult> {
+    const { data } = await api.post<{ data: ImportResult }>('/production/configurations/import', {
+        rows,
+        dry_run: dryRun,
+    });
+    return data.data;
+}
+
+export async function listDowntimeReasons(selectableAtStart?: boolean): Promise<{ data: DowntimeReason[] }> {
+    const { data } = await api.get<{ data: DowntimeReason[] }>('/production/downtime-reasons', {
+        params: selectableAtStart ? { selectable_at_start: 1 } : undefined,
+    });
+    return data;
+}
+
+export async function saveDowntimeReason(
+    payload: Partial<DowntimeReason> & { code: string; description: string; planning_type: string },
+    id?: number,
+): Promise<DowntimeReason> {
+    const { data } = id
+        ? await api.put<{ data: DowntimeReason }>(`/production/downtime-reasons/${id}`, payload)
+        : await api.post<{ data: DowntimeReason }>('/production/downtime-reasons', payload);
+    return data.data;
+}
+
+export async function listFactorySettings(): Promise<{ data: FactorySetting[] }> {
+    const { data } = await api.get<{ data: FactorySetting[] }>('/production/factory-settings');
+    return data;
+}
+
+export async function saveFactorySetting(payload: {
+    key: string;
+    value: string | null;
+    change_reason?: string;
+}): Promise<FactorySetting> {
+    const { data } = await api.post<{ data: FactorySetting }>('/production/factory-settings', payload);
+    return data.data;
+}
+
+export async function updateWorkCenterCapability(
+    id: number,
+    payload: {
+        name?: string;
+        capacity_class?: string | null;
+        min_cavities?: number | null;
+        max_cavities?: number | null;
+        permitted_cavities?: number[] | null;
+        cycle_time_min?: number | null;
+        cycle_time_max?: number | null;
+        default_shift_hours?: number | null;
+    },
+): Promise<WorkCenter> {
+    const { data } = await api.put<{ data: WorkCenter }>(`/production/work-centers/${id}`, payload);
     return data.data;
 }

@@ -168,6 +168,8 @@ class ProductionConfigurationTest extends TestCase
         $row = ShiftProductionEntry::find($entry['id']);
 
         $this->assertSame($config->id, $row->production_configuration_id);
+        // The approval is attributable — who and when, not just a flag.
+        $this->assertNotNull($config->fresh()->approved_at);
         $this->assertSame(ProductionCalculationEngine::VERSION_CURRENT, $row->calculation_version);
         // Configuration standards win over the item master's.
         $this->assertSame('12.00', (string) $row->standard_cycle_time);
@@ -268,6 +270,18 @@ class ProductionConfigurationTest extends TestCase
         $row = ShiftProductionEntry::find($entry['id']);
         $this->assertSame('configuration', $row->cavities_source);
         $this->assertNull($row->override_reason);
+    }
+
+    public function test_approval_records_who_approved_and_when(): void
+    {
+        $config = $this->draft();
+        $approver = User::factory()->create(['is_active' => true]);
+
+        $approved = app(ProductionConfigurationService::class)->approve($config, $approver->id);
+
+        $this->assertSame($approver->id, $approved->approved_by);
+        $this->assertNotNull($approved->approved_at);
+        $this->assertNotNull($approved->effective_from);
     }
 
     public function test_only_approved_configurations_appear_for_a_machine(): void
