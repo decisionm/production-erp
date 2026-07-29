@@ -18,7 +18,7 @@ export interface ProductionSettings {
     tolerances: Record<string, number | null>;
     /**
      * Phase 6 lot/barcode traceability master switch — backend config
-     * `production.traceability_enabled` (env PROD_TRACEABILITY, default false).
+     * `production.traceability_enabled` (env PROD_TRACEABILITY, default true).
      * Optional: older backends don't send it. Treat anything but `true` as off;
      * with it off the entire traceability UI must be invisible and inert.
      */

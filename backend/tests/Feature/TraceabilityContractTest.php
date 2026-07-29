@@ -79,6 +79,8 @@ class TraceabilityContractTest extends TestCase
     {
         $this->actingAsUserWithPermissions('production.manage');
 
+        // PHPUnit pins the flag off so the suite is deterministic regardless
+        // of the shipped default or a developer's local environment.
         $this->getJson('/api/v1/production/settings')
             ->assertSuccessful()
             ->assertJsonPath('data.traceability_enabled', false);
@@ -91,6 +93,7 @@ class TraceabilityContractTest extends TestCase
 
     public function test_the_aggregate_gets_404_while_the_flag_is_off(): void
     {
+        config(['production.traceability_enabled' => false]);
         $this->actingAsUserWithPermissions('production.manage');
         [, $warehouse, $machine] = $this->masters();
         $entry = $this->inProgressEntry($machine, $warehouse);

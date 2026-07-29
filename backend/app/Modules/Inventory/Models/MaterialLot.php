@@ -4,6 +4,7 @@ namespace App\Modules\Inventory\Models;
 
 use App\Models\User;
 use App\Modules\Procurement\Models\GoodsReceiptNote;
+use App\Modules\Procurement\Models\GoodsReceiptNoteLine;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -16,8 +17,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * aggregate. All writes go through TraceabilityService.
  */
 #[Fillable([
-    'grn_id', 'item_id', 'supplier_lot_no', 'received_date', 'bag_count',
-    'bag_weight_kg', 'total_received_kg', 'notes', 'created_by',
+    'grn_id', 'goods_receipt_note_line_id', 'item_id', 'supplier_lot_no',
+    'received_date', 'bag_count', 'bag_weight_kg', 'total_received_kg',
+    'notes', 'created_by',
 ])]
 class MaterialLot extends Model
 {
@@ -43,6 +45,11 @@ class MaterialLot extends Model
     public function grn(): BelongsTo
     {
         return $this->belongsTo(GoodsReceiptNote::class, 'grn_id');
+    }
+
+    public function goodsReceiptLine(): BelongsTo
+    {
+        return $this->belongsTo(GoodsReceiptNoteLine::class, 'goods_receipt_note_line_id');
     }
 
     public function bags(): HasMany

@@ -1,4 +1,5 @@
 import type { Item, Warehouse } from '@/features/inventory/types';
+import type { MaterialLot } from '@/features/production/types';
 
 export interface Vendor {
     id: number;
@@ -60,15 +61,18 @@ export interface GoodsReceiptNoteLine {
     item: Item;
     quantity: string;
     unit_cost: string;
+    material_lots?: MaterialLot[];
 }
 
 export interface GoodsReceiptNote {
     id: number;
+    receipt_key?: string;
     purchase_order_id: number;
     warehouse: Warehouse;
     reference: string | null;
     received_date: string;
     notes: string | null;
     lines: GoodsReceiptNoteLine[];
+    material_lots?: MaterialLot[];
     created_at: string;
 }

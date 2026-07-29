@@ -96,12 +96,13 @@ export async function listGoodsReceipts(): Promise<Paginated<GoodsReceiptNote>> 
 }
 
 /**
- * The GRN payload is exactly what StoreGoodsReceiptRequest validates — no
- * lot data rides along. Phase 6 supplier lots are registered separately,
- * one POST /inventory/material-lots per lot AFTER the receipt saves (see
- * GoodsReceiptsPage), because lots are Inventory's surface, not the GRN's.
+ * One idempotent, atomic GRN payload. When a mass-material line carries
+ * lots, Procurement records the aggregate receipt and Inventory fans out
+ * its physical bags in the same transaction.
  */
 export interface CreateGoodsReceiptPayload {
+    /** Stable across retries: replay returns the original receipt without moving stock twice. */
+    receipt_key: string;
     purchase_order_id: number;
     warehouse_id: number;
     reference?: string;
@@ -110,6 +111,15 @@ export interface CreateGoodsReceiptPayload {
         purchase_order_line_id: number;
         quantity: number;
         unit_cost?: number;
+        lots?: {
+            supplier_lot_no?: string;
+            bag_count: number;
+            bag_weight_kg?: number;
+            total_received_kg: number;
+            barcodes?: string[];
+            bag_weights?: number[];
+            notes?: string;
+        }[];
     }[];
 }
 

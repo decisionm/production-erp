@@ -28,6 +28,7 @@ import {
     getBinBayAvailability,
     getBinBayHistory,
     getMaterialBagPickList,
+    listActiveBatches,
     listWorkCenters,
     loadBinBay,
     machineLabel,
@@ -84,6 +85,16 @@ export default function BinBayLoadingPage() {
         queryKey: ['production', 'work-centers', 'active'],
         queryFn: () => listWorkCenters(true),
     });
+    const {
+        data: activeBatches,
+        isLoading: activeBatchesLoading,
+        isError: activeBatchesError,
+    } = useQuery({
+        queryKey: ['production', 'active-batches'],
+        queryFn: listActiveBatches,
+        enabled: traceabilityEnabled,
+        refetchInterval: 20000,
+    });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
 
     // A bay operator usually has no user-admin rights, so /users 403s for
@@ -126,6 +137,13 @@ export default function BinBayLoadingPage() {
     const scannedBag = useMemo(
         () => (barcode ? (pickList ?? []).find((bag) => bag.barcode === barcode) ?? null : null),
         [barcode, pickList],
+    );
+    const runningBatch = useMemo(
+        () =>
+            (activeBatches?.data ?? []).find(
+                (entry) => entry.work_center.id === machineId && entry.batch_status === 'in_progress',
+            ) ?? null,
+        [activeBatches, machineId],
     );
 
     const machineOptions = (machines?.data ?? []).map((machine) => ({
@@ -187,15 +205,37 @@ export default function BinBayLoadingPage() {
     });
 
     const canSubmit =
-        machineId !== null && barcode !== null && (mode === 'full' || (weighedKg !== null && weighedKg > 0));
+        machineId !== null
+        && barcode !== null
+        && activeBatches !== undefined
+        && !activeBatchesError
+        && (mode === 'full' || (weighedKg !== null && weighedKg > 0));
 
-    const submit = () => {
+    const performLoad = () => {
         if (!canSubmit) return;
         loadMutation.mutate({
             work_center_id: machineId!,
             barcode: barcode!,
             quantity_kg: mode === 'partial' ? weighedKg! : undefined,
             loaded_by: loadedBy ?? undefined,
+            shift_production_entry_id: runningBatch?.id,
+        });
+    };
+
+    const submit = () => {
+        if (!canSubmit) return;
+        if (runningBatch) {
+            performLoad();
+            return;
+        }
+
+        Modal.confirm({
+            title: 'Pre-load this material?',
+            content:
+                'This machine has no running batch. The load will become opening stock in the centralized bin bay '
+                + 'and the next batch will read it from there.',
+            okText: 'Pre-load for next batch',
+            onOk: performLoad,
         });
     };
 
@@ -344,6 +384,31 @@ export default function BinBayLoadingPage() {
                                     optionFilterProp="label"
                                 />
                             </Form.Item>
+                            {machineId !== null && (
+                                <Alert
+                                    type={activeBatchesError ? 'error' : runningBatch ? 'success' : 'warning'}
+                                    showIcon
+                                    style={{ marginBottom: 16 }}
+                                    message={
+                                        activeBatchesError
+                                            ? 'Could not verify this machine’s running batch'
+                                            : activeBatchesLoading || activeBatches === undefined
+                                              ? 'Checking this machine’s running batch…'
+                                              : runningBatch
+                                            ? `Loading into Batch ${runningBatch.batch_number ?? `#${runningBatch.id}`}`
+                                            : 'No batch is running on this machine'
+                                    }
+                                    description={
+                                        activeBatchesError
+                                            ? 'Loading is paused so material cannot be attached to the wrong batch. Refresh and try again.'
+                                            : activeBatchesLoading || activeBatches === undefined
+                                              ? 'The load button will unlock when the current machine state is known.'
+                                              : runningBatch
+                                            ? `${runningBatch.item.name} · this scan will be traceable to the active batch.`
+                                            : 'You can still pre-load the bin for the next run, but the app will ask you to confirm.'
+                                    }
+                                />
+                            )}
                             <Form.Item
                                 label="Material"
                                 help="Optional — pick it to see this bay's stock and the bag's weight before you load."

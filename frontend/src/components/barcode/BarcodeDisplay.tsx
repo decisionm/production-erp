@@ -6,9 +6,27 @@ import { useEffect, useRef } from 'react';
 interface BarcodeDisplayProps {
     code: string;
     label?: string;
+    /** Extra human-readable context printed below the barcode. */
+    printDetails?: string[];
+    /** Callers that reopen an existing label can make the reprint action explicit. */
+    printButtonLabel?: string;
 }
 
-export default function BarcodeDisplay({ code, label }: BarcodeDisplayProps) {
+function escapeHtml(value: string): string {
+    return value
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+}
+
+export default function BarcodeDisplay({
+    code,
+    label,
+    printDetails = [],
+    printButtonLabel = 'Print Label',
+}: BarcodeDisplayProps) {
     const svgRef = useRef<SVGSVGElement>(null);
 
     useEffect(() => {
@@ -36,9 +54,13 @@ export default function BarcodeDisplay({ code, label }: BarcodeDisplayProps) {
         printWindow.document.write(`
             <!doctype html>
             <html>
-                <head><title>${code}</title></head>
-                <body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;">
-                    ${svg.outerHTML}
+                <head><title>${escapeHtml(code)}</title></head>
+                <body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial,sans-serif;">
+                    <div style="text-align:center;">
+                        ${label ? `<div style="font-weight:700;margin-bottom:4px;">${escapeHtml(label)}</div>` : ''}
+                        ${svg.outerHTML}
+                        ${printDetails.map((detail) => `<div style="font-size:12px;margin-top:2px;">${escapeHtml(detail)}</div>`).join('')}
+                    </div>
                 </body>
             </html>
         `);
@@ -52,7 +74,7 @@ export default function BarcodeDisplay({ code, label }: BarcodeDisplayProps) {
             {label && <Typography.Text type="secondary">{label}</Typography.Text>}
             <svg ref={svgRef} />
             <Button icon={<PrinterOutlined />} onClick={handlePrint}>
-                Print Label
+                {printButtonLabel}
             </Button>
         </Space>
     );
