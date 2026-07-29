@@ -2141,16 +2141,37 @@ export default function ShiftProductionEntryPage() {
                                 style={{ marginBottom: 16 }}
                                 title={<Typography.Text strong>Product standards</Typography.Text>}
                             >
-                                <Descriptions.Item label="Colour">{startItem.colour ?? '—'}</Descriptions.Item>
+                                {/* Same precedence the estimate and Start Batch already
+                                    use: the factory product standard outranks the item
+                                    master. Reading the item alone made this card show
+                                    dashes for a product whose estimate underneath was
+                                    computing correctly from the standard — the screen
+                                    calculated from the right numbers and displayed none
+                                    of them. */}
+                                <Descriptions.Item label="Colour">
+                                    {startItem.colour ?? startColour ?? '—'}
+                                </Descriptions.Item>
                                 <Descriptions.Item label="Weight">
-                                    {startItem.nominal_weight_grams ? `${fmtNum(toNum(startItem.nominal_weight_grams))} g` : '—'}
+                                    {(() => {
+                                        const w = batchPreview?.standard?.unit_weight_grams ?? startItem.nominal_weight_grams;
+                                        return w ? `${fmtNum(toNum(w))} g` : '—';
+                                    })()}
                                 </Descriptions.Item>
                                 <Descriptions.Item label="Std CT">
-                                    {startItem.standard_cycle_time ? `${fmtNum(toNum(startItem.standard_cycle_time))} s` : '—'}
+                                    {(() => {
+                                        const ct = batchPreview?.standard?.cycle_time ?? startItem.standard_cycle_time;
+                                        return ct ? `${fmtNum(toNum(ct))} s` : '—';
+                                    })()}
                                 </Descriptions.Item>
-                                <Descriptions.Item label="Std cavities">{startItem.standard_cavities ?? '—'}</Descriptions.Item>
-                                <Descriptions.Item label="Pcs/box">{startItem.nos_per_box ?? '—'}</Descriptions.Item>
-                                <Descriptions.Item label="Pcs/tray">{startItem.nos_per_tray ?? '—'}</Descriptions.Item>
+                                <Descriptions.Item label="Std cavities">
+                                    {batchPreview?.standard?.cavities ?? startItem.standard_cavities ?? '—'}
+                                </Descriptions.Item>
+                                <Descriptions.Item label="Pcs/box">
+                                    {batchPreview?.estimation?.nos_per_box ?? startItem.nos_per_box ?? '—'}
+                                </Descriptions.Item>
+                                <Descriptions.Item label="Pcs/tray">
+                                    {batchPreview?.estimation?.nos_per_tray ?? startItem.nos_per_tray ?? '—'}
+                                </Descriptions.Item>
                             </Descriptions>
                             <Form.Item
                                 label="Active Cavities"
