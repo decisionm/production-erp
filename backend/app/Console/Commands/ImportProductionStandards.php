@@ -11,7 +11,7 @@ use Illuminate\Console\Command;
  */
 class ImportProductionStandards extends Command
 {
-    protected $signature = 'production:import-standards {file : JSON file of source rows} {--write : Actually write (default is a dry run)}';
+    protected $signature = 'production:import-standards {file : JSON file of source rows} {--write : Actually write (default is a dry run)} {--exact-only : Skip unmatched and ambiguous rows}';
 
     protected $description = 'Import factory product-level production standards from a JSON row file';
 
@@ -31,13 +31,13 @@ class ImportProductionStandards extends Command
             return self::FAILURE;
         }
 
-        $result = $import->import($rows, ! $this->option('write'), null);
+        $result = $import->import($rows, ! $this->option('write'), null, (bool) $this->option('exact-only'));
         $s = $result['summary'];
 
         $this->info($result['dry_run'] ? 'DRY RUN — nothing written' : 'IMPORTED');
         $this->table(
-            ['source rows', 'variants', 'matched', 'unmatched', 'unresolved', 'packaging options'],
-            [[$s['source_rows'], $s['variants'], $s['matched'], $s['unmatched'], $s['unresolved'], $s['packaging_options']]],
+            ['source rows', 'variants', 'matched', 'unmatched', 'unresolved', 'packaging', 'importable', 'skipped'],
+            [[$s['source_rows'], $s['variants'], $s['matched'], $s['unmatched'], $s['unresolved'], $s['packaging_options'], $s['importable'], $s['skipped']]],
         );
 
         $unresolved = array_filter($result['variants'], fn ($v) => $v['status'] === 'unresolved');

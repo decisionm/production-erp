@@ -187,6 +187,65 @@ class ProductionStandardImportTest extends TestCase
         $this->assertSame(1150, $tray->nos_per_box);
     }
 
+    public function test_exact_only_writes_matched_unambiguous_rows_and_reports_the_rest(): void
+    {
+        // The production safety setting. Only 60ML ROUND has a matching item
+        // here, so only its two variants may be written; everything else is
+        // reported with a reason rather than silently dropped.
+        $item = Item::create([
+            'sku' => 'FAC-1', 'name' => '60ML ROUND', 'uom' => 'Nos.', 'is_active' => true,
+            'tally_stock_item_guid' => 'itm-1',
+        ]);
+        // 500ML ROUND DOES match an item but is still ambiguous (split cycle
+        // time, blank weight) — so it exercises the second skip reason,
+        // which the unmatched check would otherwise mask.
+        Item::create([
+            'sku' => 'FAC-2', 'name' => '500ML ROUND', 'uom' => 'Nos.', 'is_active' => true,
+            'tally_stock_item_guid' => 'itm-2',
+        ]);
+
+        $result = app(ProductionStandardImportService::class)
+            ->import($this->factoryRows(), dryRun: false, createdBy: null, exactOnly: true);
+
+        $this->assertSame(2, $result['summary']['importable']);
+        $this->assertSame(2, ProductionStandard::count());
+        $this->assertSame($item->id, ProductionStandard::first()->item_id);
+
+        // Every skipped variant carries a reason a person can act on.
+        $skipped = array_filter($result['variants'], fn ($v) => $v['skip_reason'] !== null);
+        $this->assertSame($result['summary']['skipped'], count($skipped));
+        foreach ($skipped as $variant) {
+            $this->assertNotEmpty($variant['skip_reason']);
+        }
+
+        // The unmatched and the ambiguous are skipped for DIFFERENT reasons.
+        $reasons = implode(' ', array_column($skipped, 'skip_reason'));
+        $this->assertStringContainsString('No exact item match for "90ML RIB"', $reasons);
+        // A matched-but-ambiguous variant is skipped for its ambiguity, not
+        // for a missing match.
+        $this->assertStringContainsString('Cycle time cell held several values', $reasons);
+
+        // Nothing unresolved reached the database.
+        $this->assertSame(0, ProductionStandard::where('status', 'unresolved')->count());
+    }
+
+    public function test_exact_only_import_is_idempotent(): void
+    {
+        Item::create([
+            'sku' => 'FAC-1', 'name' => '60ML ROUND', 'uom' => 'Nos.', 'is_active' => true,
+            'tally_stock_item_guid' => 'itm-1',
+        ]);
+        $service = app(ProductionStandardImportService::class);
+
+        $service->import($this->factoryRows(), false, null, true);
+        $afterFirst = [ProductionStandard::count(), ProductionStandardPackaging::count()];
+
+        $service->import($this->factoryRows(), false, null, true);
+        $service->import($this->factoryRows(), false, null, true);
+
+        $this->assertSame($afterFirst, [ProductionStandard::count(), ProductionStandardPackaging::count()]);
+    }
+
     public function test_a_standard_is_offered_on_every_active_machine_in_watch_mode(): void
     {
         $this->seed(CanonicalMachineSeeder::class);

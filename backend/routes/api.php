@@ -55,6 +55,7 @@ use App\Modules\Production\Http\Controllers\PowerInterruptionLogController;
 use App\Modules\Production\Http\Controllers\ProductionConfigurationController;
 use App\Modules\Production\Http\Controllers\ProductionReportController;
 use App\Modules\Production\Http\Controllers\ProductionSettingsController;
+use App\Modules\Production\Http\Controllers\ProductionStandardController;
 use App\Modules\Production\Http\Controllers\ReworkOrderController;
 use App\Modules\Production\Http\Controllers\RoutingController;
 use App\Modules\Production\Http\Controllers\ScrapReasonController;
@@ -335,6 +336,10 @@ Route::prefix('v1')->group(function () {
             Route::post('configurations/{production_configuration}/copy', [ProductionConfigurationController::class, 'copy']);
             Route::get('work-centers/{work_center}/configurations', [ProductionConfigurationController::class, 'forMachine']);
             Route::post('configurations/import', [ProductionConfigurationController::class, 'importRows']);
+
+            // Factory product-level standards (ERPPRO master import).
+            Route::get('standards', [ProductionStandardController::class, 'index']);
+            Route::post('standards/import', [ProductionStandardController::class, 'import']);
 
             Route::get('downtime-reasons', [DowntimeReasonController::class, 'index']);
             Route::post('downtime-reasons', [DowntimeReasonController::class, 'store']);

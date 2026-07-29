@@ -41,9 +41,26 @@ class ProductionStandardImportService
      *     variants: list<array<string, mixed>>,
      * }
      */
-    public function import(array $rows, bool $dryRun, ?int $createdBy): array
+    public function import(array $rows, bool $dryRun, ?int $createdBy, bool $exactOnly = false): array
     {
         $variants = $this->normalise($rows);
+
+        // exactOnly is the production safety setting: write ONLY variants
+        // that resolved to exactly one item AND carry no unresolved
+        // ambiguity. Everything else is reported as skipped with its reason
+        // — a mapping report for the factory, not a silent omission.
+        foreach ($variants as &$variant) {
+            $variant['skip_reason'] = null;
+            if (! $exactOnly) {
+                continue;
+            }
+            if ($variant['item_id'] === null) {
+                $variant['skip_reason'] = 'No exact item match for "'.$variant['source_product_name'].'" — needs mapping to a Tally item name.';
+            } elseif ($variant['status'] === 'unresolved') {
+                $variant['skip_reason'] = $variant['unresolved_reason'];
+            }
+        }
+        unset($variant);
 
         $summary = [
             'source_rows' => count($rows),
@@ -52,6 +69,8 @@ class ProductionStandardImportService
             'unmatched' => 0,
             'unresolved' => 0,
             'packaging_options' => 0,
+            'importable' => 0,
+            'skipped' => 0,
         ];
 
         foreach ($variants as $variant) {
@@ -60,11 +79,16 @@ class ProductionStandardImportService
                 $summary['unresolved']++;
             }
             $summary['packaging_options'] += count($variant['packagings']);
+            $summary[($variant['skip_reason'] ?? null) === null ? 'importable' : 'skipped']++;
         }
 
         if (! $dryRun) {
             DB::transaction(function () use (&$variants, $createdBy) {
                 foreach ($variants as &$variant) {
+                    if (($variant['skip_reason'] ?? null) !== null) {
+                        continue;
+                    }
+
                     // Idempotent on the variant key: re-running the import
                     // updates rather than duplicating, so a corrected sheet
                     // can be re-imported without cleanup.
