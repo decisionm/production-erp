@@ -45,6 +45,10 @@ class ProductionStandardImportTest extends TestCase
             // Multi-valued cycle time — must split, never average.
             ['sl_no' => 60, 'product' => '500ML ROUND', 'cavities' => 3, 'unit_weight_grams' => null, 'cycle_time' => '21.5 / 17.8',
                 'nos_per_pouch' => 60, 'pouch_nos_per_box' => 300],
+            // Multi-valued WEIGHT — the ambiguous 200Ml Round family, open
+            // since 24 July. Must split like a multi-valued cycle time.
+            ['sl_no' => 48, 'product' => '200ML ROUND', 'cavities' => 4, 'unit_weight_grams' => '18/20', 'cycle_time' => 16.5,
+                'nos_per_pouch' => 105, 'pouch_nos_per_box' => 520],
             // Above the old 14 s "global maximum" — must import cleanly.
             ['sl_no' => 99, 'product' => '1000ML ROUND / IFF', 'cavities' => 2, 'unit_weight_grams' => 40, 'cycle_time' => 30.5,
                 'nos_per_tray' => 40, 'tray_nos_per_box' => 160],
@@ -116,6 +120,25 @@ class ProductionStandardImportTest extends TestCase
         foreach ($variants as $variant) {
             $this->assertSame('unresolved', $variant->status);
             $this->assertStringContainsString('21.5 / 17.8', (string) $variant->cycle_time_raw);
+        }
+    }
+
+    public function test_a_multi_valued_weight_splits_into_unresolved_variants(): void
+    {
+        $this->import();
+
+        $variants = ProductionStandard::where('source_product_name', '200ML ROUND')
+            ->orderBy('unit_weight_grams')->get();
+
+        // 18 g and 20 g are different bottles, not a 19 g average.
+        $this->assertCount(2, $variants);
+        $this->assertSame(['18.0000', '20.0000'], $variants->pluck('unit_weight_grams')->map(fn ($w) => (string) $w)->all());
+
+        foreach ($variants as $variant) {
+            $this->assertSame('unresolved', $variant->status);
+            $this->assertStringContainsString('Unit weight cell held several values (18/20)', (string) $variant->unresolved_reason);
+            // Cycle time was single-valued, so it is shared, not split.
+            $this->assertSame('16.50', (string) $variant->cycle_time);
         }
     }
 
