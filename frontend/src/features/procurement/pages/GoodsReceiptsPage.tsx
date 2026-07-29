@@ -1,14 +1,14 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Descriptions, Drawer, Form, Input, InputNumber, message, Modal, Select, Space, Table, Typography } from 'antd';
+import { Alert, Button, Descriptions, Drawer, Form, Input, InputNumber, message, Modal, Select, Space, Table, Typography } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
-import { Controller, useFieldArray, useForm, type Control } from 'react-hook-form';
+import { Controller, useFieldArray, useForm, useWatch, type Control, type FieldPath } from 'react-hook-form';
 import { z } from 'zod';
 import BarcodeScanInput from '@/components/barcode/BarcodeScanInput';
+import MaterialBagLabels from '@/features/inventory/components/MaterialBagLabels';
 import { listWarehouses } from '@/features/inventory/api';
 import { createGoodsReceipt, listGoodsReceipts, listPurchaseOrders } from '@/features/procurement/api';
 import type { GoodsReceiptNote } from '@/features/procurement/types';
-import { createMaterialLot } from '@/features/production/api';
 import { useProductionSettings } from '@/features/production/packing';
 
 const receiptSchema = z.object({
@@ -20,6 +20,7 @@ const receiptSchema = z.object({
             z.object({
                 purchase_order_line_id: z.number(),
                 item_label: z.string(),
+                item_uom: z.string(),
                 quantity: z.number().gt(0, 'Quantity must be greater than 0'),
                 unit_cost: z.number().min(0),
                 // Phase 6 traceability intake — optional, and only ever
@@ -40,6 +41,16 @@ const receiptSchema = z.object({
 });
 type ReceiptFormValues = z.infer<typeof receiptSchema>;
 
+function newReceiptKey(): string {
+    return typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `grn-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function isMassUom(uom: string): boolean {
+    return ['kg', 'kgs', 'kilogram', 'kilograms'].includes(uom.trim().toLowerCase().replace(/\.$/, ''));
+}
+
 /**
  * Phase 6 traceability: supplier lots & bags received on one GRN line — the
  * top of the GRN → lot → bag → day-bin chain. One row per supplier lot; the
@@ -48,6 +59,13 @@ type ReceiptFormValues = z.infer<typeof receiptSchema>;
  */
 function LineLotsSubForm({ control, lineIndex }: { control: Control<ReceiptFormValues>; lineIndex: number }) {
     const lots = useFieldArray({ control, name: `lines.${lineIndex}.lots` });
+    const line = useWatch({ control, name: `lines.${lineIndex}` });
+    const receiptKg = Number(line?.quantity ?? 0);
+    const registeredKg = (line?.lots ?? []).reduce(
+        (total, lot) => total + Number(lot?.bag_count ?? 0) * Number(lot?.bag_weight_kg ?? 0),
+        0,
+    );
+    const differenceKg = Number((registeredKg - receiptKg).toFixed(4));
     return (
         <div style={{ margin: '4px 0 8px 16px' }}>
             {lots.fields.map((lotField, lotIndex) => (
@@ -56,21 +74,30 @@ function LineLotsSubForm({ control, lineIndex }: { control: Control<ReceiptFormV
                         name={`lines.${lineIndex}.lots.${lotIndex}.supplier_lot_no`}
                         control={control}
                         render={({ field, fieldState }) => (
-                            <Input {...field} size="small" placeholder="Supplier lot no" status={fieldState.error ? 'error' : undefined} style={{ width: 160 }} />
+                            <Space direction="vertical" size={0}>
+                                <Input {...field} size="small" placeholder="Supplier lot no" status={fieldState.error ? 'error' : undefined} style={{ width: 160 }} />
+                                {fieldState.error && <Typography.Text type="danger" style={{ fontSize: 11 }}>{fieldState.error.message}</Typography.Text>}
+                            </Space>
                         )}
                     />
                     <Controller
                         name={`lines.${lineIndex}.lots.${lotIndex}.bag_count`}
                         control={control}
                         render={({ field, fieldState }) => (
-                            <InputNumber {...field} size="small" min={1} placeholder="Bags" status={fieldState.error ? 'error' : undefined} style={{ width: 90 }} />
+                            <Space direction="vertical" size={0}>
+                                <InputNumber {...field} size="small" min={1} placeholder="Bags" status={fieldState.error ? 'error' : undefined} style={{ width: 90 }} />
+                                {fieldState.error && <Typography.Text type="danger" style={{ fontSize: 11 }}>{fieldState.error.message}</Typography.Text>}
+                            </Space>
                         )}
                     />
                     <Controller
                         name={`lines.${lineIndex}.lots.${lotIndex}.bag_weight_kg`}
                         control={control}
                         render={({ field, fieldState }) => (
-                            <InputNumber {...field} size="small" min={0} step={0.5} placeholder="Kg/bag" status={fieldState.error ? 'error' : undefined} style={{ width: 100 }} />
+                            <Space direction="vertical" size={0}>
+                                <InputNumber {...field} size="small" min={0} step={0.5} placeholder="Kg/bag" status={fieldState.error ? 'error' : undefined} style={{ width: 100 }} />
+                                {fieldState.error && <Typography.Text type="danger" style={{ fontSize: 11 }}>{fieldState.error.message}</Typography.Text>}
+                            </Space>
                         )}
                     />
                     <Button size="small" danger onClick={() => lots.remove(lotIndex)}>
@@ -92,6 +119,19 @@ function LineLotsSubForm({ control, lineIndex }: { control: Control<ReceiptFormV
             >
                 + Lot &amp; bags
             </Button>
+            {lots.fields.length > 0 && (
+                <Typography.Paragraph
+                    type={Math.abs(differenceKg) < 0.0001 ? 'success' : 'danger'}
+                    style={{ margin: '6px 0 0', fontSize: 12 }}
+                >
+                    Bag total {parseFloat(registeredKg.toFixed(4))} kg · receipt line {parseFloat(receiptKg.toFixed(4))} kg.{' '}
+                    {Math.abs(differenceKg) < 0.0001
+                        ? 'The quantities match.'
+                        : differenceKg > 0
+                          ? `Reduce the bag count or weight by ${differenceKg} kg.`
+                          : `Add bags or increase the weight by ${Math.abs(differenceKg)} kg.`}
+                </Typography.Paragraph>
+            )}
         </div>
     );
 }
@@ -99,6 +139,9 @@ function LineLotsSubForm({ control, lineIndex }: { control: Control<ReceiptFormV
 export default function GoodsReceiptsPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [detailReceipt, setDetailReceipt] = useState<GoodsReceiptNote | null>(null);
+    const [createdReceipt, setCreatedReceipt] = useState<GoodsReceiptNote | null>(null);
+    const [receiptKey, setReceiptKey] = useState(newReceiptKey);
+    const [serverErrors, setServerErrors] = useState<string[]>([]);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['procurement', 'goods-receipts'], queryFn: listGoodsReceipts });
@@ -116,7 +159,7 @@ export default function GoodsReceiptsPage() {
     const orderOptions = receivableOrders.map((o) => ({ value: o.id, label: `PO #${o.id} — ${o.vendor.name}` }));
     const warehouseOptions = warehouses?.data.map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })) ?? [];
 
-    const { control, handleSubmit, reset, watch, formState: { errors } } = useForm<ReceiptFormValues>({
+    const { control, handleSubmit, reset, setError, watch, formState: { errors } } = useForm<ReceiptFormValues>({
         resolver: zodResolver(receiptSchema),
         defaultValues: { lines: [] },
     });
@@ -151,32 +194,44 @@ export default function GoodsReceiptsPage() {
             .map((line) => ({
                 purchase_order_line_id: line.id,
                 item_label: `${line.item.sku} — ${line.item.name}`,
+                item_uom: line.item.uom,
                 quantity: Number(line.quantity) - Number(line.quantity_received),
                 unit_cost: Number(line.unit_price),
-                lots: [],
+                // In the new traceability UI, kg receipts cannot silently
+                // bypass their physical bags. Pre-opening one required row
+                // makes the normal path obvious; the backend remains
+                // backward-compatible with already-open legacy clients.
+                lots:
+                    traceabilityEnabled && isMassUom(line.item.uom)
+                        ? [{
+                              supplier_lot_no: '',
+                              bag_count: undefined as unknown as number,
+                              bag_weight_kg: undefined as unknown as number,
+                          }]
+                        : [],
             }));
 
         replace(remainingLines);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedOrderId]);
+    }, [selectedOrderId, traceabilityEnabled]);
 
     const invalidate = () => {
         queryClient.invalidateQueries({ queryKey: ['procurement', 'goods-receipts'] });
         queryClient.invalidateQueries({ queryKey: ['procurement', 'purchase-orders'] });
         queryClient.invalidateQueries({ queryKey: ['inventory', 'stock-balances'] });
+        queryClient.invalidateQueries({ queryKey: ['inventory', 'material-lots'] });
+        queryClient.invalidateQueries({ queryKey: ['production', 'material-bags'] });
     };
 
     /**
-     * Two-step submit: the GRN posts first (its payload carries no lot data
-     * — the backend ignores it there), then each entered supplier lot is
-     * registered with one POST /inventory/material-lots against the saved
-     * receipt. Lot failures are collected and SHOWN, never swallowed: the
-     * receipt itself succeeded, but the store must know which lots still
-     * need registering (they can be re-entered from the Inventory side).
+     * One atomic receipt: stock, supplier lots and physical bag barcodes
+     * either all save, or none do. `receipt_key` stays unchanged across a
+     * retry, so a lost response cannot post the same GRN/stock movement twice.
      */
     const mutation = useMutation({
-        mutationFn: async (values: ReceiptFormValues) => {
-            const grn = await createGoodsReceipt({
+        mutationFn: (values: ReceiptFormValues) =>
+            createGoodsReceipt({
+                receipt_key: receiptKey,
                 purchase_order_id: values.purchase_order_id,
                 warehouse_id: values.warehouse_id,
                 reference: values.reference,
@@ -184,73 +239,64 @@ export default function GoodsReceiptsPage() {
                     purchase_order_line_id: l.purchase_order_line_id,
                     quantity: l.quantity,
                     unit_cost: l.unit_cost,
+                    lots:
+                        traceabilityEnabled && (l.lots?.length ?? 0) > 0
+                            ? l.lots!.map((lot) => ({
+                                  supplier_lot_no: lot.supplier_lot_no,
+                                  bag_count: lot.bag_count,
+                                  bag_weight_kg: lot.bag_weight_kg,
+                                  total_received_kg: Number((lot.bag_count * lot.bag_weight_kg).toFixed(4)),
+                              }))
+                            : undefined,
                 })),
-            });
-
-            const lotFailures: string[] = [];
-            if (traceabilityEnabled) {
-                for (const line of values.lines) {
-                    for (const lot of line.lots ?? []) {
-                        const grnLine = grn.lines.find(
-                            (l) => l.purchase_order_line_id === line.purchase_order_line_id,
-                        );
-                        if (!grnLine) {
-                            lotFailures.push(`Lot ${lot.supplier_lot_no} (${line.item_label}): line missing on the saved receipt`);
-                            continue;
-                        }
-                        try {
-                            await createMaterialLot({
-                                grn_id: grn.id,
-                                item_id: grnLine.item.id,
-                                supplier_lot_no: lot.supplier_lot_no,
-                                received_date: grn.received_date.slice(0, 10),
-                                bag_count: lot.bag_count,
-                                bag_weight_kg: lot.bag_weight_kg,
-                                total_received_kg: lot.bag_count * lot.bag_weight_kg,
-                                warehouse_id: values.warehouse_id,
-                            });
-                        } catch (error: any) {
-                            lotFailures.push(
-                                `Lot ${lot.supplier_lot_no} (${grnLine.item.sku}): ${error?.response?.data?.message ?? 'unknown error'}`,
-                            );
-                        }
-                    }
-                }
-            }
-
-            return { grn, lotFailures };
-        },
-        onSuccess: ({ grn, lotFailures }) => {
+            }),
+        onSuccess: (grn) => {
             invalidate();
             setModalOpen(false);
             reset({ lines: [] });
-            if (lotFailures.length > 0) {
-                Modal.error({
-                    title: `Receipt #${grn.id} posted, but ${lotFailures.length} lot(s) failed to register`,
-                    content: (
-                        <>
-                            {lotFailures.map((failure) => (
-                                <div key={failure}>{failure}</div>
-                            ))}
-                            <div style={{ marginTop: 8 }}>
-                                The goods receipt itself is saved. Register the failed lots again from Inventory
-                                so their bags get barcodes.
-                            </div>
-                        </>
-                    ),
-                });
+            setServerErrors([]);
+            setReceiptKey(newReceiptKey());
+            const materialLots =
+                grn.material_lots ?? grn.lines.flatMap((line) => line.material_lots ?? []);
+            if (materialLots.length > 0) {
+                setCreatedReceipt({ ...grn, material_lots: materialLots });
+            } else {
+                message.success(`Goods receipt #${grn.id} posted.`);
             }
         },
         onError: (error: any) => {
-            Modal.error({ title: 'Could not post receipt', content: error?.response?.data?.message ?? 'Unknown error' });
+            const body = error?.response?.data;
+            const validationErrors = (body?.errors ?? {}) as Record<string, string[] | string>;
+            const messages = Object.entries(validationErrors).flatMap(([path, value]) => {
+                const fieldMessages = Array.isArray(value) ? value : [value];
+                if (path.startsWith('lines.')) {
+                    setError(path as FieldPath<ReceiptFormValues>, {
+                        type: 'server',
+                        message: fieldMessages[0],
+                    });
+                }
+                return fieldMessages;
+            });
+            setServerErrors(
+                messages.length > 0
+                    ? [...new Set(messages)]
+                    : [body?.message ?? 'The receipt was not saved. Check the entered values and try again.'],
+            );
         },
     });
+
+    const openNewReceipt = () => {
+        reset({ lines: [] });
+        setServerErrors([]);
+        setReceiptKey(newReceiptKey());
+        setModalOpen(true);
+    };
 
     return (
         <>
             <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
                 <Typography.Title level={3} style={{ margin: 0 }}>Goods Receipts</Typography.Title>
-                <Button type="primary" onClick={() => setModalOpen(true)}>New Goods Receipt</Button>
+                <Button type="primary" onClick={openNewReceipt}>New Goods Receipt</Button>
             </Space>
 
             <Table<GoodsReceiptNote>
@@ -288,6 +334,19 @@ export default function GoodsReceiptsPage() {
                 width={700}
             >
                 <Form layout="vertical">
+                    {serverErrors.length > 0 && (
+                        <Alert
+                            type="error"
+                            showIcon
+                            style={{ marginBottom: 16 }}
+                            message="Receipt not saved — your entries are still here"
+                            description={
+                                <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                    {serverErrors.map((error) => <li key={error}>{error}</li>)}
+                                </ul>
+                            }
+                        />
+                    )}
                     <Form.Item
                         label="Purchase Order"
                         validateStatus={errors.purchase_order_id ? 'error' : ''}
@@ -354,7 +413,9 @@ export default function GoodsReceiptsPage() {
                             {/* Phase 6: per-line supplier lots & bags — the GRN
                                 end of the lot → bag → day-bin chain. Optional:
                                 a GRN without lots posts exactly as before. */}
-                            {traceabilityEnabled && <LineLotsSubForm control={control} lineIndex={index} />}
+                            {traceabilityEnabled && isMassUom(field.item_uom) && (
+                                <LineLotsSubForm control={control} lineIndex={index} />
+                            )}
                         </div>
                     ))}
                 </Form>
@@ -397,6 +458,26 @@ export default function GoodsReceiptsPage() {
                             ]}
                         />
                     </>
+                )}
+            </Drawer>
+
+            <Drawer
+                title={`Goods receipt #${createdReceipt?.id} — bag labels ready`}
+                open={createdReceipt !== null}
+                onClose={() => setCreatedReceipt(null)}
+                width={980}
+                destroyOnHidden
+            >
+                {createdReceipt && (
+                    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+                        <Alert
+                            type="success"
+                            showIcon
+                            message="Receipt, lots and bags saved together"
+                            description="Print these labels now, or reopen them later from Inventory → Material Receipts & Bag Labels."
+                        />
+                        <MaterialBagLabels lots={createdReceipt.material_lots ?? []} />
+                    </Space>
                 )}
             </Drawer>
         </>

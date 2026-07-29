@@ -11,10 +11,12 @@ use App\Modules\Inventory\Models\MaterialBag;
 use App\Modules\Inventory\Models\MaterialLot;
 use App\Modules\Production\Models\DayBinMovement;
 use App\Modules\Production\Models\Enums\DayBinMovementType;
+use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Services\DayBinLedgerService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /**
  * The store-side half of Phase 6 traceability: supplier lots, bag fan-out
@@ -38,11 +40,12 @@ class TraceabilityService
 {
     public function __construct(private readonly DayBinLedgerService $dayBin) {}
 
-    public function paginateLots(?int $itemId = null, int $perPage = 20): LengthAwarePaginator
+    public function paginateLots(?int $itemId = null, ?int $grnId = null, int $perPage = 20): LengthAwarePaginator
     {
         return MaterialLot::query()
             ->with(['item', 'bags'])
             ->when($itemId, fn ($query) => $query->where('item_id', $itemId))
+            ->when($grnId, fn ($query) => $query->where('grn_id', $grnId))
             ->orderByDesc('received_date')
             ->orderByDesc('id')
             ->paginate($perPage);
@@ -85,7 +88,8 @@ class TraceabilityService
      * hard guard underneath.
      *
      * @param  array{
-     *     grn_id?: ?int, item_id: int, supplier_lot_no?: ?string,
+     *     grn_id?: ?int, goods_receipt_note_line_id?: ?int, item_id: int,
+     *     supplier_lot_no?: ?string,
      *     received_date: string, bag_count: int,
      *     bag_weight_kg?: string|float|null, total_received_kg: string|float,
      *     warehouse_id?: ?int, notes?: ?string,
@@ -97,6 +101,7 @@ class TraceabilityService
         return DB::transaction(function () use ($data, $createdBy) {
             $lot = MaterialLot::create([
                 'grn_id' => $data['grn_id'] ?? null,
+                'goods_receipt_note_line_id' => $data['goods_receipt_note_line_id'] ?? null,
                 'item_id' => $data['item_id'],
                 'supplier_lot_no' => $data['supplier_lot_no'] ?? null,
                 'received_date' => $data['received_date'],
@@ -180,6 +185,15 @@ class TraceabilityService
     public function loadBagToDayBin(array $data, ?int $userId): DayBinMovement
     {
         return DB::transaction(function () use ($data, $userId) {
+            if (isset($data['shift_production_entry_id'])) {
+                $segment = ShiftProductionEntry::query()->find($data['shift_production_entry_id']);
+                if ($segment === null || $segment->work_center_id !== (int) $data['work_center_id']) {
+                    throw ValidationException::withMessages([
+                        'shift_production_entry_id' => 'The selected production segment belongs to a different machine.',
+                    ]);
+                }
+            }
+
             $bag = MaterialBag::query()
                 ->when(
                     isset($data['material_bag_id']),

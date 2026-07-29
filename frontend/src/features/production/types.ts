@@ -507,6 +507,7 @@ export interface ItemLite {
 export interface MaterialLot {
     id: number;
     grn_id: number | null;
+    goods_receipt_note_line_id?: number | null;
     item?: Item;
     supplier_lot_no: string | null;
     received_date: string | null;

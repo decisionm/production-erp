@@ -12,6 +12,7 @@ class MaterialLotResource extends JsonResource
         return [
             'id' => $this->id,
             'grn_id' => $this->grn_id,
+            'goods_receipt_note_line_id' => $this->goods_receipt_note_line_id,
             'item' => ItemResource::make($this->whenLoaded('item')),
             'supplier_lot_no' => $this->supplier_lot_no,
             'received_date' => $this->received_date?->toDateString(),

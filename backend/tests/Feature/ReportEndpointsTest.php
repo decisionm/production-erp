@@ -280,10 +280,10 @@ class ReportEndpointsTest extends TestCase
 
     public function test_traceability_report_is_404_with_the_flag_off(): void
     {
+        config(['production.traceability_enabled' => false]);
         $this->actingAsViewer();
 
-        // Default config: PROD_TRACEABILITY unset → the report does not
-        // exist, indistinguishable from a deployment that never had it.
+        // An explicitly disabled deployment exposes no traceability report.
         $this->getJson('/api/v1/production/reports/traceability?date_from=2026-07-01&date_to=2026-07-31')
             ->assertNotFound();
         $this->getJson('/api/v1/production/reports/traceability')->assertNotFound();

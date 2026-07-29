@@ -16,8 +16,16 @@ class MaterialLotController extends Controller
 
     public function index(Request $request): AnonymousResourceCollection
     {
+        $validated = $request->validate([
+            'item_id' => ['nullable', 'integer', 'exists:items,id'],
+            'grn_id' => ['nullable', 'integer', 'exists:goods_receipt_notes,id'],
+        ]);
+
         return MaterialLotResource::collection(
-            $this->traceability->paginateLots($request->query('item_id') ? (int) $request->query('item_id') : null),
+            $this->traceability->paginateLots(
+                isset($validated['item_id']) ? (int) $validated['item_id'] : null,
+                isset($validated['grn_id']) ? (int) $validated['grn_id'] : null,
+            ),
         );
     }
 

@@ -33,12 +33,11 @@ return [
             ? (float) env('PROD_TOL_UNACCOUNTED_BLOCKING') : null,
     ],
 
-    // Phase 6 — Lot/Barcode traceability & shift continuity. Master switch:
-    // with this off (the default) the entire feature is invisible and inert —
-    // every traceability route 404s and the SPA renders nothing new. Schema
-    // stays applied either way (additive, harmless). Flip per deployment via
-    // .env once the machine pilot starts (design doc "Rollout" §3).
-    'traceability_enabled' => (bool) env('PROD_TRACEABILITY', false),
+    // Phase 6 — Lot/Barcode traceability & shift continuity. The centralized
+    // GRN → bag labels → bin-bay workflow is now the factory's live path, so
+    // it ships on. A deployment can still fail closed by explicitly setting
+    // PROD_TRACEABILITY=false; schema changes remain additive either way.
+    'traceability_enabled' => (bool) env('PROD_TRACEABILITY', true),
 
     'traceability' => [
         // Vincent Q3 (FIFO mandatory vs preference) absorbed by config:

@@ -582,9 +582,16 @@ export async function createShiftStockCount(payload: CreateShiftStockCountPayloa
 // the aggregates are Production's.
 // ---------------------------------------------------------------------------
 
-export async function listMaterialLots(itemId?: number): Promise<Paginated<MaterialLot>> {
+export interface ListMaterialLotsParams {
+    item_id?: number;
+    grn_id?: number;
+    per_page?: number;
+    page?: number;
+}
+
+export async function listMaterialLots(params?: ListMaterialLotsParams): Promise<Paginated<MaterialLot>> {
     const { data } = await api.get<Paginated<MaterialLot>>('/inventory/material-lots', {
-        params: itemId ? { item_id: itemId } : undefined,
+        params,
     });
     return data;
 }

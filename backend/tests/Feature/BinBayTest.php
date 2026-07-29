@@ -75,10 +75,11 @@ class BinBayTest extends TestCase
 
     public function test_with_the_flag_off_every_bin_bay_route_is_a_404(): void
     {
+        config(['production.traceability_enabled' => false]);
         $this->actingAsUserWithPermissions('production.manage');
         [$resin, , $machine] = $this->masters();
 
-        // Default config: PROD_TRACEABILITY unset => the bay does not exist.
+        // An explicitly disabled deployment has no bin-bay surface.
         $this->getJson('/api/v1/production/bin-bay/availability?work_center_id='.$machine->id.'&item_id='.$resin->id)
             ->assertNotFound();
         $this->getJson('/api/v1/production/bin-bay/history?work_center_id='.$machine->id)->assertNotFound();

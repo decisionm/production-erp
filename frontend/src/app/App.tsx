@@ -53,6 +53,7 @@ import SpcCharacteristicsPage from '@/features/quality/pages/SpcCharacteristicsP
 import BatchesPage from '@/features/inventory/pages/BatchesPage';
 import ItemDetailPage from '@/features/inventory/pages/ItemDetailPage';
 import ItemsPage from '@/features/inventory/pages/ItemsPage';
+import MaterialLotsPage from '@/features/inventory/pages/MaterialLotsPage';
 import SerialNumbersPage from '@/features/inventory/pages/SerialNumbersPage';
 import StockPage from '@/features/inventory/pages/StockPage';
 import WarehousesPage from '@/features/inventory/pages/WarehousesPage';
@@ -90,6 +91,7 @@ export default function App() {
                                     <Route path="/inventory/items/:id" element={<ItemDetailPage />} />
                                     <Route path="/inventory/warehouses" element={<WarehousesPage />} />
                                     <Route path="/inventory/stock" element={<StockPage />} />
+                                    <Route path="/inventory/material-lots" element={<MaterialLotsPage />} />
                                     <Route path="/inventory/batches" element={<BatchesPage />} />
                                     <Route path="/inventory/serial-numbers" element={<SerialNumbersPage />} />
                                     <Route path="/production/work-centers" element={<WorkCentersPage />} />

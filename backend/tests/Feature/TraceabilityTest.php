@@ -79,11 +79,12 @@ class TraceabilityTest extends TestCase
 
     public function test_with_the_flag_off_every_traceability_route_is_a_404(): void
     {
+        config(['production.traceability_enabled' => false]);
         $this->actingAsUserWithPermissions('inventory.manage', 'production.manage');
         [$resin, $warehouse, $machine] = $this->masters();
 
-        // Default config: PROD_TRACEABILITY unset => disabled. The feature
-        // must be indistinguishable from not existing.
+        // An explicitly disabled deployment must make the feature
+        // indistinguishable from not existing.
         $this->getJson('/api/v1/inventory/material-lots')->assertNotFound();
         $this->postJson('/api/v1/inventory/material-lots', [
             'item_id' => $resin->id, 'received_date' => '2026-07-20',
