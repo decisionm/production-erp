@@ -27,12 +27,20 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
     'accountant_signed_by', 'accountant_signed_at',
     'status', 'rejection_reason', 'approved_by', 'approved_at',
     'operator_id', 'notes', 'created_by', 'parent_entry_id',
+    // Configurable production: the resolved configuration, the formula set
+    // that produced this entry's figures, and the frozen inputs.
+    'production_configuration_id', 'calculation_version', 'config_snapshot',
+    'cycle_time_source', 'cavities_source', 'override_reason', 'override_by',
+    'planned_downtime_minutes', 'scheduled_hours',
 ])]
 class ShiftProductionEntry extends Model
 {
     protected function casts(): array
     {
         return [
+            'config_snapshot' => 'array',
+            'planned_downtime_minutes' => 'decimal:2',
+            'scheduled_hours' => 'decimal:2',
             'production_date' => 'date',
             'batch_status' => BatchStatus::class,
             'status' => ShiftProductionEntryStatus::class,

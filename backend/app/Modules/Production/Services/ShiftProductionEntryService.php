@@ -42,6 +42,9 @@ class ShiftProductionEntryService
         private readonly BomService $boms,
         private readonly DayBinLedgerService $dayBin,
         private readonly ProductReadinessService $readiness,
+        private readonly ProductionConfigurationService $configurations,
+        private readonly BatchEstimationService $estimation,
+        private readonly ProductionDowntimeService $downtime,
     ) {}
 
     public function paginate(int $perPage = 20, ?ShiftProductionEntryStatus $status = null): LengthAwarePaginator
@@ -144,30 +147,105 @@ class ShiftProductionEntryService
                 throw ProductNotReadyException::make($readiness);
             }
 
+            $shift = Shift::query()->find($data['shift_id']);
             $productionDate = $data['production_date']
-                ?? Shift::query()->find($data['shift_id'])?->productionDateFor()
+                ?? $shift?->productionDateFor()
                 ?? now()->toDateString();
+
+            // Resolve the approved machine-product configuration. Null means
+            // this product has none yet — the run falls back to the item
+            // master and is stamped legacy/unconfigured so nothing pretends
+            // it ran against an agreed standard.
+            $configuration = $this->configurations->resolve(
+                workCenterId: $data['work_center_id'],
+                itemId: $data['item_id'],
+                moldId: $data['mold_id'] ?? null,
+                colour: $data['colour'] ?? null,
+                on: $productionDate,
+            );
+
+            // Bounded override: a supervisor may deviate from the approved
+            // standard only within its declared limits, and only with a
+            // reason. resolveEffectiveValues() throws otherwise.
+            $effective = $this->configurations->resolveEffectiveValues(
+                $configuration,
+                [
+                    'cycle_time' => $data['cycle_time_override'] ?? null,
+                    // active_cavities is the pre-configuration field and
+                    // still the one the shop-floor form sends. Treated as
+                    // the cavity override so the legacy path keeps working;
+                    // bounds and the reason requirement only bite once an
+                    // approved configuration governs the run.
+                    'cavities' => $data['cavities_override'] ?? $data['active_cavities'] ?? null,
+                    'reason' => $data['override_reason'] ?? null,
+                ],
+                $item,
+            );
+
+            $scheduledHours = $data['scheduled_hours']
+                ?? ($shift !== null ? $this->estimation->shiftLengthHours($shift) : null);
+
+            // Planned downtime known BEFORE the run — this is what makes the
+            // adjusted target differ from the full-shift target at Start,
+            // rather than only explaining the shortfall afterwards.
+            $plannedMinutes = $this->downtime->plannedMinutesFor(
+                $data['work_center_id'],
+                $productionDate,
+                $data['planned_downtime'] ?? [],
+            );
 
             $entry = ShiftProductionEntry::create([
                 'shift_id' => $data['shift_id'],
                 'work_center_id' => $data['work_center_id'],
                 'item_id' => $data['item_id'],
                 'warehouse_id' => $data['warehouse_id'],
+                'production_configuration_id' => $configuration?->id,
                 'production_date' => $productionDate,
                 'batch_number' => $this->generateBatchNumber($data['work_center_id'], $productionDate),
                 'batch_status' => BatchStatus::InProgress,
                 'quantity_produced' => null,
                 'quantity_scrap' => '0',
-                // Snapshot the item's molding standards (see method docblock);
-                // active cavities default to standard, adjustable when the
-                // machine runs with cavities blocked.
-                'standard_cycle_time' => $item?->standard_cycle_time,
-                'standard_cavities' => $item?->standard_cavities,
+                // Standards snapshot. Configuration wins over the item
+                // master; both are frozen here so a later master edit can
+                // never move this run's numbers.
+                'standard_cycle_time' => $configuration?->default_cycle_time ?? $item?->standard_cycle_time,
+                'standard_cavities' => $configuration?->default_cavities ?? $item?->standard_cavities,
                 'actual_cycle_time' => $data['actual_cycle_time'] ?? null,
-                'active_cavities' => $data['active_cavities'] ?? $item?->standard_cavities,
+                'active_cavities' => $effective['cavities'],
+                'cycle_time_source' => $effective['cycle_time_source'],
+                'cavities_source' => $effective['cavities_source'],
+                'override_reason' => $effective['reason'],
+                'override_by' => ($effective['cycle_time_source'] === 'override' || $effective['cavities_source'] === 'override')
+                    ? $createdBy : null,
+                'scheduled_hours' => $scheduledHours,
+                'planned_downtime_minutes' => $plannedMinutes,
+                // Which formula set produced this entry's figures. Stamped
+                // once, never recalculated — see ProductionCalculationEngine.
+                'calculation_version' => ProductionCalculationEngine::VERSION_CURRENT,
+                'config_snapshot' => [
+                    'configuration_id' => $configuration?->id,
+                    'configuration_status' => $configuration?->status?->value,
+                    'effective_cycle_time' => $effective['cycle_time'],
+                    'effective_cavities' => $effective['cavities'],
+                    'cycle_time_source' => $effective['cycle_time_source'],
+                    'cavities_source' => $effective['cavities_source'],
+                    'unit_weight_grams' => (string) ($configuration?->unit_weight_grams ?? $item?->nominal_weight_grams ?? ''),
+                    'nos_per_box' => $item?->nos_per_box,
+                    'nos_per_tray' => $item?->nos_per_tray,
+                    'nos_per_pouch' => $item?->nos_per_pouch,
+                    'bom_id' => $configuration?->bom_id,
+                    'scheduled_hours' => $scheduledHours,
+                    'planned_downtime_minutes' => $plannedMinutes,
+                    // Explicitly recorded so every downstream reader can see
+                    // this run had no agreed standard behind it.
+                    'unconfigured' => $configuration === null,
+                ],
                 'operator_id' => $data['operator_id'] ?? null,
                 'created_by' => $createdBy,
             ]);
+
+            // Attach the planned downtime to the batch now that it exists.
+            $this->downtime->attachPlannedToEntry($entry, $data['planned_downtime'] ?? [], $createdBy);
 
             return $entry->fresh(['shift', 'workCenter', 'item', 'warehouse', 'operator']);
         });

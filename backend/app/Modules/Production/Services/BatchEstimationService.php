@@ -48,7 +48,7 @@ class BatchEstimationService
         ?string $plannedHours = null,
         ?int $activeCavities = null,
     ): array {
-        $hours = $plannedHours ?? ($shift !== null ? $this->shiftHours($shift) : null);
+        $hours = $plannedHours ?? ($shift !== null ? $this->shiftLengthHours($shift) : null);
         $cycleTime = $item->standard_cycle_time !== null ? (string) $item->standard_cycle_time : null;
         $cavities = $activeCavities ?? $item->standard_cavities;
 
@@ -138,7 +138,7 @@ class BatchEstimationService
      * wrap past midnight — the same convention Shift::productionDateFor()
      * encodes for dates.
      */
-    private function shiftHours(Shift $shift): ?string
+    public function shiftLengthHours(Shift $shift): ?string
     {
         if ($shift->start_time === null || $shift->end_time === null) {
             return null;
