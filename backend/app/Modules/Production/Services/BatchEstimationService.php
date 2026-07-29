@@ -48,10 +48,16 @@ class BatchEstimationService
         ?Shift $shift,
         ?string $plannedHours = null,
         ?int $activeCavities = null,
+        ?object $standard = null,
+        ?object $packaging = null,
     ): array {
         $hours = $plannedHours ?? ($shift !== null ? $this->shiftLengthHours($shift) : null);
-        $cycleTime = $item->standard_cycle_time !== null ? (string) $item->standard_cycle_time : null;
-        $cavities = $activeCavities ?? $item->standard_cavities;
+        // The factory product standard outranks the item master — it is the
+        // factory's own current figure for this product.
+        $cycleTime = $standard?->cycle_time !== null
+            ? (string) $standard->cycle_time
+            : ($item->standard_cycle_time !== null ? (string) $item->standard_cycle_time : null);
+        $cavities = $activeCavities ?? $standard?->cavities ?? $item->standard_cavities;
 
         // One floor implementation, in the engine — duplicating it here is
         // exactly how two screens end up disagreeing about the same shift.
@@ -61,9 +67,9 @@ class BatchEstimationService
             : null;
 
         $expectedKg = null;
-        if ($pieces !== null && $item->nominal_weight_grams !== null
-            && bccomp((string) $item->nominal_weight_grams, '0', 4) === 1) {
-            $expectedKg = bcdiv(bcmul((string) $pieces, (string) $item->nominal_weight_grams, 4), '1000', 4);
+        $unitWeight = $standard?->unit_weight_grams ?? $item->nominal_weight_grams;
+        if ($pieces !== null && $unitWeight !== null && bccomp((string) $unitWeight, '0', 4) === 1) {
+            $expectedKg = bcdiv(bcmul((string) $pieces, (string) $unitWeight, 4), '1000', 4);
         }
 
         return [
@@ -74,17 +80,18 @@ class BatchEstimationService
             'expected_cycles' => $cycles,
             'expected_pieces' => $pieces,
             'expected_kg' => $expectedKg,
-            'nos_per_tray' => $item->nos_per_tray,
-            'nos_per_box' => $item->nos_per_box,
-            'nos_per_pouch' => $item->nos_per_pouch,
+            'nos_per_tray' => $packaging?->nos_per_tray ?? $item->nos_per_tray,
+            'nos_per_box' => $packaging?->nos_per_box ?? $item->nos_per_box,
+            'nos_per_pouch' => $packaging?->nos_per_pouch ?? $item->nos_per_pouch,
+            'packaging_mode' => $packaging?->mode,
             // Trays and pouches are packing SUGGESTIONS — how many
             // containers you need, so a part-filled one still counts (ceil).
-            'expected_trays' => $this->containers($pieces, $item->nos_per_tray),
-            'expected_pouches' => $this->containers($pieces, $item->nos_per_pouch),
+            'expected_trays' => $this->containers($pieces, $packaging?->nos_per_tray ?? $item->nos_per_tray),
+            'expected_pouches' => $this->containers($pieces, $packaging?->nos_per_pouch ?? $item->nos_per_pouch),
             // Boxes are the TARGET the shift is measured against, and the
             // factory's EST BOX column rounds to nearest. Using the packing
             // ceil here would inflate the target and understate efficiency.
-            'expected_boxes' => $this->engine->expectedBoxes($pieces, $item->nos_per_box),
+            'expected_boxes' => $this->engine->expectedBoxes($pieces, $packaging?->nos_per_box ?? $item->nos_per_box),
             ...$this->expectedMaterials($item, $pieces),
         ];
     }

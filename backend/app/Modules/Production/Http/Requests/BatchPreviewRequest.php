@@ -26,6 +26,8 @@ class BatchPreviewRequest extends FormRequest
             'shift_id' => ['sometimes', 'nullable', 'integer', 'exists:shifts,id'],
             'planned_hours' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:24'],
             'active_cavities' => ['sometimes', 'nullable', 'integer', 'min:1'],
+            'production_standard_id' => ['sometimes', 'nullable', 'integer', 'exists:production_standards,id'],
+            'production_standard_packaging_id' => ['sometimes', 'nullable', 'integer', 'exists:production_standard_packagings,id'],
         ];
     }
 }

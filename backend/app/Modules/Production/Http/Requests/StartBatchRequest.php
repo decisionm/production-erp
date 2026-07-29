@@ -32,6 +32,10 @@ class StartBatchRequest extends FormRequest
             // approved configuration governs the run; the *_override pair
             // is the bounded, reasoned deviation from it.
             'mold_id' => ['sometimes', 'nullable', 'integer', 'exists:molds,id'],
+            // Which product standard variant and packaging this run uses —
+            // asked only when the product genuinely offers a choice.
+            'production_standard_id' => ['sometimes', 'nullable', 'integer', 'exists:production_standards,id'],
+            'production_standard_packaging_id' => ['sometimes', 'nullable', 'integer', 'exists:production_standard_packagings,id'],
             'colour' => ['sometimes', 'nullable', 'string', 'max:64'],
             'cycle_time_override' => ['sometimes', 'nullable', 'numeric', 'min:0.1', 'max:9999.99'],
             'cavities_override' => ['sometimes', 'nullable', 'integer', 'min:1'],

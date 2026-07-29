@@ -776,11 +776,17 @@ export interface BatchEstimation {
     expected_pouches: number | null;
     expected_materials: EstimatedMaterial[];
     recipe_source: string | null;
+    packaging_mode?: string | null;
 }
 
 export interface BatchPreview {
     readiness: ProductReadiness;
     estimation: BatchEstimation;
+    /** The resolved variant, or null when the product offers a choice. */
+    standard: (Omit<StandardVariant, 'packagings' | 'label'> & { label: string; unresolved_reason: string | null }) | null;
+    variants: StandardVariant[];
+    packaging: { id: number; mode: string; label: string; nos_per_box: number | null } | null;
+    warnings: StandardWarning[];
 }
 
 export interface VoucherPreviewLine {
@@ -881,4 +887,39 @@ export interface ImportResult {
     dry_run: boolean;
     summary: { create: number; conflict: number; rejected: number };
     rows: ImportRowResult[];
+}
+
+/** A packaging option on a product standard: how pieces reach a box. */
+export interface StandardPackaging {
+    id: number;
+    mode: 'pouch' | 'tray' | 'direct_box';
+    label: string;
+    nos_per_pouch: number | null;
+    pouches_per_box: number | null;
+    nos_per_tray: number | null;
+    trays_per_box: number | null;
+    nos_per_box: number | null;
+    is_default: boolean;
+}
+
+/**
+ * One product-level standard variant from the factory master: cavities +
+ * weight + cycle time, with its packaging options. A product may have
+ * several genuinely different variants; the supervisor picks one only when
+ * there is more than one.
+ */
+export interface StandardVariant {
+    id: number;
+    label: string;
+    cavities: number | null;
+    unit_weight_grams: string | null;
+    cycle_time: string | null;
+    status: 'draft' | 'approved' | 'unresolved';
+    packagings: StandardPackaging[];
+}
+
+/** Advisory only — watch mode never blocks a start. */
+export interface StandardWarning {
+    code: string;
+    message: string;
 }

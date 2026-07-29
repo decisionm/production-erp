@@ -530,6 +530,15 @@ export default function ShiftProductionEntryPage() {
     // backend rather than recomputed here: the gate that REFUSES the start
     // is server-side, so the screen must show that same verdict, not a
     // second opinion that could disagree with it.
+    // Variant/packaging selection. Reset whenever the product changes — a
+    // choice made for one product is meaningless for the next.
+    const [selectedStandardId, setSelectedStandardId] = useState<number | undefined>();
+    const [selectedPackagingId, setSelectedPackagingId] = useState<number | undefined>();
+    useEffect(() => {
+        setSelectedStandardId(undefined);
+        setSelectedPackagingId(undefined);
+    }, [startItemId]);
+
     const startWarehouseId = startForm.watch('warehouse_id');
     const startActiveCavities = startForm.watch('active_cavities');
     const { data: batchPreview, isFetching: previewLoading } = useQuery({
@@ -541,6 +550,8 @@ export default function ShiftProductionEntryPage() {
             startWarehouseId,
             effectiveShiftId,
             startActiveCavities,
+            selectedStandardId,
+            selectedPackagingId,
         ],
         queryFn: () =>
             getBatchPreview({
@@ -549,6 +560,8 @@ export default function ShiftProductionEntryPage() {
                 warehouse_id: startWarehouseId,
                 shift_id: effectiveShiftId ?? undefined,
                 active_cavities: startActiveCavities ?? undefined,
+                production_standard_id: selectedStandardId,
+                production_standard_packaging_id: selectedPackagingId,
             }),
         enabled: startingMachine !== null && !!startItemId,
     });
@@ -567,6 +580,8 @@ export default function ShiftProductionEntryPage() {
                 work_center_id: startingMachine.id,
                 shift_id: effectiveShiftId,
                 production_date: today,
+                production_standard_id: selectedStandardId,
+                production_standard_packaging_id: selectedPackagingId,
             });
         },
         onSuccess: () => {
@@ -1307,6 +1322,69 @@ export default function ShiftProductionEntryPage() {
                             }
                         />
                     )}
+                    {/* Variant picker — shown ONLY when the product genuinely has
+                        more than one standard. One variant means no question is
+                        asked: configuration complexity must not reach the floor. */}
+                    {(batchPreview?.variants?.length ?? 0) > 1 && (
+                        <Form.Item
+                            label="Which standard is this run?"
+                            extra="Same product, different cavity / weight / cycle time."
+                        >
+                            <Radio.Group
+                                value={selectedStandardId}
+                                onChange={(e) => {
+                                    setSelectedStandardId(e.target.value);
+                                    setSelectedPackagingId(undefined);
+                                }}
+                                optionType="button"
+                                buttonStyle="solid"
+                                size="large"
+                                options={(batchPreview?.variants ?? []).map((v) => ({
+                                    value: v.id,
+                                    label: v.status === 'unresolved' ? `${v.label} — needs confirming` : v.label,
+                                }))}
+                            />
+                        </Form.Item>
+                    )}
+
+                    {/* Packaging choice — only when both pouch and tray exist. */}
+                    {(() => {
+                        const chosen = (batchPreview?.variants ?? []).find((v) => v.id === selectedStandardId)
+                            ?? (batchPreview?.variants?.length === 1 ? batchPreview.variants[0] : undefined);
+                        if (!chosen || chosen.packagings.length < 2) return null;
+                        return (
+                            <Form.Item label="How is it packed?">
+                                <Radio.Group
+                                    value={selectedPackagingId}
+                                    onChange={(e) => setSelectedPackagingId(e.target.value)}
+                                    optionType="button"
+                                    buttonStyle="solid"
+                                    size="large"
+                                    options={chosen.packagings.map((p) => ({ value: p.id, label: p.label }))}
+                                />
+                            </Form.Item>
+                        );
+                    })()}
+
+                    {/* Watch-mode notes. Advisory by design — the factory has 86
+                        product standards and no machine mapping yet, so blocking
+                        here would stop production without producing information. */}
+                    {(batchPreview?.warnings?.length ?? 0) > 0 && (
+                        <Alert
+                            type="warning"
+                            showIcon
+                            style={{ marginBottom: 16 }}
+                            message="Using the factory product standard"
+                            description={
+                                <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                                    {(batchPreview?.warnings ?? []).map((w) => (
+                                        <li key={w.code}>{w.message}</li>
+                                    ))}
+                                </ul>
+                            }
+                        />
+                    )}
+
                     {startItem && (
                         <>
                             {/* Read-only card of the item master's standards — what the

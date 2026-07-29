@@ -35,6 +35,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
     // Audited target adjustment — the replacement for the workbook's
     // unexplained "+1" cells.
     'target_boxes_override', 'target_override_reason', 'target_override_by',
+    'production_standard_id', 'production_standard_packaging_id', 'packaging_mode',
 ])]
 class ShiftProductionEntry extends Model
 {

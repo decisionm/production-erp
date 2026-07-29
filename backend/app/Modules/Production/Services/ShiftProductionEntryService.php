@@ -45,6 +45,7 @@ class ShiftProductionEntryService
         private readonly ProductionConfigurationService $configurations,
         private readonly BatchEstimationService $estimation,
         private readonly ProductionDowntimeService $downtime,
+        private readonly ProductionStandardResolver $standards,
     ) {}
 
     public function paginate(int $perPage = 20, ?ShiftProductionEntryStatus $status = null): LengthAwarePaginator
@@ -164,6 +165,12 @@ class ShiftProductionEntryService
                 on: $productionDate,
             );
 
+            // The product-level standard from the factory master. In watch
+            // mode this is what a run uses when no machine-product
+            // configuration is approved — which is every product today.
+            $standard = $this->standards->resolve($data['item_id'], $data['production_standard_id'] ?? null);
+            $packaging = $this->standards->resolvePackaging($standard, $data['production_standard_packaging_id'] ?? null);
+
             // Bounded override: a supervisor may deviate from the approved
             // standard only within its declared limits, and only with a
             // reason. resolveEffectiveValues() throws otherwise.
@@ -179,7 +186,11 @@ class ShiftProductionEntryService
                     'cavities' => $data['cavities_override'] ?? $data['active_cavities'] ?? null,
                     'reason' => $data['override_reason'] ?? null,
                 ],
-                $item,
+                // Fallback order: approved machine configuration, then the
+                // factory product standard, then the item master. The
+                // standard beats the item master because it is the factory's
+                // own current figure.
+                $standard ?? $item,
             );
 
             $scheduledHours = $data['scheduled_hours']
@@ -200,6 +211,12 @@ class ShiftProductionEntryService
                 'item_id' => $data['item_id'],
                 'warehouse_id' => $data['warehouse_id'],
                 'production_configuration_id' => $configuration?->id,
+                // Recorded even with no approved mapping: this pairing of
+                // machine and standard is the evidence the factory will
+                // later approve a machine-product mapping FROM.
+                'production_standard_id' => $standard?->id,
+                'production_standard_packaging_id' => $packaging?->id,
+                'packaging_mode' => $packaging?->mode,
                 'production_date' => $productionDate,
                 'batch_number' => $this->generateBatchNumber($data['work_center_id'], $productionDate),
                 'batch_status' => BatchStatus::InProgress,
@@ -208,8 +225,8 @@ class ShiftProductionEntryService
                 // Standards snapshot. Configuration wins over the item
                 // master; both are frozen here so a later master edit can
                 // never move this run's numbers.
-                'standard_cycle_time' => $configuration?->default_cycle_time ?? $item?->standard_cycle_time,
-                'standard_cavities' => $configuration?->default_cavities ?? $item?->standard_cavities,
+                'standard_cycle_time' => $configuration?->default_cycle_time ?? $standard?->cycle_time ?? $item?->standard_cycle_time,
+                'standard_cavities' => $configuration?->default_cavities ?? $standard?->cavities ?? $item?->standard_cavities,
                 'actual_cycle_time' => $data['actual_cycle_time'] ?? null,
                 'active_cavities' => $effective['cavities'],
                 'cycle_time_source' => $effective['cycle_time_source'],
@@ -229,10 +246,14 @@ class ShiftProductionEntryService
                     'effective_cavities' => $effective['cavities'],
                     'cycle_time_source' => $effective['cycle_time_source'],
                     'cavities_source' => $effective['cavities_source'],
-                    'unit_weight_grams' => (string) ($configuration?->unit_weight_grams ?? $item?->nominal_weight_grams ?? ''),
-                    'nos_per_box' => $item?->nos_per_box,
-                    'nos_per_tray' => $item?->nos_per_tray,
-                    'nos_per_pouch' => $item?->nos_per_pouch,
+                    'unit_weight_grams' => (string) ($configuration?->unit_weight_grams ?? $standard?->unit_weight_grams ?? $item?->nominal_weight_grams ?? ''),
+                    'production_standard_id' => $standard?->id,
+                    'packaging_mode' => $packaging?->mode,
+                    'nos_per_box' => $packaging?->nos_per_box ?? $item?->nos_per_box,
+                    'nos_per_tray' => $packaging?->nos_per_tray ?? $item?->nos_per_tray,
+                    'nos_per_pouch' => $packaging?->nos_per_pouch ?? $item?->nos_per_pouch,
+                    'pouches_per_box' => $packaging?->pouches_per_box,
+                    'trays_per_box' => $packaging?->trays_per_box,
                     'bom_id' => $configuration?->bom_id,
                     'scheduled_hours' => $scheduledHours,
                     'planned_downtime_minutes' => $plannedMinutes,

@@ -231,17 +231,11 @@ class ProductionConfigurationService
             ]);
         }
 
-        $ct = (float) $configuration->default_cycle_time;
-        if ($machine->cycle_time_min !== null && $ct < (float) $machine->cycle_time_min) {
-            throw ValidationException::withMessages([
-                'default_cycle_time' => "{$machine->name} has a minimum cycle time of {$machine->cycle_time_min}s.",
-            ]);
-        }
-        if ($machine->cycle_time_max !== null && $ct > (float) $machine->cycle_time_max) {
-            throw ValidationException::withMessages([
-                'default_cycle_time' => "{$machine->name} has a maximum cycle time of {$machine->cycle_time_max}s.",
-            ]);
-        }
+        // Cycle-time bounds are ADVISORY, never blocking. The factory's own
+        // product master contains 48 approved standards above the 14 s
+        // "global maximum" — up to 30.5 s — so a blocking bound would
+        // refuse half the real catalogue. Unusual values are surfaced as
+        // warnings by cycleTimeWarning(); they never stop a valid standard.
     }
 
     /**
@@ -292,13 +286,20 @@ class ProductionConfigurationService
      */
     public function resolveEffectiveValues(?ProductionConfiguration $configuration, array $override, ?object $itemFallback = null): array
     {
+        // $itemFallback is either an Item (standard_cycle_time /
+        // standard_cavities) or a ProductionStandard (cycle_time /
+        // cavities). Both are read here so the caller can pass whichever is
+        // the best available source without a second code path.
+        $fallbackCt = $itemFallback?->cycle_time ?? $itemFallback?->standard_cycle_time ?? null;
+        $fallbackCav = $itemFallback?->cavities ?? $itemFallback?->standard_cavities ?? null;
+
         $baseCt = $configuration?->default_cycle_time !== null
             ? (string) $configuration->default_cycle_time
-            : ($itemFallback?->standard_cycle_time !== null ? (string) $itemFallback->standard_cycle_time : null);
-        $baseCav = $configuration?->default_cavities ?? $itemFallback?->standard_cavities;
+            : ($fallbackCt !== null ? (string) $fallbackCt : null);
+        $baseCav = $configuration?->default_cavities ?? $fallbackCav;
 
-        $ctSource = $configuration?->default_cycle_time !== null ? 'configuration' : ($baseCt !== null ? 'item_master' : 'none');
-        $cavSource = $configuration?->default_cavities !== null ? 'configuration' : ($baseCav !== null ? 'item_master' : 'none');
+        $ctSource = $configuration?->default_cycle_time !== null ? 'configuration' : ($baseCt !== null ? 'product_standard' : 'none');
+        $cavSource = $configuration?->default_cavities !== null ? 'configuration' : ($baseCav !== null ? 'product_standard' : 'none');
 
         $ct = $baseCt;
         $cav = $baseCav;
@@ -343,24 +344,38 @@ class ProductionConfigurationService
         ];
     }
 
-    private function assertCycleTimeAllowed(string $value, ?ProductionConfiguration $configuration): void
+    /**
+     * An advisory note when a cycle time sits outside the declared bounds,
+     * or null when it does not. Deliberately not an exception: the factory's
+     * master carries valid standards well outside the global range, and a
+     * supervisor who cannot start a real product because of a config row
+     * will simply stop using the app.
+     */
+    public function cycleTimeWarning(?string $value, ?ProductionConfiguration $configuration = null, ?object $machine = null): ?string
     {
-        // Narrowest applicable bound wins: configuration, else machine, else
-        // the global factory setting. An unbounded value is allowed only
-        // when nothing anywhere declares a bound.
-        $min = $configuration?->cycle_time_min ?? $configuration?->workCenter?->cycle_time_min;
-        $max = $configuration?->cycle_time_max ?? $configuration?->workCenter?->cycle_time_max;
+        if ($value === null) {
+            return null;
+        }
+
+        $min = $configuration?->cycle_time_min ?? $machine?->cycle_time_min;
+        $max = $configuration?->cycle_time_max ?? $machine?->cycle_time_max;
 
         if ($min !== null && (float) $value < (float) $min) {
-            throw ValidationException::withMessages([
-                'cycle_time' => "Cycle time {$value}s is below the permitted minimum of {$min}s.",
-            ]);
+            return "Cycle time {$value}s is below the usual minimum of {$min}s for this machine.";
         }
         if ($max !== null && (float) $value > (float) $max) {
-            throw ValidationException::withMessages([
-                'cycle_time' => "Cycle time {$value}s is above the permitted maximum of {$max}s.",
-            ]);
+            return "Cycle time {$value}s is above the usual maximum of {$max}s for this machine.";
         }
+
+        return null;
+    }
+
+    private function assertCycleTimeAllowed(string $value, ?ProductionConfiguration $configuration): void
+    {
+        // Intentionally empty of throws — see cycleTimeWarning(). Kept as a
+        // named seam so the call site still reads as "check the cycle time",
+        // and so a future factory decision to make bounds hard has one
+        // obvious place to live.
     }
 
     private function assertCavitiesAllowed(int $value, ?ProductionConfiguration $configuration): void

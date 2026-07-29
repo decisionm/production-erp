@@ -114,14 +114,52 @@ class ProductionConfigurationTest extends TestCase
             ->assertJsonPath('errors.default_cavities.0', 'Machine 10 permits only these cavity options: 6, 7, 8.');
     }
 
-    public function test_approval_refuses_a_cycle_time_outside_the_machine_bounds(): void
+    public function test_a_cycle_time_above_the_global_bound_is_approved_with_a_warning(): void
     {
-        $config = $this->draft(['default_cycle_time' => '20']);
+        // The factory's own product master carries 48 standards above the
+        // 14 s "global maximum", up to 30.5 s. A blocking bound would
+        // refuse half the real catalogue, so bounds are advisory.
+        $config = $this->draft(['default_cycle_time' => '21.5']);
 
         $this->actor();
         $this->postJson("/api/v1/production/configurations/{$config->id}/approve")
-            ->assertStatus(422)
-            ->assertJsonPath('errors.default_cycle_time.0', 'Machine 10 has a maximum cycle time of 14.00s.');
+            ->assertOk()
+            ->assertJsonPath('data.status', 'approved')
+            ->assertJsonPath('data.default_cycle_time', '21.50');
+
+        // The advisory note is still available to show beside it.
+        $warning = app(ProductionConfigurationService::class)
+            ->cycleTimeWarning('21.5', $config->fresh()->load('workCenter'), $this->machine);
+
+        $this->assertNotNull($warning);
+        $this->assertStringContainsString('above the usual maximum', $warning);
+    }
+
+    public function test_cavity_six_and_seven_are_ordinary_valid_configurations(): void
+    {
+        // 6 and 7 are CAVITY COUNTS, not machines. The factory master has
+        // 6 variants at 6 cavities and 4 at 7, and they must behave exactly
+        // like 2, 3, 4 or 5.
+        $service = app(ProductionConfigurationService::class);
+        $this->actor();
+
+        foreach ([6, 7] as $cavities) {
+            $item = Item::create([
+                'sku' => "BTL-CAV{$cavities}", 'name' => "Bottle {$cavities} cav",
+                'uom' => 'Nos.', 'is_active' => true, 'nominal_weight_grams' => '10.5',
+            ]);
+
+            $config = $service->create([
+                'work_center_id' => $this->machine->id, 'item_id' => $item->id,
+                'default_cycle_time' => '11.6', 'default_cavities' => $cavities,
+                'unit_weight_grams' => '10.5',
+            ], null);
+
+            $this->postJson("/api/v1/production/configurations/{$config->id}/approve")
+                ->assertOk()
+                ->assertJsonPath('data.default_cavities', $cavities)
+                ->assertJsonPath('data.status', 'approved');
+        }
     }
 
     public function test_two_approved_configurations_cannot_overlap_in_time(): void

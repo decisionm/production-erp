@@ -264,6 +264,10 @@ export interface StartBatchPayload {
     warehouse_id: number;
     production_date?: string;
     operator_id?: number;
+    // Which factory product-standard variant and packaging this run uses.
+    // Asked only when the product genuinely offers a choice.
+    production_standard_id?: number;
+    production_standard_packaging_id?: number;
     // Backend defaults active cavities to the item's standard at Start Batch;
     // sent when the supervisor overrides it up front (e.g. blocked cavity).
     // Complete Batch re-sends it, so a backend that ignores this still gets
@@ -273,6 +277,8 @@ export interface StartBatchPayload {
 
 export interface BatchPreviewParams {
     item_id: number;
+    production_standard_id?: number;
+    production_standard_packaging_id?: number;
     work_center_id?: number;
     warehouse_id?: number;
     shift_id?: number;
