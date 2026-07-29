@@ -3,6 +3,7 @@
 namespace App\Modules\Production\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StartBatchRequest extends FormRequest
 {
@@ -17,9 +18,17 @@ class StartBatchRequest extends FormRequest
             'shift_id' => ['required', 'integer', 'exists:shifts,id'],
             'work_center_id' => ['required', 'integer', 'exists:work_centers,id'],
             'item_id' => ['required', 'integer', 'exists:items,id'],
-            'warehouse_id' => ['required', 'integer', 'exists:warehouses,id'],
+            'warehouse_id' => [
+                'required',
+                'integer',
+                Rule::exists('warehouses', 'id')->where('is_active', true),
+            ],
             'production_date' => ['nullable', 'date'],
-            'operator_id' => ['nullable', 'integer', 'exists:employees,id'],
+            'operator_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('employees', 'id')->where('status', 'active'),
+            ],
             // Run actuals, optional at start (may also be set at completion).
             // standard_cycle_time / standard_cavities are deliberately NOT
             // accepted here (or anywhere): they are snapshotted from the item

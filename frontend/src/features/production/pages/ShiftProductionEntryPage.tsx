@@ -3,9 +3,9 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import { Alert, Button, Card, Checkbox, Col, Descriptions, Drawer, Form, Input, InputNumber, Modal, Radio, Row, Select, Space, Table, Tag, TimePicker, Typography } from 'antd';
 import dayjs from 'dayjs';
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import { listAllEmployees } from '@/features/hrms/api';
 import { listAllItems, listAllWarehouses } from '@/features/inventory/api';
@@ -49,6 +49,13 @@ import type {
 } from '@/features/production/types';
 import { currentShift, justEndedShift, productionDateFor } from '@/features/production/shiftClock';
 import { roundPer, useProductionSettings } from '@/features/production/packing';
+import {
+    buildStartBatchRecipeUrl,
+    hasStartBatchResume,
+    parseStartBatchResume,
+    type StartBatchResumeDraft,
+    type StartBatchResumeOutcome,
+} from '@/features/production/startBatchResume';
 
 // Combines a picked "HH:mm" with today's date into a full ISO datetime for
 // the API — shared by every backdate-capable modal below (Report Down,
@@ -534,6 +541,11 @@ export default function ShiftProductionEntryPage() {
     const [selectedShiftId, setSelectedShiftId] = useState<number | undefined>(undefined);
     const [graceBannerDismissed, setGraceBannerDismissed] = useState(false);
     const [startingMachine, setStartingMachine] = useState<WorkCenter | null>(null);
+    const [pendingStartBatchResume, setPendingStartBatchResume] = useState<StartBatchResumeDraft | null>(null);
+    const pendingStartBatchResumeRef = useRef<StartBatchResumeDraft | null>(null);
+    const processedStartBatchResumeQueryRef = useRef<string | null>(null);
+    const [startProductionDateOverride, setStartProductionDateOverride] = useState<string | null>(null);
+    const [startResumeNotice, setStartResumeNotice] = useState<StartBatchResumeOutcome | null>(null);
     const [completingEntry, setCompletingEntry] = useState<ShiftProductionEntry | null>(null);
     const [reportingDownMachine, setReportingDownMachine] = useState<WorkCenter | null>(null);
     const [closingDowntimeLog, setClosingDowntimeLog] = useState<MachineDowntimeLog | null>(null);
@@ -546,6 +558,17 @@ export default function ShiftProductionEntryPage() {
     const [dayBinTarget, setDayBinTarget] = useState<{ workCenter: WorkCenter; entry: ShiftProductionEntry } | null>(null);
     const [handoverEntry, setHandoverEntry] = useState<ShiftProductionEntry | null>(null);
     const queryClient = useQueryClient();
+    const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
+    const resumeQuery = searchParams.toString();
+    const resumeFlowRequested = useMemo(
+        () => hasStartBatchResume(new URLSearchParams(resumeQuery), 'resume'),
+        [resumeQuery],
+    );
+    const parsedStartBatchResume = useMemo(
+        () => (resumeFlowRequested ? parseStartBatchResume(new URLSearchParams(resumeQuery)) : null),
+        [resumeFlowRequested, resumeQuery],
+    );
 
     const { data: shifts } = useQuery({ queryKey: ['production', 'shifts'], queryFn: listShifts });
     const { data: workCenters } = useQuery({ queryKey: ['production', 'work-centers', 'active'], queryFn: () => listWorkCenters(true) });
@@ -652,9 +675,15 @@ export default function ShiftProductionEntryPage() {
     // pick of something to install — it can be any mold regardless of
     // current status (it may have gone straight to "under repair").
     const allMoldOptions = molds?.data.map((m) => ({ value: m.id, label: `${m.code} — ${m.name}` })) ?? [];
-    const warehouseOptions = warehouses?.data.map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })) ?? [];
+    const warehouseOptions =
+        warehouses?.data
+            .filter((warehouse) => warehouse.is_active)
+            .map((warehouse) => ({ value: warehouse.id, label: `${warehouse.code} — ${warehouse.name}` })) ?? [];
     const scrapReasonOptions = scrapReasons?.data.map((r) => ({ value: r.id, label: `${r.code} — ${r.name}` })) ?? [];
-    const employeeOptions = employees?.data.map((e) => ({ value: e.id, label: `${e.employee_code} — ${e.name}` })) ?? [];
+    const employeeOptions =
+        employees?.data
+            .filter((employee) => employee.status === 'active')
+            .map((employee) => ({ value: employee.id, label: `${employee.employee_code} — ${employee.name}` })) ?? [];
 
     // Default to the shift whose time window contains "now" (Night handled
     // across midnight), so a supervisor who never touches the picker still
@@ -673,6 +702,10 @@ export default function ShiftProductionEntryPage() {
     // Shift-aware, LOCAL production date: at 02:00 on the Night shift this is
     // yesterday (the shift's start date), so the whole night files together.
     const today = productionDateFor(effectiveShift);
+    // A Configure Recipe round-trip may cross a shift/date boundary. Preserve
+    // the date the supervisor originally reviewed instead of silently filing
+    // the batch under whatever the wall clock says when they return.
+    const startProductionDate = startProductionDateOverride ?? today;
     // The clock's ACTUAL current context (not the shift the user is viewing) —
     // a running batch outside it is a carryover to flag, independent of which
     // shift tab is selected.
@@ -800,6 +833,10 @@ export default function ShiftProductionEntryPage() {
     // Items without a standard leave it blank — fully manual, as before.
     useEffect(() => {
         if (!startingMachine) return;
+        // During a Configure Recipe round-trip the supervisor's draft is the
+        // source of truth. The normal item-default effect must not overwrite
+        // the cavities/colour they already reviewed.
+        if (pendingStartBatchResumeRef.current?.item_id === startItem?.id) return;
         startForm.setValue('active_cavities', startItem?.standard_cavities ?? undefined);
         // Colour is per-item too. Cleared on every product change so a colour
         // chosen for the last product can never ride along onto this one —
@@ -815,11 +852,13 @@ export default function ShiftProductionEntryPage() {
     const [selectedStandardId, setSelectedStandardId] = useState<number | undefined>();
     const [selectedPackagingId, setSelectedPackagingId] = useState<number | undefined>();
     useEffect(() => {
+        if (pendingStartBatchResumeRef.current?.item_id === startItemId) return;
         setSelectedStandardId(undefined);
         setSelectedPackagingId(undefined);
     }, [startItemId]);
 
     const startWarehouseId = startForm.watch('warehouse_id');
+    const startOperatorId = startForm.watch('operator_id');
     const startActiveCavities = startForm.watch('active_cavities');
     const startColour = startForm.watch('colour');
     const { data: batchPreview, isFetching: previewLoading } = useQuery({
@@ -846,6 +885,210 @@ export default function ShiftProductionEntryPage() {
             }),
         enabled: startingMachine !== null && !!startItemId,
     });
+
+    // A single standard is intentionally not shown as a choice, but it is
+    // still the standard behind any packaging option and must travel through
+    // Configure Recipe and into Start Batch. Without this resolved id, a
+    // pouch choice would be detached from the only standard it belongs to.
+    const resolvedStartStandardId =
+        selectedStandardId
+        ?? (batchPreview?.variants?.length === 1 ? batchPreview.variants[0].id : undefined);
+    const startBatchRecipeDraft = useMemo<StartBatchResumeDraft | null>(() => {
+        if (!startingMachine || !effectiveShiftId || !startItemId || !startWarehouseId) return null;
+        return {
+            machine_id: startingMachine.id,
+            shift_id: effectiveShiftId,
+            production_date: startProductionDate,
+            item_id: startItemId,
+            warehouse_id: startWarehouseId,
+            operator_id: startOperatorId,
+            active_cavities: startActiveCavities ?? undefined,
+            standard_id: resolvedStartStandardId,
+            packaging_id: selectedPackagingId,
+            colour: startColour ?? undefined,
+        };
+    }, [
+        effectiveShiftId,
+        selectedPackagingId,
+        resolvedStartStandardId,
+        startActiveCavities,
+        startColour,
+        startItemId,
+        startOperatorId,
+        startProductionDate,
+        startWarehouseId,
+        startingMachine,
+    ]);
+
+    // Imported factory standards live on production_standards, while the
+    // legacy item-master cavity may be empty. Once the server resolves the
+    // exact standard for this run, use that cavity as the editable default.
+    // Primitive dependencies keep a supervisor's later manual edit intact;
+    // the effect reruns only when the product/standard itself changes.
+    const resolvedStartCavities =
+        batchPreview?.standard?.cavities ?? startItem?.standard_cavities ?? undefined;
+    useEffect(() => {
+        if (!startingMachine || !startItemId || resolvedStartCavities === undefined) return;
+        if (pendingStartBatchResumeRef.current?.item_id === startItemId) return;
+        if (selectedStandardId && batchPreview?.standard?.id !== selectedStandardId) return;
+
+        startForm.setValue('active_cavities', resolvedStartCavities);
+    }, [
+        batchPreview?.standard?.id,
+        resolvedStartCavities,
+        selectedStandardId,
+        startForm,
+        startItemId,
+        startingMachine,
+    ]);
+
+    // Restore a Start Batch draft after the supervisor creates/cancels a BOM.
+    // Query parameters are only a transport: every id is checked against the
+    // freshly loaded reference data, then consumed with replace so refresh or
+    // Back cannot reopen the modal forever.
+    useEffect(() => {
+        if (!resumeFlowRequested) {
+            processedStartBatchResumeQueryRef.current = null;
+            return;
+        }
+        if (!workCenters || !items || !warehouses || !employees || !shifts || !activeBatches) return;
+        if (processedStartBatchResumeQueryRef.current === resumeQuery) return;
+        processedStartBatchResumeQueryRef.current = resumeQuery;
+
+        if (
+            !parsedStartBatchResume
+            || parsedStartBatchResume.phase !== 'resume'
+            || !parsedStartBatchResume.outcome
+        ) {
+            setSearchParams({}, { replace: true });
+            Modal.error({
+                title: 'Could not restore Start Batch',
+                content: 'The saved setup link is incomplete or invalid. Open the machine and review the batch again.',
+            });
+            return;
+        }
+
+        const { draft, outcome } = parsedStartBatchResume;
+        const machine = workCenters.data.find((candidate) => candidate.id === draft.machine_id && candidate.is_active);
+        const shift = shifts.data.find((candidate) => candidate.id === draft.shift_id && candidate.is_active);
+        const item = items.data.find((candidate) => candidate.id === draft.item_id && candidate.is_active);
+        const warehouse = warehouses.data.find(
+            (candidate) => candidate.id === draft.warehouse_id && candidate.is_active,
+        );
+        const operatorExists =
+            draft.operator_id === undefined
+            || employees.data.some(
+                (candidate) => candidate.id === draft.operator_id && candidate.status === 'active',
+            );
+        const machineRunning = activeBatches.data.some(
+            (entry) => entry.batch_status === 'in_progress' && entry.work_center.id === draft.machine_id,
+        );
+
+        const invalidReason =
+            !machine
+                ? 'The selected machine is no longer active.'
+                : machineRunning
+                    ? 'Another batch is now running on this machine.'
+                    : !shift
+                        ? 'The selected shift is no longer active.'
+                        : !item
+                            ? 'The selected product is no longer active.'
+                            : !warehouse
+                                ? 'The selected finished-goods warehouse no longer exists.'
+                                : !operatorExists
+                                    ? 'The selected operator is no longer available.'
+                                    : null;
+
+        setSearchParams({}, { replace: true });
+        if (invalidReason || !machine) {
+            Modal.error({
+                title: 'Start Batch was not reopened',
+                content: `${invalidReason ?? 'The saved setup is no longer valid'} Review the current floor state and start again.`,
+            });
+            return;
+        }
+
+        // A newly created recipe changes readiness and material estimation.
+        // Refetch those facts; never carry a preview through the side trip.
+        if (outcome === 'created') {
+            queryClient.invalidateQueries({ queryKey: ['production', 'batch-preview'] });
+            // Availability is recipe-dependent. Remove, rather than merely
+            // invalidate, so a cached old recipe cannot keep Start enabled
+            // while the new component/shortage calculation is in flight.
+            queryClient.removeQueries({ queryKey: ['production', 'bin-bay', 'availability'] });
+        }
+
+        pendingStartBatchResumeRef.current = draft;
+        setPendingStartBatchResume(draft);
+        setStartProductionDateOverride(draft.production_date);
+        setStartResumeNotice(outcome);
+        setSelectedShiftId(draft.shift_id);
+        setSelectedStandardId(undefined);
+        setSelectedPackagingId(undefined);
+        setStartingMachine(machine);
+        startForm.reset({
+            item_id: draft.item_id,
+            warehouse_id: draft.warehouse_id,
+            operator_id: draft.operator_id,
+            active_cavities: draft.active_cavities,
+            colour: draft.colour,
+        });
+        if (draft.active_cavities !== undefined) {
+            startForm.setValue('active_cavities', draft.active_cavities, { shouldDirty: true });
+        }
+        if (draft.colour !== undefined) {
+            startForm.setValue('colour', draft.colour, { shouldDirty: true });
+        }
+    }, [
+        activeBatches,
+        employees,
+        items,
+        parsedStartBatchResume,
+        queryClient,
+        resumeQuery,
+        resumeFlowRequested,
+        setSearchParams,
+        shifts,
+        startForm,
+        warehouses,
+        workCenters,
+    ]);
+
+    // The variant/package ids are validated against a fresh base preview for
+    // the restored product. A stale or cross-product id is dropped rather
+    // than being attached to the wrong run.
+    useEffect(() => {
+        if (!pendingStartBatchResume || !batchPreview) return;
+
+        let selectionWarning: string | null = null;
+        const restoredStandard = pendingStartBatchResume.standard_id
+            ? batchPreview.variants.find((variant) => variant.id === pendingStartBatchResume.standard_id)
+            : undefined;
+
+        if (pendingStartBatchResume.standard_id && !restoredStandard) {
+            selectionWarning = 'The previously selected production standard is no longer available; select it again.';
+        } else {
+            setSelectedStandardId(restoredStandard?.id);
+        }
+
+        if (pendingStartBatchResume.packaging_id) {
+            const restoredPackaging = restoredStandard?.packagings.find(
+                (packaging) => packaging.id === pendingStartBatchResume.packaging_id,
+            );
+            if (restoredPackaging) {
+                setSelectedPackagingId(restoredPackaging.id);
+            } else {
+                selectionWarning =
+                    'The previously selected packaging option is no longer available; select it again.';
+            }
+        }
+
+        setPendingStartBatchResume(null);
+        pendingStartBatchResumeRef.current = null;
+        if (selectionWarning) {
+            Modal.warning({ title: 'Production setup changed', content: selectionWarning });
+        }
+    }, [batchPreview, pendingStartBatchResume]);
 
     // ---------------------------------------------------------------------
     // Material availability, read from the CENTRAL bin bay.
@@ -948,8 +1191,8 @@ export default function ShiftProductionEntryPage() {
                 colour: startColourRequired ? (colour ?? undefined) : undefined,
                 work_center_id: startingMachine.id,
                 shift_id: effectiveShiftId,
-                production_date: today,
-                production_standard_id: selectedStandardId,
+                production_date: startProductionDate,
+                production_standard_id: resolvedStartStandardId,
                 production_standard_packaging_id: selectedPackagingId,
                 // Only when the shortage was real AND explicitly waved
                 // through — never a stale reason from a shortage that has
@@ -961,6 +1204,10 @@ export default function ShiftProductionEntryPage() {
         onSuccess: () => {
             invalidate();
             setStartingMachine(null);
+            setStartProductionDateOverride(null);
+            setStartResumeNotice(null);
+            setPendingStartBatchResume(null);
+            pendingStartBatchResumeRef.current = null;
             startForm.reset();
             setStartAnyway(false);
             setShortageReason('');
@@ -1723,6 +1970,12 @@ export default function ShiftProductionEntryPage() {
                                 mb_item_id: suggestMasterbatchId(items?.data, running.item.colour),
                             });
                         } else {
+                            setStartProductionDateOverride(null);
+                            setStartResumeNotice(null);
+                            setPendingStartBatchResume(null);
+                            pendingStartBatchResumeRef.current = null;
+                            setSelectedStandardId(undefined);
+                            setSelectedPackagingId(undefined);
                             setStartingMachine(wc);
                             // Default the warehouse to a finished-goods godown that
                             // Tally actually knows (tally_guid set) — the voucher's
@@ -1873,7 +2126,13 @@ export default function ShiftProductionEntryPage() {
                 maskClosable={false}
                 title={`Start Batch — ${startingMachine?.name}`}
                 open={startingMachine !== null}
-                onCancel={() => setStartingMachine(null)}
+                onCancel={() => {
+                    setStartingMachine(null);
+                    setStartProductionDateOverride(null);
+                    setStartResumeNotice(null);
+                    setPendingStartBatchResume(null);
+                    pendingStartBatchResumeRef.current = null;
+                }}
                 onOk={startForm.handleSubmit((values) => startMutation.mutate(values))}
                 confirmLoading={startMutation.isPending}
                 // Fail-closed in the UI too: the button is dead until the
@@ -1882,6 +2141,11 @@ export default function ShiftProductionEntryPage() {
                 okButtonProps={{
                     disabled:
                         previewLoading
+                        // During a Configure Recipe return, the base preview
+                        // arrives before the saved variant/package selection
+                        // is revalidated against it. Never allow the brief
+                        // intermediate state to start a different standard.
+                        || pendingStartBatchResume !== null
                         || (!!startItemId && !!batchPreview && !batchPreview.readiness.ready)
                         // A material shortage does not refuse the start — the
                         // backend records it and lets the batch run. It only
@@ -1914,8 +2178,20 @@ export default function ShiftProductionEntryPage() {
                     auto-picked from the clock, so show it rather than ask again. */}
                 <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
                     Shift: <Typography.Text strong>{effectiveShift?.name ?? '—'}</Typography.Text>
-                    {' · '}Date: <Typography.Text strong>{today}</Typography.Text>
+                    {' · '}Date: <Typography.Text strong>{startProductionDate}</Typography.Text>
                 </Typography.Paragraph>
+                {startResumeNotice && (
+                    <Alert
+                        type={startResumeNotice === 'created' ? 'success' : 'info'}
+                        showIcon
+                        style={{ marginBottom: 16 }}
+                        message={
+                            startResumeNotice === 'created'
+                                ? 'Recipe saved — readiness and material estimates were refreshed.'
+                                : 'Recipe was not changed — your Start Batch details were restored.'
+                        }
+                    />
+                )}
                 <Form layout="vertical">
                     <Form.Item
                         label="Item"
@@ -2256,11 +2532,22 @@ export default function ShiftProductionEntryPage() {
                                     style={{ marginBottom: 16 }}
                                     message="No consumption recipe for this product — resin, masterbatch and consumables cannot be estimated."
                                     action={
-                                        startItemId ? (
-                                            <Link to={`/production/boms?item_id=${startItemId}`}>
-                                                <Button size="small">Configure recipe</Button>
-                                            </Link>
-                                        ) : undefined
+                                        <Button
+                                            size="small"
+                                            disabled={!startBatchRecipeDraft}
+                                            title={
+                                                startBatchRecipeDraft
+                                                    ? undefined
+                                                    : 'Choose the finished-goods warehouse before configuring the recipe.'
+                                            }
+                                            onClick={() => {
+                                                if (startBatchRecipeDraft) {
+                                                    navigate(buildStartBatchRecipeUrl(startBatchRecipeDraft));
+                                                }
+                                            }}
+                                        >
+                                            Configure recipe
+                                        </Button>
                                     }
                                 />
                             )}
