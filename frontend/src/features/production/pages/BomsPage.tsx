@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
-import { listItems } from '@/features/inventory/api';
+import { listAllItems } from '@/features/inventory/api';
 import { createBom, listBoms } from '@/features/production/api';
 import type { Bom } from '@/features/production/types';
 
@@ -34,7 +34,13 @@ export default function BomsPage() {
     const prefillItemId = Number(searchParams.get('item_id')) || null;
 
     const { data, isLoading } = useQuery({ queryKey: ['production', 'boms'], queryFn: () => listBoms() });
-    const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
+    // Every item, not the default first page of 20. A BOM picker that reaches
+    // 20 of the factory's ~650 products cannot build a recipe for the other
+    // 630, and the prefill below would silently find nothing and open a blank
+    // form. The key must stay distinct from ['inventory','items'] — that entry
+    // holds the 20-row page, and sharing the key would serve it here depending
+    // on which page the supervisor happened to open first.
+    const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
     const itemOptions = items?.data.map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<BomFormValues>({
