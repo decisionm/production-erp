@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Checkbox, Col, Descriptions, Drawer, Form, Input, InputNumber, Modal, Radio, Row, Select, Space, Table, Tag, TimePicker, Typography } from 'antd';
 import dayjs from 'dayjs';
 import type { ReactNode } from 'react';
@@ -17,6 +17,7 @@ import {
     completeBatch,
     createPowerInterruptionLog,
     createShiftStockCount,
+    getBinBayAvailability,
     getEntryDayBinSummary,
     listMachineDowntimeLogs,
     listAllMolds,
@@ -33,6 +34,8 @@ import {
     startBatch,
 } from '@/features/production/api';
 import type {
+    BinBayAvailability,
+    BinBayRequirementComponent,
     EntryDayBinMaterialSummary,
     MachineDowntimeLog,
     MoldChangeLog,
@@ -655,6 +658,15 @@ export default function ShiftProductionEntryPage() {
     const invalidateDowntime = () => queryClient.invalidateQueries({ queryKey: ['production', 'machine-downtime-logs'] });
     const invalidateMoldChange = () => queryClient.invalidateQueries({ queryKey: ['production', 'mold-change-logs'] });
 
+    const settings = useProductionSettings();
+    // Phase 6 master switch: anything traceability-related renders/fetches ONLY
+    // when the backend says so — with the flag off (or an older backend that
+    // doesn't send the field) this page is byte-for-byte today's UI.
+    // Declared here rather than beside the Complete Batch form because Start
+    // Batch's bin-bay read is gated on it too, and the bin-bay routes 404
+    // with the flag off.
+    const traceabilityEnabled = settings?.traceability_enabled === true;
+
     const startForm = useForm<StartBatchFormValues>({ resolver: zodResolver(startBatchSchema) });
     // The picked item's master record — drives the read-only "Product
     // standards" summary and the Active Cavities prefill in Start Batch.
@@ -707,6 +719,89 @@ export default function ShiftProductionEntryPage() {
         enabled: startingMachine !== null && !!startItemId,
     });
 
+    // ---------------------------------------------------------------------
+    // Material availability, read from the CENTRAL bin bay.
+    //
+    // Read-only here on purpose. Material is scanned into a machine's bin
+    // ONCE, at the bay, on the Bin Bay page — this dialog only reports what
+    // is already in there against what the recipe needs, and never opens a
+    // load form. Asking the same question a second time is how the bin and
+    // the batch end up disagreeing.
+    //
+    // The gate this drives fails OPEN, unlike the readiness gate above: a
+    // bay mid-load, a flag-off instance (these routes 404), a product with
+    // no recipe, or a piece count the estimator could not produce are all
+    // ordinary, and none of them may stop a machine the floor can run. No
+    // data therefore means NO shortage, never an assumed one — the backend
+    // records the override rather than refusing the start, so the worst a
+    // missing read can cost is an unrecorded reason, not lost production.
+    // ---------------------------------------------------------------------
+    const startExpectedPieces = batchPreview?.estimation.expected_pieces ?? null;
+    const { data: binAvailability, isFetching: binAvailabilityLoading } = useQuery({
+        queryKey: ['production', 'bin-bay', 'availability', startingMachine?.id, startItemId, startExpectedPieces],
+        queryFn: () =>
+            getBinBayAvailability({
+                work_center_id: startingMachine!.id,
+                // The PRODUCT about to run, paired with its piece count —
+                // the endpoint requires both together, never one alone.
+                product_item_id: startItemId!,
+                expected_pieces: startExpectedPieces!,
+            }),
+        enabled:
+            traceabilityEnabled && startingMachine !== null && !!startItemId && startExpectedPieces !== null,
+    });
+
+    // Only mass components live in the bin. A Nos consumable (caps, labels)
+    // is not bin-tracked, so its shortage_quantity is null by design and it
+    // must never appear as short — a false shortage on every single run is
+    // how a real one stops being read.
+    const startMassComponents = useMemo<BinBayRequirementComponent[]>(
+        () => (binAvailability?.requirement?.components ?? []).filter((c) => c.is_mass),
+        [binAvailability],
+    );
+
+    // One availability read per mass component, this time by MATERIAL, to
+    // pull the lot layers behind the balance. The product-level call above
+    // returns `bin: null` (it names no item_id), so without these the card
+    // could only quote a number with nothing behind it.
+    const startBinLayerQueries = useQueries({
+        queries: startMassComponents.map((component) => ({
+            queryKey: ['production', 'bin-bay', 'availability', startingMachine?.id, 'material', component.item_id],
+            queryFn: () =>
+                getBinBayAvailability({ work_center_id: startingMachine!.id, item_id: component.item_id }),
+            enabled: traceabilityEnabled && startingMachine !== null,
+        })),
+    });
+    const startBinByItemId = useMemo(() => {
+        const map = new Map<number, BinBayAvailability>();
+        startMassComponents.forEach((component, index) => {
+            const bin = startBinLayerQueries[index]?.data?.bin;
+            if (bin) map.set(component.item_id, bin);
+        });
+        return map;
+    }, [startMassComponents, startBinLayerQueries]);
+
+    const startShortComponents = useMemo(
+        () => startMassComponents.filter((c) => c.shortage_quantity !== null && (toNum(c.shortage_quantity) ?? 0) > 0),
+        [startMassComponents],
+    );
+    const startHasShortage = startShortComponents.length > 0;
+
+    // The supervisor's explicit "start anyway" — deliberately useState and
+    // NOT part of startBatchSchema: the mutation spreads the form values
+    // straight into the request body, so a UI-only tick-box added there
+    // would ride along to an API that never asked for it.
+    const [startAnyway, setStartAnyway] = useState(false);
+    const [shortageReason, setShortageReason] = useState('');
+    const shortageReasonOk = shortageReason.trim().length >= 5;
+    // Reset on machine/product change ONLY. Never on the availability data:
+    // a background refetch while the supervisor is mid-sentence would wipe
+    // what they had typed.
+    useEffect(() => {
+        setStartAnyway(false);
+        setShortageReason('');
+    }, [startingMachine, startItemId]);
+
     const startMutation = useMutation({
         mutationFn: (values: StartBatchFormValues) => {
             if (!startingMachine || !effectiveShiftId) throw new Error('Missing machine or shift');
@@ -723,12 +818,19 @@ export default function ShiftProductionEntryPage() {
                 production_date: today,
                 production_standard_id: selectedStandardId,
                 production_standard_packaging_id: selectedPackagingId,
+                // Only when the shortage was real AND explicitly waved
+                // through — never a stale reason from a shortage that has
+                // since been loaded away.
+                material_shortage_override_reason:
+                    startHasShortage && startAnyway && shortageReasonOk ? shortageReason.trim() : undefined,
             });
         },
         onSuccess: () => {
             invalidate();
             setStartingMachine(null);
             startForm.reset();
+            setStartAnyway(false);
+            setShortageReason('');
             // Loading material is deliberately NOT part of Start Batch any
             // more. Bags are scanned into the bins once, for the whole bay,
             // on the Bin Bay page — a per-batch material form here asked the
@@ -784,11 +886,6 @@ export default function ShiftProductionEntryPage() {
     const [packingRevision, setPackingRevision] = useState(0);
     const quantityProduced = completeForm.watch('quantity_produced');
     const quantityScrap = completeForm.watch('quantity_scrap');
-    const settings = useProductionSettings();
-    // Phase 6 master switch: anything traceability-related renders/fetches ONLY
-    // when the backend says so — with the flag off (or an older backend that
-    // doesn't send the field) this page is byte-for-byte today's UI.
-    const traceabilityEnabled = settings?.traceability_enabled === true;
     const goodBoxesWatch = completeForm.watch('no_of_box');
     const pouchesWatch = completeForm.watch('no_of_pouches');
     const loosePiecesWatch = completeForm.watch('loose_pieces');
@@ -1650,7 +1747,26 @@ export default function ShiftProductionEntryPage() {
                 // backend says the product is ready. The server refuses it
                 // regardless — this only stops the supervisor wasting a tap.
                 okButtonProps={{
-                    disabled: previewLoading || (!!startItemId && !!batchPreview && !batchPreview.readiness.ready),
+                    disabled:
+                        previewLoading
+                        || (!!startItemId && !!batchPreview && !batchPreview.readiness.ready)
+                        // A material shortage does not refuse the start — the
+                        // backend records it and lets the batch run. It only
+                        // demands that a human says, in writing, why. With no
+                        // shortage read at all (flag off, no recipe, no piece
+                        // count) startHasShortage is false and this term
+                        // vanishes: a permanently absent read must never
+                        // dead-end a start.
+                        || (startHasShortage && !(startAnyway && shortageReasonOk))
+                        // But a read that is merely IN FLIGHT is different from
+                        // one that will never come. Without this, the moment
+                        // between the preview resolving and the bin answering
+                        // is a live OK button on a batch nobody has been told
+                        // is short — a short start with no prompt and no
+                        // recorded reason. Milliseconds, and self-clearing:
+                        // on error isFetching drops with data still undefined,
+                        // so a failed read leaves the button live.
+                        || (binAvailabilityLoading && !binAvailability),
                 }}
                 okText="Start Batch"
                 destroyOnHidden
@@ -1877,6 +1993,203 @@ export default function ShiftProductionEntryPage() {
                                     message="No consumption recipe for this product — resin, masterbatch and consumables cannot be estimated."
                                 />
                             )}
+
+                            {/* What the machine's bin ACTUALLY holds, against what
+                                the recipe needs. Strictly read-only: bags are
+                                scanned in once, for the whole bay, on the Bin Bay
+                                page. Nothing here opens a load form — a second
+                                place to declare material is exactly how the bin
+                                and the batch end up disagreeing.
+
+                                Only bin-tracked (mass) components appear. Nos
+                                consumables never sit in the bin, so listing them
+                                here would invite a "shortage" that cannot exist. */}
+                            {traceabilityEnabled && startExpectedPieces !== null && (
+                                <Card
+                                    size="small"
+                                    style={{ marginBottom: 16 }}
+                                    loading={binAvailabilityLoading && !binAvailability}
+                                    title={<Typography.Text strong>Material availability — bin bay</Typography.Text>}
+                                    extra={
+                                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                            Read-only · load bags on the Bin Bay page
+                                        </Typography.Text>
+                                    }
+                                >
+                                    {startMassComponents.length === 0 ? (
+                                        <Typography.Text type="secondary">
+                                            Nothing in this product&rsquo;s recipe is bin-tracked — there is no bay
+                                            balance to check this run against.
+                                        </Typography.Text>
+                                    ) : (
+                                        <Table
+                                            size="small"
+                                            rowKey="item_id"
+                                            pagination={false}
+                                            dataSource={startMassComponents}
+                                            columns={[
+                                                {
+                                                    title: 'Material',
+                                                    render: (_, row) => (
+                                                        <>
+                                                            <div>{row.name}</div>
+                                                            {row.sku && (
+                                                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                                                    {row.sku}
+                                                                </Typography.Text>
+                                                            )}
+                                                        </>
+                                                    ),
+                                                },
+                                                {
+                                                    title: 'Needs',
+                                                    align: 'right',
+                                                    render: (_, row) =>
+                                                        `${fmtNum(toNum(row.expected_quantity), 3)} ${row.uom ?? ''}`.trim(),
+                                                },
+                                                {
+                                                    title: 'In bin',
+                                                    align: 'right',
+                                                    render: (_, row) =>
+                                                        `${fmtNum(toNum(row.available_quantity), 3)} ${row.uom ?? ''}`.trim(),
+                                                },
+                                                {
+                                                    title: 'Short by',
+                                                    align: 'right',
+                                                    render: (_, row) => {
+                                                        const short = toNum(row.shortage_quantity) ?? 0;
+                                                        return short > 0 ? (
+                                                            <Tag color="error">
+                                                                {fmtNum(short, 3)} {row.uom ?? ''}
+                                                            </Tag>
+                                                        ) : (
+                                                            <Tag color="success">enough</Tag>
+                                                        );
+                                                    },
+                                                },
+                                            ]}
+                                            expandable={{
+                                                rowExpandable: (row) =>
+                                                    (startBinByItemId.get(row.item_id)?.layers.length ?? 0) > 0,
+                                                expandedRowRender: (row) => {
+                                                    const bin = startBinByItemId.get(row.item_id);
+                                                    if (!bin || bin.layers.length === 0) return null;
+                                                    return (
+                                                        <>
+                                                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                                                Where the {row.name} in this bin came from — oldest load
+                                                                first.
+                                                            </Typography.Text>
+                                                            <Table
+                                                                size="small"
+                                                                rowKey="movement_id"
+                                                                pagination={false}
+                                                                style={{ marginTop: 8 }}
+                                                                dataSource={bin.layers}
+                                                                columns={[
+                                                                    {
+                                                                        title: 'Lot',
+                                                                        render: (_, layer) =>
+                                                                            layer.lot?.supplier_lot_no ?? '—',
+                                                                    },
+                                                                    {
+                                                                        title: 'Bag barcode',
+                                                                        render: (_, layer) => layer.barcode ?? '—',
+                                                                    },
+                                                                    {
+                                                                        title: 'Loaded (kg)',
+                                                                        align: 'right',
+                                                                        render: (_, layer) =>
+                                                                            fmtNum(toNum(layer.loaded_kg), 3),
+                                                                    },
+                                                                    {
+                                                                        title: 'Still in bin (kg)',
+                                                                        align: 'right',
+                                                                        render: (_, layer) =>
+                                                                            fmtNum(toNum(layer.in_bin_kg), 3),
+                                                                    },
+                                                                ]}
+                                                            />
+                                                        </>
+                                                    );
+                                                },
+                                            }}
+                                        />
+                                    )}
+                                </Card>
+                            )}
+
+                            {/* The shortfall, named. Loud on purpose — the cost of
+                                finding out mid-shift is a stopped machine. It does
+                                not hide any of the form below it. */}
+                            {startHasShortage && (
+                                <Alert
+                                    type="error"
+                                    showIcon
+                                    style={{ marginBottom: 16 }}
+                                    message="Not enough material in this machine's bin for the full run"
+                                    description={
+                                        <>
+                                            <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+                                                {startShortComponents.map((c) => (
+                                                    <li key={c.item_id}>
+                                                        <Typography.Text strong>{c.name}</Typography.Text> — short{' '}
+                                                        <Typography.Text strong>
+                                                            {fmtNum(toNum(c.shortage_quantity), 3)} {c.uom ?? ''}
+                                                        </Typography.Text>{' '}
+                                                        (needs {fmtNum(toNum(c.expected_quantity), 3)}, bin holds{' '}
+                                                        {fmtNum(toNum(c.available_quantity), 3)})
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                            <Typography.Paragraph
+                                                type="secondary"
+                                                style={{ fontSize: 12, margin: '8px 0 0' }}
+                                            >
+                                                Scan the bags in at the Bin Bay — or start anyway and say why.
+                                            </Typography.Paragraph>
+                                        </>
+                                    }
+                                />
+                            )}
+                            {/* The audited override. The server records it and
+                                refuses nothing; this tick-box is the guard that
+                                makes a short start a deliberate, attributed
+                                decision rather than an accident. */}
+                            {startHasShortage && (
+                                <Form.Item style={{ marginBottom: startAnyway ? 8 : 16 }}>
+                                    <Checkbox
+                                        checked={startAnyway}
+                                        onChange={(e) => setStartAnyway(e.target.checked)}
+                                    >
+                                        Start anyway — material will reach the machine before it runs out
+                                    </Checkbox>
+                                </Form.Item>
+                            )}
+                            {startHasShortage && startAnyway && (
+                                <Form.Item
+                                    label="Why is this run starting short?"
+                                    required
+                                    validateStatus={
+                                        shortageReason.length > 0 && !shortageReasonOk ? 'error' : ''
+                                    }
+                                    help={
+                                        shortageReason.length > 0 && !shortageReasonOk
+                                            ? 'At least 5 characters.'
+                                            : undefined
+                                    }
+                                    extra="Recorded against this batch and readable on the approval trail."
+                                >
+                                    <Input.TextArea
+                                        value={shortageReason}
+                                        onChange={(e) => setShortageReason(e.target.value)}
+                                        rows={2}
+                                        maxLength={500}
+                                        showCount
+                                        placeholder="e.g. bay is weighing the next lot in now"
+                                    />
+                                </Form.Item>
+                            )}
                         </>
                     )}
                     <Form.Item
@@ -1972,7 +2285,17 @@ export default function ShiftProductionEntryPage() {
                             <Form.Item
                                 label="Quantity Produced (Nos)"
                                 validateStatus={completeForm.formState.errors.quantity_produced ? 'error' : ''}
-                                help={completeForm.formState.errors.quantity_produced?.message}
+                                help={
+                                    // The field is derived (and disabled) when packing lines
+                                    // drive it, so "Must be greater than 0" would point at
+                                    // something the supervisor cannot edit. Point at the
+                                    // lines, which is where the fix actually is.
+                                    completeForm.formState.errors.quantity_produced
+                                        ? usePackingLines
+                                            ? 'Fill in the cartons and pieces on the packing lines below — this total comes from them.'
+                                            : completeForm.formState.errors.quantity_produced.message
+                                        : undefined
+                                }
                                 extra={
                                     usePackingLines
                                         ? 'sum of the packing lines + loose pieces'
