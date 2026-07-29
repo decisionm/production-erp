@@ -19,7 +19,10 @@ export default function WorkCentersPage() {
     const [editingWorkCenter, setEditingWorkCenter] = useState<WorkCenter | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['production', 'work-centers'], queryFn: listWorkCenters });
+    // Wrapped, not passed by reference: TanStack calls queryFn with its own
+    // context object, which would arrive as the `active` argument and
+    // silently filter this admin list. Undefined = both active and retired.
+    const { data, isLoading } = useQuery({ queryKey: ['production', 'work-centers'], queryFn: () => listWorkCenters() });
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<WorkCenterFormValues>({
         resolver: zodResolver(workCenterSchema),

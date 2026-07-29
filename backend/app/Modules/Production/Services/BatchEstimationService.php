@@ -28,6 +28,7 @@ class BatchEstimationService
 {
     public function __construct(
         private readonly BomService $boms,
+        private readonly ProductionCalculationEngine $engine,
     ) {}
 
     /**
@@ -52,18 +53,12 @@ class BatchEstimationService
         $cycleTime = $item->standard_cycle_time !== null ? (string) $item->standard_cycle_time : null;
         $cavities = $activeCavities ?? $item->standard_cavities;
 
-        $cycles = null;
-        $pieces = null;
-
-        if ($hours !== null && bccomp($hours, '0', 4) === 1
-            && $cycleTime !== null && bccomp($cycleTime, '0', 4) === 1
-            && $cavities !== null && $cavities > 0) {
-            // Expected cycles = floor(effective seconds / cycle time); a
-            // partial shot produces nothing.
-            $seconds = bcmul($hours, '3600', 4);
-            $cycles = (int) bcdiv($seconds, $cycleTime, 0);
-            $pieces = $cycles * $cavities;
-        }
+        // One floor implementation, in the engine — duplicating it here is
+        // exactly how two screens end up disagreeing about the same shift.
+        $pieces = $this->engine->targetPieces($hours, $cycleTime, $cavities);
+        $cycles = ($pieces !== null && $cavities !== null && $cavities > 0)
+            ? intdiv($pieces, $cavities)
+            : null;
 
         $expectedKg = null;
         if ($pieces !== null && $item->nominal_weight_grams !== null
@@ -82,9 +77,14 @@ class BatchEstimationService
             'nos_per_tray' => $item->nos_per_tray,
             'nos_per_box' => $item->nos_per_box,
             'nos_per_pouch' => $item->nos_per_pouch,
+            // Trays and pouches are packing SUGGESTIONS — how many
+            // containers you need, so a part-filled one still counts (ceil).
             'expected_trays' => $this->containers($pieces, $item->nos_per_tray),
-            'expected_boxes' => $this->containers($pieces, $item->nos_per_box),
             'expected_pouches' => $this->containers($pieces, $item->nos_per_pouch),
+            // Boxes are the TARGET the shift is measured against, and the
+            // factory's EST BOX column rounds to nearest. Using the packing
+            // ceil here would inflate the target and understate efficiency.
+            'expected_boxes' => $this->engine->expectedBoxes($pieces, $item->nos_per_box),
             ...$this->expectedMaterials($item, $pieces),
         ];
     }

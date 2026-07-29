@@ -32,6 +32,9 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
     'production_configuration_id', 'calculation_version', 'config_snapshot',
     'cycle_time_source', 'cavities_source', 'override_reason', 'override_by',
     'planned_downtime_minutes', 'scheduled_hours',
+    // Audited target adjustment — the replacement for the workbook's
+    // unexplained "+1" cells.
+    'target_boxes_override', 'target_override_reason', 'target_override_by',
 ])]
 class ShiftProductionEntry extends Model
 {

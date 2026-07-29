@@ -21,6 +21,7 @@ import { useMemo, useState } from 'react';
 import { listAllItems } from '@/features/inventory/api';
 import {
     approveProductionConfiguration,
+    machineLabel,
     copyProductionConfiguration,
     createProductionConfiguration,
     deactivateProductionConfiguration,
@@ -82,7 +83,13 @@ function ConfigurationsTab() {
         queryKey: ['production', 'configurations', status, search],
         queryFn: () => listProductionConfigurations({ status, search: search || undefined }),
     });
-    const { data: machines } = useQuery({ queryKey: ['production', 'work-centers'], queryFn: listWorkCenters });
+    // Active only: a retired machine must not be selectable for a new
+    // configuration, or the configuration is unusable the moment it is
+    // approved.
+    const { data: machines } = useQuery({
+        queryKey: ['production', 'work-centers', 'active'],
+        queryFn: () => listWorkCenters(true),
+    });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
     const { data: molds } = useQuery({ queryKey: ['production', 'molds'], queryFn: listMolds });
 
@@ -229,7 +236,7 @@ function ConfigurationsTab() {
                         <Select
                             showSearch
                             optionFilterProp="label"
-                            options={(machines?.data ?? []).map((m) => ({ value: m.id, label: m.name }))}
+                            options={(machines?.data ?? []).map((m) => ({ value: m.id, label: machineLabel(m) }))}
                         />
                     </Form.Item>
                     <Form.Item name="item_id" label="Product" rules={[{ required: true }]}>
@@ -285,7 +292,14 @@ function ConfigurationsTab() {
 
 function MachinesTab() {
     const queryClient = useQueryClient();
-    const { data, isFetching } = useQuery({ queryKey: ['production', 'work-centers'], queryFn: listWorkCenters });
+    // Defaults to the machines actually in service. Retired ones stay
+    // reachable behind the filter — production history references them and
+    // they must remain inspectable, just not selectable.
+    const [showInactive, setShowInactive] = useState(false);
+    const { data, isFetching } = useQuery({
+        queryKey: ['production', 'work-centers', showInactive ? 'inactive' : 'active'],
+        queryFn: () => listWorkCenters(!showInactive),
+    });
     const [editing, setEditing] = useState<WorkCenter | null>(null);
     const [form] = Form.useForm();
 
@@ -318,6 +332,10 @@ function MachinesTab() {
                 description="Only a stated limit constrains a configuration. Today every machine's cavity limits are blank — the factory's master workbook leaves them empty."
                 closable
             />
+            <Space style={{ marginBottom: 16 }}>
+                <Switch checked={showInactive} onChange={setShowInactive} size="small" />
+                <Typography.Text>{showInactive ? 'Showing retired machines' : 'Showing active machines'}</Typography.Text>
+            </Space>
             <Table
                 rowKey="id"
                 size="small"

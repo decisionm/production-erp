@@ -29,7 +29,12 @@ export default function RoutingsPage() {
 
     const { data, isLoading } = useQuery({ queryKey: ['production', 'routings'], queryFn: () => listRoutings() });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
-    const { data: workCenters } = useQuery({ queryKey: ['production', 'work-centers'], queryFn: listWorkCenters });
+    // A routing step is production setup — a retired machine must not be
+    // selectable for one.
+    const { data: workCenters } = useQuery({
+        queryKey: ['production', 'work-centers', 'active'],
+        queryFn: () => listWorkCenters(true),
+    });
 
     const itemOptions = items?.data.map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];
     const workCenterOptions = workCenters?.data.map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })) ?? [];

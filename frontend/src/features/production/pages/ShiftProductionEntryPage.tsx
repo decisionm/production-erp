@@ -378,7 +378,7 @@ export default function ShiftProductionEntryPage() {
     const queryClient = useQueryClient();
 
     const { data: shifts } = useQuery({ queryKey: ['production', 'shifts'], queryFn: listShifts });
-    const { data: workCenters } = useQuery({ queryKey: ['production', 'work-centers'], queryFn: listWorkCenters });
+    const { data: workCenters } = useQuery({ queryKey: ['production', 'work-centers', 'active'], queryFn: () => listWorkCenters(true) });
     // Shop-floor pickers need the WHOLE reference list, not the default first
     // 20 — with 642 items the type-to-search Select would otherwise only ever
     // see page 1 and most items would be unselectable. Distinct query keys so
@@ -1030,6 +1030,9 @@ export default function ShiftProductionEntryPage() {
             </Form.Item>
 
             <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
+                {/* Server already returns active-only; this filter stays as
+                    defence in depth for a cached response from before the
+                    active flag existed. */}
                 {(workCenters?.data ?? []).filter((w) => w.is_active).map((wc) => {
                     const running = runningByMachine.get(wc.id);
                     const down = openDowntimeByMachine.get(wc.id);

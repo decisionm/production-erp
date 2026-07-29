@@ -118,6 +118,137 @@ class ProductionCalculationEngine
     }
 
     /**
+     * Estimated boxes for a target — the factory's EST BOX column.
+     *
+     * Deliberately a SEPARATE rounding stage from targetPieces(). The two
+     * roundings answer different questions and must not be merged:
+     *
+     *   FLOOR on cycles  — physics. A machine cannot complete a fractional
+     *                      shot, so a partial cycle yields no pieces.
+     *   ROUND on boxes   — the factory's own reporting convention. EST BOX
+     *                      is a target to compare actual boxes against, and
+     *                      the workbook rounds it to nearest.
+     *
+     * Flooring here as well would quietly lower every target by up to a box
+     * and inflate efficiency; ceiling would do the reverse. Neither matches
+     * the sheet the factory reconciles against, so nearest is the default
+     * and the policy is configurable (production.est_box_rounding) in case
+     * Vincent rules that only completely filled boxes count.
+     *
+     * Worked check (factory row): CT 12.2s, 5 cavities, 8h, 840/box —
+     * FLOOR(28800/12.2)=2360 cycles × 5 = 11,800 pieces; 11,800/840 =
+     * 14.0476 → 14 boxes, matching the workbook's
+     * ROUND((3600/12.2)×5×8÷840, 0) = 14.
+     */
+    public function expectedBoxes(?int $pieces, ?int $piecesPerBox, ?string $policy = null): ?int
+    {
+        if ($pieces === null || $piecesPerBox === null || $piecesPerBox <= 0) {
+            return null;
+        }
+
+        $exact = bcdiv((string) $pieces, (string) $piecesPerBox, 8);
+
+        return (int) match ($policy ?? config('production.est_box_rounding', 'round')) {
+            'floor' => bcdiv($exact, '1', 0),
+            'ceil' => bccomp($exact, bcdiv($exact, '1', 0), 8) === 1
+                ? bcadd(bcdiv($exact, '1', 0), '1', 0)
+                : bcdiv($exact, '1', 0),
+            default => $this->roundHalfUp($exact),
+        };
+    }
+
+    /**
+     * Production efficiency the way the factory reads it: actual boxes over
+     * the DISPLAYED estimated boxes.
+     *
+     * The denominator is the rounded, displayed figure, not the exact
+     * fraction — otherwise the percentage on screen would not reconcile
+     * with the two box numbers printed beside it, which is precisely the
+     * arithmetic a supervisor checks by hand.
+     *
+     * Factory row: 10 actual / 14 estimated = 71.43%.
+     */
+    public function boxEfficiency(?int $actualBoxes, ?int $displayedEstimatedBoxes): ?float
+    {
+        return $this->pct($actualBoxes, $displayedEstimatedBoxes);
+    }
+
+    /**
+     * Total rejection, per the factory workbook: QC rejection kg + lumps.
+     *
+     * Two policy points, BOTH pending Vincent, both configurable rather
+     * than guessed:
+     *
+     *  - Precedence: the workbook uses the QC-weighed rejection, not the
+     *    piece-count-derived production figure, when both exist. QC put it
+     *    on a scale; production multiplied a count by a nominal weight.
+     *  - The workbook does NOT include its separate QC-lumps column in this
+     *    sum. That looks like an omission but may be deliberate, so this
+     *    mirrors the sheet and flags it rather than silently "fixing" it.
+     *
+     * @return array{total_rejection_kg: ?string, rejection_source: string, qc_difference_kg: ?string}
+     */
+    public function totalRejection(
+        ?string $productionRejectionKg,
+        ?string $qcRejectionKg,
+        ?string $lumpsKg,
+        ?string $precedence = null,
+    ): array {
+        $precedence ??= (string) config('production.rejection_precedence', 'qc');
+
+        $chosen = $precedence === 'production'
+            ? ($productionRejectionKg ?? $qcRejectionKg)
+            : ($qcRejectionKg ?? $productionRejectionKg);
+
+        $source = $chosen === null
+            ? 'none'
+            : (($precedence === 'production' && $productionRejectionKg !== null) ? 'production'
+                : (($precedence === 'qc' && $qcRejectionKg !== null) ? 'qc'
+                    : ($qcRejectionKg !== null ? 'qc' : 'production')));
+
+        // The QC-vs-production gap: what the scale said minus what the
+        // piece count implied. A persistent gap means the nominal weight
+        // is wrong, which is worth seeing rather than averaging away.
+        $difference = ($productionRejectionKg !== null && $qcRejectionKg !== null)
+            ? bcsub($productionRejectionKg, $qcRejectionKg, 4)
+            : null;
+
+        return [
+            'total_rejection_kg' => $chosen !== null ? bcadd($chosen, $lumpsKg ?? '0', 4) : null,
+            'rejection_source' => $source,
+            'qc_difference_kg' => $difference,
+        ];
+    }
+
+    /**
+     * ACCOUNTED raw-material consumption: good production kg + total
+     * rejection kg.
+     *
+     * This is NOT measured consumption and must never be presented as it.
+     * It is what the output implies was consumed, derived from piece counts
+     * and a nominal weight. Actual resin, masterbatch and other input are
+     * captured separately and reconciled against this figure — the gap
+     * between them is the whole point of the reconciliation, and collapsing
+     * the two would erase it.
+     */
+    public function accountedConsumptionKg(?string $goodProductionKg, ?string $totalRejectionKg): ?string
+    {
+        if ($goodProductionKg === null) {
+            return null;
+        }
+
+        return bcadd($goodProductionKg, $totalRejectionKg ?? '0', 4);
+    }
+
+    private function roundHalfUp(string $value): string
+    {
+        $truncated = bcdiv($value, '1', 0);
+        $fraction = bcsub($value, $truncated, 8);
+
+        return bccomp($fraction, '0.5', 8) >= 0 ? bcadd($truncated, '1', 0) : $truncated;
+    }
+
+    /**
      * Pieces → kg at the snapshotted unit weight. Four decimals: the
      * reconciliation is in kg and the factory's own sheet carries 4dp
      * (1.7646 kg of masterbatch).

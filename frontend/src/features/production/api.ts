@@ -38,9 +38,23 @@ import type {
     WorkOrder,
 } from './types';
 
-export async function listWorkCenters(): Promise<Paginated<WorkCenter>> {
-    const { data } = await api.get<Paginated<WorkCenter>>('/production/work-centers');
+/**
+ * @param active true = in-service machines only (what every production
+ *   selector must pass), false = retired only, undefined = both.
+ */
+export async function listWorkCenters(active?: boolean): Promise<Paginated<WorkCenter>> {
+    const { data } = await api.get<Paginated<WorkCenter>>('/production/work-centers', {
+        params: active === undefined ? undefined : { active: active ? 1 : 0 },
+    });
     return data;
+}
+
+/**
+ * "Machine 1 (MC-01)" — the floor name plus the internal code, so a
+ * supervisor and the office are naming the same machine.
+ */
+export function machineLabel(machine: Pick<WorkCenter, 'name' | 'code'>): string {
+    return machine.code && machine.code !== machine.name ? `${machine.name} (${machine.code})` : machine.name;
 }
 
 export interface CreateWorkCenterPayload {
