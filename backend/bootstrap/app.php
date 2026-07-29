@@ -44,10 +44,16 @@ return Application::configure(basePath: dirname(__DIR__))
         // exception exposing errorCode() additionally carries a stable
         // machine-readable `code` so clients can branch without parsing
         // message text (e.g. FifoPolicyException → 'fifo_order').
+        // An exception exposing payload() merges extra keys into the body —
+        // used where a sentence isn't enough (ProductNotReadyException ships
+        // the whole list of missing masters so the SPA can render them).
         $exceptions->render(function (DomainException $e) {
             $payload = ['message' => $e->getMessage()];
             if (method_exists($e, 'errorCode')) {
                 $payload['code'] = $e->errorCode();
+            }
+            if (method_exists($e, 'payload')) {
+                $payload = [...$payload, ...$e->payload()];
             }
 
             return response()->json($payload, 422);

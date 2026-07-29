@@ -155,6 +155,21 @@ class TallySyncService
             return $this->enqueueShiftVoucher($entry);
         }
 
+        return $this->enqueue($entry, 'Manufacturing Journal', $this->buildBatchVoucherPayload($entry));
+    }
+
+    /**
+     * The per-batch voucher payload, built WITHOUT writing anything.
+     *
+     * Split out of enqueueShiftProductionEntry() so the pre-post preview and
+     * the real post are produced by the same code — a preview built by a
+     * parallel implementation would eventually drift from what actually gets
+     * sent, which is precisely the confidence the preview exists to provide.
+     *
+     * @return array<string, mixed>
+     */
+    public function buildBatchVoucherPayload(ShiftProductionEntry $entry): array
+    {
         $entry->loadMissing(['item', 'warehouse', 'materialConsumptions.item', 'materialConsumptions.warehouse', 'scraps.scrapReason']);
 
         // Each consumption line names its own godown (the RM store it was
@@ -195,7 +210,7 @@ class TallySyncService
             })
             ->implode('; ');
 
-        return $this->enqueue($entry, 'Manufacturing Journal', [
+        return [
             'voucher_type' => 'Manufacturing Journal',
             'voucher_date' => $entry->production_date?->toDateString(),
             'voucher_number' => "SPE-{$entry->id}",
@@ -205,7 +220,7 @@ class TallySyncService
             'produced' => $produced,
             'consumed' => $consumed,
             'scraps' => $scraps,
-        ]);
+        ];
     }
 
     /**

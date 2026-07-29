@@ -22,6 +22,18 @@ class MachineOrderAndAutoBatchTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // This suite exercises machine ordering and batch-number minting, not the production-readiness gate.
+        // Its fixtures are deliberately minimal items (no weight, no Tally
+        // identity), which the fail-closed gate would refuse at Start Batch.
+        // Turning enforcement off here keeps each test on its own subject;
+        // the gate itself is covered by ProductReadinessGateTest.
+        config()->set('production.readiness.enforced', false);
+    }
+
     public function test_machines_list_in_business_sequence_not_name_order(): void
     {
         WorkCenter::create(['code' => 'MC-10', 'name' => 'Machine 10', 'display_sequence' => 10]);

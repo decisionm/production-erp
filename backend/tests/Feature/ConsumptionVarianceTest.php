@@ -197,4 +197,72 @@ class ConsumptionVarianceTest extends TestCase
 
         $this->assertNull(app(ShiftProductionEntryService::class)->consumptionVariance($entry));
     }
+
+    public function test_a_nos_unit_consumption_line_is_excluded_from_the_kg_actual(): void
+    {
+        // The expected/BOM side has always filtered to the kg family; the
+        // actual side did not. The "Other materials (exceptions)" repeater
+        // accepts ANY item and labels the input with that item's own UOM, so
+        // a supervisor entering 500 cartons wrote 500 into a column named
+        // quantity_issued_kg — and 500 kg into the variance. Stock stays
+        // correct (the issue is in the item's own unit); only the kg
+        // roll-ups were wrong.
+        $entry = $this->completedEntry(itemAttributes: ['nominal_weight_grams' => '20.0000']);
+        $carton = Item::create(['sku' => 'CTN-24', 'name' => 'Corrugated Carton 24', 'uom' => 'Nos.']);
+
+        $entry->materialConsumptions()->create([
+            'item_id' => $this->resin->id,
+            'warehouse_id' => $this->rmStore->id,
+            'quantity_issued_kg' => '25',
+        ]);
+        $entry->materialConsumptions()->create([
+            'item_id' => $carton->id,
+            'warehouse_id' => $this->rmStore->id,
+            'quantity_issued_kg' => '500',
+        ]);
+
+        $variance = app(ShiftProductionEntryService::class)->consumptionVariance($entry);
+
+        // 25 kg of resin — not 525.
+        $this->assertSame('25.0000', $variance['actual_kg']);
+        $this->assertSame('5.0000', $variance['variance_kg']);
+        $this->assertSame(25.0, $variance['variance_pct']);
+    }
+
+    public function test_a_soft_deleted_consumption_master_still_counts_toward_the_kg_actual(): void
+    {
+        // Mirrors the BOM-side rule: a master cleanup trashing the resin
+        // item must not silently drop kg already issued against it.
+        $entry = $this->completedEntry(itemAttributes: ['nominal_weight_grams' => '20.0000']);
+        $entry->materialConsumptions()->create([
+            'item_id' => $this->resin->id,
+            'warehouse_id' => $this->rmStore->id,
+            'quantity_issued_kg' => '25',
+        ]);
+
+        $this->resin->delete();
+
+        $variance = app(ShiftProductionEntryService::class)->consumptionVariance($entry->fresh());
+
+        $this->assertSame('25.0000', $variance['actual_kg']);
+    }
+
+    public function test_a_consumption_line_whose_master_has_no_uom_counts_as_kg(): void
+    {
+        // Fail-safe direction: an unknown/blank UOM keeps its historical
+        // behaviour (counted as kg) rather than silently vanishing from the
+        // reconciliation. Dropping a real resin line would be the worse bug.
+        $entry = $this->completedEntry(itemAttributes: ['nominal_weight_grams' => '20.0000']);
+        $unknown = Item::create(['sku' => 'MYSTERY', 'name' => 'Unlabelled material', 'uom' => '']);
+
+        $entry->materialConsumptions()->create([
+            'item_id' => $unknown->id,
+            'warehouse_id' => $this->rmStore->id,
+            'quantity_issued_kg' => '7',
+        ]);
+
+        $variance = app(ShiftProductionEntryService::class)->consumptionVariance($entry);
+
+        $this->assertSame('7.0000', $variance['actual_kg']);
+    }
 }

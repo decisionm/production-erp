@@ -4,8 +4,11 @@ namespace App\Modules\Production\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Inventory\Models\Item;
+use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Production\Events\ShiftProductionEntryApproved;
+use App\Modules\Production\Exceptions\MachineBusyException;
+use App\Modules\Production\Exceptions\ProductNotReadyException;
 use App\Modules\Production\Models\Bom;
 use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
@@ -38,6 +41,7 @@ class ShiftProductionEntryService
         private readonly StockMovementService $stock,
         private readonly BomService $boms,
         private readonly DayBinLedgerService $dayBin,
+        private readonly ProductReadinessService $readiness,
     ) {}
 
     public function paginate(int $perPage = 20, ?ShiftProductionEntryStatus $status = null): LengthAwarePaginator
@@ -45,7 +49,8 @@ class ShiftProductionEntryService
         return ShiftProductionEntry::query()
             ->with([
                 'shift', 'workCenter', 'item', 'warehouse', 'scrapReason', 'operator',
-                'materialConsumptions.item', 'scraps.scrapReason', 'approvedBy',
+                'materialConsumptions.item' => fn ($query) => $query->withTrashed(),
+                'scraps.scrapReason', 'approvedBy',
                 'tallySyncEntries',
             ])
             ->when($status, function ($query) use ($status) {
@@ -109,17 +114,35 @@ class ShiftProductionEntryService
                 ->where('work_center_id', $data['work_center_id'])
                 ->where('batch_status', BatchStatus::InProgress->value)
                 ->lockForUpdate()
-                ->exists();
+                ->first();
 
-            if ($alreadyRunning) {
-                throw InvalidStatusTransitionException::make(
-                    'shift production entry batch',
-                    'idle',
-                    BatchStatus::InProgress->value,
+            if ($alreadyRunning !== null) {
+                // Carries the running batch rather than a bare refusal — the
+                // usual cause is a batch the supervisor cannot see (previous
+                // shift, someone else's start), and "here is what is running"
+                // is the answer they need.
+                throw MachineBusyException::make(
+                    $alreadyRunning->load(['item', 'workCenter', 'shift'])
                 );
             }
 
             $item = Item::query()->find($data['item_id']);
+
+            // The readiness gate, fail-closed: a product whose masters are
+            // incomplete must not start, because every downstream figure it
+            // would produce (expected output, efficiency, reconciliation,
+            // the Tally voucher) is either a dash or a rejection — and by
+            // then the shift has already been worked. Severity per check is
+            // configurable; see config/production.php → readiness.
+            $readiness = $this->readiness->assess(
+                $item ?? new Item,
+                Warehouse::query()->find($data['warehouse_id']),
+                WorkCenter::query()->find($data['work_center_id']),
+            );
+
+            if (! $readiness['ready']) {
+                throw ProductNotReadyException::make($readiness);
+            }
 
             $productionDate = $data['production_date']
                 ?? Shift::query()->find($data['shift_id'])?->productionDateFor()
@@ -263,7 +286,8 @@ class ShiftProductionEntryService
 
             return $entry->fresh([
                 'shift', 'workCenter', 'item', 'warehouse', 'scrapReason', 'operator',
-                'materialConsumptions.item', 'scraps.scrapReason',
+                'materialConsumptions.item' => fn ($query) => $query->withTrashed(),
+                'scraps.scrapReason',
             ]);
         });
     }
@@ -524,12 +548,15 @@ class ShiftProductionEntryService
 
         // No-ops on the approval list, whose paginate() already eager-loads
         // these; only ad-hoc single-entry callers trigger a load here.
-        $entry->loadMissing(['item', 'materialConsumptions', 'scraps']);
+        $entry->loadMissing([
+            'item', 'scraps',
+            // withTrashed: a master cleanup that soft-deletes a material
+            // must not blank its UOM and silently reclassify already-issued
+            // kg (mirrors the BOM side in expectedConsumptionKg()).
+            'materialConsumptions.item' => fn ($query) => $query->withTrashed(),
+        ]);
 
-        $actual = '0';
-        foreach ($entry->materialConsumptions as $consumption) {
-            $actual = bcadd($actual, (string) $consumption->quantity_issued_kg, 4);
-        }
+        $actual = $this->consumedMassKg($entry);
 
         $scrap = '0';
         foreach ($entry->scraps as $line) {
@@ -609,7 +636,13 @@ class ShiftProductionEntryService
             return null;
         }
 
-        $entry->loadMissing(['item', 'materialConsumptions', 'scraps']);
+        $entry->loadMissing([
+            'item', 'scraps',
+            // withTrashed: a master cleanup that soft-deletes a material
+            // must not blank its UOM and silently reclassify already-issued
+            // kg (mirrors the BOM side in expectedConsumptionKg()).
+            'materialConsumptions.item' => fn ($query) => $query->withTrashed(),
+        ]);
 
         // Expected pieces = 3600/CT × active cavities × running hours (WB2's
         // EST BOX numerator, always at the STANDARD cycle time — the snapshot
@@ -676,10 +709,7 @@ class ShiftProductionEntryService
             }
         }
 
-        $issued = '0.0000';
-        foreach ($entry->materialConsumptions as $consumption) {
-            $issued = bcadd($issued, (string) $consumption->quantity_issued_kg, 4);
-        }
+        $issued = $this->consumedMassKg($entry);
 
         $good = $entry->quantity_produced_kg !== null
             ? bcadd((string) $entry->quantity_produced_kg, '0', 4)
@@ -846,6 +876,37 @@ class ShiftProductionEntryService
         }
 
         return $this->activeBomCache[$itemId];
+    }
+
+    /**
+     * Sum of the entry's consumption lines that are genuinely mass, in kg.
+     *
+     * `shift_material_consumptions.quantity_issued_kg` is a misnomer: the
+     * Complete Batch form's "Other materials (exceptions)" repeater accepts
+     * ANY item and labels the input with that item's own UOM, so a Nos-unit
+     * line (cartons, caps, labels, preforms) lands a piece count in a column
+     * named kg. The stock issue is correct either way — it moves the item in
+     * its own unit — but every kg roll-up here (variance, reconciliation,
+     * unaccounted) has to exclude the non-mass lines, exactly as the
+     * expected/BOM side already does in expectedConsumptionKg().
+     *
+     * Fail-safe direction: an item with a blank/unknown UOM is COUNTED. A
+     * dropped resin line understates issue and hides material; a stray
+     * unlabelled line at worst overstates it visibly.
+     */
+    private function consumedMassKg(ShiftProductionEntry $entry): string
+    {
+        $total = '0';
+        foreach ($entry->materialConsumptions as $consumption) {
+            $uom = $consumption->item?->uom;
+            if ($uom !== null && trim($uom) !== '' && ! $this->isMassUom($uom)) {
+                continue;
+            }
+
+            $total = bcadd($total, (string) $consumption->quantity_issued_kg, 4);
+        }
+
+        return $total;
     }
 
     private function isMassUom(?string $uom): bool

@@ -28,6 +28,18 @@ class ExpectedOutputEngineTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // This suite exercises the expected-output formulas, not the production-readiness gate.
+        // Its fixtures are deliberately minimal items (no weight, no Tally
+        // identity), which the fail-closed gate would refuse at Start Batch.
+        // Turning enforcement off here keeps each test on its own subject;
+        // the gate itself is covered by ProductReadinessGateTest.
+        config()->set('production.readiness.enforced', false);
+    }
+
     /**
      * In-memory completed entry with its relations set (OutboundVoucherTest
      * pattern) — productionMetrics() is pure computation, so no DB needed.
@@ -149,6 +161,34 @@ class ExpectedOutputEngineTest extends TestCase
         // QC weighed it, so QC wins as the confirmed figure.
         $this->assertSame('3.1600', $metrics['confirmed_rejection_kg']);
         $this->assertSame('0.5000', $metrics['lumps_kg']);
+        $this->assertSame('1.9240', $metrics['reconciliation_unaccounted_kg']);
+    }
+
+    public function test_reconciliation_excludes_a_nos_unit_consumption_line(): void
+    {
+        // Same defect as ConsumptionVarianceTest's nos-unit case, on the
+        // reconciliation side: 500 cartons entered through the exceptions
+        // repeater must not read as 500 kg issued, or unaccounted_kg — the
+        // number management investigates — is off by the carton count.
+        $resin = new ShiftMaterialConsumption(['quantity_issued_kg' => '130']);
+        $resin->setRelation('item', new Item(['sku' => 'PET', 'name' => 'PET Resin', 'uom' => 'Kgs.']));
+        $cartons = new ShiftMaterialConsumption(['quantity_issued_kg' => '500']);
+        $cartons->setRelation('item', new Item(['sku' => 'CTN', 'name' => 'Carton 24', 'uom' => 'Nos.']));
+
+        $entry = new ShiftProductionEntry([
+            'batch_status' => BatchStatus::Completed,
+            'quantity_produced_kg' => '124.416',
+            'qc_rejection_kg' => '3.16',
+        ]);
+        $entry->setRelation('item', new Item(['sku' => 'BTL-1', 'name' => 'Bottle', 'uom' => 'NOS']));
+        $entry->setRelation('materialConsumptions', collect([$resin, $cartons]));
+        $entry->setRelation('scraps', collect([new ShiftScrap(['type' => 'lumps', 'quantity_kg' => '0.5'])]));
+
+        $metrics = $this->metrics($entry);
+
+        // Identical to the WB1 row 62 fixture above — the carton line is
+        // invisible to the kg reconciliation.
+        $this->assertSame('130.0000', $metrics['issued_kg']);
         $this->assertSame('1.9240', $metrics['reconciliation_unaccounted_kg']);
     }
 

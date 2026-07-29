@@ -2,10 +2,10 @@
 
 namespace Tests\Feature;
 
-use App\Exceptions\InvalidStatusTransitionException;
 use App\Models\User;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\Warehouse;
+use App\Modules\Production\Exceptions\MachineBusyException;
 use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
 use App\Modules\Production\Models\Shift;
@@ -28,6 +28,18 @@ use Tests\TestCase;
 class ActiveBatchVisibilityTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // This suite exercises global machine-state visibility, not the production-readiness gate.
+        // Its fixtures are deliberately minimal items (no weight, no Tally
+        // identity), which the fail-closed gate would refuse at Start Batch.
+        // Turning enforcement off here keeps each test on its own subject;
+        // the gate itself is covered by ProductReadinessGateTest.
+        config()->set('production.readiness.enforced', false);
+    }
 
     private function viewer(): User
     {
@@ -127,12 +139,25 @@ class ActiveBatchVisibilityTest extends TestCase
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.work_center.id', $machine->id);
 
-        // ...and the guard still refuses a second batch on it (unchanged).
-        $this->expectException(InvalidStatusTransitionException::class);
-        $service->startBatch([
-            'shift_id' => $shift->id, 'work_center_id' => $machine->id,
-            'item_id' => $item->id, 'warehouse_id' => $warehouse->id,
-            'production_date' => '2026-07-28',
-        ], User::factory()->create()->id);
+        // ...and the guard still refuses a second batch on it. The refusal
+        // now names the running batch (MachineBusyException) instead of a
+        // bare transition error — the machine looking idle on today's screen
+        // while the backend considers it running is exactly this case, and
+        // "here is what is on it" is the answer the supervisor needs.
+        try {
+            $service->startBatch([
+                'shift_id' => $shift->id, 'work_center_id' => $machine->id,
+                'item_id' => $item->id, 'warehouse_id' => $warehouse->id,
+                'production_date' => '2026-07-28',
+            ], User::factory()->create()->id);
+
+            $this->fail('Expected the start guard to refuse a second batch.');
+        } catch (MachineBusyException $e) {
+            $this->assertSame('machine_busy', $e->errorCode());
+            $this->assertSame('Machine 1', $e->payload()['active_batch']['work_center']);
+            $this->assertStringStartsWith('2026-07-27', (string) $e->payload()['active_batch']['production_date']);
+        }
+
+        $this->assertDatabaseCount('shift_production_entries', 1);
     }
 }
