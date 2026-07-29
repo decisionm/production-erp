@@ -18,6 +18,7 @@ import ReliabilityReportPage from '@/features/maintenance/pages/ReliabilityRepor
 import SchedulesPage from '@/features/maintenance/pages/SchedulesPage';
 import MaintenanceWorkOrdersPage from '@/features/maintenance/pages/WorkOrdersPage';
 import ApproveProductionPage from '@/features/production/pages/ApproveProductionPage';
+import BinBayLoadingPage from '@/features/production/pages/BinBayLoadingPage';
 import BomsPage from '@/features/production/pages/BomsPage';
 import CapacityPlanPage from '@/features/production/pages/CapacityPlanPage';
 import MoldsPage from '@/features/production/pages/MoldsPage';
@@ -103,6 +104,7 @@ export default function App() {
                                     <Route path="/production/molds" element={<MoldsPage />} />
                                     <Route path="/production/shifts" element={<ShiftsPage />} />
                                     <Route path="/production/shift-production" element={<ShiftProductionEntryPage />} />
+                                    <Route path="/production/bin-bay" element={<BinBayLoadingPage />} />
                                     <Route path="/production/shift-summary" element={<ShiftSummaryPage />} />
                                     <Route path="/production/approve-production" element={<ApproveProductionPage />} />
                                     <Route path="/production/reports" element={<ProductionReportsPage />} />

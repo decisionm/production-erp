@@ -42,6 +42,7 @@ use App\Modules\Procurement\Http\Controllers\PurchaseOrderController;
 use App\Modules\Procurement\Http\Controllers\PurchaseRequisitionController;
 use App\Modules\Procurement\Http\Controllers\VendorController;
 use App\Modules\Production\Http\Controllers\BatchPreviewController;
+use App\Modules\Production\Http\Controllers\BinBayController;
 use App\Modules\Production\Http\Controllers\BomController;
 use App\Modules\Production\Http\Controllers\CapacityPlanController;
 use App\Modules\Production\Http\Controllers\DayBinController;
@@ -410,6 +411,14 @@ Route::prefix('v1')->group(function () {
                 Route::get('shift-production-entries/{shift_production_entry}/day-bin', [DayBinController::class, 'entryState']);
 
                 Route::post('shift-production-entries/{shift_production_entry}/handover', [ShiftProductionEntryController::class, 'handover']);
+
+                // The CENTRAL bin bay. Material is loaded into a machine's
+                // day bin here, once — not re-declared inside every batch.
+                // A load is an inventory location movement (store → day
+                // bin): not consumption, never a Tally post.
+                Route::get('bin-bay/availability', [BinBayController::class, 'availability']);
+                Route::get('bin-bay/history', [BinBayController::class, 'history']);
+                Route::post('bin-bay/load', [BinBayController::class, 'load']);
 
                 // Lot → bag → machine/segment report — only meaningful (and
                 // only visible) with traceability on.

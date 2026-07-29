@@ -923,3 +923,91 @@ export interface StandardWarning {
     code: string;
     message: string;
 }
+
+// ---------------------------------------------------------------------------
+// The CENTRAL bin bay (/production/bin-bay/*, traceability-gated like every
+// shape above). Material is loaded into a machine's day bin ONCE, at the bay
+// — never re-declared inside a batch.
+//
+// A load is an inventory LOCATION movement: the material travels store →
+// machine day bin and nothing else happens. It is NOT consumption (that is
+// derived later, at batch completion, from the day-bin count) and it NEVER
+// posts a Tally voucher.
+// ---------------------------------------------------------------------------
+
+/**
+ * One load that fed the bin, oldest first — the bin's own FIFO (the order
+ * material physically went in), which is not the store pick list's ordering
+ * (lot received_date).
+ */
+export interface BinBayLayer {
+    movement_id: number;
+    material_bag_id: number | null;
+    barcode: string | null;
+    /** Ledger truth: the kg this load put in. */
+    loaded_kg: string;
+    /**
+     * DERIVED, not recorded: the current balance allocated across layers
+     * first-in-first-out, so what is left is attributed to the newest loads.
+     * An estimate — the ledger never tracks which grain came out of which bag.
+     */
+    in_bin_kg: string;
+    recorded_at: string | null;
+    lot: { id: number; supplier_lot_no: string | null; received_date: string | null } | null;
+}
+
+/** What one bin bay holds of one material right now, and where it came from. */
+export interface BinBayAvailability {
+    work_center_id: number;
+    item: { id: number; name: string; sku: string | null; uom: string | null } | null;
+    /** The ledger balance — a weighed count re-anchors it. */
+    available_kg: string;
+    loaded_kg: string;
+    /** Balance a count put above everything ever loaded; no lot can account for it. */
+    unattributed_kg: string;
+    layers: BinBayLayer[];
+}
+
+export interface BinBayRequirementComponent {
+    item_id: number;
+    name: string;
+    sku: string | null;
+    uom: string | null;
+    /** Kg-based components are day-bin tracked; Nos consumables are not. */
+    is_mass: boolean;
+    /** Null when no piece count was given — a blank is honest, a zero is not. */
+    expected_quantity: string | null;
+    available_quantity: string;
+    /** Null for non-mass components: they never sit in the bin, so "short" is meaningless. */
+    shortage_quantity: string | null;
+}
+
+/** The product's active recipe priced out against what the bay actually holds. */
+export interface BinBayRequirement {
+    product_item_id: number;
+    expected_pieces: number | null;
+    /** Null = no active BOM; the components list is then empty rather than guessed. */
+    recipe_source: 'bom' | null;
+    components: BinBayRequirementComponent[];
+}
+
+export interface BinBayAvailabilityResponse {
+    /** Null unless an item_id was asked for. */
+    bin: BinBayAvailability | null;
+    /** Null unless a product_item_id + expected_pieces pair was asked for. */
+    requirement: BinBayRequirement | null;
+}
+
+/** Who loaded what into a bay, when, off which bag — newest first. */
+export interface BinBayHistoryRow {
+    id: number;
+    recorded_at: string | null;
+    quantity_kg: string;
+    /** Loading is central: normally null, set only when a load is tied to a running segment. */
+    shift_production_entry_id: number | null;
+    item: { id: number; name: string; sku: string | null } | null;
+    material_bag_id: number | null;
+    barcode: string | null;
+    lot: { id: number; supplier_lot_no: string | null } | null;
+    loaded_by: { id: number; name: string } | null;
+}
