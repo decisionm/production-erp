@@ -753,10 +753,31 @@ export default function ShiftProductionEntryPage() {
         }
     }, [entryDayBin, completingEntry, traceabilityEnabled, completeForm]);
 
+    // Watched so the actual-consumption prefill recomputes as the closing
+    // weight is typed.
+    const closingWatch = completeForm.watch('closing_day_bin');
+
     useEffect(() => {
         if (!traceabilityEnabled || !completingEntry || !entryDayBin?.has_movements) return;
         for (const material of entryDayBin.materials) {
-            const consumed = toNum(material.consumption_kg);
+            // consumption_kg is the SERVER's figure and stays null until a
+            // closing count exists — which only happens after this form is
+            // submitted. So during completion the same formula is applied to
+            // what the supervisor is typing right now:
+            //     consumed = opening + loaded − closing − returned
+            // Without this the actual line stayed empty on every batch and
+            // the reconciliation had nothing to work with.
+            const serverConsumed = toNum(material.consumption_kg);
+            const rawClosing = (closingWatch ?? []).find((row) => row?.item_id === material.item.id)?.quantity_kg;
+            const typedClosing = rawClosing === null || rawClosing === undefined ? null : Number(rawClosing);
+            const derived =
+                typedClosing === null
+                    ? null
+                    : (toNum(material.opening_kg) ?? 0) +
+                      (toNum(material.loaded_kg) ?? 0) -
+                      typedClosing -
+                      (toNum(material.returned_kg) ?? 0);
+            const consumed = serverConsumed ?? derived;
             if (consumed === null || consumed < 0) continue;
             const target = isResinItem(material.item) ? ('resin' as const) : isMasterbatchItem(material.item) ? ('mb' as const) : null;
             if (!target) continue;
@@ -771,7 +792,7 @@ export default function ShiftProductionEntryPage() {
                 completeForm.setValue(itemField, material.item.id);
             }
         }
-    }, [entryDayBin, completingEntry, traceabilityEnabled, completeForm]);
+    }, [entryDayBin, completingEntry, traceabilityEnabled, completeForm, closingWatch]);
 
     const nominalWeight = completingEntry?.item.nominal_weight_grams ? Number(completingEntry.item.nominal_weight_grams) : null;
     const previewProducedKg = nominalWeight && quantityProduced ? ((quantityProduced * nominalWeight) / 1000).toFixed(4) : null;
