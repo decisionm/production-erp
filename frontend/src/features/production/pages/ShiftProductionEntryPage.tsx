@@ -2243,12 +2243,25 @@ export default function ShiftProductionEntryPage() {
                                     ))}
                                 </Descriptions>
                             )}
+                            {/* A missing recipe is a setup gap, not a fact of
+                                life, so the notice carries the way to close it.
+                                The item id rides along so the BOM form opens on
+                                the product the supervisor was already looking at
+                                — retyping it here is how the wrong product ends
+                                up with the recipe. */}
                             {batchPreview && batchPreview.estimation.recipe_source === null && (
                                 <Alert
                                     type="info"
                                     showIcon
                                     style={{ marginBottom: 16 }}
                                     message="No consumption recipe for this product — resin, masterbatch and consumables cannot be estimated."
+                                    action={
+                                        startItemId ? (
+                                            <Link to={`/production/boms?item_id=${startItemId}`}>
+                                                <Button size="small">Configure recipe</Button>
+                                            </Link>
+                                        ) : undefined
+                                    }
                                 />
                             )}
 
