@@ -41,6 +41,7 @@ use App\Modules\Procurement\Http\Controllers\GoodsReceiptController;
 use App\Modules\Procurement\Http\Controllers\PurchaseOrderController;
 use App\Modules\Procurement\Http\Controllers\PurchaseRequisitionController;
 use App\Modules\Procurement\Http\Controllers\VendorController;
+use App\Modules\Production\Http\Controllers\BatchPreviewController;
 use App\Modules\Production\Http\Controllers\BomController;
 use App\Modules\Production\Http\Controllers\CapacityPlanController;
 use App\Modules\Production\Http\Controllers\DayBinController;
@@ -59,6 +60,7 @@ use App\Modules\Production\Http\Controllers\ShiftProductionEntryController;
 use App\Modules\Production\Http\Controllers\ShiftStockCountController;
 use App\Modules\Production\Http\Controllers\ShiftSummaryController;
 use App\Modules\Production\Http\Controllers\SubcontractOrderController;
+use App\Modules\Production\Http\Controllers\VoucherPreviewController;
 use App\Modules\Production\Http\Controllers\WorkCenterController;
 use App\Modules\Production\Http\Controllers\WorkOrderController;
 use App\Modules\Quality\Http\Controllers\CalibrationRecordController;
@@ -320,6 +322,10 @@ Route::prefix('v1')->group(function () {
             // yet); "complete" fills in the finished numbers once the batch
             // is done running — see PRODUCTION-SUPERVISOR-UX-PLAN.md §1.
             Route::get('shift-production-entries/active', [ShiftProductionEntryController::class, 'active']);
+            // Readiness + estimation for an intended run, before it starts.
+            // GET and side-effect free: the SPA calls it on every product or
+            // machine change while the supervisor fills the form.
+            Route::get('shift-production-entries/preview', BatchPreviewController::class);
             Route::apiResource('shift-production-entries', ShiftProductionEntryController::class)->only(['index', 'store']);
             Route::post('shift-production-entries/{shift_production_entry}/complete', [ShiftProductionEntryController::class, 'complete']);
             // The 4-stage approval chain (Supervisor submits at completeBatch):
@@ -327,6 +333,9 @@ Route::prefix('v1')->group(function () {
             Route::post('shift-production-entries/{shift_production_entry}/pm-approve', [ShiftProductionEntryController::class, 'pmApprove']);
             Route::post('shift-production-entries/{shift_production_entry}/accountant-approve', [ShiftProductionEntryController::class, 'accountantApprove']);
             Route::post('shift-production-entries/{shift_production_entry}/md-approve', [ShiftProductionEntryController::class, 'mdApprove']);
+            // What Tally will receive, resolved against real masters —
+            // inspected before the approval that posts it.
+            Route::get('shift-production-entries/{shift_production_entry}/voucher-preview', VoucherPreviewController::class);
             Route::post('shift-production-entries/{shift_production_entry}/reject', [ShiftProductionEntryController::class, 'reject']);
 
             Route::post('shift-summaries', [ShiftSummaryController::class, 'store']);

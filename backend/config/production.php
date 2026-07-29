@@ -58,4 +58,58 @@ return [
     // half-up ROUND to keep matching the workbook — see
     // ShiftProductionEntryService::productionMetrics().
     'packing_rounding' => env('PROD_PACKING_ROUNDING', 'ceil'),
+
+    /*
+     * The production-readiness gate (ProductReadinessService). Master switch
+     * first: with `enforced` false the gate still evaluates and still shows
+     * every finding, it just never refuses a Start Batch — the way to watch
+     * the gate against real shifts before letting it bite.
+     *
+     * Per-check severity: 'block' | 'warn' | 'off'.
+     *
+     * The defaults below are DELIBERATELY NOT all-blocking, and the reason is
+     * master-data coverage, not a judgement about which fields matter:
+     *
+     *   - consumption_recipe defaults to 'warn' because no product carries a
+     *     BOM yet. Blocking on it would refuse every batch on the floor.
+     *   - colour defaults to 'warn' because it drives a suggestion (which
+     *     masterbatch) and the scrap-item split, neither of which stops a
+     *     shift from being recorded truthfully.
+     *   - tally_item / tally_godown default to 'block' because they are
+     *     voucher-fatal: Tally rejects the whole voucher, and the failure
+     *     surfaces hours after the work is done.
+     *
+     * Raise each to 'block' as the corresponding masters get loaded. That
+     * progression is the intended operating procedure, not a workaround.
+     *
+     * `enforced` DEFAULTS TO FALSE — watch-only — and that default is a
+     * safety property of the deployment, not a preference. Roughly 364 of
+     * ~410 finished-good items still lack cycle time and cavities. A
+     * deployment that reached a server whose .env had not been edited yet
+     * would, with a `true` default, refuse every batch for those products
+     * on the next shift. Watch-only cannot cause that: the gate evaluates,
+     * displays every finding, and refuses nothing.
+     *
+     * Flip to true (PROD_READINESS_ENFORCED=true) once master coverage is
+     * good enough that blocking is what the factory wants. That is a
+     * deliberate decision made against real data, which is exactly why it
+     * should not be arrived at by forgetting to set an .env line.
+     */
+    'readiness' => [
+        'enforced' => (bool) env('PROD_READINESS_ENFORCED', false),
+
+        'checks' => [
+            'item_active' => env('PROD_READINESS_ITEM_ACTIVE', 'block'),
+            'uom' => env('PROD_READINESS_UOM', 'block'),
+            'weight' => env('PROD_READINESS_WEIGHT', 'block'),
+            'cycle_time' => env('PROD_READINESS_CYCLE_TIME', 'block'),
+            'cavities' => env('PROD_READINESS_CAVITIES', 'block'),
+            'packing' => env('PROD_READINESS_PACKING', 'block'),
+            'consumption_recipe' => env('PROD_READINESS_RECIPE', 'warn'),
+            'colour' => env('PROD_READINESS_COLOUR', 'warn'),
+            'tally_item' => env('PROD_READINESS_TALLY_ITEM', 'block'),
+            'tally_godown' => env('PROD_READINESS_TALLY_GODOWN', 'block'),
+            'machine_active' => env('PROD_READINESS_MACHINE_ACTIVE', 'block'),
+        ],
+    ],
 ];
