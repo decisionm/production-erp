@@ -150,50 +150,62 @@ class ProductionStandardImportService
             }
 
             $cavities = $this->intOrNull($row['cavities'] ?? null);
-            $weight = $this->decimalOrNull($row['unit_weight_grams'] ?? null);
 
-            // One source row can yield several variants when a cell holds
-            // several values.
-            [$cycleTimes, $rawCycleTime] = $this->cycleTimes($row['cycle_time'] ?? null);
+            // A single source cell can hold several values — "18/20" for the
+            // long-standing ambiguous 200Ml Round weight, "21.5 / 17.8" for
+            // a cycle time that differs by machine. Each becomes its own
+            // unresolved variant. Averaging would invent a weight no bottle
+            // has and a rate no machine runs at.
+            [$weights, $rawWeight] = $this->splitValues($row['unit_weight_grams'] ?? null);
+            [$cycleTimes, $rawCycleTime] = $this->splitValues($row['cycle_time'] ?? null);
 
-            foreach ($cycleTimes as $cycleTime) {
-                $key = implode('|', [mb_strtolower($product), $cavities ?? '', $weight ?? '', $cycleTime ?? '']);
+            foreach ($weights as $weight) {
+                foreach ($cycleTimes as $cycleTime) {
+                    $key = implode('|', [mb_strtolower($product), $cavities ?? '', $weight ?? '', $cycleTime ?? '']);
 
-                if (! isset($variants[$key])) {
-                    $unresolved = [];
-                    if (count($cycleTimes) > 1) {
-                        $unresolved[] = "Cycle time cell held several values ({$rawCycleTime}); each is a separate variant pending confirmation of which applies where.";
+                    if (! isset($variants[$key])) {
+                        $unresolved = [];
+                        if (count($cycleTimes) > 1) {
+                            $unresolved[] = "Cycle time cell held several values ({$rawCycleTime}); each is a separate variant pending confirmation of which applies where.";
+                        }
+                        if (count($weights) > 1) {
+                            $unresolved[] = "Unit weight cell held several values ({$rawWeight}); each is a separate variant pending confirmation of which applies where.";
+                        }
+                        if (count($weights) > 1 && count($cycleTimes) > 1) {
+                            $unresolved[] = 'Weight and cycle time are BOTH multi-valued, so these combinations are generated, not observed — confirm which pairings are real and discard the rest.';
+                        }
+                        if ($cycleTime === null) {
+                            $unresolved[] = 'Cycle time is blank.';
+                        }
+                        if ($cavities === null) {
+                            $unresolved[] = 'Cavities is blank.';
+                        }
+                        if ($weight === null) {
+                            $unresolved[] = 'Unit weight is blank.';
+                        }
+
+                        $variants[$key] = [
+                            'source_product_name' => $product,
+                            'item_id' => $this->matchItem($product)?->id,
+                            'matched_item_name' => $this->matchItem($product)?->name,
+                            'cavities' => $cavities,
+                            'unit_weight_grams' => $weight,
+                            'cycle_time' => $cycleTime,
+                            'cycle_time_raw' => count($cycleTimes) > 1 || $cycleTime === null ? $rawCycleTime : null,
+                            'unit_weight_raw' => count($weights) > 1 || $weight === null ? $rawWeight : null,
+                            'status' => $unresolved === [] ? 'draft' : 'unresolved',
+                            'unresolved_reason' => $unresolved === [] ? null : implode(' ', $unresolved),
+                            'source_reference' => (string) ($row['sl_no'] ?? ''),
+                            'packagings' => [],
+                        ];
                     }
-                    if ($cycleTime === null) {
-                        $unresolved[] = 'Cycle time is blank.';
-                    }
-                    if ($cavities === null) {
-                        $unresolved[] = 'Cavities is blank.';
-                    }
-                    if ($weight === null) {
-                        $unresolved[] = 'Unit weight is blank.';
-                    }
 
-                    $variants[$key] = [
-                        'source_product_name' => $product,
-                        'item_id' => $this->matchItem($product)?->id,
-                        'matched_item_name' => $this->matchItem($product)?->name,
-                        'cavities' => $cavities,
-                        'unit_weight_grams' => $weight,
-                        'cycle_time' => $cycleTime,
-                        'cycle_time_raw' => count($cycleTimes) > 1 || $cycleTime === null ? $rawCycleTime : null,
-                        'status' => $unresolved === [] ? 'draft' : 'unresolved',
-                        'unresolved_reason' => $unresolved === [] ? null : implode(' ', $unresolved),
-                        'source_reference' => (string) ($row['sl_no'] ?? ''),
-                        'packagings' => [],
-                    ];
-                }
-
-                foreach ($this->packagings($row) as $packaging) {
-                    // Merge, keyed by mode: this is where a pouch row and a
-                    // tray row for the same standard become one standard
-                    // with two options.
-                    $variants[$key]['packagings'][$packaging['mode']] = $packaging;
+                    foreach ($this->packagings($row) as $packaging) {
+                        // Merge, keyed by mode: this is where a pouch row and a
+                        // tray row for the same standard become one standard
+                        // with two options.
+                        $variants[$key]['packagings'][$packaging['mode']] = $packaging;
+                    }
                 }
             }
         }
@@ -253,14 +265,18 @@ class ProductionStandardImportService
     }
 
     /**
-     * Split a cycle-time cell into one or more values.
+     * Split a numeric cell into one or more values.
      *
      * "12.2" -> [12.2];  "21.5 / 17.8" -> [21.5, 17.8];  "18/20" -> [18, 20];
      * blank -> [null] (one variant, flagged).
      *
+     * Used for BOTH cycle time and unit weight: the factory's sheet carries
+     * multi-valued cells in each, and the ambiguous 200Ml Round weight
+     * ("18/20") is a question that has been open since 24 July.
+     *
      * @return array{0: list<?string>, 1: ?string}
      */
-    private function cycleTimes(mixed $value): array
+    private function splitValues(mixed $value): array
     {
         $raw = is_string($value) ? trim($value) : (is_numeric($value) ? (string) $value : null);
 
