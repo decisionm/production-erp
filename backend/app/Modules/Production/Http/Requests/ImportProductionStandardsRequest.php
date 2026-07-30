@@ -30,8 +30,18 @@ class ImportProductionStandardsRequest extends FormRequest
             'rows.*.cycle_time' => ['nullable'],
             'rows.*.nos_per_pouch' => ['nullable'],
             'rows.*.pouch_nos_per_box' => ['nullable'],
+            // The sheet's own containers-per-box figures (POUCH/BOX DETAILS,
+            // TRAY/BOX DETAILS). Accepted rather than always re-derived by
+            // division: on the 200ML ROUND rows the sheet's figure and the
+            // division disagree, and the sheet is the record.
+            'rows.*.pouches_per_box' => ['nullable'],
             'rows.*.nos_per_tray' => ['nullable'],
             'rows.*.tray_nos_per_box' => ['nullable'],
+            'rows.*.trays_per_box' => ['nullable'],
+            // Packaging-material specs, free text (e.g. "750*610"). Not counts.
+            'rows.*.carton_spec' => ['nullable', 'string', 'max:64'],
+            'rows.*.tray_spec' => ['nullable', 'string', 'max:64'],
+            'rows.*.pouch_spec' => ['nullable', 'string', 'max:64'],
         ];
     }
 }

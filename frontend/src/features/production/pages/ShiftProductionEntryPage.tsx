@@ -2448,6 +2448,28 @@ export default function ShiftProductionEntryPage() {
                                 <Descriptions.Item label="Pcs/tray">
                                     {batchPreview?.estimation?.nos_per_tray ?? startItem.nos_per_tray ?? '—'}
                                 </Descriptions.Item>
+                                {/* The master's packaging-MATERIAL specs. Which carton,
+                                    which tray, which pouch film to fetch — the three
+                                    right-hand columns of the factory sheet. Shown only
+                                    when the standard actually carries one: a row of
+                                    dashes for material nobody recorded is noise on a
+                                    card a supervisor reads mid-setup. Never computed
+                                    from — "750*610" is millimetres, not a count. */}
+                                {batchPreview?.standard?.carton_spec && (
+                                    <Descriptions.Item label="Carton">
+                                        {batchPreview.standard.carton_spec}
+                                    </Descriptions.Item>
+                                )}
+                                {batchPreview?.standard?.tray_spec && (
+                                    <Descriptions.Item label="Tray">
+                                        {batchPreview.standard.tray_spec}
+                                    </Descriptions.Item>
+                                )}
+                                {batchPreview?.standard?.pouch_spec && (
+                                    <Descriptions.Item label="Pouch film">
+                                        {batchPreview.standard.pouch_spec}
+                                    </Descriptions.Item>
+                                )}
                             </Descriptions>
                             <Form.Item
                                 label="Active Cavities"

@@ -33,6 +33,42 @@ return [
             ? (float) env('PROD_TOL_UNACCOUNTED_BLOCKING') : null,
     ],
 
+    /*
+     * Machine capability by cavity count.
+     *
+     * The factory's rule (30-Jul): a mould running `cavity_threshold` cavities
+     * or more is only mounted on the machines listed here; everything below
+     * that runs on any machine. 12 of the master's 103 rows are affected
+     * (8 at 6 cavities, 4 at 7).
+     *
+     * A RULE, not a mapping table. 90 standards × 10 machines of stored rows
+     * would need regenerating on every re-import and would silently keep
+     * whatever the last one decided; the cavity count already lives on the
+     * standard, so the rule reads it directly.
+     *
+     * Machines are listed by ID, not name — a name stops matching the moment
+     * someone renames "Machine 10" in the work-centre master, and the
+     * restriction would vanish with nothing to show it had ever applied.
+     *
+     * ADVISORY, deliberately. Exceeding it warns loudly on Start Batch and is
+     * recorded against the batch, but never refuses the start: the cavity
+     * figure comes from a sheet with known ambiguities, and one wrong number
+     * would otherwise make a real product unrunnable mid-shift. Set
+     * PROD_CAVITY_RULE_ENFORCED=true once the rule has been watched against
+     * real shifts and the factory wants it to bite.
+     */
+    'machine_capability' => [
+        'cavity_threshold' => (int) env('PROD_CAVITY_THRESHOLD', 6),
+
+        // Comma-separated work-centre IDs, e.g. "10" or "9,10".
+        'high_cavity_work_center_ids' => array_values(array_filter(
+            array_map('intval', array_map('trim', explode(',', (string) env('PROD_HIGH_CAVITY_WORK_CENTERS', '10')))),
+            fn (int $id) => $id > 0,
+        )),
+
+        'enforced' => (bool) env('PROD_CAVITY_RULE_ENFORCED', false),
+    ],
+
     // Phase 6 — Lot/Barcode traceability & shift continuity. The centralized
     // GRN → bag labels → bin-bay workflow is now the factory's live path, so
     // it ships on. A deployment can still fail closed by explicitly setting

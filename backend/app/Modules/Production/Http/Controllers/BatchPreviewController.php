@@ -66,6 +66,13 @@ class BatchPreviewController extends Controller
                     'cycle_time' => $standard->cycle_time,
                     'status' => $standard->status,
                     'unresolved_reason' => $standard->unresolved_reason,
+                    // Packaging-material specs from the master's three
+                    // right-hand columns. Reference only — free text like
+                    // "750*610" (a film in mm), never a count, so nothing
+                    // downstream computes from them.
+                    'carton_spec' => $standard->carton_spec,
+                    'tray_spec' => $standard->tray_spec,
+                    'pouch_spec' => $standard->pouch_spec,
                 ],
                 // Only a real choice is surfaced; one variant means the SPA
                 // never shows a picker.
@@ -87,7 +94,7 @@ class BatchPreviewController extends Controller
                     'id' => $packaging->id, 'mode' => $packaging->mode, 'label' => $packaging->label(),
                     'nos_per_box' => $packaging->nos_per_box,
                 ],
-                'warnings' => $this->standards->warningsFor($standard, $packaging, $item->id),
+                'warnings' => $this->standards->warningsFor($standard, $packaging, $item->id, $workCenter?->id),
             ],
         ]);
     }
