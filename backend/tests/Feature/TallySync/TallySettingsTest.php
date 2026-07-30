@@ -14,19 +14,11 @@ class TallySettingsTest extends TestCase
 {
     use RefreshDatabase;
 
-    /**
-     * `tally.manage` — the permission the deployment actually provisions.
-     *
-     * This used to grant "tally-sync.manage", which it also had to CREATE
-     * first, because no seeder makes one. That kept this test green while
-     * every real user got a 403 from the route group: the test was asserting
-     * against a permission that existed only inside the test.
-     */
     private function actAsStaff(): void
     {
         $user = User::factory()->create(['is_active' => true]);
-        Permission::findOrCreate('tally.manage', 'web');
-        $user->givePermissionTo('tally.manage');
+        Permission::findOrCreate('tally-sync.manage', 'web');
+        $user->givePermissionTo('tally-sync.manage');
         Sanctum::actingAs($user);
     }
 

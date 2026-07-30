@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Models\User;
+use App\Modules\Core\Services\PermissionService;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\MaterialLot;
 use App\Modules\Inventory\Models\StockBalance;
@@ -204,10 +205,15 @@ class AcceptanceFixtureSeeder extends Seeder
     /** One user per approval desk, so the whole chain is walkable locally. */
     private function users(): void
     {
-        foreach (['production.view', 'production.manage', 'inventory.view', 'inventory.manage',
-            'tally.view', 'tally.manage', 'procurement.view', 'procurement.manage'] as $permission) {
-            Permission::findOrCreate($permission, 'web');
-        }
+        // Derived from PermissionService, never hand-listed. The hand-written
+        // list this replaces had drifted: it created "tally.view"/"tally.manage"
+        // while every route group and PermissionSeeder use the module key
+        // "tally-sync". A fixture user therefore held a permission that gated
+        // nothing and lacked the one that gates the Tally screens, so the whole
+        // Tally surface 403'd on any database seeded from this fixture alone —
+        // looking exactly like a product bug rather than a fixture gap.
+        $permissions = collect(app(PermissionService::class)->allPermissionNames())
+            ->map(fn (string $name) => Permission::findOrCreate($name, 'web'));
 
         $desks = [
             ['supervisor@example.com', 'Fixture Supervisor', null],
@@ -221,7 +227,7 @@ class AcceptanceFixtureSeeder extends Seeder
                 'password' => Hash::make(self::PASSWORD),
                 'is_active' => true,
             ]);
-            $user->syncPermissions(Permission::all());
+            $user->syncPermissions($permissions);
             if ($role !== null) {
                 $user->assignRole(Role::findOrCreate($role, 'web'));
             }

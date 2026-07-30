@@ -587,24 +587,6 @@ class ShiftProductionEntryService
         return $fresh;
     }
 
-    /**
-     * DORMANT: reserved for a future "big approvals" flow (e.g. value-
-     * threshold entries routed MD-ward before posting). The normal path goes
-     * pm_approved → approved at the accountant, so accountant_approved is
-     * currently unreachable; this transition stays for when thresholds land.
-     */
-    public function mdApprove(ShiftProductionEntry $entry, int $approvedBy): ShiftProductionEntry
-    {
-        $fresh = $this->advance($entry, ShiftProductionEntryStatus::AccountantApproved, ShiftProductionEntryStatus::Approved, [
-            'approved_by' => $approvedBy,
-            'approved_at' => now(),
-        ]);
-
-        event(new ShiftProductionEntryApproved($fresh));
-
-        return $fresh;
-    }
-
     private function advance(
         ShiftProductionEntry $entry,
         ShiftProductionEntryStatus $from,

@@ -77,15 +77,6 @@ class ShiftProductionEntryController extends Controller
         );
     }
 
-    public function mdApprove(Request $request, ShiftProductionEntry $shiftProductionEntry): ShiftProductionEntryResource
-    {
-        abort_unless($request->user()->hasAnyRole(['Administrator']), 403, 'Final approval requires an Administrator (MD/Director) account.');
-
-        return ShiftProductionEntryResource::make(
-            $this->entries->mdApprove($shiftProductionEntry, $request->user()->id),
-        );
-    }
-
     public function reject(RejectShiftProductionEntryRequest $request, ShiftProductionEntry $shiftProductionEntry): ShiftProductionEntryResource
     {
         return ShiftProductionEntryResource::make(

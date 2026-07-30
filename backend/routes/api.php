@@ -238,14 +238,7 @@ Route::prefix('v1')->group(function () {
         });
 
         Route::prefix('tally-sync')->group(function () {
-            // module:tally, NOT module:tally-sync. EnsureModulePermission
-            // derives the permission names from this string, and the
-            // permissions that exist are tally.view / tally.manage — so
-            // "tally-sync" demanded tally-sync.view, which nothing grants and
-            // no seeder creates. The whole Tally surface (queue, retry, agent
-            // tokens, company + ledger mappings) therefore 403'd for EVERY
-            // user, including one holding every permission in the system.
-            Route::middleware('module:tally')->group(function () {
+            Route::middleware('module:tally-sync')->group(function () {
                 Route::get('entries', [TallySyncController::class, 'index']);
                 Route::post('entries/{tally_sync_entry}/retry', [TallySyncController::class, 'retry']);
 
@@ -371,7 +364,6 @@ Route::prefix('v1')->group(function () {
             // PM verifies → Accountant reconciles → MD final approval → Tally.
             Route::post('shift-production-entries/{shift_production_entry}/pm-approve', [ShiftProductionEntryController::class, 'pmApprove']);
             Route::post('shift-production-entries/{shift_production_entry}/accountant-approve', [ShiftProductionEntryController::class, 'accountantApprove']);
-            Route::post('shift-production-entries/{shift_production_entry}/md-approve', [ShiftProductionEntryController::class, 'mdApprove']);
             // What Tally will receive, resolved against real masters —
             // inspected before the approval that posts it.
             Route::get('shift-production-entries/{shift_production_entry}/voucher-preview', VoucherPreviewController::class);
