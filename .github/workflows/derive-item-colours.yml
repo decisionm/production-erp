@@ -54,6 +54,7 @@ jobs:
 
       - name: Run it
         run: |
+          set -o pipefail
           FLAGS=""
           [ "${{ inputs.write }}" = "true" ] && FLAGS="$FLAGS --write"
           [ "${{ inputs.only_products }}" = "true" ] && FLAGS="$FLAGS --only-products"
