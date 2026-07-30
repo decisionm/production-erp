@@ -200,7 +200,7 @@ class ProductReadinessService
         }
 
         if (! $this->hasConsumptionRecipe($item)) {
-            $failures['consumption_recipe'] = 'No active consumption recipe — expected resin, masterbatch and consumable quantities cannot be calculated.';
+            $failures['consumption_recipe'] = 'No material recipe saved yet, so the expected resin/masterbatch card stays empty. Starting, completing, expected-vs-actual and Tally are NOT affected — enter consumption as weighed, as usual.';
         }
 
         // A LOCAL- fixture has no Tally GUID BY CONSTRUCTION — it was

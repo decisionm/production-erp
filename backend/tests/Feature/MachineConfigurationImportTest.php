@@ -177,4 +177,40 @@ class MachineConfigurationImportTest extends TestCase
 
         $this->assertSame([4, 5], $cavities);
     }
+
+    public function test_the_approve_flag_makes_the_rows_govern_the_floor(): void
+    {
+        // The owner's go-live instruction: "we have machines, just the
+        // mapping — make it available." With --approve the imported rows are
+        // approved, and approval is the switch resolve() honours.
+        $this->seedFloor();
+
+        $this->artisan('production:import-machine-configurations --write --approve')->assertExitCode(0);
+
+        $machine1 = WorkCenter::where('name', 'Machine 1')->firstOrFail();
+        $item = Item::where('name', 'B.100 Ml Round Pet Bottle Amber-12.9gms')->firstOrFail();
+
+        $resolved = app(ProductionConfigurationService::class)->resolve($machine1->id, $item->id);
+
+        $this->assertNotNull($resolved, 'An approved imported row must be what the floor resolves.');
+        $this->assertSame(ConfigurationStatus::Approved, $resolved->status);
+        $this->assertStringContainsString('owner instruction', (string) $resolved->confirmation_status);
+    }
+
+    public function test_a_row_a_person_already_touched_survives_a_bulk_approve(): void
+    {
+        // Bulk approval must never overwrite an individual decision — a row
+        // someone retired stays retired, figures and all.
+        $this->seedFloor();
+        $this->artisan('production:import-machine-configurations --write');
+
+        $config = ProductionConfiguration::query()->firstOrFail();
+        $config->update(['status' => ConfigurationStatus::Inactive, 'default_cycle_time' => '77.00']);
+
+        $this->artisan('production:import-machine-configurations --write --approve');
+
+        $fresh = $config->fresh();
+        $this->assertSame(ConfigurationStatus::Inactive, $fresh->status);
+        $this->assertSame('77.00', (string) $fresh->default_cycle_time);
+    }
 }

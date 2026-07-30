@@ -60,7 +60,8 @@ class ImportMachineConfigurations extends Command
 
     protected $signature = 'production:import-machine-configurations
         {--json= : JSON file (default: storage/'.self::DEFAULT_ROW_FILE.', falling back to the committed fixture)}
-        {--write : Actually write (default is a dry run)}';
+        {--write : Actually write (default is a dry run)}
+        {--approve : Approve the rows this import writes, on the owner\'s explicit instruction. Rows a person already approved or retired stay theirs.}';
 
     protected $description = 'Seed draft machine–product configurations from the factory\'s daily production review sheets';
 
@@ -148,6 +149,17 @@ class ImportMachineConfigurations extends Command
                     $updated++;
                 } else {
                     $unchanged++;
+                }
+
+                // Bulk approval is an OWNER'S ACT, not a default: it exists
+                // because at go-live the owner said, in so many words, "we
+                // have machines, just the mapping — make it available". The
+                // provenance line records that this approval was that
+                // instruction, not a per-row review.
+                if ($this->option('approve')) {
+                    $config->status = ConfigurationStatus::Approved;
+                    $config->approved_at = now();
+                    $config->confirmation_status = 'Bulk-approved at go-live on owner instruction';
                 }
 
                 $config->save();
