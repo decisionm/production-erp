@@ -2413,6 +2413,26 @@ export default function ShiftProductionEntryPage() {
 
                     {startItem && (
                         <>
+                            {/* The machine's own approved figures govern when they exist —
+                                said out loud, because the supervisor comparing this card
+                                to the workbook would otherwise see numbers that differ
+                                from the printed standard with no explanation. */}
+                            {batchPreview?.configuration && (
+                                <Alert
+                                    type="success"
+                                    showIcon
+                                    style={{ marginBottom: 12 }}
+                                    message={`Using this machine's approved configuration${
+                                        batchPreview.configuration.default_cycle_time
+                                            ? ` — CT ${fmtNum(toNum(batchPreview.configuration.default_cycle_time))} s`
+                                            : ''
+                                    }${
+                                        batchPreview.configuration.default_cavities
+                                            ? ` · ${batchPreview.configuration.default_cavities} cavities`
+                                            : ''
+                                    }`}
+                                />
+                            )}
                             {/* Read-only card of the item master's standards — what the
                                 expected-output engine will hold this run against. */}
                             <Descriptions
@@ -2440,12 +2460,19 @@ export default function ShiftProductionEntryPage() {
                                 </Descriptions.Item>
                                 <Descriptions.Item label="Std CT">
                                     {(() => {
-                                        const ct = batchPreview?.standard?.cycle_time ?? startItem.standard_cycle_time;
+                                        // Effective precedence, matching the backend: approved
+                                        // machine configuration → standard → item master.
+                                        const ct = batchPreview?.configuration?.default_cycle_time
+                                            ?? batchPreview?.standard?.cycle_time
+                                            ?? startItem.standard_cycle_time;
                                         return ct ? `${fmtNum(toNum(ct))} s` : '—';
                                     })()}
                                 </Descriptions.Item>
                                 <Descriptions.Item label="Std cavities">
-                                    {batchPreview?.standard?.cavities ?? startItem.standard_cavities ?? '—'}
+                                    {batchPreview?.configuration?.default_cavities
+                                        ?? batchPreview?.standard?.cavities
+                                        ?? startItem.standard_cavities
+                                        ?? '—'}
                                 </Descriptions.Item>
                                 <Descriptions.Item label="Pcs/box">
                                     {batchPreview?.estimation?.nos_per_box ?? startItem.nos_per_box ?? '—'}

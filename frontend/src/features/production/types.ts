@@ -810,6 +810,19 @@ export interface BatchPreview {
         | null;
     variants: StandardVariant[];
     packaging: { id: number; mode: string; label: string; nos_per_box: number | null } | null;
+    /**
+     * The APPROVED machine-product configuration governing this run, when the
+     * chosen machine has one. Its figures outrank the product standard — the
+     * estimation above is already computed from them; this block exists so the
+     * screen can say so instead of leaving the numbers unexplained.
+     */
+    configuration?: {
+        id: number;
+        default_cycle_time: string | null;
+        default_cavities: number | null;
+        unit_weight_grams: string | null;
+        colour: string | null;
+    } | null;
     warnings: StandardWarning[];
 }
 

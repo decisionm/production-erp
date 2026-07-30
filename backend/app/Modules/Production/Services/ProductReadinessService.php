@@ -89,9 +89,10 @@ class ProductReadinessService
         ?WorkCenter $workCenter = null,
         ?ProductionStandard $standard = null,
         ?ProductionStandardPackaging $packaging = null,
+        ?object $configuration = null,
     ): array {
         $severities = config('production.readiness.checks', []);
-        $failures = $this->failures($item, $warehouse, $workCenter, $standard, $packaging);
+        $failures = $this->failures($item, $warehouse, $workCenter, $standard, $packaging, $configuration);
 
         $blocking = [];
         $warnings = [];
@@ -160,6 +161,7 @@ class ProductReadinessService
         ?WorkCenter $workCenter,
         ?ProductionStandard $standard = null,
         ?ProductionStandardPackaging $packaging = null,
+        ?object $configuration = null,
     ): array {
         $failures = [];
 
@@ -177,15 +179,15 @@ class ProductReadinessService
         // falls back to the item master and may still report these missing —
         // which is honest, because until the supervisor says which variant
         // this run is, nothing knows what it weighs either.
-        if (! $this->positive($standard?->unit_weight_grams ?? $item->nominal_weight_grams)) {
+        if (! $this->positive($configuration?->unit_weight_grams ?? $standard?->unit_weight_grams ?? $item->nominal_weight_grams)) {
             $failures['weight'] = 'No product weight — pieces cannot be converted to kg, so rejection and reconciliation cannot be calculated.';
         }
 
-        if (! $this->positive($standard?->cycle_time ?? $item->standard_cycle_time)) {
+        if (! $this->positive($configuration?->default_cycle_time ?? $standard?->cycle_time ?? $item->standard_cycle_time)) {
             $failures['cycle_time'] = 'No standard cycle time — expected output and efficiency cannot be calculated.';
         }
 
-        if (! $this->positive($standard?->cavities ?? $item->standard_cavities)) {
+        if (! $this->positive($configuration?->default_cavities ?? $standard?->cavities ?? $item->standard_cavities)) {
             $failures['cavities'] = 'No standard cavities — expected output cannot be calculated.';
         }
 

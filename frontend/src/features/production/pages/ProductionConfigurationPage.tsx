@@ -76,13 +76,21 @@ const STATUS_COLOUR: Record<string, string> = { draft: 'default', approved: 'suc
 function ConfigurationsTab() {
     const queryClient = useQueryClient();
     const [status, setStatus] = useState<string | undefined>();
+    const [machineId, setMachineId] = useState<number | undefined>();
+    const [page, setPage] = useState(1);
     const [search, setSearch] = useState('');
     const [creating, setCreating] = useState(false);
     const [form] = Form.useForm();
 
     const { data, isFetching } = useQuery({
-        queryKey: ['production', 'configurations', status, search],
-        queryFn: () => listProductionConfigurations({ status, search: search || undefined }),
+        queryKey: ['production', 'configurations', status, machineId, page, search],
+        queryFn: () => listProductionConfigurations({
+            status,
+            work_center_id: machineId,
+            page,
+            per_page: 50,
+            search: search || undefined,
+        }),
     });
     // Active only: a retired machine must not be selectable for a new
     // configuration, or the configuration is unusable the moment it is
@@ -203,6 +211,16 @@ function ConfigurationsTab() {
                         { value: 'inactive', label: 'Inactive' },
                     ]}
                 />
+                <Select
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    placeholder="All machines"
+                    style={{ width: 180 }}
+                    value={machineId}
+                    onChange={(v) => { setMachineId(v); setPage(1); }}
+                    options={(machines?.data ?? []).map((m) => ({ value: m.id, label: m.name }))}
+                />
                 <Button type="primary" onClick={() => setCreating(true)}>
                     New Configuration
                 </Button>
@@ -214,7 +232,14 @@ function ConfigurationsTab() {
                 loading={isFetching}
                 dataSource={data?.data ?? []}
                 columns={columns as never}
-                pagination={false}
+                pagination={{
+                    current: page,
+                    pageSize: 50,
+                    total: data?.meta?.total ?? 0,
+                    onChange: setPage,
+                    showSizeChanger: false,
+                    showTotal: (total) => `${total} configurations`,
+                }}
             />
 
             <Modal

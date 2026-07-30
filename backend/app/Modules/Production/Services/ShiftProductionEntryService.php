@@ -161,6 +161,30 @@ class ShiftProductionEntryService
             $standard = $this->standards->resolve($data['item_id'], $data['production_standard_id'] ?? null);
             $packaging = $this->standards->resolvePackaging($standard, $data['production_standard_packaging_id'] ?? null);
 
+            $shift = Shift::query()->find($data['shift_id']);
+            $productionDate = $data['production_date']
+                ?? $shift?->productionDateFor()
+                ?? now()->toDateString();
+
+            // Resolve the approved machine-product configuration. Null means
+            // this product has none yet — the run falls back to the item
+            // master and is stamped legacy/unconfigured so nothing pretends
+            // it ran against an agreed standard.
+            //
+            // Resolved BEFORE the readiness gate for the same reason the
+            // standard is: the gate judges the figures this run will actually
+            // use, and once a machine's configuration is approved those ARE
+            // its figures. Assessed without it, the gate would refuse a
+            // product whose approved configuration carries the very cycle
+            // time it says is missing.
+            $configuration = $this->configurations->resolve(
+                workCenterId: $data['work_center_id'],
+                itemId: $data['item_id'],
+                moldId: $data['mold_id'] ?? null,
+                colour: $data['colour'] ?? null,
+                on: $productionDate,
+            );
+
             // The readiness gate, fail-closed: a product whose masters are
             // incomplete must not start, because every downstream figure it
             // would produce (expected output, efficiency, reconciliation,
@@ -173,28 +197,12 @@ class ShiftProductionEntryService
                 WorkCenter::query()->find($data['work_center_id']),
                 $standard,
                 $packaging,
+                $configuration,
             );
 
             if (! $readiness['ready']) {
                 throw ProductNotReadyException::make($readiness);
             }
-
-            $shift = Shift::query()->find($data['shift_id']);
-            $productionDate = $data['production_date']
-                ?? $shift?->productionDateFor()
-                ?? now()->toDateString();
-
-            // Resolve the approved machine-product configuration. Null means
-            // this product has none yet — the run falls back to the item
-            // master and is stamped legacy/unconfigured so nothing pretends
-            // it ran against an agreed standard.
-            $configuration = $this->configurations->resolve(
-                workCenterId: $data['work_center_id'],
-                itemId: $data['item_id'],
-                moldId: $data['mold_id'] ?? null,
-                colour: $data['colour'] ?? null,
-                on: $productionDate,
-            );
 
             // Bounded override: a supervisor may deviate from the approved
             // standard only within its declared limits, and only with a
