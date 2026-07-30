@@ -22,8 +22,14 @@ class ProductionConfigurationController extends Controller
 
     public function index(Request $request): AnonymousResourceCollection
     {
+        // per_page honoured up to a cap: 46 seeded configurations silently
+        // truncated to the default page was indistinguishable from "the rest
+        // of the data is missing" — which is exactly how it was reported.
         return ProductionConfigurationResource::collection(
-            $this->configurations->paginate($request->only(['work_center_id', 'item_id', 'status', 'search'])),
+            $this->configurations->paginate(
+                $request->only(['work_center_id', 'item_id', 'status', 'search']),
+                min((int) $request->query('per_page', 25), 200),
+            ),
         );
     }
 

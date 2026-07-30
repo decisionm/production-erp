@@ -147,4 +147,59 @@ class MachineCavityCapabilityTest extends TestCase
         // wrong cavity figure would otherwise make a real product unrunnable.
         $this->assertFalse((bool) config('production.machine_capability.enforced'));
     }
+
+    public function test_a_machines_own_declared_capability_beats_the_global_rule(): void
+    {
+        // THE resolution for the Machine 9 contradiction: the daily sheets show
+        // 180ml PDL running 32 shifts at 6 cavities on Machine 9, while the
+        // global rule says 6+ belongs on Machine 10. The factory settles it on
+        // the Machines & Capabilities tab: declare Machine 9 capable up to 7,
+        // and its own declaration outranks the .env list — no deploy, no code.
+        [$low] = $this->machines();
+        $low->update(['max_cavities' => 7]);
+
+        $service = new MachineCapabilityService;
+
+        $this->assertTrue($service->allows(6, $low->id));
+        $this->assertNull($service->warningFor($this->standard(6), $low->id));
+    }
+
+    public function test_a_machine_declaring_a_low_maximum_refuses_even_below_the_global_threshold(): void
+    {
+        // The other direction: a machine set up for at most 3 cavities warns on
+        // a 4-cavity mould even though the global rule only watches 6 and up.
+        [$low] = $this->machines();
+        $low->update(['max_cavities' => 3]);
+
+        $warning = (new MachineCapabilityService)->warningFor($this->standard(4), $low->id);
+
+        $this->assertNotNull($warning);
+        $this->assertStringContainsString('set up for', $warning['message']);
+        $this->assertStringContainsString('Machines & Capabilities', $warning['message']);
+    }
+
+    public function test_an_explicit_permitted_list_beats_the_min_max_range(): void
+    {
+        [$low] = $this->machines();
+        $low->update(['min_cavities' => 1, 'max_cavities' => 8, 'permitted_cavities' => [2, 4]]);
+
+        $service = new MachineCapabilityService;
+
+        $this->assertTrue($service->allows(4, $low->id));
+        // Inside the range but not on the list — the list is the setup truth.
+        $this->assertFalse($service->allows(3, $low->id));
+    }
+
+    public function test_a_machine_declaring_nothing_still_falls_back_to_the_global_rule(): void
+    {
+        // Capability columns all null — the .env threshold rule keeps working
+        // exactly as before, so deployments that never touch the tab lose
+        // nothing.
+        [$low, $high] = $this->machines();
+
+        $service = new MachineCapabilityService;
+
+        $this->assertFalse($service->allows(6, $low->id));
+        $this->assertTrue($service->allows(6, $high->id));
+    }
 }

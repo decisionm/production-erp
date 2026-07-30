@@ -817,6 +817,8 @@ export async function listProductionConfigurations(params?: {
     item_id?: number;
     status?: string;
     search?: string;
+    page?: number;
+    per_page?: number;
 }): Promise<Paginated<ProductionConfiguration>> {
     const { data } = await api.get<Paginated<ProductionConfiguration>>('/production/configurations', { params });
     return data;
