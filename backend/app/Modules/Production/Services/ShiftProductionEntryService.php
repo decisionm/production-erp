@@ -109,14 +109,28 @@ class ShiftProductionEntryService
     public function startBatch(array $data, ?int $createdBy): ShiftProductionEntry
     {
         return DB::transaction(function () use ($data, $createdBy) {
-            // A machine can only physically run one item at a time — reject
-            // a second "Start Batch" if this machine already has one
-            // in_progress, per PRODUCTION-SUPERVISOR-UX-PLAN.md §2 ("two
-            // people can genuinely tap the same machine at once"). The row
-            // lock only closes the window between two transactions that
-            // both reach this check; it can't lock a row that doesn't exist
-            // yet, so a lock on `work_centers` itself narrows the race to
-            // effectively zero for how this is actually used.
+            // A machine can only physically run one item at a time — reject a
+            // second "Start Batch" if this machine already has one in_progress,
+            // per PRODUCTION-SUPERVISOR-UX-PLAN.md §2 ("two people can
+            // genuinely tap the same machine at once").
+            //
+            // THE MACHINE ROW IS LOCKED FIRST, and this ordering is the whole
+            // protection. Locking the shift_production_entries rows cannot help
+            // in the case that matters: when the machine is idle there is no
+            // in_progress row to lock, so two concurrent requests both selected
+            // nothing, both passed the check, and both inserted. The previous
+            // code acknowledged this in its own comment and then did not do it.
+            //
+            // work_centers always has exactly one row per machine, so it is a
+            // lock that exists whether or not a batch does. Every starter
+            // serialises on it, and the recheck below therefore runs with the
+            // machine held — the second request blocks here, then reads the
+            // first request's committed row and is refused.
+            WorkCenter::query()
+                ->whereKey($data['work_center_id'])
+                ->lockForUpdate()
+                ->first();
+
             $alreadyRunning = ShiftProductionEntry::query()
                 ->where('work_center_id', $data['work_center_id'])
                 ->where('batch_status', BatchStatus::InProgress->value)
