@@ -170,6 +170,36 @@ class ProductReadinessGateTest extends TestCase
             ->assertJsonPath('blocking.0.code', 'machine_active');
     }
 
+    public function test_a_deactivated_shift_is_refused_through_the_api(): void
+    {
+        // Same hole as the machine above, and it survived that fix: the shift
+        // rule was a bare exists: check, so the "only active shifts" rule lived
+        // solely in the browser's picker. A retired shift's start/end times
+        // drive the shift-aware production date and the Tally voucher's period,
+        // so a batch filed against one lands on a date nobody worked.
+        //
+        // Refused by validation rather than by the readiness gate, which has no
+        // shift check to extend — hence a plain 422 on the field, not a
+        // structured `blocking` finding.
+        $this->supervisor();
+        $item = $this->readyItem();
+        $this->shift->update(['is_active' => false]);
+
+        $this->postJson('/api/v1/production/shift-production-entries', $this->startPayload($item))
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('shift_id');
+    }
+
+    public function test_an_active_shift_still_starts(): void
+    {
+        // The other half: scoping the rule must not refuse the normal case.
+        $this->supervisor();
+        $item = $this->readyItem();
+
+        $this->postJson('/api/v1/production/shift-production-entries', $this->startPayload($item))
+            ->assertStatus(200);
+    }
+
     public function test_missing_recipe_and_colour_warn_but_do_not_block_by_default(): void
     {
         // Deliberate default: no product carries a BOM yet, so blocking on

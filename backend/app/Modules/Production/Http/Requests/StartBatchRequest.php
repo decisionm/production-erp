@@ -15,7 +15,24 @@ class StartBatchRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'shift_id' => ['required', 'integer', 'exists:shifts,id'],
+            // Active-scoped, like the warehouse and operator rules below. A
+            // bare exists() accepted a RETIRED shift, and the rule against it
+            // lived only in the browser's shift picker — so any client, or a
+            // replayed request, could file a batch against a shift the factory
+            // no longer runs. Its start/end times then drive the shift-aware
+            // production date and the Tally voucher's period, so the batch
+            // lands on a date nobody worked.
+            'shift_id' => [
+                'required',
+                'integer',
+                Rule::exists('shifts', 'id')->where('is_active', true),
+            ],
+            // Deliberately NOT active-scoped, unlike the shift above: the
+            // readiness gate already refuses an inactive machine and answers
+            // with a structured `machine_active` finding the screen can explain.
+            // Rejecting it here instead turned that into an anonymous 422 and
+            // broke three tests that assert on the finding — the gate is the
+            // better mechanism, so this stays a plain existence check.
             'work_center_id' => ['required', 'integer', 'exists:work_centers,id'],
             'item_id' => ['required', 'integer', 'exists:items,id'],
             'warehouse_id' => [
