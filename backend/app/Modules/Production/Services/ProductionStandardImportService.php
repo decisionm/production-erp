@@ -3,6 +3,7 @@
 namespace App\Modules\Production\Services;
 
 use App\Modules\Inventory\Models\Item;
+use App\Modules\Production\Data\ProductMasterCorrections;
 use App\Modules\Production\Models\ProductionStandard;
 use App\Modules\Production\Models\ProductionStandardPackaging;
 use Illuminate\Support\Facades\DB;
@@ -174,6 +175,19 @@ class ProductionStandardImportService
         $conflicts = 0;
 
         foreach ($rows as $row) {
+            // Factory answers, applied on top of the verbatim sheet. See
+            // ProductMasterCorrections for why these live apart from the rows
+            // rather than being edited into them.
+            $correction = ProductMasterCorrections::forRow($row);
+            $confirmedSplits = [];
+
+            if ($correction !== null) {
+                foreach ($correction['set'] ?? [] as $field => $value) {
+                    $row[$field] = $value;
+                }
+                $confirmedSplits = $correction['confirm_split'] ?? [];
+            }
+
             $product = trim((string) ($row['product'] ?? ''));
             if ($product === '') {
                 continue;
@@ -203,10 +217,19 @@ class ProductionStandardImportService
 
                     if (! $alreadySeen) {
                         $unresolved = [];
-                        if (count($cycleTimes) > 1) {
+                        // A confirmed split is a deliberate multi-value: the
+                        // variants are still produced, they just stop being an
+                        // open question. Confirming one cell never silences the
+                        // other, and never silences the BOTH-multi-valued note
+                        // below — that one is about pairings nobody observed,
+                        // which is a different question from "are both real".
+                        $weightSplitConfirmed = in_array('unit_weight_grams', $confirmedSplits, true);
+                        $cycleSplitConfirmed = in_array('cycle_time', $confirmedSplits, true);
+
+                        if (count($cycleTimes) > 1 && ! $cycleSplitConfirmed) {
                             $unresolved[] = "Cycle time cell held several values ({$rawCycleTime}); each is a separate variant pending confirmation of which applies where.";
                         }
-                        if (count($weights) > 1) {
+                        if (count($weights) > 1 && ! $weightSplitConfirmed) {
                             $unresolved[] = "Unit weight cell held several values ({$rawWeight}); each is a separate variant pending confirmation of which applies where.";
                         }
                         if (count($weights) > 1 && count($cycleTimes) > 1) {
