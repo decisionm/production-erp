@@ -549,11 +549,15 @@ class ShiftProductionEntryService
     }
 
     /**
-     * The 4-stage approval chain (factory answer 9), each stage a blocking
-     * gate: Supervisor submits (completeBatch → pending) → Plant Manager
-     * verifies → Accountant reconciles → MD final approval → Tally. Every
-     * transition is the same conditional-UPDATE concurrency guard as the
-     * batch lifecycle: two approvers acting at once can't double-advance.
+     * The approval chain, each stage a blocking gate: Supervisor submits
+     * (completeBatch → pending) → Plant Manager verifies → Accountant
+     * reconciles and posts → Tally. Every transition is the same
+     * conditional-UPDATE concurrency guard as the batch lifecycle: two
+     * approvers acting at once can't double-advance.
+     *
+     * THE ACCOUNTANT IS FINAL. There is no MD stage — it was removed, and this
+     * docblock described it for longer than the code did. Left uncorrected it
+     * is the first thing anyone reads when debugging approvals under pressure.
      */
     public function pmApprove(ShiftProductionEntry $entry, int $signedBy): ShiftProductionEntry
     {
