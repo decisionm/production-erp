@@ -123,22 +123,52 @@ class ProductionStandardImportTest extends TestCase
         }
     }
 
-    public function test_a_multi_valued_weight_splits_into_unresolved_variants(): void
+    public function test_a_multi_valued_weight_splits_rather_than_averaging(): void
     {
         $this->import();
 
         $variants = ProductionStandard::where('source_product_name', '200ML ROUND')
             ->orderBy('unit_weight_grams')->get();
 
-        // 18 g and 20 g are different bottles, not a 19 g average.
+        // 18 g and 20 g are different bottles, not a 19 g average. The SPLIT is
+        // what this test is about, and it is unchanged.
         $this->assertCount(2, $variants);
         $this->assertSame(['18.0000', '20.0000'], $variants->pluck('unit_weight_grams')->map(fn ($w) => (string) $w)->all());
+        $this->assertSame(0, ProductionStandard::where('unit_weight_grams', 19)->count());
 
         foreach ($variants as $variant) {
-            $this->assertSame('unresolved', $variant->status);
-            $this->assertStringContainsString('Unit weight cell held several values (18/20)', (string) $variant->unresolved_reason);
             // Cycle time was single-valued, so it is shared, not split.
             $this->assertSame('16.50', (string) $variant->cycle_time);
+        }
+    }
+
+    public function test_a_confirmed_split_no_longer_asks_the_factory_about_itself(): void
+    {
+        // SL 48 is 200ML ROUND, whose "18/20" weight the factory has confirmed
+        // as deliberate (see ProductMasterCorrections). The variants still
+        // exist; they simply stop being an open question.
+        $this->import();
+
+        foreach (ProductionStandard::where('source_product_name', '200ML ROUND')->get() as $variant) {
+            $this->assertSame('draft', $variant->status);
+            $this->assertNull($variant->unresolved_reason);
+        }
+    }
+
+    public function test_an_unconfirmed_multi_valued_weight_is_still_flagged(): void
+    {
+        // The rule itself is intact for any product the factory has not spoken
+        // about — otherwise the correction above would look like the importer
+        // had simply stopped caring.
+        $result = app(ProductionStandardImportService::class)->import([
+            ['sl_no' => 900, 'product' => 'UNSPOKEN BOTTLE', 'cavities' => 4,
+                'unit_weight_grams' => '18/20', 'cycle_time' => 16.5,
+                'nos_per_tray' => 100, 'tray_nos_per_box' => 500],
+        ], true, null);
+
+        foreach ($result['variants'] as $variant) {
+            $this->assertSame('unresolved', $variant['status']);
+            $this->assertStringContainsString('Unit weight cell held several values (18/20)', (string) $variant['unresolved_reason']);
         }
     }
 

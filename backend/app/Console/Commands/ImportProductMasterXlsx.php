@@ -94,6 +94,7 @@ class ImportProductMasterXlsx extends Command
         {--json= : JSON row file (default: storage/'.self::DEFAULT_ROW_FILE.')}
         {--write : Actually write (default is a dry run)}
         {--exact-only : Write only variants matched to exactly one item and free of ambiguity}
+        {--diagnose : Explain why product names did not match, with the nearest catalogue entries. Writes nothing.}
         {--local-fixtures : LOCAL ONLY — fabricate a "LOCAL-" item for every unmatched product}';
 
     protected $description = 'Import the factory product master (converted to JSON) as normalised production standards';
@@ -114,6 +115,10 @@ class ImportProductMasterXlsx extends Command
             $this->error("Not a non-empty JSON array of rows: {$path}");
 
             return self::FAILURE;
+        }
+
+        if ($this->option('diagnose')) {
+            return $this->diagnose($import, $rows);
         }
 
         $localFixtures = (bool) $this->option('local-fixtures');
@@ -163,6 +168,63 @@ class ImportProductMasterXlsx extends Command
                 $this->line("  · {$v['source_product_name']} — {$v['unresolved_reason']}");
             }
         }
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * Read-only: why nothing matched.
+     *
+     * A `matched to an item = 0` summary is the same whether the catalogue is
+     * empty or merely spelled differently, and those need opposite fixes — pull
+     * the masters from Tally, or reconcile names. This says which.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     */
+    private function diagnose(ProductionStandardImportService $import, array $rows): int
+    {
+        $report = $import->matchReport($rows);
+
+        $this->info('DIAGNOSE — nothing written');
+        $this->newLine();
+        $this->line("Active items in the catalogue: {$report['active_items']}");
+
+        if ($report['active_items'] === 0) {
+            $this->newLine();
+            $this->error('The catalogue has no active items, so nothing can match.');
+            $this->line('Pull the masters from Tally first — standards attach to items, and there are none to attach to.');
+
+            return self::SUCCESS;
+        }
+
+        $this->line('A sample of what the catalogue calls things:');
+        foreach ($report['sample_item_names'] as $name) {
+            $this->line("  · {$name}");
+        }
+
+        $unmatched = $report['unmatched'];
+
+        if ($unmatched === []) {
+            $this->newLine();
+            $this->info('Every product name in the sheet matches an item. Nothing to reconcile.');
+
+            return self::SUCCESS;
+        }
+
+        $this->newLine();
+        $this->warn(count($unmatched).' product name(s) in the sheet match no item. Nearest catalogue entries:');
+        $this->newLine();
+
+        foreach ($unmatched as $row) {
+            $this->line("<comment>{$row['product']}</comment>");
+            foreach ($row['candidates'] as $candidate) {
+                $this->line("    {$candidate['score']}%  {$candidate['name']}  [{$candidate['sku']}]");
+            }
+        }
+
+        $this->newLine();
+        $this->line('A high score is a likely rename; a low one usually means the item does not exist yet.');
+        $this->line('Matching is exact after lower-casing and collapsing spaces — it never guesses.');
 
         return self::SUCCESS;
     }

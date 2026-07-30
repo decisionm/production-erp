@@ -37,17 +37,20 @@ class ProductMasterImportTest extends TestCase
     private const PACKAGING_CONFIGURATIONS = 109;
 
     /**
-     * Multi-valued or blank cells, split rather than guessed — plus packaging
-     * figures that contradict each other.
+     * Variants still carrying a question only the factory can answer.
      *
-     * Was 9 while containers-per-box was always re-derived by division. Reading
-     * the sheet's own POUCH/BOX DETAILS instead surfaced the 200ML ROUND
-     * contradiction (105 per pouch × 5 pouches = 525, sheet says 520 per box)
-     * on four variants, two of which were already unresolved for a
-     * multi-valued weight. Net +2. The division had been quietly returning 4
-     * pouches per box — a figure the master plainly contradicts.
+     * History, because this number has moved twice for good reasons:
+     *   9  — original, while containers-per-box was always re-derived.
+     *   11 — reading the sheet's own POUCH/BOX DETAILS surfaced the 200ML ROUND
+     *        contradiction (105 per pouch × 5 = 525 vs the sheet's 520 per box).
+     *   4  — the factory answered (see ProductMasterCorrections): the pouch
+     *        holds 104, which reconciles to 520 exactly; the 18/20 and 20/18
+     *        weight splits are deliberate; and 200CC (43MM NECK) runs 12.5 s.
+     *
+     * The remaining 4 are all 500ML ROUND, where cycle time AND weight are both
+     * multi-valued and nobody has said which pairings are real.
      */
-    private const UNRESOLVED = 11;
+    private const UNRESOLVED = 4;
 
     /** Sibling rows folded into a variant that already existed. */
     private const ROWS_MERGED = 20;
@@ -208,12 +211,16 @@ class ProductMasterImportTest extends TestCase
         $this->assertSame(5, $pouch->pouches_per_box);
     }
 
-    public function test_a_sheet_figure_that_contradicts_the_division_is_kept_and_flagged(): void
+    // ---------------------------------------------------------------------
+    // Factory answers (ProductMasterCorrections)
+    // ---------------------------------------------------------------------
+
+    public function test_the_factory_correction_reconciles_the_200ml_round_pouch(): void
     {
-        // The 200ML ROUND rows: 105 per pouch, 520 per box, 5 pouches per box.
-        // 105 x 5 = 525, not 520. Integer division had been quietly answering
-        // 4 — a figure the master plainly contradicts. All three are kept as
-        // written and the variant is flagged for a person.
+        // The sheet said 105 per pouch, 5 pouches per box, 520 per box —
+        // arithmetic that cannot hold (105 x 5 = 525). The factory confirmed
+        // the pouch holds 104, which reconciles exactly and vindicates the
+        // sheet's own per-box figure.
         $this->service()->import($this->realRows(), dryRun: false, createdBy: null);
 
         $standard = ProductionStandard::where('source_product_name', '200ML ROUND')
@@ -223,15 +230,70 @@ class ProductMasterImportTest extends TestCase
 
         $pouch = $standard->packagings->firstWhere('mode', 'pouch');
 
-        $this->assertSame(105, $pouch->nos_per_pouch);
-        $this->assertSame(520, $pouch->nos_per_box);
-        // The sheet's own figure, NOT intdiv(520, 105) = 4.
+        $this->assertSame(104, $pouch->nos_per_pouch);
         $this->assertSame(5, $pouch->pouches_per_box);
+        $this->assertSame(520, $pouch->nos_per_box);
+        // The three figures now agree, so the contradiction note is gone.
+        $this->assertSame(104 * 5, $pouch->nos_per_box);
+        $this->assertSame('draft', $standard->status);
+    }
 
-        $this->assertSame('unresolved', $standard->status);
-        $this->assertStringContainsString('do not agree', (string) $standard->unresolved_reason);
-        $this->assertStringContainsString('525', (string) $standard->unresolved_reason);
-        $this->assertStringContainsString('520', (string) $standard->unresolved_reason);
+    public function test_a_blank_cycle_time_answered_by_the_factory_resolves(): void
+    {
+        $this->service()->import($this->realRows(), dryRun: false, createdBy: null);
+
+        $standard = ProductionStandard::where('source_product_name', '200CC  (43MM NECK)')->firstOrFail();
+
+        $this->assertSame('12.50', $standard->cycle_time);
+        $this->assertSame('draft', $standard->status);
+    }
+
+    public function test_a_confirmed_weight_split_still_makes_two_variants_but_asks_nothing(): void
+    {
+        // "Both are real" does not mean "collapse them" — the factory runs both
+        // weights, so both variants must stay selectable on the floor.
+        $this->service()->import($this->realRows(), dryRun: false, createdBy: null);
+
+        $square = ProductionStandard::where('source_product_name', '250ML SQUARE')->get();
+
+        $this->assertSame(['18.0000', '20.0000'], $square->pluck('unit_weight_grams')->sort()->values()->all());
+        $this->assertSame(['draft', 'draft'], $square->pluck('status')->all());
+    }
+
+    public function test_an_unanswered_pairing_stays_flagged(): void
+    {
+        // 500ML ROUND has BOTH cycle time and weight multi-valued, so the four
+        // combinations are generated rather than observed. Confirming a split
+        // must never silence this — the split is not the question, the pairing
+        // is. This is the guard against over-applying a correction.
+        $this->service()->import($this->realRows(), dryRun: false, createdBy: null);
+
+        $variants = ProductionStandard::where('source_product_name', '500ML ROUND')->get();
+
+        $this->assertCount(4, $variants);
+        foreach ($variants as $variant) {
+            $this->assertSame('unresolved', $variant->status);
+            $this->assertStringContainsString('generated, not observed', (string) $variant->unresolved_reason);
+        }
+    }
+
+    public function test_a_correction_is_ignored_when_the_row_holds_a_different_product(): void
+    {
+        // Corrections are keyed by SL.NO. but verified against the product name,
+        // so a reordered sheet cannot apply an answer about one bottle to
+        // another. SL 29's answer is about 200ML ROUND.
+        $result = $this->service()->import([
+            [
+                'sl_no' => 29, 'product' => 'SOMETHING ELSE ENTIRELY', 'cavities' => '4',
+                'unit_weight_grams' => '18', 'cycle_time' => '14.3',
+                'nos_per_pouch' => '105', 'pouch_nos_per_box' => '520', 'pouches_per_box' => '5',
+            ],
+        ], dryRun: true, createdBy: null);
+
+        // Untouched: still the sheet's 105, and still flagged as contradictory.
+        $pouch = $result['variants'][0]['packagings'][0];
+        $this->assertSame(105, $pouch['nos_per_pouch']);
+        $this->assertSame('unresolved', $result['variants'][0]['status']);
     }
 
     public function test_the_division_still_covers_rows_with_no_containers_per_box_figure(): void
@@ -354,8 +416,11 @@ class ProductMasterImportTest extends TestCase
     public function test_only_genuinely_blank_values_are_flagged(): void
     {
         $rows = [
-            // SL 97: the cycle time cell holds a single space. Genuinely blank.
-            ['sl_no' => 97, 'product' => '200CC  (43MM NECK)', 'cavities' => '2', 'unit_weight_grams' => '19.5',
+            // A blank cycle time on a product the factory has NOT answered for.
+            // Deliberately not SL 97 / 200CC (43MM NECK) any more: the factory
+            // supplied that one's cycle time, so using it here would test the
+            // correction rather than the blank-detection rule.
+            ['sl_no' => 901, 'product' => 'UNANSWERED BOTTLE', 'cavities' => '2', 'unit_weight_grams' => '19.5',
                 'cycle_time' => null, 'nos_per_pouch' => '115', 'pouch_nos_per_box' => '575'],
             // SL 78: no pouch columns at all. Not a gap — it is tray-packed.
             ['sl_no' => 78, 'product' => '90ML RIB', 'cavities' => '7', 'unit_weight_grams' => '8.5',
@@ -364,7 +429,7 @@ class ProductMasterImportTest extends TestCase
 
         $this->service()->import($rows, dryRun: false, createdBy: null);
 
-        $blank = ProductionStandard::where('source_product_name', '200CC  (43MM NECK)')->firstOrFail();
+        $blank = ProductionStandard::where('source_product_name', 'UNANSWERED BOTTLE')->firstOrFail();
         $this->assertSame('unresolved', $blank->status);
         $this->assertStringContainsString('Cycle time is blank', (string) $blank->unresolved_reason);
 

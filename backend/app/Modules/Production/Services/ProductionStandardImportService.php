@@ -3,6 +3,7 @@
 namespace App\Modules\Production\Services;
 
 use App\Modules\Inventory\Models\Item;
+use App\Modules\Production\Data\ProductMasterCorrections;
 use App\Modules\Production\Models\ProductionStandard;
 use App\Modules\Production\Models\ProductionStandardPackaging;
 use Illuminate\Support\Facades\DB;
@@ -174,6 +175,19 @@ class ProductionStandardImportService
         $conflicts = 0;
 
         foreach ($rows as $row) {
+            // Factory answers, applied on top of the verbatim sheet. See
+            // ProductMasterCorrections for why these live apart from the rows
+            // rather than being edited into them.
+            $correction = ProductMasterCorrections::forRow($row);
+            $confirmedSplits = [];
+
+            if ($correction !== null) {
+                foreach ($correction['set'] ?? [] as $field => $value) {
+                    $row[$field] = $value;
+                }
+                $confirmedSplits = $correction['confirm_split'] ?? [];
+            }
+
             $product = trim((string) ($row['product'] ?? ''));
             if ($product === '') {
                 continue;
@@ -203,10 +217,19 @@ class ProductionStandardImportService
 
                     if (! $alreadySeen) {
                         $unresolved = [];
-                        if (count($cycleTimes) > 1) {
+                        // A confirmed split is a deliberate multi-value: the
+                        // variants are still produced, they just stop being an
+                        // open question. Confirming one cell never silences the
+                        // other, and never silences the BOTH-multi-valued note
+                        // below — that one is about pairings nobody observed,
+                        // which is a different question from "are both real".
+                        $weightSplitConfirmed = in_array('unit_weight_grams', $confirmedSplits, true);
+                        $cycleSplitConfirmed = in_array('cycle_time', $confirmedSplits, true);
+
+                        if (count($cycleTimes) > 1 && ! $cycleSplitConfirmed) {
                             $unresolved[] = "Cycle time cell held several values ({$rawCycleTime}); each is a separate variant pending confirmation of which applies where.";
                         }
-                        if (count($weights) > 1) {
+                        if (count($weights) > 1 && ! $weightSplitConfirmed) {
                             $unresolved[] = "Unit weight cell held several values ({$rawWeight}); each is a separate variant pending confirmation of which applies where.";
                         }
                         if (count($weights) > 1 && count($cycleTimes) > 1) {
@@ -331,6 +354,67 @@ class ProductionStandardImportService
      * @param  array<string, Item>  $index
      * @return list<array<string, mixed>>
      */
+    /**
+     * Why the names did not match, and what they nearly matched.
+     *
+     * Matching is exact after lower-casing and collapsing whitespace, so a
+     * catalogue that spells the same bottle differently produces zero matches
+     * and an import that silently writes nothing — which is what happened on
+     * the live instance, and which the summary table alone cannot explain.
+     *
+     * Reports the catalogue size first, because "no active items at all" and
+     * "items named differently" look identical in a matched=0 result and need
+     * completely different fixes: pull the masters from Tally, versus reconcile
+     * names.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     * @return array{
+     *     active_items: int,
+     *     sample_item_names: list<string>,
+     *     unmatched: list<array{product: string, candidates: list<array{name: string, sku: string, score: int}>}>,
+     * }
+     */
+    public function matchReport(array $rows): array
+    {
+        $normalised = $this->normalise($rows);
+        $index = $this->itemIndex();
+
+        $items = Item::query()->where('is_active', true)->get(['id', 'name', 'sku']);
+
+        $unmatched = [];
+
+        foreach ($normalised['families'] as $family) {
+            if (isset($index[$this->normaliseName((string) $family)])) {
+                continue;
+            }
+
+            // Nearest catalogue entries by similarity, so a human can confirm
+            // a mapping instead of reading 400 item names per product.
+            $candidates = $items
+                ->map(function (Item $item) use ($family) {
+                    similar_text(
+                        $this->normaliseName((string) $family),
+                        $this->normaliseName((string) $item->name),
+                        $percent,
+                    );
+
+                    return ['name' => (string) $item->name, 'sku' => (string) $item->sku, 'score' => (int) round($percent)];
+                })
+                ->sortByDesc('score')
+                ->take(3)
+                ->values()
+                ->all();
+
+            $unmatched[] = ['product' => (string) $family, 'candidates' => $candidates];
+        }
+
+        return [
+            'active_items' => $items->count(),
+            'sample_item_names' => $items->take(10)->pluck('name')->map(fn ($n) => (string) $n)->all(),
+            'unmatched' => $unmatched,
+        ];
+    }
+
     private function attachItems(array $variants, array $index): array
     {
         foreach ($variants as &$variant) {
