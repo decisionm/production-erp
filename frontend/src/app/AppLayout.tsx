@@ -78,6 +78,7 @@ const allNavItems: NavGroup[] = [
         label: 'Production',
         module: 'production',
         children: [
+            { key: '/production/live-monitor', label: 'Live Monitor' },
             { key: '/production/shift-production', label: 'Shift Floor' },
             { key: '/production/bin-bay', label: 'Bin Bay Loading' },
             { key: '/production/shift-summary', label: 'Shift Summary' },
