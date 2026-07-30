@@ -35,6 +35,10 @@ import { itemLabel } from '@/lib/itemLabel';
  *    "No active consumption recipe" means.
  */
 
+/** The standard's packaging row for one mode, if the workbook gave one. */
+const pkg = (r: ProductionStandardRow, mode: 'pouch' | 'tray' | 'direct_box') =>
+    r.packagings.find((p) => p.mode === mode);
+
 const fmt = (v: string | number | null | undefined, suffix = ''): string => {
     if (v === null || v === undefined || v === '') return '—';
     const n = typeof v === 'number' ? v : parseFloat(v);
@@ -57,7 +61,7 @@ const STATUS: Record<string, { colour: string; label: string; help: string }> = 
 
 export default function ProductStandardsPage() {
     const [page, setPage] = useState(1);
-    const [scope, setScope] = useState<'mapped' | 'all'>('mapped');
+    const [scope, setScope] = useState<'mapped' | 'all'>('all');
     const [search, setSearch] = useState('');
 
     const { data, isLoading } = useQuery({
@@ -213,40 +217,38 @@ export default function ProductStandardsPage() {
                             ),
                     },
                     {
-                        title: 'Packed as',
-                        render: (_, r) =>
-                            r.packagings.length === 0 ? (
-                                '—'
-                            ) : (
-                                <Space size={4} wrap>
-                                    {r.packagings.map((p) => (
-                                        <Tooltip
-                                            key={p.id}
-                                            title={
-                                                p.mode === 'pouch'
-                                                    ? `${p.nos_per_pouch ?? '?'} per pouch · ${p.pouches_per_box ?? '?'} pouches per box · ${p.nos_per_box ?? '?'} per box`
-                                                    : p.mode === 'tray'
-                                                      ? `${p.nos_per_tray ?? '?'} per tray · ${p.trays_per_box ?? '?'} trays per box · ${p.nos_per_box ?? '?'} per box`
-                                                      : `${p.nos_per_box ?? '?'} per box`
-                                            }
-                                        >
-                                            <Tag color={p.mode === 'pouch' ? 'purple' : p.mode === 'tray' ? 'blue' : 'default'}>
-                                                {p.mode === 'direct_box' ? 'box' : p.mode}
-                                            </Tag>
-                                        </Tooltip>
-                                    ))}
-                                </Space>
-                            ),
+                        // The workbook's own three pouch columns, as columns —
+                        // not folded into a tooltip. This page is read against
+                        // the printed sheet, so it must line up with it.
+                        title: 'Pouch',
+                        children: [
+                            { title: 'Pcs/pouch', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'pouch')?.nos_per_pouch ?? '—' },
+                            { title: 'Pcs/box', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'pouch')?.nos_per_box ?? '—' },
+                            { title: 'Pouches/box', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'pouch')?.pouches_per_box ?? '—' },
+                        ],
                     },
                     {
-                        title: 'Materials',
-                        render: (_, r) => (
-                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                {[r.carton_spec && `carton ${r.carton_spec}`, r.tray_spec && `tray ${r.tray_spec}`, r.pouch_spec && `film ${r.pouch_spec}`]
-                                    .filter(Boolean)
-                                    .join(' · ') || '—'}
-                            </Typography.Text>
-                        ),
+                        title: 'Tray',
+                        children: [
+                            { title: 'Pcs/tray', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'tray')?.nos_per_tray ?? '—' },
+                            { title: 'Pcs/box', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'tray')?.nos_per_box ?? '—' },
+                            { title: 'Trays/box', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'tray')?.trays_per_box ?? '—' },
+                        ],
+                    },
+                    {
+                        title: 'Box only',
+                        align: 'right' as const,
+                        render: (_, r) => pkg(r, 'direct_box')?.nos_per_box ?? '—',
+                    },
+                    {
+                        // The three right-hand spec columns of the sheet:
+                        // which carton, which tray, which pouch film.
+                        title: 'Packaging materials',
+                        children: [
+                            { title: 'Carton', render: (_: unknown, r: ProductionStandardRow) => r.carton_spec ?? '—' },
+                            { title: 'Tray', render: (_: unknown, r: ProductionStandardRow) => r.tray_spec ?? '—' },
+                            { title: 'Pouch film', render: (_: unknown, r: ProductionStandardRow) => r.pouch_spec ?? '—' },
+                        ],
                     },
                     {
                         title: 'Status',
