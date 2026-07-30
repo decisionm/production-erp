@@ -37,7 +37,12 @@ const statusColor: Record<ShiftProductionEntryStatus, string> = {
 const statusLabel: Record<ShiftProductionEntryStatus, string> = {
     pending: 'Awaiting Plant Manager',
     pm_approved: 'Awaiting Accountant',
-    accountant_approved: 'Awaiting MD (reserved)',
+    // The accountant is the final approver, so nothing is ever written with
+    // this status any more. It stays mapped only so a historical row that
+    // still carries it renders as a legacy state rather than a blank tag —
+    // "Awaiting MD" would name a desk that no longer has a queue and send
+    // someone looking for an approval button that does not exist.
+    accountant_approved: 'Approved (legacy stage)',
     approved: 'Approved — syncing',
     rejected: 'Rejected',
     synced: 'Synced to Tally',

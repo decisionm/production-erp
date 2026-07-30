@@ -386,10 +386,6 @@ export async function accountantApproveShiftProductionEntry(id: number): Promise
     return data.data;
 }
 
-export async function mdApproveShiftProductionEntry(id: number): Promise<ShiftProductionEntry> {
-    const { data } = await api.post<{ data: ShiftProductionEntry }>(`/production/shift-production-entries/${id}/md-approve`);
-    return data.data;
-}
 
 export async function rejectShiftProductionEntry(id: number, reason?: string): Promise<ShiftProductionEntry> {
     const { data } = await api.post<{ data: ShiftProductionEntry }>(`/production/shift-production-entries/${id}/reject`, {

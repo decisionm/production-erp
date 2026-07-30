@@ -3,17 +3,21 @@
 namespace App\Modules\Production\Models\Enums;
 
 /**
- * The 4-stage approval chain (factory answer 9) + the Tally-sync tail — a
- * separate concern from BatchStatus (whether the batch itself finished
- * running). Flow:
+ * The approval chain + the Tally-sync tail — a separate concern from
+ * BatchStatus (whether the batch itself finished running). Flow:
  *
- *   pending → pm_approved → accountant_approved → approved (MD) → synced
- *                                                              ↘ failed
- *   (rejected at any pre-MD stage → rejected, back to the supervisor)
+ *   pending → pm_approved → approved (accountant) → synced
+ *                                                 ↘ failed
+ *   (rejected at either pre-approval stage → rejected, back to the supervisor)
  *
- * 'approved' is deliberately the MD's FINAL approval: the Tally enqueue and
- * the agent's synced/failed write-back already key off that value, so the
- * chain slots in front of the existing sync machinery without touching it.
+ * THE ACCOUNTANT IS FINAL. Their approval is the posting gate: the entry
+ * becomes eligible for Tally immediately, so production quantities reach the
+ * books the same shift with no MD wait. There is no MD approval step — the MD
+ * gets a live read-only view of production instead of a queue to clear.
+ *
+ * `accountant_approved` is retained as a value but is never written. It backed
+ * a fourth MD gate that was removed; keeping the case means any historical row
+ * still carrying it continues to cast rather than blowing up on read.
  */
 enum ShiftProductionEntryStatus: string
 {

@@ -17,10 +17,11 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
- * The 4-stage approval chain (factory answer 9): pending → pm_approved →
- * accountant_approved → approved (MD) → Tally. Stages can't be skipped, only
- * the MD's final approval enqueues a voucher, and rejection from any pre-MD
- * stage sends the entry back.
+ * The approval chain: pending → pm_approved → approved (accountant) → Tally.
+ *
+ * The accountant is FINAL — their approval is the posting gate and the only
+ * thing that enqueues a voucher. Stages can't be skipped, and rejection from
+ * either pre-approval stage sends the entry back to the supervisor.
  */
 class ApprovalChainTest extends TestCase
 {
@@ -77,16 +78,25 @@ class ApprovalChainTest extends TestCase
         $service->accountantApprove($entry, $user->id);
     }
 
-    public function test_dormant_md_path_rejects_entries_not_routed_to_it(): void
+    public function test_there_is_no_md_approval_step(): void
     {
-        // mdApprove only accepts accountant_approved — a state the normal
-        // flow no longer produces (reserved for future "big approvals").
-        $entry = $this->submittedEntry();
-        $service = app(ShiftProductionEntryService::class);
-        $user = User::factory()->create();
+        // The accountant is final. An MD gate existed as dead code behind an
+        // endpoint that could only ever 422, which read on the Approve screen
+        // as a stage someone still had to clear. Asserted rather than merely
+        // deleted so re-adding one is a deliberate act.
+        $this->assertFalse(
+            method_exists(ShiftProductionEntryService::class, 'mdApprove'),
+            'The accountant is the final approver — there is no MD approval stage.',
+        );
+        $this->assertNull(
+            app('router')->getRoutes()->getByName('md-approve'),
+        );
 
-        $this->expectException(InvalidStatusTransitionException::class);
-        $service->mdApprove($entry, $user->id);
+        $paths = collect(app('router')->getRoutes()->getRoutes())
+            ->map(fn ($route) => $route->uri())
+            ->filter(fn (string $uri) => str_contains($uri, 'md-approve'));
+
+        $this->assertCount(0, $paths, 'No route may expose an MD approval step.');
     }
 
     public function test_rejection_from_a_middle_stage_sends_it_back_and_never_enqueues(): void
@@ -107,7 +117,8 @@ class ApprovalChainTest extends TestCase
     {
         $entry = $this->submittedEntry();
 
-        // A supervisor (no PM/Accounts/Administrator role) hits a 403 at every gate.
+        // A supervisor (no PM/Accounts role) hits a 403 at both gates — the
+        // person who ran the batch cannot approve their own figures.
         $supervisor = User::factory()->create(['is_active' => true]);
 
         $this->actingAs($supervisor)
@@ -115,9 +126,6 @@ class ApprovalChainTest extends TestCase
             ->assertStatus(403);
         $this->actingAs($supervisor)
             ->postJson("/api/v1/production/shift-production-entries/{$entry->id}/accountant-approve")
-            ->assertStatus(403);
-        $this->actingAs($supervisor)
-            ->postJson("/api/v1/production/shift-production-entries/{$entry->id}/md-approve")
             ->assertStatus(403);
     }
 }
