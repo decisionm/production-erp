@@ -50,14 +50,22 @@ class BatchEstimationService
         ?int $activeCavities = null,
         ?object $standard = null,
         ?object $packaging = null,
+        ?object $configuration = null,
     ): array {
         $hours = $plannedHours ?? ($shift !== null ? $this->shiftLengthHours($shift) : null);
-        // The factory product standard outranks the item master — it is the
-        // factory's own current figure for this product.
-        $cycleTime = $standard?->cycle_time !== null
-            ? (string) $standard->cycle_time
-            : ($item->standard_cycle_time !== null ? (string) $item->standard_cycle_time : null);
-        $cavities = $activeCavities ?? $standard?->cavities ?? $item->standard_cavities;
+        // Precedence: the APPROVED machine configuration, then the factory
+        // product standard, then the item master — the same order startBatch
+        // snapshots (config_snapshot lines). This estimate is what the
+        // supervisor reads before confirming, so it must be computed from the
+        // figures the run will actually use; a preview quoting the standard's
+        // cycle time while the batch runs the machine's own is the screen
+        // disagreeing with the gate.
+        $cycleTime = $configuration?->default_cycle_time !== null
+            ? (string) $configuration->default_cycle_time
+            : ($standard?->cycle_time !== null
+                ? (string) $standard->cycle_time
+                : ($item->standard_cycle_time !== null ? (string) $item->standard_cycle_time : null));
+        $cavities = $activeCavities ?? $configuration?->default_cavities ?? $standard?->cavities ?? $item->standard_cavities;
 
         // One floor implementation, in the engine — duplicating it here is
         // exactly how two screens end up disagreeing about the same shift.
@@ -67,7 +75,7 @@ class BatchEstimationService
             : null;
 
         $expectedKg = null;
-        $unitWeight = $standard?->unit_weight_grams ?? $item->nominal_weight_grams;
+        $unitWeight = $configuration?->unit_weight_grams ?? $standard?->unit_weight_grams ?? $item->nominal_weight_grams;
         if ($pieces !== null && $unitWeight !== null && bccomp((string) $unitWeight, '0', 4) === 1) {
             $expectedKg = bcdiv(bcmul((string) $pieces, (string) $unitWeight, 4), '1000', 4);
         }

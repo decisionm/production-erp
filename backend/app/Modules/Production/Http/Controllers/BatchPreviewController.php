@@ -9,6 +9,7 @@ use App\Modules\Production\Http\Requests\BatchPreviewRequest;
 use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\WorkCenter;
 use App\Modules\Production\Services\BatchEstimationService;
+use App\Modules\Production\Services\ProductionConfigurationService;
 use App\Modules\Production\Services\ProductionStandardResolver;
 use App\Modules\Production\Services\ProductReadinessService;
 use Illuminate\Http\JsonResponse;
@@ -27,6 +28,7 @@ class BatchPreviewController extends Controller
         private readonly ProductReadinessService $readiness,
         private readonly BatchEstimationService $estimation,
         private readonly ProductionStandardResolver $standards,
+        private readonly ProductionConfigurationService $configurations,
     ) {}
 
     public function __invoke(BatchPreviewRequest $request): JsonResponse
@@ -44,20 +46,40 @@ class BatchPreviewController extends Controller
         $standard = $this->standards->resolve($item->id, $data['production_standard_id'] ?? null);
         $packaging = $this->standards->resolvePackaging($standard, $data['production_standard_packaging_id'] ?? null);
 
+        // The approved machine–product configuration, once a machine is named.
+        // Same precedence as startBatch's snapshot: configuration → standard →
+        // item. Without this the preview quoted the standard's figures while
+        // the batch ran the machine's own — the screen disagreeing with the
+        // gate, which is the one thing a preview must never do.
+        $configuration = $workCenter !== null
+            ? $this->configurations->resolve($workCenter->id, $item->id)
+            : null;
+
         return response()->json([
             'data' => [
                 // Assessed against the SAME resolved standard/packaging the
                 // estimation below uses, so the two halves of this response
                 // can never contradict each other.
-                'readiness' => $this->readiness->assess($item, $warehouse, $workCenter, $standard, $packaging),
+                'readiness' => $this->readiness->assess($item, $warehouse, $workCenter, $standard, $packaging, $configuration),
                 'estimation' => $this->estimation->estimate(
                     $item,
                     $shift,
                     $data['planned_hours'] ?? null,
-                    $data['active_cavities'] ?? $standard?->cavities,
+                    $data['active_cavities'] ?? $configuration?->default_cavities ?? $standard?->cavities,
                     $standard,
                     $packaging,
+                    $configuration,
                 ),
+                // Named so the screen can SAY the machine's own approved
+                // figures are in use, rather than leaving the supervisor to
+                // wonder why the numbers differ from the standards card.
+                'configuration' => $configuration === null ? null : [
+                    'id' => $configuration->id,
+                    'default_cycle_time' => $configuration->default_cycle_time,
+                    'default_cavities' => $configuration->default_cavities,
+                    'unit_weight_grams' => $configuration->unit_weight_grams,
+                    'colour' => $configuration->colour,
+                ],
                 'standard' => $standard === null ? null : [
                     'id' => $standard->id,
                     'label' => $standard->variantLabel(),
