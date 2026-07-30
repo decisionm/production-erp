@@ -25,6 +25,10 @@ on:
         description: 'Skip any row that does not resolve to exactly one Tally item, or that carries an ambiguity. Keep true for a live instance.'
         type: boolean
         default: true
+      diagnose:
+        description: 'Explain why product names did not match, with the nearest catalogue entries. Writes nothing and ignores the other options.'
+        type: boolean
+        default: false
 
 concurrency:
   group: import-product-master
@@ -51,7 +55,9 @@ jobs:
 
       - name: Report what is about to run
         run: |
-          if [ "${{ inputs.write }}" = "true" ]; then
+          if [ "${{ inputs.diagnose }}" = "true" ]; then
+            echo "Diagnosing name matching — nothing will be written."
+          elif [ "${{ inputs.write }}" = "true" ]; then
             echo "::warning::WRITING product standards to the live database (exact_only=${{ inputs.exact_only }})."
           else
             echo "Dry run — nothing will be written."
@@ -60,8 +66,14 @@ jobs:
       - name: Run the import
         run: |
           FLAGS=""
-          [ "${{ inputs.write }}" = "true" ] && FLAGS="$FLAGS --write"
-          [ "${{ inputs.exact_only }}" = "true" ] && FLAGS="$FLAGS --exact-only"
+          # diagnose is read-only and self-contained: it must never be combined
+          # with --write, so it wins outright rather than adding to the flags.
+          if [ "${{ inputs.diagnose }}" = "true" ]; then
+            FLAGS="--diagnose"
+          else
+            [ "${{ inputs.write }}" = "true" ] && FLAGS="$FLAGS --write"
+            [ "${{ inputs.exact_only }}" = "true" ] && FLAGS="$FLAGS --exact-only"
+          fi
 
           # --local-fixtures is deliberately NOT offered: it fabricates items,
           # and the command itself refuses it in the production environment.

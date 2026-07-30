@@ -331,6 +331,67 @@ class ProductionStandardImportService
      * @param  array<string, Item>  $index
      * @return list<array<string, mixed>>
      */
+    /**
+     * Why the names did not match, and what they nearly matched.
+     *
+     * Matching is exact after lower-casing and collapsing whitespace, so a
+     * catalogue that spells the same bottle differently produces zero matches
+     * and an import that silently writes nothing — which is what happened on
+     * the live instance, and which the summary table alone cannot explain.
+     *
+     * Reports the catalogue size first, because "no active items at all" and
+     * "items named differently" look identical in a matched=0 result and need
+     * completely different fixes: pull the masters from Tally, versus reconcile
+     * names.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     * @return array{
+     *     active_items: int,
+     *     sample_item_names: list<string>,
+     *     unmatched: list<array{product: string, candidates: list<array{name: string, sku: string, score: int}>}>,
+     * }
+     */
+    public function matchReport(array $rows): array
+    {
+        $normalised = $this->normalise($rows);
+        $index = $this->itemIndex();
+
+        $items = Item::query()->where('is_active', true)->get(['id', 'name', 'sku']);
+
+        $unmatched = [];
+
+        foreach ($normalised['families'] as $family) {
+            if (isset($index[$this->normaliseName((string) $family)])) {
+                continue;
+            }
+
+            // Nearest catalogue entries by similarity, so a human can confirm
+            // a mapping instead of reading 400 item names per product.
+            $candidates = $items
+                ->map(function (Item $item) use ($family) {
+                    similar_text(
+                        $this->normaliseName((string) $family),
+                        $this->normaliseName((string) $item->name),
+                        $percent,
+                    );
+
+                    return ['name' => (string) $item->name, 'sku' => (string) $item->sku, 'score' => (int) round($percent)];
+                })
+                ->sortByDesc('score')
+                ->take(3)
+                ->values()
+                ->all();
+
+            $unmatched[] = ['product' => (string) $family, 'candidates' => $candidates];
+        }
+
+        return [
+            'active_items' => $items->count(),
+            'sample_item_names' => $items->take(10)->pluck('name')->map(fn ($n) => (string) $n)->all(),
+            'unmatched' => $unmatched,
+        ];
+    }
+
     private function attachItems(array $variants, array $index): array
     {
         foreach ($variants as &$variant) {
