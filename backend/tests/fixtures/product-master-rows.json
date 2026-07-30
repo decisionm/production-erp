@@ -7,8 +7,13 @@
   "cycle_time": "10.8",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "434",
-  "tray_nos_per_box": "3038"
+  "tray_nos_per_box": "3038",
+  "trays_per_box": "7",
+  "carton_spec": "15ML",
+  "tray_spec": "60ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 2,
@@ -18,8 +23,13 @@
   "cycle_time": "11.3",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "324",
-  "tray_nos_per_box": "1944"
+  "tray_nos_per_box": "1944",
+  "trays_per_box": "6",
+  "carton_spec": null,
+  "tray_spec": null,
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 3,
@@ -29,8 +39,13 @@
   "cycle_time": "12.2",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "324",
-  "tray_nos_per_box": "1944"
+  "tray_nos_per_box": "1944",
+  "trays_per_box": "6",
+  "carton_spec": "30ML",
+  "tray_spec": "100ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 4,
@@ -40,8 +55,13 @@
   "cycle_time": "10.8",
   "nos_per_pouch": "245",
   "pouch_nos_per_box": "1225",
+  "pouches_per_box": "5",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "60ML",
+  "tray_spec": "60 ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 5,
@@ -51,8 +71,13 @@
   "cycle_time": "10.8",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "230",
-  "tray_nos_per_box": "1150"
+  "tray_nos_per_box": "1150",
+  "trays_per_box": "5",
+  "carton_spec": "60ML",
+  "tray_spec": "60 ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 6,
@@ -62,8 +87,13 @@
   "cycle_time": "10.8",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "209",
-  "tray_nos_per_box": "1045"
+  "tray_nos_per_box": "1045",
+  "trays_per_box": "5",
+  "carton_spec": "60ML",
+  "tray_spec": "60 ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 7,
@@ -73,8 +103,13 @@
   "cycle_time": "10.8",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "209",
-  "tray_nos_per_box": "1045"
+  "tray_nos_per_box": "1045",
+  "trays_per_box": "5",
+  "carton_spec": "60ML",
+  "tray_spec": "60 ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 8,
@@ -84,8 +119,13 @@
   "cycle_time": "12.3",
   "nos_per_pouch": "168",
   "pouch_nos_per_box": "840",
+  "pouches_per_box": "5",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "100ML",
+  "tray_spec": "100ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 9,
@@ -95,8 +135,13 @@
   "cycle_time": "12.3",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "162",
-  "tray_nos_per_box": "810"
+  "tray_nos_per_box": "810",
+  "trays_per_box": "5",
+  "carton_spec": "100ML",
+  "tray_spec": "100ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 10,
@@ -106,8 +151,13 @@
   "cycle_time": "12.3",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "162",
-  "tray_nos_per_box": "810"
+  "tray_nos_per_box": "810",
+  "trays_per_box": "5",
+  "carton_spec": "100ML",
+  "tray_spec": "100ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 11,
@@ -117,8 +167,13 @@
   "cycle_time": "12.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "208",
-  "tray_nos_per_box": "1040"
+  "tray_nos_per_box": "1040",
+  "trays_per_box": "5",
+  "carton_spec": "100ML",
+  "tray_spec": "100ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 12,
@@ -128,8 +183,13 @@
   "cycle_time": "12.2",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "162",
-  "tray_nos_per_box": "810"
+  "tray_nos_per_box": "810",
+  "trays_per_box": "5",
+  "carton_spec": "100ML",
+  "tray_spec": "100ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 13,
@@ -139,8 +199,13 @@
   "cycle_time": "12.2",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "144",
-  "tray_nos_per_box": "576"
+  "tray_nos_per_box": "576",
+  "trays_per_box": "4",
+  "carton_spec": "100ML",
+  "tray_spec": "100ML",
+  "pouch_spec": "780*610"
  },
  {
   "sl_no": 14,
@@ -150,8 +215,13 @@
   "cycle_time": "12.2",
   "nos_per_pouch": "168",
   "pouch_nos_per_box": "840",
+  "pouches_per_box": "5",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "100ML",
+  "tray_spec": "100ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 15,
@@ -161,8 +231,13 @@
   "cycle_time": "12.2",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "162",
-  "tray_nos_per_box": "810"
+  "tray_nos_per_box": "810",
+  "trays_per_box": "5",
+  "carton_spec": "100ML",
+  "tray_spec": "100ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 16,
@@ -172,8 +247,13 @@
   "cycle_time": "12.2",
   "nos_per_pouch": "168",
   "pouch_nos_per_box": "840",
+  "pouches_per_box": "5",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "100ML",
+  "tray_spec": "100ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 17,
@@ -183,8 +263,13 @@
   "cycle_time": "12.2",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "162",
-  "tray_nos_per_box": "810"
+  "tray_nos_per_box": "810",
+  "trays_per_box": "5",
+  "carton_spec": "100ML",
+  "tray_spec": "100ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 18,
@@ -194,8 +279,13 @@
   "cycle_time": "11.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "208",
-  "tray_nos_per_box": "1040"
+  "tray_nos_per_box": "1040",
+  "trays_per_box": "5",
+  "carton_spec": "200ML ROUND",
+  "tray_spec": "60ML",
+  "pouch_spec": "780*610"
  },
  {
   "sl_no": 19,
@@ -205,8 +295,13 @@
   "cycle_time": "13.2",
   "nos_per_pouch": "120",
   "pouch_nos_per_box": "600",
+  "pouches_per_box": "5",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "170ML",
+  "tray_spec": "60ML",
+  "pouch_spec": "780*610"
  },
  {
   "sl_no": 20,
@@ -216,8 +311,13 @@
   "cycle_time": "13.2",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "112",
-  "tray_nos_per_box": "560"
+  "tray_nos_per_box": "560",
+  "trays_per_box": "5",
+  "carton_spec": "170ML",
+  "tray_spec": "60ML",
+  "pouch_spec": "780*610"
  },
  {
   "sl_no": 21,
@@ -227,8 +327,13 @@
   "cycle_time": "13.2",
   "nos_per_pouch": "149",
   "pouch_nos_per_box": "745",
+  "pouches_per_box": "5",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "200ML ROUND",
+  "tray_spec": "60ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 22,
@@ -238,8 +343,13 @@
   "cycle_time": "13.2",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "144",
-  "tray_nos_per_box": "720"
+  "tray_nos_per_box": "720",
+  "trays_per_box": "5",
+  "carton_spec": "200ML ROUND",
+  "tray_spec": "60ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 23,
@@ -249,8 +359,13 @@
   "cycle_time": "13.2",
   "nos_per_pouch": "149",
   "pouch_nos_per_box": "745",
+  "pouches_per_box": "5",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "200ML ROUND",
+  "tray_spec": "60ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 24,
@@ -260,8 +375,13 @@
   "cycle_time": "13.2",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "144",
-  "tray_nos_per_box": "720"
+  "tray_nos_per_box": "720",
+  "trays_per_box": "5",
+  "carton_spec": "200ML ROUND",
+  "tray_spec": "60ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 25,
@@ -271,8 +391,13 @@
   "cycle_time": "13.2",
   "nos_per_pouch": "120",
   "pouch_nos_per_box": "600",
+  "pouches_per_box": "5",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "200ML ROUND",
+  "tray_spec": "60ML",
+  "pouch_spec": "780*610"
  },
  {
   "sl_no": 26,
@@ -282,8 +407,13 @@
   "cycle_time": "13.2",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "128",
-  "tray_nos_per_box": "640"
+  "tray_nos_per_box": "640",
+  "trays_per_box": "5",
+  "carton_spec": "200ML ROUND",
+  "tray_spec": "60ML",
+  "pouch_spec": "780*610"
  },
  {
   "sl_no": 27,
@@ -293,8 +423,13 @@
   "cycle_time": "13.2",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "176",
-  "tray_nos_per_box": "704"
+  "tray_nos_per_box": "704",
+  "trays_per_box": "4",
+  "carton_spec": "30ML ROUND",
+  "tray_spec": "60ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 28,
@@ -304,8 +439,13 @@
   "cycle_time": "13.2",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "203",
-  "tray_nos_per_box": "1015"
+  "tray_nos_per_box": "1015",
+  "trays_per_box": "5",
+  "carton_spec": "170ML",
+  "tray_spec": "60ML",
+  "pouch_spec": "780*610"
  },
  {
   "sl_no": 29,
@@ -315,8 +455,13 @@
   "cycle_time": "14.3",
   "nos_per_pouch": "105",
   "pouch_nos_per_box": "520",
+  "pouches_per_box": "5",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "200ML ROUND",
+  "tray_spec": "60ML",
+  "pouch_spec": "780*610"
  },
  {
   "sl_no": 30,
@@ -326,8 +471,13 @@
   "cycle_time": "14.3",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "98",
-  "tray_nos_per_box": "490"
+  "tray_nos_per_box": "490",
+  "trays_per_box": "5",
+  "carton_spec": "200ML ROUND",
+  "tray_spec": "60ML",
+  "pouch_spec": "780*610"
  },
  {
   "sl_no": 31,
@@ -337,8 +487,13 @@
   "cycle_time": "13.5",
   "nos_per_pouch": "125",
   "pouch_nos_per_box": "625",
+  "pouches_per_box": "5",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "200ML BRUTE",
+  "tray_spec": "100ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 32,
@@ -348,8 +503,13 @@
   "cycle_time": "13.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "132",
-  "tray_nos_per_box": "528"
+  "tray_nos_per_box": "528",
+  "trays_per_box": "4",
+  "carton_spec": "200ML BRUTE",
+  "tray_spec": "200ML BRUTE",
+  "pouch_spec": "835*610"
  },
  {
   "sl_no": 33,
@@ -359,8 +519,13 @@
   "cycle_time": "13",
   "nos_per_pouch": "256",
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "HM 30.5*49",
+  "tray_spec": null,
+  "pouch_spec": null
  },
  {
   "sl_no": 34,
@@ -370,8 +535,13 @@
   "cycle_time": "11.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": "256",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "HM 30.5*49",
+  "tray_spec": null,
+  "pouch_spec": null
  },
  {
   "sl_no": 35,
@@ -381,8 +551,13 @@
   "cycle_time": "11.5",
   "nos_per_pouch": "168",
   "pouch_nos_per_box": "840",
+  "pouches_per_box": "5",
   "nos_per_tray": "162",
-  "tray_nos_per_box": "810"
+  "tray_nos_per_box": "810",
+  "trays_per_box": "5",
+  "carton_spec": "100ML",
+  "tray_spec": "100ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 36,
@@ -392,8 +567,13 @@
   "cycle_time": "12.5",
   "nos_per_pouch": "180",
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "HM 30.5*49",
+  "tray_spec": null,
+  "pouch_spec": null
  },
  {
   "sl_no": 37,
@@ -403,8 +583,13 @@
   "cycle_time": "12.5",
   "nos_per_pouch": "180",
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "HM 30.5*49",
+  "tray_spec": null,
+  "pouch_spec": null
  },
  {
   "sl_no": 38,
@@ -414,8 +599,13 @@
   "cycle_time": "18.5",
   "nos_per_pouch": "105",
   "pouch_nos_per_box": "520",
+  "pouches_per_box": "5",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "200ML ROUND",
+  "tray_spec": "60ML",
+  "pouch_spec": "780*610"
  },
  {
   "sl_no": 39,
@@ -425,8 +615,13 @@
   "cycle_time": "18.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "98",
-  "tray_nos_per_box": "490"
+  "tray_nos_per_box": "490",
+  "trays_per_box": "5",
+  "carton_spec": "200ML ROUND",
+  "tray_spec": "60ML",
+  "pouch_spec": "780*610"
  },
  {
   "sl_no": 40,
@@ -436,8 +631,13 @@
   "cycle_time": "18",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "85",
-  "tray_nos_per_box": "340"
+  "tray_nos_per_box": "340",
+  "trays_per_box": "4",
+  "carton_spec": "200ML BRUTE",
+  "tray_spec": "200ML BRUTE",
+  "pouch_spec": "835*610"
  },
  {
   "sl_no": 41,
@@ -447,8 +647,13 @@
   "cycle_time": "11.6",
   "nos_per_pouch": "289",
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "HM 30.5*49",
+  "tray_spec": null,
+  "pouch_spec": null
  },
  {
   "sl_no": 42,
@@ -458,8 +663,13 @@
   "cycle_time": "11.6",
   "nos_per_pouch": "462",
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "HM 30.5*49",
+  "tray_spec": null,
+  "pouch_spec": null
  },
  {
   "sl_no": 43,
@@ -469,8 +679,13 @@
   "cycle_time": "11.6",
   "nos_per_pouch": "256",
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "HM 30.5*49",
+  "tray_spec": null,
+  "pouch_spec": null
  },
  {
   "sl_no": 44,
@@ -480,8 +695,13 @@
   "cycle_time": "11.6",
   "nos_per_pouch": "245",
   "pouch_nos_per_box": "1225",
+  "pouches_per_box": "5",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "60ML",
+  "tray_spec": "60 ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 45,
@@ -491,8 +711,13 @@
   "cycle_time": "11.6",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "230",
-  "tray_nos_per_box": "1150"
+  "tray_nos_per_box": "1150",
+  "trays_per_box": "5",
+  "carton_spec": "60ML",
+  "tray_spec": "60 ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 46,
@@ -502,8 +727,13 @@
   "cycle_time": "11.6",
   "nos_per_pouch": "245",
   "pouch_nos_per_box": "1225",
+  "pouches_per_box": "5",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "60ML",
+  "tray_spec": "60 ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 47,
@@ -513,8 +743,13 @@
   "cycle_time": "11.6",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "230",
-  "tray_nos_per_box": "1150"
+  "tray_nos_per_box": "1150",
+  "trays_per_box": "5",
+  "carton_spec": "60ML",
+  "tray_spec": "60 ML",
+  "pouch_spec": "750*610"
  },
  {
   "sl_no": 48,
@@ -524,8 +759,13 @@
   "cycle_time": "16.5",
   "nos_per_pouch": "105",
   "pouch_nos_per_box": "520",
+  "pouches_per_box": "5",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "200ML ROUND",
+  "tray_spec": "60ML",
+  "pouch_spec": "780*610"
  },
  {
   "sl_no": 49,
@@ -535,8 +775,13 @@
   "cycle_time": "16.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "98",
-  "tray_nos_per_box": "490"
+  "tray_nos_per_box": "490",
+  "trays_per_box": "5",
+  "carton_spec": "200ML ROUND",
+  "tray_spec": "60ML",
+  "pouch_spec": "780*610"
  },
  {
   "sl_no": 50,
@@ -546,8 +791,13 @@
   "cycle_time": "16.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "85",
-  "tray_nos_per_box": "340"
+  "tray_nos_per_box": "340",
+  "trays_per_box": "4",
+  "carton_spec": "200ML BRUTE",
+  "tray_spec": "200ML BRUTE",
+  "pouch_spec": "835*610"
  },
  {
   "sl_no": 51,
@@ -557,8 +807,13 @@
   "cycle_time": "18",
   "nos_per_pouch": "80",
   "pouch_nos_per_box": "400",
+  "pouches_per_box": "5",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "170ML",
+  "tray_spec": "100ML",
+  "pouch_spec": "835*610"
  },
  {
   "sl_no": 52,
@@ -568,8 +823,13 @@
   "cycle_time": "18",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "80",
-  "tray_nos_per_box": "400"
+  "tray_nos_per_box": "400",
+  "trays_per_box": "5",
+  "carton_spec": "170ML",
+  "tray_spec": "100ML",
+  "pouch_spec": "835*610"
  },
  {
   "sl_no": 53,
@@ -579,8 +839,13 @@
   "cycle_time": "16.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "98",
-  "tray_nos_per_box": "490"
+  "tray_nos_per_box": "490",
+  "trays_per_box": "5",
+  "carton_spec": "200ML ROUND",
+  "tray_spec": "60ML",
+  "pouch_spec": "780*610"
  },
  {
   "sl_no": 54,
@@ -590,8 +855,13 @@
   "cycle_time": "16.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "91",
-  "tray_nos_per_box": "546"
+  "tray_nos_per_box": "546",
+  "trays_per_box": "6",
+  "carton_spec": "500ML ROUND",
+  "tray_spec": "500ML ROUND",
+  "pouch_spec": null
  },
  {
   "sl_no": 55,
@@ -601,8 +871,13 @@
   "cycle_time": "16.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "91",
-  "tray_nos_per_box": "273"
+  "tray_nos_per_box": "273",
+  "trays_per_box": "3",
+  "carton_spec": "300ML EMCURE",
+  "tray_spec": "200ML BRUTE",
+  "pouch_spec": "835*610"
  },
  {
   "sl_no": 56,
@@ -612,8 +887,13 @@
   "cycle_time": "16.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "92",
-  "tray_nos_per_box": "368"
+  "tray_nos_per_box": "368",
+  "trays_per_box": "4",
+  "carton_spec": "170ML ROUND",
+  "tray_spec": "60ML",
+  "pouch_spec": "835*610"
  },
  {
   "sl_no": 57,
@@ -623,8 +903,13 @@
   "cycle_time": "17.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "92",
-  "tray_nos_per_box": "368"
+  "tray_nos_per_box": "368",
+  "trays_per_box": "4",
+  "carton_spec": "170ML ROUND",
+  "tray_spec": "60ML",
+  "pouch_spec": "780*610"
  },
  {
   "sl_no": 58,
@@ -634,8 +919,13 @@
   "cycle_time": "16.5",
   "nos_per_pouch": "161",
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "HM 30.5*49",
+  "tray_spec": null,
+  "pouch_spec": null
  },
  {
   "sl_no": 59,
@@ -645,8 +935,13 @@
   "cycle_time": "14.5",
   "nos_per_pouch": "161",
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "HM 30.5*49",
+  "tray_spec": null,
+  "pouch_spec": null
  },
  {
   "sl_no": 60,
@@ -656,8 +951,13 @@
   "cycle_time": "16.5",
   "nos_per_pouch": "182",
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": null,
+  "tray_spec": null,
+  "pouch_spec": null
  },
  {
   "sl_no": 61,
@@ -667,8 +967,13 @@
   "cycle_time": "16.5",
   "nos_per_pouch": "96",
   "pouch_nos_per_box": "288",
+  "pouches_per_box": "3",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "300ML EMCURE",
+  "tray_spec": "835 X 610",
+  "pouch_spec": "835*610"
  },
  {
   "sl_no": 62,
@@ -678,8 +983,13 @@
   "cycle_time": "16.5",
   "nos_per_pouch": "50",
   "pouch_nos_per_box": "300",
+  "pouches_per_box": "6",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "500ML ROUND",
+  "tray_spec": "500ML",
+  "pouch_spec": "835*610"
  },
  {
   "sl_no": 63,
@@ -689,8 +999,13 @@
   "cycle_time": "13.85",
   "nos_per_pouch": "156",
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "HM 30.5*49",
+  "tray_spec": null,
+  "pouch_spec": null
  },
  {
   "sl_no": 64,
@@ -700,8 +1015,13 @@
   "cycle_time": "16.5",
   "nos_per_pouch": "60",
   "pouch_nos_per_box": "240",
+  "pouches_per_box": "4",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "170ML ROUND",
+  "tray_spec": "60ML",
+  "pouch_spec": "780*610"
  },
  {
   "sl_no": 65,
@@ -711,8 +1031,13 @@
   "cycle_time": "16.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "60",
-  "tray_nos_per_box": "240"
+  "tray_nos_per_box": "240",
+  "trays_per_box": "4",
+  "carton_spec": "170ML ROUND",
+  "tray_spec": "60ML",
+  "pouch_spec": "780*610"
  },
  {
   "sl_no": 66,
@@ -722,8 +1047,13 @@
   "cycle_time": "16.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "108",
-  "tray_nos_per_box": "648"
+  "tray_nos_per_box": "648",
+  "trays_per_box": "6",
+  "carton_spec": "500ML ROUND",
+  "tray_spec": "500ML",
+  "pouch_spec": null
  },
  {
   "sl_no": 67,
@@ -733,8 +1063,13 @@
   "cycle_time": "16.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "85",
-  "tray_nos_per_box": "425"
+  "tray_nos_per_box": "425",
+  "trays_per_box": "5",
+  "carton_spec": "200ML BRUTE",
+  "tray_spec": "200ML BRUTE",
+  "pouch_spec": "780*610"
  },
  {
   "sl_no": 68,
@@ -744,8 +1079,13 @@
   "cycle_time": "16.5",
   "nos_per_pouch": "221",
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "LD 30 X 49",
+  "tray_spec": null,
+  "pouch_spec": null
  },
  {
   "sl_no": 69,
@@ -755,8 +1095,13 @@
   "cycle_time": "16.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "95",
-  "tray_nos_per_box": "380"
+  "tray_nos_per_box": "380",
+  "trays_per_box": "4",
+  "carton_spec": "170ML ROUND",
+  "tray_spec": "100 ML",
+  "pouch_spec": "780*610"
  },
  {
   "sl_no": 70,
@@ -766,8 +1111,13 @@
   "cycle_time": "16.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "85",
-  "tray_nos_per_box": "340"
+  "tray_nos_per_box": "340",
+  "trays_per_box": "4",
+  "carton_spec": "200ML BRUTE",
+  "tray_spec": "200ML BRUTE",
+  "pouch_spec": "835X 610"
  },
  {
   "sl_no": 71,
@@ -777,8 +1127,13 @@
   "cycle_time": "13.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "105",
-  "tray_nos_per_box": "420"
+  "tray_nos_per_box": "420",
+  "trays_per_box": "4",
+  "carton_spec": "200ML BRUTE",
+  "tray_spec": "200ML BRUTE",
+  "pouch_spec": "835X 610"
  },
  {
   "sl_no": 72,
@@ -788,8 +1143,13 @@
   "cycle_time": "21.5 / 17.8",
   "nos_per_pouch": "83",
   "pouch_nos_per_box": "249",
+  "pouches_per_box": "3",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "500ML ROUND",
+  "tray_spec": "LD 28.5 X 38",
+  "pouch_spec": null
  },
  {
   "sl_no": 73,
@@ -799,8 +1159,13 @@
   "cycle_time": "16.5",
   "nos_per_pouch": "120",
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "LD 30 X 49",
+  "tray_spec": null,
+  "pouch_spec": null
  },
  {
   "sl_no": 74,
@@ -810,8 +1175,13 @@
   "cycle_time": "21.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "500ML ROUND",
+  "tray_spec": "LD 28.5 X 38",
+  "pouch_spec": null
  },
  {
   "sl_no": 75,
@@ -821,8 +1191,13 @@
   "cycle_time": "20",
   "nos_per_pouch": "77",
   "pouch_nos_per_box": "231",
+  "pouches_per_box": "3",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "500ML ROUND",
+  "tray_spec": "LD 28.5 X 38",
+  "pouch_spec": null
  },
  {
   "sl_no": 76,
@@ -832,8 +1207,13 @@
   "cycle_time": "16.75",
   "nos_per_pouch": "145",
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "60",
-  "tray_nos_per_box": "240"
+  "tray_nos_per_box": "240",
+  "trays_per_box": "4",
+  "carton_spec": "170ML ROUND",
+  "tray_spec": "60ML",
+  "pouch_spec": "LD 30 X 49"
  },
  {
   "sl_no": 77,
@@ -843,8 +1223,13 @@
   "cycle_time": "18",
   "nos_per_pouch": "96",
   "pouch_nos_per_box": "288",
+  "pouches_per_box": "3",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "300ML EMCURE",
+  "tray_spec": null,
+  "pouch_spec": "835 X 610"
  },
  {
   "sl_no": 78,
@@ -854,8 +1239,13 @@
   "cycle_time": "12",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "132",
-  "tray_nos_per_box": "1320"
+  "tray_nos_per_box": "1320",
+  "trays_per_box": "10",
+  "carton_spec": "500ML ROUND",
+  "tray_spec": "500ML ROUND",
+  "pouch_spec": "LD28.5 X 39"
  },
  {
   "sl_no": 79,
@@ -865,8 +1255,13 @@
   "cycle_time": "12",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "275",
-  "tray_nos_per_box": "1375"
+  "tray_nos_per_box": "1375",
+  "trays_per_box": "5",
+  "carton_spec": "200ML ROUND",
+  "tray_spec": "60ML ROUND",
+  "pouch_spec": null
  },
  {
   "sl_no": 80,
@@ -876,8 +1271,13 @@
   "cycle_time": "15.5",
   "nos_per_pouch": "110",
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": null,
+  "tray_spec": null,
+  "pouch_spec": "HM 30 X 49"
  },
  {
   "sl_no": 81,
@@ -887,8 +1287,13 @@
   "cycle_time": "15.5",
   "nos_per_pouch": "161",
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": null,
+  "tray_spec": null,
+  "pouch_spec": "HM 30 X 49"
  },
  {
   "sl_no": 82,
@@ -898,8 +1303,13 @@
   "cycle_time": "18.25",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "35",
-  "tray_nos_per_box": "105"
+  "tray_nos_per_box": "105",
+  "trays_per_box": "3",
+  "carton_spec": "200ML ROUND",
+  "tray_spec": "LAYER",
+  "pouch_spec": null
  },
  {
   "sl_no": 83,
@@ -909,8 +1319,13 @@
   "cycle_time": "18.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "42",
-  "tray_nos_per_box": "84"
+  "tray_nos_per_box": "84",
+  "trays_per_box": "2",
+  "carton_spec": "100ML ROUND",
+  "tray_spec": "LAYER",
+  "pouch_spec": null
  },
  {
   "sl_no": 84,
@@ -920,8 +1335,13 @@
   "cycle_time": "18",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "72",
-  "tray_nos_per_box": "216"
+  "tray_nos_per_box": "216",
+  "trays_per_box": "3",
+  "carton_spec": "200ML ROUND",
+  "tray_spec": "LAYER",
+  "pouch_spec": null
  },
  {
   "sl_no": 85,
@@ -931,8 +1351,13 @@
   "cycle_time": "18.25",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "60",
-  "tray_nos_per_box": "180"
+  "tray_nos_per_box": "180",
+  "trays_per_box": "3",
+  "carton_spec": "200ML BRUTE",
+  "tray_spec": "200ML BRUTE",
+  "pouch_spec": null
  },
  {
   "sl_no": 86,
@@ -942,8 +1367,13 @@
   "cycle_time": "18",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "84",
-  "tray_nos_per_box": "168"
+  "tray_nos_per_box": "168",
+  "trays_per_box": "2",
+  "carton_spec": "500ML ROUND",
+  "tray_spec": "500ML ROUND",
+  "pouch_spec": null
  },
  {
   "sl_no": 87,
@@ -953,8 +1383,13 @@
   "cycle_time": "18",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "48",
-  "tray_nos_per_box": "96"
+  "tray_nos_per_box": "96",
+  "trays_per_box": "2",
+  "carton_spec": "100ML ROUND",
+  "tray_spec": "100ML ROUND",
+  "pouch_spec": null
  },
  {
   "sl_no": 88,
@@ -964,8 +1399,13 @@
   "cycle_time": "13.5",
   "nos_per_pouch": "208",
   "pouch_nos_per_box": "1040",
+  "pouches_per_box": "5",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "200ML ROUND",
+  "tray_spec": "60ML ROUND",
+  "pouch_spec": "750X 610"
  },
  {
   "sl_no": 89,
@@ -975,8 +1415,13 @@
   "cycle_time": "13.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "209",
-  "tray_nos_per_box": "1045"
+  "tray_nos_per_box": "1045",
+  "trays_per_box": "5",
+  "carton_spec": "200ML ROUND",
+  "tray_spec": "60ML ROUND",
+  "pouch_spec": "750X 610"
  },
  {
   "sl_no": 90,
@@ -986,8 +1431,13 @@
   "cycle_time": "13.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "208",
-  "tray_nos_per_box": "1040"
+  "tray_nos_per_box": "1040",
+  "trays_per_box": "5",
+  "carton_spec": "200ML ROUND",
+  "tray_spec": "60ML ROUND",
+  "pouch_spec": "750X 610"
  },
  {
   "sl_no": 91,
@@ -997,8 +1447,13 @@
   "cycle_time": "14.5",
   "nos_per_pouch": "110",
   "pouch_nos_per_box": "550",
+  "pouches_per_box": "5",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "30ML ROUND",
+  "tray_spec": "100ML ROUND",
+  "pouch_spec": "750 X 610"
  },
  {
   "sl_no": 92,
@@ -1008,8 +1463,13 @@
   "cycle_time": "14.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "105",
-  "tray_nos_per_box": "525"
+  "tray_nos_per_box": "525",
+  "trays_per_box": "5",
+  "carton_spec": "30ML ROUND",
+  "tray_spec": "100ML ROUND",
+  "pouch_spec": "750 X 610"
  },
  {
   "sl_no": 93,
@@ -1019,8 +1479,13 @@
   "cycle_time": "14.5",
   "nos_per_pouch": "130",
   "pouch_nos_per_box": "650",
+  "pouches_per_box": "5",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "300ML ROUND",
+  "tray_spec": "60ML ROUND",
+  "pouch_spec": "750 X 610"
  },
  {
   "sl_no": 94,
@@ -1030,8 +1495,13 @@
   "cycle_time": "14.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "128",
-  "tray_nos_per_box": "640"
+  "tray_nos_per_box": "640",
+  "trays_per_box": "5",
+  "carton_spec": "300ML ROUND",
+  "tray_spec": "60ML ROUND",
+  "pouch_spec": "750 X 610"
  },
  {
   "sl_no": 95,
@@ -1041,8 +1511,13 @@
   "cycle_time": "17.2",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": "120",
-  "tray_nos_per_box": "600"
+  "tray_nos_per_box": "600",
+  "trays_per_box": "5",
+  "carton_spec": "100ML ROUND",
+  "tray_spec": "100ML ROUND",
+  "pouch_spec": "750 X 610"
  },
  {
   "sl_no": 96,
@@ -1052,8 +1527,13 @@
   "cycle_time": "30.5",
   "nos_per_pouch": null,
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "LD 28.5 X 38",
+  "tray_spec": null,
+  "pouch_spec": null
  },
  {
   "sl_no": 97,
@@ -1063,8 +1543,13 @@
   "cycle_time": null,
   "nos_per_pouch": "115",
   "pouch_nos_per_box": "575",
+  "pouches_per_box": "5",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "100ML ROUND",
+  "tray_spec": "100ML ROUND",
+  "pouch_spec": "750 X 610"
  },
  {
   "sl_no": 98,
@@ -1074,8 +1559,13 @@
   "cycle_time": "17.8",
   "nos_per_pouch": "83",
   "pouch_nos_per_box": "249",
+  "pouches_per_box": "3",
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "500ML ROUND",
+  "tray_spec": "500ML IFF",
+  "pouch_spec": "LD 28.5 X 38"
  },
  {
   "sl_no": 99,
@@ -1085,8 +1575,13 @@
   "cycle_time": "16.5",
   "nos_per_pouch": "120",
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": null,
+  "tray_spec": "450 LAYER",
+  "pouch_spec": "LD 30 X 49"
  },
  {
   "sl_no": 100,
@@ -1096,8 +1591,13 @@
   "cycle_time": "13.5",
   "nos_per_pouch": "161",
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "HM 30.5*49",
+  "tray_spec": null,
+  "pouch_spec": null
  },
  {
   "sl_no": 101,
@@ -1107,8 +1607,13 @@
   "cycle_time": "11.25",
   "nos_per_pouch": "319",
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "LD 30 X 49",
+  "tray_spec": null,
+  "pouch_spec": null
  },
  {
   "sl_no": 102,
@@ -1118,8 +1623,13 @@
   "cycle_time": "12.4",
   "nos_per_pouch": "289",
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "HM 30.5*49",
+  "tray_spec": null,
+  "pouch_spec": null
  },
  {
   "sl_no": 103,
@@ -1129,7 +1639,12 @@
   "cycle_time": "11.25",
   "nos_per_pouch": "319",
   "pouch_nos_per_box": null,
+  "pouches_per_box": null,
   "nos_per_tray": null,
-  "tray_nos_per_box": null
+  "tray_nos_per_box": null,
+  "trays_per_box": null,
+  "carton_spec": "LD 30 X 49",
+  "tray_spec": null,
+  "pouch_spec": null
  }
 ]

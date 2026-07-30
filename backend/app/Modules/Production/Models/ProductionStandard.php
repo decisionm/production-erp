@@ -16,7 +16,8 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  */
 #[Fillable([
     'item_id', 'source_product_name', 'cavities', 'unit_weight_grams',
-    'cycle_time', 'cycle_time_raw', 'status', 'unresolved_reason',
+    'cycle_time', 'cycle_time_raw', 'carton_spec', 'tray_spec', 'pouch_spec',
+    'status', 'unresolved_reason',
     'source', 'source_reference', 'confirmation_status', 'notes',
     'approved_by', 'approved_at', 'created_by',
 ])]

@@ -46,6 +46,7 @@ class ShiftProductionEntryService
         private readonly BatchEstimationService $estimation,
         private readonly ProductionDowntimeService $downtime,
         private readonly ProductionStandardResolver $standards,
+        private readonly MachineCapabilityService $machineCapability,
     ) {}
 
     public function paginate(int $perPage = 20, ?ShiftProductionEntryStatus $status = null): LengthAwarePaginator
@@ -306,6 +307,21 @@ class ShiftProductionEntryService
                     // pair lives here instead and needs no migration.
                     'material_shortage_override_reason' => $materialShortageReason,
                     'material_shortage_override_by' => $materialShortageReason !== null ? $createdBy : null,
+                    // The cavity rule, recorded for the same reason and in the
+                    // same place. Written on EVERY run, not only violations:
+                    // "this batch was checked against the rule and complied"
+                    // and "no rule was in force" are different facts, and a key
+                    // that appears only on breaches cannot tell them apart
+                    // months later when the rule has since been changed.
+                    'machine_cavity_rule' => [
+                        'threshold' => $this->machineCapability->threshold(),
+                        'restricted_work_center_ids' => $this->machineCapability->restrictedWorkCenterIds(),
+                        'standard_cavities' => $standard?->cavities,
+                        'applies' => $this->machineCapability->isRestricted($standard?->cavities),
+                        'complied' => $this->machineCapability->allows($standard?->cavities, (int) $data['work_center_id']),
+                        'overridden_by' => $this->machineCapability->allows($standard?->cavities, (int) $data['work_center_id'])
+                            ? null : $createdBy,
+                    ],
                 ],
                 'operator_id' => $data['operator_id'] ?? null,
                 'created_by' => $createdBy,

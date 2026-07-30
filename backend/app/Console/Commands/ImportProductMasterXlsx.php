@@ -18,22 +18,23 @@ use Illuminate\Console\Command;
  * this command consumes the JSON it produces:
  *
  *     # one-off, from a venv with openpyxl installed
- *     python - <<'PY'
- *     import json, openpyxl
- *     ws = openpyxl.load_workbook('ERPPRO29072026.xlsx', data_only=True)['PRODUCT DETAILS - SOFTWARE  (2']
- *     cols = {'sl_no':1,'product':2,'cavities':3,'unit_weight_grams':4,'cycle_time':5,
- *             'nos_per_pouch':6,'pouch_nos_per_box':7,'nos_per_tray':9,'tray_nos_per_box':10}
- *     def cell(v):
- *         if v is None: return None
- *         if isinstance(v, float) and v.is_integer(): return str(int(v))
- *         if isinstance(v, (int, float)): return str(v)
- *         return str(v).strip() or None
- *     rows = []
- *     for r in range(10, 113):                      # data rows B10:O112
- *         t = [ws.cell(row=r, column=c).value for c in range(1, 16)]
- *         rows.append({k: cell(t[i]) for k, i in cols.items()})
- *     json.dump(rows, open('storage/app/product-master-rows.json','w'), indent=1)
- *     PY
+ *     python3 scripts/convert-product-master.py \
+ *         ERPPRO29072026.xlsx storage/app/product-master-rows.json
+ *
+ * The sheet's data range is B10:O112, and the converter names its columns by
+ * their 1-based SHEET column so the mapping can be checked against the
+ * workbook directly. Header rows 7-8 read:
+ *
+ *     B SL.NO. | C PRODUCT | D NO. OF CAVITY | E WT. | F CYCLE TIME
+ *     G BOTL/POUCH | H BOT/BOX | I POUCH/BOX DETAILS
+ *     J BOTL/TRAY | K BOT/BOX | L TRAY/BOX DETAILS
+ *     M CARTON   | N TRAY    | O POUCH
+ *
+ * G-I are the pouch figures, J-L the tray figures, and M-O are packaging
+ * MATERIAL specs — "750*610" is a film in millimetres, not a count, so none of
+ * the three can produce a pieces-per-container figure. I and L are read rather
+ * than re-derived from H ÷ G: on the 200ML ROUND rows the division and the
+ * sheet disagree, and the sheet is the record.
  *
  * Cells are copied VERBATIM. "18/20" and "21.5 / 17.8" must survive into the
  * JSON whole so the importer can split them into separate unresolved

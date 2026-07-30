@@ -22,6 +22,10 @@ use Illuminate\Database\Eloquent\Collection;
  */
 class ProductionStandardResolver
 {
+    public function __construct(
+        private readonly MachineCapabilityService $machineCapability = new MachineCapabilityService,
+    ) {}
+
     /**
      * Every standard variant for a product, newest-usable first.
      *
@@ -86,8 +90,12 @@ class ProductionStandardResolver
      *
      * @return list<array{code: string, message: string}>
      */
-    public function warningsFor(?ProductionStandard $standard, ?ProductionStandardPackaging $packaging, int $itemId): array
-    {
+    public function warningsFor(
+        ?ProductionStandard $standard,
+        ?ProductionStandardPackaging $packaging,
+        int $itemId,
+        ?int $workCenterId = null,
+    ): array {
         $warnings = [];
 
         if ($standard === null) {
@@ -116,6 +124,14 @@ class ProductionStandardResolver
 
         if ($standard->unit_weight_grams === null) {
             $warnings[] = ['code' => 'weight_missing', 'message' => 'No unit weight on this standard — kg figures cannot be calculated.'];
+        }
+
+        // The cavity rule: high-cavity moulds belong on specific machines. Sits
+        // with the other advisories on purpose — it is a "you should know",
+        // and the run gets recorded either way.
+        $cavityWarning = $this->machineCapability->warningFor($standard, $workCenterId);
+        if ($cavityWarning !== null) {
+            $warnings[] = $cavityWarning;
         }
 
         return $warnings;

@@ -792,7 +792,22 @@ export interface BatchPreview {
     readiness: ProductReadiness;
     estimation: BatchEstimation;
     /** The resolved variant, or null when the product offers a choice. */
-    standard: (Omit<StandardVariant, 'packagings' | 'label'> & { label: string; unresolved_reason: string | null }) | null;
+    standard:
+        | (Omit<StandardVariant, 'packagings' | 'label'> & {
+              label: string;
+              unresolved_reason: string | null;
+              /**
+               * Packaging-MATERIAL specs from the factory master's three
+               * right-hand columns (CARTON / TRAY / POUCH). Free text, e.g.
+               * "750*610" — a pouch film in millimetres, not a count. Shown for
+               * reference only; nothing is ever computed from them, which is
+               * why they are strings rather than numbers.
+               */
+              carton_spec: string | null;
+              tray_spec: string | null;
+              pouch_spec: string | null;
+          })
+        | null;
     variants: StandardVariant[];
     packaging: { id: number; mode: string; label: string; nos_per_box: number | null } | null;
     warnings: StandardWarning[];

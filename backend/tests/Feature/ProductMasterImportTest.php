@@ -17,7 +17,7 @@ use Tests\TestCase;
  *
  * The count assertions below are the contract with the factory: 103 rows of
  * spreadsheet describe 76 products, which run as 90 distinct standard
- * variants packed 109 different ways, and 9 of those variants carry a
+ * variants packed 109 different ways, and 11 of those variants carry a
  * question only the factory can answer. If a future edit changes any of
  * those numbers, it changed what the factory can select on the floor.
  */
@@ -36,8 +36,18 @@ class ProductMasterImportTest extends TestCase
 
     private const PACKAGING_CONFIGURATIONS = 109;
 
-    /** Multi-valued or blank cells, split rather than guessed. */
-    private const UNRESOLVED = 9;
+    /**
+     * Multi-valued or blank cells, split rather than guessed — plus packaging
+     * figures that contradict each other.
+     *
+     * Was 9 while containers-per-box was always re-derived by division. Reading
+     * the sheet's own POUCH/BOX DETAILS instead surfaced the 200ML ROUND
+     * contradiction (105 per pouch × 5 pouches = 525, sheet says 520 per box)
+     * on four variants, two of which were already unresolved for a
+     * multi-valued weight. Net +2. The division had been quietly returning 4
+     * pouches per box — a figure the master plainly contradicts.
+     */
+    private const UNRESOLVED = 11;
 
     /** Sibling rows folded into a variant that already existed. */
     private const ROWS_MERGED = 20;
@@ -70,14 +80,7 @@ class ProductMasterImportTest extends TestCase
             // checkout for something it was never given.
             $this->markTestSkipped(
                 "Product master rows missing at {$path}. Regenerate with:\n"
-                ."  python - <<'PY'\n"
-                ."  import json, openpyxl\n"
-                ."  ws = openpyxl.load_workbook('ERPPRO29072026.xlsx', data_only=True)['PRODUCT DETAILS - SOFTWARE  (2']\n"
-                ."  cols = {'sl_no':1,'product':2,'cavities':3,'unit_weight_grams':4,'cycle_time':5,'nos_per_pouch':6,'pouch_nos_per_box':7,'nos_per_tray':9,'tray_nos_per_box':10}\n"
-                ."  cell = lambda v: None if v is None else (str(int(v)) if isinstance(v, float) and v.is_integer() else (str(v) if isinstance(v, (int, float)) else (str(v).strip() or None)))\n"
-                ."  rows = [{k: cell([ws.cell(row=r, column=c).value for c in range(1,16)][i]) for k, i in cols.items()} for r in range(10, 113)]\n"
-                ."  json.dump(rows, open('storage/app/product-master-rows.json','w'), indent=1)\n"
-                .'  PY',
+                .'  python3 scripts/convert-product-master.py ERPPRO29072026.xlsx storage/app/product-master-rows.json',
             );
         }
 
@@ -186,6 +189,129 @@ class ProductMasterImportTest extends TestCase
         $this->assertSame(['pouch', 'tray'], $standard->packagings->pluck('mode')->sort()->values()->all());
         $this->assertSame(1225, $standard->packagings->firstWhere('mode', 'pouch')->nos_per_box);
         $this->assertSame(1150, $standard->packagings->firstWhere('mode', 'tray')->nos_per_box);
+    }
+
+    // ---------------------------------------------------------------------
+    // Containers per box, and the packaging-material specs
+    // ---------------------------------------------------------------------
+
+    public function test_the_sheets_own_containers_per_box_is_used_rather_than_a_division(): void
+    {
+        // SL 4: 245 per pouch, 1225 per box, and POUCH/BOX DETAILS says 5.
+        // Division agrees here, so this is the case that must not regress.
+        $this->service()->import($this->realRows(), dryRun: false, createdBy: null);
+
+        $pouch = ProductionStandard::where('source_product_name', '60ML ROUND')
+            ->where('cavities', 5)->with('packagings')->firstOrFail()
+            ->packagings->firstWhere('mode', 'pouch');
+
+        $this->assertSame(5, $pouch->pouches_per_box);
+    }
+
+    public function test_a_sheet_figure_that_contradicts_the_division_is_kept_and_flagged(): void
+    {
+        // The 200ML ROUND rows: 105 per pouch, 520 per box, 5 pouches per box.
+        // 105 x 5 = 525, not 520. Integer division had been quietly answering
+        // 4 — a figure the master plainly contradicts. All three are kept as
+        // written and the variant is flagged for a person.
+        $this->service()->import($this->realRows(), dryRun: false, createdBy: null);
+
+        $standard = ProductionStandard::where('source_product_name', '200ML ROUND')
+            ->where('cavities', 4)
+            ->where('cycle_time', '14.30')
+            ->with('packagings')->firstOrFail();
+
+        $pouch = $standard->packagings->firstWhere('mode', 'pouch');
+
+        $this->assertSame(105, $pouch->nos_per_pouch);
+        $this->assertSame(520, $pouch->nos_per_box);
+        // The sheet's own figure, NOT intdiv(520, 105) = 4.
+        $this->assertSame(5, $pouch->pouches_per_box);
+
+        $this->assertSame('unresolved', $standard->status);
+        $this->assertStringContainsString('do not agree', (string) $standard->unresolved_reason);
+        $this->assertStringContainsString('525', (string) $standard->unresolved_reason);
+        $this->assertStringContainsString('520', (string) $standard->unresolved_reason);
+    }
+
+    public function test_the_division_still_covers_rows_with_no_containers_per_box_figure(): void
+    {
+        // 20 pouch rows carry a bottles-per-pouch count and nothing else. They
+        // become pouch options with a blank box figure rather than being
+        // dropped — Complete Batch asks for the carton size on the line.
+        $result = $this->service()->import([
+            [
+                'sl_no' => 1, 'product' => 'DERIVED BOX', 'cavities' => '4',
+                'unit_weight_grams' => '10', 'cycle_time' => '12',
+                'nos_per_pouch' => '100', 'pouch_nos_per_box' => '500',
+            ],
+        ], dryRun: true, createdBy: null);
+
+        $pouch = $result['variants'][0]['packagings'][0];
+
+        $this->assertSame('pouch', $pouch['mode']);
+        $this->assertSame(5, $pouch['pouches_per_box']);
+        $this->assertSame('draft', $result['variants'][0]['status']);
+    }
+
+    public function test_a_pouch_count_with_no_box_figure_at_all_still_becomes_a_pouch_option(): void
+    {
+        $result = $this->service()->import([
+            [
+                'sl_no' => 1, 'product' => 'NO BOX FIGURE', 'cavities' => '4',
+                'unit_weight_grams' => '10', 'cycle_time' => '12',
+                'nos_per_pouch' => '256',
+            ],
+        ], dryRun: true, createdBy: null);
+
+        $pouch = $result['variants'][0]['packagings'][0];
+
+        $this->assertSame('pouch', $pouch['mode']);
+        $this->assertSame(256, $pouch['nos_per_pouch']);
+        $this->assertNull($pouch['nos_per_box']);
+        $this->assertNull($pouch['pouches_per_box']);
+        // Nothing contradicts anything, so no question is raised.
+        $this->assertSame('draft', $result['variants'][0]['status']);
+    }
+
+    public function test_the_packaging_material_specs_are_imported_verbatim(): void
+    {
+        $this->service()->import($this->realRows(), dryRun: false, createdBy: null);
+
+        $standard = ProductionStandard::where('source_product_name', '200ML ROUND')
+            ->where('cavities', 4)->where('cycle_time', '14.30')->firstOrFail();
+
+        // "780*610" is a film in MILLIMETRES, not a count — stored as written.
+        // The sheet spells one film six ways; normalising them here would be a
+        // guess about which spellings name the same material.
+        $this->assertSame('780*610', $standard->pouch_spec);
+        $this->assertSame('200ML ROUND', $standard->carton_spec);
+        $this->assertSame('60ML', $standard->tray_spec);
+    }
+
+    public function test_a_spec_supplied_by_one_sibling_row_is_not_blanked_by_the_other(): void
+    {
+        // The pouch row and its tray sibling describe the same product, and the
+        // sheet fills the spec columns on only one of them often enough that
+        // last-write-wins would lose it.
+        $result = $this->service()->import([
+            [
+                'sl_no' => 1, 'product' => 'SIBLING SPECS', 'cavities' => '4',
+                'unit_weight_grams' => '10', 'cycle_time' => '12',
+                'nos_per_pouch' => '100', 'pouch_nos_per_box' => '500', 'pouches_per_box' => '5',
+                'pouch_spec' => '750*610', 'carton_spec' => null,
+            ],
+            [
+                'sl_no' => 2, 'product' => 'SIBLING SPECS', 'cavities' => '4',
+                'unit_weight_grams' => '10', 'cycle_time' => '12',
+                'nos_per_tray' => '50', 'tray_nos_per_box' => '500', 'trays_per_box' => '10',
+                'pouch_spec' => null, 'carton_spec' => '250ML',
+            ],
+        ], dryRun: true, createdBy: null);
+
+        $this->assertCount(1, $result['variants']);
+        $this->assertSame('750*610', $result['variants'][0]['pouch_spec']);
+        $this->assertSame('250ML', $result['variants'][0]['carton_spec']);
     }
 
     // ---------------------------------------------------------------------

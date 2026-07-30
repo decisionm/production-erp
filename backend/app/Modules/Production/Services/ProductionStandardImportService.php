@@ -233,8 +233,20 @@ class ProductionStandardImportService
                             'unit_weight_raw' => count($weights) > 1 || $weight === null ? $rawWeight : null,
                             'unresolved_notes' => $unresolved,
                             'source_reference' => (string) ($row['sl_no'] ?? ''),
+                            // Packaging-material specs from the sheet's three
+                            // right-hand columns. First non-blank wins: a
+                            // pouch row and its tray sibling describe the same
+                            // product, so a later row must not blank a spec an
+                            // earlier one supplied.
+                            'carton_spec' => $this->textOrNull($row['carton_spec'] ?? null),
+                            'tray_spec' => $this->textOrNull($row['tray_spec'] ?? null),
+                            'pouch_spec' => $this->textOrNull($row['pouch_spec'] ?? null),
                             'packagings' => [],
                         ];
+                    } else {
+                        foreach (['carton_spec', 'tray_spec', 'pouch_spec'] as $specKey) {
+                            $variants[$key][$specKey] ??= $this->textOrNull($row[$specKey] ?? null);
+                        }
                     }
 
                     $modesAdded = 0;
@@ -249,6 +261,14 @@ class ProductionStandardImportService
                             // standard with two options.
                             $variants[$key]['packagings'][$mode] = $packaging;
                             $modesAdded++;
+
+                            // Figures that contradict each other WITHIN one
+                            // option — flagged on arrival, before any later
+                            // row can be blamed for it.
+                            $inconsistency = $this->packagingInconsistency($packaging);
+                            if ($inconsistency !== null) {
+                                $variants[$key]['unresolved_notes'][] = $inconsistency;
+                            }
 
                             continue;
                         }
@@ -374,6 +394,9 @@ class ProductionStandardImportService
                 [
                     'item_id' => $variant['item_id'],
                     'cycle_time_raw' => $variant['cycle_time_raw'],
+                    'carton_spec' => $variant['carton_spec'],
+                    'tray_spec' => $variant['tray_spec'],
+                    'pouch_spec' => $variant['pouch_spec'],
                     'status' => $variant['status'],
                     'unresolved_reason' => $variant['unresolved_reason'],
                     'source' => 'ERPPRO29072026',
@@ -420,9 +443,11 @@ class ProductionStandardImportService
             $out[] = [
                 'mode' => ProductionStandardPackaging::MODE_POUCH,
                 'nos_per_pouch' => $nosPerPouch,
-                // Derived, not assumed: the sheet gives pieces per pouch and
-                // pieces per box, so pouches per box follows.
-                'pouches_per_box' => ($pouchBox !== null && $nosPerPouch > 0) ? intdiv($pouchBox, $nosPerPouch) : null,
+                'pouches_per_box' => $this->innersPerBox(
+                    $row['pouches_per_box'] ?? null,
+                    $pouchBox,
+                    $nosPerPouch,
+                ),
                 'nos_per_box' => $pouchBox,
             ];
         }
@@ -433,7 +458,11 @@ class ProductionStandardImportService
             $out[] = [
                 'mode' => ProductionStandardPackaging::MODE_TRAY,
                 'nos_per_tray' => $nosPerTray,
-                'trays_per_box' => ($trayBox !== null && $nosPerTray > 0) ? intdiv($trayBox, $nosPerTray) : null,
+                'trays_per_box' => $this->innersPerBox(
+                    $row['trays_per_box'] ?? null,
+                    $trayBox,
+                    $nosPerTray,
+                ),
                 'nos_per_box' => $trayBox,
             ];
         }
@@ -448,6 +477,78 @@ class ProductionStandardImportService
         }
 
         return $out;
+    }
+
+    /**
+     * Containers per box: the SHEET'S OWN figure when it gives one, else
+     * derived from pieces-per-box ÷ pieces-per-container.
+     *
+     * The sheet is preferred because it is the record. Deriving unconditionally
+     * is what produced 4 pouches per box on the three 200ML ROUND rows, where
+     * POUCH/BOX DETAILS plainly says 5 — an integer division quietly discarding
+     * the remainder and contradicting the master it was read from.
+     *
+     * The derivation stays as the fallback for the 20 pouch rows that carry a
+     * bottles-per-pouch count and no containers-per-box figure at all.
+     */
+    private function innersPerBox(mixed $sheetValue, ?int $nosPerBox, int $nosPerInner): ?int
+    {
+        $stated = $this->intOrNull($sheetValue);
+        if ($stated !== null && $stated > 0) {
+            return $stated;
+        }
+
+        return ($nosPerBox !== null && $nosPerInner > 0) ? intdiv($nosPerBox, $nosPerInner) : null;
+    }
+
+    /**
+     * Where a packaging option's own three figures cannot all be true at once.
+     *
+     * containers × pieces-per-container should equal pieces-per-box. On the
+     * 200ML ROUND rows it does not: 105 per pouch × 5 pouches = 525, while the
+     * sheet's BOT/BOX says 520. Nothing here can say which of the three is the
+     * typo, so all three are kept verbatim and the variant is flagged for a
+     * person — picking the pair that makes the arithmetic close would invent a
+     * packing figure and hide a real contradiction in the master.
+     *
+     * @param  array<string, mixed>  $packaging
+     */
+    private function packagingInconsistency(array $packaging): ?string
+    {
+        $inner = match ($packaging['mode']) {
+            ProductionStandardPackaging::MODE_POUCH => ['pouches_per_box', 'nos_per_pouch', 'pouch'],
+            ProductionStandardPackaging::MODE_TRAY => ['trays_per_box', 'nos_per_tray', 'tray'],
+            default => null,
+        };
+
+        if ($inner === null) {
+            return null;
+        }
+
+        [$perBoxKey, $perInnerKey, $noun] = $inner;
+        $containers = $packaging[$perBoxKey] ?? null;
+        $perInner = $packaging[$perInnerKey] ?? null;
+        $nosPerBox = $packaging['nos_per_box'] ?? null;
+
+        if ($containers === null || $perInner === null || $nosPerBox === null) {
+            return null;
+        }
+
+        $implied = $containers * $perInner;
+        if ($implied === $nosPerBox) {
+            return null;
+        }
+
+        return sprintf(
+            'The %s figures do not agree: %d per %s × %d %ses per box = %d, but the sheet says %d per box. All three are kept as written — confirm which is correct.',
+            $noun,
+            $perInner,
+            $noun,
+            $containers,
+            $noun,
+            $implied,
+            $nosPerBox,
+        );
     }
 
     /** @param  array<string, mixed>  $packaging */
@@ -590,5 +691,24 @@ class ProductionStandardImportService
     private function intOrNull(mixed $value): ?int
     {
         return is_numeric($value) ? (int) $value : null;
+    }
+
+    /**
+     * A packaging spec cell as stored text, or null when it says nothing.
+     *
+     * Trimmed but NOT normalised. The sheet spells one pouch film six ways
+     * ("750*610", "750 X 610", "750X 610"); collapsing them would be a guess
+     * about which spellings name the same material, and this value's only job
+     * is to be read by a supervisor who already knows which one they have.
+     */
+    private function textOrNull(mixed $value): ?string
+    {
+        if (! is_scalar($value)) {
+            return null;
+        }
+
+        $text = trim((string) $value);
+
+        return $text === '' ? null : mb_substr($text, 0, 64);
     }
 }
