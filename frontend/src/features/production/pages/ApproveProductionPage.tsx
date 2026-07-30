@@ -543,10 +543,10 @@ function VoucherPreviewSection({ preview, loading }: { preview: VoucherPreview |
 }
 
 /**
- * The 4-stage chain (factory answer 9): Supervisor submits → Plant Manager
- * verifies → Accountant reconciles → MD final approval → Tally. Each row's
- * available action depends on its stage AND the viewer's role — the stage
- * config drives both the button and the visibility.
+ * The chain: Supervisor submits → Plant Manager verifies → Accountant
+ * reconciles and posts → Tally. The accountant is FINAL; there is no MD stage.
+ * Each row's available action depends on its stage AND the viewer's role — the
+ * stage config drives both the button and the visibility.
  */
 const STAGES: {
     status: ShiftProductionEntryStatus;
@@ -555,8 +555,8 @@ const STAGES: {
     mutate: (id: number) => Promise<ShiftProductionEntry>;
 }[] = [
     { status: 'pending', action: 'Approve (Plant Manager)', roles: ['Plant Manager', 'Administrator'], mutate: pmApproveShiftProductionEntry },
-    // The accountant's approval posts to Tally (team decision 2026-07-26).
-    // MD approval is reserved for a future "big approvals" flow.
+    // The accountant's approval posts to Tally and ends the chain (team
+    // decision 2026-07-26). Nothing follows it.
     { status: 'pm_approved', action: 'Approve & Post (Accountant)', roles: ['Accounts', 'Administrator'], mutate: accountantApproveShiftProductionEntry },
 ];
 
