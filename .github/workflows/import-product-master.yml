@@ -1,0 +1,84 @@
+name: Import product master
+
+# Runs the factory product-master import ON THE SERVER, over the same SSH key
+# the deploy uses.
+#
+# Why this exists: the import is deliberately NOT part of the deploy — it
+# writes master data, so it must be a considered act rather than a side effect
+# of pushing code. But the only other way to run it was an interactive SSH
+# session, which needs a password nobody should be typing into a prompt (and
+# repeated failed attempts trip the host's brute-force protection, which has
+# already broken one deploy). Actions already holds a working key, so this
+# reuses the credential that demonstrably works and leaves a run log of who
+# imported what and when.
+#
+# Manual only — never on push. Defaults to a DRY RUN.
+
+on:
+  workflow_dispatch:
+    inputs:
+      write:
+        description: 'Actually write. Leave false for a dry run that changes nothing.'
+        type: boolean
+        default: false
+      exact_only:
+        description: 'Skip any row that does not resolve to exactly one Tally item, or that carries an ambiguity. Keep true for a live instance.'
+        type: boolean
+        default: true
+
+concurrency:
+  group: import-product-master
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Same diagnostics as the deploy workflow: ssh-keyscan can exit 0
+          # having collected nothing, so check the output rather than the code.
+          keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Check hPanel → Advanced → SSH Access (it can be off or IP-restricted) and whether brute-force protection has banned the runner. Re-running this workflow often clears a transient failure."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      - name: Report what is about to run
+        run: |
+          if [ "${{ inputs.write }}" = "true" ]; then
+            echo "::warning::WRITING product standards to the live database (exact_only=${{ inputs.exact_only }})."
+          else
+            echo "Dry run — nothing will be written."
+          fi
+
+      - name: Run the import
+        run: |
+          FLAGS=""
+          [ "${{ inputs.write }}" = "true" ] && FLAGS="$FLAGS --write"
+          [ "${{ inputs.exact_only }}" = "true" ] && FLAGS="$FLAGS --exact-only"
+
+          # --local-fixtures is deliberately NOT offered: it fabricates items,
+          # and the command itself refuses it in the production environment.
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && /opt/alt/php84/usr/bin/php artisan production:import-product-master $FLAGS" \
+            2>&1 | tee import-output.txt
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Product master import"
+            echo
+            echo "write: \`${{ inputs.write }}\` · exact_only: \`${{ inputs.exact_only }}\`"
+            echo
+            echo '```'
+            cat import-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
