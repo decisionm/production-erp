@@ -1,0 +1,77 @@
+name: Derive item colours
+
+# Fills in items.colour from the colour the Tally item name already states, ON
+# THE SERVER, over the same SSH key the deploy uses.
+#
+# Same reasoning as the product-master import workflow: this writes master data,
+# so it must be a deliberate act rather than a deploy side effect — but the only
+# other way to run it is an interactive SSH session, and repeated password
+# failures trip the host's brute-force protection (which has already broken one
+# deploy). Actions holds a key that works.
+#
+# Manual only. DRY RUN by default.
+
+on:
+  workflow_dispatch:
+    inputs:
+      write:
+        description: 'Actually write. Leave false for a dry run that changes nothing.'
+        type: boolean
+        default: false
+      only_products:
+        description: 'Skip packaging and raw material ("Master Batch Amber" IS the colourant, not an amber bottle). Keep true.'
+        type: boolean
+        default: true
+
+concurrency:
+  group: derive-item-colours
+  cancel-in-progress: false
+
+jobs:
+  derive:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Check hPanel → Advanced → SSH Access, and whether brute-force protection has banned the runner. Re-running often clears a transient failure."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      - name: Report what is about to run
+        run: |
+          if [ "${{ inputs.write }}" = "true" ]; then
+            echo "::warning::WRITING item colours to the live database (only_products=${{ inputs.only_products }})."
+          else
+            echo "Dry run — nothing will be written."
+          fi
+
+      - name: Run it
+        run: |
+          FLAGS=""
+          [ "${{ inputs.write }}" = "true" ] && FLAGS="$FLAGS --write"
+          [ "${{ inputs.only_products }}" = "true" ] && FLAGS="$FLAGS --only-products"
+
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && /opt/alt/php84/usr/bin/php artisan inventory:derive-item-colours $FLAGS" \
+            2>&1 | tee output.txt
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Derive item colours"
+            echo
+            echo "write: \`${{ inputs.write }}\` · only_products: \`${{ inputs.only_products }}\`"
+            echo
+            echo '```'
+            cat output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
