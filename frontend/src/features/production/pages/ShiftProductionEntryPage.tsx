@@ -1212,13 +1212,17 @@ export default function ShiftProductionEntryPage() {
             startForm.reset();
             setStartAnyway(false);
             setShortageReason('');
-            // Loading material is deliberately NOT part of Start Batch any
-            // more. Bags are scanned into the bins once, for the whole bay,
-            // on the Bin Bay page — a per-batch material form here asked the
-            // same question a second time and let the two disagree. The
-            // "Materials" button on the running card stays: it is a
-            // read-only look at what is in this machine's bin, not a load
-            // form.
+            // Loading material is deliberately NOT part of Start Batch. Bags
+            // are scanned into the bins once, for the whole bay, on the PET
+            // Resin Bag Loading page — a per-batch material form here asked the
+            // same question a second time and let the two disagree.
+            //
+            // The "Materials" button on the running card stays, and it is now
+            // genuinely what this comment always claimed: the balance plus
+            // returns, with no load control. It kept a Load mode until the
+            // duplicate was removed from DayBinDrawer, so this note described
+            // an intention rather than the code — worth stating, because the
+            // next person to read it will rely on it.
         },
         onError: (error: any) => {
             const body = error?.response?.data;
