@@ -53,7 +53,18 @@ class ProductionStandardResolver
     public function resolve(int $itemId, ?int $standardId = null): ?ProductionStandard
     {
         if ($standardId !== null) {
-            return ProductionStandard::query()->with('packagings')->find($standardId);
+            // Scoped to the item, not a bare find(). The id arrives from a
+            // client and the request layer validates only that the standard
+            // EXISTS (StartBatchRequest, BatchPreviewRequest), so an id
+            // belonging to a different product was previously applied in full:
+            // its cavities, weight and cycle time became the run's frozen
+            // standard, and every expected figure and the Tally voucher derived
+            // from another bottle's numbers. Returning null instead degrades
+            // correctly to the "choose a standard" warning.
+            return ProductionStandard::query()
+                ->with('packagings')
+                ->where('item_id', $itemId)
+                ->find($standardId);
         }
 
         $variants = $this->variantsFor($itemId);

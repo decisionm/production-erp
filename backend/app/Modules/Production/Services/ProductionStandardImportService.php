@@ -3,6 +3,7 @@
 namespace App\Modules\Production\Services;
 
 use App\Modules\Inventory\Models\Item;
+use App\Modules\Production\Data\MouldItemMap;
 use App\Modules\Production\Data\ProductMasterCorrections;
 use App\Modules\Production\Models\ProductionStandard;
 use App\Modules\Production\Models\ProductionStandardPackaging;
@@ -140,6 +141,12 @@ class ProductionStandardImportService
             'local_fixture_items' => $dryRun ? count($missing) : $fixturesCreated,
             'importable' => 0,
             'skipped' => 0,
+            // Row-scoped, and deliberately reported alongside rather than
+            // instead of the counts above. One mould standard covers every
+            // colour variant of its bottle, so a variant writes one row PER
+            // matched item — "90 variants" and "N standard rows" are both true
+            // and answer different questions.
+            'standard_rows' => 0,
         ];
 
         foreach ($variants as $variant) {
@@ -149,6 +156,9 @@ class ProductionStandardImportService
             }
             $summary['packaging_options'] += count($variant['packagings']);
             $summary[($variant['skip_reason'] ?? null) === null ? 'importable' : 'skipped']++;
+            if (($variant['skip_reason'] ?? null) === null) {
+                $summary['standard_rows'] += count($variant['matched_items'] ?? []);
+            }
         }
 
         return ['dry_run' => $dryRun, 'summary' => $summary, 'variants' => array_values($variants)];
@@ -461,12 +471,72 @@ class ProductionStandardImportService
         return preg_match('/(\d+(?:\.\d+)?)\s*(?:ml|cc)/i', $name, $m) === 1 ? $m[1] : null;
     }
 
+    /**
+     * Resolve each variant to the Tally items its standard applies to.
+     *
+     * A variant can now match SEVERAL items, because the factory's rule is that
+     * one mould standard covers every colour variant of that bottle — Tally
+     * sells "15ml Round ... Amber" and "15ml Round ... Clear" as separate SKUs
+     * and both run to the same standard. Each matched item becomes its own
+     * production_standards row carrying identical figures.
+     *
+     * Two sources, in order:
+     *
+     *  1. The reviewed map in {@see MouldItemMap}, keyed on the whole variant
+     *     identity. This is where the mould-name-to-SKU join actually lives —
+     *     see that class for why it is recorded data rather than inference.
+     *  2. The exact-name index, unchanged. It still resolves a catalogue that
+     *     happens to name items exactly as the sheet does, which is what the
+     *     LOCAL- fixture path relies on.
+     *
+     * `item_id` and `matched_item_name` keep pointing at the FIRST match so
+     * every existing reader (the summary counters, the skip reasons, the
+     * mapping report) keeps working and keeps counting VARIANTS. The row fan-out
+     * happens in write(), against `matched_items`.
+     *
+     * @param  list<array<string, mixed>>  $variants
+     * @param  array<string, Item>  $index
+     * @return list<array<string, mixed>>
+     */
     private function attachItems(array $variants, array $index): array
     {
+        // One pass, so a catalogue of 649 items is not re-scanned per variant.
+        $byName = [];
+        foreach ($index as $item) {
+            $byName[$this->normaliseName((string) $item->name)] ??= $item;
+        }
+
         foreach ($variants as &$variant) {
-            $item = $index[$this->normaliseName($variant['source_product_name'])] ?? null;
-            $variant['item_id'] = $item?->id;
-            $variant['matched_item_name'] = $item?->name;
+            $matched = [];
+
+            foreach (MouldItemMap::itemsFor(
+                $variant['source_product_name'],
+                $variant['cavities'],
+                $variant['unit_weight_grams'],
+                $variant['cycle_time'],
+            ) as $name) {
+                $item = $byName[$this->normaliseName($name)] ?? null;
+                // A mapped name the catalogue does not carry is skipped in
+                // silence here and reported by the summary as an unmatched
+                // variant — the map is reviewed against one catalogue and must
+                // not assume every deployment has the same items.
+                if ($item !== null) {
+                    $matched[$item->id] ??= $item;
+                }
+            }
+
+            if ($matched === []) {
+                $item = $index[$this->normaliseName($variant['source_product_name'])] ?? null;
+                if ($item !== null) {
+                    $matched[$item->id] = $item;
+                }
+            }
+
+            $matched = array_values($matched);
+
+            $variant['matched_items'] = $matched;
+            $variant['item_id'] = $matched[0]->id ?? null;
+            $variant['matched_item_name'] = $matched[0]->name ?? null;
         }
         unset($variant);
 
@@ -475,9 +545,16 @@ class ProductionStandardImportService
 
     /**
      * exactOnly is the production safety setting: write ONLY variants that
-     * resolved to exactly one item AND carry no unresolved ambiguity.
+     * resolved to AT LEAST ONE item and carry no unresolved ambiguity.
      * Everything else is reported as skipped with its reason — a mapping
      * report for the factory, not a silent omission.
+     *
+     * It used to read "exactly one item", which was right while a standard
+     * could only belong to one product. It is not right now: the factory's rule
+     * is that one mould standard covers every colour variant of its bottle, so
+     * several matches is the CORRECT outcome and must not be treated as
+     * ambiguity. Genuine ambiguity — two different mould names claiming the same
+     * item — is refused earlier, when the mapping is reviewed, not here.
      *
      * @param  list<array<string, mixed>>  $variants
      * @return list<array<string, mixed>>
@@ -511,18 +588,36 @@ class ProductionStandardImportService
                 continue;
             }
 
-            // Idempotent on the variant key: re-running the import updates
-            // rather than duplicating, so a corrected sheet can be
-            // re-imported without cleanup.
-            $standard = ProductionStandard::updateOrCreate(
-                [
+            $variant['created_ids'] = [];
+
+            // An unmatched variant still gets a row, with a null item. That is
+            // what production_standards.item_id is nullable FOR: an unmatched
+            // standard is visible work someone can finish, whereas writing
+            // nothing would report the import as clean while quietly dropping
+            // the variant. Fanning out over an empty match list would have done
+            // exactly that.
+            $targets = $variant['matched_items'] !== [] ? $variant['matched_items'] : [null];
+
+            foreach ($targets as $item) {
+                // Row identity is the variant key PLUS the item. Without
+                // item_id in the key, every item of one mould matched the same
+                // row: the first created it and the rest updated it in place,
+                // so a mould covering three colours silently produced one
+                // standard against whichever colour happened to be last.
+                //
+                // withTrashed()/firstOrNew rather than updateOrCreate because
+                // ProductionStandard soft-deletes: the default scope hides a
+                // trashed row from the lookup, so a re-import would try to
+                // insert a duplicate of a row that still exists.
+                $standard = ProductionStandard::withTrashed()->firstOrNew([
+                    'item_id' => $item?->id,
                     'source_product_name' => $variant['source_product_name'],
                     'cavities' => $variant['cavities'],
                     'unit_weight_grams' => $variant['unit_weight_grams'],
                     'cycle_time' => $variant['cycle_time'],
-                ],
-                [
-                    'item_id' => $variant['item_id'],
+                ]);
+
+                $standard->fill([
                     'cycle_time_raw' => $variant['cycle_time_raw'],
                     'carton_spec' => $variant['carton_spec'],
                     'tray_spec' => $variant['tray_spec'],
@@ -533,24 +628,32 @@ class ProductionStandardImportService
                     'source_reference' => $variant['source_reference'],
                     'confirmation_status' => 'Factory master 29-Jul',
                     'created_by' => $createdBy,
-                ],
-            );
+                ]);
+                $standard->save();
 
-            foreach ($variant['packagings'] as $packaging) {
-                ProductionStandardPackaging::updateOrCreate(
-                    ['production_standard_id' => $standard->id, 'mode' => $packaging['mode']],
-                    $packaging,
-                );
+                if ($standard->trashed()) {
+                    $standard->restore();
+                }
+
+                foreach ($variant['packagings'] as $packaging) {
+                    ProductionStandardPackaging::updateOrCreate(
+                        ['production_standard_id' => $standard->id, 'mode' => $packaging['mode']],
+                        $packaging,
+                    );
+                }
+
+                // Exactly one option = the default, so the supervisor is never
+                // asked a question with one answer.
+                $options = $standard->packagings()->get();
+                if ($options->count() === 1) {
+                    $options->first()->update(['is_default' => true]);
+                }
+
+                $variant['created_ids'][] = $standard->id;
             }
 
-            // Exactly one option = the default, so the supervisor is never
-            // asked a question with one answer.
-            $options = $standard->packagings()->get();
-            if ($options->count() === 1) {
-                $options->first()->update(['is_default' => true]);
-            }
-
-            $variant['created_id'] = $standard->id;
+            // Kept for readers that expect a single id; the first row written.
+            $variant['created_id'] = $variant['created_ids'][0] ?? null;
         }
         unset($variant);
 
