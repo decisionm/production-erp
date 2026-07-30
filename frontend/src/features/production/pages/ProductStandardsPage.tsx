@@ -188,7 +188,16 @@ export default function ProductStandardsPage() {
                 }}
                 columns={[
                     {
-                        title: 'Workbook product',
+                        title: 'SL.NO.',
+                        align: 'right' as const,
+                        render: (_, r) => (
+                            <Tooltip title={r.source ? `From ${r.source}` : undefined}>
+                                <Typography.Text type="secondary">{r.source_reference ?? '—'}</Typography.Text>
+                            </Tooltip>
+                        ),
+                    },
+                    {
+                        title: 'PRODUCT',
                         render: (_, r) => <Typography.Text strong>{r.source_product_name}</Typography.Text>,
                     },
                     {
@@ -202,10 +211,10 @@ export default function ProductStandardsPage() {
                                 </Tooltip>
                             ),
                     },
-                    { title: 'Cavities', align: 'right', render: (_, r) => r.cavities ?? '—' },
-                    { title: 'Weight (g)', align: 'right', render: (_, r) => fmt(r.unit_weight_grams) },
+                    { title: 'NO. OF CAVITY', align: 'right', render: (_, r) => r.cavities ?? '—' },
+                    { title: 'WT. (g)', align: 'right', render: (_, r) => fmt(r.unit_weight_grams) },
                     {
-                        title: 'Cycle time (s)',
+                        title: 'CYCLE TIME (s)',
                         align: 'right',
                         render: (_, r) =>
                             r.cycle_time_raw && r.cycle_time_raw !== r.cycle_time ? (
@@ -220,19 +229,19 @@ export default function ProductStandardsPage() {
                         // The workbook's own three pouch columns, as columns —
                         // not folded into a tooltip. This page is read against
                         // the printed sheet, so it must line up with it.
-                        title: 'Pouch',
+                        title: 'POUCH',
                         children: [
-                            { title: 'Pcs/pouch', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'pouch')?.nos_per_pouch ?? '—' },
-                            { title: 'Pcs/box', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'pouch')?.nos_per_box ?? '—' },
-                            { title: 'Pouches/box', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'pouch')?.pouches_per_box ?? '—' },
+                            { title: 'BOTL/POUCH', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'pouch')?.nos_per_pouch ?? '—' },
+                            { title: 'BOT/BOX', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'pouch')?.nos_per_box ?? '—' },
+                            { title: 'POUCH/BOX', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'pouch')?.pouches_per_box ?? '—' },
                         ],
                     },
                     {
-                        title: 'Tray',
+                        title: 'TRAY',
                         children: [
-                            { title: 'Pcs/tray', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'tray')?.nos_per_tray ?? '—' },
-                            { title: 'Pcs/box', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'tray')?.nos_per_box ?? '—' },
-                            { title: 'Trays/box', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'tray')?.trays_per_box ?? '—' },
+                            { title: 'BOTL/TRAY', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'tray')?.nos_per_tray ?? '—' },
+                            { title: 'BOT/BOX', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'tray')?.nos_per_box ?? '—' },
+                            { title: 'TRAY/BOX', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'tray')?.trays_per_box ?? '—' },
                         ],
                     },
                     {
@@ -245,9 +254,9 @@ export default function ProductStandardsPage() {
                         // which carton, which tray, which pouch film.
                         title: 'Packaging materials',
                         children: [
-                            { title: 'Carton', render: (_: unknown, r: ProductionStandardRow) => r.carton_spec ?? '—' },
-                            { title: 'Tray', render: (_: unknown, r: ProductionStandardRow) => r.tray_spec ?? '—' },
-                            { title: 'Pouch film', render: (_: unknown, r: ProductionStandardRow) => r.pouch_spec ?? '—' },
+                            { title: 'CARTON', render: (_: unknown, r: ProductionStandardRow) => r.carton_spec ?? '—' },
+                            { title: 'TRAY', render: (_: unknown, r: ProductionStandardRow) => r.tray_spec ?? '—' },
+                            { title: 'POUCH', render: (_: unknown, r: ProductionStandardRow) => r.pouch_spec ?? '—' },
                         ],
                     },
                     {
@@ -260,15 +269,6 @@ export default function ProductStandardsPage() {
                                 </Tooltip>
                             );
                         },
-                    },
-                    {
-                        title: 'From',
-                        render: (_, r) => (
-                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                {r.source ?? '—'}
-                                {r.source_reference ? ` row ${r.source_reference}` : ''}
-                            </Typography.Text>
-                        ),
                     },
                 ]}
             />
