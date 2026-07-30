@@ -1,0 +1,810 @@
+{
+ "configurations": [
+  {
+   "machine": 1,
+   "item": "B. 100 Ml Round Amber -12.0gms",
+   "cavities": 5,
+   "colour": "Amber",
+   "unit_weight_grams": 12.0,
+   "cycle_time_median": 11.5,
+   "cycle_time_min": 10.7,
+   "cycle_time_max": 12.6,
+   "shifts_observed": 7,
+   "first_seen": "13.07.2026",
+   "last_seen": "15.07.2026",
+   "sheet_names": [
+    "100 ml Round"
+   ]
+  },
+  {
+   "machine": 1,
+   "item": "B.100 Ml Round Pet Bottle Amber-12.9gms",
+   "cavities": 5,
+   "colour": "Amber",
+   "unit_weight_grams": 12.9,
+   "cycle_time_median": 12.2,
+   "cycle_time_min": 11.7,
+   "cycle_time_max": 12.6,
+   "shifts_observed": 21,
+   "first_seen": "13.07.2026",
+   "last_seen": "23.07.2026",
+   "sheet_names": [
+    "100 ml Round"
+   ]
+  },
+  {
+   "machine": 1,
+   "item": "B.100 Ml Round Pet Bottle Clear-12.9gms",
+   "cavities": 4,
+   "colour": "Clear",
+   "unit_weight_grams": 12.9,
+   "cycle_time_median": 12.4,
+   "cycle_time_min": 12.08,
+   "cycle_time_max": 12.6,
+   "shifts_observed": 7,
+   "first_seen": "17.07.2026",
+   "last_seen": "19.07.2026",
+   "sheet_names": [
+    "100 ml Round"
+   ]
+  },
+  {
+   "machine": 1,
+   "item": "B.100 Ml Round Pet Bottle Clear-12.9gms",
+   "cavities": 5,
+   "colour": "Clear",
+   "unit_weight_grams": 12.9,
+   "cycle_time_median": 12.45,
+   "cycle_time_min": 12.4,
+   "cycle_time_max": 12.45,
+   "shifts_observed": 2,
+   "first_seen": "16.07.2026",
+   "last_seen": "17.07.2026",
+   "sheet_names": [
+    "100 ml Round"
+   ]
+  },
+  {
+   "machine": 1,
+   "item": "B.100ml Round Pet Bottle Clear 12.0 Gms",
+   "cavities": 5,
+   "colour": "Clear",
+   "unit_weight_grams": 12.0,
+   "cycle_time_median": 11.6,
+   "cycle_time_min": 10.6,
+   "cycle_time_max": 12.4,
+   "shifts_observed": 13,
+   "first_seen": "12.07.2026",
+   "last_seen": "26.07.2026",
+   "sheet_names": [
+    "100 ml Round"
+   ]
+  },
+  {
+   "machine": 2,
+   "item": "B.400ml Round Pet Bottle Clear-26g",
+   "cavities": 2,
+   "colour": "Clear",
+   "unit_weight_grams": 26.0,
+   "cycle_time_median": 16.4,
+   "cycle_time_min": 16.2,
+   "cycle_time_max": 16.8,
+   "shifts_observed": 4,
+   "first_seen": "25.07.2026",
+   "last_seen": "26.07.2026",
+   "sheet_names": [
+    "400 ml Round"
+   ]
+  },
+  {
+   "machine": 2,
+   "item": "B.500 Ml Round Pet Bottle Amber - 31.5gm",
+   "cavities": 3,
+   "colour": "Amber",
+   "unit_weight_grams": 31.5,
+   "cycle_time_median": 17.2,
+   "cycle_time_min": 11.7,
+   "cycle_time_max": 19.0,
+   "shifts_observed": 14,
+   "first_seen": "15.07.2026",
+   "last_seen": "19.07.2026",
+   "sheet_names": [
+    "500 ml Round"
+   ]
+  },
+  {
+   "machine": 2,
+   "item": "B.500 Ml Round Pet Bottle Amber - 36gms",
+   "cavities": 7,
+   "colour": "Amber",
+   "unit_weight_grams": 36.0,
+   "cycle_time_median": 18.64,
+   "cycle_time_min": 18.64,
+   "cycle_time_max": 18.64,
+   "shifts_observed": 1,
+   "first_seen": "16.07.2026",
+   "last_seen": "16.07.2026",
+   "sheet_names": [
+    "500 ml Round"
+   ]
+  },
+  {
+   "machine": 2,
+   "item": "B.500ML JLI Pet Bottle Clear-36gms",
+   "cavities": 3,
+   "colour": "Clear",
+   "unit_weight_grams": 36.0,
+   "cycle_time_median": 21.28,
+   "cycle_time_min": 20.7,
+   "cycle_time_max": 21.8,
+   "shifts_observed": 5,
+   "first_seen": "14.07.2026",
+   "last_seen": "20.07.2026",
+   "sheet_names": [
+    "500 ml JLI"
+   ]
+  },
+  {
+   "machine": 2,
+   "item": "B.500ML JLI Pet Bottle Clear-36gms",
+   "cavities": 7,
+   "colour": "Clear",
+   "unit_weight_grams": 36.0,
+   "cycle_time_median": 20.5,
+   "cycle_time_min": 20.5,
+   "cycle_time_max": 20.5,
+   "shifts_observed": 1,
+   "first_seen": "19.07.2026",
+   "last_seen": "19.07.2026",
+   "sheet_names": [
+    "500 ml JLI"
+   ]
+  },
+  {
+   "machine": 2,
+   "item": "L.60ML Liquor Pet Bottle - Clear 8.5 Gms",
+   "cavities": 4,
+   "colour": "Clear",
+   "unit_weight_grams": 8.5,
+   "cycle_time_median": 11.5,
+   "cycle_time_min": 11.4,
+   "cycle_time_max": 11.9,
+   "shifts_observed": 11,
+   "first_seen": "21.07.2026",
+   "last_seen": "24.07.2026",
+   "sheet_names": [
+    "60 ml Liquor"
+   ]
+  },
+  {
+   "machine": 2,
+   "item": "L.60ML Liquor Pet Bottle - Clear 8.5 Gms",
+   "cavities": 7,
+   "colour": "Clear",
+   "unit_weight_grams": 8.5,
+   "cycle_time_median": 11.98,
+   "cycle_time_min": 11.78,
+   "cycle_time_max": 11.98,
+   "shifts_observed": 2,
+   "first_seen": "25.07.2026",
+   "last_seen": "25.07.2026",
+   "sheet_names": [
+    "60 ml Liquor"
+   ]
+  },
+  {
+   "machine": 3,
+   "item": "B.100 Ml Round Pet Bottle Clear-12.9gms",
+   "cavities": 5,
+   "colour": "Clear",
+   "unit_weight_grams": 12.9,
+   "cycle_time_median": 12.3,
+   "cycle_time_min": 11.7,
+   "cycle_time_max": 12.4,
+   "shifts_observed": 5,
+   "first_seen": "25.07.2026",
+   "last_seen": "26.07.2026",
+   "sheet_names": [
+    "100 ml Round"
+   ]
+  },
+  {
+   "machine": 3,
+   "item": "L.375ml Rib Pet Bottle Clear- 15 Gram",
+   "cavities": 5,
+   "colour": "Clear",
+   "unit_weight_grams": 15.0,
+   "cycle_time_median": 12.75,
+   "cycle_time_min": 11.5,
+   "cycle_time_max": 12.9,
+   "shifts_observed": 15,
+   "first_seen": "20.07.2026",
+   "last_seen": "25.07.2026",
+   "sheet_names": [
+    "375 ml RIB"
+   ]
+  },
+  {
+   "machine": 3,
+   "item": "L.90ML Hybrid Pet Bottle Clear - 12.9 Gms",
+   "cavities": 5,
+   "colour": "Clear",
+   "unit_weight_grams": 12.9,
+   "cycle_time_median": 11.94,
+   "cycle_time_min": 11.09,
+   "cycle_time_max": 12.6,
+   "shifts_observed": 26,
+   "first_seen": "12.07.2026",
+   "last_seen": "21.07.2026",
+   "sheet_names": [
+    "90 ml Hybrid"
+   ]
+  },
+  {
+   "machine": 4,
+   "item": "A.60 Ml Round Amber Pet Bottle 10gms",
+   "cavities": 4,
+   "colour": "Amber",
+   "unit_weight_grams": 10.0,
+   "cycle_time_median": 11.5,
+   "cycle_time_min": 10.0,
+   "cycle_time_max": 11.98,
+   "shifts_observed": 23,
+   "first_seen": "17.07.2026",
+   "last_seen": "24.07.2026",
+   "sheet_names": [
+    "60 ml Round"
+   ]
+  },
+  {
+   "machine": 4,
+   "item": "A.60 Ml Round Amber Pet Bottle 10gms",
+   "cavities": 5,
+   "colour": "Amber",
+   "unit_weight_grams": 10.0,
+   "cycle_time_median": 11.5,
+   "cycle_time_min": 10.6,
+   "cycle_time_max": 12.4,
+   "shifts_observed": 18,
+   "first_seen": "12.07.2026",
+   "last_seen": "26.07.2026",
+   "sheet_names": [
+    "60 ml Round"
+   ]
+  },
+  {
+   "machine": 4,
+   "item": "A.60 Ml Round Pet Bottle Clear 10 Gms",
+   "cavities": 5,
+   "colour": "Clear",
+   "unit_weight_grams": 10.0,
+   "cycle_time_median": 11.5,
+   "cycle_time_min": 11.2,
+   "cycle_time_max": 12.1,
+   "shifts_observed": 6,
+   "first_seen": "14.07.2026",
+   "last_seen": "16.07.2026",
+   "sheet_names": [
+    "60 ml Round"
+   ]
+  },
+  {
+   "machine": 5,
+   "item": "B.100ml Boston Pet Bottle  Black-11.7 Gms",
+   "cavities": 4,
+   "colour": "Black",
+   "unit_weight_grams": 11.7,
+   "cycle_time_median": 13.6,
+   "cycle_time_min": 13.6,
+   "cycle_time_max": 13.6,
+   "shifts_observed": 2,
+   "first_seen": "13.07.2026",
+   "last_seen": "13.07.2026",
+   "sheet_names": [
+    "100 ml Boston"
+   ]
+  },
+  {
+   "machine": 5,
+   "item": "B.100ml Boston Pet Bottle Amber - 11.7gms",
+   "cavities": 4,
+   "colour": "Amber",
+   "unit_weight_grams": 11.7,
+   "cycle_time_median": 13.3,
+   "cycle_time_min": 12.4,
+   "cycle_time_max": 13.6,
+   "shifts_observed": 6,
+   "first_seen": "12.07.2026",
+   "last_seen": "14.07.2026",
+   "sheet_names": [
+    "100 ml Boston"
+   ]
+  },
+  {
+   "machine": 5,
+   "item": "L.500ML Kidney Clear Pet Bottle 28gms (Cover)",
+   "cavities": 2,
+   "colour": "Clear",
+   "unit_weight_grams": 28.0,
+   "cycle_time_median": 14.5,
+   "cycle_time_min": 13.49,
+   "cycle_time_max": 15.94,
+   "shifts_observed": 31,
+   "first_seen": "15.07.2026",
+   "last_seen": "25.07.2026",
+   "sheet_names": [
+    "500 ml Kidney"
+   ]
+  },
+  {
+   "machine": 5,
+   "item": "T.120ml Tablet Container Green-17gms",
+   "cavities": 3,
+   "colour": "Green",
+   "unit_weight_grams": 17.0,
+   "cycle_time_median": 13.6,
+   "cycle_time_min": 12.8,
+   "cycle_time_max": 13.6,
+   "shifts_observed": 6,
+   "first_seen": "25.07.2026",
+   "last_seen": "26.07.2026",
+   "sheet_names": [
+    "120 ml  Tablet"
+   ]
+  },
+  {
+   "machine": 6,
+   "item": "B.120 Ml Round Pet Bottle Amber-16.5gms",
+   "cavities": 4,
+   "colour": "Amber",
+   "unit_weight_grams": 16.5,
+   "cycle_time_median": 13.0,
+   "cycle_time_min": 12.9,
+   "cycle_time_max": 13.8,
+   "shifts_observed": 10,
+   "first_seen": "16.07.2026",
+   "last_seen": "26.07.2026",
+   "sheet_names": [
+    "120 ml  Round",
+    "120 ml Round"
+   ]
+  },
+  {
+   "machine": 6,
+   "item": "B.120ml Round Pet Bottle Dark Amber-16.5gms",
+   "cavities": 4,
+   "colour": "Dark Amber",
+   "unit_weight_grams": 16.5,
+   "cycle_time_median": 13.2,
+   "cycle_time_min": 13.2,
+   "cycle_time_max": 13.2,
+   "shifts_observed": 1,
+   "first_seen": "18.07.2026",
+   "last_seen": "18.07.2026",
+   "sheet_names": [
+    "120 ml Round"
+   ]
+  },
+  {
+   "machine": 6,
+   "item": "B.170ml Round Milk White-16.5gms",
+   "cavities": 4,
+   "colour": "White",
+   "unit_weight_grams": 16.5,
+   "cycle_time_median": 13.5,
+   "cycle_time_min": 13.2,
+   "cycle_time_max": 13.96,
+   "shifts_observed": 3,
+   "first_seen": "15.07.2026",
+   "last_seen": "16.07.2026",
+   "sheet_names": [
+    "170 ml Round",
+    "170 ml Round Milk"
+   ]
+  },
+  {
+   "machine": 6,
+   "item": "B.200 Ml Brute Pet Bottle Amber-18gms",
+   "cavities": 4,
+   "colour": "Amber",
+   "unit_weight_grams": 18.0,
+   "cycle_time_median": 15.2,
+   "cycle_time_min": 14.9,
+   "cycle_time_max": 15.4,
+   "shifts_observed": 35,
+   "first_seen": "12.07.2026",
+   "last_seen": "25.07.2026",
+   "sheet_names": [
+    "200 ml Brute",
+    "200 ml Brute Skyec"
+   ]
+  },
+  {
+   "machine": 7,
+   "item": "B.200 Ml Round Pet Bottle Amber 18gms",
+   "cavities": 4,
+   "colour": "Amber",
+   "unit_weight_grams": 18.0,
+   "cycle_time_median": 15.12,
+   "cycle_time_min": 14.8,
+   "cycle_time_max": 15.6,
+   "shifts_observed": 44,
+   "first_seen": "12.07.2026",
+   "last_seen": "26.07.2026",
+   "sheet_names": [
+    "200 ml Round"
+   ]
+  },
+  {
+   "machine": 7,
+   "item": "B.200 Ml Round Pet Bottle Clear",
+   "cavities": 4,
+   "colour": "Clear",
+   "unit_weight_grams": 18.0,
+   "cycle_time_median": 15.0,
+   "cycle_time_min": 15.0,
+   "cycle_time_max": 15.0,
+   "shifts_observed": 3,
+   "first_seen": "20.07.2026",
+   "last_seen": "21.07.2026",
+   "sheet_names": [
+    "200 ml Round"
+   ]
+  },
+  {
+   "machine": 8,
+   "item": "B.500ml Boston Pet Bottle Clear - 41.5 Gms",
+   "cavities": 2,
+   "colour": "Clear",
+   "unit_weight_grams": 41.5,
+   "cycle_time_median": 18.2,
+   "cycle_time_min": 18.2,
+   "cycle_time_max": 18.2,
+   "shifts_observed": 1,
+   "first_seen": "26.07.2026",
+   "last_seen": "26.07.2026",
+   "sheet_names": [
+    "500 ml Boston"
+   ]
+  },
+  {
+   "machine": 8,
+   "item": "C.1000ml Oval Clear Pet Bottle-41.5gms",
+   "cavities": 2,
+   "colour": "Clear",
+   "unit_weight_grams": 41.5,
+   "cycle_time_median": 18.9,
+   "cycle_time_min": 18.2,
+   "cycle_time_max": 20.0,
+   "shifts_observed": 13,
+   "first_seen": "17.07.2026",
+   "last_seen": "21.07.2026",
+   "sheet_names": [
+    "1000 ml oval"
+   ]
+  },
+  {
+   "machine": 8,
+   "item": "C.1000ml Round Pet Bottle Clear-41.5gm",
+   "cavities": 2,
+   "colour": "Clear",
+   "unit_weight_grams": 41.5,
+   "cycle_time_median": 19.3,
+   "cycle_time_min": 18.6,
+   "cycle_time_max": 19.96,
+   "shifts_observed": 14,
+   "first_seen": "21.07.2026",
+   "last_seen": "26.07.2026",
+   "sheet_names": [
+    "1000 ml Round"
+   ]
+  },
+  {
+   "machine": 8,
+   "item": "L.500ml Kidney Pet Bottles Green (Long Neck)-39 Gms",
+   "cavities": 2,
+   "colour": "Green",
+   "unit_weight_grams": 39.0,
+   "cycle_time_median": 15.36,
+   "cycle_time_min": 15.0,
+   "cycle_time_max": 15.6,
+   "shifts_observed": 7,
+   "first_seen": "12.07.2026",
+   "last_seen": "14.07.2026",
+   "sheet_names": [
+    "500 ml long neck"
+   ]
+  },
+  {
+   "machine": 8,
+   "item": "L.750ml Kidney Clear Cover-39gms (110nos)",
+   "cavities": 2,
+   "colour": "Clear",
+   "unit_weight_grams": 39.0,
+   "cycle_time_median": 15.7,
+   "cycle_time_min": 15.16,
+   "cycle_time_max": 16.0,
+   "shifts_observed": 9,
+   "first_seen": "14.07.2026",
+   "last_seen": "17.07.2026",
+   "sheet_names": [
+    "750 ml Kidney"
+   ]
+  },
+  {
+   "machine": 9,
+   "item": "C.1000ml Oval Clear Pet Bottle-41.5gms",
+   "cavities": 2,
+   "colour": "Clear",
+   "unit_weight_grams": 41.5,
+   "cycle_time_median": 19.0,
+   "cycle_time_min": 19.0,
+   "cycle_time_max": 19.0,
+   "shifts_observed": 1,
+   "first_seen": "20.07.2026",
+   "last_seen": "20.07.2026",
+   "sheet_names": [
+    "1000 ml oval"
+   ]
+  },
+  {
+   "machine": 9,
+   "item": "L.180ml Rib Pet Bottle Clear-Cover-10.5 G +/-0.5gms",
+   "cavities": 6,
+   "colour": "Clear",
+   "unit_weight_grams": 10.5,
+   "cycle_time_median": 11.4,
+   "cycle_time_min": 10.9,
+   "cycle_time_max": 12.48,
+   "shifts_observed": 32,
+   "first_seen": "16.07.2026",
+   "last_seen": "26.07.2026",
+   "sheet_names": [
+    "180 ml PDL"
+   ]
+  },
+  {
+   "machine": 9,
+   "item": "L.500ML Kidney Clear Pet Bottle 28gms (Cover)",
+   "cavities": 2,
+   "colour": "Clear",
+   "unit_weight_grams": 28.0,
+   "cycle_time_median": 13.8,
+   "cycle_time_min": 13.2,
+   "cycle_time_max": 13.9,
+   "shifts_observed": 4,
+   "first_seen": "12.07.2026",
+   "last_seen": "13.07.2026",
+   "sheet_names": [
+    "500 ml Kidney"
+   ]
+  },
+  {
+   "machine": 9,
+   "item": "T.120ml Tablet Container Green-17gms",
+   "cavities": 3,
+   "colour": "Green",
+   "unit_weight_grams": 17.0,
+   "cycle_time_median": 13.5,
+   "cycle_time_min": 12.4,
+   "cycle_time_max": 14.45,
+   "shifts_observed": 8,
+   "first_seen": "13.07.2026",
+   "last_seen": "15.07.2026",
+   "sheet_names": [
+    "120 cc Tablet"
+   ]
+  },
+  {
+   "machine": 10,
+   "item": "B.500 Ml Round Pet Bottle Amber - 36gms",
+   "cavities": 3,
+   "colour": "Amber",
+   "unit_weight_grams": 36.0,
+   "cycle_time_median": 18.6,
+   "cycle_time_min": 18.6,
+   "cycle_time_max": 18.6,
+   "shifts_observed": 1,
+   "first_seen": "19.07.2026",
+   "last_seen": "19.07.2026",
+   "sheet_names": [
+    "500 ml Round"
+   ]
+  },
+  {
+   "machine": 10,
+   "item": "B.500 Ml Round Pet Bottle Amber - 36gms",
+   "cavities": 7,
+   "colour": "Amber",
+   "unit_weight_grams": 36.0,
+   "cycle_time_median": 18.5,
+   "cycle_time_min": 18.4,
+   "cycle_time_max": 18.5,
+   "shifts_observed": 2,
+   "first_seen": "17.07.2026",
+   "last_seen": "20.07.2026",
+   "sheet_names": [
+    "500 ml Round"
+   ]
+  },
+  {
+   "machine": 10,
+   "item": "B.500 Ml Round Pet Bottle Clear - 36gm",
+   "cavities": 3,
+   "colour": "Clear",
+   "unit_weight_grams": 36.0,
+   "cycle_time_median": 18.4,
+   "cycle_time_min": 18.4,
+   "cycle_time_max": 18.4,
+   "shifts_observed": 1,
+   "first_seen": "17.07.2026",
+   "last_seen": "17.07.2026",
+   "sheet_names": [
+    "500 ml Round"
+   ]
+  },
+  {
+   "machine": 10,
+   "item": "B.500 Ml Round Pet Bottle Clear - 36gm",
+   "cavities": 7,
+   "colour": "Clear",
+   "unit_weight_grams": 36.0,
+   "cycle_time_median": 18.6,
+   "cycle_time_min": 18.16,
+   "cycle_time_max": 19.0,
+   "shifts_observed": 8,
+   "first_seen": "17.07.2026",
+   "last_seen": "19.07.2026",
+   "sheet_names": [
+    "500 ml Round"
+   ]
+  },
+  {
+   "machine": 10,
+   "item": "B.500ML JLI Pet Bottle Clear-36gms",
+   "cavities": 7,
+   "colour": "Clear",
+   "unit_weight_grams": 36.0,
+   "cycle_time_median": 19.9,
+   "cycle_time_min": 19.9,
+   "cycle_time_max": 19.9,
+   "shifts_observed": 1,
+   "first_seen": "19.07.2026",
+   "last_seen": "19.07.2026",
+   "sheet_names": [
+    "500 ml JLI"
+   ]
+  },
+  {
+   "machine": 10,
+   "item": "B.500ml Round Pet Bottles Amber-36g IFF",
+   "cavities": 7,
+   "colour": "Amber",
+   "unit_weight_grams": 36.0,
+   "cycle_time_median": 18.64,
+   "cycle_time_min": 18.16,
+   "cycle_time_max": 19.1,
+   "shifts_observed": 11,
+   "first_seen": "15.07.2026",
+   "last_seen": "22.07.2026",
+   "sheet_names": [
+    "500 ml IFF",
+    "500 ml Round  IFF"
+   ]
+  },
+  {
+   "machine": 10,
+   "item": "L. 500 ml Kidney RIB clear Pet Bottle 23 Gram",
+   "cavities": 6,
+   "colour": "Clear",
+   "unit_weight_grams": 23.0,
+   "cycle_time_median": 13.0,
+   "cycle_time_min": 12.4,
+   "cycle_time_max": 13.6,
+   "shifts_observed": 5,
+   "first_seen": "22.07.2026",
+   "last_seen": "23.07.2026",
+   "sheet_names": [
+    "500 ml Kidney Rib"
+   ]
+  },
+  {
+   "machine": 10,
+   "item": "L.180ml Rib Pet Bottle Clear-Cover-10.5 G +/-0.5gms",
+   "cavities": 6,
+   "colour": "Clear",
+   "unit_weight_grams": 10.5,
+   "cycle_time_median": 12.28,
+   "cycle_time_min": 12.28,
+   "cycle_time_max": 12.28,
+   "shifts_observed": 1,
+   "first_seen": "20.07.2026",
+   "last_seen": "20.07.2026",
+   "sheet_names": [
+    "180 ml PDL"
+   ]
+  },
+  {
+   "machine": 10,
+   "item": "L.500ML Kidney Clear Pet Bottle 28gms (Cover)",
+   "cavities": 6,
+   "colour": "Clear",
+   "unit_weight_grams": 28.0,
+   "cycle_time_median": 13.7,
+   "cycle_time_min": 13.4,
+   "cycle_time_max": 14.1,
+   "shifts_observed": 19,
+   "first_seen": "12.07.2026",
+   "last_seen": "26.07.2026",
+   "sheet_names": [
+    "500 ml Kidney"
+   ]
+  }
+ ],
+ "skipped": [
+  {
+   "machine": 6,
+   "product": "120 ml Round",
+   "colour": "Black",
+   "wt": 16.5,
+   "cavity": 4,
+   "shifts_observed": 1,
+   "ct_median": 12.9,
+   "ct_min": 12.9,
+   "ct_max": 12.9,
+   "pack": 745,
+   "dates": [
+    "17.07.2026"
+   ],
+   "reason": "no Tally item matches size+shape+colour+weight"
+  },
+  {
+   "machine": 7,
+   "product": "200 ml Round",
+   "colour": "Gold",
+   "wt": 18.0,
+   "cavity": 4,
+   "shifts_observed": 1,
+   "ct_median": 15.0,
+   "ct_min": 15.0,
+   "ct_max": 15.0,
+   "pack": 490,
+   "dates": [
+    "22.07.2026"
+   ],
+   "reason": "no Tally item matches size+shape+colour+weight"
+  },
+  {
+   "machine": 7,
+   "product": "200 ml Round",
+   "colour": "Yellow",
+   "wt": 18.0,
+   "cavity": 4,
+   "shifts_observed": 1,
+   "ct_median": 15.0,
+   "ct_min": 15.0,
+   "ct_max": 15.0,
+   "pack": 490,
+   "dates": [
+    "17.07.2026"
+   ],
+   "reason": "no Tally item matches size+shape+colour+weight"
+  },
+  {
+   "machine": 11,
+   "product": "500 ml Round  IFF",
+   "colour": "Amber",
+   "wt": 36.0,
+   "cavity": 7,
+   "shifts_observed": 1,
+   "ct_median": 18.29,
+   "ct_min": 18.29,
+   "ct_max": 18.29,
+   "pack": 249,
+   "dates": [
+    "20.07.2026"
+   ],
+   "reason": "machine 11 does not exist \u2014 the floor has 10 machines"
+  }
+ ]
+}
