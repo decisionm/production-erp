@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { listItems } from '@/features/inventory/api';
 import { createRouting, listRoutings, listWorkCenters } from '@/features/production/api';
 import type { Routing } from '@/features/production/types';
+import { itemLabel } from '@/lib/itemLabel';
 
 const operationSchema = z.object({
     work_center_id: z.number({ error: 'Work center is required' }),
@@ -36,7 +37,7 @@ export default function RoutingsPage() {
         queryFn: () => listWorkCenters(true),
     });
 
-    const itemOptions = items?.data.map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];
+    const itemOptions = items?.data.map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
     const workCenterOptions = workCenters?.data.map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })) ?? [];
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<RoutingFormValues>({
@@ -74,7 +75,7 @@ export default function RoutingsPage() {
                 dataSource={data?.data}
                 pagination={false}
                 columns={[
-                    { title: 'Item', render: (_, row) => `${row.item.sku} — ${row.item.name}` },
+                    { title: 'Item', render: (_, row) => itemLabel(row.item) },
                     { title: 'Name', dataIndex: 'name' },
                     {
                         title: 'Operations',

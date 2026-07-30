@@ -5,6 +5,7 @@ import MaterialBagLabels from '@/features/inventory/components/MaterialBagLabels
 import { listAllItems } from '@/features/inventory/api';
 import { listMaterialLots } from '@/features/production/api';
 import type { MaterialLot } from '@/features/production/types';
+import { itemLabel } from '@/lib/itemLabel';
 
 function fmtKg(value: string | null | undefined): string {
     if (value === null || value === undefined || value === '') return '—';
@@ -41,7 +42,7 @@ export default function MaterialLotsPage() {
     const itemOptions =
         items?.data
             .filter((item) => item.is_active)
-            .map((item) => ({ value: item.id, label: `${item.sku} — ${item.name}` })) ?? [];
+            .map((item) => ({ value: item.id, label: itemLabel(item) })) ?? [];
 
     return (
         <>
@@ -142,7 +143,7 @@ export default function MaterialLotsPage() {
                     }}
                     columns={[
                         { title: 'GRN', dataIndex: 'grn_id', render: (value: number | null) => (value ? `#${value}` : '—') },
-                        { title: 'Material', render: (_, lot) => (lot.item ? `${lot.item.sku} — ${lot.item.name}` : '—') },
+                        { title: 'Material', render: (_, lot) => (lot.item ? itemLabel(lot.item) : '—') },
                         { title: 'Supplier lot', dataIndex: 'supplier_lot_no', render: (value: string | null) => value ?? '—' },
                         { title: 'Received', dataIndex: 'received_date', render: (value: string | null) => value ?? '—' },
                         { title: 'Bags', dataIndex: 'bag_count', align: 'right' },

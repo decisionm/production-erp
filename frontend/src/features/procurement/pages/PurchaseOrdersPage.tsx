@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { listItems } from '@/features/inventory/api';
 import { createPurchaseOrder, listPurchaseOrders, listVendors, sendPurchaseOrder } from '@/features/procurement/api';
 import type { PurchaseOrder, PurchaseOrderStatus } from '@/features/procurement/types';
+import { itemLabel } from '@/lib/itemLabel';
 
 const orderSchema = z.object({
     vendor_id: z.number({ error: 'Vendor is required' }),
@@ -43,7 +44,7 @@ export default function PurchaseOrdersPage() {
     const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
 
     const vendorOptions = vendors?.data.map((v) => ({ value: v.id, label: `${v.code} — ${v.name}` })) ?? [];
-    const itemOptions = items?.data.map((item) => ({ value: item.id, label: `${item.sku} — ${item.name}` })) ?? [];
+    const itemOptions = items?.data.map((item) => ({ value: item.id, label: itemLabel(item) })) ?? [];
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<OrderFormValues>({
         resolver: zodResolver(orderSchema),
@@ -234,7 +235,7 @@ export default function PurchaseOrdersPage() {
                             dataSource={detailOrder.lines}
                             scroll={{ x: 'max-content' }}
                             columns={[
-                                { title: 'Item', render: (_, line) => `${line.item.sku} — ${line.item.name}` },
+                                { title: 'Item', render: (_, line) => itemLabel(line.item) },
                                 { title: 'Quantity', dataIndex: 'quantity' },
                                 { title: 'Received', dataIndex: 'quantity_received' },
                                 { title: 'Unit Price', dataIndex: 'unit_price' },

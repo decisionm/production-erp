@@ -14,6 +14,7 @@ import {
     type StartBatchResumeDraft,
 } from '@/features/production/startBatchResume';
 import type { Bom } from '@/features/production/types';
+import { itemLabel } from '@/lib/itemLabel';
 
 const lineSchema = z.object({
     component_item_id: z.number({ error: 'Component is required' }),
@@ -67,7 +68,7 @@ export default function BomsPage() {
     const itemOptions =
         items?.data
             .filter((item) => item.is_active)
-            .map((item) => ({ value: item.id, label: `${item.sku} — ${item.name}` })) ?? [];
+            .map((item) => ({ value: item.id, label: itemLabel(item) })) ?? [];
 
     const { clearErrors, control, handleSubmit, reset, setError, formState: { errors } } = useForm<BomFormValues>({
         resolver: zodResolver(bomSchema),
@@ -237,7 +238,7 @@ export default function BomsPage() {
                 dataSource={data?.data}
                 pagination={false}
                 columns={[
-                    { title: 'Item', render: (_, row) => `${row.item.sku} — ${row.item.name}` },
+                    { title: 'Item', render: (_, row) => itemLabel(row.item) },
                     { title: 'Name', dataIndex: 'name' },
                     { title: 'Version', dataIndex: 'version' },
                     { title: 'Components', render: (_, row) => row.lines.map((l) => l.component.sku).join(', ') },
@@ -397,7 +398,7 @@ export default function BomsPage() {
                             columns={[
                                 {
                                     title: 'Component',
-                                    render: (_, line) => `${line.component.sku} — ${line.component.name}`,
+                                    render: (_, line) => itemLabel(line.component),
                                 },
                                 { title: 'Quantity per Unit', dataIndex: 'quantity_per' },
                             ]}

@@ -14,6 +14,7 @@ import {
     releaseReworkOrder,
 } from '@/features/production/api';
 import type { ReworkOrder, ReworkOrderStatus } from '@/features/production/types';
+import { itemLabel } from '@/lib/itemLabel';
 
 const createSchema = z.object({
     item_id: z.number({ error: 'Item is required' }),
@@ -48,7 +49,7 @@ export default function ReworkOrdersPage() {
     const { data: workOrders } = useQuery({ queryKey: ['production', 'work-orders'], queryFn: listWorkOrders });
     const { data: boms } = useQuery({ queryKey: ['production', 'boms'], queryFn: () => listBoms() });
 
-    const itemOptions = items?.data.map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];
+    const itemOptions = items?.data.map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
     const warehouseOptions = warehouses?.data.map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })) ?? [];
     const workOrderOptions = workOrders?.data.map((wo) => ({ value: wo.id, label: `WO #${wo.id} — ${wo.item.sku}` })) ?? [];
     const bomOptions = boms?.data.map((b) => ({ value: b.id, label: `${b.item.sku} — ${b.name}` })) ?? [];
@@ -116,7 +117,7 @@ export default function ReworkOrdersPage() {
                 dataSource={data?.data}
                 pagination={false}
                 columns={[
-                    { title: 'Item', render: (_, row) => `${row.item.sku} — ${row.item.name}` },
+                    { title: 'Item', render: (_, row) => itemLabel(row.item) },
                     { title: 'Source WO', render: (_, row) => row.source_work_order_id ?? '—' },
                     { title: 'Input Qty', dataIndex: 'quantity_input' },
                     { title: 'Recovered', dataIndex: 'quantity_recovered' },
@@ -292,7 +293,7 @@ export default function ReworkOrdersPage() {
                                 columns={[
                                     {
                                         title: 'Component',
-                                        render: (_, m) => `${m.component.sku} — ${m.component.name}`,
+                                        render: (_, m) => itemLabel(m.component),
                                     },
                                     { title: 'Required', dataIndex: 'quantity_required' },
                                     { title: 'Issued', dataIndex: 'quantity_issued' },

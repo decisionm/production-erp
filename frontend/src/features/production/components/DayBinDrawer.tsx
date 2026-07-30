@@ -1,15 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Drawer, InputNumber, message, Modal, Radio, Select, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Drawer, InputNumber, message, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import BarcodeScanInput from '@/components/barcode/BarcodeScanInput';
-import {
-    getDayBin,
-    getMaterialBagPickList,
-    loadDayBin,
-    returnDayBin,
-    type LoadDayBinPayload,
-} from '@/features/production/api';
+import { Link } from 'react-router-dom';
+import { getDayBin, getMaterialBagPickList, returnDayBin } from '@/features/production/api';
 import type { DayBinLoadedBag, ShiftProductionEntry, WorkCenter } from '@/features/production/types';
+import { itemLabel } from '@/lib/itemLabel';
 
 /** "10.6000" → "10.6"; "—" for null/unparseable. */
 function fmtKg(v: string | null | undefined): string {
@@ -31,17 +27,26 @@ interface DayBinDrawerProps {
  * settings.traceability_enabled is true — the parent gates it, so with the
  * flag off this file contributes nothing to the visible UI.
  *
+ * LOADING IS NOT DONE HERE. Bags are scanned into a machine's day bin once, at
+ * the central bay, on the PET Resin Bag Loading page. This drawer used to offer
+ * a Load mode as well, which made the production floor a second place to do the
+ * same thing — and asking the same question twice is how the bin and the batch
+ * end up disagreeing about what is in the machine. The factory's own workflow
+ * spec requires the duplicate control to be gone from production pages, leaving
+ * them a read-only view of the balance.
+ *
+ * What remains is per-machine by nature and has no equivalent at the bay:
+ *   Return — POST /production/day-bin/return; kg + material required, the bag
+ *            optional (a scan resolves it to material_bag_id — the backend
+ *            takes ids, not barcodes, on returns)
+ *   Balance and bag list — read-only, and the figures Complete Batch's
+ *            closing-weight prefill reads from the same ledger.
+ *
  * Scanner-gun-first: the barcode input is a plain autofocused text field
- * (hardware scanners type + Enter), camera scan is the built-in fallback of
- * BarcodeScanInput. Scanning acts immediately in the selected mode:
- *   Load   — POST /production/day-bin/load with the barcode (full bag when
- *            the weighed-kg field is empty, partial when set)
- *   Return — POST /production/day-bin/return; kg + material required, the
- *            bag optional (scan resolves it to material_bag_id — the
- *            backend takes ids, not barcodes, on returns)
+ * (hardware scanners type + Enter), with camera scan as BarcodeScanInput's
+ * built-in fallback.
  */
 export default function DayBinDrawer({ workCenter, entry, open, onClose }: DayBinDrawerProps) {
-    const [mode, setMode] = useState<'load' | 'return'>('load');
     const [weighedKg, setWeighedKg] = useState<number | null>(null);
     const [returnItemId, setReturnItemId] = useState<number | null>(null);
     const queryClient = useQueryClient();
@@ -67,37 +72,6 @@ export default function DayBinDrawer({ workCenter, entry, open, onClose }: DayBi
         if (entry) queryClient.invalidateQueries({ queryKey: ['production', 'entry-day-bin', entry.id] });
     };
 
-    const loadMutation = useMutation({
-        mutationFn: loadDayBin,
-        onSuccess: (movement) => {
-            invalidate();
-            setWeighedKg(null);
-            const bag = movement.material_bag;
-            message.success(
-                `Loaded ${fmtKg(movement.quantity_kg)} kg${bag ? ` from bag ${bag.barcode} (${fmtKg(bag.remaining_kg)} kg left)` : ''}`,
-            );
-        },
-        onError: (error: any, variables: LoadDayBinPayload) => {
-            const data = error?.response?.data;
-            const msg: string = data?.message ?? 'Unknown error';
-            // FIFO refusal — keyed STRICTLY off the machine-readable code the
-            // backend puts in the 422 body, never off message text. The
-            // override retry itself is still enforced server-side (the
-            // production.override-fifo permission, recorded against a name).
-            if (!variables.override_fifo && data?.code === 'fifo_order') {
-                Modal.confirm({
-                    title: 'Older bag still open',
-                    content: `${msg} Override FIFO and load this bag anyway? This needs the FIFO-override permission and is recorded against your name.`,
-                    okText: 'Override FIFO',
-                    okButtonProps: { danger: true },
-                    onOk: () => loadMutation.mutate({ ...variables, override_fifo: true }),
-                });
-                return;
-            }
-            Modal.error({ title: 'Could not load bag', content: msg });
-        },
-    });
-
     const returnMutation = useMutation({
         mutationFn: returnDayBin,
         onSuccess: (movement) => {
@@ -110,16 +84,6 @@ export default function DayBinDrawer({ workCenter, entry, open, onClose }: DayBi
             Modal.error({ title: 'Could not return material', content: error?.response?.data?.message ?? 'Unknown error' });
         },
     });
-
-    const handleLoadScan = (code: string) => {
-        if (!workCenter) return;
-        loadMutation.mutate({
-            work_center_id: workCenter.id,
-            barcode: code,
-            quantity_kg: weighedKg ?? undefined,
-            shift_production_entry_id: entry?.id,
-        });
-    };
 
     /**
      * Returns go to the backend by bag ID, so a scanned barcode is resolved
@@ -171,7 +135,7 @@ export default function DayBinDrawer({ workCenter, entry, open, onClose }: DayBi
         }
     };
 
-    const submitting = loadMutation.isPending || returnMutation.isPending;
+    const submitting = returnMutation.isPending;
 
     const loadedBags: (DayBinLoadedBag & { itemSku: string })[] = materials.flatMap((m) =>
         m.loaded_bags.map((b) => ({ ...b, itemSku: m.item.sku })),
@@ -199,32 +163,36 @@ export default function DayBinDrawer({ workCenter, entry, open, onClose }: DayBi
                 />
             )}
 
-            <Radio.Group
-                value={mode}
-                onChange={(e) => setMode(e.target.value)}
-                optionType="button"
-                buttonStyle="solid"
-                size="large"
-                style={{ marginBottom: 8 }}
-                options={[
-                    { value: 'load', label: 'Load' },
-                    { value: 'return', label: 'Return' },
-                ]}
+            {/* Loading happens once, centrally. Naming where instead of just
+                refusing: a supervisor who finds no Load button here needs to
+                know the bay is the place, not go hunting. */}
+            <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message="Bags are loaded at the bay, not here"
+                description={
+                    <>
+                        Scan bags into this machine on the{' '}
+                        <Link to="/production/bin-bay">PET Resin Bag Loading</Link> page. This view is the
+                        balance, plus returning material that comes back out.
+                    </>
+                }
             />
 
-            {mode === 'return' && (
-                <Select
-                    value={returnItemId}
-                    onChange={(v) => setReturnItemId(v)}
-                    placeholder="Material going back"
-                    style={{ width: '100%', marginBottom: 8 }}
-                    options={materials.map((m) => ({ value: m.item.id, label: `${m.item.sku} — ${m.item.name}` }))}
-                />
-            )}
+            <Typography.Text strong>Return material to store</Typography.Text>
+
+            <Select
+                value={returnItemId}
+                onChange={(v) => setReturnItemId(v)}
+                placeholder="Material going back"
+                style={{ width: '100%', marginBottom: 8, marginTop: 8 }}
+                options={materials.map((m) => ({ value: m.item.id, label: itemLabel(m.item) }))}
+            />
 
             <BarcodeScanInput
-                onScan={(code) => (mode === 'load' ? handleLoadScan(code) : void handleReturnScan(code))}
-                placeholder={mode === 'load' ? 'Scan bag to load…' : 'Scan bag to return to (optional)…'}
+                onScan={(code) => void handleReturnScan(code)}
+                placeholder="Scan bag to return to (optional)…"
                 style={{ marginBottom: 8 }}
             />
 
@@ -236,36 +204,32 @@ export default function DayBinDrawer({ workCenter, entry, open, onClose }: DayBi
                     onChange={(v) => setWeighedKg(v)}
                     suffix="Kg"
                     style={{ width: 200 }}
-                    placeholder={mode === 'load' ? 'Weighed kg' : 'Kg going back'}
+                    placeholder="Kg going back"
                 />
-                {mode === 'return' && (
-                    <Button
-                        disabled={!weighedKg || weighedKg <= 0 || returnItemId === null}
-                        loading={submitting}
-                        onClick={() => {
-                            if (!workCenter || !weighedKg || returnItemId === null) return;
-                            returnMutation.mutate({
-                                work_center_id: workCenter.id,
-                                item_id: returnItemId,
-                                quantity_kg: weighedKg,
-                                shift_production_entry_id: entry?.id,
-                            });
-                        }}
-                    >
-                        Return without bag
-                    </Button>
-                )}
+                <Button
+                    disabled={!weighedKg || weighedKg <= 0 || returnItemId === null}
+                    loading={submitting}
+                    onClick={() => {
+                        if (!workCenter || !weighedKg || returnItemId === null) return;
+                        returnMutation.mutate({
+                            work_center_id: workCenter.id,
+                            item_id: returnItemId,
+                            quantity_kg: weighedKg,
+                            shift_production_entry_id: entry?.id,
+                        });
+                    }}
+                >
+                    Return without bag
+                </Button>
             </Space>
             <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginBottom: 16 }}>
-                {mode === 'load'
-                    ? 'Leave kg empty to load the FULL bag; enter a weighed kg for a partial load.'
-                    : 'Weigh what goes back; scan the bag it returns to, or use "Return without bag".'}
+                Weigh what goes back; scan the bag it returns to, or use “Return without bag”.
             </Typography.Text>
 
             <Typography.Text strong>Current balance</Typography.Text>
             {materials.length === 0 && (
                 <Typography.Paragraph type="secondary" style={{ marginTop: 4 }}>
-                    {isLoading ? 'Loading…' : 'Day bin is empty — scan a bag to load it.'}
+                    {isLoading ? 'Loading…' : 'Day bin is empty — load a bag at the bay before starting a batch.'}
                 </Typography.Paragraph>
             )}
             {materials.map((m) => (

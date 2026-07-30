@@ -18,6 +18,7 @@ import {
     recordTransfer,
 } from '@/features/inventory/api';
 import type { StockBalance } from '@/features/inventory/types';
+import { itemLabel } from '@/lib/itemLabel';
 
 const movementTypeColor: Record<string, string> = {
     receipt: 'green',
@@ -80,7 +81,7 @@ export default function StockPage() {
     const { data: batches } = useQuery({ queryKey: ['inventory', 'batches'], queryFn: () => listBatches() });
     const { data: serialNumbers } = useQuery({ queryKey: ['inventory', 'serial-numbers'], queryFn: () => listSerialNumbers() });
 
-    const itemOptions = items?.data.map((item) => ({ value: item.id, label: `${item.sku} — ${item.name}` })) ?? [];
+    const itemOptions = items?.data.map((item) => ({ value: item.id, label: itemLabel(item) })) ?? [];
     const warehouseOptions = warehouses?.data.map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })) ?? [];
 
     const itemsById = new Map(items?.data.map((i) => [i.id, i]));
@@ -198,7 +199,7 @@ export default function StockPage() {
                 dataSource={balances?.data}
                 pagination={false}
                 columns={[
-                    { title: 'Item', render: (_, row) => `${row.item.sku} — ${row.item.name}` },
+                    { title: 'Item', render: (_, row) => itemLabel(row.item) },
                     { title: 'Warehouse', render: (_, row) => `${row.warehouse.code} — ${row.warehouse.name}` },
                     { title: 'Quantity', dataIndex: 'quantity' },
                     { title: 'Avg. Cost', dataIndex: 'average_cost' },
