@@ -19,6 +19,10 @@ on:
         description: 'Actually write. Leave false for a dry run that changes nothing.'
         type: boolean
         default: false
+      approve:
+        description: 'Approve the imported rows so they govern the floor immediately. Owner instruction only — rows a person already approved or retired are never touched.'
+        type: boolean
+        default: false
 
 concurrency:
   group: import-machine-configurations
@@ -54,6 +58,7 @@ jobs:
           set -o pipefail
           FLAGS=""
           [ "${{ inputs.write }}" = "true" ] && FLAGS="$FLAGS --write"
+          [ "${{ inputs.approve }}" = "true" ] && [ "${{ inputs.write }}" = "true" ] && FLAGS="$FLAGS --approve"
           
           ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
