@@ -348,12 +348,22 @@ class ProductionStandardImportService
     }
 
     /**
-     * Resolve every variant's item from a prebuilt index.
+     * Words that mean "this row is packaging or raw material, not the bottle".
      *
-     * @param  list<array<string, mixed>>  $variants
-     * @param  array<string, Item>  $index
-     * @return list<array<string, mixed>>
+     * A readability filter, NOT a truth claim. Raw string similarity ranked
+     * "15ml Round Master Box" as the best match for 15ML ROUND — a carton, not
+     * a product — so every factory product pointed at packaging and the report
+     * was unreadable. Excluding these makes the bottles visible.
+     *
+     * Kept deliberately narrow: it only ever removes candidates from a report a
+     * human then confirms, and it never touches what the importer matches on.
      */
+    private const NON_PRODUCT_WORDS = [
+        'box', 'carton', 'tray', 'pouch', 'pad', 'cap', 'cup', 'label',
+        'sticker', 'film', 'resin', 'masterbatch', 'master batch', 'preform',
+        'sleeve', 'shrink', 'tape', 'ink', 'scrap', 'lump',
+    ];
+
     /**
      * Why the names did not match, and what they nearly matched.
      *
@@ -370,8 +380,9 @@ class ProductionStandardImportService
      * @param  list<array<string, mixed>>  $rows
      * @return array{
      *     active_items: int,
+     *     product_items: int,
      *     sample_item_names: list<string>,
-     *     unmatched: list<array{product: string, candidates: list<array{name: string, sku: string, score: int}>}>,
+     *     unmatched: list<array{product: string, candidates: list<array{name: string, sku: string, score: int, same_size: bool}>}>,
      * }
      */
     public function matchReport(array $rows): array
@@ -381,6 +392,20 @@ class ProductionStandardImportService
 
         $items = Item::query()->where('is_active', true)->get(['id', 'name', 'sku']);
 
+        // Bottles only. Packaging and raw material outscored real products on
+        // raw similarity, which made the whole report point at master boxes.
+        $products = $items->reject(function (Item $item) {
+            $name = mb_strtolower((string) $item->name);
+
+            foreach (self::NON_PRODUCT_WORDS as $word) {
+                if (str_contains($name, $word)) {
+                    return true;
+                }
+            }
+
+            return false;
+        });
+
         $unmatched = [];
 
         foreach ($normalised['families'] as $family) {
@@ -388,20 +413,29 @@ class ProductionStandardImportService
                 continue;
             }
 
-            // Nearest catalogue entries by similarity, so a human can confirm
-            // a mapping instead of reading 400 item names per product.
-            $candidates = $items
-                ->map(function (Item $item) use ($family) {
-                    similar_text(
-                        $this->normaliseName((string) $family),
-                        $this->normaliseName((string) $item->name),
-                        $percent,
-                    );
+            // The size is the strongest signal the two naming schemes share:
+            // "15ML ROUND" and "A.15ml Round Clear - Sangam" agree on 15. Without
+            // it, "200ml Round Pouch" scored 67% against 30ML ROUND — a
+            // different bottle entirely. Candidates carrying the same size are
+            // ranked first, and the rest only fill the remaining slots.
+            $size = $this->sizeToken((string) $family);
 
-                    return ['name' => (string) $item->name, 'sku' => (string) $item->sku, 'score' => (int) round($percent)];
+            $candidates = $products
+                ->map(function (Item $item) use ($family, $size) {
+                    $name = $this->normaliseName((string) $item->name);
+                    similar_text($this->normaliseName((string) $family), $name, $percent);
+
+                    $sameSize = $size !== null && preg_match('/\b'.preg_quote($size, '/').'\s*(ml|cc|gm|gms)?\b/', $name) === 1;
+
+                    return [
+                        'name' => (string) $item->name,
+                        'sku' => (string) $item->sku,
+                        'score' => (int) round($percent),
+                        'same_size' => $sameSize,
+                    ];
                 })
-                ->sortByDesc('score')
-                ->take(3)
+                ->sortByDesc(fn (array $c) => [$c['same_size'] ? 1 : 0, $c['score']])
+                ->take(5)
                 ->values()
                 ->all();
 
@@ -410,9 +444,21 @@ class ProductionStandardImportService
 
         return [
             'active_items' => $items->count(),
-            'sample_item_names' => $items->take(10)->pluck('name')->map(fn ($n) => (string) $n)->all(),
+            'product_items' => $products->count(),
+            'sample_item_names' => $products->take(10)->pluck('name')->map(fn ($n) => (string) $n)->all(),
             'unmatched' => $unmatched,
         ];
+    }
+
+    /**
+     * The leading size figure in a product name — "15" from "15ML ROUND".
+     *
+     * Both naming schemes lead with it, which makes it the one token worth
+     * trusting when nothing else about the two strings lines up.
+     */
+    private function sizeToken(string $name): ?string
+    {
+        return preg_match('/(\d+(?:\.\d+)?)\s*(?:ml|cc)/i', $name, $m) === 1 ? $m[1] : null;
     }
 
     private function attachItems(array $variants, array $index): array

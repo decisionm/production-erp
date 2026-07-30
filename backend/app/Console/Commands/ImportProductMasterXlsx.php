@@ -188,6 +188,7 @@ class ImportProductMasterXlsx extends Command
         $this->info('DIAGNOSE — nothing written');
         $this->newLine();
         $this->line("Active items in the catalogue: {$report['active_items']}");
+        $this->line("  of which look like products rather than packaging: {$report['product_items']}");
 
         if ($report['active_items'] === 0) {
             $this->newLine();
@@ -218,13 +219,21 @@ class ImportProductMasterXlsx extends Command
         foreach ($unmatched as $row) {
             $this->line("<comment>{$row['product']}</comment>");
             foreach ($row['candidates'] as $candidate) {
-                $this->line("    {$candidate['score']}%  {$candidate['name']}  [{$candidate['sku']}]");
+                // The size marker is the part worth reading: it means the
+                // candidate is at least the same capacity of bottle.
+                $marker = $candidate['same_size'] ? '<info>=size</info>' : '      ';
+                $this->line("    {$marker}  {$candidate['score']}%  {$candidate['name']}");
             }
         }
 
         $this->newLine();
-        $this->line('A high score is a likely rename; a low one usually means the item does not exist yet.');
-        $this->line('Matching is exact after lower-casing and collapsing spaces — it never guesses.');
+        $this->line('Candidates marked =size share the capacity in the sheet name, which is the strongest');
+        $this->line('signal the two naming schemes have in common. Packaging and raw material are excluded.');
+        $this->newLine();
+        $this->line('NOTE: one sheet product often corresponds to SEVERAL catalogue items — the catalogue');
+        $this->line('names a bottle by colour and customer as well ("A.15ml Round Clear - Sangam"), while the');
+        $this->line('sheet names the mould. A standard carries ONE item_id, so that is a mapping decision,');
+        $this->line('not a rename. Matching itself is unchanged and still never guesses.');
 
         return self::SUCCESS;
     }
