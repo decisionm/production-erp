@@ -29,6 +29,10 @@ on:
         description: 'Explain why product names did not match, with the nearest catalogue entries. Writes nothing and ignores the other options.'
         type: boolean
         default: false
+      local_fixtures:
+        description: 'DEMO INSTANCES ONLY — create a clearly-marked "LOCAL-" item for every product the catalogue does not carry, so the floor can be rehearsed before Tally names are reconciled. Refused outright when APP_ENV=production.'
+        type: boolean
+        default: false
 
 concurrency:
   group: import-product-master
@@ -59,6 +63,9 @@ jobs:
             echo "Diagnosing name matching — nothing will be written."
           elif [ "${{ inputs.write }}" = "true" ]; then
             echo "::warning::WRITING product standards to the live database (exact_only=${{ inputs.exact_only }})."
+            if [ "${{ inputs.local_fixtures }}" = "true" ]; then
+              echo "::warning::AND fabricating LOCAL- items for every unmatched product. Demo instances only. The command refuses this when APP_ENV=production."
+            fi
           else
             echo "Dry run — nothing will be written."
           fi
@@ -73,10 +80,12 @@ jobs:
           else
             [ "${{ inputs.write }}" = "true" ] && FLAGS="$FLAGS --write"
             [ "${{ inputs.exact_only }}" = "true" ] && FLAGS="$FLAGS --exact-only"
+            # Passed through, never forced. The command's own APP_ENV=production
+            # guard is the real protection and is deliberately left intact —
+            # this only stops the flag being unreachable on a demo box.
+            [ "${{ inputs.local_fixtures }}" = "true" ] && FLAGS="$FLAGS --local-fixtures"
           fi
 
-          # --local-fixtures is deliberately NOT offered: it fabricates items,
-          # and the command itself refuses it in the production environment.
           ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
             "cd '${{ secrets.DEPLOY_PATH }}/backend' && /opt/alt/php84/usr/bin/php artisan production:import-product-master $FLAGS" \
