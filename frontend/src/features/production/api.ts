@@ -1,6 +1,7 @@
 import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
 import type {
+    ProductionStandardRow,
     BatchPreview,
     BinBayAvailabilityResponse,
     BinBayHistoryRow,
@@ -296,6 +297,21 @@ export interface StartBatchPayload {
 export interface StandardCoverageRow {
     item_id: number;
     source_product_name: string | null;
+}
+
+/**
+ * The imported factory product master, paginated. Read-only — the only writer
+ * is the import command, so this is a window onto master data rather than an
+ * editing surface.
+ */
+export async function listProductionStandards(params: {
+    page?: number;
+    per_page?: number;
+    status?: string;
+    matched_only?: boolean;
+} = {}): Promise<Paginated<ProductionStandardRow>> {
+    const { data } = await api.get<Paginated<ProductionStandardRow>>('/production/standards', { params });
+    return data;
 }
 
 export async function listStandardCoverage(): Promise<{ data: StandardCoverageRow[] }> {
