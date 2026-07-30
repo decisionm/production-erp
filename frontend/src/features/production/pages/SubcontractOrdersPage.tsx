@@ -13,6 +13,7 @@ import {
     sendSubcontractOrderMaterials,
 } from '@/features/production/api';
 import type { SubcontractOrder, SubcontractOrderStatus } from '@/features/production/types';
+import { itemLabel } from '@/lib/itemLabel';
 
 const createSchema = z.object({
     vendor_id: z.number({ error: 'Vendor is required' }),
@@ -46,7 +47,7 @@ export default function SubcontractOrdersPage() {
     const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses'], queryFn: listWarehouses });
 
     const vendorOptions = vendors?.data.map((v) => ({ value: v.id, label: `${v.code} — ${v.name}` })) ?? [];
-    const itemOptions = items?.data.map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];
+    const itemOptions = items?.data.map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
     const warehouseOptions = warehouses?.data.map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })) ?? [];
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['production', 'subcontract-orders'] });
@@ -113,7 +114,7 @@ export default function SubcontractOrdersPage() {
                 pagination={false}
                 columns={[
                     { title: 'Vendor', render: (_, row) => row.vendor.name },
-                    { title: 'Item', render: (_, row) => `${row.item.sku} — ${row.item.name}` },
+                    { title: 'Item', render: (_, row) => itemLabel(row.item) },
                     { title: 'Planned', dataIndex: 'quantity_planned' },
                     { title: 'Received', dataIndex: 'quantity_received' },
                     { title: 'Materials Cost', dataIndex: 'materials_cost' },
@@ -276,7 +277,7 @@ export default function SubcontractOrdersPage() {
                                 columns={[
                                     {
                                         title: 'Component',
-                                        render: (_, m) => `${m.component.sku} — ${m.component.name}`,
+                                        render: (_, m) => itemLabel(m.component),
                                     },
                                     { title: 'Required', dataIndex: 'quantity_required' },
                                     { title: 'Sent', dataIndex: 'quantity_sent' },

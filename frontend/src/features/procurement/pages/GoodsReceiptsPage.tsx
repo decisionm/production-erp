@@ -10,6 +10,7 @@ import { listWarehouses } from '@/features/inventory/api';
 import { createGoodsReceipt, listGoodsReceipts, listPurchaseOrders } from '@/features/procurement/api';
 import type { GoodsReceiptNote } from '@/features/procurement/types';
 import { useProductionSettings } from '@/features/production/packing';
+import { itemLabel } from '@/lib/itemLabel';
 
 const receiptSchema = z.object({
     purchase_order_id: z.number({ error: 'Purchase order is required' }),
@@ -193,7 +194,7 @@ export default function GoodsReceiptsPage() {
             .filter((line) => Number(line.quantity) - Number(line.quantity_received) > 0)
             .map((line) => ({
                 purchase_order_line_id: line.id,
-                item_label: `${line.item.sku} — ${line.item.name}`,
+                item_label: itemLabel(line.item),
                 item_uom: line.item.uom,
                 quantity: Number(line.quantity) - Number(line.quantity_received),
                 unit_cost: Number(line.unit_price),
@@ -452,7 +453,7 @@ export default function GoodsReceiptsPage() {
                             dataSource={detailReceipt.lines}
                             scroll={{ x: 'max-content' }}
                             columns={[
-                                { title: 'Item', render: (_, line) => `${line.item.sku} — ${line.item.name}` },
+                                { title: 'Item', render: (_, line) => itemLabel(line.item) },
                                 { title: 'Quantity', dataIndex: 'quantity' },
                                 { title: 'Unit Cost', dataIndex: 'unit_cost' },
                             ]}

@@ -7,6 +7,7 @@ import { z } from 'zod';
 import BarcodeDisplay from '@/components/barcode/BarcodeDisplay';
 import { createBatch, getBatchLedger, listBatches, listItems } from '@/features/inventory/api';
 import type { Batch, BatchLedger } from '@/features/inventory/types';
+import { itemLabel } from '@/lib/itemLabel';
 
 const batchSchema = z.object({
     item_id: z.number({ error: 'Item is required' }),
@@ -26,7 +27,7 @@ export default function BatchesPage() {
 
     const { data, isLoading } = useQuery({ queryKey: ['inventory', 'batches'], queryFn: () => listBatches() });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
-    const itemOptions = items?.data.filter((i) => i.tracking_type === 'batch').map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];
+    const itemOptions = items?.data.filter((i) => i.tracking_type === 'batch').map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<BatchFormValues>({
         resolver: zodResolver(batchSchema),
@@ -69,7 +70,7 @@ export default function BatchesPage() {
                 dataSource={data?.data}
                 pagination={false}
                 columns={[
-                    { title: 'Item', render: (_, row) => `${row.item.sku} — ${row.item.name}` },
+                    { title: 'Item', render: (_, row) => itemLabel(row.item) },
                     { title: 'Batch Number', dataIndex: 'batch_number' },
                     { title: 'Manufactured', dataIndex: 'manufactured_date' },
                     { title: 'Expiry', dataIndex: 'expiry_date' },

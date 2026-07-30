@@ -49,6 +49,7 @@ import type {
 } from '@/features/production/types';
 import { currentShift, justEndedShift, productionDateFor } from '@/features/production/shiftClock';
 import { roundPer, useProductionSettings } from '@/features/production/packing';
+import { itemLabel } from '@/lib/itemLabel';
 import {
     buildStartBatchRecipeUrl,
     hasStartBatchResume,
@@ -626,7 +627,7 @@ export default function ShiftProductionEntryPage() {
     const shiftOptions = shifts?.data.filter((s) => s.is_active).map((s) => ({ value: s.id, label: s.name })) ?? [];
     // Inactive items (retired demo/legacy masters) must not be selectable —
     // Tally rejects vouchers for items it doesn't know.
-    const itemOptions = items?.data.filter((i) => i.is_active).map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];
+    const itemOptions = items?.data.filter((i) => i.is_active).map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
     // Which items the factory standards cover. Undefined coverage (still in
     // flight, or an older backend) is deliberately distinguished from empty
     // coverage below — see startItemOptions.
@@ -644,7 +645,7 @@ export default function ShiftProductionEntryPage() {
     // search by natural product name keeps working inside the groups.
     const startItemOptions = useMemo(() => {
         const active = items?.data.filter((i) => i.is_active) ?? [];
-        const toOption = (i: Item) => ({ value: i.id, label: `${i.sku} — ${i.name}` });
+        const toOption = (i: Item) => ({ value: i.id, label: itemLabel(i) });
 
         // Coverage not answered yet: show the flat list rather than filing
         // every product under "Unconfigured — setup required" for a beat.
@@ -666,9 +667,9 @@ export default function ShiftProductionEntryPage() {
     // Focused pickers for the two fixed consumption rows — a supervisor
     // filling "Resin (kg)" should only ever see resins, not all 642 items.
     const resinOptions =
-        items?.data.filter((i) => i.is_active && isResinItem(i)).map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];
+        items?.data.filter((i) => i.is_active && isResinItem(i)).map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
     const mbOptions =
-        items?.data.filter((i) => i.is_active && isMasterbatchItem(i)).map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];
+        items?.data.filter((i) => i.is_active && isMasterbatchItem(i)).map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
     const moldOptions =
         molds?.data.filter((m) => m.status === 'active').map((m) => ({ value: m.id, label: `${m.code} — ${m.name}` })) ?? [];
     // "Changed From" is a historical record of what just came out, not a
@@ -2109,7 +2110,7 @@ export default function ShiftProductionEntryPage() {
                 columns={[
                     { title: 'Machine', render: (_, row) => row.work_center.name },
                     { title: 'Shift', render: (_, row) => row.shift.name },
-                    { title: 'Item', render: (_, row) => `${row.item.sku} — ${row.item.name}` },
+                    { title: 'Item', render: (_, row) => itemLabel(row.item) },
                     { title: 'Batch #', dataIndex: 'batch_number', render: (v: string | null) => v ?? '—' },
                     { title: 'Produced', dataIndex: 'quantity_produced' },
                     { title: 'Produced (Kg)', dataIndex: 'quantity_produced_kg', render: (v: string | null) => v ?? '—' },

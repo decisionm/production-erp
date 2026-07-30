@@ -12,6 +12,7 @@ import {
     rejectPurchaseRequisition,
 } from '@/features/procurement/api';
 import type { PurchaseRequisition, PurchaseRequisitionStatus } from '@/features/procurement/types';
+import { itemLabel } from '@/lib/itemLabel';
 
 const requisitionSchema = z.object({
     needed_by_date: z.string().optional(),
@@ -44,7 +45,7 @@ export default function PurchaseRequisitionsPage() {
         queryFn: listPurchaseRequisitions,
     });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
-    const itemOptions = items?.data.map((item) => ({ value: item.id, label: `${item.sku} — ${item.name}` })) ?? [];
+    const itemOptions = items?.data.map((item) => ({ value: item.id, label: itemLabel(item) })) ?? [];
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<RequisitionFormValues>({
         resolver: zodResolver(requisitionSchema),
@@ -219,7 +220,7 @@ export default function PurchaseRequisitionsPage() {
                             dataSource={detailRequisition.lines}
                             scroll={{ x: 'max-content' }}
                             columns={[
-                                { title: 'Item', render: (_, line) => `${line.item.sku} — ${line.item.name}` },
+                                { title: 'Item', render: (_, line) => itemLabel(line.item) },
                                 { title: 'Quantity', dataIndex: 'quantity' },
                                 { title: 'Notes', dataIndex: 'notes' },
                             ]}

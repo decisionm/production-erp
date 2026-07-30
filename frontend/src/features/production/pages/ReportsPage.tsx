@@ -20,6 +20,7 @@ import type {
     TraceabilityReportRow,
 } from '@/features/production/types';
 import { downloadCsv, toCsv } from '@/lib/csv';
+import { itemLabel } from '@/lib/itemLabel';
 
 // Bands are ruled server-side (config/production.php tolerances) — the UI
 // only colour-maps them. Same mapping as ApproveProductionPage.
@@ -40,8 +41,6 @@ const fmtKg = (v: string | null | undefined): string => {
 };
 
 const fmtPct = (v: number | null | undefined): string => (v === null || v === undefined ? '—' : `${v}%`);
-
-const itemLabel = (item: { sku: string; name: string }): string => `${item.sku} — ${item.name}`;
 
 const BAG_STATUS_LABEL: Record<MaterialBagStatus, string> = {
     in_store: 'In Store',

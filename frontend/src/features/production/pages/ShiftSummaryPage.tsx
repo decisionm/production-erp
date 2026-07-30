@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { listAllEmployees } from '@/features/hrms/api';
 import { getShiftKpiReport, listShifts, saveShiftSummary } from '@/features/production/api';
 import { currentShift, productionDateFor } from '@/features/production/shiftClock';
+import { itemLabel } from '@/lib/itemLabel';
 import type {
     ShiftKpiDowntimeLog,
     ShiftKpiItemBreakdown,
@@ -214,7 +215,7 @@ export default function ShiftSummaryPage() {
                             dataSource={report?.items_manufactured ?? []}
                             locale={{ emptyText: 'Nothing completed yet.' }}
                             columns={[
-                                { title: 'Item', render: (_, row) => `${row.item.sku} — ${row.item.name}` },
+                                { title: 'Item', render: (_, row) => itemLabel(row.item) },
                                 { title: 'Batches', dataIndex: 'batches', width: 80 },
                                 { title: 'Produced (Nos)', dataIndex: 'quantity_produced' },
                                 { title: 'Produced (Kg)', dataIndex: 'quantity_produced_kg' },
@@ -307,7 +308,7 @@ export default function ShiftSummaryPage() {
                                 dataSource={report?.stock_counts ?? []}
                                 columns={[
                                     { title: 'Location', dataIndex: 'location_label' },
-                                    { title: 'Item', render: (_, row) => `${row.item.sku} — ${row.item.name}` },
+                                    { title: 'Item', render: (_, row) => itemLabel(row.item) },
                                     { title: 'Kg', dataIndex: 'quantity_kg' },
                                 ]}
                             />

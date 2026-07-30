@@ -23,6 +23,7 @@ import type {
     VoucherPreview,
 } from '@/features/production/types';
 import { type PackingRounding, roundPer, useProductionSettings } from '@/features/production/packing';
+import { itemLabel } from '@/lib/itemLabel';
 
 const statusColor: Record<ShiftProductionEntryStatus, string> = {
     pending: 'processing',
@@ -444,7 +445,7 @@ function SourceMaterialSection({
             .map((bag) => ({
                 key: `${lot.id}-${bag.id}`,
                 lot: lot.supplier_lot_no ?? `Lot #${lot.id}`,
-                material: `${lot.item.sku} — ${lot.item.name}`,
+                material: itemLabel(lot.item),
                 barcode: bag.barcode,
                 loaded_kg: bag.fed.filter((feed) => feed.segment?.id === row.id).reduce((sum, feed) => sum + parseFloat(feed.loaded_kg), 0),
             })),
@@ -678,7 +679,7 @@ export default function ApproveProductionPage() {
                     { title: 'Date', dataIndex: 'production_date' },
                     { title: 'Shift', render: (_, row) => row.shift.name },
                     { title: 'Machine', render: (_, row) => row.work_center.name },
-                    { title: 'Item', render: (_, row) => `${row.item.sku} — ${row.item.name}` },
+                    { title: 'Item', render: (_, row) => itemLabel(row.item) },
                     { title: 'Batch #', dataIndex: 'batch_number', render: (v: string | null) => v ?? '—' },
                     { title: 'Produced', dataIndex: 'quantity_produced' },
                     { title: 'Produced (Kg)', dataIndex: 'quantity_produced_kg', render: (v: string | null) => v ?? '—' },
@@ -821,7 +822,7 @@ export default function ApproveProductionPage() {
                                     pagination={false}
                                     dataSource={detailRow.material_consumptions}
                                     columns={[
-                                        { title: 'Item', render: (_, row) => `${row.item.sku} — ${row.item.name}` },
+                                        { title: 'Item', render: (_, row) => itemLabel(row.item) },
                                         { title: 'From', render: (_, row) => row.warehouse.code },
                                         { title: 'Kg', dataIndex: 'quantity_issued_kg' },
                                     ]}

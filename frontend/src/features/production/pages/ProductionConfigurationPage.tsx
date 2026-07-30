@@ -36,6 +36,7 @@ import {
     updateWorkCenterCapability,
 } from '@/features/production/api';
 import type { DowntimeReason, ImportResult, ProductionConfiguration, WorkCenter } from '@/features/production/types';
+import { itemLabel } from '@/lib/itemLabel';
 
 /**
  * The Production Configuration area — where the factory's real values are
@@ -243,7 +244,7 @@ function ConfigurationsTab() {
                         <Select
                             showSearch
                             optionFilterProp="label"
-                            options={(items?.data ?? []).map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` }))}
+                            options={(items?.data ?? []).map((i) => ({ value: i.id, label: itemLabel(i) }))}
                         />
                     </Form.Item>
                     <Row gutter={12}>

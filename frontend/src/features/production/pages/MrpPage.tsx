@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { listItems } from '@/features/inventory/api';
 import { getMrpNetRequirements } from '@/features/production/api';
 import type { MrpNetRequirement } from '@/features/production/types';
+import { itemLabel } from '@/lib/itemLabel';
 
 export default function MrpPage() {
     const [itemId, setItemId] = useState<number | undefined>();
@@ -11,7 +12,7 @@ export default function MrpPage() {
     const [results, setResults] = useState<MrpNetRequirement[] | null>(null);
 
     const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
-    const itemOptions = items?.data.map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];
+    const itemOptions = items?.data.map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
 
     const mutation = useMutation({
         mutationFn: ({ itemId, quantity }: { itemId: number; quantity: number }) => getMrpNetRequirements(itemId, quantity),

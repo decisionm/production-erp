@@ -7,6 +7,7 @@ import { z } from 'zod';
 import BarcodeDisplay from '@/components/barcode/BarcodeDisplay';
 import { createSerialNumber, getSerialNumberHistory, listItems, listSerialNumbers } from '@/features/inventory/api';
 import type { SerialNumber, SerialNumberStatus } from '@/features/inventory/types';
+import { itemLabel } from '@/lib/itemLabel';
 
 const serialSchema = z.object({
     item_id: z.number({ error: 'Item is required' }),
@@ -31,7 +32,7 @@ export default function SerialNumbersPage() {
 
     const { data, isLoading } = useQuery({ queryKey: ['inventory', 'serial-numbers'], queryFn: () => listSerialNumbers() });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
-    const itemOptions = items?.data.filter((i) => i.tracking_type === 'serial').map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];
+    const itemOptions = items?.data.filter((i) => i.tracking_type === 'serial').map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<SerialFormValues>({
         resolver: zodResolver(serialSchema),
@@ -76,7 +77,7 @@ export default function SerialNumbersPage() {
                 dataSource={data?.data}
                 pagination={false}
                 columns={[
-                    { title: 'Item', render: (_, row) => `${row.item.sku} — ${row.item.name}` },
+                    { title: 'Item', render: (_, row) => itemLabel(row.item) },
                     { title: 'Serial Number', dataIndex: 'serial_number' },
                     {
                         title: 'Status',

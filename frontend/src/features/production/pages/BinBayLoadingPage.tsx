@@ -36,6 +36,7 @@ import {
 } from '@/features/production/api';
 import { useProductionSettings } from '@/features/production/packing';
 import type { BinBayHistoryRow, BinBayLayer, BinBayRequirementComponent } from '@/features/production/types';
+import { itemLabel } from '@/lib/itemLabel';
 
 /** "10.6000" → "10.6"; "—" for null/unparseable. */
 function fmtKg(value: string | null | undefined): string {
@@ -150,7 +151,7 @@ export default function BinBayLoadingPage() {
         value: machine.id,
         label: machineLabel(machine),
     }));
-    const itemOptions = (items?.data ?? []).map((item) => ({ value: item.id, label: `${item.sku} — ${item.name}` }));
+    const itemOptions = (items?.data ?? []).map((item) => ({ value: item.id, label: itemLabel(item) }));
     const userOptions =
         usersUnavailable || !users
             ? currentUser

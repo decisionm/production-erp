@@ -3,6 +3,7 @@ import { Descriptions, Form, InputNumber, Modal, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { getDayBin, handoverShiftProductionEntry } from '@/features/production/api';
 import type { Shift, ShiftProductionEntry } from '@/features/production/types';
+import { itemLabel } from '@/lib/itemLabel';
 
 function fmtKg(v: string | null | undefined): string {
     if (v === null || v === undefined || v === '') return '—';
@@ -104,7 +105,7 @@ export default function HandoverModal({ entry, incomingShift, productionDate, on
                         {incomingShift ? `${incomingShift.name} · ${productionDate}` : 'Pick a shift on the Shift Floor first'}
                     </Descriptions.Item>
                     <Descriptions.Item label="Batch">{entry.batch_number ?? '—'}</Descriptions.Item>
-                    <Descriptions.Item label="Product">{`${entry.item.sku} — ${entry.item.name}`}</Descriptions.Item>
+                    <Descriptions.Item label="Product">{itemLabel(entry.item)}</Descriptions.Item>
                     <Descriptions.Item label="Lots in day bin">{lots.length > 0 ? lots.join(', ') : '—'}</Descriptions.Item>
                     <Descriptions.Item label="Day-bin balance">
                         {materials.length > 0

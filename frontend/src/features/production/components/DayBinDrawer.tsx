@@ -10,6 +10,7 @@ import {
     type LoadDayBinPayload,
 } from '@/features/production/api';
 import type { DayBinLoadedBag, ShiftProductionEntry, WorkCenter } from '@/features/production/types';
+import { itemLabel } from '@/lib/itemLabel';
 
 /** "10.6000" → "10.6"; "—" for null/unparseable. */
 function fmtKg(v: string | null | undefined): string {
@@ -218,7 +219,7 @@ export default function DayBinDrawer({ workCenter, entry, open, onClose }: DayBi
                     onChange={(v) => setReturnItemId(v)}
                     placeholder="Material going back"
                     style={{ width: '100%', marginBottom: 8 }}
-                    options={materials.map((m) => ({ value: m.item.id, label: `${m.item.sku} — ${m.item.name}` }))}
+                    options={materials.map((m) => ({ value: m.item.id, label: itemLabel(m.item) }))}
                 />
             )}
 
