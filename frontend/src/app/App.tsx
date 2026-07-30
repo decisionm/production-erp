@@ -29,6 +29,7 @@ import RoutingsPage from '@/features/production/pages/RoutingsPage';
 import ScrapReasonsPage from '@/features/production/pages/ScrapReasonsPage';
 import ProductionConfigurationPage from '@/features/production/pages/ProductionConfigurationPage';
 import LiveMonitorPage from '@/features/production/pages/LiveMonitorPage';
+import ProductStandardsPage from '@/features/production/pages/ProductStandardsPage';
 import ShiftProductionEntryPage from '@/features/production/pages/ShiftProductionEntryPage';
 import ShiftsPage from '@/features/production/pages/ShiftsPage';
 import ShiftSummaryPage from '@/features/production/pages/ShiftSummaryPage';
@@ -108,6 +109,7 @@ export default function App() {
                                     <Route path="/production/shifts" element={<ShiftsPage />} />
                                     <Route path="/production/shift-production" element={<ShiftProductionEntryPage />} />
                                     <Route path="/production/live-monitor" element={<LiveMonitorPage />} />
+                                    <Route path="/production/standards" element={<ProductStandardsPage />} />
                                     <Route path="/production/bin-bay" element={<BinBayLoadingPage />} />
                                     <Route path="/production/shift-summary" element={<ShiftSummaryPage />} />
                                     <Route path="/production/approve-production" element={<ApproveProductionPage />} />

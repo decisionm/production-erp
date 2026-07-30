@@ -1035,3 +1035,31 @@ export interface BinBayHistoryRow {
     lot: { id: number; supplier_lot_no: string | null } | null;
     loaded_by: { id: number; name: string } | null;
 }
+
+/**
+ * One row of the factory's imported product master — the workbook's
+ * cavities/weight/cycle-time for a product, with the packaging modes it can be
+ * packed in, attached to the Tally item it applies to.
+ *
+ * Distinct from ProductionConfiguration, which is a machine + product + mould
+ * approval. A standard says what a product runs to WHEREVER it runs; a
+ * configuration says that a specific machine has been approved to run it.
+ */
+export interface ProductionStandardRow {
+    id: number;
+    item: Item | null;
+    source_product_name: string;
+    cavities: number | null;
+    unit_weight_grams: string | null;
+    cycle_time: string | null;
+    cycle_time_raw: string | null;
+    carton_spec: string | null;
+    tray_spec: string | null;
+    pouch_spec: string | null;
+    status: 'draft' | 'approved' | 'unresolved';
+    unresolved_reason: string | null;
+    source: string | null;
+    source_reference: string | null;
+    confirmation_status: string | null;
+    packagings: StandardPackaging[];
+}
