@@ -15,6 +15,7 @@ import type {
     DayBinState,
     EntryDayBinSummary,
     FactoryDayBin,
+    FactoryDayBinLoadResult,
     MachineDowntimeLog,
     MaterialBag,
     MaterialBagStatus,
@@ -649,6 +650,27 @@ export async function getMaterialBagPickList(itemId: number): Promise<MaterialBa
     return data.data;
 }
 
+/**
+ * Resolve one bag by its scanned barcode — the Shift Floor's central Load
+ * Material lookup. The /inventory/material-bags index may not understand a
+ * `barcode` filter yet, so the param is sent (a filtering backend answers in
+ * one page) AND the open-bag pages are walked client-side as the fallback.
+ * Bounded, and only an unknown/mistyped code ever pays the full walk. Only
+ * in-store bags qualify: a consumed or already-loaded bag cannot be loaded.
+ */
+export async function findMaterialBagByBarcode(barcode: string): Promise<MaterialBag | null> {
+    const maxPages = 40;
+    for (let page = 1; page <= maxPages; page += 1) {
+        const { data } = await api.get<Paginated<MaterialBag>>('/inventory/material-bags', {
+            params: { barcode, status: 'in_store', page },
+        });
+        const match = data.data.find((bag) => bag.barcode === barcode);
+        if (match) return match;
+        if (page >= (data.meta?.last_page ?? page)) return null;
+    }
+    return null;
+}
+
 /** Live day-bin state (per-material balance + bags currently at the machine). */
 export async function getDayBin(workCenterId: number): Promise<DayBinState> {
     const { data } = await api.get<{ data: DayBinState }>(`/production/work-centers/${workCenterId}/day-bin`);
@@ -674,6 +696,36 @@ export interface LoadDayBinPayload {
 
 export async function loadDayBin(payload: LoadDayBinPayload): Promise<DayBinMovement> {
     const { data } = await api.post<{ data: DayBinMovement }>('/production/day-bin/load', payload);
+    return data.data;
+}
+
+/**
+ * The Shift Floor's CENTRAL load — POST /production/day-bin/load-bag. One
+ * scan point for every machine: the bag's kg moves store → the factory
+ * day-bin WAREHOUSE (FactoryDayBin), never a per-machine ledger — that is
+ * what loadDayBin above is for. When no day-bin warehouse is configured yet
+ * the backend answers 422 with `errors.day_bin` and a message saying so
+ * (the Day Bin page names the warehouse).
+ */
+export interface FactoryDayBinLoadPayload {
+    /** The scanned bag barcode. */
+    barcode: string;
+    /**
+     * Kg to move — prefilled with the bag's whole remaining_kg, lowered for
+     * a part bag. (The backend also treats an ABSENT value as "whole bag",
+     * but this client always weighs in a number.)
+     */
+    quantity_kg: number;
+    /**
+     * users.id of the acting supervisor, defaulted to the logged-in user.
+     * A note on the movement only — the audit identity stays the
+     * authenticated user.
+     */
+    supervisor_id: number;
+}
+
+export async function loadBagToFactoryDayBin(payload: FactoryDayBinLoadPayload): Promise<FactoryDayBinLoadResult> {
+    const { data } = await api.post<{ data: FactoryDayBinLoadResult }>('/production/day-bin/load-bag', payload);
     return data.data;
 }
 

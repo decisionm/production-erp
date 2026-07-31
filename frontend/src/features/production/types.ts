@@ -1110,3 +1110,17 @@ export interface FactoryDayBin {
     warehouse: Warehouse | null;
     materials: FactoryDayBinMaterial[];
 }
+
+/**
+ * POST /production/day-bin/load-bag — the Shift Floor's central "Load
+ * Material" scan: one bag's kg moves store → the factory day-bin warehouse.
+ * Central by design (this replaced the per-machine Bin Bay scan page), so
+ * there is deliberately no work_center_id here. Mirrors
+ * FactoryDayBinController::loadBag's response verbatim.
+ */
+export interface FactoryDayBinLoadResult {
+    /** Post-load bag state (remaining_kg already reduced; lot.item loaded). */
+    bag: MaterialBag;
+    /** The day bin's row for this material — quantity_kg is the NEW balance. */
+    day_bin: FactoryDayBinMaterial;
+}

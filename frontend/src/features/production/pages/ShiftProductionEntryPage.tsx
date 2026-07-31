@@ -1,12 +1,14 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Checkbox, Col, Descriptions, Drawer, Form, Input, InputNumber, Modal, Radio, Row, Select, Space, Table, Tag, TimePicker, Typography } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Descriptions, Drawer, Form, Input, InputNumber, type InputRef, Modal, Radio, Row, Select, Space, Table, Tag, TimePicker, Typography } from 'antd';
 import dayjs from 'dayjs';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
+import { listUsers } from '@/features/access/api';
+import { useAuthStore } from '@/features/auth/store';
 import { listAllEmployees } from '@/features/hrms/api';
 import { listAllItems, listAllWarehouses } from '@/features/inventory/api';
 import type { Item } from '@/features/inventory/types';
@@ -18,6 +20,7 @@ import {
     completeBatch,
     createPowerInterruptionLog,
     createShiftStockCount,
+    findMaterialBagByBarcode,
     getBinBayAvailability,
     getEntryDayBinSummary,
     getFactoryDayBin,
@@ -31,6 +34,7 @@ import {
     listShiftProductionEntries,
     listShifts,
     listWorkCenters,
+    loadBagToFactoryDayBin,
     openDowntimeLog,
     openMoldChangeLog,
     getBatchPreview,
@@ -41,6 +45,7 @@ import type {
     BinBayRequirementComponent,
     EntryDayBinMaterialSummary,
     MachineDowntimeLog,
+    MaterialBag,
     MoldChangeLog,
     Shift,
     ShiftProductionEntry,
@@ -555,6 +560,19 @@ export default function ShiftProductionEntryPage() {
     const [finishingMoldChangeLog, setFinishingMoldChangeLog] = useState<MoldChangeLog | null>(null);
     const [powerInterruptionOpen, setPowerInterruptionOpen] = useState(false);
     const [stockCountOpen, setStockCountOpen] = useState(false);
+    // Central "Load Material" — one scan point feeding the factory day bin
+    // for every machine (the owner retired the per-machine Bin Bay page in
+    // favour of this). Plain state, not a form: the driver is a barcode
+    // scanner typing a code and sending Enter, not a keyboard user tabbing.
+    const [loadMaterialOpen, setLoadMaterialOpen] = useState(false);
+    const [loadBagBarcode, setLoadBagBarcode] = useState('');
+    const [scannedLoadBag, setScannedLoadBag] = useState<MaterialBag | null>(null);
+    const [loadBagKg, setLoadBagKg] = useState<number | null>(null);
+    const [loadBagSupervisorId, setLoadBagSupervisorId] = useState<number | null>(null);
+    const [loadBagSuccess, setLoadBagSuccess] = useState<string | null>(null);
+    const [loadBagError, setLoadBagError] = useState<{ text: string; needsWarehouse: boolean } | null>(null);
+    const loadBagInputRef = useRef<InputRef>(null);
+    const currentUser = useAuthStore((s) => s.user);
     // Phase 6 traceability targets — only ever set from UI that itself only
     // renders when settings.traceability_enabled is true.
     const [dayBinTarget, setDayBinTarget] = useState<{ workCenter: WorkCenter; entry: ShiftProductionEntry } | null>(null);
@@ -638,6 +656,30 @@ export default function ShiftProductionEntryPage() {
         queryKey: ['production', 'standards', 'coverage'],
         queryFn: listStandardCoverage,
     });
+    // Supervisor picker for the central Load Material modal, fetched only
+    // while it is open. A floor login often has no user-admin rights, so
+    // /users 403s — a normal answer, not an error: the picker quietly
+    // collapses to just the logged-in user.
+    const { data: loadBagUsers, isError: loadBagUsersUnavailable } = useQuery({
+        queryKey: ['access', 'users', 'shift-floor'],
+        queryFn: listUsers,
+        retry: false,
+        enabled: loadMaterialOpen,
+    });
+    // Active users only — a deactivated supervisor must not be creditable
+    // with new loads. The logged-in user is always present (and preselected)
+    // even when the users list didn't include them or didn't load at all.
+    const loadBagSupervisorOptions = useMemo(() => {
+        const listed = loadBagUsersUnavailable || !loadBagUsers ? [] : loadBagUsers.data.filter((u) => u.is_active);
+        const options = listed.map((u) => ({
+            value: u.id,
+            label: u.id === currentUser?.id ? `${u.name} (you)` : u.name,
+        }));
+        if (currentUser && !listed.some((u) => u.id === currentUser.id)) {
+            options.unshift({ value: currentUser.id, label: `${currentUser.name} (you)` });
+        }
+        return options;
+    }, [loadBagUsers, loadBagUsersUnavailable, currentUser]);
 
     const shiftOptions = shifts?.data.filter((s) => s.is_active).map((s) => ({ value: s.id, label: s.name })) ?? [];
     // Inactive items (retired demo/legacy masters) must not be selectable —
@@ -1968,6 +2010,92 @@ export default function ShiftProductionEntryPage() {
         },
     });
 
+    // ----- Central Load Material: scan a bag into the factory day bin -----
+
+    const openLoadMaterial = () => {
+        setLoadBagBarcode('');
+        setScannedLoadBag(null);
+        setLoadBagKg(null);
+        setLoadBagSupervisorId(currentUser?.id ?? null);
+        setLoadBagSuccess(null);
+        setLoadBagError(null);
+        setLoadMaterialOpen(true);
+    };
+
+    const bagLookupMutation = useMutation({
+        mutationFn: findMaterialBagByBarcode,
+        onSuccess: (bag, barcode) => {
+            if (!bag) {
+                setScannedLoadBag(null);
+                setLoadBagKg(null);
+                setLoadBagError({ text: `No open bag with barcode "${barcode}" in the store.`, needsWarehouse: false });
+                return;
+            }
+            setScannedLoadBag(bag);
+            // Prefill the whole bag; the field stays editable for a part bag.
+            setLoadBagKg(Number(bag.remaining_kg));
+            setLoadBagError(null);
+        },
+        onError: (error: any) => {
+            setScannedLoadBag(null);
+            setLoadBagKg(null);
+            setLoadBagError({ text: error?.response?.data?.message ?? 'Could not look up that barcode.', needsWarehouse: false });
+        },
+    });
+
+    const submitLoadBagBarcode = () => {
+        const code = loadBagBarcode.trim();
+        if (!code) return;
+        setLoadBagBarcode('');
+        setLoadBagSuccess(null);
+        bagLookupMutation.mutate(code);
+    };
+
+    const loadBagMutation = useMutation({
+        mutationFn: loadBagToFactoryDayBin,
+        onSuccess: (result, payload) => {
+            // Compose the confirmation from the response where it answers,
+            // falling back to what was scanned — never a blank.
+            const material = result?.day_bin?.item ?? result?.bag?.lot?.item ?? scannedLoadBag?.lot?.item ?? null;
+            const balance = result?.day_bin?.quantity_kg;
+            setLoadBagSuccess(
+                `Loaded ${payload.quantity_kg} kg of ${material ? itemLabel(material) : 'material'}` +
+                    `${balance ? ` — day bin now holds ${balance} kg` : ''}.`,
+            );
+            setScannedLoadBag(null);
+            setLoadBagKg(null);
+            setLoadBagError(null);
+            // The bag lost kg and the central day bin gained it — every
+            // surface quoting either must move.
+            queryClient.invalidateQueries({ queryKey: ['production', 'factory-day-bin'] });
+            queryClient.invalidateQueries({ queryKey: ['inventory', 'stock-balances'] });
+            queryClient.invalidateQueries({ queryKey: ['production', 'material-bags', 'pick-list'] });
+            // Back to the gun: the next bag scans without a tap.
+            loadBagInputRef.current?.focus();
+        },
+        onError: (error: any) => {
+            const text = error?.response?.data?.message ?? 'Could not load the bag into the day bin.';
+            setLoadBagError({
+                text,
+                // The one setup failure a supervisor can actually fix: nobody
+                // has named the day-bin warehouse yet. The backend flags it as
+                // a 422 on the `day_bin` key; the message match is a fallback.
+                needsWarehouse:
+                    Boolean(error?.response?.data?.errors?.day_bin) || /day.?bin warehouse/i.test(text),
+            });
+        },
+    });
+
+    const submitLoadBag = () => {
+        const supervisorId = loadBagSupervisorId ?? currentUser?.id;
+        if (!scannedLoadBag || !loadBagKg || loadBagKg <= 0 || !supervisorId) return;
+        loadBagMutation.mutate({
+            barcode: scannedLoadBag.barcode,
+            quantity_kg: loadBagKg,
+            supervisor_id: supervisorId,
+        });
+    };
+
     return (
         <>
             <Typography.Title level={3} style={{ marginBottom: 4 }}>Shift Floor</Typography.Title>
@@ -2184,6 +2312,13 @@ export default function ShiftProductionEntryPage() {
             </Row>
 
             <Space style={{ marginBottom: 32 }}>
+                {traceabilityEnabled && (
+                    // Deliberately page-level, not on any machine card: bags
+                    // feed the CENTRAL factory day bin, for all machines.
+                    <Button type="primary" onClick={openLoadMaterial}>
+                        Load Material
+                    </Button>
+                )}
                 <Button onClick={() => setPowerInterruptionOpen(true)}>
                     Log Power Interruption{powerInterruptionsToday.length > 0 ? ` (${powerInterruptionsToday.length} today)` : ''}
                 </Button>
@@ -2661,38 +2796,34 @@ export default function ShiftProductionEntryPage() {
                                     ))}
                                 </Descriptions>
                             )}
-                            {/* A missing recipe is a setup gap, not a fact of
-                                life, so the notice carries the way to close it.
-                                The item id rides along so the BOM form opens on
-                                the product the supervisor was already looking at
-                                — retyping it here is how the wrong product ends
-                                up with the recipe. */}
-                            {batchPreview && batchPreview.estimation.recipe_source === null && (
-                                <Alert
-                                    type="info"
-                                    showIcon
-                                    style={{ marginBottom: 16 }}
-                                    message="No consumption recipe for this product — resin, masterbatch and consumables cannot be estimated."
-                                    action={
-                                        <Button
-                                            size="small"
-                                            disabled={!startBatchRecipeDraft}
-                                            title={
-                                                startBatchRecipeDraft
-                                                    ? undefined
-                                                    : 'Choose the finished-goods warehouse before configuring the recipe.'
-                                            }
-                                            onClick={() => {
-                                                if (startBatchRecipeDraft) {
-                                                    navigate(buildStartBatchRecipeUrl(startBatchRecipeDraft));
-                                                }
-                                            }}
-                                        >
-                                            Configure recipe
-                                        </Button>
-                                    }
-                                />
-                            )}
+                            {/* Resin needs NO recipe — the factory's own paper
+                                report calculates consumption purely from bottle
+                                weight (production kg + rejection kg + lumps,
+                                verified against real sheets 11 rows out of 11),
+                                and expected_kg is that same weight arithmetic.
+                                This block used to be an Alert saying resin
+                                "cannot be estimated", which contradicted the
+                                paper in the supervisor's other hand; the owner
+                                called it out, correctly. A recipe only ever
+                                adds masterbatch/consumable norms — and those
+                                stay unestimated on purpose until the factory
+                                confirms the dosing. */}
+                            {batchPreview &&
+                                batchPreview.estimation.recipe_source === null &&
+                                batchPreview.estimation.expected_kg !== null && (
+                                    <Descriptions
+                                        size="small"
+                                        column={1}
+                                        bordered
+                                        style={{ marginBottom: 16 }}
+                                        title={<Typography.Text strong>Expected materials</Typography.Text>}
+                                    >
+                                        <Descriptions.Item label="PET resin (from bottle weight)">
+                                            ≈ {fmtNum(toNum(batchPreview.estimation.expected_kg))} kg — rejection and
+                                            lumps add to this as weighed, same as the paper report
+                                        </Descriptions.Item>
+                                    </Descriptions>
+                                )}
 
                             {/* What the machine's bin ACTUALLY holds, against what
                                 the recipe needs. Strictly read-only: bags are
@@ -4060,6 +4191,100 @@ export default function ShiftProductionEntryPage() {
                             setHandoverEntry(null);
                         }}
                     />
+                    {/* Central Load Material — stays open between bags so a
+                        stack can be scanned one after another; footer is our
+                        own Load button because OK-that-closes would end the
+                        scanning session after every bag. */}
+                    <Modal
+                        maskClosable={false}
+                        title="Load Material"
+                        open={loadMaterialOpen}
+                        onCancel={() => setLoadMaterialOpen(false)}
+                        afterOpenChange={(open) => {
+                            if (open) loadBagInputRef.current?.focus();
+                        }}
+                        footer={null}
+                        destroyOnHidden
+                    >
+                        <Typography.Paragraph type="secondary">
+                            Central load for every machine: scan a bag and its kg move from the store into the
+                            factory day bin. The scanner types the code and presses Enter by itself.
+                        </Typography.Paragraph>
+                        {loadBagSuccess && (
+                            <Alert type="success" showIcon message={loadBagSuccess} style={{ marginBottom: 12 }} />
+                        )}
+                        {loadBagError && (
+                            <Alert
+                                type={loadBagError.needsWarehouse ? 'warning' : 'error'}
+                                showIcon
+                                style={{ marginBottom: 12 }}
+                                message={loadBagError.text}
+                                description={
+                                    loadBagError.needsWarehouse ? (
+                                        <Link to="/production/day-bin">Open the Day Bin page to choose the warehouse</Link>
+                                    ) : undefined
+                                }
+                            />
+                        )}
+                        <Form layout="vertical">
+                            <Form.Item label="Bag barcode">
+                                <Input
+                                    ref={loadBagInputRef}
+                                    autoFocus
+                                    value={loadBagBarcode}
+                                    onChange={(e) => setLoadBagBarcode(e.target.value)}
+                                    onPressEnter={submitLoadBagBarcode}
+                                    placeholder="Scan or type the bag barcode, then Enter"
+                                />
+                            </Form.Item>
+                            {bagLookupMutation.isPending && (
+                                <Typography.Paragraph type="secondary">Looking up the bag…</Typography.Paragraph>
+                            )}
+                            {scannedLoadBag && (
+                                <>
+                                    <Descriptions size="small" column={1} bordered style={{ marginBottom: 12 }}>
+                                        <Descriptions.Item label="Material">
+                                            {scannedLoadBag.lot?.item ? itemLabel(scannedLoadBag.lot.item) : '—'}
+                                        </Descriptions.Item>
+                                        <Descriptions.Item label="Bag">{scannedLoadBag.barcode}</Descriptions.Item>
+                                        <Descriptions.Item label="Remaining in bag (kg)">
+                                            {scannedLoadBag.remaining_kg}
+                                        </Descriptions.Item>
+                                    </Descriptions>
+                                    <Form.Item label="Kg to load" extra="The whole bag unless you lower it for a part bag.">
+                                        <InputNumber
+                                            min={0.001}
+                                            max={Number(scannedLoadBag.remaining_kg)}
+                                            value={loadBagKg}
+                                            onChange={(value) => setLoadBagKg(value)}
+                                            style={{ width: '100%' }}
+                                        />
+                                    </Form.Item>
+                                </>
+                            )}
+                            <Form.Item
+                                label="Supervisor"
+                                extra={loadBagUsersUnavailable ? 'User list unavailable for this login — recorded as you.' : undefined}
+                            >
+                                <Select
+                                    value={loadBagSupervisorId ?? currentUser?.id}
+                                    onChange={(value) => setLoadBagSupervisorId(value)}
+                                    options={loadBagSupervisorOptions}
+                                    showSearch
+                                    optionFilterProp="label"
+                                />
+                            </Form.Item>
+                            <Button
+                                type="primary"
+                                block
+                                onClick={submitLoadBag}
+                                loading={loadBagMutation.isPending}
+                                disabled={!scannedLoadBag || !loadBagKg || loadBagKg <= 0}
+                            >
+                                Load into Day Bin
+                            </Button>
+                        </Form>
+                    </Modal>
                 </>
             )}
         </>
