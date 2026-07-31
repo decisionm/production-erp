@@ -7,6 +7,7 @@ use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Production\Models\Enums\ConfigurationStatus;
 use App\Modules\Production\Models\ProductionConfiguration;
+use App\Modules\Production\Models\ProductionStandard;
 use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\WorkCenter;
 use App\Modules\Production\Services\ShiftProductionEntryService;
@@ -131,6 +132,60 @@ class ConfigurationGovernsTheFloorTest extends TestCase
         $this->assertNotContains('cycle_time', $codes);
         $this->assertNotContains('cavities', $codes);
         $this->assertNotContains('weight', $codes);
+    }
+
+    /**
+     * One product standard for the item, so the preview resolves a standard and
+     * warningsFor() reaches the machine-settings notice at all. Without this the
+     * two tests below pass for the wrong reason — no standard means an early
+     * return long before the notice is considered.
+     */
+    private function standard(): ProductionStandard
+    {
+        return ProductionStandard::create([
+            'item_id' => $this->item->id,
+            'source_product_name' => 'B.200 Ml Brute Pet Bottle Amber-18gms',
+            'cavities' => 2,
+            'unit_weight_grams' => '18.0000',
+            'cycle_time' => '20.00',
+            'status' => 'approved',
+        ]);
+    }
+
+    public function test_an_approved_configuration_silences_the_missing_settings_notice(): void
+    {
+        // The bug the owner read as an error three times: a machine WITH
+        // approved settings was still told there were none.
+        $this->standard();
+        $this->config(ConfigurationStatus::Approved);
+
+        $data = $this->preview();
+
+        // The configuration really did resolve — so the absence below is the
+        // suppression working, not the notice never being reachable.
+        $this->assertNotNull($data['configuration']);
+        $this->assertNotContains('machine_mapping_unconfirmed', array_column($data['warnings'], 'code'));
+    }
+
+    public function test_with_no_configuration_the_notice_is_present_and_speaks_plainly(): void
+    {
+        $this->standard();
+
+        $data = $this->preview();
+
+        $this->assertNull($data['configuration']);
+        $warning = collect($data['warnings'])->firstWhere('code', 'machine_mapping_unconfirmed');
+        $this->assertNotNull($warning, 'A machine with no approved settings must still be told so.');
+
+        // Read out loud on the floor by a supervisor, not an engineer. The
+        // three facts that matter, and none of the words that do not.
+        $message = strtolower($warning['message']);
+        $this->assertStringContainsString('not saved yet', $message);
+        $this->assertStringContainsString('factory product standard', $message);
+        $this->assertStringContainsString('nothing is blocked', $message);
+        foreach (['evidence', 'watch mode', 'mapping', 'unconfirmed'] as $jargon) {
+            $this->assertStringNotContainsString($jargon, $message, "The notice must not say \"{$jargon}\".");
+        }
     }
 
     public function test_the_started_batch_snapshots_the_approved_figures(): void

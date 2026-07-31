@@ -156,10 +156,17 @@ class ImportMachineConfigurations extends Command
                 // have machines, just the mapping — make it available". The
                 // provenance line records that this approval was that
                 // instruction, not a per-row review.
+                //
+                // Kept inside 32 characters because that is the column's width
+                // (production_configurations.confirmation_status), shared with
+                // the factory workbook's own wording like "Discussion
+                // Confirmed". A longer line aborted the whole import against
+                // MySQL in strict mode — the transaction rolled back, so it
+                // failed loudly and changed nothing, but it still failed.
                 if ($this->option('approve')) {
                     $config->status = ConfigurationStatus::Approved;
                     $config->approved_at = now();
-                    $config->confirmation_status = 'Bulk-approved at go-live on owner instruction';
+                    $config->confirmation_status = 'Owner-approved at go-live';
                 }
 
                 $config->save();

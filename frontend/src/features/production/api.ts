@@ -14,6 +14,7 @@ import type {
     DayBinMovement,
     DayBinState,
     EntryDayBinSummary,
+    FactoryDayBin,
     MachineDowntimeLog,
     MaterialBag,
     MaterialBagStatus,
@@ -996,4 +997,55 @@ export interface BinBayLoadPayload {
 export async function loadBinBay(payload: BinBayLoadPayload): Promise<DayBinMovement> {
     const { data } = await api.post<{ data: DayBinMovement }>('/production/bin-bay/load', payload);
     return data.data;
+}
+
+// ---------------------------------------------------------------------------
+// The FACTORY DAY BIN (central, always available — NOT flag-gated).
+//
+// The day bin is a warehouse, so these are deliberately thin:
+//  - the read is the warehouse plus its stock balances,
+//  - naming the warehouse is one app setting,
+//  - LOADING it is the EXISTING inventory transfer endpoint. No new write
+//    path was added for it: material moving store → day bin is a location
+//    movement, not consumption, and never a Tally post.
+// ---------------------------------------------------------------------------
+
+/** What the factory day bin holds right now (warehouse null = not configured). */
+export async function getFactoryDayBin(): Promise<FactoryDayBin> {
+    const { data } = await api.get<{ data: FactoryDayBin }>('/production/factory-day-bin');
+    return data.data;
+}
+
+/** Name the warehouse that IS the factory day bin (null clears it). */
+export async function setDayBinWarehouse(warehouseId: number | null): Promise<number | null> {
+    const { data } = await api.put<{ data: { day_bin_warehouse_id: number | null } }>(
+        '/production/settings/day-bin-warehouse',
+        { warehouse_id: warehouseId },
+    );
+    return data.data.day_bin_warehouse_id;
+}
+
+export interface LoadFactoryDayBinPayload {
+    item_id: number;
+    from_warehouse_id: number;
+    to_warehouse_id: number;
+    /** Kg (or the material's own unit) being moved into the bin. */
+    quantity: number;
+    /** 'YYYY-MM-DD HH:mm:ss' — when it physically went in, not when it was typed. */
+    movement_date?: string;
+    reference?: string;
+    notes?: string;
+}
+
+/**
+ * Move material store → factory day bin. Posts Inventory's existing transfer
+ * endpoint (the one loader for a location move); called from here rather than
+ * through features/inventory/api.ts only because that module's TransferPayload
+ * does not carry movement_date, and the floor backdates a load routinely.
+ *
+ * Guarded by `module:inventory` server-side — a production-only login gets a
+ * 403 here, which the page reports as a permission message.
+ */
+export async function loadFactoryDayBin(payload: LoadFactoryDayBinPayload): Promise<void> {
+    await api.post('/inventory/stock-movements/transfers', payload);
 }

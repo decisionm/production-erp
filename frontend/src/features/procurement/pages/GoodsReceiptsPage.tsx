@@ -1,8 +1,10 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Descriptions, Drawer, Form, Input, InputNumber, message, Modal, Select, Space, Table, Typography } from 'antd';
-import { useEffect, useMemo, useState } from 'react';
+import { Alert, Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, message, Modal, Select, Space, Table, Typography } from 'antd';
+import dayjs from 'dayjs';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Controller, useFieldArray, useForm, useWatch, type Control, type FieldPath } from 'react-hook-form';
+import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import BarcodeScanInput from '@/components/barcode/BarcodeScanInput';
 import MaterialBagLabels from '@/features/inventory/components/MaterialBagLabels';
@@ -10,11 +12,23 @@ import { listWarehouses } from '@/features/inventory/api';
 import { createGoodsReceipt, listGoodsReceipts, listPurchaseOrders } from '@/features/procurement/api';
 import type { GoodsReceiptNote } from '@/features/procurement/types';
 import { useProductionSettings } from '@/features/production/packing';
+import { formatDateTime } from '@/lib/datetime';
 import { itemLabel } from '@/lib/itemLabel';
+
+/** Wall-clock text the API stores as-is — never a timezone-converted instant. */
+const RECEIVED_AT_FORMAT = 'YYYY-MM-DD HH:mm';
+
+function nowReceivedAt(): string {
+    return dayjs().format(RECEIVED_AT_FORMAT);
+}
 
 const receiptSchema = z.object({
     purchase_order_id: z.number({ error: 'Purchase order is required' }),
     warehouse_id: z.number({ error: 'Warehouse is required' }),
+    // The real unloading date+time, not the moment the form is submitted.
+    received_date: z
+        .string({ error: 'Received date & time is required' })
+        .min(1, 'Received date & time is required'),
     reference: z.string().optional(),
     lines: z
         .array(
@@ -46,6 +60,17 @@ function newReceiptKey(): string {
     return typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID()
         : `grn-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+/**
+ * The price actually paid on this receipt. One figure when every line was
+ * received at the same rate (the normal case), otherwise each distinct rate —
+ * the per-line breakdown stays in the View drawer.
+ */
+function unitPriceSummary(receipt: GoodsReceiptNote): string {
+    const prices = [...new Set(receipt.lines.map((line) => line.unit_cost))];
+
+    return prices.length > 0 ? prices.join(', ') : '—';
 }
 
 function isMassUom(uom: string): boolean {
@@ -145,8 +170,21 @@ export default function GoodsReceiptsPage() {
     const [serverErrors, setServerErrors] = useState<string[]>([]);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['procurement', 'goods-receipts'], queryFn: listGoodsReceipts });
-    const { data: orders } = useQuery({ queryKey: ['procurement', 'purchase-orders'], queryFn: listPurchaseOrders });
+    // Deep links into this page: ?grn=7 from the material-lot register (that
+    // one receipt), ?po=3 from an item's movement history (every receipt on
+    // that order). With neither param the page behaves exactly as before.
+    const [searchParams, setSearchParams] = useSearchParams();
+    const focusGrnId = Number(searchParams.get('grn')) || null;
+    const focusPoId = Number(searchParams.get('po')) || null;
+    const isDeepLinked = focusGrnId !== null || focusPoId !== null;
+
+    // A link may point at a receipt older than the newest 20, so a linked view
+    // asks for the whole register rather than the default first page.
+    const { data, isLoading } = useQuery({
+        queryKey: ['procurement', 'goods-receipts', isDeepLinked ? 'all' : 'first-page'],
+        queryFn: () => listGoodsReceipts(isDeepLinked ? { per_page: 1000 } : undefined),
+    });
+    const { data: orders } = useQuery({ queryKey: ['procurement', 'purchase-orders'], queryFn: () => listPurchaseOrders() });
     const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses'], queryFn: listWarehouses });
     // Phase 6 lot/bag intake renders only when the backend flag is on — with
     // it off (or an older backend) this page is exactly the pre-traceability UI.
@@ -159,6 +197,33 @@ export default function GoodsReceiptsPage() {
     );
     const orderOptions = receivableOrders.map((o) => ({ value: o.id, label: `PO #${o.id} — ${o.vendor.name}` }));
     const warehouseOptions = warehouses?.data.map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })) ?? [];
+
+    const receipts = data?.data ?? [];
+    const visibleReceipts = useMemo(
+        () =>
+            receipts.filter(
+                (receipt) =>
+                    (focusGrnId === null || receipt.id === focusGrnId) &&
+                    (focusPoId === null || receipt.purchase_order_id === focusPoId),
+            ),
+        [receipts, focusGrnId, focusPoId],
+    );
+
+    // Following a ?grn= link opens that receipt straight away — once, so
+    // closing the drawer doesn't reopen it.
+    const openedGrnRef = useRef<number | null>(null);
+    useEffect(() => {
+        if (focusGrnId === null) {
+            openedGrnRef.current = null;
+            return;
+        }
+        if (openedGrnRef.current === focusGrnId) return;
+        const match = receipts.find((receipt) => receipt.id === focusGrnId);
+        if (match) {
+            openedGrnRef.current = focusGrnId;
+            setDetailReceipt(match);
+        }
+    }, [focusGrnId, receipts]);
 
     const { control, handleSubmit, reset, setError, watch, formState: { errors } } = useForm<ReceiptFormValues>({
         resolver: zodResolver(receiptSchema),
@@ -235,6 +300,7 @@ export default function GoodsReceiptsPage() {
                 receipt_key: receiptKey,
                 purchase_order_id: values.purchase_order_id,
                 warehouse_id: values.warehouse_id,
+                received_date: values.received_date,
                 reference: values.reference,
                 lines: values.lines.map((l) => ({
                     purchase_order_line_id: l.purchase_order_line_id,
@@ -254,7 +320,7 @@ export default function GoodsReceiptsPage() {
         onSuccess: (grn) => {
             invalidate();
             setModalOpen(false);
-            reset({ lines: [] });
+            reset({ lines: [], received_date: nowReceivedAt() });
             setServerErrors([]);
             setReceiptKey(newReceiptKey());
             const materialLots =
@@ -287,7 +353,9 @@ export default function GoodsReceiptsPage() {
     });
 
     const openNewReceipt = () => {
-        reset({ lines: [] });
+        // Defaulted here rather than in defaultValues so it is the time the
+        // form was opened, not the time the page was loaded.
+        reset({ lines: [], received_date: nowReceivedAt() });
         setServerErrors([]);
         setReceiptKey(newReceiptKey());
         setModalOpen(true);
@@ -300,17 +368,45 @@ export default function GoodsReceiptsPage() {
                 <Button type="primary" onClick={openNewReceipt}>New Goods Receipt</Button>
             </Space>
 
+            {isDeepLinked && (
+                <Alert
+                    type="info"
+                    showIcon
+                    style={{ marginBottom: 16 }}
+                    message={
+                        focusGrnId !== null
+                            ? `Showing goods receipt #${focusGrnId} only`
+                            : `Showing the goods receipts for PO #${focusPoId} only`
+                    }
+                    action={
+                        <Button size="small" onClick={() => setSearchParams({})}>
+                            Show all receipts
+                        </Button>
+                    }
+                />
+            )}
+
             <Table<GoodsReceiptNote>
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
-                dataSource={data?.data}
+                dataSource={visibleReceipts}
                 pagination={false}
                 columns={[
                     { title: 'ID', dataIndex: 'id' },
-                    { title: 'PO', render: (_, row) => `PO #${row.purchase_order_id}` },
+                    {
+                        title: 'PO',
+                        render: (_, row) => (
+                            // Straight back up the chain to the order this
+                            // material was received against.
+                            <Link to={`/procurement/purchase-orders?po=${row.purchase_order_id}`}>
+                                PO #{row.purchase_order_id}
+                            </Link>
+                        ),
+                    },
                     { title: 'Warehouse', render: (_, row) => `${row.warehouse.code} — ${row.warehouse.name}` },
-                    { title: 'Received', render: (_, row) => row.received_date.slice(0, 10) },
+                    { title: 'Received', render: (_, row) => formatDateTime(row.received_date) },
+                    { title: 'Unit Price', render: (_, row) => unitPriceSummary(row) },
                     { title: 'Reference', dataIndex: 'reference' },
                     { title: 'Lines', render: (_, row) => row.lines.length },
                     {
@@ -374,6 +470,26 @@ export default function GoodsReceiptsPage() {
                             )}
                         />
                     </Form.Item>
+                    <Form.Item
+                        label="Received (date & time the material actually arrived)"
+                        validateStatus={errors.received_date ? 'error' : ''}
+                        help={errors.received_date?.message}
+                    >
+                        <Controller
+                            name="received_date"
+                            control={control}
+                            render={({ field }) => (
+                                <DatePicker
+                                    style={{ width: '100%' }}
+                                    showTime={{ format: 'HH:mm' }}
+                                    format={RECEIVED_AT_FORMAT}
+                                    allowClear={false}
+                                    value={field.value ? dayjs(field.value) : null}
+                                    onChange={(value) => field.onChange(value ? value.format(RECEIVED_AT_FORMAT) : '')}
+                                />
+                            )}
+                        />
+                    </Form.Item>
                     <Form.Item label="Reference">
                         <Controller name="reference" control={control} render={({ field }) => <Input {...field} />} />
                     </Form.Item>
@@ -432,12 +548,16 @@ export default function GoodsReceiptsPage() {
                 {detailReceipt && (
                     <>
                         <Descriptions column={1} size="small" bordered>
-                            <Descriptions.Item label="Purchase Order">PO #{detailReceipt.purchase_order_id}</Descriptions.Item>
+                            <Descriptions.Item label="Purchase Order">
+                                <Link to={`/procurement/purchase-orders?po=${detailReceipt.purchase_order_id}`}>
+                                    PO #{detailReceipt.purchase_order_id}
+                                </Link>
+                            </Descriptions.Item>
                             <Descriptions.Item label="Warehouse">
                                 {detailReceipt.warehouse.code} — {detailReceipt.warehouse.name}
                             </Descriptions.Item>
-                            <Descriptions.Item label="Received Date">
-                                {detailReceipt.received_date.slice(0, 10)}
+                            <Descriptions.Item label="Received (date &amp; time)">
+                                {formatDateTime(detailReceipt.received_date)}
                             </Descriptions.Item>
                             <Descriptions.Item label="Reference">{detailReceipt.reference ?? '—'}</Descriptions.Item>
                             <Descriptions.Item label="Notes">{detailReceipt.notes ?? '—'}</Descriptions.Item>

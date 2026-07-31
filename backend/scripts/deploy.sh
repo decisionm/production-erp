@@ -31,6 +31,26 @@ $PHP -d memory_limit=-1 "$(command -v composer)" install --no-dev --optimize-aut
 # Apply any new migrations. --force is required in production (no prompt).
 $PHP artisan migrate --force
 
+# Master data the app cannot function without, loaded by name on every deploy.
+#
+# A migration creates the downtime_reasons and factory_settings TABLES; only a
+# seeder puts the factory's own rows in them. Because deploy.sh ran migrations
+# and nothing else, the live instance had both tables empty for weeks — so the
+# Shift Floor offered no downtime reason to pick and the System Config page was
+# blank, while every developer machine looked fine because a full `db:seed` had
+# been run there once. That asymmetry is the bug: "works locally" was true and
+# meaningless.
+#
+# Named explicitly, never a bare `db:seed`. A bare seed would pull in
+# DatabaseSeeder, which creates a test user and the demo factory
+# (BottleManufacturingDemoSeeder) — fabricated products and stations in a live
+# company's books. Any seeder added to this list must be idempotent AND carry no
+# invented transactional data; all three below use firstOrCreate/findOrCreate
+# and refuse to overwrite a value someone on site has since edited.
+for seeder in PermissionSeeder ShiftSeeder ProductionConfigurationDefaultsSeeder; do
+  $PHP artisan db:seed --class="$seeder" --force
+done
+
 # Ensure the public storage symlink exists (no-op if already linked).
 $PHP artisan storage:link || true
 

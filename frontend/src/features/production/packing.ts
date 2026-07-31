@@ -23,6 +23,14 @@ export interface ProductionSettings {
      * with it off the entire traceability UI must be invisible and inert.
      */
     traceability_enabled?: boolean;
+    /**
+     * Which warehouse IS the factory day bin (app_settings, set on the Day Bin
+     * (factory) page — not deploy config). null/absent = not chosen yet, in
+     * which case every screen behaves exactly as it did before the day bin
+     * existed. Screens that also need the bin's BALANCES read
+     * GET /production/factory-day-bin instead, which carries this id too.
+     */
+    day_bin_warehouse_id?: number | null;
 }
 
 export function useProductionSettings(): ProductionSettings | undefined {

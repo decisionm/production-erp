@@ -1,11 +1,28 @@
 import { useQuery } from '@tanstack/react-query';
 import { Alert, Button, Drawer, Empty, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import MaterialBagLabels from '@/features/inventory/components/MaterialBagLabels';
 import { listAllItems } from '@/features/inventory/api';
 import { listMaterialLots } from '@/features/production/api';
 import type { MaterialLot } from '@/features/production/types';
+import { formatDateTime } from '@/lib/datetime';
 import { itemLabel } from '@/lib/itemLabel';
+
+/**
+ * The register also carries each lot's receipt provenance (MaterialLotResource
+ * `receipt`): which goods receipt it arrived on, the price paid and the exact
+ * date+time it was received. Present whenever the API eager-loads it, which
+ * this endpoint does.
+ */
+type LotWithReceipt = MaterialLot & {
+    receipt?: {
+        goods_receipt_note_id: number;
+        purchase_order_id: number | null;
+        received_at: string | null;
+        unit_cost: string | null;
+    };
+};
 
 function fmtKg(value: string | null | undefined): string {
     if (value === null || value === undefined || value === '') return '—';
@@ -88,10 +105,10 @@ export default function MaterialLotsPage() {
                     style={{ width: 'min(100%, 420px)' }}
                 />
 
-                <Table<MaterialLot>
+                <Table<LotWithReceipt>
                     rowKey="id"
                     loading={isLoading}
-                    dataSource={data?.data ?? []}
+                    dataSource={(data?.data ?? []) as LotWithReceipt[]}
                     scroll={{ x: 'max-content' }}
                     pagination={
                         data?.meta
@@ -142,10 +159,30 @@ export default function MaterialLotsPage() {
                         ),
                     }}
                     columns={[
-                        { title: 'GRN', dataIndex: 'grn_id', render: (value: number | null) => (value ? `#${value}` : '—') },
+                        {
+                            title: 'GRN',
+                            dataIndex: 'grn_id',
+                            // Straight to the receipt this lot arrived on, so
+                            // the price stops being a dead end here.
+                            render: (value: number | null) =>
+                                value ? (
+                                    <Link to={`/procurement/goods-receipts?grn=${value}`}>#{value}</Link>
+                                ) : (
+                                    '—'
+                                ),
+                        },
                         { title: 'Material', render: (_, lot) => (lot.item ? itemLabel(lot.item) : '—') },
                         { title: 'Supplier lot', dataIndex: 'supplier_lot_no', render: (value: string | null) => value ?? '—' },
                         { title: 'Received', dataIndex: 'received_date', render: (value: string | null) => value ?? '—' },
+                        {
+                            title: 'Receipt date & time',
+                            render: (_, lot) => formatDateTime(lot.receipt?.received_at),
+                        },
+                        {
+                            title: 'Receipt price',
+                            align: 'right',
+                            render: (_, lot) => lot.receipt?.unit_cost ?? '—',
+                        },
                         { title: 'Bags', dataIndex: 'bag_count', align: 'right' },
                         { title: 'Received kg', dataIndex: 'total_received_kg', align: 'right', render: fmtKg },
                         {

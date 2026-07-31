@@ -21,6 +21,7 @@ import ApproveProductionPage from '@/features/production/pages/ApproveProduction
 import BinBayLoadingPage from '@/features/production/pages/BinBayLoadingPage';
 import BomsPage from '@/features/production/pages/BomsPage';
 import CapacityPlanPage from '@/features/production/pages/CapacityPlanPage';
+import FactoryDayBinPage from '@/features/production/pages/FactoryDayBinPage';
 import MoldsPage from '@/features/production/pages/MoldsPage';
 import MrpPage from '@/features/production/pages/MrpPage';
 import ProductionReportsPage from '@/features/production/pages/ReportsPage';
@@ -110,6 +111,10 @@ export default function App() {
                                     <Route path="/production/shift-production" element={<ShiftProductionEntryPage />} />
                                     <Route path="/production/live-monitor" element={<LiveMonitorPage />} />
                                     <Route path="/production/standards" element={<ProductStandardsPage />} />
+                                    {/* The central factory day bin (a warehouse). The
+                                        per-machine bag-level bin bay below it is the
+                                        optional detail, not the main path. */}
+                                    <Route path="/production/day-bin" element={<FactoryDayBinPage />} />
                                     <Route path="/production/bin-bay" element={<BinBayLoadingPage />} />
                                     <Route path="/production/shift-summary" element={<ShiftSummaryPage />} />
                                     <Route path="/production/approve-production" element={<ApproveProductionPage />} />

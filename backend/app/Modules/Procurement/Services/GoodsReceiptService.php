@@ -11,6 +11,7 @@ use App\Modules\Procurement\Exceptions\OverReceiptException;
 use App\Modules\Procurement\Models\Enums\PurchaseOrderStatus;
 use App\Modules\Procurement\Models\GoodsReceiptNote;
 use App\Modules\Procurement\Models\PurchaseOrder;
+use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -150,7 +151,13 @@ class GoodsReceiptService
                             'grn_id' => $grn->id,
                             'goods_receipt_note_line_id' => $grnLine->id,
                             'item_id' => $poLine->item_id,
-                            'received_date' => $data['received_date'] ?? now()->toDateString(),
+                            // material_lots.received_date is a date column
+                            // (FIFO index + whereDate queries), so a receipt
+                            // datetime is narrowed to its calendar day here
+                            // rather than left to the database to truncate.
+                            'received_date' => isset($data['received_date'])
+                                ? Carbon::parse($data['received_date'])->toDateString()
+                                : now()->toDateString(),
                             'warehouse_id' => $data['warehouse_id'],
                         ], $createdBy);
                     }

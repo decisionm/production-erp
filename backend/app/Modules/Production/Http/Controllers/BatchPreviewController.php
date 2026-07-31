@@ -116,7 +116,10 @@ class BatchPreviewController extends Controller
                     'id' => $packaging->id, 'mode' => $packaging->mode, 'label' => $packaging->label(),
                     'nos_per_box' => $packaging->nos_per_box,
                 ],
-                'warnings' => $this->standards->warningsFor($standard, $packaging, $item->id, $workCenter?->id),
+                // The resolved configuration goes in too: without it the
+                // preview told a machine WITH approved settings that it had
+                // none.
+                'warnings' => $this->standards->warningsFor($standard, $packaging, $item->id, $workCenter?->id, $configuration),
             ],
         ]);
     }

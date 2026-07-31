@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { Descriptions, Table, Tabs, Tag, Typography } from 'antd';
 import { useMemo } from 'react';
-import { useParams } from 'react-router-dom';
-import { listItems, listStockBalances, listStockMovements } from '@/features/inventory/api';
+import { Link, useParams } from 'react-router-dom';
+import { getItem, listStockBalances, listStockMovements } from '@/features/inventory/api';
 import type { ItemTrackingType, StockMovement } from '@/features/inventory/types';
+import { formatDateTime } from '@/lib/datetime';
 
 const trackingTypeColor: Record<ItemTrackingType, string> = {
     none: 'default',
@@ -35,11 +36,29 @@ function categorize(reference: string | null): MovementCategory {
     return 'manual';
 }
 
+// A goods receipt names the order it was received against ("GRN for PO #4"),
+// and keeps doing so when the store team typed their own reference containing
+// it. That number is the only handle back to the document, so the reference
+// links to the goods receipts for that order. Purely a display rule — the
+// stored reference text and the tab grouping above are untouched.
+const PURCHASE_ORDER_REFERENCE = /\bPO #(\d+)/;
+
+function ReferenceCell({ reference }: { reference: string | null }) {
+    if (!reference) return <>—</>;
+
+    const purchaseOrder = reference.match(PURCHASE_ORDER_REFERENCE);
+    if (purchaseOrder) {
+        return <Link to={`/procurement/goods-receipts?po=${purchaseOrder[1]}`}>{reference}</Link>;
+    }
+
+    return <>{reference}</>;
+}
+
 const movementColumns = [
     {
         title: 'Date',
         dataIndex: 'movement_date',
-        render: (d: string) => d.slice(0, 10),
+        render: (d: string) => formatDateTime(d),
     },
     {
         title: 'Type',
@@ -49,7 +68,11 @@ const movementColumns = [
     { title: 'Warehouse', render: (_: unknown, row: StockMovement) => row.warehouse.code },
     { title: 'Quantity', dataIndex: 'quantity' },
     { title: 'Unit Cost', dataIndex: 'unit_cost' },
-    { title: 'Reference', dataIndex: 'reference' },
+    {
+        title: 'Reference',
+        dataIndex: 'reference',
+        render: (reference: string | null) => <ReferenceCell reference={reference} />,
+    },
     { title: 'Notes', dataIndex: 'notes', render: (n: string | null) => n ?? '—' },
 ];
 
@@ -72,9 +95,16 @@ function MovementTable({ movements, emptyText }: { movements: StockMovement[]; e
 export default function ItemDetailPage() {
     const { id } = useParams<{ id: string }>();
     const itemId = Number(id);
+    const hasValidId = !Number.isNaN(itemId);
 
-    const { data: items, isLoading: itemsLoading } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
-    const item = items?.data.find((i) => i.id === itemId);
+    // Loaded by id. This used to search the first page of the items list, so
+    // with 600+ items in the master almost every item reported "not found".
+    const { data: item, isLoading: itemLoading } = useQuery({
+        queryKey: ['inventory', 'item', itemId],
+        queryFn: () => getItem(itemId),
+        enabled: hasValidId,
+        retry: false,
+    });
 
     const { data: balances } = useQuery({ queryKey: ['inventory', 'stock-balances'], queryFn: listStockBalances });
     const itemBalances = balances?.data.filter((b) => b.item.id === itemId) ?? [];
@@ -82,7 +112,7 @@ export default function ItemDetailPage() {
     const { data: movements, isLoading: movementsLoading } = useQuery({
         queryKey: ['inventory', 'stock-movements', itemId],
         queryFn: () => listStockMovements({ item_id: itemId, per_page: 300 }),
-        enabled: !Number.isNaN(itemId),
+        enabled: hasValidId,
     });
 
     const byCategory = useMemo(() => {
@@ -99,11 +129,15 @@ export default function ItemDetailPage() {
         return groups;
     }, [movements]);
 
-    if (itemsLoading) {
+    if (hasValidId && itemLoading) {
         return <Typography.Text type="secondary">Loading…</Typography.Text>;
     }
     if (!item) {
-        return <Typography.Text type="danger">Item not found.</Typography.Text>;
+        return (
+            <Typography.Text type="danger">
+                Item not found. Open it again from the <Link to="/inventory/items">Items list</Link>.
+            </Typography.Text>
+        );
     }
 
     const allMovements = movements?.data ?? [];

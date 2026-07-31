@@ -18,6 +18,7 @@ import {
     recordTransfer,
 } from '@/features/inventory/api';
 import type { StockBalance } from '@/features/inventory/types';
+import { formatDateTime } from '@/lib/datetime';
 import { itemLabel } from '@/lib/itemLabel';
 
 const movementTypeColor: Record<string, string> = {
@@ -457,7 +458,12 @@ export default function StockPage() {
                         <Typography.Paragraph type="secondary">
                             Every movement recorded against {historyRow.item.sku} at{' '}
                             {historyRow.warehouse.code}, most recent first. For the full picture of what
-                            each entry means, see <Link to="/inventory/items">the item's detail page</Link>.
+                            each entry means, see{' '}
+                            {/* This row's own item, not the generic list. */}
+                            <Link to={`/inventory/items/${historyRow.item.id}`}>
+                                {historyRow.item.sku}'s detail page
+                            </Link>
+                            .
                         </Typography.Paragraph>
                         <Table
                             rowKey="id"
@@ -470,7 +476,7 @@ export default function StockPage() {
                                 {
                                     title: 'Date',
                                     dataIndex: 'movement_date',
-                                    render: (d: string) => d.slice(0, 10),
+                                    render: (d: string) => formatDateTime(d),
                                 },
                                 {
                                     title: 'Type',

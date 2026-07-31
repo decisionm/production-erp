@@ -22,6 +22,18 @@ class WarehouseService
     }
 
     /**
+     * One warehouse by id, or null when it does not exist (or was soft
+     * deleted). The cross-module read other modules use instead of touching
+     * Inventory's models — e.g. Production resolving the configured factory
+     * day-bin warehouse, which must survive that warehouse being retired
+     * rather than blow up mid-shift.
+     */
+    public function find(int $id): ?Warehouse
+    {
+        return Warehouse::query()->find($id);
+    }
+
+    /**
      * Upsert Tally godowns as warehouses. Godowns can nest, so the same
      * self-referencing hierarchy resolution is used; a warehouse `code` (unique,
      * required) is generated from the name for new ones — staff can rename later.
