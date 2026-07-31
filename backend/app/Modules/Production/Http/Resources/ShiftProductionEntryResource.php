@@ -76,6 +76,11 @@ class ShiftProductionEntryResource extends JsonResource
             // two different blocks by design.
             'variance' => app(ShiftProductionEntryService::class)->consumptionVariance($this->resource),
             'metrics' => app(ShiftProductionEntryService::class)->productionMetrics($this->resource),
+            // What the consumed material actually cost — each line at the
+            // unit cost its own issue movement recorded, plus a total that
+            // is null (never a partial figure) when any line is unpriced.
+            // Null until the batch completes, like variance/metrics above.
+            'material_cost' => app(ShiftProductionEntryService::class)->materialCost($this->resource),
             'sync_error' => $this->when(
                 $this->status === ShiftProductionEntryStatus::Failed && $this->relationLoaded('tallySyncEntries'),
                 fn () => $this->tallySyncEntries->first()?->error_message,
