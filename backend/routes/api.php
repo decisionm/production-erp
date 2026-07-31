@@ -54,6 +54,7 @@ use App\Modules\Production\Http\Controllers\MasterbatchDosingController;
 use App\Modules\Production\Http\Controllers\MoldChangeLogController;
 use App\Modules\Production\Http\Controllers\MoldController;
 use App\Modules\Production\Http\Controllers\MrpController;
+use App\Modules\Production\Http\Controllers\PackingMaterialMappingController;
 use App\Modules\Production\Http\Controllers\PowerInterruptionLogController;
 use App\Modules\Production\Http\Controllers\ProductionConfigurationController;
 use App\Modules\Production\Http\Controllers\ProductionReportController;
@@ -400,6 +401,18 @@ Route::prefix('v1')->group(function () {
             Route::get('masterbatch-dosings', [MasterbatchDosingController::class, 'index']);
             Route::post('masterbatch-dosings', [MasterbatchDosingController::class, 'store']);
             Route::delete('masterbatch-dosings/{masterbatch_dosing}', [MasterbatchDosingController::class, 'destroy']);
+
+            // Packing materials — which Tally item each workbook spec string
+            // means ("170ML" -> "170 Ml Master Box"), plus the per-piece film
+            // weight and the metres of tape a box seals with. The deploy-time
+            // seed resolves what this instance's own catalogue can prove and
+            // leaves the rest empty on purpose; the POST is how the factory
+            // answers the rest — which cartons take Green tape, which of two
+            // identically-named trays a shift consumes. Same guard as
+            // masterbatch-dosings: .view reads, .manage writes.
+            Route::get('packing-material-mappings', [PackingMaterialMappingController::class, 'index']);
+            Route::post('packing-material-mappings', [PackingMaterialMappingController::class, 'store']);
+            Route::delete('packing-material-mappings/{packing_material_mapping}', [PackingMaterialMappingController::class, 'destroy']);
 
             Route::get('shift-production-entries/active', [ShiftProductionEntryController::class, 'active']);
             // Readiness + estimation for an intended run, before it starts.

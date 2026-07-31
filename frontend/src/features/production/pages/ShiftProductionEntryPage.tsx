@@ -55,6 +55,7 @@ import type {
     ShiftProductionEntryStatus,
     StandardPackaging,
     SuggestedMaterial,
+    SuggestedPackingMaterial,
     WorkCenter,
 } from '@/features/production/types';
 import { currentShift, justEndedShift, productionDateFor } from '@/features/production/shiftClock';
@@ -387,6 +388,190 @@ function readSuggestion(raw: SuggestedMaterial | null | undefined): FixedRowPick
         grams: grams !== null && Number.isFinite(grams) && grams > 0 ? grams : null,
         reason: (raw.reason ?? '').trim() || null,
     };
+}
+
+// ---- Packing consumption: reading the mapping off the wire ----------------
+// Which of the drawer's own counts a packing line is multiplied by. `null` is
+// a real value: a material whose mapping states no basis is shown, named, and
+// left for the supervisor to fill — never multiplied by a count nobody chose.
+type PackingBasis = 'carton' | 'tray' | 'pouch' | 'bottle';
+type PackingKind = 'carton' | 'tray' | 'film' | 'tape' | 'other';
+
+/** One packing material, normalised — the shape the drawer computes from. */
+type PackingSuggestion = {
+    /** Stable across a preview refetch: what a supervisor's edit is keyed to. */
+    key: string;
+    kind: PackingKind;
+    label: string;
+    itemId: number | null;
+    itemName: string | null;
+    /** The unit the quantity is counted in, as printed beside the box. */
+    unit: string;
+    basis: PackingBasis | null;
+    /** The word for the count in the arithmetic line — "cartons", "trays". */
+    basisWord: string | null;
+    /** How much one carton (or tray) takes. Null = the mapping does not say. */
+    perUnit: number | null;
+    /** Film only — grams a piece weighs, which turns pieces into kg. */
+    gramsPerPiece: number | null;
+    spec: string | null;
+    reason: string | null;
+};
+
+/** A wire figure that may arrive as a decimal string, as a number, or not at all. */
+function wireNum(value: string | number | null | undefined): number | null {
+    const n = typeof value === 'number' ? value : toNum(value ?? null);
+    return n !== null && Number.isFinite(n) ? n : null;
+}
+
+/** A wire string, trimmed, with the empty string read as "not sent". */
+function wireText(value: string | null | undefined): string | null {
+    const text = (value ?? '').trim();
+    return text === '' ? null : text;
+}
+
+/**
+ * WHICH MATERIAL a mapping row is, from the backend's own `kind` and from
+ * nothing else.
+ *
+ * The four values PackingMaterialMapping::KIND_* can take are `carton`,
+ * `tray`, `pouch_film` and `tape` — POUCH_FILM being the one that does not
+ * spell the way the drawer names it. They are matched as whole words rather
+ * than guessed at from the item's name: the kind decides which of the drawer's
+ * counts multiplies the line, so a row misread as a tray books a tray count
+ * against a carton, and an item name is not evidence of what the mapping meant.
+ * An unrecognised kind is "other" — shown, named, and multiplied by nothing.
+ */
+function packingKindOf(raw: SuggestedPackingMaterial): PackingKind {
+    switch ((wireText(raw.kind) ?? '').toLowerCase()) {
+        case 'carton':
+            return 'carton';
+        case 'tray':
+            return 'tray';
+        case 'pouch_film':
+            return 'film';
+        case 'tape':
+            return 'tape';
+        default:
+            return 'other';
+    }
+}
+
+/**
+ * The unit as the floor writes it. The mapping states units lowercase ("nos",
+ * "kg", "m"); the drawer's other quantity boxes are suffixed "Kg" and "g", and
+ * one row reading "24 nos" beside another reading "3.33 Kg" looks like two
+ * different screens. Anything unrecognised is printed exactly as sent.
+ */
+function packingUnitLabel(unit: string): string {
+    const key = unit.trim().toLowerCase();
+    if (key === 'nos' || key === 'no' || key === 'nos.') return 'Nos';
+    if (key === 'kg' || key === 'kgs' || key === 'kgs.') return 'Kg';
+    return unit.trim();
+}
+
+/**
+ * The stated basis, or the one this kind is counted against by settled fact.
+ *
+ * The backend states `per_carton` / `per_tray`; the fallbacks below cover only
+ * the case of a row whose kind is recognised and whose basis is absent, which
+ * is why they name the settled facts rather than repeat the wire's vocabulary.
+ */
+function packingBasisOf(raw: SuggestedPackingMaterial, kind: PackingKind): PackingBasis | null {
+    const stated = (wireText(raw.basis) ?? '').toLowerCase();
+    if (/carton|box/.test(stated)) return 'carton';
+    if (/tray/.test(stated)) return 'tray';
+    if (/pouch/.test(stated)) return 'pouch';
+    if (/bottle|piece|\bnos?\b/.test(stated)) return 'bottle';
+    if (kind === 'tray') return 'tray';
+    // Cartons, film and tape all count CARTONS: a carton is one per carton, and
+    // the owner settled 31 Jul that one film wraps a carton's contents and that
+    // tape is dosed in metres PER BOX.
+    if (kind === 'carton' || kind === 'film' || kind === 'tape') return 'carton';
+    return null;
+}
+
+/**
+ * The preview's packing mapping, read in ONE place — the same contract as
+ * `readSuggestion` above and for the same reason: an absent block is silence
+ * rather than an error, and every field the wire carries is read here and
+ * nowhere else, so a rename on the backend costs one line in one function.
+ *
+ * WHAT THE WIRE DOES NOT CARRY is worth naming, because an earlier draft of
+ * this function read for all of it: there is no per-row warehouse (the mapping
+ * has no such column — the supervisor names the packing store), no `label` (the
+ * kind supplies the heading), and no provenance object (an inferred spec is
+ * appended to `reason` by the backend's own inferredNote()).
+ *
+ * TAPE IS QUOTED IN METRES, deliberately, even though this factory's Tally
+ * books count "Packing Tape - Transparent" in Nos. Metres per box is the figure
+ * the factory actually gave (the 13-row table), and whether a Tally "No" is one
+ * metre or one strip is STILL OPEN with the owner. So the metre figure is shown
+ * and submitted WITH ITS UNIT STATED rather than silently relabelled Nos — a
+ * number is worth nothing if the screen and the voucher disagree about what it
+ * counts. If the mapping ever states a metre unit of its own, that wins.
+ */
+function readPackingSuggestions(raw: SuggestedPackingMaterial[] | null | undefined): PackingSuggestion[] {
+    if (!Array.isArray(raw)) return [];
+    return raw.map((row, index): PackingSuggestion => {
+        const kind = packingKindOf(row);
+        const basis = packingBasisOf(row, kind);
+        const itemId = row.item?.id ?? null;
+        const spec = wireText(row.spec);
+        const statedUnit = wireText(row.unit);
+        const factor = wireNum(row.factor);
+        // A FACTOR QUOTED IN GRAMS IS A WEIGHT, NOT A COUNT. The mapping states
+        // the film as grams per piece with the quantity in kg (factor 120,
+        // factor_unit "g", unit "kg" = 0.12 kg a carton), and reading that 120
+        // as pieces per carton would book a thousand times the film that went
+        // in. `factor_unit` is the only thing that tells the three factors
+        // apart, so it is read rather than assumed from the kind.
+        const factorIsGrams = /^g(ram)?s?$/i.test(wireText(row.factor_unit) ?? '');
+        const gramsPerPiece = factorIsGrams ? factor : null;
+        const perUnitStated = factorIsGrams ? null : factor;
+        return {
+            // The wire carries no row id — a suggestion is computed, not stored
+            // — so identity is the kind, the item and the spec. Stable across a
+            // refetch, and distinct between the carton row and the tape row
+            // that share a carton spec because the kind leads.
+            key: `${kind}:${itemId ?? 'unmapped'}:${spec ?? index}`,
+            kind,
+            label: { carton: 'Carton', tray: 'Tray', film: 'Film', tape: 'Tape', other: 'Packing material' }[kind],
+            itemId,
+            itemName: wireText(row.item?.name),
+            unit: packingUnitLabel(
+                kind === 'tape'
+                    ? (statedUnit && /^m(etre|eter)?s?$/i.test(statedUnit) ? statedUnit : 'm')
+                    : (statedUnit ?? (gramsPerPiece !== null ? 'kg' : 'nos')),
+            ),
+            basis,
+            basisWord: wireText(row.quantity_basis),
+            // One per container is what a carton and a tray are.
+            //
+            // A film is one per carton TOO — but only once its per-piece weight
+            // is known, and that is not pedantry. The mapping quotes film in
+            // KILOGRAMS off a grams figure, and its grams column is nullable:
+            // an unweighed film arrives as factor null with unit still "kg".
+            // Defaulting the count to 1 there would put 24 CARTONS in a
+            // kilogram box, read "24 Kg" on screen, and — being mapped and
+            // nonzero — issue 24 kg of film against a real warehouse. So a
+            // mass-quoted row with no weight behind it computes nothing and
+            // says so, exactly as an unmapped tape does.
+            //
+            // Tape has no default for the same reason: its metres come from the
+            // factory's own table through the mapping, and inventing one would
+            // invent a consumption figure nobody stated.
+            perUnit:
+                perUnitStated ??
+                (kind === 'carton' || kind === 'tray' || (kind === 'film' && gramsPerPiece !== null) ? 1 : null),
+            gramsPerPiece,
+            spec,
+            // The backend's sentence, which already carries the "spec inferred
+            // from row N" note when the workbook cell was filled rather than
+            // stated — there is no separate provenance object on this wire.
+            reason: wireText(row.reason),
+        };
+    });
 }
 
 /**
@@ -1594,6 +1779,12 @@ export default function ShiftProductionEntryPage() {
     const quantityProduced = completeForm.watch('quantity_produced');
     const quantityScrap = completeForm.watch('quantity_scrap');
     const goodBoxesWatch = completeForm.watch('no_of_box');
+    // Watched for the packing-consumption rows below. These two totals — not
+    // the packing_lines array — are what the drawer multiplies, because they
+    // are top-level setValue targets that recomputePackingTotals writes AND
+    // that a product with no packing lines still fills in by hand; anything
+    // keyed on packing_lines identity is stale by construction.
+    const traysWatch = completeForm.watch('no_of_trays');
     const pouchesWatch = completeForm.watch('no_of_pouches');
     const loosePiecesWatch = completeForm.watch('loose_pieces');
     const runningHoursWatch = completeForm.watch('running_hours');
@@ -1649,6 +1840,30 @@ export default function ShiftProductionEntryPage() {
     // figure back.
     const resinGramsTouchedRef = useRef(false);
     const mbGramsTouchedRef = useRef(false);
+
+    /**
+     * THE SAME "a supervisor's edit wins permanently" CONTRACT, for a list.
+     *
+     * The packing rows are not a fixed pair, so the latch cannot be a ref per
+     * box: it is a map from the MAPPING's identity to the figure the supervisor
+     * typed. Keyed on identity and never on array position, deliberately — the
+     * preview refetches on every keystroke that changes the run, and an
+     * index-keyed latch would re-attach an edit to whichever material happened
+     * to land in that slot next. A key PRESENT in the map is a touched row,
+     * even when its value is null (a supervisor who clears a box means "none",
+     * and the calculation must not creep back in).
+     *
+     * Cleared when the drawer opens on a new batch, exactly like the refs above.
+     */
+    const [packingEdits, setPackingEdits] = useState<Record<string, number | null>>({});
+    /**
+     * Where the packing materials came out of, asked ONLY in the setup gap
+     * where no factory day bin is configured — the same one surviving case the
+     * resin and masterbatch rows still ask in. With a bin configured this stays
+     * null and every packing line silently carries the bin, like every other
+     * line in this drawer.
+     */
+    const [packingSourceId, setPackingSourceId] = useState<number | null>(null);
 
     // ---- The factory day bin, on the completion form -----------------------
     // Every consumption line already carries its own warehouse, so issuing a
@@ -2522,6 +2737,131 @@ export default function ShiftProductionEntryPage() {
         rowBinMismatch(isMasterbatchItem, mbItemIdWatch),
     );
 
+    // ---- Packing consumption ----------------------------------------------
+    // The cartons, trays, film and tape this run ate, counted off the packing
+    // entry the supervisor has already made rather than asked for a second
+    // time. The mapping (which Tally item, how much per carton) is the
+    // backend's; the multiplying is done here so every figure moves with the
+    // keystroke, the same reason the resin and masterbatch kg are computed on
+    // this side of the wire.
+    // `suggested_packing` is the key the preview serves — the only one
+    // (BatchPreviewController, alongside suggested_resin/suggested_masterbatch,
+    // from PackingMaterialSuggestionService::forStandard).
+    const packingSuggestions = useMemo(
+        () => readPackingSuggestions(completePreview?.suggested_packing),
+        [completePreview],
+    );
+
+    /**
+     * One row per suggested packing material: the item (fixed, from the
+     * mapping), the quantity, its unit, and the sentence of arithmetic behind
+     * it. The DISPLAYED quantity and the SUBMITTED quantity are this one
+     * number — the screen and the voucher cannot disagree about what went in.
+     *
+     * A material with no mapping keeps its row and states its spec; it carries
+     * no quantity at all. Never a zero, which would assert the factory packs
+     * this product in nothing, and never anything that blocks completion.
+     */
+    const packingRows = useMemo(() => {
+        const round4 = (n: number) => Math.round(n * 10000) / 10000;
+        const counts: Record<PackingBasis, { count: number | null; word: string }> = {
+            carton: { count: goodBoxesWatch ?? null, word: 'cartons' },
+            tray: { count: traysWatch ?? null, word: 'trays' },
+            pouch: { count: pouchesWatch ?? null, word: 'pouches' },
+            bottle: { count: quantityProduced ?? null, word: 'bottles' },
+        };
+
+        return packingSuggestions.map((row) => {
+            const basis = row.basis === null ? null : counts[row.basis];
+            const count = basis?.count ?? null;
+            // The mapping's own word for the count when it sends one, so the
+            // sentence on screen reads in the factory's vocabulary.
+            const basisWord = row.basisWord ?? basis?.word ?? null;
+            // Pieces of the material first (cartons × per carton), then kg if
+            // the mapping states a per-piece weight — this factory's film is
+            // counted per carton but weighed into Tally in Kgs, and its item
+            // name carries the grams.
+            const pieces = count !== null && row.perUnit !== null ? count * row.perUnit : null;
+            // Nothing packed yet reads BLANK, not "0 cartons × 1 = 0 Nos". A
+            // drawer that opens on a seeded packing line has no_of_box = 0 for
+            // the first keystroke, and a screen full of zeros is this file's
+            // own anti-zero rule broken four rows at a time — no_of_trays
+            // already goes null rather than 0 for exactly this reason.
+            const calculated =
+                pieces === null || pieces === 0
+                    ? null
+                    : round4(row.gramsPerPiece !== null ? (pieces * row.gramsPerPiece) / 1000 : pieces);
+
+            const touched = Object.prototype.hasOwnProperty.call(packingEdits, row.key);
+            const quantity = touched ? packingEdits[row.key] : calculated;
+
+            // "3 cartons × 120 g = 0.36 Kg" for film, "24 cartons × 2.296 m =
+            // 55.104 m" for tape, "24 cartons × 1 = 24 Nos" for the carton
+            // itself. The per-unit figure carries its own unit wherever it is
+            // not a plain one-per-container count — a bare "2.296" beside a
+            // carton count is the sort of number a floor reads as pieces.
+            const perUnitPart = row.perUnit !== null && row.perUnit !== 1 ? ` × ${fmtNum(row.perUnit, 4)}` : '';
+            const perUnitText =
+                row.perUnit === 1 ? fmtNum(row.perUnit, 4) : `${fmtNum(row.perUnit, 4)} ${row.unit}`;
+            const arithmetic =
+                calculated === null || count === null || basisWord === null
+                    ? null
+                    : row.gramsPerPiece !== null
+                      ? `${count.toLocaleString('en-IN')} ${basisWord}${perUnitPart} × ${fmtNum(row.gramsPerPiece, 4)} g = ${fmtNum(calculated, 4)} ${row.unit}`
+                      : `${count.toLocaleString('en-IN')} ${basisWord} × ${perUnitText} = ${fmtNum(calculated, 4)} ${row.unit}`;
+
+            return {
+                ...row,
+                // The mapping names the item; the catalogue is only a fallback
+                // for a backend that sends the id without the name.
+                itemName: row.itemName ?? itemById(row.itemId)?.name ?? null,
+                calculated,
+                quantity,
+                touched,
+                arithmetic,
+                // WHERE THE PACKING MATERIAL IS ISSUED FROM — the store the
+                // supervisor named, and NOTHING ELSE. Deliberately not the
+                // factory day bin that every other line in this drawer falls
+                // back to, and deliberately not defaulted from the mapping,
+                // which carries no store of its own.
+                //
+                // The day bin is the kg resin/masterbatch bin; it holds no
+                // cartons, no tape and no film, so a carton issued from it
+                // would be booked against a location that never held one.
+                //
+                // AND A CONSUMPTION LINE IS NOT JUST A RECORD. completeBatch
+                // issues every line against its named warehouse through
+                // StockMovementService::recordIssue, whose decrementBalance
+                // THROWS InsufficientStockException the moment the balance is
+                // short (StockMovementService.php:320). So a named store that
+                // has never had cartons received into it WILL refuse the
+                // completion — packing lines carry exactly the same weight as
+                // the resin line and the "Other materials" rows, no more and no
+                // less. That is why the store is asked for rather than guessed:
+                // leaving it blank is a real answer that records nothing and
+                // cannot block, and naming one is a deliberate statement that
+                // this store holds the stock.
+                warehouseId: packingSourceId ?? null,
+            };
+        });
+    }, [
+        packingSuggestions,
+        packingEdits,
+        packingSourceId,
+        goodBoxesWatch,
+        traysWatch,
+        pouchesWatch,
+        quantityProduced,
+        itemById,
+    ]);
+
+    /**
+     * Is there a mapped packing row with nowhere to come out of? Then the
+     * section asks once, for all of them, and goes quiet the moment a store is
+     * named. Nothing else can answer it: the mapping carries no store.
+     */
+    const packingStoreNeeded = packingRows.some((row) => row.itemId !== null && row.warehouseId === null);
+
     const completeMutation = useMutation({
         mutationFn: (values: CompleteBatchFormValues) => {
             if (!completingEntry) throw new Error('No batch selected');
@@ -2562,6 +2902,29 @@ export default function ShiftProductionEntryPage() {
                 fieldValue ?? dayBinWarehouseId ?? null;
             const resinWarehouseId = rowWarehouseId(resin_warehouse_id);
             const mbWarehouseId = rowWarehouseId(mb_warehouse_id);
+            // The packing materials, on the SAME wire as every other
+            // consumption line — the carton, the tray, the film, the tape.
+            // Sent exactly as the row shows them: the number the supervisor
+            // read on screen, in the unit stated beside it.
+            //
+            // Three kinds of row are deliberately left out rather than sent as
+            // zero: one with no mapped item (nobody has decided which Tally
+            // item that spec is), one whose quantity worked out to nothing or
+            // was cleared, and one with no source to issue from. A zero line
+            // would assert a material was issued and came to nothing.
+            const packingConsumptions = packingRows
+                .filter(
+                    (row) =>
+                        row.itemId !== null &&
+                        row.warehouseId !== null &&
+                        row.quantity !== null &&
+                        row.quantity > 0,
+                )
+                .map((row) => ({
+                    item_id: row.itemId as number,
+                    warehouse_id: row.warehouseId as number,
+                    quantity_issued_kg: row.quantity as number,
+                }));
             const consumptions = [
                 ...(resin_item_id && resinWarehouseId && resin_kg && resin_kg > 0
                     ? [{ item_id: resin_item_id, warehouse_id: resinWarehouseId, quantity_issued_kg: resin_kg }]
@@ -2569,6 +2932,7 @@ export default function ShiftProductionEntryPage() {
                 ...(mb_item_id && mbWarehouseId && mb_kg && mb_kg > 0
                     ? [{ item_id: mb_item_id, warehouse_id: mbWarehouseId, quantity_issued_kg: mb_kg }]
                     : []),
+                ...packingConsumptions,
                 ...(material_consumptions ?? []),
             ];
             // Only rows the supervisor actually weighed. A blank closing
@@ -2637,6 +3001,10 @@ export default function ShiftProductionEntryPage() {
             invalidate();
             setCompletingEntry(null);
             completeForm.reset({ material_consumptions: [], scraps: [], packing_lines: [], downtime_events: [] });
+            // The packing edits belong to the batch that just went in — the
+            // next one recalculates from its own cartons and trays.
+            setPackingEdits({});
+            setPackingSourceId(null);
         },
         onError: (error: any) => {
             const body = error?.response?.data;
@@ -3027,6 +3395,12 @@ export default function ShiftProductionEntryPage() {
                             mbKgWeighedRef.current = false;
                             resinGramsTouchedRef.current = false;
                             mbGramsTouchedRef.current = false;
+                            // And the packing rows: a fresh batch recalculates
+                            // every carton, tray, film and tape figure from its
+                            // own packing entry, with no edit carried over from
+                            // the batch before it.
+                            setPackingEdits({});
+                            setPackingSourceId(null);
                             // Forget which masterbatch the LAST batch ended on,
                             // so this batch's pre-selection counts as a first
                             // sighting and blanks nothing.
@@ -4868,6 +5242,147 @@ export default function ShiftProductionEntryPage() {
                                 )}
                                 <Col xs={24}>{dayBinHint(mbItemIdWatch, mbKgWatch, completeForm.watch('mb_warehouse_id'))}</Col>
                             </Row>
+                        </>
+                    )}
+
+                    {/* PACKING CONSUMPTION — the carton, the tray, the film and
+                        the tape, counted off the packing entry already made
+                        above rather than typed a second time. One row per
+                        material: the item is FIXED by the factory's mapping
+                        (this is not a place to pick a different carton), the
+                        quantity is calculated and editable, and the unit is
+                        stated because these are not all kilograms.
+
+                        The whole section is absent until the mapping serves a
+                        row — a heading over nothing tells the floor a figure is
+                        missing when in fact none was ever due. */}
+                    {packingRows.length > 0 && (
+                        <>
+                            <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 12 }}>
+                                Packing consumption
+                            </Typography.Text>
+                            {/* Asked ONCE for the whole section, and only while
+                                a mapped row still has nowhere to come out of.
+                                Cartons, tape and film do not pass through the
+                                kg day bin the other rows carry silently, so
+                                this is a real question, asked once, not four
+                                times — and the sentence beside it says what
+                                naming a store actually does, because it issues
+                                stock and a short store refuses the completion
+                                (StockMovementService::decrementBalance). */}
+                            {packingStoreNeeded && (
+                                <Row gutter={[8, 8]} align="middle" style={{ marginTop: 4 }}>
+                                    <Col xs={24} sm={10}>
+                                        <Select
+                                            size="large"
+                                            value={packingSourceId ?? undefined}
+                                            onChange={(value: number) => setPackingSourceId(value ?? null)}
+                                            options={warehouseOptions}
+                                            showSearch
+                                            optionFilterProp="label"
+                                            allowClear
+                                            style={{ width: '100%' }}
+                                            placeholder="Packing store"
+                                        />
+                                    </Col>
+                                    <Col xs={24} sm={14}>
+                                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                            Which store the packing materials came out of. The figures below are counted
+                                            either way; until a store is named they are shown but not recorded. Naming a
+                                            store issues that stock for real — if it does not hold enough, the completion
+                                            is refused, the same as any other material line.
+                                        </Typography.Text>
+                                    </Col>
+                                </Row>
+                            )}
+                            {packingRows.map((row) => {
+                                // No mapping — one quiet line naming the spec.
+                                // Never a zero quantity against an item nobody
+                                // has chosen, and never a reason not to
+                                // complete the batch.
+                                if (row.itemId === null) {
+                                    return (
+                                        <Typography.Text
+                                            key={row.key}
+                                            type="secondary"
+                                            style={{ display: 'block', fontSize: 12, marginTop: 6 }}
+                                        >
+                                            {/* The mapping's own sentence when
+                                                it sends one — it already names
+                                                the spec and says what is
+                                                missing, and saying it twice in
+                                                two wordings reads as two
+                                                different problems. */}
+                                            {row.reason ??
+                                                `${row.label}${row.spec ? ` “${row.spec}”` : ''} — no packing item mapped yet, so nothing is counted for it.`}
+                                        </Typography.Text>
+                                    );
+                                }
+
+                                // The one grey line under the row: the
+                                // arithmetic, then the mapping's own sentence —
+                                // which is also where an inferred spec is
+                                // declared, the backend having appended "spec
+                                // inferred from row N" to it rather than sending
+                                // a provenance object of its own.
+                                const note = [
+                                    row.arithmetic ??
+                                        (row.perUnit === null
+                                            ? `no per-${row.basis ?? 'carton'} figure mapped yet — enter what went in`
+                                            : null),
+                                    // The mapping's sentence already names the
+                                    // spec and carries the "spec inferred from
+                                    // row N" note, so the spec is only spelled
+                                    // out here when nothing else says it.
+                                    row.reason ?? (row.spec ? `${row.label.toLowerCase()} spec “${row.spec}”` : null),
+                                    // Said out loud on the row rather than left
+                                    // for someone to notice on the voucher: the
+                                    // factory doses tape in metres per box, and
+                                    // whether a Tally tape "No" is one metre or
+                                    // one strip is still the owner's to answer.
+                                    row.kind === 'tape' ? 'metres, as the factory doses it — the Tally piece conversion is still open' : null,
+                                    row.warehouseId === null ? 'not recorded until a packing store is named above' : null,
+                                    row.touched ? 'your figure, kept' : null,
+                                ]
+                                    .filter((part): part is string => !!part)
+                                    .join(' — ');
+
+                                return (
+                                    <Row key={row.key} gutter={[8, 8]} align="middle" style={{ marginTop: 4 }}>
+                                        <Col xs={24} sm={14}>
+                                            <Typography.Text>{row.itemName ?? row.label}</Typography.Text>
+                                            <Typography.Text type="secondary" style={{ fontSize: 12, marginLeft: 6 }}>
+                                                {row.label}
+                                            </Typography.Text>
+                                        </Col>
+                                        <Col xs={12} sm={10}>
+                                            <InputNumber
+                                                size="large"
+                                                min={0}
+                                                value={row.quantity}
+                                                suffix={row.unit}
+                                                placeholder={row.unit}
+                                                style={{ width: '100%' }}
+                                                onChange={(value) =>
+                                                    // A supervisor's figure owns
+                                                    // this row for the rest of the
+                                                    // batch — including a cleared
+                                                    // box, which means "none went
+                                                    // in", not "recalculate".
+                                                    setPackingEdits((edits) => ({ ...edits, [row.key]: value }))
+                                                }
+                                            />
+                                        </Col>
+                                        {note && (
+                                            <Col xs={24}>
+                                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                                    {note}
+                                                </Typography.Text>
+                                            </Col>
+                                        )}
+                                    </Row>
+                                );
+                            })}
                         </>
                     )}
 
