@@ -362,6 +362,14 @@ export default function AppLayout({ children }: PropsWithChildren) {
                             }}
                         >
                             Powered by Balin
+                            {/* The build stamp answers "which version am I on?"
+                                out loud. The app is an installed PWA that keeps
+                                serving its saved copy until the background
+                                update lands, so after every deploy the owner
+                                and the tooling were reduced to guessing about
+                                caches. Deliberately beside the attribution:
+                                small, always visible, never a dialog. */}
+                            <span style={{ opacity: 0.7 }}> · {__BUILD_STAMP__}</span>
                         </Typography.Text>
                     )}
                 </div>

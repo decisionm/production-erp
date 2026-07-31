@@ -1031,10 +1031,26 @@ class ShiftProductionEntryService
 
         // Bands are ruled here so every client colours the same judgement;
         // thresholds live in config/production.php, never in code.
+        //
+        // 'over_standard' is tested FIRST and outranks ok/watch/investigate:
+        // a run above its own standard would otherwise show as the greenest
+        // possible 'ok', which is the opposite of the truth. Owner, 30-Jul:
+        // "the efficiency should not go more than 100%. if a machine can
+        // produce a certain [amount] of material how can it be more than
+        // that". Over 100% means an input is wrong — produced count, running
+        // hours, cavities, or a standard cycle time set slower than the
+        // machine really runs (correctable on Product Standards / Machine
+        // Exceptions). It is a WARNING, never a gate: blocks_approval below
+        // keys only off unaccounted_blocking_kg and must stay that way — the
+        // pieces were genuinely made and the shift must still be recordable.
+        //
+        // Strict `>` so exactly 100.0 is 'ok', not over: the boundary is the
+        // standard being met, not beaten.
         $efficiencyBand = null;
         if ($efficiency !== null) {
-            $efficiencyBand = $efficiency >= $tolerances['efficiency_ok'] ? 'ok'
-                : ($efficiency >= $tolerances['efficiency_watch'] ? 'watch' : 'investigate');
+            $efficiencyBand = $efficiency > $tolerances['efficiency_over'] ? 'over_standard'
+                : ($efficiency >= $tolerances['efficiency_ok'] ? 'ok'
+                : ($efficiency >= $tolerances['efficiency_watch'] ? 'watch' : 'investigate'));
         }
 
         $unaccountedBand = null;

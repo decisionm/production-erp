@@ -28,6 +28,18 @@ const BAND_TAG: Record<string, ReactElement> = {
     ok: <Tag color="green">OK</Tag>,
     watch: <Tag color="orange">Watch</Tag>,
     investigate: <Tag color="red">Investigate</Tag>,
+    // Efficiency above the standard the run was measured against — not a grade
+    // but a query: the produced count, hours or cavities are wrong, or the
+    // standard cycle time is set slower than the machine really runs. Red, like
+    // Investigate, because that is what it asks for. Without this row an
+    // over-standard entry renders NO tag here (bandTag returns null for an
+    // unmapped band) — history's loudest rows would go quietest.
+    //
+    // The label names no percentage on purpose: the boundary is deployment
+    // config (production.tolerances.efficiency_over, 100 by default) and the
+    // backend has already applied it to produce this band, so "over standard"
+    // stays true even if a factory later allows a measurement margin.
+    over_standard: <Tag color="red">Over standard</Tag>,
 };
 
 const bandTag = (band: string | null | undefined): ReactElement | null => (band ? (BAND_TAG[band] ?? null) : null);

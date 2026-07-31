@@ -158,9 +158,22 @@ export interface ProductionMetrics {
     actual_pouches: number | null;
     /** = quantity_produced (box-first: frontend derives it, backend just reports). */
     actual_pieces: string | null;
-    /** actual_boxes / expected_boxes × 100 rounded 1dp — null when expected_boxes null/0. */
+    /**
+     * actual_pieces / expected_pieces × 100 rounded 1dp — null when expected
+     * pieces is null/0. CAN EXCEED 100: the ratio is honest, so a machine that
+     * beat the standard cycle time it was measured against reads over 100 and
+     * the screens say so rather than clamping it (see efficiency_band).
+     */
     efficiency_pct: number | null;
-    efficiency_band?: 'ok' | 'watch' | 'investigate' | null;
+    /**
+     * `over_standard` is the band for a figure above 100% — not a better grade
+     * than `ok` but a signal that a number is wrong: the produced count, the
+     * hours or the cavities, or a standard cycle time set slower than the
+     * machine really runs. Optional and possibly absent/legacy, which is why
+     * every screen decides "over standard" from the percentage itself and uses
+     * the band only as a second opinion.
+     */
+    efficiency_band?: 'ok' | 'watch' | 'investigate' | 'over_standard' | null;
     /** quantity_rejection_kg (pieces × g / 1000). */
     rejection_kg_production: string | null;
     /** qc_rejection_kg. */
@@ -671,7 +684,8 @@ export interface ProductionReportRow {
     lumps_kg: string;
     /** actual_boxes / expected_boxes × 100 — formula dictionary row 24. */
     efficiency_pct: number | null;
-    efficiency_band?: 'ok' | 'watch' | 'investigate' | null;
+    /** Same band set as ProductionMetrics, `over_standard` included. */
+    efficiency_band?: 'ok' | 'watch' | 'investigate' | 'over_standard' | null;
 }
 
 export interface ProductionReportTotals {
