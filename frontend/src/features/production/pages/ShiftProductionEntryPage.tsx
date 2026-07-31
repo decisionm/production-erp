@@ -12,7 +12,6 @@ import { useAuthStore } from '@/features/auth/store';
 import { listAllEmployees } from '@/features/hrms/api';
 import { listAllItems, listAllWarehouses } from '@/features/inventory/api';
 import type { Item } from '@/features/inventory/types';
-import DayBinDrawer from '@/features/production/components/DayBinDrawer';
 import HandoverModal from '@/features/production/components/HandoverModal';
 import {
     closeDowntimeLog,
@@ -26,6 +25,7 @@ import {
     getFactoryDayBin,
     listDowntimeReasons,
     listMachineDowntimeLogs,
+    listMasterbatchDosings,
     listAllMolds,
     listMoldChangeLogs,
     listPowerInterruptionLogs,
@@ -652,10 +652,11 @@ export default function ShiftProductionEntryPage() {
     const [loadBagError, setLoadBagError] = useState<{ text: string; needsWarehouse: boolean } | null>(null);
     const loadBagInputRef = useRef<InputRef>(null);
     const currentUser = useAuthStore((s) => s.user);
-    // The central day-bin view. A plain boolean, not a machine + entry: there
-    // is ONE bin feeding all the machines, so the drawer has no per-machine
-    // target to carry (it reads GET /production/factory-day-bin).
-    const [dayBinOpen, setDayBinOpen] = useState(false);
+    // There is no per-machine materials view here any more. One bin feeds the
+    // whole factory, so it has ONE page — /production/day-bin — plus Load
+    // Material at the top of this screen. A button on each of ten machine
+    // cards opening the identical factory-wide drawer was ten doors to one
+    // room, and it implied the machine had material of its own.
     // Phase 6 traceability targets — only ever set from UI that itself only
     // renders when settings.traceability_enabled is true.
     const [handoverEntry, setHandoverEntry] = useState<ShiftProductionEntry | null>(null);
@@ -1367,16 +1368,13 @@ export default function ShiftProductionEntryPage() {
             setStartAnyway(false);
             setShortageReason('');
             // Loading material is deliberately NOT part of Start Batch. Bags
-            // are scanned into the bins once, for the whole bay, on the PET
-            // Resin Bag Loading page — a per-batch material form here asked the
+            // are scanned into the ONE factory day bin from the Load Material
+            // button on this screen — a per-batch material form here asked the
             // same question a second time and let the two disagree.
             //
-            // The "Materials" button on the running card stays, and it is now
-            // genuinely what this comment always claimed: the balance plus
-            // returns, with no load control. It kept a Load mode until the
-            // duplicate was removed from DayBinDrawer, so this note described
-            // an intention rather than the code — worth stating, because the
-            // next person to read it will rely on it.
+            // Nor is there a per-machine materials view any more: the bin's
+            // balance, its loads and its returns are all on /production/day-bin,
+            // the one page for the one bin.
         },
         onError: (error: any) => {
             const body = error?.response?.data;
@@ -1469,6 +1467,12 @@ export default function ShiftProductionEntryPage() {
     // for the batch (both reset when the drawer opens for the next one).
     const resinKgTouchedRef = useRef(false);
     const resinKgWeighedRef = useRef(false);
+    // The same PAIR for masterbatch, now that it has a dosing suggestion.
+    // Both are needed: applyDayBinConsumption also writes mb_kg from a real
+    // weighment, and without the weighed latch the next keystroke on the
+    // bottle count would overwrite a figure that came off the scale.
+    const mbKgTouchedRef = useRef(false);
+    const mbKgWeighedRef = useRef(false);
 
     // ---- The factory day bin, on the completion form -----------------------
     // Every consumption line already carries its own warehouse, so issuing a
@@ -1491,12 +1495,54 @@ export default function ShiftProductionEntryPage() {
         [dayBinBalances],
     );
 
-    // Default every consumption line's warehouse to the day bin — but only
-    // for a material the bin actually HOLDS. Defaulting to an empty bin would
-    // turn Complete Batch into an insufficient-stock refusal, and a blocked
-    // completion is never an acceptable price for a tidier default: those
-    // lines stay exactly as they are today (blank, supervisor picks).
-    // Never overwrites a value already there, so a manual pick stands.
+    /**
+     * Can the day bin be this material's source? ONE predicate, used by both
+     * the silent default below and the "From" picker's visibility in the
+     * drawer — they MUST agree. If the default used `held > 0` while the
+     * picker appeared only on `held === null`, a material with a 0.0000
+     * balance row would get neither a value nor a field: Complete Batch would
+     * fail validation on a warehouse nobody can see or set, which reads as a
+     * button that does nothing.
+     */
+    const binCanSupply = useCallback(
+        (itemId: number | null | undefined): boolean =>
+            dayBinWarehouseId !== null && itemId != null && (dayBinKgFor(itemId) ?? 0) > 0,
+        [dayBinWarehouseId, dayBinKgFor],
+    );
+
+    /**
+     * Does this row still have to ASK where the material came from?
+     *
+     * Normally no — the source was already recorded when the bag was loaded
+     * into the factory day bin, so asking again at completion asks a question
+     * that already has an answer (the owner's point). The picker comes back
+     * only when the bin genuinely cannot be the answer:
+     *
+     *  - no day-bin warehouse is named yet → every row asks, exactly as before
+     *    the bin existed (never a blocked completion for a setup gap), or
+     *  - the bin holds none of this material → it did NOT come through the
+     *    bin, so the premise does not hold for this row and asking is correct.
+     *    Issuing from an empty bin instead would drive it negative and the
+     *    backend would refuse the whole completion.
+     *
+     * Deliberately keyed on the bin balance, never on the typed kg — the
+     * field must not appear and disappear as digits are entered. A row with
+     * no item yet asks nothing: there is no material to place.
+     */
+    const askSourceFor = useCallback(
+        (itemId: number | null | undefined): boolean =>
+            dayBinWarehouseId === null ? true : itemId != null && !binCanSupply(itemId),
+        [dayBinWarehouseId, binCanSupply],
+    );
+    const askResinSource = askSourceFor(resinItemIdWatch);
+    const askMbSource = askSourceFor(mbItemIdWatch);
+
+    // Supply the day-bin warehouse silently for every row it can answer for,
+    // so nothing is asked. Never overwrites a value already there, so a pick
+    // made through the fallback picker stands. Written into the FORM FIELD,
+    // not just into the submit payload: the shortfall warning below compares
+    // the watched field to the bin, and the resolver requires a warehouse per
+    // line with a quantity.
     useEffect(() => {
         if (dayBinWarehouseId === null || !completingEntry) return;
 
@@ -1504,8 +1550,7 @@ export default function ShiftProductionEntryPage() {
             field: 'resin_warehouse_id' | 'mb_warehouse_id' | `material_consumptions.${number}.warehouse_id`,
             itemId: number | null | undefined,
         ) => {
-            const held = dayBinKgFor(itemId);
-            if (held === null || held <= 0) return;
+            if (!binCanSupply(itemId)) return;
             if (completeForm.getValues(field) != null) return;
             completeForm.setValue(field, dayBinWarehouseId);
         };
@@ -1515,7 +1560,7 @@ export default function ShiftProductionEntryPage() {
         (consumptionsWatch ?? []).forEach((line, index) => {
             applyDefault(`material_consumptions.${index}.warehouse_id`, line?.item_id);
         });
-    }, [dayBinWarehouseId, dayBinKgFor, completingEntry, resinItemIdWatch, mbItemIdWatch, consumptionsWatch, completeForm]);
+    }, [dayBinWarehouseId, binCanSupply, completingEntry, resinItemIdWatch, mbItemIdWatch, consumptionsWatch, completeForm]);
 
     // With exactly ONE candidate in a fixed-row picker there is nothing to
     // choose — pre-pick it, only while the field is untouched and empty
@@ -1540,18 +1585,33 @@ export default function ShiftProductionEntryPage() {
      * the balance fall as batches complete — plus a plain warning when they
      * are about to issue more than the bin holds (the backend would refuse
      * it). Never changes the typed figure.
+     *
+     * When the bin holds NONE of the material this line is the reason its
+     * "From" picker is still on screen. Without that sentence the picker reads
+     * as the source question that was just taken away, with no way to tell it
+     * is a different question about a different material.
      */
     const dayBinHint = (itemId: number | null | undefined, typedKg: number | null | undefined, warehouseId: number | null | undefined): ReactNode => {
         if (dayBinWarehouseId === null || itemId === null || itemId === undefined) return null;
         const held = dayBinKgFor(itemId);
-        if (held === null) return null;
+
+        if (held === null || held <= 0) {
+            const material = items?.data.find((candidate) => candidate.id === itemId);
+            return (
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    The day bin has no {material ? material.name : 'stock of this material'} — say where this one came
+                    from, or load it in <Link to="/production/day-bin">Day Bin (factory)</Link>.
+                </Typography.Text>
+            );
+        }
+
         const issuingFromBin = warehouseId === dayBinWarehouseId;
         const short = issuingFromBin && typedKg != null && typedKg > held;
 
         return (
             <Typography.Text type={short ? 'danger' : 'secondary'} style={{ fontSize: 12 }}>
                 Day bin: {fmtNum(held, 4)}
-                {short && ' — more than the day bin holds; load it or pick another location'}
+                {short && ' — more than the day bin holds; load it in Day Bin (factory) before completing'}
             </Typography.Text>
         );
     };
@@ -1817,8 +1877,10 @@ export default function ShiftProductionEntryPage() {
             if (completeForm.getFieldState(kgField).isDirty) return;
             completeForm.setValue(kgField, Math.round(consumed * 10000) / 10000);
             // A weighed day-bin figure outranks the calculated estimate —
-            // latch so the live resin auto-calculation stops overwriting it.
+            // latch so the live auto-calculation stops overwriting it. Both
+            // rows have an estimate now, so both need the latch.
             if (target === 'resin') resinKgWeighedRef.current = true;
+            else mbKgWeighedRef.current = true;
         },
         [completeForm],
     );
@@ -1934,8 +1996,6 @@ export default function ShiftProductionEntryPage() {
     // rejection kg + lumps kg, all from bottle weight. Prefills LIVE as the
     // quantities are typed; a manual edit or a weighed day-bin figure takes
     // the field over permanently for this batch (the two latches above).
-    // Masterbatch is deliberately NEVER estimated — actual weighed entry
-    // only (owner decision pending the factory dosing answer).
     const resinCalcKg =
         results && results.goodKg !== null
             ? Math.round((results.goodKg + (results.rejProdKg ?? 0) + results.lumpsKg) * 10000) / 10000
@@ -1945,6 +2005,66 @@ export default function ShiftProductionEntryPage() {
         if (resinKgTouchedRef.current || resinKgWeighedRef.current) return;
         completeForm.setValue('resin_kg', resinCalcKg);
     }, [resinCalcKg, completingEntry, completeForm]);
+
+    // ---- Masterbatch dosing ------------------------------------------------
+    // The factory's own figure, in GRAMS PER BOTTLE ("for master amber 0.25 is
+    // the value per bottle"), read from the dosing master for THIS masterbatch
+    // and THIS product. Asked only once the masterbatch row names a material —
+    // a dosing is a property of the colour that gets weighed, so without one
+    // there is no question to ask.
+    //
+    // An empty answer is a real answer: no dosing set → no prefill and no
+    // caption. Silence, not a zero: a zero would tell the floor the factory
+    // has said this colour needs no masterbatch, and nobody has said that.
+    const { data: mbDosings } = useQuery({
+        queryKey: ['production', 'masterbatch-dosings', completingEntry?.item.id ?? null, mbItemIdWatch ?? null],
+        queryFn: () =>
+            listMasterbatchDosings({ item_id: completingEntry!.item.id, masterbatch_item_id: mbItemIdWatch! }),
+        enabled: completingEntry !== null && mbItemIdWatch != null,
+        // A login without production.view 403s — a normal answer, not an error
+        // worth retrying.
+        retry: false,
+        // Deliberately SHORT for master data (same 60s as the day-bin read):
+        // with a long window, one failed or forbidden read would leave the row
+        // with no prefill and no caption for that whole window, and the
+        // supervisor would have no way to tell that from "no dosing is set".
+        staleTime: 60 * 1000,
+    });
+    /** Grams per bottle in force here, or null for "no dosing set". */
+    const mbDosingGrams = useMemo(() => {
+        const row = mbDosings?.[0];
+        if (!row) return null;
+        const grams = Number(row.grams_per_bottle);
+        // A non-positive or unreadable master figure is not a dosing — the
+        // backend refuses to compute a kg from one, and neither does this.
+        return Number.isFinite(grams) && grams > 0 ? grams : null;
+    }, [mbDosings]);
+
+    // kg = bottles × grams ÷ 1000 — the factory's arithmetic, live off the
+    // bottle count exactly as the resin figure is. ONE term: good bottles.
+    // Rejected bottles are deliberately NOT added, unlike resin, because the
+    // factory stated the per-bottle dosing and nothing else; adding a term
+    // would be inventing arithmetic nobody gave us.
+    //
+    // Rounded HALF-UP at 4dp to agree with ProductionCalculationEngine::
+    // masterbatchKg, which is the authority (13,333 × 0.25 g = 3.33325 kg →
+    // 3.3333, not the 3.3332 a truncation would give). Computed here rather
+    // than read from the endpoint's own `suggested_kg` for one reason: this
+    // field has to move with every keystroke on the bottle count, and a
+    // server round trip per digit would lag the figure behind the typing —
+    // the same reason every other live figure in this drawer is a frontend
+    // duplicate of a backend formula.
+    const mbDosingKg =
+        mbDosingGrams !== null && quantityProduced !== null && quantityProduced !== undefined && quantityProduced > 0
+            ? Math.round(((quantityProduced * mbDosingGrams) / 1000) * 10000) / 10000
+            : null;
+    useEffect(() => {
+        if (!completingEntry || mbDosingKg === null) return;
+        // A supervisor-typed figure or a weighed day-bin figure owns the field
+        // for the rest of this batch — same contract as resin.
+        if (mbKgTouchedRef.current || mbKgWeighedRef.current) return;
+        completeForm.setValue('mb_kg', mbDosingKg);
+    }, [mbDosingKg, completingEntry, completeForm]);
 
     const completeMutation = useMutation({
         mutationFn: (values: CompleteBatchFormValues) => {
@@ -2425,11 +2545,14 @@ export default function ShiftProductionEntryPage() {
                             setFinishingMoldChangeLog(moldChange);
                         } else if (running) {
                             setCompletingEntry(running);
-                            // A fresh batch gets a fresh resin field: the
-                            // auto-calculation runs again until this batch's
-                            // own manual edit or weighed figure latches it.
+                            // A fresh batch gets fresh resin and masterbatch
+                            // fields: the auto-calculations run again until this
+                            // batch's own manual edit or weighed figure latches
+                            // them.
                             resinKgTouchedRef.current = false;
                             resinKgWeighedRef.current = false;
+                            mbKgTouchedRef.current = false;
+                            mbKgWeighedRef.current = false;
                             // Prefill Nos/Tray and Nos/Box from the item's packing
                             // master when set — for items without standards both are
                             // undefined and this reset is identical to before.
@@ -2544,20 +2667,10 @@ export default function ShiftProductionEntryPage() {
                                         {/* Phase 6 traceability actions — invisible unless the
                                             backend flag is on, so with it off this card is
                                             exactly the pre-traceability UI. */}
-                                        {/* Opens the CENTRAL bin, not "this machine's bin" —
-                                            one bin feeds every machine, so no machine or
-                                            batch is handed to the drawer. */}
-                                        {running && traceabilityEnabled && (
-                                            <Button
-                                                block
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setDayBinOpen(true);
-                                                }}
-                                            >
-                                                Materials
-                                            </Button>
-                                        )}
+                                        {/* No "Materials" button: the bin is factory-wide, so
+                                            it lives on its own page (/production/day-bin) and
+                                            is loaded from the one Load Material button below
+                                            the machine grid. */}
                                         {running && traceabilityEnabled && (
                                             <Button
                                                 block
@@ -3905,20 +4018,20 @@ export default function ShiftProductionEntryPage() {
                         consumes — pickers scoped to resins / masterbatches so
                         the right item is one tap, not a 642-item search. Rows
                         without a quantity are simply not sent. */}
-                    {/* Where consumption comes OUT of. With a factory day bin
-                        configured the rows below default to it, so completing
-                        the batch reduces the bin automatically; without one,
-                        one plain line says so and nothing changes. */}
+                    {/* Where consumption comes OUT of — stated, not asked. The
+                        source was already recorded when the bag was loaded into
+                        the factory day bin, so these rows carry it silently and
+                        completing the batch reduces the bin. ONE line says
+                        which place that is, with somewhere to change it. */}
                     {dayBinWarehouseId === null ? (
                         <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
-                            No factory day bin chosen — pick the "From" warehouse yourself, as today.{' '}
-                            <Link to="/production/day-bin">Choose one in Day Bin (factory)</Link>.
+                            No factory day bin chosen yet, so each line still asks where its material came from.{' '}
+                            <Link to="/production/day-bin">Choose one in Day Bin (factory)</Link> and it stops asking.
                         </Typography.Text>
                     ) : (
                         <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
-                            "From" is where the material came out of. It is already set to the day bin for you —
-                            change it only if this material came straight from the store.{' '}
-                            <Link to="/production/day-bin">Open Day Bin (factory)</Link>
+                            Issued from the factory day bin — {factoryDayBin?.warehouse?.name ?? 'the day bin'}.{' '}
+                            <Link to="/production/day-bin">Change it in Day Bin (factory)</Link>.
                         </Typography.Text>
                     )}
 
@@ -3941,22 +4054,27 @@ export default function ShiftProductionEntryPage() {
                                 />
                             </Form.Item>
                         </Col>
-                        <Col xs={12} sm={7}>
-                            <Form.Item
-                                style={{ marginBottom: 0 }}
-                                validateStatus={completeForm.formState.errors.resin_warehouse_id ? 'error' : ''}
-                                help={completeForm.formState.errors.resin_warehouse_id?.message}
-                            >
-                                <Controller
-                                    name="resin_warehouse_id"
-                                    control={completeForm.control}
-                                    render={({ field }) => (
-                                        <Select {...field} size="large" options={warehouseOptions} showSearch optionFilterProp="label" allowClear style={{ width: '100%' }} placeholder="From" />
-                                    )}
-                                />
-                            </Form.Item>
-                        </Col>
-                        <Col xs={12} sm={7}>
+                        {/* No "From" here in the normal case: the day bin already
+                            knows. It reappears only for a material the bin holds
+                            none of — see askSourceFor. */}
+                        {askResinSource && (
+                            <Col xs={12} sm={7}>
+                                <Form.Item
+                                    style={{ marginBottom: 0 }}
+                                    validateStatus={completeForm.formState.errors.resin_warehouse_id ? 'error' : ''}
+                                    help={completeForm.formState.errors.resin_warehouse_id?.message}
+                                >
+                                    <Controller
+                                        name="resin_warehouse_id"
+                                        control={completeForm.control}
+                                        render={({ field }) => (
+                                            <Select {...field} size="large" options={warehouseOptions} showSearch optionFilterProp="label" allowClear style={{ width: '100%' }} placeholder="From" />
+                                        )}
+                                    />
+                                </Form.Item>
+                            </Col>
+                        )}
+                        <Col xs={askResinSource ? 12 : 24} sm={askResinSource ? 7 : 14}>
                             <Controller
                                 name="resin_kg"
                                 control={completeForm.control}
@@ -4008,28 +4126,53 @@ export default function ShiftProductionEntryPage() {
                                 />
                             </Form.Item>
                         </Col>
-                        <Col xs={12} sm={7}>
-                            <Form.Item
-                                style={{ marginBottom: 0 }}
-                                validateStatus={completeForm.formState.errors.mb_warehouse_id ? 'error' : ''}
-                                help={completeForm.formState.errors.mb_warehouse_id?.message}
-                            >
-                                <Controller
-                                    name="mb_warehouse_id"
-                                    control={completeForm.control}
-                                    render={({ field }) => (
-                                        <Select {...field} size="large" options={warehouseOptions} showSearch optionFilterProp="label" allowClear style={{ width: '100%' }} placeholder="From" />
-                                    )}
-                                />
-                            </Form.Item>
-                        </Col>
-                        <Col xs={12} sm={7}>
+                        {askMbSource && (
+                            <Col xs={12} sm={7}>
+                                <Form.Item
+                                    style={{ marginBottom: 0 }}
+                                    validateStatus={completeForm.formState.errors.mb_warehouse_id ? 'error' : ''}
+                                    help={completeForm.formState.errors.mb_warehouse_id?.message}
+                                >
+                                    <Controller
+                                        name="mb_warehouse_id"
+                                        control={completeForm.control}
+                                        render={({ field }) => (
+                                            <Select {...field} size="large" options={warehouseOptions} showSearch optionFilterProp="label" allowClear style={{ width: '100%' }} placeholder="From" />
+                                        )}
+                                    />
+                                </Form.Item>
+                            </Col>
+                        )}
+                        <Col xs={askMbSource ? 12 : 24} sm={askMbSource ? 7 : 14}>
                             <Controller
                                 name="mb_kg"
                                 control={completeForm.control}
-                                render={({ field }) => <InputNumber {...field} size="large" min={0} placeholder="Kg" suffix="Kg" style={{ width: '100%' }} />}
+                                render={({ field }) => (
+                                    <InputNumber
+                                        {...field}
+                                        size="large"
+                                        min={0}
+                                        placeholder="Kg"
+                                        suffix="Kg"
+                                        style={{ width: '100%' }}
+                                        onChange={(value) => {
+                                            // Same contract as resin: a supervisor-typed
+                                            // figure owns the field for the rest of this
+                                            // batch and the dosing suggestion backs off.
+                                            mbKgTouchedRef.current = true;
+                                            field.onChange(value);
+                                        }}
+                                    />
+                                )}
                             />
                         </Col>
+                        {mbDosingKg !== null && mbDosingGrams !== null && quantityProduced !== null && quantityProduced !== undefined && (
+                            <Col xs={24}>
+                                <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                                    {`= ${quantityProduced.toLocaleString('en-IN')} bottles × ${fmtNum(mbDosingGrams)} g = ${fmtNum(mbDosingKg)} kg — edit if the weighed figure differs`}
+                                </Typography.Text>
+                            </Col>
+                        )}
                         <Col xs={24}>{dayBinHint(mbItemIdWatch, mbKgWatch, completeForm.watch('mb_warehouse_id'))}</Col>
                     </Row>
 
@@ -4054,9 +4197,14 @@ export default function ShiftProductionEntryPage() {
                         // (factory answer: UOM comes from the item master).
                         const selectedItemId = completeForm.watch(`material_consumptions.${index}.item_id`);
                         const selectedUom = items?.data.find((i) => i.id === selectedItemId)?.uom ?? 'Kg';
+                        // These exception lines are usually the Nos consumables
+                        // (caps, labels, cartons), which never pass through the
+                        // kg-only day bin — so this is the one place the source
+                        // question genuinely survives, and only for those.
+                        const askLineSource = askSourceFor(selectedItemId);
                         return (
                         <Row key={field.id} gutter={[8, 8]} align="middle" style={{ marginTop: 8 }}>
-                            <Col xs={24} sm={10}>
+                            <Col xs={24} sm={askLineSource ? 10 : 14}>
                                 <Controller
                                     name={`material_consumptions.${index}.item_id`}
                                     control={completeForm.control}
@@ -4065,16 +4213,18 @@ export default function ShiftProductionEntryPage() {
                                     )}
                                 />
                             </Col>
-                            <Col xs={12} sm={6}>
-                                <Controller
-                                    name={`material_consumptions.${index}.warehouse_id`}
-                                    control={completeForm.control}
-                                    render={({ field }) => (
-                                        <Select {...field} size="large" options={warehouseOptions} showSearch optionFilterProp="label" style={{ width: '100%' }} placeholder="From" />
-                                    )}
-                                />
-                            </Col>
-                            <Col xs={12} sm={5}>
+                            {askLineSource && (
+                                <Col xs={12} sm={6}>
+                                    <Controller
+                                        name={`material_consumptions.${index}.warehouse_id`}
+                                        control={completeForm.control}
+                                        render={({ field }) => (
+                                            <Select {...field} size="large" options={warehouseOptions} showSearch optionFilterProp="label" style={{ width: '100%' }} placeholder="From" />
+                                        )}
+                                    />
+                                </Col>
+                            )}
+                            <Col xs={12} sm={askLineSource ? 5 : 7}>
                                 <Controller
                                     name={`material_consumptions.${index}.quantity_issued_kg`}
                                     control={completeForm.control}
@@ -4633,7 +4783,6 @@ export default function ShiftProductionEntryPage() {
                 flag is on; with it off the tree is identical to today's. */}
             {traceabilityEnabled && (
                 <>
-                    <DayBinDrawer open={dayBinOpen} onClose={() => setDayBinOpen(false)} />
                     <HandoverModal
                         entry={handoverEntry}
                         incomingShift={effectiveShift}

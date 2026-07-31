@@ -319,31 +319,30 @@ export default function AppLayout({ children }: PropsWithChildren) {
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: collapsed ? 'center' : 'flex-start',
-                        gap: 8,
-                        color: '#fff',
                         overflow: 'hidden',
                     }}
                 >
+                    {/* The logo is navy-on-white artwork, so it sits on a white
+                        plaque rather than directly on the dark sider — keeping the
+                        factory's own colours instead of inventing a reversed
+                        variant. Collapsed, only the chevron mark fits. */}
                     <div
                         style={{
-                            width: 32,
-                            height: 32,
-                            flexShrink: 0,
+                            background: '#fff',
                             borderRadius: 8,
-                            background: 'linear-gradient(135deg, #1677ff, #52c9ff)',
+                            padding: collapsed ? '6px 8px' : '8px 12px',
                             display: 'flex',
                             alignItems: 'center',
-                            justifyContent: 'center',
-                            fontWeight: 700,
+                            flexShrink: 0,
+                            lineHeight: 0,
                         }}
                     >
-                        M
+                        <img
+                            src={`${import.meta.env.BASE_URL}${collapsed ? 'swaashpet-mark.png' : 'swaashpet-logo.png'}`}
+                            alt="SWAASHPET POLYMERS"
+                            style={{ height: collapsed ? 30 : 38, width: 'auto', display: 'block' }}
+                        />
                     </div>
-                    {!collapsed && (
-                        <Typography.Text style={{ color: '#fff', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                            Manufacturing ERP
-                        </Typography.Text>
-                    )}
                 </div>
                 <Menu
                     theme="dark"
@@ -395,6 +394,16 @@ export default function AppLayout({ children }: PropsWithChildren) {
                         <MenuUnfoldOutlined style={{ fontSize: 18, cursor: 'pointer' }} onClick={() => setCollapsed(false)} />
                     ) : (
                         <MenuFoldOutlined style={{ fontSize: 18, cursor: 'pointer' }} onClick={() => setCollapsed(true)} />
+                    )}
+                    {/* On a phone the sider is off-canvas at width 0, so the logo
+                        above is unreachable until the drawer is opened. This is
+                        the same mark shown there, never both at once. */}
+                    {isMobile && (
+                        <img
+                            src={`${import.meta.env.BASE_URL}swaashpet-logo.png`}
+                            alt="SWAASHPET POLYMERS"
+                            style={{ height: 26, width: 'auto', display: 'block' }}
+                        />
                     )}
                     <Dropdown
                         menu={{

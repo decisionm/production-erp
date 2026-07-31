@@ -45,32 +45,34 @@ export default function LoginPage() {
                     flex: '1 1 0',
                     minWidth: 0,
                     padding: '48px 64px',
-                    background: 'linear-gradient(135deg, #0b2a6b 0%, #1677ff 55%, #52c9ff 100%)',
+                    // Brand navy taken from the logo artwork.
+                    background: 'linear-gradient(135deg, #0A145B 0%, #16256E 100%)',
                     color: '#fff',
                 }}
             >
+                {/* Navy-on-white artwork, so it sits on a white plaque rather
+                    than directly on the navy panel. */}
                 <div
                     style={{
-                        width: 44,
-                        height: 44,
+                        alignSelf: 'flex-start',
+                        background: '#fff',
                         borderRadius: 12,
-                        background: 'rgba(255,255,255,0.15)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontWeight: 700,
-                        fontSize: 20,
+                        padding: '14px 18px',
                         marginBottom: 32,
+                        lineHeight: 0,
                     }}
                 >
-                    M
+                    <img
+                        src={`${import.meta.env.BASE_URL}swaashpet-logo.png`}
+                        alt="SWAASHPET POLYMERS"
+                        style={{ height: 56, width: 'auto', display: 'block' }}
+                    />
                 </div>
-                <Typography.Title level={2} style={{ color: '#fff', maxWidth: 480 }}>
-                    Manufacturing ERP
+                <Typography.Title level={3} style={{ color: '#fff', maxWidth: 480, marginTop: 0 }}>
+                    Swaashpet Polymers Private Limited
                 </Typography.Title>
-                <Typography.Paragraph style={{ color: 'rgba(255,255,255,0.85)', maxWidth: 440, fontSize: 16 }}>
-                    Inventory, Production, Procurement, Sales, Finance, HRMS, Payroll, Quality and
-                    Maintenance — with GST, TDS and Tally compliance built in for the Indian market.
+                <Typography.Paragraph style={{ color: 'rgba(255,255,255,0.85)', maxWidth: 440, fontSize: 16, marginBottom: 0 }}>
+                    Production, stores and compliance.
                 </Typography.Paragraph>
             </Flex>
 
@@ -132,6 +134,13 @@ export default function LoginPage() {
                             Sign in
                         </Button>
                     </Form>
+
+                    {/* Inside the card, not the brand panel: the panel is hidden
+                        below the `lg` breakpoint (see index.css), so this is the
+                        only spot a phone actually shows. */}
+                    <Typography.Text type="secondary" style={{ display: 'block', marginTop: 24, textAlign: 'center', fontSize: 12 }}>
+                        Powered by Balin
+                    </Typography.Text>
                 </Card>
             </Flex>
         </Flex>

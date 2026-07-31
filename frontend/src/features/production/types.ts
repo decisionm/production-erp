@@ -805,6 +805,42 @@ export interface BatchEstimation {
     packaging_mode?: string | null;
 }
 
+/**
+ * MASTERBATCH DOSING — grams of colour per bottle, the factory's own master
+ * figure (amber: 0.25 g/bottle, given 31 Jul). Shape mirrors
+ * MasterbatchDosingService::describe() field for field.
+ *
+ * An EMPTY list from the endpoint is a real answer, not a failure: it means no
+ * dosing is set for that (masterbatch, product) pair, so the completion screen
+ * prefills nothing and says nothing. There is deliberately no zero row — zero
+ * would assert that a colour needs no masterbatch, which nobody has said.
+ */
+export interface MasterbatchDosing {
+    id: number;
+    masterbatch_item: { id: number; name: string };
+    /** Null = applies to every product that uses this masterbatch. */
+    product_item: { id: number; name: string } | null;
+    /** Human label for the above, e.g. "factory-wide". */
+    scope: string;
+    /** GRAMS per bottle — 4dp decimal string, e.g. "0.2500". Never a number. */
+    grams_per_bottle: string;
+    /** Where the figure came from, free text — "factory, 31 Jul". */
+    note: string | null;
+    set_by: string | null;
+    set_at: string | null;
+    /**
+     * Echo of the bottle count `suggested_kg` was quoted against; null when
+     * the caller sent none.
+     */
+    bottles: number | null;
+    /**
+     * kg for `bottles`, computed by ProductionCalculationEngine::masterbatchKg.
+     * Null when no count was sent — a kg with no bottle count behind it is a
+     * figure nobody can check.
+     */
+    suggested_kg: string | null;
+}
+
 export interface BatchPreview {
     readiness: ProductReadiness;
     estimation: BatchEstimation;
