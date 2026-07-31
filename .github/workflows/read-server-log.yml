@@ -1,0 +1,85 @@
+name: Read server log
+
+# Tails the LIVE Laravel log over the same SSH key the deploy uses.
+#
+# Why this exists: when the floor reports "the screen is broken", the only
+# authoritative account of what the server actually did is
+# storage/logs/laravel.log. Without this, diagnosing meant guessing from the
+# frontend and re-deploying speculative fixes — which is how a go-live morning
+# gets spent. Reading the log is strictly READ-ONLY: no artisan command, no
+# writes, nothing that can change state.
+#
+# Deliberately NOT a general shell. The command is fixed (tail + optional
+# grep), so this workflow cannot be repurposed into arbitrary remote
+# execution by editing an input.
+
+on:
+  workflow_dispatch:
+    inputs:
+      lines:
+        description: 'How many lines from the end of the log.'
+        type: string
+        default: '250'
+      pattern:
+        description: 'Optional case-insensitive filter (e.g. an exception class, a route, an entry id). Leave blank for the raw tail.'
+        type: string
+        default: ''
+
+concurrency:
+  group: read-server-log
+  cancel-in-progress: false
+
+jobs:
+  read:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # ssh-keyscan can exit 0 having collected nothing, so check the
+          # output rather than the exit code (same trap as the deploy).
+          keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Re-running often clears a transient failure; otherwise check hPanel → Advanced → SSH Access and whether brute-force protection has banned the runner."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      - name: Tail the log
+        run: |
+          set -o pipefail
+          # Sanitised: lines must be digits, so the value cannot smuggle shell.
+          LINES=$(printf '%s' "${{ inputs.lines }}" | tr -cd '0-9')
+          LINES=${LINES:-250}
+
+          # The pattern is passed to a REMOTE grep as a single-quoted argument;
+          # single quotes in the input are stripped so the quoting cannot be
+          # broken out of.
+          PATTERN=$(printf '%s' "${{ inputs.pattern }}" | tr -d "'\\\\\`\$")
+
+          if [ -n "$PATTERN" ]; then
+            REMOTE="tail -n 4000 storage/logs/laravel.log | grep -i -- '$PATTERN' | tail -n $LINES"
+          else
+            REMOTE="tail -n $LINES storage/logs/laravel.log"
+          fi
+
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && $REMOTE" \
+            2>&1 | tee log-output.txt
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Live Laravel log"
+            echo
+            echo "lines: \`${{ inputs.lines }}\` · pattern: \`${{ inputs.pattern }}\`"
+            echo
+            echo '```'
+            cat log-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
