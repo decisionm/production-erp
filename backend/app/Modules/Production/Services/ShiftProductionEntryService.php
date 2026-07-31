@@ -55,6 +55,14 @@ class ShiftProductionEntryService
             ->with([
                 'shift', 'workCenter', 'item', 'warehouse', 'scrapReason', 'operator',
                 'materialConsumptions.item' => fn ($query) => $query->withTrashed(),
+                // Every consumption line carries its own source warehouse
+                // (a day bin, a store) and approval shows it per line —
+                // ShiftMaterialConsumptionResource emits `warehouse` only
+                // whenLoaded, so leaving it out drops the key from the JSON
+                // rather than merely costing a query. withTrashed for the
+                // same reason as the item above: a godown retired after the
+                // batch ran must still be nameable in that batch's history.
+                'materialConsumptions.warehouse' => fn ($query) => $query->withTrashed(),
                 'scraps.scrapReason', 'approvedBy',
                 'downtimeEvents.reason',
                 'tallySyncEntries',
@@ -495,6 +503,10 @@ class ShiftProductionEntryService
             return $entry->fresh([
                 'shift', 'workCenter', 'item', 'warehouse', 'scrapReason', 'operator',
                 'materialConsumptions.item' => fn ($query) => $query->withTrashed(),
+                // The line's OWN warehouse — which day bin or store the
+                // material left. Approval reads it per line; an unloaded
+                // relation makes the resource drop the key entirely.
+                'materialConsumptions.warehouse' => fn ($query) => $query->withTrashed(),
                 'scraps.scrapReason',
                 'downtimeEvents.reason',
             ]);

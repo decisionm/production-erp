@@ -91,10 +91,20 @@ export type ShiftProductionEntryStatus =
     | 'failed';
 export type ShiftScrapType = 'rejected_finished_good' | 'lumps';
 
+/**
+ * One material line issued at Complete Batch.
+ *
+ * `item` and `warehouse` are OPTIONAL on purpose, and this is not defensive
+ * padding: ShiftMaterialConsumptionResource emits both only `whenLoaded`, so
+ * any endpoint that returns an entry without eager-loading the relation drops
+ * the key from the JSON entirely. Typing them as always-present is what let
+ * `row.warehouse.code` ship and blank the approval drawer (30-Jul) — the type
+ * must describe what the wire can actually carry.
+ */
 export interface ShiftMaterialConsumption {
     id: number;
-    item: Item;
-    warehouse: Warehouse;
+    item?: Item | null;
+    warehouse?: Warehouse | null;
     quantity_issued_kg: string;
 }
 
@@ -211,8 +221,15 @@ export interface ShiftProductionEntry {
     running_hours: string | null;
     /** Entered at/after completion. */
     qc_rejection_kg: string | null;
-    material_consumptions: ShiftMaterialConsumption[];
-    scraps: ShiftScrap[];
+    /**
+     * Both collections are `whenLoaded` on the backend resource, and the
+     * approval/reject/start endpoints deliberately don't load them — so they
+     * are ABSENT, not empty, on those payloads. Read them as `?? []`.
+     */
+    material_consumptions?: ShiftMaterialConsumption[];
+    scraps?: ShiftScrap[];
+    /** Downtime logged at Start or with the completion; absent when not loaded. */
+    downtime_events?: ProductionDowntimeEvent[];
     /** Null when batch_status is not completed (no consumption yet). */
     variance: ConsumptionVariance | null;
     /**
@@ -891,6 +908,22 @@ export interface DowntimeReason {
     selectable_at_start: boolean;
     is_active: boolean;
     confirmation_status: string | null;
+}
+
+/**
+ * One downtime event against a batch — planned at Start Batch or logged with
+ * the completion. `reason` rides along when loaded (it is `whenLoaded` on the
+ * resource, so treat it as possibly absent) and `minutes` is a decimal string.
+ */
+export interface ProductionDowntimeEvent {
+    id: number;
+    downtime_reason_id: number;
+    reason?: DowntimeReason | null;
+    minutes: string;
+    is_planned: boolean;
+    known_before_start: boolean;
+    note: string | null;
+    recorded_at: string | null;
 }
 
 export interface FactorySetting {
