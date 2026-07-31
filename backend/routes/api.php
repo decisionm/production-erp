@@ -420,6 +420,13 @@ Route::prefix('v1')->group(function () {
                 Route::post('day-bin/return', [DayBinController::class, 'returnMaterial']);
                 Route::post('day-bin/count', [DayBinController::class, 'count']);
 
+                // The CENTRALIZED bag scan into the FACTORY day bin (the
+                // warehouse, all machines at once — no work center picked).
+                // Moves the bag's kg via the existing store → bin stock
+                // transfer; inside this gate because a barcode only resolves
+                // to a MaterialBag with traceability on.
+                Route::post('day-bin/load-bag', [FactoryDayBinController::class, 'loadBag']);
+
                 // Aggregate reads the SPA consumes: live machine state and
                 // the per-segment consumption summary.
                 Route::get('work-centers/{work_center}/day-bin', [DayBinController::class, 'workCenterState']);
