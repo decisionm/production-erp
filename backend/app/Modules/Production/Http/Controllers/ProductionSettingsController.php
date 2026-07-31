@@ -5,11 +5,15 @@ namespace App\Modules\Production\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Production\Http\Requests\UpdateDayBinWarehouseRequest;
 use App\Modules\Production\Services\FactoryDayBinService;
+use App\Modules\Production\Services\MachineCapabilityService;
 use Illuminate\Http\JsonResponse;
 
 class ProductionSettingsController extends Controller
 {
-    public function __construct(private readonly FactoryDayBinService $dayBin) {}
+    public function __construct(
+        private readonly FactoryDayBinService $dayBin,
+        private readonly MachineCapabilityService $machineCapability,
+    ) {}
 
     /**
      * Deployment-level production settings the frontend must agree with
@@ -30,6 +34,19 @@ class ProductionSettingsController extends Controller
                 // null = not chosen yet: every screen then behaves exactly as
                 // it did before the day bin existed, and prompts for it.
                 'day_bin_warehouse_id' => $this->dayBin->warehouseId(),
+                // The factory's machine rule, published so a screen can STATE
+                // which machines a product runs on. It was enforced on every
+                // start and displayed nowhere, which is why the owner could not
+                // find the machine mapping they had asked for: it exists as a
+                // rule, not as rows. Sent as the threshold plus the machines
+                // above it belong to, so the client derives the answer per
+                // product from the cavity count it already has — no
+                // product-machine table to create, approve, or let drift from
+                // the workbook.
+                'machine_capability' => [
+                    'cavity_threshold' => $this->machineCapability->threshold(),
+                    'restricted_machines' => $this->machineCapability->restrictedMachines(),
+                ],
             ],
         ]);
     }
