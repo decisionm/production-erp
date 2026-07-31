@@ -354,6 +354,17 @@ export interface BatchPreviewParams {
     shift_id?: number;
     planned_hours?: number;
     active_cavities?: number;
+    /**
+     * Which colour is running, when it is known — the answer the supervisor
+     * gave at Start Batch, read back off the entry.
+     *
+     * Sent because colour is what picks the masterbatch, and the endpoint
+     * ranks a stated colour above the configuration's and the item master's
+     * exactly as Start Batch does. Omitting it made the completion drawer ask
+     * for the masterbatch of a WEAKER colour than the run was started with —
+     * for most bottle items, no colour at all.
+     */
+    colour?: string;
 }
 
 /**

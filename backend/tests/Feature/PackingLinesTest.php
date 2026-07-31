@@ -398,6 +398,140 @@ class PackingLinesTest extends TestCase
     }
 
     // -----------------------------------------------------------------
+    // Tray-first counting
+    //
+    // The floor counts TRAYS, not cartons: "5 tray = 1 carton boxes, then
+    // 600 units based on 120 PER TRAY, SO FIVE TRAY SO 600". The SPA turns
+    // a tray count into the pair this API already speaks — whole cartons in
+    // `boxes`, the trays over in `loose_inner` — so these rules need no
+    // change at all. The three tests below are what says so out loud:
+    // a full carton, a part carton, and a count that does not add up.
+    // -----------------------------------------------------------------
+
+    public function test_five_trays_of_120_is_one_carton_of_600_pieces(): void
+    {
+        // The owner's own example, exactly: 5 trays × 120 = 600 pieces and
+        // 1 carton, with the carton DERIVED from the tray count.
+        $this->actingAsProduction();
+        $item = $this->item('BTL-170');
+        $standard = $this->standardFor($item, [
+            ['mode' => ProductionStandardPackaging::MODE_TRAY,
+                'nos_per_tray' => 120, 'trays_per_box' => 5, 'nos_per_box' => 600],
+        ]);
+        $entry = $this->inProgressEntry($item, $standard);
+        $tray = $standard->packagings->firstWhere('mode', 'tray');
+
+        $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/complete", [
+            'quantity_produced' => '600',
+            'no_of_box' => 1,
+            'packing_lines' => [[
+                'mode' => 'tray', 'production_standard_packaging_id' => $tray->id,
+                'boxes' => 1, 'nos_per_box' => 600, 'loose_inner' => 0, 'nos_per_inner' => 120,
+                'derived_pieces' => 600, 'actual_pieces' => 600,
+            ]],
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.quantity_produced', fn ($v) => (float) $v === 600.0)
+            ->assertJsonPath('data.no_of_box', 1);
+    }
+
+    public function test_three_trays_with_no_whole_carton_is_accepted(): void
+    {
+        // The case that would have forced a rules change if the API could
+        // only speak in whole cartons: a shift that ends on 3 trays. They
+        // ride in loose_inner, the carton total is a legitimate 0, and the
+        // pieces still come to trays × 120.
+        $this->actingAsProduction();
+        $item = $this->item('BTL-170');
+        $standard = $this->standardFor($item, [
+            ['mode' => ProductionStandardPackaging::MODE_TRAY,
+                'nos_per_tray' => 120, 'trays_per_box' => 5, 'nos_per_box' => 600],
+        ]);
+        $entry = $this->inProgressEntry($item, $standard);
+        $tray = $standard->packagings->firstWhere('mode', 'tray');
+
+        $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/complete", [
+            'quantity_produced' => '360',
+            'no_of_box' => 0,
+            'packing_lines' => [[
+                'mode' => 'tray', 'production_standard_packaging_id' => $tray->id,
+                'boxes' => 0, 'nos_per_box' => 600, 'loose_inner' => 3, 'nos_per_inner' => 120,
+                'derived_pieces' => 360, 'actual_pieces' => 360,
+            ]],
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.quantity_produced', fn ($v) => (float) $v === 360.0)
+            ->assertJsonPath('data.no_of_box', 0);
+    }
+
+    public function test_seven_trays_is_one_carton_plus_two_trays_over(): void
+    {
+        // 1 × 600 + 2 × 120 = 840 — the "+ 2 trays over" the drawer shows.
+        $this->actingAsProduction();
+        $item = $this->item('BTL-170');
+        $standard = $this->standardFor($item, [
+            ['mode' => ProductionStandardPackaging::MODE_TRAY,
+                'nos_per_tray' => 120, 'trays_per_box' => 5, 'nos_per_box' => 600],
+        ]);
+        $entry = $this->inProgressEntry($item, $standard);
+        $tray = $standard->packagings->firstWhere('mode', 'tray');
+
+        $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/complete", [
+            'quantity_produced' => '840',
+            'no_of_box' => 1,
+            'packing_lines' => [[
+                'mode' => 'tray', 'production_standard_packaging_id' => $tray->id,
+                'boxes' => 1, 'nos_per_box' => 600, 'loose_inner' => 2, 'nos_per_inner' => 120,
+                'derived_pieces' => 840, 'actual_pieces' => 840,
+            ]],
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.quantity_produced', fn ($v) => (float) $v === 840.0)
+            ->assertJsonPath('data.no_of_box', 1);
+    }
+
+    public function test_a_tray_count_whose_pieces_do_not_add_up_is_still_refused(): void
+    {
+        // The other half: counting in trays buys no relaxation. A batch
+        // total that is not the lines' pieces is still a 422, and so is a
+        // carton total that is not the lines' cartons.
+        $this->actingAsProduction();
+        $item = $this->item('BTL-170');
+        $standard = $this->standardFor($item, [
+            ['mode' => ProductionStandardPackaging::MODE_TRAY,
+                'nos_per_tray' => 120, 'trays_per_box' => 5, 'nos_per_box' => 600],
+        ]);
+        $entry = $this->inProgressEntry($item, $standard);
+
+        // 5 trays is 600 pieces — 720 is a tray count someone re-typed.
+        $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/complete", [
+            'quantity_produced' => '720',
+            'no_of_box' => 1,
+            'packing_lines' => [[
+                'mode' => 'tray', 'boxes' => 1, 'nos_per_box' => 600, 'loose_inner' => 0,
+                'nos_per_inner' => 120, 'derived_pieces' => 600, 'actual_pieces' => 600,
+            ]],
+        ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['quantity_produced']);
+
+        // 7 trays = 1 carton, not 2 — cartons still have to be stated once
+        // and add up.
+        $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/complete", [
+            'quantity_produced' => '840',
+            'no_of_box' => 2,
+            'packing_lines' => [[
+                'mode' => 'tray', 'boxes' => 1, 'nos_per_box' => 600, 'loose_inner' => 2,
+                'nos_per_inner' => 120, 'derived_pieces' => 840, 'actual_pieces' => 840,
+            ]],
+        ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['no_of_box']);
+
+        $this->assertSame(BatchStatus::InProgress, $entry->fresh()->batch_status);
+    }
+
+    // -----------------------------------------------------------------
     // Backwards compatibility + the approval-side preview
     // -----------------------------------------------------------------
 

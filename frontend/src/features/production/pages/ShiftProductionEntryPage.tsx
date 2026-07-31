@@ -54,6 +54,7 @@ import type {
     ShiftProductionEntry,
     ShiftProductionEntryStatus,
     StandardPackaging,
+    SuggestedMaterial,
     WorkCenter,
 } from '@/features/production/types';
 import { currentShift, justEndedShift, productionDateFor } from '@/features/production/shiftClock';
@@ -186,6 +187,15 @@ function innerNoun(mode: PackingMode): string | null {
     return mode === 'pouch' ? 'pouches' : mode === 'tray' ? 'trays' : null;
 }
 
+/**
+ * The inner container's singular. Spelled out rather than sliced off the
+ * plural — "pouches" minus its "s" is "pouche", which is not a word anyone
+ * on the floor would recognise on a label that says "Pcs per pouch".
+ */
+function innerNounOne(mode: PackingMode): string | null {
+    return mode === 'pouch' ? 'pouch' : mode === 'tray' ? 'tray' : null;
+}
+
 /** Pieces per inner container for a mode, straight from the imported standard. */
 function innerPackSize(packaging: StandardPackaging): number | null {
     if (packaging.mode === 'pouch') return packaging.nos_per_pouch;
@@ -200,6 +210,32 @@ function innersPerBox(packaging: StandardPackaging): number | null {
     return null;
 }
 
+/**
+ * Trays (or pouches) that make one carton — the single figure that lets the
+ * floor count TRAYS and have the cartons follow. "5 tray = 1 carton boxes,
+ * then 600 units based on 120 PER TRAY, SO FIVE TRAY SO 600" is the whole
+ * requirement, and this is the 5 in it.
+ *
+ * Returned ONLY when the imported standard reconciles with itself:
+ * inners × pcs/inner must come to exactly pcs/carton. Deriving it by
+ * dividing the standard's own figures is arithmetic, NOT the assumed
+ * 5-per-box this file has always refused — 600 pcs/carton at 120 pcs/tray
+ * IS five trays, whatever the sheet's trays_per_box column forgot to say.
+ * But when the sheet states a different figure, or the carton is not a
+ * whole number of trays, this returns null and the line stays carton-first:
+ * a carton count the standard itself contradicts would post cartons the
+ * factory never packed.
+ */
+function innersPerCarton(packaging: StandardPackaging): number | null {
+    const perBox = packaging.nos_per_box;
+    const perInner = innerPackSize(packaging);
+    if (!perBox || !perInner || perBox % perInner !== 0) return null;
+    const derived = perBox / perInner;
+    const stated = innersPerBox(packaging);
+    if (stated !== null && stated > 0 && stated !== derived) return null;
+    return derived;
+}
+
 interface PackingLineValues {
     mode: PackingMode;
     production_standard_packaging_id?: number | null;
@@ -207,6 +243,14 @@ interface PackingLineValues {
     loose_inner?: number | null;
     nos_per_box?: number | null;
     nos_per_inner?: number | null;
+    /**
+     * Trays/pouches per carton, fixed for the line from the standard (see
+     * innersPerCarton). Set = the floor types TRAYS and boxes/loose_inner
+     * are derived from it; null = this line falls back to counting cartons.
+     * Never sent to the server — boxes and loose_inner already carry the
+     * split, which is exactly what the API contract asks for.
+     */
+    inners_per_box?: number | null;
     actual_pieces?: number | null;
     override_reason?: string;
 }
@@ -230,9 +274,56 @@ function blankPackingLine(packaging: StandardPackaging): PackingLineValues {
         loose_inner: null,
         nos_per_box: packaging.nos_per_box,
         nos_per_inner: innerPackSize(packaging),
+        inners_per_box: innersPerCarton(packaging),
         actual_pieces: null,
         override_reason: undefined,
     };
+}
+
+/**
+ * How many trays/pouches make a carton on this line, or null when the line
+ * must be counted in cartons after all (direct-to-box, or a standard whose
+ * carton is not a whole number of inner containers).
+ *
+ * This is the ONE gate for tray-first entry: with it set, the supervisor
+ * types trays and boxes/loose_inner are derived; without it, nothing about
+ * the line changes from how it has always worked.
+ */
+function trayFirstStep(line: PackingLineValues | undefined): number | null {
+    if (!line || innerNoun(line.mode) === null) return null;
+    const step = line.inners_per_box ?? null;
+    return step !== null && step >= 1 ? step : null;
+}
+
+/**
+ * A tray count split into whole cartons and the trays left over — the exact
+ * pair the API contract wants (boxes + loose_inner), so the server's own
+ * recompute, boxes × pcs/carton + loose × pcs/tray, lands on trays × pcs/tray
+ * for every tray count. 5 trays → 1 carton, 0 over → 600 pcs. 7 → 1 carton,
+ * 2 over → 840.
+ */
+function splitInners(total: number, step: number): { boxes: number; loose: number } {
+    // Trays are counted, never measured — a half tray is a typo, and
+    // rounding it matches what the input itself shows the supervisor.
+    const whole = Math.max(0, Math.round(total));
+    return { boxes: Math.floor(whole / step), loose: whole % step };
+}
+
+/**
+ * The trays/pouches a line holds, for the box the floor types into. Null
+ * until something is entered, so a fresh line shows an empty field rather
+ * than a zero that looks like a counted nothing.
+ */
+function lineInnerCount(line: PackingLineValues, step: number): number | null {
+    if ((line.boxes ?? null) === null && (line.loose_inner ?? null) === null) return null;
+    return (line.boxes ?? 0) * step + (line.loose_inner ?? 0);
+}
+
+/** "1 carton", "2 cartons", "1 carton + 2 trays over" — how the floor says it. */
+function cartonSummary(boxes: number, over: number, one: string, many: string): string {
+    const cartons = `${boxes} ${boxes === 1 ? 'carton' : 'cartons'}`;
+    if (over <= 0) return cartons;
+    return `${cartons} + ${over} ${over === 1 ? one : many} over`;
 }
 
 // Structural (sku+name) so both full Items and the day-bin aggregates'
@@ -267,19 +358,73 @@ function normaliseProductName(name: string | null | undefined): string {
 }
 
 /**
- * Masterbatch suggested from the product's colour — matched on the MB item's
- * own colour field first, then on its name containing the colour. Clear
- * products get no suggestion (no masterbatch goes into Clear).
+ * What a fixed consumption row (Resin, Masterbatch) arrives holding: the
+ * material, already chosen, and the one-line reason it was chosen. `itemId`
+ * null with a `reason` set is a real answer too — "two masterbatches match
+ * Amber" is worth saying, and is far better than pre-selecting the wrong one.
  */
-function suggestMasterbatchId(items: Item[] | undefined, colour: string | null | undefined): number | undefined {
-    if (!items || !colour || isClearColour(colour)) return undefined;
+type FixedRowPick = { itemId: number | null; reason: string | null };
+
+const NO_PICK: FixedRowPick = { itemId: null, reason: null };
+
+/**
+ * The preview's pre-chosen material, read in ONE place.
+ *
+ * Tolerant by design: the material may arrive as `item: {id}` or as a bare
+ * `item_id`, and grams as a decimal string or a number. The cost of guessing
+ * the wrong key is an empty picker on the floor — the very defect this reads
+ * away — so both spellings are accepted rather than assumed.
+ */
+function readSuggestion(raw: SuggestedMaterial | null | undefined): FixedRowPick & { grams: number | null } {
+    if (!raw) return { ...NO_PICK, grams: null };
+    const itemId = raw.item?.id ?? raw.item_id ?? null;
+    const rawGrams = raw.grams_per_bottle;
+    const grams = typeof rawGrams === 'number' ? rawGrams : toNum(rawGrams ?? null);
+    return {
+        itemId: itemId ?? null,
+        // A non-positive or unreadable figure is not a dosing — same rule the
+        // backend applies before it will compute a kg from one.
+        grams: grams !== null && Number.isFinite(grams) && grams > 0 ? grams : null,
+        reason: (raw.reason ?? '').trim() || null,
+    };
+}
+
+/**
+ * Masterbatch chosen from the RUN'S COLOUR, matched against the item's own
+ * derived `colour` COLUMN — and against nothing else.
+ *
+ * A MASTERBATCH NAME IS NEVER READ HERE, deliberately, and this is the whole
+ * point of the function. This factory's catalogue defeats a colour-word scan
+ * outright: "Masterbatch -Red(Brown)" names two colours, and "ARIHANT PET
+ * WHITE 1020 Master Batch" buries its colour between a brand and a grade
+ * number. Falling through to `name.includes(colour)` and taking the first hit
+ * is exactly what put a WHITE masterbatch on a non-white run in the owner's
+ * screenshot; the rung has been removed rather than made cleverer, because a
+ * wrong pre-selection is worse than an empty box — it books the wrong material
+ * to Tally and looks like it was checked. The backend's own resolver draws the
+ * same line (RunMaterialSuggestionService), and the factory's answer for a
+ * colour the column cannot express belongs in the `masterbatch_colour_map`
+ * factory setting, which is data a person can fix.
+ *
+ * Only ever pre-selects when the colour column gives ONE answer. Two matches
+ * pre-select nothing and say so.
+ *
+ * The backend's own `suggested_masterbatch` outranks this — this is the
+ * fallback for a backend that does not send one yet.
+ */
+function suggestMasterbatchByColour(items: Item[] | undefined, colour: string | null | undefined): FixedRowPick {
+    if (!items || !colour || isClearColour(colour)) return NO_PICK;
     const c = colour.trim().toLowerCase();
-    if (c === '') return undefined;
+    if (c === '') return NO_PICK;
+    // isMasterbatchItem is a FAMILY test ("master batch"), not a colour test —
+    // it narrows the pool to colourants and never chooses between them.
     const mbs = items.filter((i) => i.is_active && isMasterbatchItem(i));
-    const match =
-        mbs.find((i) => (i.colour ?? '').trim().toLowerCase() === c) ??
-        mbs.find((i) => i.name.toLowerCase().includes(c));
-    return match?.id;
+    const byColour = mbs.filter((i) => (i.colour ?? '').trim().toLowerCase() === c);
+    if (byColour.length === 1) return { itemId: byColour[0].id, reason: `matched to the bottle's colour (${colour})` };
+    if (byColour.length > 1) {
+        return { itemId: null, reason: `${byColour.length} masterbatches match ${colour} — pick the one that went in` };
+    }
+    return NO_PICK;
 }
 
 const efficiencyTag = (pct: number | null) => {
@@ -354,11 +499,19 @@ const completeBatchSchema = z.object({
     qc_rejection_kg: z.number().min(0).nullish(),
     // The two fixed material rows (resin + masterbatch). Only rows with a
     // quantity are sent — merged into material_consumptions on submit.
+    //
+    // THREE boxes each: the material, its grams per bottle, and the total kg.
+    // `*_grams_per_bottle` is an ENTRY AID and is never submitted — it is what
+    // the total kg is computed from, and the total kg is the figure that is
+    // stored and that Tally receives. Both numeric boxes are editable and a
+    // supervisor's edit to either one wins.
     resin_item_id: z.number().nullish(),
     resin_warehouse_id: z.number().nullish(),
+    resin_grams_per_bottle: z.number().min(0).nullish(),
     resin_kg: z.number().min(0).nullish(),
     mb_item_id: z.number().nullish(),
     mb_warehouse_id: z.number().nullish(),
+    mb_grams_per_bottle: z.number().min(0).nullish(),
     mb_kg: z.number().min(0).nullish(),
     helper_name: z.string().max(120, 'Max 120 characters').optional(),
     notes: z.string().optional(),
@@ -418,6 +571,10 @@ const completeBatchSchema = z.object({
                 loose_inner: z.number().int().min(0, 'Cannot be negative').nullish(),
                 nos_per_box: z.number().int().min(1, 'At least 1').nullish(),
                 nos_per_inner: z.number().int().min(1, 'At least 1').nullish(),
+                // Declared so it survives parsing — zod strips unknown keys
+                // before the refinements below run, and this is what tells
+                // them the line is counted in trays rather than cartons.
+                inners_per_box: z.number().int().min(1, 'At least 1').nullish(),
                 actual_pieces: z.number().int().min(0, 'Cannot be negative').nullish(),
                 override_reason: z.string().max(255, 'Max 255 characters').optional(),
             }),
@@ -481,9 +638,21 @@ const completeBatchSchema = z.object({
             seenModes.set(line.mode, index);
         }
 
-        // Without a carton size no line total is computable — surfaced on
-        // the field rather than as a bare backend rejection.
-        if ((line.nos_per_box ?? 0) < 1) {
+        // Without a pack size no line total is computable — surfaced on the
+        // field the supervisor can actually see. A tray-first line has no
+        // pcs/carton box on screen (it derives from pcs/tray × trays per
+        // carton), so its complaint has to land on pcs/tray instead —
+        // otherwise Complete Batch would refuse with nothing showing why.
+        const step = trayFirstStep(line);
+        if (step !== null) {
+            if ((line.nos_per_inner ?? 0) < 1 || (line.nos_per_box ?? 0) < 1) {
+                ctx.addIssue({
+                    code: 'custom',
+                    path: ['packing_lines', index, 'nos_per_inner'],
+                    message: `Enter how many pieces go in one ${innerNounOne(line.mode) ?? 'tray'} — the carton count comes from it.`,
+                });
+            }
+        } else if ((line.nos_per_box ?? 0) < 1) {
             ctx.addIssue({
                 code: 'custom',
                 path: ['packing_lines', index, 'nos_per_box'],
@@ -1432,6 +1601,8 @@ export default function ShiftProductionEntryPage() {
     const qcRejectionWatch = completeForm.watch('qc_rejection_kg');
     const resinKgWatch = completeForm.watch('resin_kg');
     const mbKgWatch = completeForm.watch('mb_kg');
+    const resinGramsWatch = completeForm.watch('resin_grams_per_bottle');
+    const mbGramsWatch = completeForm.watch('mb_grams_per_bottle');
     const scrapsWatch = completeForm.watch('scraps');
     const consumptionsWatch = completeForm.watch('material_consumptions');
     const resinItemIdWatch = completeForm.watch('resin_item_id');
@@ -1473,6 +1644,11 @@ export default function ShiftProductionEntryPage() {
     // bottle count would overwrite a figure that came off the scale.
     const mbKgTouchedRef = useRef(false);
     const mbKgWeighedRef = useRef(false);
+    // And for the grams-per-bottle boxes: a supervisor who corrects the bottle
+    // weight owns that box for the batch, so a later prefill cannot walk their
+    // figure back.
+    const resinGramsTouchedRef = useRef(false);
+    const mbGramsTouchedRef = useRef(false);
 
     // ---- The factory day bin, on the completion form -----------------------
     // Every consumption line already carries its own warehouse, so issuing a
@@ -1496,13 +1672,9 @@ export default function ShiftProductionEntryPage() {
     );
 
     /**
-     * Can the day bin be this material's source? ONE predicate, used by both
-     * the silent default below and the "From" picker's visibility in the
-     * drawer — they MUST agree. If the default used `held > 0` while the
-     * picker appeared only on `held === null`, a material with a 0.0000
-     * balance row would get neither a value nor a field: Complete Batch would
-     * fail validation on a warehouse nobody can see or set, which reads as a
-     * button that does nothing.
+     * Does the day bin currently hold this material? Used ONLY to default the
+     * source on an "Other materials" exception line and to word the grey note
+     * beneath a row — never to decide whether a question gets asked.
      */
     const binCanSupply = useCallback(
         (itemId: number | null | undefined): boolean =>
@@ -1511,74 +1683,55 @@ export default function ShiftProductionEntryPage() {
     );
 
     /**
-     * Does this row still have to ASK where the material came from?
+     * THE RESIN AND MASTERBATCH ROWS NEVER ASK WHERE THE MATERIAL CAME FROM.
      *
-     * Normally no — the source was already recorded when the bag was loaded
-     * into the factory day bin, so asking again at completion asks a question
-     * that already has an answer (the owner's point). The picker comes back
-     * only when the bin genuinely cannot be the answer:
+     * It came out of the factory day bin — that is what the bin is, and the
+     * source was already recorded when the bag was loaded into it. This used to
+     * be conditional on the bin currently HOLDING the material, so the question
+     * came back the moment a balance ran out; the owner has now asked three
+     * times to be rid of it. A bin holding none of a material the machine is
+     * plainly eating is a reconciliation fact, not a question for the
+     * supervisor: it is stated in one grey line under the row (see dayBinHint)
+     * and fixed on the Day Bin page, not answered with a dropdown here.
      *
-     *  - no day-bin warehouse is named yet → every row asks, exactly as before
-     *    the bin existed (never a blocked completion for a setup gap), or
-     *  - the bin holds none of this material → it did NOT come through the
-     *    bin, so the premise does not hold for this row and asking is correct.
-     *    Issuing from an empty bin instead would drive it negative and the
-     *    backend would refuse the whole completion.
-     *
-     * Deliberately keyed on the bin balance, never on the typed kg — the
-     * field must not appear and disappear as digits are entered. A row with
-     * no item yet asks nothing: there is no material to place.
+     * The ONE surviving case is a setup gap: no day-bin warehouse has been
+     * named at all, so there is no answer to state. Then these rows fall back
+     * to exactly what they did before the bin existed — a source picker — never
+     * a completion blocked on a warehouse nobody can see or set.
      */
-    const askSourceFor = useCallback(
-        (itemId: number | null | undefined): boolean =>
-            dayBinWarehouseId === null ? true : itemId != null && !binCanSupply(itemId),
-        [dayBinWarehouseId, binCanSupply],
-    );
-    const askResinSource = askSourceFor(resinItemIdWatch);
-    const askMbSource = askSourceFor(mbItemIdWatch);
+    const askMaterialSource = dayBinWarehouseId === null;
 
-    // Supply the day-bin warehouse silently for every row it can answer for,
-    // so nothing is asked. Never overwrites a value already there, so a pick
-    // made through the fallback picker stands. Written into the FORM FIELD,
-    // not just into the submit payload: the shortfall warning below compares
-    // the watched field to the bin, and the resolver requires a warehouse per
-    // line with a quantity.
+    // Supply the day-bin warehouse silently, so nothing is asked. Never
+    // overwrites a value already there, so a pick made through the setup-gap
+    // picker stands. Written into the FORM FIELD, not just into the submit
+    // payload: the shortfall warning below compares the watched field to the
+    // bin, and the resolver requires a warehouse per line with a quantity.
     useEffect(() => {
         if (dayBinWarehouseId === null || !completingEntry) return;
 
         const applyDefault = (
             field: 'resin_warehouse_id' | 'mb_warehouse_id' | `material_consumptions.${number}.warehouse_id`,
-            itemId: number | null | undefined,
         ) => {
-            if (!binCanSupply(itemId)) return;
             if (completeForm.getValues(field) != null) return;
             completeForm.setValue(field, dayBinWarehouseId);
         };
 
-        applyDefault('resin_warehouse_id', resinItemIdWatch);
-        applyDefault('mb_warehouse_id', mbItemIdWatch);
+        // The two fixed rows: UNCONDITIONALLY the day bin, balance irrelevant.
+        // The balance decides what the grey note says, never where the material
+        // is issued from.
+        applyDefault('resin_warehouse_id');
+        applyDefault('mb_warehouse_id');
+        // Exception lines are the other way round: they are usually the Nos
+        // consumables (caps, labels, cartons), which never pass through the
+        // kg-only day bin. Defaulting those to the bin would guarantee an
+        // insufficient-stock refusal on the whole completion, so they are
+        // defaulted only when the bin genuinely holds the material and the
+        // always-visible picker below answers for the rest.
         (consumptionsWatch ?? []).forEach((line, index) => {
-            applyDefault(`material_consumptions.${index}.warehouse_id`, line?.item_id);
+            if (!binCanSupply(line?.item_id)) return;
+            applyDefault(`material_consumptions.${index}.warehouse_id`);
         });
-    }, [dayBinWarehouseId, binCanSupply, completingEntry, resinItemIdWatch, mbItemIdWatch, consumptionsWatch, completeForm]);
-
-    // With exactly ONE candidate in a fixed-row picker there is nothing to
-    // choose — pre-pick it, only while the field is untouched and empty
-    // (same contract as every other prefill in this drawer). Clear products
-    // never get a masterbatch pick: no masterbatch goes into Clear.
-    const soleResinItemId = resinOptions.length === 1 ? resinOptions[0].value : null;
-    const soleMbItemId = mbOptions.length === 1 ? mbOptions[0].value : null;
-    useEffect(() => {
-        if (!completingEntry) return;
-        const applySole = (field: 'resin_item_id' | 'mb_item_id', id: number | null) => {
-            if (id === null) return;
-            if (completeForm.getFieldState(field).isDirty) return;
-            if (completeForm.getValues(field) != null) return;
-            completeForm.setValue(field, id);
-        };
-        applySole('resin_item_id', soleResinItemId);
-        if (!isClearColour(completingEntry.item.colour)) applySole('mb_item_id', soleMbItemId);
-    }, [completingEntry, soleResinItemId, soleMbItemId, completeForm]);
+    }, [dayBinWarehouseId, binCanSupply, completingEntry, consumptionsWatch, completeForm]);
 
     /**
      * "Day bin: 1250.5 Kg" beside a consumption row, so the supervisor watches
@@ -1586,10 +1739,10 @@ export default function ShiftProductionEntryPage() {
      * are about to issue more than the bin holds (the backend would refuse
      * it). Never changes the typed figure.
      *
-     * When the bin holds NONE of the material this line is the reason its
-     * "From" picker is still on screen. Without that sentence the picker reads
-     * as the source question that was just taken away, with no way to tell it
-     * is a different question about a different material.
+     * When the bin holds NONE of the material, this line is a STATEMENT, not a
+     * question: the material is still issued from the bin, and the bin has to
+     * be loaded for the figures to reconcile. It names that and where to fix
+     * it, because there is no longer a picker to hand the problem to.
      */
     const dayBinHint = (itemId: number | null | undefined, typedKg: number | null | undefined, warehouseId: number | null | undefined): ReactNode => {
         if (dayBinWarehouseId === null || itemId === null || itemId === undefined) return null;
@@ -1599,8 +1752,8 @@ export default function ShiftProductionEntryPage() {
             const material = items?.data.find((candidate) => candidate.id === itemId);
             return (
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    The day bin has no {material ? material.name : 'stock of this material'} — say where this one came
-                    from, or load it in <Link to="/production/day-bin">Day Bin (factory)</Link>.
+                    The day bin has no {material ? material.name : 'stock of this material'} recorded — load it in{' '}
+                    <Link to="/production/day-bin">Day Bin (factory)</Link> before completing.
                 </Typography.Text>
             );
         }
@@ -1696,15 +1849,34 @@ export default function ShiftProductionEntryPage() {
     const completingPackagingMode =
         (completingEntry as unknown as { packaging_mode?: string | null } | null)?.packaging_mode ?? null;
 
+    /**
+     * The colour THIS RUN is recorded as making — the answer frozen into the
+     * batch's config snapshot at Start, which the entry Resource sends back as
+     * `colour`. The item master's own colour is the fallback and nothing more:
+     * most bottle items carry none (which is exactly why Start Batch asks),
+     * and a mislabelled one names a different colour's masterbatch.
+     *
+     * Used for every colour decision in this drawer — which masterbatch is
+     * offered, and whether the masterbatch row is shown at all.
+     */
+    const completingColour = completingEntry?.colour ?? completingEntry?.item.colour ?? null;
+
     // Reuses the Start Batch preview endpoint (read-only GET) — the standard's
     // packaging rows are the only place the real modes and pack sizes live.
+    //
+    // The run's colour rides along: the endpoint ranks a stated colour above
+    // the configuration's and the item master's, so sending it is what makes
+    // the pre-selected masterbatch the one for the colour this batch is
+    // RECORDED as running. Keyed on it too, so a re-read after the colour is
+    // known is not served the colourless answer from cache.
     const { data: completePreview } = useQuery({
-        queryKey: ['production', 'batch-preview', 'complete', completingEntry?.id, completingStandardId],
+        queryKey: ['production', 'batch-preview', 'complete', completingEntry?.id, completingStandardId, completingColour],
         queryFn: () =>
             getBatchPreview({
                 item_id: completingEntry!.item.id,
                 work_center_id: completingEntry!.work_center.id,
                 production_standard_id: completingStandardId ?? undefined,
+                colour: completingColour ?? undefined,
             }),
         enabled: completingEntry !== null,
     });
@@ -1756,7 +1928,11 @@ export default function ShiftProductionEntryPage() {
             boxes += line.boxes ?? 0;
 
             const packaging = packagingForLine(line);
-            const perBox = packaging ? innersPerBox(packaging) : null;
+            // A tray-first line already holds the split the supervisor
+            // typed, so its own trays-per-carton is the honest divisor and
+            // the tray total comes back out exactly as entered. Carton-first
+            // lines keep reading the standard's stated figure, as before.
+            const perBox = trayFirstStep(line) ?? (packaging ? innersPerBox(packaging) : null);
             const inners = (line.boxes ?? 0) * (perBox ?? 0) + (line.loose_inner ?? 0);
             if (line.mode === 'tray') trays += inners;
             if (line.mode === 'pouch') pouches += inners;
@@ -1825,6 +2001,98 @@ export default function ShiftProductionEntryPage() {
         }
     }, [entryDayBin, completingEntry, traceabilityEnabled, completeForm]);
 
+    // ---- Which material each fixed row arrives holding ---------------------
+    // Box 1 arrives ANSWERED. The backend's own suggestion is the authority: it
+    // matches the masterbatch on the product's derived COLOUR, which is the only
+    // thing that can tell Amber from White. A masterbatch NAME cannot, and
+    // reading one is how "ARIHANT PET WHITE 1020 Master Batch" came up on an
+    // amber run on the owner's screen.
+    //
+    // Under it, a ladder of facts rather than guesses, for a backend that does
+    // not send a suggestion yet: the product's own recipe, then the material
+    // physically in the day bin, then a catalogue that offers only one
+    // candidate. Each rung says WHY under the row, and an ambiguous colour
+    // pre-selects nothing at all rather than the first name that matches.
+    //
+    // Declared HERE, above applyDayBinConsumption, deliberately: that function
+    // must be able to see whether a colour match exists before it writes a
+    // material of its own, and the two queries behind them resolve in whatever
+    // order the network decides.
+    const resinSuggestion = useMemo(() => readSuggestion(completePreview?.suggested_resin), [completePreview]);
+    const mbSuggestion = useMemo(() => readSuggestion(completePreview?.suggested_masterbatch), [completePreview]);
+
+    const itemById = useCallback(
+        (itemId: number | null | undefined): Item | null =>
+            itemId === null || itemId === undefined ? null : items?.data.find((i) => i.id === itemId) ?? null,
+        [items],
+    );
+
+    /** Materials of one family the factory day bin is holding right now. */
+    const binItemIdsMatching = useCallback(
+        (matches: (item: Pick<Item, 'sku' | 'name'>) => boolean): number[] =>
+            (factoryDayBin?.materials ?? [])
+                .filter((row) => (toNum(row.quantity_kg) ?? 0) > 0)
+                .map((row) => row.item ?? itemById(row.item_id))
+                .filter((material): material is Item => material !== null && matches(material))
+                .map((material) => material.id),
+        [factoryDayBin, itemById],
+    );
+
+    /** Materials of one family named by the product's own recipe (BOM). */
+    const recipeItemIdsMatching = useCallback(
+        (matches: (item: Pick<Item, 'sku' | 'name'>) => boolean): number[] =>
+            (completePreview?.estimation.expected_materials ?? [])
+                .filter((line) => {
+                    const material = itemById(line.item_id);
+                    return material !== null && matches(material);
+                })
+                .map((line) => line.item_id),
+        [completePreview, itemById],
+    );
+
+    const resinPick = useMemo<FixedRowPick>(() => {
+        if (resinSuggestion.itemId !== null) {
+            return { itemId: resinSuggestion.itemId, reason: resinSuggestion.reason ?? 'the resin for this product' };
+        }
+        const fromRecipe = recipeItemIdsMatching(isResinItem);
+        if (fromRecipe.length === 1) return { itemId: fromRecipe[0], reason: "from the product's recipe" };
+        const inBin = binItemIdsMatching(isResinItem);
+        if (inBin.length === 1) return { itemId: inBin[0], reason: 'the only resin in the day bin' };
+        if (resinOptions.length === 1) return { itemId: resinOptions[0].value, reason: 'the only resin in the catalogue' };
+        return NO_PICK;
+    }, [resinSuggestion, recipeItemIdsMatching, binItemIdsMatching, resinOptions]);
+
+    const mbPick = useMemo<FixedRowPick>(() => {
+        if (!completingEntry) return NO_PICK;
+        // No masterbatch goes into Clear — nothing is pre-selected, and the row
+        // is not even shown (see hideMbRow).
+        if (isClearColour(completingColour)) return NO_PICK;
+        if (mbSuggestion.itemId !== null) {
+            return { itemId: mbSuggestion.itemId, reason: mbSuggestion.reason ?? "matched to the bottle's colour" };
+        }
+        const byColour = suggestMasterbatchByColour(items?.data, completingColour);
+        if (byColour.itemId !== null || byColour.reason !== null) return byColour;
+        const inBin = binItemIdsMatching(isMasterbatchItem);
+        if (inBin.length === 1) return { itemId: inBin[0], reason: 'the only masterbatch in the day bin' };
+        if (mbOptions.length === 1) return { itemId: mbOptions[0].value, reason: 'the only masterbatch in the catalogue' };
+        return NO_PICK;
+    }, [completingEntry, completingColour, mbSuggestion, items, binItemIdsMatching, mbOptions]);
+
+    // Pre-select both materials — only while the box is untouched and empty, the
+    // same contract as every other prefill in this drawer, so a supervisor's own
+    // pick is never walked back.
+    useEffect(() => {
+        if (!completingEntry) return;
+        const apply = (field: 'resin_item_id' | 'mb_item_id', itemId: number | null) => {
+            if (itemId === null) return;
+            if (completeForm.getFieldState(field).isDirty) return;
+            if (completeForm.getValues(field) != null) return;
+            completeForm.setValue(field, itemId);
+        };
+        apply('resin_item_id', resinPick.itemId);
+        apply('mb_item_id', mbPick.itemId);
+    }, [completingEntry, resinPick, mbPick, completeForm]);
+
     /**
      * Write one material's day-bin consumption into whichever fixed row it
      * belongs to (Resin or Masterbatch), from either the server's figure or
@@ -1855,10 +2123,20 @@ export default function ShiftProductionEntryPage() {
             if (!target) return;
             const kgField = target === 'resin' ? ('resin_kg' as const) : ('mb_kg' as const);
             const itemField = target === 'resin' ? ('resin_item_id' as const) : ('mb_item_id' as const);
+            const pick = target === 'resin' ? resinPick : mbPick;
 
-            // The bag actually scanned into the machine beats the colour-based
-            // MB suggestion — still only while the supervisor hasn't touched it.
-            if (!completeForm.getFieldState(itemField).isDirty) {
+            // WHAT MOVED THROUGH THE BIN OWNS THE KG, NOT THE MATERIAL.
+            //
+            // This used to name the material too, on the grounds that a scanned
+            // bag beats a suggestion. It does for a weight; it does not for a
+            // colour. Leftover white masterbatch in the bin during an amber run
+            // is exactly how the wrong colour appeared pre-selected on the
+            // owner's screen — and the row it lands in was chosen by the
+            // material's FAMILY (any masterbatch), which cannot tell the bag was
+            // the wrong one. So a colour/recipe match keeps box 1, the bin's own
+            // reading is reported in the grey line beneath, and this fills the
+            // box only when nothing better has answered.
+            if (pick.itemId === null && !completeForm.getFieldState(itemField).isDirty && completeForm.getValues(itemField) == null) {
                 completeForm.setValue(itemField, material.item.id);
             }
 
@@ -1874,6 +2152,11 @@ export default function ShiftProductionEntryPage() {
             // A negative result means the closing weight is more than what
             // went in — a real data problem, not a consumption figure.
             if (consumed === null || consumed < 0) return;
+            // And a weighment for a DIFFERENT material than the row names is not
+            // this row's kg. Reported under the row instead (see rowBinMismatch),
+            // never quietly written against the wrong colour.
+            const selectedItemId = completeForm.getValues(itemField);
+            if (selectedItemId != null && selectedItemId !== material.item.id) return;
             if (completeForm.getFieldState(kgField).isDirty) return;
             completeForm.setValue(kgField, Math.round(consumed * 10000) / 10000);
             // A weighed day-bin figure outranks the calculated estimate —
@@ -1882,7 +2165,7 @@ export default function ShiftProductionEntryPage() {
             if (target === 'resin') resinKgWeighedRef.current = true;
             else mbKgWeighedRef.current = true;
         },
-        [completeForm],
+        [completeForm, resinPick, mbPick],
     );
 
     // The server-figure pass, on load. `entryDayBin` is a fresh object each
@@ -1991,14 +2274,39 @@ export default function ShiftProductionEntryPage() {
         consumptionsWatch,
     ]);
 
-    // Resin auto-calculation (the factory rule, verified line-for-line
-    // against the 17.7.24 paper report): resin consumed = production kg +
-    // rejection kg + lumps kg, all from bottle weight. Prefills LIVE as the
-    // quantities are typed; a manual edit or a weighed day-bin figure takes
-    // the field over permanently for this batch (the two latches above).
+    // Box 2, grams per bottle. For resin that is the bottle's own unit weight —
+    // the same figure the kg arithmetic below has always used. Blank when the
+    // product master has no weight: an invented weight would silently invent
+    // every kg computed from it.
+    const resinGramsSuggested = resinSuggestion.grams ?? nominalWeight;
+    useEffect(() => {
+        if (!completingEntry || resinGramsSuggested === null) return;
+        if (resinGramsTouchedRef.current) return;
+        completeForm.setValue('resin_grams_per_bottle', resinGramsSuggested);
+    }, [resinGramsSuggested, completingEntry, completeForm]);
+
+    /**
+     * Resin auto-calculation (the factory rule, verified line-for-line against
+     * the 17.7.24 paper report): resin consumed = production kg + rejection kg
+     * + lumps kg, all from bottle weight. Prefills LIVE as the quantities are
+     * typed; a manual edit to the kg box or a weighed day-bin figure takes the
+     * field over permanently for this batch (the two latches above).
+     *
+     * THE FORMULA IS UNCHANGED. The only thing box 2 can do is correct the
+     * gram figure the formula reads: while it holds the master's unit weight
+     * the arithmetic is identical to what shipped, and a supervisor who
+     * corrects 5.0 g to 5.2 g gets the same formula at their weight — not a
+     * different formula that quietly drops rejection and lumps.
+     */
+    const effectiveResinGrams = resinGramsWatch ?? resinGramsSuggested ?? null;
     const resinCalcKg =
-        results && results.goodKg !== null
-            ? Math.round((results.goodKg + (results.rejProdKg ?? 0) + results.lumpsKg) * 10000) / 10000
+        effectiveResinGrams !== null && effectiveResinGrams > 0 && quantityProduced
+            ? Math.round(
+                  ((quantityProduced * effectiveResinGrams) / 1000 +
+                      (quantityScrap ? (quantityScrap * effectiveResinGrams) / 1000 : 0) +
+                      lumpsKgLive) *
+                      10000,
+              ) / 10000
             : null;
     useEffect(() => {
         if (!completingEntry || resinCalcKg === null) return;
@@ -2040,6 +2348,64 @@ export default function ShiftProductionEntryPage() {
         return Number.isFinite(grams) && grams > 0 ? grams : null;
     }, [mbDosings]);
 
+    // Box 2 of the masterbatch row: the dosing, prefilled and editable. The
+    // preview's suggestion carries the same figure and covers the beat before
+    // the dosing read answers, so the box is not blank for a moment on a
+    // masterbatch the factory HAS given a figure for.
+    //
+    // But it backs up ONLY ITS OWN masterbatch. Once the row names a different
+    // material the suggestion is not a stand-in for that material's dosing — a
+    // suggestion's grams under someone else's colour is a borrowed figure, and
+    // a borrowed figure is what books the wrong kg to Tally.
+    const mbGramsSuggested =
+        mbDosingGrams ?? (mbItemIdWatch != null && mbItemIdWatch === mbSuggestion.itemId ? mbSuggestion.grams : null);
+    useEffect(() => {
+        if (!completingEntry || mbGramsSuggested === null) return;
+        if (mbGramsTouchedRef.current) return;
+        completeForm.setValue('mb_grams_per_bottle', mbGramsSuggested);
+    }, [mbGramsSuggested, completingEntry, completeForm]);
+    /**
+     * A CHANGED masterbatch re-reads its own dosing — it never inherits the
+     * previous one's.
+     *
+     * Without this, switching a row from Amber (0.25 g/bottle) to a colour
+     * whose dosing is deliberately unset left 0.25 and its computed kg sitting
+     * in the boxes, and the grey line went on printing that arithmetic as if
+     * the factory had stated it for the new colour. Nobody stated it: that is a
+     * borrowed dosing booked against the wrong material, the same class of
+     * error as the wrong pre-selection, one field over.
+     *
+     * So both boxes are blanked and both latches released the instant the
+     * material changes, and the dosing effects above refill them if — and only
+     * if — the NEW masterbatch has a figure of its own. "No dosing set"
+     * therefore reads BLANK, never inherited and never zero.
+     *
+     * The weighed latch goes too: a day-bin weighment belonged to the material
+     * that just left the row, and its own guard already refuses to write a
+     * figure against a material the row no longer names.
+     */
+    const mbLastItemIdRef = useRef<number | null | undefined>(undefined);
+    useEffect(() => {
+        const previous = mbLastItemIdRef.current;
+        const current = mbItemIdWatch ?? null;
+        mbLastItemIdRef.current = current;
+        // Only a CHANGE of material clears anything. An EMPTY row being filled
+        // — the pre-selection landing, or the supervisor's first pick — is not
+        // a change, and must not clear: the day-bin pass writes a weighed kg
+        // and latches it while the row is still empty (its own guard lets a
+        // null row through), so treating null→material as a change would blank
+        // a figure somebody actually weighed and let the estimate overwrite it.
+        // Clearing the row back to empty IS a change, and does blank.
+        if (previous === undefined || previous === null || previous === current) return;
+        mbGramsTouchedRef.current = false;
+        mbKgTouchedRef.current = false;
+        mbKgWeighedRef.current = false;
+        completeForm.setValue('mb_grams_per_bottle', null);
+        completeForm.setValue('mb_kg', null);
+    }, [mbItemIdWatch, completeForm]);
+
+    const effectiveMbGrams = mbGramsWatch ?? mbGramsSuggested ?? null;
+
     // kg = bottles × grams ÷ 1000 — the factory's arithmetic, live off the
     // bottle count exactly as the resin figure is. ONE term: good bottles.
     // Rejected bottles are deliberately NOT added, unlike resin, because the
@@ -2055,8 +2421,8 @@ export default function ShiftProductionEntryPage() {
     // the same reason every other live figure in this drawer is a frontend
     // duplicate of a backend formula.
     const mbDosingKg =
-        mbDosingGrams !== null && quantityProduced !== null && quantityProduced !== undefined && quantityProduced > 0
-            ? Math.round(((quantityProduced * mbDosingGrams) / 1000) * 10000) / 10000
+        effectiveMbGrams !== null && effectiveMbGrams > 0 && quantityProduced !== null && quantityProduced !== undefined && quantityProduced > 0
+            ? Math.round(((quantityProduced * effectiveMbGrams) / 1000) * 10000) / 10000
             : null;
     useEffect(() => {
         if (!completingEntry || mbDosingKg === null) return;
@@ -2066,17 +2432,112 @@ export default function ShiftProductionEntryPage() {
         completeForm.setValue('mb_kg', mbDosingKg);
     }, [mbDosingKg, completingEntry, completeForm]);
 
+    /**
+     * A Clear bottle takes no masterbatch, so the row is not shown at all —
+     * an empty row on screen is an invitation to put something in it, and a
+     * masterbatch booked against a clear run is a wrong Tally voucher.
+     *
+     * Gated on the box ALSO being empty, not on the colour alone: if a
+     * masterbatch genuinely moved through the day bin on a clear run, the
+     * weighment has already named it here and that is a fact worth keeping —
+     * the row reappears and reports it rather than the figure vanishing from a
+     * hidden field.
+     *
+     * Read off the RUN's colour, not the item master's: an item master that
+     * says Clear while the supervisor started the batch on Amber would
+     * otherwise hide the row on an amber run, and no masterbatch at all would
+     * reach the voucher.
+     */
+    const hideMbRow = completingEntry !== null && isClearColour(completingColour) && mbItemIdWatch == null;
+
+    /**
+     * The one grey line under a fixed row: the arithmetic that produced the kg,
+     * then which material and why it was chosen.
+     *
+     * The reason is dropped the moment the supervisor picks a different material
+     * than the one suggested — a stale "matched to the bottle's colour" under
+     * their own pick would be a lie about where the figure came from. A pick of
+     * NOTHING keeps its reason ("two masterbatches match Amber"), because that
+     * is the whole explanation for an empty box.
+     */
+    const pickReason = (pick: FixedRowPick, selectedItemId: number | null | undefined): string | null =>
+        pick.itemId === null ? pick.reason : pick.itemId === selectedItemId ? pick.reason : null;
+
+    /**
+     * A day-bin weighment on this batch that belongs to this row's family but
+     * names a DIFFERENT material than the row does — leftover white masterbatch
+     * weighed out during an amber run, say. Stated, because the alternative is
+     * either a silent switch of the material or a silent kg against the wrong
+     * colour, and both have already happened once.
+     */
+    const rowBinMismatch = (
+        family: (item: Pick<Item, 'sku' | 'name'>) => boolean,
+        selectedItemId: number | null | undefined,
+    ): string | null => {
+        if (!traceabilityEnabled || !entryDayBin?.has_movements || selectedItemId == null) return null;
+        const other = entryDayBin.materials.find((m) => family(m.item) && m.item.id !== selectedItemId);
+        return other ? `the day bin also recorded ${other.item.name} on this batch — check what actually went in` : null;
+    };
+
+    const rowNote = (arithmetic: string | null, materialName: string | null, reason: string | null, mismatch: string | null): string | null => {
+        const who = [materialName, reason].filter((part): part is string => !!part).join(', ');
+        const parts = [arithmetic, who || null, mismatch].filter((part): part is string => !!part);
+        return parts.length > 0 ? parts.join(' — ') : null;
+    };
+
+    const resinRowNote = rowNote(
+        resinCalcKg !== null && effectiveResinGrams !== null && quantityProduced
+            ? `${quantityProduced.toLocaleString('en-IN')} bottles × ${fmtNum(effectiveResinGrams, 4)} g = ` +
+              `${fmtNum((quantityProduced * effectiveResinGrams) / 1000)} kg + ` +
+              `${fmtNum(quantityScrap ? (quantityScrap * effectiveResinGrams) / 1000 : 0)} rejection + ` +
+              `${fmtNum(lumpsKgLive)} lumps = ${fmtNum(resinCalcKg)} kg total`
+            : null,
+        itemById(resinItemIdWatch)?.name ?? null,
+        pickReason(resinPick, resinItemIdWatch),
+        rowBinMismatch(isResinItem, resinItemIdWatch),
+    );
+
+    /**
+     * Why the two masterbatch boxes are empty, in the arithmetic slot — because
+     * "no dosing set" is the whole explanation for them being empty, and two
+     * blank boxes with no sentence are indistinguishable from a screen still
+     * loading. The factory has deliberately left White and Red unset, so this
+     * is a normal state, not an error: it names the gap and hands the row back
+     * to the scale, which is the only other place the figure can come from.
+     *
+     * Still never a zero — a zero would assert the factory had said this colour
+     * needs no masterbatch, and nobody has said that.
+     */
+    const mbNoDosingNote =
+        !hideMbRow && mbItemIdWatch != null && effectiveMbGrams === null
+            ? 'no dosing set for this masterbatch — enter the kg the floor weighed'
+            : null;
+
+    const mbRowNote = rowNote(
+        mbDosingKg !== null && effectiveMbGrams !== null && quantityProduced
+            ? `${quantityProduced.toLocaleString('en-IN')} bottles × ${fmtNum(effectiveMbGrams, 4)} g = ${fmtNum(mbDosingKg)} kg total`
+            : mbNoDosingNote,
+        itemById(mbItemIdWatch)?.name ?? null,
+        pickReason(mbPick, mbItemIdWatch),
+        rowBinMismatch(isMasterbatchItem, mbItemIdWatch),
+    );
+
     const completeMutation = useMutation({
         mutationFn: (values: CompleteBatchFormValues) => {
             if (!completingEntry) throw new Error('No batch selected');
             // loose_pieces and no_of_pouches ride through in ...rest — both are
-            // real persisted fields since Wave A packaging.
+            // real persisted fields since Wave A packaging. The two
+            // grams-per-bottle boxes are destructured out and NEVER sent: they
+            // are how the kg was arrived at, and the kg is what is stored and
+            // what Tally receives.
             const {
                 resin_item_id,
                 resin_warehouse_id,
+                resin_grams_per_bottle: _resinGramsPerBottle,
                 resin_kg,
                 mb_item_id,
                 mb_warehouse_id,
+                mb_grams_per_bottle: _mbGramsPerBottle,
                 mb_kg,
                 running_hours,
                 qc_rejection_kg,
@@ -2090,12 +2551,23 @@ export default function ShiftProductionEntryPage() {
             } = values;
             // The fixed resin/MB rows are ordinary consumption lines on the
             // wire — same payload shape as before, no backend change.
+            //
+            // The warehouse is STATED, not asked: the configured day bin is what
+            // these two rows are issued from, so it backs up the form field
+            // rather than leaving a line un-sendable if the field never filled.
+            // A row with no material or no kg is simply omitted — never a
+            // zero-kg line, which would assert a material was issued and
+            // weighed at nothing.
+            const rowWarehouseId = (fieldValue: number | null | undefined): number | null =>
+                fieldValue ?? dayBinWarehouseId ?? null;
+            const resinWarehouseId = rowWarehouseId(resin_warehouse_id);
+            const mbWarehouseId = rowWarehouseId(mb_warehouse_id);
             const consumptions = [
-                ...(resin_item_id && resin_warehouse_id && resin_kg && resin_kg > 0
-                    ? [{ item_id: resin_item_id, warehouse_id: resin_warehouse_id, quantity_issued_kg: resin_kg }]
+                ...(resin_item_id && resinWarehouseId && resin_kg && resin_kg > 0
+                    ? [{ item_id: resin_item_id, warehouse_id: resinWarehouseId, quantity_issued_kg: resin_kg }]
                     : []),
-                ...(mb_item_id && mb_warehouse_id && mb_kg && mb_kg > 0
-                    ? [{ item_id: mb_item_id, warehouse_id: mb_warehouse_id, quantity_issued_kg: mb_kg }]
+                ...(mb_item_id && mbWarehouseId && mb_kg && mb_kg > 0
+                    ? [{ item_id: mb_item_id, warehouse_id: mbWarehouseId, quantity_issued_kg: mb_kg }]
                     : []),
                 ...(material_consumptions ?? []),
             ];
@@ -2553,13 +3025,26 @@ export default function ShiftProductionEntryPage() {
                             resinKgWeighedRef.current = false;
                             mbKgTouchedRef.current = false;
                             mbKgWeighedRef.current = false;
+                            resinGramsTouchedRef.current = false;
+                            mbGramsTouchedRef.current = false;
+                            // Forget which masterbatch the LAST batch ended on,
+                            // so this batch's pre-selection counts as a first
+                            // sighting and blanks nothing.
+                            mbLastItemIdRef.current = undefined;
                             // Prefill Nos/Tray and Nos/Box from the item's packing
                             // master when set — for items without standards both are
                             // undefined and this reset is identical to before.
                             // Expected-output prefills: Running Hours defaults to
                             // the shift's full length, Active Cavities to what Start
-                            // Batch recorded (itself defaulted from the standard),
-                            // and the Masterbatch row to the colour-matched MB item.
+                            // Batch recorded (itself defaulted from the standard).
+                            //
+                            // The two material rows are deliberately NOT seeded
+                            // here. They are filled by the pre-selection effect
+                            // above, which prefers the preview's colour-matched
+                            // suggestion over anything this click can compute —
+                            // seeding a name-matched guess here would win the
+                            // "already has a value" race and keep the wrong
+                            // masterbatch on screen.
                             completeForm.reset({
                                 material_consumptions: [],
                                 scraps: [],
@@ -2574,7 +3059,12 @@ export default function ShiftProductionEntryPage() {
                                 nos_per_box: running.item.nos_per_box ?? undefined,
                                 running_hours: shiftLengthHours(running.shift) ?? undefined,
                                 active_cavities: running.active_cavities ?? running.standard_cavities ?? undefined,
-                                mb_item_id: suggestMasterbatchId(items?.data, running.item.colour),
+                                // Where both fixed rows are issued from: the day
+                                // bin, stated rather than asked. Left undefined
+                                // when none is configured, which is the one case
+                                // the rows still show a source picker.
+                                resin_warehouse_id: dayBinWarehouseId ?? undefined,
+                                mb_warehouse_id: dayBinWarehouseId ?? undefined,
                             });
                         } else {
                             setStartProductionDateOverride(null);
@@ -3460,6 +3950,21 @@ export default function ShiftProductionEntryPage() {
                                 const derived = linePieces(line);
                                 const actual = line.actual_pieces ?? derived;
                                 const lineErrors = completeForm.formState.errors.packing_lines?.[index];
+                                // Tray-first: the floor counts trays (or
+                                // pouches) and the cartons follow. Null keeps
+                                // the line exactly as it always was.
+                                const step = trayFirstStep(line);
+                                const innerName = inner ?? 'trays';
+                                const innerOne = innerNounOne(line.mode) ?? 'tray';
+                                const innerCount = step !== null ? lineInnerCount(line, step) : null;
+                                // Pieces per tray can be cleared mid-edit. Until it comes back
+                                // nothing about this line is computable, so nothing is asserted:
+                                // a card reading "1 carton" beside "0 pcs" is worse than a dash.
+                                const trayPieceSize = step !== null ? (line.nos_per_inner ?? null) : null;
+                                const cartonText =
+                                    step !== null && trayPieceSize !== null
+                                        ? cartonSummary(line.boxes ?? 0, line.loose_inner ?? 0, innerOne, innerName)
+                                        : '';
                                 return (
                                     <Card
                                         key={field.id}
@@ -3470,7 +3975,7 @@ export default function ShiftProductionEntryPage() {
                                                 <Tag color="blue">{MODE_LABEL[line.mode]}</Tag>
                                                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                                                     {line.nos_per_box ?? '—'} pcs/carton
-                                                    {inner && line.nos_per_inner ? ` · ${line.nos_per_inner} pcs/${inner.slice(0, -1)}` : ''}
+                                                    {inner && line.nos_per_inner ? ` · ${line.nos_per_inner} pcs/${innerNounOne(line.mode)}` : ''}
                                                 </Typography.Text>
                                             </Space>
                                         }
@@ -3493,71 +3998,183 @@ export default function ShiftProductionEntryPage() {
                                             <Alert type="error" showIcon style={{ marginBottom: 8 }} message={lineErrors.mode.message} />
                                         )}
                                         <Row gutter={[8, 8]}>
-                                            <Col xs={12} sm={8}>
-                                                <Form.Item
-                                                    label="Cartons"
-                                                    style={{ marginBottom: 0 }}
-                                                    validateStatus={lineErrors?.boxes ? 'error' : ''}
-                                                    help={lineErrors?.boxes?.message}
-                                                >
-                                                    <Controller
-                                                        name={`packing_lines.${index}.boxes`}
-                                                        control={completeForm.control}
-                                                        render={({ field: boxField }) => (
+                                            {step !== null ? (
+                                                <>
+                                                    {/* Tray-first. "5 tray = 1 carton boxes, then 600
+                                                        units based on 120 PER TRAY, SO FIVE TRAY SO
+                                                        600" — the floor counts trays, so trays are
+                                                        what it types. Cartons are arithmetic and are
+                                                        shown, never asked for; the trays left over a
+                                                        whole carton ride along in loose_inner, which
+                                                        is why the API contract needs no change. */}
+                                                    <Col xs={12} sm={8}>
+                                                        <Form.Item
+                                                            label={`${innerName.charAt(0).toUpperCase()}${innerName.slice(1)}`}
+                                                            style={{ marginBottom: 0 }}
+                                                            extra={`counted this run · ${step} per carton`}
+                                                            validateStatus={lineErrors?.boxes || lineErrors?.loose_inner ? 'error' : ''}
+                                                            help={lineErrors?.boxes?.message ?? lineErrors?.loose_inner?.message}
+                                                        >
                                                             <InputNumber
-                                                                {...boxField}
+                                                                value={innerCount}
                                                                 size="large"
                                                                 min={0}
+                                                                precision={0}
                                                                 style={{ width: '100%' }}
                                                                 onChange={(value) => {
-                                                                    boxField.onChange(value);
+                                                                    // Cleared means "not counted yet",
+                                                                    // which is not the same as a
+                                                                    // counted nothing — keep the pair
+                                                                    // empty rather than writing zeros.
+                                                                    const split =
+                                                                        value === null || value === undefined
+                                                                            ? { boxes: null, loose: null }
+                                                                            : splitInners(Number(value), step);
+                                                                    completeForm.setValue(`packing_lines.${index}.boxes`, split.boxes);
+                                                                    completeForm.setValue(`packing_lines.${index}.loose_inner`, split.loose);
                                                                     recomputePackingTotals();
                                                                 }}
                                                             />
-                                                        )}
-                                                    />
-                                                </Form.Item>
-                                            </Col>
-                                            <Col xs={12} sm={8}>
-                                                {/* Prefilled from the imported standard and still
-                                                    editable: a run genuinely packed at a different
-                                                    carton size must be recordable, and a standard
-                                                    that never carried the figure must not dead-end
-                                                    the completion. */}
-                                                <Form.Item
-                                                    label="Pcs/carton"
-                                                    style={{ marginBottom: 0 }}
-                                                    extra={packaging?.nos_per_box ? `standard: ${packaging.nos_per_box}` : 'not on the standard — enter it'}
-                                                    validateStatus={lineErrors?.nos_per_box ? 'error' : ''}
-                                                    help={lineErrors?.nos_per_box?.message}
-                                                >
-                                                    <Controller
-                                                        name={`packing_lines.${index}.nos_per_box`}
-                                                        control={completeForm.control}
-                                                        render={({ field: perBoxField }) => (
-                                                            <InputNumber
-                                                                {...perBoxField}
-                                                                size="large"
-                                                                min={1}
-                                                                style={{ width: '100%' }}
-                                                                onChange={(value) => {
-                                                                    perBoxField.onChange(value);
-                                                                    recomputePackingTotals();
-                                                                }}
+                                                        </Form.Item>
+                                                    </Col>
+                                                    <Col xs={12} sm={8}>
+                                                        {/* Prefilled from the imported standard and
+                                                            still editable: a run genuinely packed at a
+                                                            different tray size must be recordable. The
+                                                            carton size follows it, so a carton stays
+                                                            the same NUMBER of trays. */}
+                                                        <Form.Item
+                                                            label={`Pcs per ${innerOne}`}
+                                                            style={{ marginBottom: 0 }}
+                                                            extra={
+                                                                packaging && innerPackSize(packaging)
+                                                                    ? `standard: ${innerPackSize(packaging)}`
+                                                                    : 'not on the standard — enter it'
+                                                            }
+                                                            validateStatus={lineErrors?.nos_per_inner ? 'error' : ''}
+                                                            help={lineErrors?.nos_per_inner?.message}
+                                                        >
+                                                            <Controller
+                                                                name={`packing_lines.${index}.nos_per_inner`}
+                                                                control={completeForm.control}
+                                                                render={({ field: perInnerField }) => (
+                                                                    <InputNumber
+                                                                        {...perInnerField}
+                                                                        size="large"
+                                                                        min={1}
+                                                                        precision={0}
+                                                                        style={{ width: '100%' }}
+                                                                        onChange={(value) => {
+                                                                            perInnerField.onChange(value);
+                                                                            // The carton follows the tray:
+                                                                            // it stays the same NUMBER of
+                                                                            // trays, so pcs/carton is
+                                                                            // step × pcs/tray. Rounded —
+                                                                            // a fractional pcs/carton
+                                                                            // would be refused on a field
+                                                                            // this line does not show.
+                                                                            completeForm.setValue(
+                                                                                `packing_lines.${index}.nos_per_box`,
+                                                                                value === null || value === undefined
+                                                                                    ? null
+                                                                                    : step * Math.round(Number(value)),
+                                                                            );
+                                                                            recomputePackingTotals();
+                                                                        }}
+                                                                    />
+                                                                )}
                                                             />
-                                                        )}
-                                                    />
-                                                </Form.Item>
-                                            </Col>
-                                            {inner !== null && (line.nos_per_inner ?? null) === null && (
+                                                        </Form.Item>
+                                                    </Col>
+                                                    <Col xs={12} sm={8}>
+                                                        <Form.Item
+                                                            label="Cartons"
+                                                            style={{ marginBottom: 0 }}
+                                                            extra={
+                                                                trayPieceSize !== null
+                                                                    ? `derived · ${line.nos_per_box ?? 0} pcs/carton`
+                                                                    : `enter pcs per ${innerOne}`
+                                                            }
+                                                        >
+                                                            <Typography.Text strong style={{ display: 'block', fontSize: 16, lineHeight: '40px' }}>
+                                                                {cartonText ? `= ${cartonText}` : '—'}
+                                                            </Typography.Text>
+                                                        </Form.Item>
+                                                    </Col>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Col xs={12} sm={8}>
+                                                        <Form.Item
+                                                            label="Cartons"
+                                                            style={{ marginBottom: 0 }}
+                                                            validateStatus={lineErrors?.boxes ? 'error' : ''}
+                                                            help={lineErrors?.boxes?.message}
+                                                        >
+                                                            <Controller
+                                                                name={`packing_lines.${index}.boxes`}
+                                                                control={completeForm.control}
+                                                                render={({ field: boxField }) => (
+                                                                    <InputNumber
+                                                                        {...boxField}
+                                                                        size="large"
+                                                                        min={0}
+                                                                        style={{ width: '100%' }}
+                                                                        onChange={(value) => {
+                                                                            boxField.onChange(value);
+                                                                            recomputePackingTotals();
+                                                                        }}
+                                                                    />
+                                                                )}
+                                                            />
+                                                        </Form.Item>
+                                                    </Col>
+                                                    <Col xs={12} sm={8}>
+                                                        {/* Prefilled from the imported standard and still
+                                                            editable: a run genuinely packed at a different
+                                                            carton size must be recordable, and a standard
+                                                            that never carried the figure must not dead-end
+                                                            the completion. */}
+                                                        <Form.Item
+                                                            label="Pcs/carton"
+                                                            style={{ marginBottom: 0 }}
+                                                            extra={packaging?.nos_per_box ? `standard: ${packaging.nos_per_box}` : 'not on the standard — enter it'}
+                                                            validateStatus={lineErrors?.nos_per_box ? 'error' : ''}
+                                                            help={lineErrors?.nos_per_box?.message}
+                                                        >
+                                                            <Controller
+                                                                name={`packing_lines.${index}.nos_per_box`}
+                                                                control={completeForm.control}
+                                                                render={({ field: perBoxField }) => (
+                                                                    <InputNumber
+                                                                        {...perBoxField}
+                                                                        size="large"
+                                                                        min={1}
+                                                                        style={{ width: '100%' }}
+                                                                        onChange={(value) => {
+                                                                            perBoxField.onChange(value);
+                                                                            recomputePackingTotals();
+                                                                        }}
+                                                                    />
+                                                                )}
+                                                            />
+                                                        </Form.Item>
+                                                    </Col>
+                                                </>
+                                            )}
+                                            {step === null && inner !== null && (line.nos_per_inner ?? null) === null && (
                                                 <Col xs={24}>
                                                     <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                                        This standard has no pieces-per-{inner.slice(0, -1)}, so loose {inner} cannot be
+                                                        This standard has no pieces-per-{innerOne}, so loose {inner} cannot be
                                                         converted to pieces — count them into the cartons or correct the pieces below.
                                                     </Typography.Text>
                                                 </Col>
                                             )}
-                                            {inner !== null && (line.nos_per_inner ?? null) !== null && (
+                                            {/* Only a carton-first line asks for loose trays. On a
+                                                tray-first line the total trays already include them
+                                                — a second box for the ones over would count the same
+                                                trays twice. */}
+                                            {step === null && inner !== null && (line.nos_per_inner ?? null) !== null && (
                                                 <Col xs={12} sm={8}>
                                                     <Form.Item
                                                         label={`Loose ${inner}`}
@@ -3614,15 +4231,30 @@ export default function ShiftProductionEntryPage() {
                                             </Col>
                                         </Row>
                                         <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
-                                            {line.boxes ?? 0} cartons × {line.nos_per_box ?? 0}
-                                            {inner && line.nos_per_inner
-                                                ? ` + ${line.loose_inner ?? 0} loose ${inner} × ${line.nos_per_inner}`
-                                                : ''}{' '}
-                                            = <strong>{derived}</strong> pcs
+                                            {step !== null && trayPieceSize !== null ? (
+                                                <>
+                                                    {innerCount ?? 0} {innerName} × {trayPieceSize} ={' '}
+                                                    <strong>{derived}</strong> pcs · = {cartonText}
+                                                    {` (${step} ${innerName}/carton)`}
+                                                </>
+                                            ) : step !== null ? (
+                                                <>
+                                                    {innerCount ?? 0} {innerName} counted · enter pcs per {innerOne} to get the
+                                                    pieces and the cartons
+                                                </>
+                                            ) : (
+                                                <>
+                                                    {line.boxes ?? 0} cartons × {line.nos_per_box ?? 0}
+                                                    {inner && line.nos_per_inner
+                                                        ? ` + ${line.loose_inner ?? 0} loose ${inner} × ${line.nos_per_inner}`
+                                                        : ''}{' '}
+                                                    = <strong>{derived}</strong> pcs
+                                                    {packaging && innersPerBox(packaging)
+                                                        ? ` · ${innersPerBox(packaging)} ${inner}/carton`
+                                                        : ''}
+                                                </>
+                                            )}
                                             {actual !== derived ? ` · counted ${actual}` : ''}
-                                            {packaging && innersPerBox(packaging)
-                                                ? ` · ${innersPerBox(packaging)} ${inner}/carton`
-                                                : ''}
                                         </Typography.Text>
                                         {/* A counted figure that differs from the pack-size
                                             arithmetic is a real event (short box, part carton)
@@ -4018,11 +4650,11 @@ export default function ShiftProductionEntryPage() {
                         consumes — pickers scoped to resins / masterbatches so
                         the right item is one tap, not a 642-item search. Rows
                         without a quantity are simply not sent. */}
-                    {/* Where consumption comes OUT of — stated, not asked. The
+                    {/* Where consumption comes OUT of — STATED, never asked. The
                         source was already recorded when the bag was loaded into
                         the factory day bin, so these rows carry it silently and
-                        completing the batch reduces the bin. ONE line says
-                        which place that is, with somewhere to change it. */}
+                        completing the batch reduces the bin. ONE line says which
+                        place that is, with somewhere to change it. */}
                     {dayBinWarehouseId === null ? (
                         <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
                             No factory day bin chosen yet, so each line still asks where its material came from.{' '}
@@ -4035,8 +4667,12 @@ export default function ShiftProductionEntryPage() {
                         </Typography.Text>
                     )}
 
+                    {/* THREE BOXES: the material, grams per bottle, total kg.
+                        Both figures arrive filled in and both stay editable; the
+                        TOTAL is the figure that is stored and that Tally
+                        receives, and grams per bottle is how it was arrived at. */}
                     <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
-                        Resin (kg)
+                        Resin
                     </Typography.Text>
                     <Row gutter={[8, 8]} align="top" style={{ marginTop: 4 }}>
                         <Col xs={24} sm={10}>
@@ -4054,11 +4690,56 @@ export default function ShiftProductionEntryPage() {
                                 />
                             </Form.Item>
                         </Col>
-                        {/* No "From" here in the normal case: the day bin already
-                            knows. It reappears only for a material the bin holds
-                            none of — see askSourceFor. */}
-                        {askResinSource && (
-                            <Col xs={12} sm={7}>
+                        <Col xs={12} sm={7}>
+                            <Controller
+                                name="resin_grams_per_bottle"
+                                control={completeForm.control}
+                                render={({ field }) => (
+                                    <InputNumber
+                                        {...field}
+                                        size="large"
+                                        min={0}
+                                        step={0.1}
+                                        placeholder="g/bottle"
+                                        suffix="g"
+                                        style={{ width: '100%' }}
+                                        onChange={(value) => {
+                                            // A corrected bottle weight owns this box
+                                            // for the batch — and re-runs the SAME kg
+                                            // formula at the supervisor's weight.
+                                            resinGramsTouchedRef.current = true;
+                                            field.onChange(value);
+                                        }}
+                                    />
+                                )}
+                            />
+                        </Col>
+                        <Col xs={12} sm={7}>
+                            <Controller
+                                name="resin_kg"
+                                control={completeForm.control}
+                                render={({ field }) => (
+                                    <InputNumber
+                                        {...field}
+                                        size="large"
+                                        min={0}
+                                        placeholder="kg total"
+                                        suffix="Kg"
+                                        style={{ width: '100%' }}
+                                        onChange={(value) => {
+                                            // A manual edit wins permanently for this
+                                            // batch — the auto-calculation backs off.
+                                            resinKgTouchedRef.current = true;
+                                            field.onChange(value);
+                                        }}
+                                    />
+                                )}
+                            />
+                        </Col>
+                        {/* Only when NO day bin is configured: there is no source
+                            to state, so the row falls back to asking. */}
+                        {askMaterialSource && (
+                            <Col xs={24}>
                                 <Form.Item
                                     style={{ marginBottom: 0 }}
                                     validateStatus={completeForm.formState.errors.resin_warehouse_id ? 'error' : ''}
@@ -4074,107 +4755,121 @@ export default function ShiftProductionEntryPage() {
                                 </Form.Item>
                             </Col>
                         )}
-                        <Col xs={askResinSource ? 12 : 24} sm={askResinSource ? 7 : 14}>
-                            <Controller
-                                name="resin_kg"
-                                control={completeForm.control}
-                                render={({ field }) => (
-                                    <InputNumber
-                                        {...field}
-                                        size="large"
-                                        min={0}
-                                        placeholder="Kg"
-                                        suffix="Kg"
-                                        style={{ width: '100%' }}
-                                        onChange={(value) => {
-                                            // A manual edit wins permanently for this
-                                            // batch — the auto-calculation backs off.
-                                            resinKgTouchedRef.current = true;
-                                            field.onChange(value);
-                                        }}
-                                    />
-                                )}
-                            />
-                        </Col>
-                        {resinCalcKg !== null && results && (
+                        {resinRowNote && (
                             <Col xs={24}>
                                 <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
-                                    {`= ${fmtNum(results.goodKg)} production + ${fmtNum(results.rejProdKg ?? 0)} rejection + ${fmtNum(results.lumpsKg)} lumps — edit if the weighed figure differs`}
+                                    {resinRowNote}
                                 </Typography.Text>
                             </Col>
                         )}
                         <Col xs={24}>{dayBinHint(resinItemIdWatch, resinKgWatch, completeForm.watch('resin_warehouse_id'))}</Col>
                     </Row>
 
-                    <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
-                        Masterbatch (kg)
-                        {completingEntry && isClearColour(completingEntry.item.colour) && ' — No masterbatch for Clear'}
-                    </Typography.Text>
-                    <Row gutter={[8, 8]} align="top" style={{ marginTop: 4 }}>
-                        <Col xs={24} sm={10}>
-                            <Form.Item
-                                style={{ marginBottom: 0 }}
-                                validateStatus={completeForm.formState.errors.mb_item_id ? 'error' : ''}
-                                help={completeForm.formState.errors.mb_item_id?.message}
-                            >
-                                <Controller
-                                    name="mb_item_id"
-                                    control={completeForm.control}
-                                    render={({ field }) => (
-                                        <Select {...field} size="large" options={mbOptions} showSearch optionFilterProp="label" allowClear style={{ width: '100%' }} placeholder="Masterbatch…" />
-                                    )}
-                                />
-                            </Form.Item>
-                        </Col>
-                        {askMbSource && (
-                            <Col xs={12} sm={7}>
-                                <Form.Item
-                                    style={{ marginBottom: 0 }}
-                                    validateStatus={completeForm.formState.errors.mb_warehouse_id ? 'error' : ''}
-                                    help={completeForm.formState.errors.mb_warehouse_id?.message}
-                                >
+                    {/* A Clear bottle takes no colour, so the row is not shown at
+                        all — an empty masterbatch row on a clear run is an
+                        invitation to book a material that never went in. One line
+                        says so, and names where a genuine exception goes. */}
+                    {hideMbRow ? (
+                        <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
+                            Clear bottles take no masterbatch — if this run genuinely used one, add it under Other
+                            materials below.
+                        </Typography.Text>
+                    ) : (
+                        <>
+                            <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
+                                Masterbatch
+                            </Typography.Text>
+                            <Row gutter={[8, 8]} align="top" style={{ marginTop: 4 }}>
+                                <Col xs={24} sm={10}>
+                                    <Form.Item
+                                        style={{ marginBottom: 0 }}
+                                        validateStatus={completeForm.formState.errors.mb_item_id ? 'error' : ''}
+                                        help={completeForm.formState.errors.mb_item_id?.message}
+                                    >
+                                        <Controller
+                                            name="mb_item_id"
+                                            control={completeForm.control}
+                                            render={({ field }) => (
+                                                <Select {...field} size="large" options={mbOptions} showSearch optionFilterProp="label" allowClear style={{ width: '100%' }} placeholder="Masterbatch…" />
+                                            )}
+                                        />
+                                    </Form.Item>
+                                </Col>
+                                <Col xs={12} sm={7}>
                                     <Controller
-                                        name="mb_warehouse_id"
+                                        name="mb_grams_per_bottle"
                                         control={completeForm.control}
                                         render={({ field }) => (
-                                            <Select {...field} size="large" options={warehouseOptions} showSearch optionFilterProp="label" allowClear style={{ width: '100%' }} placeholder="From" />
+                                            <InputNumber
+                                                {...field}
+                                                size="large"
+                                                min={0}
+                                                step={0.01}
+                                                placeholder="g/bottle"
+                                                suffix="g"
+                                                style={{ width: '100%' }}
+                                                onChange={(value) => {
+                                                    // The floor's own dosing beats the
+                                                    // master's for this batch, and the
+                                                    // total kg follows it live.
+                                                    mbGramsTouchedRef.current = true;
+                                                    field.onChange(value);
+                                                }}
+                                            />
                                         )}
                                     />
-                                </Form.Item>
-                            </Col>
-                        )}
-                        <Col xs={askMbSource ? 12 : 24} sm={askMbSource ? 7 : 14}>
-                            <Controller
-                                name="mb_kg"
-                                control={completeForm.control}
-                                render={({ field }) => (
-                                    <InputNumber
-                                        {...field}
-                                        size="large"
-                                        min={0}
-                                        placeholder="Kg"
-                                        suffix="Kg"
-                                        style={{ width: '100%' }}
-                                        onChange={(value) => {
-                                            // Same contract as resin: a supervisor-typed
-                                            // figure owns the field for the rest of this
-                                            // batch and the dosing suggestion backs off.
-                                            mbKgTouchedRef.current = true;
-                                            field.onChange(value);
-                                        }}
+                                </Col>
+                                <Col xs={12} sm={7}>
+                                    <Controller
+                                        name="mb_kg"
+                                        control={completeForm.control}
+                                        render={({ field }) => (
+                                            <InputNumber
+                                                {...field}
+                                                size="large"
+                                                min={0}
+                                                placeholder="kg total"
+                                                suffix="Kg"
+                                                style={{ width: '100%' }}
+                                                onChange={(value) => {
+                                                    // Same contract as resin: a supervisor-typed
+                                                    // figure owns the field for the rest of this
+                                                    // batch and the dosing suggestion backs off.
+                                                    mbKgTouchedRef.current = true;
+                                                    field.onChange(value);
+                                                }}
+                                            />
+                                        )}
                                     />
+                                </Col>
+                                {askMaterialSource && (
+                                    <Col xs={24}>
+                                        <Form.Item
+                                            style={{ marginBottom: 0 }}
+                                            validateStatus={completeForm.formState.errors.mb_warehouse_id ? 'error' : ''}
+                                            help={completeForm.formState.errors.mb_warehouse_id?.message}
+                                        >
+                                            <Controller
+                                                name="mb_warehouse_id"
+                                                control={completeForm.control}
+                                                render={({ field }) => (
+                                                    <Select {...field} size="large" options={warehouseOptions} showSearch optionFilterProp="label" allowClear style={{ width: '100%' }} placeholder="From" />
+                                                )}
+                                            />
+                                        </Form.Item>
+                                    </Col>
                                 )}
-                            />
-                        </Col>
-                        {mbDosingKg !== null && mbDosingGrams !== null && quantityProduced !== null && quantityProduced !== undefined && (
-                            <Col xs={24}>
-                                <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
-                                    {`= ${quantityProduced.toLocaleString('en-IN')} bottles × ${fmtNum(mbDosingGrams)} g = ${fmtNum(mbDosingKg)} kg — edit if the weighed figure differs`}
-                                </Typography.Text>
-                            </Col>
-                        )}
-                        <Col xs={24}>{dayBinHint(mbItemIdWatch, mbKgWatch, completeForm.watch('mb_warehouse_id'))}</Col>
-                    </Row>
+                                {mbRowNote && (
+                                    <Col xs={24}>
+                                        <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                                            {mbRowNote}
+                                        </Typography.Text>
+                                    </Col>
+                                )}
+                                <Col xs={24}>{dayBinHint(mbItemIdWatch, mbKgWatch, completeForm.watch('mb_warehouse_id'))}</Col>
+                            </Row>
+                        </>
+                    )}
 
                     <Space style={{ justifyContent: 'space-between', width: '100%', marginTop: 12 }}>
                         <Typography.Text type="secondary">Other materials (exceptions)</Typography.Text>
@@ -4197,14 +4892,9 @@ export default function ShiftProductionEntryPage() {
                         // (factory answer: UOM comes from the item master).
                         const selectedItemId = completeForm.watch(`material_consumptions.${index}.item_id`);
                         const selectedUom = items?.data.find((i) => i.id === selectedItemId)?.uom ?? 'Kg';
-                        // These exception lines are usually the Nos consumables
-                        // (caps, labels, cartons), which never pass through the
-                        // kg-only day bin — so this is the one place the source
-                        // question genuinely survives, and only for those.
-                        const askLineSource = askSourceFor(selectedItemId);
                         return (
                         <Row key={field.id} gutter={[8, 8]} align="middle" style={{ marginTop: 8 }}>
-                            <Col xs={24} sm={askLineSource ? 10 : 14}>
+                            <Col xs={24} sm={10}>
                                 <Controller
                                     name={`material_consumptions.${index}.item_id`}
                                     control={completeForm.control}
@@ -4213,18 +4903,25 @@ export default function ShiftProductionEntryPage() {
                                     )}
                                 />
                             </Col>
-                            {askLineSource && (
-                                <Col xs={12} sm={6}>
-                                    <Controller
-                                        name={`material_consumptions.${index}.warehouse_id`}
-                                        control={completeForm.control}
-                                        render={({ field }) => (
-                                            <Select {...field} size="large" options={warehouseOptions} showSearch optionFilterProp="label" style={{ width: '100%' }} placeholder="From" />
-                                        )}
-                                    />
-                                </Col>
-                            )}
-                            <Col xs={12} sm={askLineSource ? 5 : 7}>
+                            {/* The exception lines keep a source — ALWAYS shown, no
+                                longer flickering in and out with the bin balance.
+                                These are usually the Nos consumables (caps, labels,
+                                cartons), which never pass through the kg-only day
+                                bin, so there is no bin answer to state and the
+                                warehouse is a required field on the wire: hiding it
+                                would fail the line on a value nobody could set. It
+                                fills in silently whenever the bin does hold the
+                                material. */}
+                            <Col xs={12} sm={6}>
+                                <Controller
+                                    name={`material_consumptions.${index}.warehouse_id`}
+                                    control={completeForm.control}
+                                    render={({ field }) => (
+                                        <Select {...field} size="large" options={warehouseOptions} showSearch optionFilterProp="label" style={{ width: '100%' }} placeholder="From" />
+                                    )}
+                                />
+                            </Col>
+                            <Col xs={12} sm={5}>
                                 <Controller
                                     name={`material_consumptions.${index}.quantity_issued_kg`}
                                     control={completeForm.control}

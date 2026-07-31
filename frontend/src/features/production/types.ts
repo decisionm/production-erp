@@ -196,6 +196,18 @@ export interface ShiftProductionEntry {
      */
     parent_entry_id?: number | null;
     batch_status: BatchStatus;
+    /**
+     * WHICH COLOUR THIS RUN IS RECORDED AS MAKING — read back out of the
+     * config snapshot Start Batch froze it into, so a later item-master edit
+     * cannot restate it.
+     *
+     * This, not `item.colour`, is what picks the masterbatch: most bottle
+     * items carry no colour at all (which is why Start Batch asks), and a
+     * mislabelled one names a different colour's material. Optional because a
+     * backend that predates the field simply omits it; null is the real
+     * answer "nobody stated a colour", never "".
+     */
+    colour?: string | null;
     batch_number: string | null;
     quantity_produced: string | null;
     quantity_produced_kg: string | null;
@@ -841,9 +853,44 @@ export interface MasterbatchDosing {
     suggested_kg: string | null;
 }
 
+/**
+ * A material the completion screen should arrive with ALREADY CHOSEN, plus the
+ * per-bottle figure behind it — the answer to "which resin / which colour, and
+ * how many grams a bottle", so the supervisor confirms a figure instead of
+ * assembling one. `reason` is the sentence the screen prints under the row, so
+ * a pre-selection is never unexplained ("matched to the bottle's colour").
+ *
+ * EVERY KEY IS OPTIONAL, deliberately. This block is served by the preview
+ * endpoint (`suggested_resin` / `suggested_masterbatch`); a backend that does
+ * not send it yet must leave the screen working, and one that names the
+ * material as a bare `item_id` rather than an `item` object must still
+ * pre-select rather than silently fall back to an empty picker — which is the
+ * exact defect this shape exists to end. Read through ONE function
+ * (`readSuggestion` in ShiftProductionEntryPage) so a wire-shape correction is
+ * a one-line change.
+ */
+export interface SuggestedMaterial {
+    item?: { id: number; name?: string | null; sku?: string | null } | null;
+    /** Alternative to `item` — the material by id alone. */
+    item_id?: number | null;
+    /** GRAMS per bottle. A decimal string on the wire; a number is accepted. */
+    grams_per_bottle?: string | number | null;
+    /** Why this material, in the supervisor's words. */
+    reason?: string | null;
+}
+
 export interface BatchPreview {
     readiness: ProductReadiness;
     estimation: BatchEstimation;
+    /**
+     * The resin and the masterbatch this run should consume, pre-chosen by the
+     * backend (the colour column is the authority for the masterbatch, never
+     * the item's name). Optional: absent on a backend that predates them, and
+     * the screen falls back to what it can prove from the recipe, the day bin
+     * and the catalogue.
+     */
+    suggested_resin?: SuggestedMaterial | null;
+    suggested_masterbatch?: SuggestedMaterial | null;
     /** The resolved variant, or null when the product offers a choice. */
     standard:
         | (Omit<StandardVariant, 'packagings' | 'label'> & {
