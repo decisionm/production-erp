@@ -272,11 +272,22 @@ class FactoryDayBinService
             ->get()
             ->groupBy('item_id');
 
-        // Only items that actually sit in the bin or the store — then the
-        // kg-uom filter cuts the set down to raw materials.
+        // EVERY active raw material, not only the ones that happen to have a
+        // stock row. Filtering on "has a balance somewhere" hid exactly the
+        // material a person came here to load: the owner reported the amber
+        // masterbatch missing, and it was missing because none had been loaded
+        // yet — a material you cannot see is a material you cannot load, so
+        // absence-of-stock made the page useless for the case it exists for.
+        // Zero is a fact worth showing; a missing row is not.
+        //
+        // A kg-family unit is this database's only signal for "raw material"
+        // (see Item::scopeKgUom), so kg-measured packing film appears here too.
+        // That is the honest consequence of the signal available and is better
+        // than a hardcoded list of names that a new masterbatch would fall out
+        // of the moment the factory bought one.
         $items = Item::query()
             ->kgUom()
-            ->whereIn('id', $binByItem->keys()->merge($storeByItem->keys())->unique())
+            ->where('is_active', true)
             ->orderBy('name')
             ->get();
 

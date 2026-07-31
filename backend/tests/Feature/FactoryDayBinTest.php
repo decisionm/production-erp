@@ -164,6 +164,73 @@ class FactoryDayBinTest extends TestCase
         $response->assertJsonPath('data.materials.1.item.sku', 'PET-RESIN');
     }
 
+    public function test_a_raw_material_with_no_stock_anywhere_still_appears_at_zero(): void
+    {
+        // The owner's report: "here the amber colour master batch should also
+        // come." It did not, because the balances table listed only items that
+        // already had a stock row — and none had been loaded yet. A material
+        // you cannot see is a material you cannot load, so absence of stock hid
+        // exactly the case this page exists for. Zero is a fact; a missing row
+        // is not.
+        $this->actingAsProduction('production.view');
+        app(FactoryDayBinService::class)->setWarehouseId($this->dayBin->id);
+
+        // Resin has stock; the masterbatch has none, anywhere.
+        $this->stockInBin($this->resin, '120.0000');
+
+        $summary = $this->getJson('/api/v1/production/factory-day-bin')
+            ->assertOk()
+            ->json('data.summary');
+
+        $byId = collect($summary)->keyBy('item_id');
+
+        $this->assertTrue($byId->has($this->masterbatch->id), 'A raw material with no stock must still be listed.');
+        $this->assertSame('0.0000', $byId[$this->masterbatch->id]['bin_kg']);
+        $this->assertSame('0.0000', $byId[$this->masterbatch->id]['store_kg']);
+        $this->assertTrue($byId->has($this->resin->id));
+
+        // And a bottle never appears: the day bin holds material bought by the
+        // kilogram, never finished goods counted in Nos.
+        $this->assertFalse($byId->has($this->bottle->id), 'A Nos-uom finished good must never appear in the day bin.');
+    }
+
+    public function test_every_kg_spelling_this_catalogue_uses_counts_as_a_raw_material(): void
+    {
+        // The live catalogue spells the unit Kgs, Kgs. and KGS. A material
+        // missed by the spelling check is invisible on this page for a reason
+        // nobody would ever guess from the screen.
+        $this->actingAsProduction('production.view');
+        app(FactoryDayBinService::class)->setWarehouseId($this->dayBin->id);
+
+        $spellings = ['Kgs' => 'MB-A', 'Kgs.' => 'MB-B', 'KGS' => 'MB-C', 'kg' => 'MB-D'];
+        $ids = [];
+        foreach ($spellings as $uom => $sku) {
+            $ids[] = Item::create(['sku' => $sku, 'name' => "Master Batch {$sku}", 'uom' => $uom])->id;
+        }
+
+        $listed = collect($this->getJson('/api/v1/production/factory-day-bin')->assertOk()->json('data.summary'))
+            ->pluck('item_id');
+
+        foreach ($ids as $id) {
+            $this->assertTrue($listed->contains($id), 'Every kg spelling in the catalogue must count as a raw material.');
+        }
+    }
+
+    public function test_an_inactive_raw_material_is_left_off_the_list(): void
+    {
+        // Listing every kg item must not mean listing retired ones — the
+        // picker would grow a tail of materials the factory no longer buys.
+        $this->actingAsProduction('production.view');
+        app(FactoryDayBinService::class)->setWarehouseId($this->dayBin->id);
+
+        $retired = Item::create(['sku' => 'MB-OLD', 'name' => 'Masterbatch Retired', 'uom' => 'KGS', 'is_active' => false]);
+
+        $listed = collect($this->getJson('/api/v1/production/factory-day-bin')->assertOk()->json('data.summary'))
+            ->pluck('item_id');
+
+        $this->assertFalse($listed->contains($retired->id));
+    }
+
     public function test_with_no_bin_configured_the_balance_endpoint_answers_null_not_an_error(): void
     {
         $this->actingAsProduction();
