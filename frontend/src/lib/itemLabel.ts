@@ -20,11 +20,21 @@
  *
  * The name is what survives, never the SKU. Where they genuinely differ the SKU
  * is a short code worth showing, so both are kept.
+ *
+ * A missing item is a legitimate input, not a caller's mistake: several
+ * backend resources expose their `item` relation `whenLoaded`, so an endpoint
+ * that did not eager-load it omits the key altogether. This is called from
+ * ~40 table cells across the app — one absent relation used to throw here and
+ * take the whole surrounding table or drawer down with it. A dash is the
+ * honest render for "no product on this line".
  */
-export function itemLabel(item: { sku?: string | null; name?: string | null }): string {
+export function itemLabel(item: { sku?: string | null; name?: string | null } | null | undefined): string {
+    if (item === null || item === undefined) return '—';
+
     const sku = (item.sku ?? '').trim();
     const name = (item.name ?? '').trim();
 
+    if (sku === '' && name === '') return '—';
     if (sku === '') return name;
     if (name === '') return sku;
 

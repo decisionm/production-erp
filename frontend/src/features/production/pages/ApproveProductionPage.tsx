@@ -75,9 +75,10 @@ const packingStandardNote = (row: ShiftProductionEntry, mode?: PackingRounding):
     const produced = row.quantity_produced === null ? NaN : parseFloat(row.quantity_produced);
     if (!Number.isFinite(produced) || produced <= 0) return null;
     const parts: string[] = [];
-    if (row.item.nos_per_tray && row.item.nos_per_tray >= 1) parts.push(`${roundPer(produced / row.item.nos_per_tray, mode)} trays`);
-    if (row.item.nos_per_pouch && row.item.nos_per_pouch >= 1) parts.push(`${roundPer(produced / row.item.nos_per_pouch, mode)} pouches`);
-    if (row.item.nos_per_box && row.item.nos_per_box >= 1) parts.push(`${roundPer(produced / row.item.nos_per_box, mode)} boxes`);
+    const item = row.item;
+    if (item?.nos_per_tray && item.nos_per_tray >= 1) parts.push(`${roundPer(produced / item.nos_per_tray, mode)} trays`);
+    if (item?.nos_per_pouch && item.nos_per_pouch >= 1) parts.push(`${roundPer(produced / item.nos_per_pouch, mode)} pouches`);
+    if (item?.nos_per_box && item.nos_per_box >= 1) parts.push(`${roundPer(produced / item.nos_per_box, mode)} boxes`);
     return parts.length > 0 ? `standard: ${parts.join(' · ')}` : null;
 };
 
@@ -249,7 +250,7 @@ function comparison(expected: ReactNode, actual: ReactNode, note?: string): Reac
  */
 function ExpectedVsActualSection({ row, metrics }: { row: ShiftProductionEntry; metrics: ProductionMetrics | null }) {
     const missing = missingExpectedInputs(row);
-    const weight = row.item.nominal_weight_grams;
+    const weight = row.item?.nominal_weight_grams;
     const expectedKg = metrics ? piecesToKg(metrics.expected_pieces, weight) : null;
     const actualKg = row.quantity_produced_kg === null ? null : parseFloat(row.quantity_produced_kg);
 
@@ -276,7 +277,7 @@ function ExpectedVsActualSection({ row, metrics }: { row: ShiftProductionEntry; 
                     {comparison(
                         metrics?.expected_boxes != null ? `${metrics.expected_boxes} boxes` : '—',
                         metrics?.actual_boxes != null ? `${metrics.actual_boxes} boxes` : (row.no_of_box ?? '—'),
-                        metrics?.expected_boxes == null && row.item.nos_per_box === null
+                        metrics?.expected_boxes == null && !row.item?.nos_per_box
                             ? 'expected cartons need pieces-per-box on the product standard'
                             : undefined,
                     )}
@@ -370,7 +371,7 @@ function MaterialVarianceSection({ metrics }: { metrics: ProductionMetrics | nul
  * as far as the entry, this says so rather than claiming there were none.
  */
 function DowntimeSection({ row, logs, loading }: { row: ShiftProductionEntry; logs: MachineDowntimeLog[] | undefined; loading: boolean }) {
-    const mine = (logs ?? []).filter((log) => log.work_center.id === row.work_center.id && log.production_date === row.production_date);
+    const mine = (logs ?? []).filter((log) => log.work_center?.id === row.work_center?.id && log.production_date === row.production_date);
     const oldestLoaded = (logs ?? []).reduce<string | null>(
         (oldest, log) => (oldest === null || log.production_date < oldest ? log.production_date : oldest),
         null,
@@ -391,7 +392,9 @@ function DowntimeSection({ row, logs, loading }: { row: ShiftProductionEntry; lo
                 />
             )}
             {!loading && !outsideWindow && mine.length === 0 && (
-                <Typography.Text type="secondary">No breakdown logged on {row.work_center.name} on {row.production_date}.</Typography.Text>
+                <Typography.Text type="secondary">
+                    No breakdown logged on {row.work_center?.name ?? 'this machine'} on {row.production_date}.
+                </Typography.Text>
             )}
             {!loading && mine.length > 0 && (
                 <>
@@ -439,15 +442,19 @@ function SourceMaterialSection({
     windowFrom: string;
     windowTo: string;
 }) {
+    // `bags`/`fed` come back only when the report loaded them — a lot row
+    // without them is a lot that fed nothing here, never a reason to throw.
     const fedRows = (lots ?? []).flatMap((lot) =>
-        lot.bags
-            .filter((bag) => bag.fed.some((feed) => feed.segment?.id === row.id))
+        (lot.bags ?? [])
+            .filter((bag) => (bag.fed ?? []).some((feed) => feed.segment?.id === row.id))
             .map((bag) => ({
                 key: `${lot.id}-${bag.id}`,
                 lot: lot.supplier_lot_no ?? `Lot #${lot.id}`,
                 material: itemLabel(lot.item),
                 barcode: bag.barcode,
-                loaded_kg: bag.fed.filter((feed) => feed.segment?.id === row.id).reduce((sum, feed) => sum + parseFloat(feed.loaded_kg), 0),
+                loaded_kg: (bag.fed ?? [])
+                    .filter((feed) => feed.segment?.id === row.id)
+                    .reduce((sum, feed) => sum + parseFloat(feed.loaded_kg), 0),
             })),
     );
 
@@ -509,9 +516,9 @@ function VoucherPreviewSection({ preview, loading }: { preview: VoucherPreview |
                         style={{ marginBottom: 8 }}
                         message={preview.postable ? 'Resolves cleanly — nothing posted yet' : 'Tally would reject this voucher as it stands'}
                         description={
-                            preview.problems.length > 0 ? (
+                            (preview.problems ?? []).length > 0 ? (
                                 <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
-                                    {preview.problems.map((problem) => (
+                                    {(preview.problems ?? []).map((problem) => (
                                         <li key={problem}>{problem}</li>
                                     ))}
                                 </ul>
@@ -524,7 +531,7 @@ function VoucherPreviewSection({ preview, loading }: { preview: VoucherPreview |
                         size="small"
                         rowKey={(line) => `${line.side}-${line.item}-${line.godown}`}
                         pagination={false}
-                        dataSource={preview.lines}
+                        dataSource={preview.lines ?? []}
                         columns={[
                             { title: 'Side', dataIndex: 'side' },
                             { title: 'Item', render: (_, line) => line.item ?? '—' },
@@ -532,7 +539,7 @@ function VoucherPreviewSection({ preview, loading }: { preview: VoucherPreview |
                             { title: 'Godown', render: (_, line) => line.godown ?? '—' },
                             {
                                 title: 'Problems',
-                                render: (_, line) => (line.problems.length === 0 ? '—' : line.problems.join('; ')),
+                                render: (_, line) => ((line.problems ?? []).length === 0 ? '—' : (line.problems ?? []).join('; ')),
                             },
                         ]}
                     />
@@ -677,8 +684,8 @@ export default function ApproveProductionPage() {
                 locale={{ emptyText: `Nothing waiting here.` }}
                 columns={[
                     { title: 'Date', dataIndex: 'production_date' },
-                    { title: 'Shift', render: (_, row) => row.shift.name },
-                    { title: 'Machine', render: (_, row) => row.work_center.name },
+                    { title: 'Shift', render: (_, row) => row.shift?.name ?? '—' },
+                    { title: 'Machine', render: (_, row) => row.work_center?.name ?? '—' },
                     { title: 'Item', render: (_, row) => itemLabel(row.item) },
                     { title: 'Batch #', dataIndex: 'batch_number', render: (v: string | null) => v ?? '—' },
                     { title: 'Produced', dataIndex: 'quantity_produced' },
@@ -716,7 +723,7 @@ export default function ApproveProductionPage() {
             />
 
             <Drawer
-                title={`Batch #${detailRow?.id} — ${detailRow?.work_center.name} · ${detailRow?.item.sku}`}
+                title={`Batch #${detailRow?.id} — ${detailRow?.work_center?.name ?? '—'} · ${detailRow?.item?.sku ?? '—'}`}
                 open={detailRow !== null}
                 onClose={() => setDetailRow(null)}
                 width="min(100vw, 520px)"
@@ -759,7 +766,7 @@ export default function ApproveProductionPage() {
                                 <Tag color={statusColor[detailRow.status]}>{statusLabel[detailRow.status]}</Tag>
                             </Descriptions.Item>
                             <Descriptions.Item label="Date">{detailRow.production_date}</Descriptions.Item>
-                            <Descriptions.Item label="Shift">{detailRow.shift.name}</Descriptions.Item>
+                            <Descriptions.Item label="Shift">{detailRow.shift?.name ?? '—'}</Descriptions.Item>
                             <Descriptions.Item label="Batch Number">{detailRow.batch_number ?? '—'}</Descriptions.Item>
                             <Descriptions.Item label="Produced">
                                 {detailRow.quantity_produced} Nos{detailRow.quantity_produced_kg ? ` (${detailRow.quantity_produced_kg} Kg)` : ''}
@@ -774,7 +781,7 @@ export default function ApproveProductionPage() {
                                 {/* Pouch/loose figures only exist for pouch-packed items /
                                     Wave A entries — appended so older rows render unchanged. */}
                                 {detailRow.no_of_pouches != null &&
-                                    `, ${detailRow.item.nos_per_pouch ?? '—'}/pouch × ${detailRow.no_of_pouches} pouches`}
+                                    `, ${detailRow.item?.nos_per_pouch ?? '—'}/pouch × ${detailRow.no_of_pouches} pouches`}
                                 {detailRow.loose_pieces != null && `, ${detailRow.loose_pieces} loose`}
                                 {packingStandardNote(detailRow, settings?.packing_rounding) && (
                                     <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
@@ -813,31 +820,37 @@ export default function ApproveProductionPage() {
 
                         {detailRow.variance && <VarianceSection variance={detailRow.variance} />}
 
-                        {detailRow.material_consumptions.length > 0 && (
+                        {(detailRow.material_consumptions ?? []).length > 0 && (
                             <>
                                 <Typography.Title level={5} style={{ marginTop: 16 }}>Material Consumption</Typography.Title>
                                 <Table
                                     size="small"
                                     rowKey="id"
                                     pagination={false}
-                                    dataSource={detailRow.material_consumptions}
+                                    dataSource={detailRow.material_consumptions ?? []}
                                     columns={[
                                         { title: 'Item', render: (_, row) => itemLabel(row.item) },
-                                        { title: 'From', render: (_, row) => row.warehouse.code },
+                                        // The line's own source warehouse. A cell that
+                                        // cannot name it must read "—": this dereference
+                                        // was unguarded while the backend only ever sent
+                                        // the key when the relation happened to be eager-
+                                        // loaded, so the first batch completed with a
+                                        // day-bin material line blanked the whole drawer.
+                                        { title: 'From', render: (_, row) => row.warehouse?.code ?? '—' },
                                         { title: 'Kg', dataIndex: 'quantity_issued_kg' },
                                     ]}
                                 />
                             </>
                         )}
 
-                        {detailRow.scraps.length > 0 && (
+                        {(detailRow.scraps ?? []).length > 0 && (
                             <>
                                 <Typography.Title level={5} style={{ marginTop: 16 }}>Scrap Detail</Typography.Title>
                                 <Table
                                     size="small"
                                     rowKey="id"
                                     pagination={false}
-                                    dataSource={detailRow.scraps}
+                                    dataSource={detailRow.scraps ?? []}
                                     columns={[
                                         { title: 'Type', dataIndex: 'type' },
                                         { title: 'Nos', dataIndex: 'quantity_nos', render: (v: string | null) => v ?? '—' },
