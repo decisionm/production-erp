@@ -11,6 +11,7 @@ use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\WorkCenter;
 use App\Modules\Production\Services\BatchEstimationService;
 use App\Modules\Production\Services\MasterbatchDosingService;
+use App\Modules\Production\Services\PackingMaterialSuggestionService;
 use App\Modules\Production\Services\ProductionConfigurationService;
 use App\Modules\Production\Services\ProductionStandardResolver;
 use App\Modules\Production\Services\ProductReadinessService;
@@ -34,6 +35,7 @@ class BatchPreviewController extends Controller
         private readonly ProductionConfigurationService $configurations,
         private readonly MasterbatchDosingService $masterbatchDosings,
         private readonly RunMaterialSuggestionService $materialSuggestions,
+        private readonly PackingMaterialSuggestionService $packingSuggestions,
     ) {}
 
     public function __invoke(BatchPreviewRequest $request): JsonResponse
@@ -144,6 +146,28 @@ class BatchPreviewController extends Controller
                 // the lines submitted, and Tally carries those.
                 'suggested_resin' => $suggestions['resin'],
                 'suggested_masterbatch' => $suggestions['masterbatch'],
+                // The other four consumables the owner asked for (31 Jul):
+                // "which carton box and tray film pouch and tape under
+                // packing consumption". A LIST, one entry per material the
+                // resolved standard's specs call for, in packing order.
+                //
+                // FACTORS, never totals, and deliberately quoted against NO
+                // bottle count: cartons and trays are being typed as this is
+                // read (the drawer recomputes them on every keystroke), and a
+                // total quoted here would be computed against a count that
+                // has already moved. It is also what lets Start Batch — where
+                // nothing has been packed yet — still say WHICH carton the
+                // run takes. The screen multiplies by its own counts.
+                //
+                // `item: null` travels freely, with a reason naming the spec:
+                // five of this workbook's pouch-film strings name no
+                // catalogue item, and putting that question on the screen is
+                // the point. The alternative is a plausible-looking guess
+                // that reaches a real dispatch.
+                //
+                // Advisory. Nothing here is stored: completion saves exactly
+                // the lines submitted, and Tally carries those.
+                'suggested_packing' => $this->packingSuggestions->forStandard($standard),
                 // Named so the screen can SAY the machine's own approved
                 // figures are in use, rather than leaving the supervisor to
                 // wonder why the numbers differ from the standards card.

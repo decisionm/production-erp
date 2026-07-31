@@ -879,9 +879,99 @@ export interface SuggestedMaterial {
     reason?: string | null;
 }
 
+/**
+ * ONE PACKING MATERIAL this run consumes — the carton, the tray, the film that
+ * wraps a carton's contents, the tape that seals it — already resolved to a
+ * Tally item by the factory's own mapping, carrying the per-unit figure the
+ * completion drawer multiplies by ITS OWN carton and tray counts. The drawer
+ * does the multiplying, live off what the supervisor is typing; this block
+ * only says WHICH item and HOW MUCH PER CARTON (or per tray).
+ *
+ * THE KEYS BELOW ARE THE ONES THE BACKEND ACTUALLY SERVES, and nothing else.
+ * They are the literal return shape of
+ * `PackingMaterialSuggestionService::forStandard()` — nine keys, every one of
+ * them always present. Earlier drafts of this interface also declared a dozen
+ * plausible alternative spellings (`uom`, `per_unit`, `grams_each`,
+ * `warehouse`, `label`, `spec_provenance` …) as a hedge against a wire name
+ * changing. None of them is ever sent, and a type that lists fields the server
+ * has no column for is a lie a reader has no way to catch: it invites the next
+ * person to write `row.warehouse` and wonder why the store is never set. If a
+ * key here is ever renamed on the backend, rename it here — the compiler will
+ * point at the one read site.
+ *
+ * They stay OPTIONAL only so that a backend deployed before this block existed
+ * leaves the drawer working untouched; the reading is done in ONE function
+ * (`readPackingSuggestions` in ShiftProductionEntryPage) so that stays true.
+ *
+ * `item` NULL IS A REAL ANSWER, not a failure. The factory master carries spec
+ * strings its Tally item list has no match for ("300ML ROUND", "750*610", the
+ * "500ML IFF" that names two live tray items), and those mappings are still the
+ * owner's to make. The drawer then names the spec and counts nothing — never a
+ * zero line, which would assert the factory packs that product in nothing, and
+ * never a block on completing the batch.
+ */
+export interface SuggestedPackingMaterial {
+    /**
+     * Which material this is, in the backend's own vocabulary:
+     * `carton` | `tray` | `pouch_film` | `tape` (PackingMaterialMapping::KIND_*).
+     * Note `pouch_film`, not `film` — the drawer normalises it.
+     */
+    kind?: string | null;
+    /** The master's spec string this row was matched from — "170ML", "750*610". */
+    spec?: string | null;
+    /**
+     * The Tally item the mapping resolved, or NULL when the factory has not
+     * answered that spec yet. `name` is the empty string if the item row has
+     * gone; the drawer treats that as unnamed and falls back to the catalogue.
+     */
+    item?: { id: number; name?: string | null } | null;
+    /**
+     * What the factor is counted against — "per_carton" / "per_tray" as
+     * PackingMaterialMapping::KIND_BASIS states it. Film is per CARTON (one
+     * film wraps a carton's contents — the owner's answer, 31 Jul), and so is
+     * tape.
+     */
+    basis?: string | null;
+    /** The word for that count in the arithmetic line — "cartons", "trays". */
+    quantity_basis?: string | null;
+    /**
+     * HOW MUCH one basis unit takes, as the mapping states it: "1" for a
+     * carton or a tray, the tape's metres per box, the film's GRAMS PER PIECE.
+     * NULL when the mapping carries the item but not the dose yet.
+     *
+     * Read together with `factor_unit`, which is the only thing that says
+     * which of those three it is — a factor of 120 with factor_unit "g" and
+     * unit "kg" is 0.12 kg a carton, not 120 of anything.
+     */
+    factor?: string | number | null;
+    /** The QUANTITY's unit — "nos", "kg", "m". Never the factor's. */
+    unit?: string | null;
+    /** The factor's own unit — "nos", "g", "m". Never the quantity's. */
+    factor_unit?: string | null;
+    /**
+     * Why this item, in the supervisor's words — and the only place a spec's
+     * provenance arrives: `inferredNote()` appends "spec inferred from row N"
+     * to this sentence rather than sending a separate provenance object.
+     */
+    reason?: string | null;
+}
+
 export interface BatchPreview {
     readiness: ProductReadiness;
     estimation: BatchEstimation;
+    /**
+     * Every packing material this run consumes, one entry per material, each
+     * already matched to a Tally item by the factory's mapping. Optional and
+     * empty-tolerant: a backend that predates the mapping sends nothing and the
+     * completion drawer shows no packing section at all, exactly as before.
+     *
+     * `suggested_packing` is the ONE key BatchPreviewController serves, from
+     * PackingMaterialSuggestionService::forStandard, alongside suggested_resin
+     * and suggested_masterbatch. It had three speculative aliases here that the
+     * server never sends; they are gone, because a fallback chain reading keys
+     * that cannot arrive hides a rename instead of surfacing it.
+     */
+    suggested_packing?: SuggestedPackingMaterial[] | null;
     /**
      * The resin and the masterbatch this run should consume, pre-chosen by the
      * backend (the colour column is the authority for the masterbatch, never
