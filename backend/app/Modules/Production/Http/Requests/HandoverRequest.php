@@ -54,7 +54,9 @@ class HandoverRequest extends FormRequest
 
             'completion.material_consumptions' => ['nullable', 'array'],
             'completion.material_consumptions.*.item_id' => ['required', 'integer', 'exists:items,id'],
-            'completion.material_consumptions.*.warehouse_id' => ['required', 'integer', 'exists:warehouses,id'],
+            // Optional, mirroring CompleteBatchRequest — the same service path
+            // (completeBatch) resolves an absent source per line.
+            'completion.material_consumptions.*.warehouse_id' => ['sometimes', 'nullable', 'integer', 'exists:warehouses,id'],
             'completion.material_consumptions.*.quantity_issued_kg' => ['required', 'numeric', 'gt:0'],
 
             'completion.scraps' => ['nullable', 'array'],

@@ -47,6 +47,62 @@ import type {
 } from './types';
 
 /**
+ * THE ONE PLACE IN THE FACTORY, RESOLVED — never asked.
+ *
+ * There is one factory and one physical place inside it, and Tally's books
+ * carry exactly one godown for it. So no floor screen may ask a supervisor
+ * which store anything came out of or goes into: the answer is always the
+ * same warehouse, and a screen that asks is asking a question the system
+ * already knows the answer to.
+ *
+ * The rule is the backend's own, not a new one and not a name guess:
+ * TallyGodownResolver::soleLinkedWarehouse() takes the warehouse Tally
+ * actually knows when there is exactly one of them, and declines otherwise.
+ * Mirroring it here means the id this frontend sends is the id the voucher
+ * builder and the readiness gate would have chosen anyway, so the two cannot
+ * disagree about where stock moved.
+ *
+ * `tally_guid` is set by exactly one code path — WarehouseService::
+ * syncGodownsFromTally, which mirrors Tally's godown list 1:1 — so "the
+ * warehouse with a tally_guid" is a fact from the books, not a local opinion.
+ * Warehouses seeded for rehearsal (RM-STORE, WIP, FG-STORE) never carry one
+ * and so can never be resolved into a real stock movement.
+ *
+ * Returns undefined when the answer is not certain — no Tally-linked
+ * warehouse, or more than one. The caller must then STATE that in a plain
+ * line with a link to where it is fixed, and never fall back to guessing
+ * from warehouse names: a silent wrong answer here books resin into the
+ * bottle store, and somebody has to find that later.
+ *
+ * @param excludeId a warehouse that cannot be the answer for this caller —
+ *   the day bin on a store→bin transfer, which the endpoint refuses when
+ *   from and to are the same warehouse.
+ */
+export interface FactoryStoreCandidate {
+    id: number;
+    code: string;
+    name: string;
+    is_active: boolean;
+    tally_guid: string | null;
+}
+
+export function resolveFactoryStore<T extends FactoryStoreCandidate>(
+    warehouses: T[] | undefined,
+    excludeId?: number | null,
+): T | undefined {
+    const linked = (warehouses ?? []).filter(
+        (warehouse) => warehouse.is_active && warehouse.tally_guid !== null && warehouse.id !== excludeId,
+    );
+
+    return linked.length === 1 ? linked[0] : undefined;
+}
+
+/** "SWAASHPET POLYMERS PVT LTD" as a floor-readable line: code — name. */
+export function factoryStoreLabel(warehouse: FactoryStoreCandidate | undefined): string | null {
+    return warehouse ? `${warehouse.code} — ${warehouse.name}` : null;
+}
+
+/**
  * @param active true = in-service machines only (what every production
  *   selector must pass), false = retired only, undefined = both.
  */
@@ -269,7 +325,14 @@ export interface StartBatchPayload {
     shift_id: number;
     work_center_id: number;
     item_id: number;
-    warehouse_id: number;
+    // WHERE THE FINISHED BOTTLES LAND. Resolved, never asked — see
+    // resolveFactoryStore above. Optional on the wire only for the case where
+    // no Tally-linked warehouse can be resolved at all: the screen then states
+    // that instead of showing a picker, and the server arbitrates (it still
+    // validates the field whenever it is sent). It is NEVER the day bin —
+    // that is the kg resin bin, and finished goods booked into it are a stock
+    // correction somebody has to find later.
+    warehouse_id?: number;
     production_date?: string;
     operator_id?: number;
     // Which factory product-standard variant and packaging this run uses.
@@ -507,7 +570,15 @@ export interface CompleteBatchPayload {
     active_cavities?: number;
     helper_name?: string;
     notes?: string;
-    material_consumptions?: { item_id: number; warehouse_id: number; quantity_issued_kg: number }[];
+    /**
+     * WITHOUT A WAREHOUSE, deliberately. Nobody on the floor is asked which
+     * store a material came out of, so no line can name one; the server
+     * resolves each line from where the material actually is (the day bin when
+     * the bin holds it, the factory store otherwise). Still optional rather
+     * than removed because the endpoint continues to accept an explicit id
+     * from non-floor callers, and validates it when sent.
+     */
+    material_consumptions?: { item_id: number; warehouse_id?: number; quantity_issued_kg: number }[];
     scraps?: { type: 'rejected_finished_good' | 'lumps'; quantity_nos?: number; quantity_kg?: number; scrap_reason_id?: number }[];
     /**
      * Day-bin closing weight per material. Same contract as handover — it

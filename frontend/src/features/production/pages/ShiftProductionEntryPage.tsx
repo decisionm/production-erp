@@ -39,6 +39,8 @@ import {
     openDowntimeLog,
     openMoldChangeLog,
     getBatchPreview,
+    factoryStoreLabel,
+    resolveFactoryStore,
     saveDowntimeReason,
     startBatch,
 } from '@/features/production/api';
@@ -725,7 +727,12 @@ const locationLabelOptions = [
 
 const startBatchSchema = z.object({
     item_id: z.number({ error: 'Pick an item' }),
-    warehouse_id: z.number({ error: 'Pick a warehouse' }),
+    // Filled by the screen from the resolved factory store, never typed and
+    // never picked — so it is optional HERE, where a required rule could only
+    // ever fail on a field the supervisor cannot see. The dialog states which
+    // store it resolved, or says plainly that it could not; the server still
+    // validates whatever is sent.
+    warehouse_id: z.number().nullish(),
     operator_id: z.number().optional(),
     // Prefilled with the item's standard cavity count; editable for the real
     // case of a blocked cavity. nullish: clearing the InputNumber emits null.
@@ -770,21 +777,27 @@ const completeBatchSchema = z.object({
     // the total kg is computed from, and the total kg is the figure that is
     // stored and that Tally receives. Both numeric boxes are editable and a
     // supervisor's edit to either one wins.
+    // No `resin_warehouse_id` / `mb_warehouse_id`: these two rows are issued
+    // from wherever the material actually is, which the server decides. Keeping
+    // the fields would have left two form values nothing fills and nothing
+    // reads, waiting to be wired back into a payload by someone reading this
+    // schema as the contract.
     resin_item_id: z.number().nullish(),
-    resin_warehouse_id: z.number().nullish(),
     resin_grams_per_bottle: z.number().min(0).nullish(),
     resin_kg: z.number().min(0).nullish(),
     mb_item_id: z.number().nullish(),
-    mb_warehouse_id: z.number().nullish(),
     mb_grams_per_bottle: z.number().min(0).nullish(),
     mb_kg: z.number().min(0).nullish(),
     helper_name: z.string().max(120, 'Max 120 characters').optional(),
     notes: z.string().optional(),
+    // No warehouse on an exception line. It was required here, and with the
+    // picker gone that rule would have failed every added row on a field the
+    // supervisor cannot see or fill — a drawer that refuses to submit and
+    // cannot say why. The server resolves the source per line instead.
     material_consumptions: z
         .array(
             z.object({
                 item_id: z.number({ error: 'Item is required' }),
-                warehouse_id: z.number({ error: 'Warehouse is required' }),
                 quantity_issued_kg: z.number().gt(0, 'Must be greater than 0'),
             }),
         )
@@ -846,21 +859,23 @@ const completeBatchSchema = z.object({
         )
         .optional(),
 }).superRefine((data, ctx) => {
-    // A fixed row with kg entered needs its item and source — otherwise the
-    // kilograms would be silently dropped from the payload.
+    // A fixed row with kg entered needs its ITEM — otherwise the kilograms
+    // would be silently dropped from the payload.
+    //
+    // It no longer needs a source. Where the material came from is the
+    // server's answer now (FactoryWarehouseResolver::consumptionSource), so
+    // there is no field to fill and a "Pick the source" issue could only ever
+    // block the drawer on something the supervisor cannot see.
     const requireRow = (
         kg: number | null | undefined,
         itemId: number | null | undefined,
-        warehouseId: number | null | undefined,
         itemPath: string,
-        warehousePath: string,
     ) => {
         if (!kg || kg <= 0) return;
         if (!itemId) ctx.addIssue({ code: 'custom', path: [itemPath], message: 'Pick the item' });
-        if (!warehouseId) ctx.addIssue({ code: 'custom', path: [warehousePath], message: 'Pick the source' });
     };
-    requireRow(data.resin_kg, data.resin_item_id, data.resin_warehouse_id, 'resin_item_id', 'resin_warehouse_id');
-    requireRow(data.mb_kg, data.mb_item_id, data.mb_warehouse_id, 'mb_item_id', 'mb_warehouse_id');
+    requireRow(data.resin_kg, data.resin_item_id, 'resin_item_id');
+    requireRow(data.mb_kg, data.mb_item_id, 'mb_item_id');
 
     // A downtime line that says anything must say everything — reason and
     // both clock times — or its minutes are unknowable and it would be
@@ -1260,10 +1275,20 @@ export default function ShiftProductionEntryPage() {
     // pick of something to install — it can be any mold regardless of
     // current status (it may have gone straight to "under repair").
     const allMoldOptions = molds?.data.map((m) => ({ value: m.id, label: `${m.code} — ${m.name}` })) ?? [];
-    const warehouseOptions =
-        warehouses?.data
-            .filter((warehouse) => warehouse.is_active)
-            .map((warehouse) => ({ value: warehouse.id, label: `${warehouse.code} — ${warehouse.name}` })) ?? [];
+    // THE FACTORY STORE — resolved once for this whole screen, and never
+    // offered as a choice. Finished goods land in it, packing materials come
+    // out of it, and an exception line the day bin cannot supply is issued
+    // from it. One factory, one place: the supervisor is told where, not
+    // asked. Undefined means the books do not say (no Tally-linked warehouse,
+    // or more than one) — every use below then states that in one line
+    // instead of guessing.
+    const factoryStore = useMemo(() => resolveFactoryStore(warehouses?.data), [warehouses]);
+    const factoryStoreId = factoryStore?.id ?? null;
+    const factoryStoreName = factoryStoreLabel(factoryStore);
+    // Where the factory godown is linked to Tally — the one place a wrong or
+    // missing answer is actually fixed, so every "we could not resolve it"
+    // line below points at the same page.
+    const warehouseSettingsLink = <Link to="/inventory/warehouses">Warehouses</Link>;
     const scrapReasonOptions = scrapReasons?.data.map((r) => ({ value: r.id, label: `${r.code} — ${r.name}` })) ?? [];
     const downtimeReasonOptions =
         downtimeReasons?.data.filter((r) => r.is_active).map((r) => ({ value: r.id, label: r.description })) ?? [];
@@ -1470,7 +1495,7 @@ export default function ShiftProductionEntryPage() {
             getBatchPreview({
                 item_id: startItemId!,
                 work_center_id: startingMachine?.id,
-                warehouse_id: startWarehouseId,
+                warehouse_id: startWarehouseId ?? undefined,
                 shift_id: effectiveShiftId ?? undefined,
                 active_cavities: startActiveCavities ?? undefined,
                 production_standard_id: selectedStandardId,
@@ -1769,7 +1794,18 @@ export default function ShiftProductionEntryPage() {
     const startMutation = useMutation({
         mutationFn: (values: StartBatchFormValues) => {
             if (!startingMachine || !effectiveShiftId) throw new Error('Missing machine or shift');
-            const { active_cavities, colour, ...rest } = values;
+            // warehouse_id is destructured out and NEVER sent. The field
+            // survives on the form only to carry the configure-recipe
+            // round-trip (startBatchResume's draft still requires an id); it is
+            // not part of the payload, because the server owns this answer.
+            //
+            // Deliberately not "send it when we resolved one, omit otherwise":
+            // an id sent from here WINS over the server's own precedence, so
+            // the moment the factory names a finished-goods warehouse in
+            // settings this screen would quietly override it with whichever
+            // store happens to be the only Tally-linked one. Always omitting
+            // means there is one answer, computed in one place.
+            const { active_cavities, colour, warehouse_id: _warehouseId, ...rest } = values;
             // production_date sent explicitly (shift-aware): a batch started at
             // 02:00 on the Night shift files under the shift's START date.
             return startBatch({
@@ -1939,14 +1975,9 @@ export default function ShiftProductionEntryPage() {
      * Cleared when the drawer opens on a new batch, exactly like the refs above.
      */
     const [packingEdits, setPackingEdits] = useState<Record<string, number | null>>({});
-    /**
-     * Where the packing materials came out of, asked ONLY in the setup gap
-     * where no factory day bin is configured — the same one surviving case the
-     * resin and masterbatch rows still ask in. With a bin configured this stays
-     * null and every packing line silently carries the bin, like every other
-     * line in this drawer.
-     */
-    const [packingSourceId, setPackingSourceId] = useState<number | null>(null);
+    // `packingSourceId` — the store the supervisor named for the packing rows —
+    // is gone with the picker that set it. Nothing reads a packing-line
+    // warehouse any more, so holding the state would only be a value to reset.
 
     // ---- The factory day bin, on the completion form -----------------------
     // Every consumption line already carries its own warehouse, so issuing a
@@ -1969,67 +2000,34 @@ export default function ShiftProductionEntryPage() {
         [dayBinBalances],
     );
 
-    /**
-     * Does the day bin currently hold this material? Used ONLY to default the
-     * source on an "Other materials" exception line and to word the grey note
-     * beneath a row — never to decide whether a question gets asked.
-     */
-    const binCanSupply = useCallback(
-        (itemId: number | null | undefined): boolean =>
-            dayBinWarehouseId !== null && itemId != null && (dayBinKgFor(itemId) ?? 0) > 0,
-        [dayBinWarehouseId, dayBinKgFor],
-    );
+    // `binCanSupply` used to live here, answering "does the bin hold this?" so
+    // an exception line could be defaulted to the bin. The server asks itself
+    // that question now, against the same stock balance, so the helper had no
+    // caller left. `dayBinKgFor` above stays — the grey note still reports the
+    // balance, which is the part the supervisor actually needs to see.
 
     /**
-     * THE RESIN AND MASTERBATCH ROWS NEVER ASK WHERE THE MATERIAL CAME FROM.
+     * NO ROW IN THIS DRAWER ASKS WHERE THE MATERIAL CAME FROM — not resin, not
+     * masterbatch, not packing film, not an exception line.
      *
-     * It came out of the factory day bin — that is what the bin is, and the
-     * source was already recorded when the bag was loaded into it. This used to
-     * be conditional on the bin currently HOLDING the material, so the question
-     * came back the moment a balance ran out; the owner has now asked three
-     * times to be rid of it. A bin holding none of a material the machine is
-     * plainly eating is a reconciliation fact, not a question for the
-     * supervisor: it is stated in one grey line under the row (see dayBinHint)
-     * and fixed on the Day Bin page, not answered with a dropdown here.
+     * There is one factory and one physical place inside it, so the question
+     * has one answer and the supervisor is standing in it. The server works it
+     * out per line (FactoryWarehouseResolver::consumptionSource): the day bin
+     * when the bin actually holds that material, the factory store otherwise —
+     * decided from the stock balance, which is a fact in the database rather
+     * than an item name or a person's guess. That is why the warehouse is
+     * simply OMITTED from every consumption line now instead of being defaulted
+     * client-side: a value sent from here would override the server's answer,
+     * and the two would disagree the moment the bin ran dry.
      *
-     * The ONE surviving case is a setup gap: no day-bin warehouse has been
-     * named at all, so there is no answer to state. Then these rows fall back
-     * to exactly what they did before the bin existed — a source picker — never
-     * a completion blocked on a warehouse nobody can see or set.
+     * What used to live here: an `askMaterialSource` fallback that put the
+     * source picker back whenever no day bin was configured, and an effect that
+     * wrote the bin id into each form field. Both are gone. A setup gap is now
+     * answered by the server too, and when it genuinely cannot be answered the
+     * completion is refused with a plain 422 naming the Settings fix — never by
+     * handing a dropdown to the floor.
      */
-    const askMaterialSource = dayBinWarehouseId === null;
 
-    // Supply the day-bin warehouse silently, so nothing is asked. Never
-    // overwrites a value already there, so a pick made through the setup-gap
-    // picker stands. Written into the FORM FIELD, not just into the submit
-    // payload: the shortfall warning below compares the watched field to the
-    // bin, and the resolver requires a warehouse per line with a quantity.
-    useEffect(() => {
-        if (dayBinWarehouseId === null || !completingEntry) return;
-
-        const applyDefault = (
-            field: 'resin_warehouse_id' | 'mb_warehouse_id' | `material_consumptions.${number}.warehouse_id`,
-        ) => {
-            if (completeForm.getValues(field) != null) return;
-            completeForm.setValue(field, dayBinWarehouseId);
-        };
-
-        // The two fixed rows: UNCONDITIONALLY the day bin, balance irrelevant.
-        // The balance decides what the grey note says, never where the material
-        // is issued from.
-        applyDefault('resin_warehouse_id');
-        applyDefault('mb_warehouse_id');
-        // Exception lines are the other way round: they are usually the Nos
-        // consumables (caps, labels, cartons), which never pass through the
-        // kg-only day bin. Defaulting those to the bin would guarantee an
-        // insufficient-stock refusal on the whole completion, so they are
-        // defaulted only when the bin genuinely holds the material and the
-        // always-visible picker below answers for the rest.
-        (consumptionsWatch ?? []).forEach((line, index) => {
-            if (!binCanSupply(line?.item_id)) return;
-            applyDefault(`material_consumptions.${index}.warehouse_id`);
-        });
-    }, [dayBinWarehouseId, binCanSupply, completingEntry, consumptionsWatch, completeForm]);
 
     /**
      * "Day bin: 1250.5 Kg" beside a consumption row, so the supervisor watches
@@ -2042,7 +2040,7 @@ export default function ShiftProductionEntryPage() {
      * be loaded for the figures to reconcile. It names that and where to fix
      * it, because there is no longer a picker to hand the problem to.
      */
-    const dayBinHint = (itemId: number | null | undefined, typedKg: number | null | undefined, warehouseId: number | null | undefined): ReactNode => {
+    const dayBinHint = (itemId: number | null | undefined, typedKg: number | null | undefined): ReactNode => {
         if (dayBinWarehouseId === null || itemId === null || itemId === undefined) return null;
         const held = dayBinKgFor(itemId);
 
@@ -2056,8 +2054,14 @@ export default function ShiftProductionEntryPage() {
             );
         }
 
-        const issuingFromBin = warehouseId === dayBinWarehouseId;
-        const short = issuingFromBin && typedKg != null && typedKg > held;
+        // The bin holds this material, so the server issues this line FROM the
+        // bin — that is the whole of consumptionSource's rule. The shortfall is
+        // therefore a straight comparison against what the bin holds. It used
+        // to be gated on the row's warehouse field matching the bin; with that
+        // field gone, keeping the gate would have silently switched this
+        // warning off for every row, which is the opposite of what removing a
+        // question should cost.
+        const short = typedKg != null && typedKg > held;
 
         return (
             <Typography.Text type={short ? 'danger' : 'secondary'} style={{ fontSize: 12 }}>
@@ -2902,35 +2906,11 @@ export default function ShiftProductionEntryPage() {
                 quantity,
                 touched,
                 arithmetic,
-                // WHERE THE PACKING MATERIAL IS ISSUED FROM — the store the
-                // supervisor named, and NOTHING ELSE. Deliberately not the
-                // factory day bin that every other line in this drawer falls
-                // back to, and deliberately not defaulted from the mapping,
-                // which carries no store of its own.
-                //
-                // The day bin is the kg resin/masterbatch bin; it holds no
-                // cartons, no tape and no film, so a carton issued from it
-                // would be booked against a location that never held one.
-                //
-                // AND A CONSUMPTION LINE IS NOT JUST A RECORD. completeBatch
-                // issues every line against its named warehouse through
-                // StockMovementService::recordIssue, whose decrementBalance
-                // THROWS InsufficientStockException the moment the balance is
-                // short (StockMovementService.php:320). So a named store that
-                // has never had cartons received into it WILL refuse the
-                // completion — packing lines carry exactly the same weight as
-                // the resin line and the "Other materials" rows, no more and no
-                // less. That is why the store is asked for rather than guessed:
-                // leaving it blank is a real answer that records nothing and
-                // cannot block, and naming one is a deliberate statement that
-                // this store holds the stock.
-                warehouseId: packingSourceId ?? null,
             };
         });
     }, [
         packingSuggestions,
         packingEdits,
-        packingSourceId,
         goodBoxesWatch,
         traysWatch,
         pouchesWatch,
@@ -2939,12 +2919,22 @@ export default function ShiftProductionEntryPage() {
     ]);
 
     /**
-     * Is there a mapped packing row with nowhere to come out of? Then the
-     * section asks once, for all of them, and goes quiet the moment a store is
-     * named. Nothing else can answer it: the mapping carries no store.
+     * The "which packing store" question used to live here, asked once for the
+     * whole section because the mapping carries no store of its own.
+     *
+     * It is gone. The owner's answer to it was the ruling itself — "what is
+     * packing store — everything happening inside the factory" — so cartons,
+     * tape and film come out of the same one place as everything else, and the
+     * server names it (FactoryWarehouseResolver::consumptionSource falls
+     * through to the factory store for anything the kg day bin does not hold,
+     * which is exactly what packing material is).
+     *
+     * The old comment here was right that a packing line issues real stock and
+     * a short store refuses the completion. That is still true and still the
+     * correct behaviour — it is just no longer a reason to ask, because a
+     * refusal now names a store the factory configured once rather than one a
+     * supervisor picked mid-shift.
      */
-    const packingStoreNeeded = packingRows.some((row) => row.itemId !== null && row.warehouseId === null);
-
     const completeMutation = useMutation({
         mutationFn: (values: CompleteBatchFormValues) => {
             if (!completingEntry) throw new Error('No batch selected');
@@ -2955,11 +2945,9 @@ export default function ShiftProductionEntryPage() {
             // what Tally receives.
             const {
                 resin_item_id,
-                resin_warehouse_id,
                 resin_grams_per_bottle: _resinGramsPerBottle,
                 resin_kg,
                 mb_item_id,
-                mb_warehouse_id,
                 mb_grams_per_bottle: _mbGramsPerBottle,
                 mb_kg,
                 running_hours,
@@ -2973,50 +2961,57 @@ export default function ShiftProductionEntryPage() {
                 ...rest
             } = values;
             // The fixed resin/MB rows are ordinary consumption lines on the
-            // wire — same payload shape as before, no backend change.
+            // wire, and they now carry NO warehouse at all.
             //
-            // The warehouse is STATED, not asked: the configured day bin is what
-            // these two rows are issued from, so it backs up the form field
-            // rather than leaving a line un-sendable if the field never filled.
-            // A row with no material or no kg is simply omitted — never a
-            // zero-kg line, which would assert a material was issued and
-            // weighed at nothing.
-            const rowWarehouseId = (fieldValue: number | null | undefined): number | null =>
-                fieldValue ?? dayBinWarehouseId ?? null;
-            const resinWarehouseId = rowWarehouseId(resin_warehouse_id);
-            const mbWarehouseId = rowWarehouseId(mb_warehouse_id);
+            // Omitting the field is what hands the answer to the server, which
+            // resolves it per line from where the material actually is. The
+            // field used to be defaulted here to the day bin; sending that
+            // value back would override the server's per-item answer with a
+            // client guess that is wrong for anything the bin does not hold.
+            //
+            // A row with no material or no kg is still omitted entirely —
+            // never a zero-kg line, which would assert a material was issued
+            // and weighed at nothing. What is NOT a reason to omit a row any
+            // more is a missing warehouse: gating on that once the field
+            // stopped being filled would have dropped the resin line from
+            // every completion, silently.
             // The packing materials, on the SAME wire as every other
             // consumption line — the carton, the tray, the film, the tape.
             // Sent exactly as the row shows them: the number the supervisor
             // read on screen, in the unit stated beside it.
             //
-            // Three kinds of row are deliberately left out rather than sent as
+            // Two kinds of row are deliberately left out rather than sent as
             // zero: one with no mapped item (nobody has decided which Tally
-            // item that spec is), one whose quantity worked out to nothing or
-            // was cleared, and one with no source to issue from. A zero line
-            // would assert a material was issued and came to nothing.
+            // item that spec is), and one whose quantity worked out to nothing
+            // or was cleared. A zero line would assert a material was issued
+            // and came to nothing.
+            //
+            // "No source to issue from" used to be a third, and its removal is
+            // the point of this change: with the store no longer asked, that
+            // test was true for EVERY packing row, so every carton, tray, film
+            // and tape line would have vanished from the payload without a
+            // word — the precise "shown but not recorded" failure the old
+            // picker existed to prevent.
             const packingConsumptions = packingRows
-                .filter(
-                    (row) =>
-                        row.itemId !== null &&
-                        row.warehouseId !== null &&
-                        row.quantity !== null &&
-                        row.quantity > 0,
-                )
+                .filter((row) => row.itemId !== null && row.quantity !== null && row.quantity > 0)
                 .map((row) => ({
                     item_id: row.itemId as number,
-                    warehouse_id: row.warehouseId as number,
                     quantity_issued_kg: row.quantity as number,
                 }));
             const consumptions = [
-                ...(resin_item_id && resinWarehouseId && resin_kg && resin_kg > 0
-                    ? [{ item_id: resin_item_id, warehouse_id: resinWarehouseId, quantity_issued_kg: resin_kg }]
+                ...(resin_item_id && resin_kg && resin_kg > 0
+                    ? [{ item_id: resin_item_id, quantity_issued_kg: resin_kg }]
                     : []),
-                ...(mb_item_id && mbWarehouseId && mb_kg && mb_kg > 0
-                    ? [{ item_id: mb_item_id, warehouse_id: mbWarehouseId, quantity_issued_kg: mb_kg }]
+                ...(mb_item_id && mb_kg && mb_kg > 0
+                    ? [{ item_id: mb_item_id, quantity_issued_kg: mb_kg }]
                     : []),
                 ...packingConsumptions,
-                ...(material_consumptions ?? []),
+                // Exception lines: the item and the quantity the supervisor
+                // typed, never a warehouse — the row no longer has that field.
+                ...(material_consumptions ?? []).map((line) => ({
+                    item_id: line.item_id,
+                    quantity_issued_kg: line.quantity_issued_kg,
+                })),
             ];
             // Only rows the supervisor actually weighed. A blank closing
             // weight is "not counted", which must stay null downstream —
@@ -3087,7 +3082,6 @@ export default function ShiftProductionEntryPage() {
             // The packing edits belong to the batch that just went in — the
             // next one recalculates from its own cartons and trays.
             setPackingEdits({});
-            setPackingSourceId(null);
         },
         onError: (error: any) => {
             const body = error?.response?.data;
@@ -3483,7 +3477,6 @@ export default function ShiftProductionEntryPage() {
                             // own packing entry, with no edit carried over from
                             // the batch before it.
                             setPackingEdits({});
-                            setPackingSourceId(null);
                             // Forget which masterbatch the LAST batch ended on,
                             // so this batch's pre-selection counts as a first
                             // sighting and blanks nothing.
@@ -3516,12 +3509,6 @@ export default function ShiftProductionEntryPage() {
                                 nos_per_box: running.item.nos_per_box ?? undefined,
                                 running_hours: shiftLengthHours(running.shift) ?? undefined,
                                 active_cavities: running.active_cavities ?? running.standard_cavities ?? undefined,
-                                // Where both fixed rows are issued from: the day
-                                // bin, stated rather than asked. Left undefined
-                                // when none is configured, which is the one case
-                                // the rows still show a source picker.
-                                resin_warehouse_id: dayBinWarehouseId ?? undefined,
-                                mb_warehouse_id: dayBinWarehouseId ?? undefined,
                             });
                         } else {
                             setStartProductionDateOverride(null);
@@ -3531,15 +3518,13 @@ export default function ShiftProductionEntryPage() {
                             setSelectedStandardId(undefined);
                             setSelectedPackagingId(undefined);
                             setStartingMachine(wc);
-                            // Default the warehouse to a finished-goods godown that
-                            // Tally actually knows (tally_guid set) — the voucher's
-                            // godown is this warehouse's name, so a seeded lookalike
-                            // would fail every voucher. Still editable; with no match
-                            // the form opens empty exactly as before.
-                            const fgWarehouse = warehouses?.data.find(
-                                (w) => w.tally_guid && (/\bfg\b|\bfinished\b/i.test(w.code) || /\bfg\b|\bfinished\b/i.test(w.name)),
-                            );
-                            startForm.reset(fgWarehouse ? { warehouse_id: fgWarehouse.id } : undefined);
+                            // Where the finished bottles land: the factory's one
+                            // Tally-known store, resolved silently. This used to
+                            // sniff the warehouse NAME for "FG"/"finished" and
+                            // then still show a dropdown — two ways to get the
+                            // same answer wrong. There is one place inside this
+                            // factory, so there is nothing to pick.
+                            startForm.reset(factoryStoreId ? { warehouse_id: factoryStoreId } : undefined);
                         }
                     };
 
@@ -4349,17 +4334,25 @@ export default function ShiftProductionEntryPage() {
                             )}
                         </>
                     )}
-                    <Form.Item
-                        label="Finished Goods Warehouse"
-                        validateStatus={startForm.formState.errors.warehouse_id ? 'error' : ''}
-                        help={startForm.formState.errors.warehouse_id?.message}
-                    >
-                        <Controller
-                            name="warehouse_id"
-                            control={startForm.control}
-                            render={({ field }) => <Select {...field} size="large" options={warehouseOptions} showSearch optionFilterProp="label" />}
-                        />
-                    </Form.Item>
+                    {/* WHERE THE FINISHED BOTTLES LAND — stated in one line, not
+                        asked. There is one factory and one place inside it, so
+                        this was never a decision the supervisor could get right
+                        or wrong; the server resolves it and this line only
+                        reports what it will almost certainly pick. When the
+                        books do not name a single store the line says so and
+                        points at the page where it is fixed — the start is not
+                        blocked here, because the server arbitrates and refuses
+                        with a message of its own if it truly cannot answer. */}
+                    <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
+                        {factoryStoreName ? (
+                            `Finished goods go to ${factoryStoreName}.`
+                        ) : (
+                            <>
+                                Finished goods go to the factory store. No single Tally-linked store is set up yet —
+                                check {warehouseSettingsLink}.
+                            </>
+                        )}
+                    </Typography.Text>
                     <Form.Item label="Operator (optional)">
                         <Controller
                             name="operator_id"
@@ -5211,25 +5204,6 @@ export default function ShiftProductionEntryPage() {
                                 )}
                             />
                         </Col>
-                        {/* Only when NO day bin is configured: there is no source
-                            to state, so the row falls back to asking. */}
-                        {askMaterialSource && (
-                            <Col xs={24}>
-                                <Form.Item
-                                    style={{ marginBottom: 0 }}
-                                    validateStatus={completeForm.formState.errors.resin_warehouse_id ? 'error' : ''}
-                                    help={completeForm.formState.errors.resin_warehouse_id?.message}
-                                >
-                                    <Controller
-                                        name="resin_warehouse_id"
-                                        control={completeForm.control}
-                                        render={({ field }) => (
-                                            <Select {...field} size="large" options={warehouseOptions} showSearch optionFilterProp="label" allowClear style={{ width: '100%' }} placeholder="From" />
-                                        )}
-                                    />
-                                </Form.Item>
-                            </Col>
-                        )}
                         {resinRowNote && (
                             <Col xs={24}>
                                 <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
@@ -5237,7 +5211,7 @@ export default function ShiftProductionEntryPage() {
                                 </Typography.Text>
                             </Col>
                         )}
-                        <Col xs={24}>{dayBinHint(resinItemIdWatch, resinKgWatch, completeForm.watch('resin_warehouse_id'))}</Col>
+                        <Col xs={24}>{dayBinHint(resinItemIdWatch, resinKgWatch)}</Col>
                     </Row>
 
                     {/* A Clear bottle takes no colour, so the row is not shown at
@@ -5317,23 +5291,6 @@ export default function ShiftProductionEntryPage() {
                                         )}
                                     />
                                 </Col>
-                                {askMaterialSource && (
-                                    <Col xs={24}>
-                                        <Form.Item
-                                            style={{ marginBottom: 0 }}
-                                            validateStatus={completeForm.formState.errors.mb_warehouse_id ? 'error' : ''}
-                                            help={completeForm.formState.errors.mb_warehouse_id?.message}
-                                        >
-                                            <Controller
-                                                name="mb_warehouse_id"
-                                                control={completeForm.control}
-                                                render={({ field }) => (
-                                                    <Select {...field} size="large" options={warehouseOptions} showSearch optionFilterProp="label" allowClear style={{ width: '100%' }} placeholder="From" />
-                                                )}
-                                            />
-                                        </Form.Item>
-                                    </Col>
-                                )}
                                 {mbRowNote && (
                                     <Col xs={24}>
                                         <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
@@ -5341,7 +5298,7 @@ export default function ShiftProductionEntryPage() {
                                         </Typography.Text>
                                     </Col>
                                 )}
-                                <Col xs={24}>{dayBinHint(mbItemIdWatch, mbKgWatch, completeForm.watch('mb_warehouse_id'))}</Col>
+                                <Col xs={24}>{dayBinHint(mbItemIdWatch, mbKgWatch)}</Col>
                             </Row>
                         </>
                     )}
@@ -5362,40 +5319,6 @@ export default function ShiftProductionEntryPage() {
                             <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 12 }}>
                                 Packing consumption
                             </Typography.Text>
-                            {/* Asked ONCE for the whole section, and only while
-                                a mapped row still has nowhere to come out of.
-                                Cartons, tape and film do not pass through the
-                                kg day bin the other rows carry silently, so
-                                this is a real question, asked once, not four
-                                times — and the sentence beside it says what
-                                naming a store actually does, because it issues
-                                stock and a short store refuses the completion
-                                (StockMovementService::decrementBalance). */}
-                            {packingStoreNeeded && (
-                                <Row gutter={[8, 8]} align="middle" style={{ marginTop: 4 }}>
-                                    <Col xs={24} sm={10}>
-                                        <Select
-                                            size="large"
-                                            value={packingSourceId ?? undefined}
-                                            onChange={(value: number) => setPackingSourceId(value ?? null)}
-                                            options={warehouseOptions}
-                                            showSearch
-                                            optionFilterProp="label"
-                                            allowClear
-                                            style={{ width: '100%' }}
-                                            placeholder="Packing store"
-                                        />
-                                    </Col>
-                                    <Col xs={24} sm={14}>
-                                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                            Which store the packing materials came out of. The figures below are counted
-                                            either way; until a store is named they are shown but not recorded. Naming a
-                                            store issues that stock for real — if it does not hold enough, the completion
-                                            is refused, the same as any other material line.
-                                        </Typography.Text>
-                                    </Col>
-                                </Row>
-                            )}
                             {packingRows.map((row) => {
                                 // No mapping — one quiet line naming the spec.
                                 // Never a zero quantity against an item nobody
@@ -5442,7 +5365,13 @@ export default function ShiftProductionEntryPage() {
                                     // whether a Tally tape "No" is one metre or
                                     // one strip is still the owner's to answer.
                                     row.kind === 'tape' ? 'metres, as the factory doses it — the Tally piece conversion is still open' : null,
-                                    row.warehouseId === null ? 'not recorded until a packing store is named above' : null,
+                                    // The "not recorded until a packing store is
+                                    // named above" caveat is gone with the
+                                    // picker: these rows are always recorded
+                                    // now, issued from the store the server
+                                    // resolves. Leaving the sentence in would
+                                    // have been a warning about a condition
+                                    // that can no longer arise.
                                     row.touched ? 'your figure, kept' : null,
                                 ]
                                     .filter((part): part is string => !!part)
@@ -5494,7 +5423,6 @@ export default function ShiftProductionEntryPage() {
                             onClick={() =>
                                 materialFields.append({
                                     item_id: undefined as unknown as number,
-                                    warehouse_id: undefined as unknown as number,
                                     quantity_issued_kg: undefined as unknown as number,
                                 })
                             }
@@ -5510,30 +5438,20 @@ export default function ShiftProductionEntryPage() {
                         const selectedUom = items?.data.find((i) => i.id === selectedItemId)?.uom ?? 'Kg';
                         return (
                         <Row key={field.id} gutter={[8, 8]} align="middle" style={{ marginTop: 8 }}>
-                            <Col xs={24} sm={10}>
+                            {/* The exception lines no longer carry a source
+                                either. They are usually the Nos consumables
+                                (caps, labels, cartons) which never pass through
+                                the kg day bin — and that is now the server's
+                                problem to solve, not a question to hand over:
+                                consumptionSource falls through to the factory
+                                store for exactly these. The item column takes
+                                back the width the picker held. */}
+                            <Col xs={24} sm={16}>
                                 <Controller
                                     name={`material_consumptions.${index}.item_id`}
                                     control={completeForm.control}
                                     render={({ field }) => (
                                         <Select {...field} size="large" options={itemOptions} showSearch optionFilterProp="label" style={{ width: '100%' }} placeholder="Resin/Masterbatch" />
-                                    )}
-                                />
-                            </Col>
-                            {/* The exception lines keep a source — ALWAYS shown, no
-                                longer flickering in and out with the bin balance.
-                                These are usually the Nos consumables (caps, labels,
-                                cartons), which never pass through the kg-only day
-                                bin, so there is no bin answer to state and the
-                                warehouse is a required field on the wire: hiding it
-                                would fail the line on a value nobody could set. It
-                                fills in silently whenever the bin does hold the
-                                material. */}
-                            <Col xs={12} sm={6}>
-                                <Controller
-                                    name={`material_consumptions.${index}.warehouse_id`}
-                                    control={completeForm.control}
-                                    render={({ field }) => (
-                                        <Select {...field} size="large" options={warehouseOptions} showSearch optionFilterProp="label" style={{ width: '100%' }} placeholder="From" />
                                     )}
                                 />
                             </Col>
@@ -5553,7 +5471,6 @@ export default function ShiftProductionEntryPage() {
                                 {dayBinHint(
                                     selectedItemId,
                                     completeForm.watch(`material_consumptions.${index}.quantity_issued_kg`),
-                                    completeForm.watch(`material_consumptions.${index}.warehouse_id`),
                                 )}
                             </Col>
                         </Row>

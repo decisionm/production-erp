@@ -58,7 +58,12 @@ class CompleteBatchRequest extends FormRequest
 
             'material_consumptions' => ['nullable', 'array'],
             'material_consumptions.*.item_id' => ['required', 'integer', 'exists:items,id'],
-            'material_consumptions.*.warehouse_id' => ['required', 'integer', 'exists:warehouses,id'],
+            // OPTIONAL for the same reason warehouse_id is on StartBatchRequest:
+            // nobody on the floor is asked which store the resin, masterbatch
+            // or packing film came out of. Absent or null lets the service
+            // resolve it per line from where the material actually is (day bin
+            // vs store) — see FactoryWarehouseResolver::consumptionSource().
+            'material_consumptions.*.warehouse_id' => ['sometimes', 'nullable', 'integer', 'exists:warehouses,id'],
             'material_consumptions.*.quantity_issued_kg' => ['required', 'numeric', 'gt:0'],
 
             // Day-bin closing weight per material, same contract as

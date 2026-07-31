@@ -4,7 +4,9 @@ namespace App\Modules\Production\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Production\Http\Requests\UpdateDayBinWarehouseRequest;
+use App\Modules\Production\Http\Requests\UpdateFactoryWarehousesRequest;
 use App\Modules\Production\Services\FactoryDayBinService;
+use App\Modules\Production\Services\FactoryWarehouseResolver;
 use App\Modules\Production\Services\MachineCapabilityService;
 use Illuminate\Http\JsonResponse;
 
@@ -13,6 +15,7 @@ class ProductionSettingsController extends Controller
     public function __construct(
         private readonly FactoryDayBinService $dayBin,
         private readonly MachineCapabilityService $machineCapability,
+        private readonly FactoryWarehouseResolver $factoryWarehouses,
     ) {}
 
     /**
@@ -34,6 +37,22 @@ class ProductionSettingsController extends Controller
                 // null = not chosen yet: every screen then behaves exactly as
                 // it did before the day bin existed, and prompts for it.
                 'day_bin_warehouse_id' => $this->dayBin->warehouseId(),
+                // The warehouses the floor is never asked about. These are
+                // what is STORED, before any fallback — the setting screen
+                // must show "not set" as not set, rather than showing the
+                // single-Tally-linked warehouse the resolver would currently
+                // fall back to and implying someone chose it.
+                //
+                // `*_resolved_warehouse_id` is what a payload would actually
+                // get right now, fallback included. Publishing both is what
+                // lets a screen say "nothing is set, and today that resolves
+                // to X" — and, when the resolved value is null, warn that
+                // Start Batch will be refused before a supervisor discovers
+                // it mid-shift.
+                'finished_goods_warehouse_id' => $this->factoryWarehouses->configuredFinishedGoodsWarehouseId(),
+                'raw_material_warehouse_id' => $this->factoryWarehouses->configuredRawMaterialWarehouseId(),
+                'finished_goods_resolved_warehouse_id' => $this->factoryWarehouses->finishedGoods()?->id,
+                'raw_material_resolved_warehouse_id' => $this->factoryWarehouses->rawMaterial()?->id,
                 // The factory's machine rule, published so a screen can STATE
                 // which machines a product runs on. It was enforced on every
                 // start and displayed nowhere, which is why the owner could not
@@ -62,5 +81,40 @@ class ProductionSettingsController extends Controller
         $this->dayBin->setWarehouseId($warehouseId !== null ? (int) $warehouseId : null);
 
         return response()->json(['data' => ['day_bin_warehouse_id' => $this->dayBin->warehouseId()]]);
+    }
+
+    /**
+     * Name the finished-goods destination and/or the raw-material source.
+     *
+     * This is the endpoint the resolver's 422 points at. Without it that
+     * message ("name one in Production settings") would be unactionable —
+     * a deployment with no single Tally-linked warehouse could be told what
+     * was wrong and given no way to fix it.
+     *
+     * Only the keys actually sent are written, so setting one role never
+     * disturbs the other; an explicit null clears a role.
+     */
+    public function updateFactoryWarehouses(UpdateFactoryWarehousesRequest $request): JsonResponse
+    {
+        $data = $request->validated();
+
+        if (array_key_exists('finished_goods_warehouse_id', $data)) {
+            $value = $data['finished_goods_warehouse_id'];
+            $this->factoryWarehouses->setFinishedGoodsWarehouseId($value !== null ? (int) $value : null);
+        }
+
+        if (array_key_exists('raw_material_warehouse_id', $data)) {
+            $value = $data['raw_material_warehouse_id'];
+            $this->factoryWarehouses->setRawMaterialWarehouseId($value !== null ? (int) $value : null);
+        }
+
+        return response()->json([
+            'data' => [
+                'finished_goods_warehouse_id' => $this->factoryWarehouses->configuredFinishedGoodsWarehouseId(),
+                'raw_material_warehouse_id' => $this->factoryWarehouses->configuredRawMaterialWarehouseId(),
+                'finished_goods_resolved_warehouse_id' => $this->factoryWarehouses->finishedGoods()?->id,
+                'raw_material_resolved_warehouse_id' => $this->factoryWarehouses->rawMaterial()?->id,
+            ],
+        ]);
     }
 }
