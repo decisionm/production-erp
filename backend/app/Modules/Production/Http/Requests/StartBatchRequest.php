@@ -35,8 +35,17 @@ class StartBatchRequest extends FormRequest
             // better mechanism, so this stays a plain existence check.
             'work_center_id' => ['required', 'integer', 'exists:work_centers,id'],
             'item_id' => ['required', 'integer', 'exists:items,id'],
+            // OPTIONAL, because the floor is never asked where finished
+            // bottles go — there is one factory and one place, and
+            // FactoryWarehouseResolver answers it server-side (owner, 30-Jul:
+            // "there is no need to select any store in any place"). Still
+            // VALIDATED when a client does send one: an explicit id must name
+            // a live, active warehouse exactly as before, so a retired
+            // warehouse is refused rather than silently swapped for the
+            // resolved one. Absent or null hands the answer to the service.
             'warehouse_id' => [
-                'required',
+                'sometimes',
+                'nullable',
                 'integer',
                 Rule::exists('warehouses', 'id')->where('is_active', true),
             ],

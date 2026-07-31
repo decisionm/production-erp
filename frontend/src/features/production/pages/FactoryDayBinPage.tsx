@@ -22,6 +22,7 @@ import {
 import type { InputRef } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuthStore } from '@/features/auth/store';
 import { listAllWarehouses } from '@/features/inventory/api';
 import {
@@ -29,11 +30,12 @@ import {
     getFactoryDayBin,
     listRawMaterials,
     loadBagToFactoryDayBin,
+    factoryStoreLabel,
     loadFactoryDayBin,
+    resolveFactoryStore,
     setDayBinWarehouse,
 } from '@/features/production/api';
 import { useProductionSettings } from '@/features/production/packing';
-import { guessRawMaterialStoreId } from '@/features/production/warehouses';
 import type {
     FactoryDayBinLoadRow,
     FactoryDayBinUnopenedBags,
@@ -156,12 +158,14 @@ export default function FactoryDayBinPage() {
                 .map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })),
         [warehouses],
     );
-    // The bin can never be its own source — the transfer endpoint refuses
-    // from === to, so it must not be offerable.
-    const sourceOptions = useMemo(
-        () => warehouseOptions.filter((option) => option.value !== dayBinWarehouse?.id),
-        [warehouseOptions, dayBinWarehouse],
-    );
+    // `sourceOptions` (warehouses minus the bin itself) is gone with the manual
+    // load's "From" picker. `warehouseOptions` above survives for ONE purpose
+    // only: the two controls that CONFIGURE which warehouse is the day bin.
+    // That is a setup question with a real choice behind it, asked once by
+    // whoever sets the factory up — not a question put to a supervisor
+    // mid-shift about stock they are holding. It is also the target every
+    // "could not work this out" link on the floor points at, so removing it
+    // would leave those messages with nowhere to send anyone.
     // Raw materials ONLY — resin and masterbatch, everything bought by the
     // kg. Deliberately never the full items master: a day bin holding
     // "1 Litre Pet Bottle" is a booking mistake this Select refuses to allow.
@@ -203,37 +207,31 @@ export default function FactoryDayBinPage() {
     }, [dayBin]);
 
     /**
-     * Which warehouse the manually-loaded material came OUT of.
+     * WHICH STORE THE MATERIAL CAME OUT OF — resolved, never asked.
      *
-     * undefined means the warehouse names do not say — several plausible
-     * stores, or none — and the field then stays EMPTY with a hint asking the
-     * person. The rule this replaced preferred any name containing "store",
-     * which on this factory's masters is FG Store, the finished-goods godown:
-     * the form offered to book PET resin out of the bottle warehouse. A
-     * pre-filled field reads as "the system knows", so no answer beats a wrong
-     * one. The whole rule lives in warehouses.ts, shared with the Shift Floor
-     * bin drawer so the two screens cannot disagree about it.
+     * This is the one warehouse question on the floor that the SERVER cannot
+     * answer for us: a manual day-bin load is a plain stock transfer, and its
+     * endpoint still requires a real `from_warehouse_id`. So the id is worked
+     * out here instead — but by the books, not by warehouse names.
+     *
+     * What this replaced was a name heuristic (/raw|rm|resin/ scored against
+     * code and name, excluding /fg|finish|dispatch/), and before that a rule
+     * preferring any name containing "store" — which on this factory's masters
+     * is FG Store, so the form once offered to book PET resin out of the
+     * bottle warehouse. Warehouse names are not a fact. `tally_guid` is: it is
+     * written only by WarehouseService::syncGodownsFromTally, mirroring the
+     * accountant's godown list, and this factory's Tally carries exactly one
+     * godown. So "the single active Tally-linked warehouse" IS the factory,
+     * and rehearsal residue (RM-STORE, WIP, FG-STORE) can never be it.
+     *
+     * The bin is excluded because the transfer endpoint refuses from === to.
+     * undefined means the books do not name a single store, and then the panel
+     * says so plainly and refuses to submit rather than guessing.
      */
-    const guessedSourceId = useMemo(
-        () => guessRawMaterialStoreId(warehouses?.data, dayBinWarehouse?.id ?? null),
+    const factoryStore = useMemo(
+        () => resolveFactoryStore(warehouses?.data, dayBinWarehouse?.id ?? null),
         [warehouses, dayBinWarehouse],
     );
-
-    // Fill the source ONCE — the first time the panel is open with the list in
-    // hand. Once deliberately: gating only on "the field is empty right now"
-    // would re-fill it after somebody had CLEARED it (a warehouse refetch is
-    // enough to re-run this), putting a warehouse nobody chose into a stock
-    // movement.
-    const sourceDefaulted = useRef(false);
-    useEffect(() => {
-        if (sourceDefaulted.current) return;
-        if (!manualOpen || !configured || warehouses === undefined) return;
-        if (manualForm.getFieldValue('from_warehouse_id') !== undefined) return;
-        if (guessedSourceId === undefined) return;
-
-        sourceDefaulted.current = true;
-        manualForm.setFieldsValue({ from_warehouse_id: guessedSourceId });
-    }, [manualOpen, configured, warehouses, guessedSourceId, manualForm]);
 
     const chooseWarehouse = useMutation({
         mutationFn: (warehouseId: number | null) => setDayBinWarehouse(warehouseId),
@@ -335,10 +333,14 @@ export default function FactoryDayBinPage() {
     // ----- Manual (no-barcode) load: the existing store → bin transfer.
 
     const manualLoad = useMutation({
-        mutationFn: (values: { item_id: number; from_warehouse_id: number; quantity: number; loaded_at?: Dayjs }) =>
+        // No `from_warehouse_id` in the form values any more — the resolved
+        // factory store supplies it. The submit is disabled unless it resolved,
+        // so the non-null assertion here is guarded by the button, the same way
+        // `dayBinWarehouse!` already is.
+        mutationFn: (values: { item_id: number; quantity: number; loaded_at?: Dayjs }) =>
             loadFactoryDayBin({
                 item_id: values.item_id,
-                from_warehouse_id: values.from_warehouse_id,
+                from_warehouse_id: factoryStore!.id,
                 to_warehouse_id: dayBinWarehouse!.id,
                 quantity: values.quantity,
                 movement_date: (values.loaded_at ?? dayjs()).format('YYYY-MM-DD HH:mm:ss'),
@@ -715,23 +717,43 @@ export default function FactoryDayBinPage() {
                                                     />
                                                 </Form.Item>
                                             </Col>
-                                            <Col xs={24} md={6}>
-                                                <Form.Item
-                                                    name="from_warehouse_id"
-                                                    label="From"
-                                                    rules={[{ required: true, message: 'Pick where it came from' }]}
-                                                >
-                                                    <Select
-                                                        size="large"
-                                                        options={sourceOptions}
-                                                        showSearch
-                                                        optionFilterProp="label"
-                                                        placeholder="Store…"
-                                                    />
-                                                </Form.Item>
-                                            </Col>
                                         </Row>
-                                        <Button type="primary" size="large" htmlType="submit" loading={manualLoad.isPending}>
+                                        {/* Where it came from: STATED in one
+                                            line, not picked. One factory, one
+                                            place — and when the books cannot
+                                            name it, the panel says exactly that
+                                            and refuses rather than moving stock
+                                            out of a warehouse nobody chose. */}
+                                        {factoryStore ? (
+                                            <Typography.Text
+                                                type="secondary"
+                                                style={{ display: 'block', fontSize: 12, marginBottom: 8 }}
+                                            >
+                                                Comes out of {factoryStoreLabel(factoryStore)}.
+                                            </Typography.Text>
+                                        ) : (
+                                            <Alert
+                                                type="warning"
+                                                showIcon
+                                                style={{ marginBottom: 8 }}
+                                                message="No store to load from"
+                                                description={
+                                                    <Typography.Text>
+                                                        The factory store could not be worked out — there is no single
+                                                        Tally-linked warehouse to move this material out of. Link the
+                                                        factory godown on <Link to="/inventory/warehouses">Warehouses</Link>{' '}
+                                                        and this panel works again.
+                                                    </Typography.Text>
+                                                }
+                                            />
+                                        )}
+                                        <Button
+                                            type="primary"
+                                            size="large"
+                                            htmlType="submit"
+                                            disabled={!factoryStore}
+                                            loading={manualLoad.isPending}
+                                        >
                                             Load into Day Bin
                                         </Button>
                                     </Form>

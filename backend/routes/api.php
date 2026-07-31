@@ -310,6 +310,13 @@ Route::prefix('v1')->group(function () {
             // needs production.manage, the GET above needs only .view — the
             // module guard settles that, same as Tally's settings pair.
             Route::put('settings/day-bin-warehouse', [ProductionSettingsController::class, 'updateDayBinWarehouse']);
+            // The finished-goods destination and raw-material source, for the
+            // same reason and by the same mechanism. The floor is never asked
+            // either question (owner, 30-Jul: "there is no need to select any
+            // store in any place"), so this is where a factory whose books
+            // carry more than one godown states the answer once — and it is
+            // the fix the resolver's 422 names.
+            Route::put('settings/factory-warehouses', [ProductionSettingsController::class, 'updateFactoryWarehouses']);
             // The central factory day bin: the warehouse and its current
             // per-material balances, readable without picking a machine.
             // NOT inside the traceability group below on purpose — the plain

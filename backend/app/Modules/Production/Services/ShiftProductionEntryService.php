@@ -47,6 +47,9 @@ class ShiftProductionEntryService
         private readonly ProductionDowntimeService $downtime,
         private readonly ProductionStandardResolver $standards,
         private readonly MachineCapabilityService $machineCapability,
+        // Answers "which warehouse" so the floor is never asked — see the
+        // class docblock on FactoryWarehouseResolver.
+        private readonly FactoryWarehouseResolver $factoryWarehouses,
     ) {}
 
     public function paginate(int $perPage = 20, ?ShiftProductionEntryStatus $status = null): LengthAwarePaginator
@@ -108,7 +111,7 @@ class ShiftProductionEntryService
      * Item row only, never from $data.
      *
      * @param  array{
-     *     shift_id: int, work_center_id: int, item_id: int, warehouse_id: int,
+     *     shift_id: int, work_center_id: int, item_id: int, warehouse_id?: ?int,
      *     production_date?: string, operator_id?: int,
      *     actual_cycle_time?: ?string, active_cavities?: ?int,
      *     colour?: ?string,
@@ -117,6 +120,22 @@ class ShiftProductionEntryService
      */
     public function startBatch(array $data, ?int $createdBy): ShiftProductionEntry
     {
+        // WHERE THE FINISHED BOTTLES GO, answered here rather than on the
+        // floor (owner, 30-Jul: "there is no need to select any store in any
+        // place"). Absent AND explicit-null both route to the resolver: the
+        // rule is 'sometimes|nullable', so a client that sends the key with
+        // no value means the same thing as one that omits it — "you decide".
+        //
+        // Resolved BEFORE the transaction opens, and before the readiness
+        // gate below, on purpose. The gate calls Warehouse::find() on this id
+        // and checks tally_godown; leaving it null until then would surface a
+        // missing setting as "this product has no Tally godown", which names
+        // the wrong fix. It also means a deployment that cannot resolve fails
+        // with a plain 422 without ever taking the work-center lock.
+        if (($data['warehouse_id'] ?? null) === null) {
+            $data['warehouse_id'] = $this->factoryWarehouses->finishedGoodsOrFail()->id;
+        }
+
         return DB::transaction(function () use ($data, $createdBy) {
             // A machine can only physically run one item at a time — reject a
             // second "Start Batch" if this machine already has one in_progress,
@@ -373,7 +392,7 @@ class ShiftProductionEntryService
      *     helper_name?: string, notes?: string,
      *     actual_cycle_time?: ?string, active_cavities?: ?int,
      *     running_hours?: ?string, qc_rejection_kg?: ?string,
-     *     material_consumptions?: array<int, array{item_id: int, warehouse_id: int, quantity_issued_kg: string}>,
+     *     material_consumptions?: array<int, array{item_id: int, warehouse_id?: ?int, quantity_issued_kg: string}>,
      *     scraps?: array<int, array{type: string, quantity_nos?: string, quantity_kg?: string, scrap_reason_id?: int}>,
      *     downtime_events?: array<int, array{downtime_reason_id: int, minutes: string|float|int, note?: ?string}>,
      * }  $data
@@ -452,17 +471,34 @@ class ShiftProductionEntryService
                 );
             }
 
-            foreach ($data['material_consumptions'] ?? [] as $line) {
+            foreach ($data['material_consumptions'] ?? [] as $index => $line) {
+                // WHICH STORE THIS MATERIAL CAME OUT OF, answered per line by
+                // the server. Absent or explicit null both mean "you decide";
+                // an id the client did send is honoured untouched, so the
+                // legacy and Tally-replay paths behave exactly as before.
+                //
+                // Item-aware because it has to be: kg resin sits in the day
+                // bin by the time a machine runs, while packing film counted
+                // in Nos never passes through the bin at all — one blanket
+                // default would fail one of them on stock it does not have.
+                // The field name is the line's own index so the 422 points at
+                // the row that could not be resolved, not at the whole array.
+                $warehouseId = $line['warehouse_id']
+                    ?? $this->factoryWarehouses->consumptionSourceOrFail(
+                        (int) $line['item_id'],
+                        "material_consumptions.{$index}.warehouse_id",
+                    )->id;
+
                 $entry->materialConsumptions()->create([
                     'item_id' => $line['item_id'],
-                    'warehouse_id' => $line['warehouse_id'],
+                    'warehouse_id' => $warehouseId,
                     'quantity_issued_kg' => $line['quantity_issued_kg'],
                     'created_by' => $completedBy,
                 ]);
 
                 $this->stock->recordIssue(
                     itemId: $line['item_id'],
-                    warehouseId: $line['warehouse_id'],
+                    warehouseId: $warehouseId,
                     quantity: (string) $line['quantity_issued_kg'],
                     reference: "SPE #{$entry->id}",
                     createdBy: $completedBy,
