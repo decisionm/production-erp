@@ -152,40 +152,36 @@ class ConfigurationGovernsTheFloorTest extends TestCase
         ]);
     }
 
-    public function test_an_approved_configuration_silences_the_missing_settings_notice(): void
+    public function test_running_on_the_product_standard_raises_no_notice_at_all(): void
     {
-        // The bug the owner read as an error three times: a machine WITH
-        // approved settings was still told there were none.
-        $this->standard();
-        $this->config(ConfigurationStatus::Approved);
-
-        $data = $this->preview();
-
-        // The configuration really did resolve — so the absence below is the
-        // suppression working, not the notice never being reachable.
-        $this->assertNotNull($data['configuration']);
-        $this->assertNotContains('machine_mapping_unconfirmed', array_column($data['warnings'], 'code'));
-    }
-
-    public function test_with_no_configuration_the_notice_is_present_and_speaks_plainly(): void
-    {
+        // Running on the factory product standard is the NORMAL case. It was
+        // warned about twice, in two wordings, and the owner read both as
+        // errors — because to the person interrupted, a yellow box IS an
+        // error. Normality is silent; the green banner appears only when a
+        // machine's own approved figures take over.
         $this->standard();
 
         $data = $this->preview();
 
         $this->assertNull($data['configuration']);
-        $warning = collect($data['warnings'])->firstWhere('code', 'machine_mapping_unconfirmed');
-        $this->assertNotNull($warning, 'A machine with no approved settings must still be told so.');
+        $this->assertSame(
+            [],
+            $data['warnings'],
+            'A product with a complete standard and no machine override must start without a single notice.',
+        );
+    }
 
-        // Read out loud on the floor by a supervisor, not an engineer. The
-        // three facts that matter, and none of the words that do not.
-        $message = strtolower($warning['message']);
-        $this->assertStringContainsString('not saved yet', $message);
-        $this->assertStringContainsString('factory product standard', $message);
-        $this->assertStringContainsString('nothing is blocked', $message);
-        foreach (['evidence', 'watch mode', 'mapping', 'unconfirmed'] as $jargon) {
-            $this->assertStringNotContainsString($jargon, $message, "The notice must not say \"{$jargon}\".");
-        }
+    public function test_an_approved_configuration_is_announced_not_warned(): void
+    {
+        $this->standard();
+        $this->config(ConfigurationStatus::Approved);
+
+        $data = $this->preview();
+
+        // The override is visible as data for the green banner — never as a
+        // warning entry.
+        $this->assertNotNull($data['configuration']);
+        $this->assertSame([], $data['warnings']);
     }
 
     public function test_the_started_batch_snapshots_the_approved_figures(): void

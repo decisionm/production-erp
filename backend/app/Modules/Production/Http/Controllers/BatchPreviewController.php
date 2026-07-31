@@ -119,7 +119,7 @@ class BatchPreviewController extends Controller
                 // The resolved configuration goes in too: without it the
                 // preview told a machine WITH approved settings that it had
                 // none.
-                'warnings' => $this->standards->warningsFor($standard, $packaging, $item->id, $workCenter?->id, $configuration),
+                'warnings' => $this->standards->warningsFor($standard, $packaging, $item->id, $workCenter?->id),
             ],
         ]);
     }

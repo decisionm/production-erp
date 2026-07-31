@@ -364,8 +364,8 @@ class ProductionStandardImportTest extends TestCase
         // 8 h at 11.6 s -> FLOOR(28800/11.6)=2482 cycles x 6 = 14,892 pieces.
         $preview->assertJsonPath('data.estimation.expected_pieces', 14892);
 
-        // The watch-mode warning is present but nothing is blocked.
-        $this->assertContains('machine_mapping_unconfirmed', array_column($preview->json('data.warnings'), 'code'));
+        // Running on the product standard is the normal case — no notice.
+        $this->assertNotContains('machine_mapping_unconfirmed', array_column($preview->json('data.warnings'), 'code'));
 
         // Start Batch succeeds and records the pairing.
         $entryId = $this->postJson('/api/v1/production/shift-production-entries', [

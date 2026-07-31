@@ -200,11 +200,12 @@ class ProductReadinessGateTest extends TestCase
             ->assertStatus(200);
     }
 
-    public function test_missing_recipe_and_colour_warn_but_do_not_block_by_default(): void
+    public function test_a_missing_recipe_is_not_a_finding_at_all(): void
     {
-        // Deliberate default: no product carries a BOM yet, so blocking on
-        // the recipe would refuse every batch on the floor. The check still
-        // reports — it is a warning until recipes are loaded.
+        // The factory decided recipes come after go-live, so EVERY product
+        // lacks one — a notice that fires on every product on every start is
+        // wallpaper, not information, and the owner read it as an error three
+        // times in one night. The expected-materials card simply stays empty.
         $this->supervisor();
         $item = $this->readyItem(['colour' => null]);
         Bom::query()->where('item_id', $item->id)->update(['is_active' => false]);
@@ -216,22 +217,22 @@ class ProductReadinessGateTest extends TestCase
             ->assertOk();
 
         $warnings = array_column($preview->json('data.readiness.warnings'), 'code');
-        sort($warnings);
-        $this->assertSame(['colour', 'consumption_recipe'], $warnings);
+        $this->assertNotContains('consumption_recipe', $warnings);
+        // colour still warns — it drives a real suggestion and is fixable.
+        $this->assertContains('colour', $warnings);
         $this->assertTrue($preview->json('data.readiness.ready'));
     }
 
     public function test_severity_is_configurable_so_a_factory_can_tighten_the_gate(): void
     {
-        config()->set('production.readiness.checks.consumption_recipe', 'block');
+        config()->set('production.readiness.checks.weight', 'block');
 
         $this->supervisor();
-        $item = $this->readyItem();
-        Bom::query()->where('item_id', $item->id)->update(['is_active' => false]);
+        $item = $this->readyItem(['nominal_weight_grams' => null]);
 
         $this->postJson('/api/v1/production/shift-production-entries', $this->startPayload($item))
             ->assertStatus(422)
-            ->assertJsonPath('blocking.0.code', 'consumption_recipe');
+            ->assertJsonPath('blocking.0.code', 'weight');
     }
 
     public function test_the_shipped_default_is_watch_only(): void
