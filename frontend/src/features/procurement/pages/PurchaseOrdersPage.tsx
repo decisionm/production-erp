@@ -1,8 +1,9 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
-import { useState } from 'react';
+import { Alert, Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
+import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import { listItems } from '@/features/inventory/api';
 import { createPurchaseOrder, listPurchaseOrders, listVendors, sendPurchaseOrder } from '@/features/procurement/api';
@@ -39,7 +40,17 @@ export default function PurchaseOrdersPage() {
     const [detailOrder, setDetailOrder] = useState<PurchaseOrder | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['procurement', 'purchase-orders'], queryFn: listPurchaseOrders });
+    // ?po=7 — a goods receipt (or a receipt's stock movement) linking back to
+    // the order it was received against. Without it the page is unchanged.
+    const [searchParams, setSearchParams] = useSearchParams();
+    const focusOrderId = Number(searchParams.get('po')) || null;
+
+    // A linked order can be older than the newest 20, so a linked view asks
+    // for the whole list instead of the default first page.
+    const { data, isLoading } = useQuery({
+        queryKey: ['procurement', 'purchase-orders', focusOrderId !== null ? 'all' : 'first-page'],
+        queryFn: () => listPurchaseOrders(focusOrderId !== null ? { per_page: 1000 } : undefined),
+    });
     const { data: vendors } = useQuery({ queryKey: ['procurement', 'vendors'], queryFn: listVendors });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
 
@@ -51,6 +62,28 @@ export default function PurchaseOrdersPage() {
         defaultValues: { lines: [{ item_id: undefined, quantity: undefined, unit_price: undefined }] },
     });
     const { fields, append, remove } = useFieldArray({ control, name: 'lines' });
+
+    const orders = data?.data ?? [];
+    const visibleOrders = useMemo(
+        () => (focusOrderId === null ? orders : orders.filter((order) => order.id === focusOrderId)),
+        [orders, focusOrderId],
+    );
+
+    // Following a ?po= link opens that order straight away — once, so closing
+    // the drawer doesn't reopen it.
+    const openedOrderRef = useRef<number | null>(null);
+    useEffect(() => {
+        if (focusOrderId === null) {
+            openedOrderRef.current = null;
+            return;
+        }
+        if (openedOrderRef.current === focusOrderId) return;
+        const match = orders.find((order) => order.id === focusOrderId);
+        if (match) {
+            openedOrderRef.current = focusOrderId;
+            setDetailOrder(match);
+        }
+    }, [focusOrderId, orders]);
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['procurement', 'purchase-orders'] });
 
@@ -71,11 +104,25 @@ export default function PurchaseOrdersPage() {
                 <Button type="primary" onClick={() => setModalOpen(true)}>New Purchase Order</Button>
             </Space>
 
+            {focusOrderId !== null && (
+                <Alert
+                    type="info"
+                    showIcon
+                    style={{ marginBottom: 16 }}
+                    message={`Showing purchase order #${focusOrderId} only`}
+                    action={
+                        <Button size="small" onClick={() => setSearchParams({})}>
+                            Show all orders
+                        </Button>
+                    }
+                />
+            )}
+
             <Table<PurchaseOrder>
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
-                dataSource={data?.data}
+                dataSource={visibleOrders}
                 pagination={false}
                 columns={[
                     { title: 'ID', dataIndex: 'id' },
@@ -223,6 +270,13 @@ export default function PurchaseOrdersPage() {
                             <Descriptions.Item label="Order Date">{detailOrder.order_date}</Descriptions.Item>
                             <Descriptions.Item label="Expected Date">{detailOrder.expected_date ?? '—'}</Descriptions.Item>
                             <Descriptions.Item label="Notes">{detailOrder.notes ?? '—'}</Descriptions.Item>
+                            <Descriptions.Item label="Receipts">
+                                {/* Forward down the chain: what has actually
+                                    been received against this order. */}
+                                <Link to={`/procurement/goods-receipts?po=${detailOrder.id}`}>
+                                    Goods receipts for this order
+                                </Link>
+                            </Descriptions.Item>
                         </Descriptions>
 
                         <Typography.Title level={5} style={{ marginTop: 24 }}>

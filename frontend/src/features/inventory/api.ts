@@ -13,6 +13,16 @@ export async function listAllItems(): Promise<Paginated<Item>> {
     return data;
 }
 
+/**
+ * One item by id — what the item detail page needs. Never resolve an item out
+ * of listItems(): that returns the first page only, so with 600+ items in the
+ * master most items simply aren't in it.
+ */
+export async function getItem(id: number): Promise<Item> {
+    const { data } = await api.get<{ data: Item }>(`/inventory/items/${id}`);
+    return data.data;
+}
+
 export interface CreateItemPayload {
     sku: string;
     name: string;

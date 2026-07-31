@@ -66,8 +66,12 @@ export async function rejectPurchaseRequisition(id: number): Promise<PurchaseReq
     return data.data;
 }
 
-export async function listPurchaseOrders(): Promise<Paginated<PurchaseOrder>> {
-    const { data } = await api.get<Paginated<PurchaseOrder>>('/procurement/purchase-orders');
+/**
+ * `per_page` exists so a page opened on a link to one specific older order
+ * (`?po=7`) can load past the default first page of 20 and actually find it.
+ */
+export async function listPurchaseOrders(params?: { per_page?: number }): Promise<Paginated<PurchaseOrder>> {
+    const { data } = await api.get<Paginated<PurchaseOrder>>('/procurement/purchase-orders', { params });
     return data;
 }
 
@@ -90,8 +94,9 @@ export async function sendPurchaseOrder(id: number): Promise<PurchaseOrder> {
     return data.data;
 }
 
-export async function listGoodsReceipts(): Promise<Paginated<GoodsReceiptNote>> {
-    const { data } = await api.get<Paginated<GoodsReceiptNote>>('/procurement/goods-receipts');
+/** Same reason as listPurchaseOrders: links point at one specific receipt. */
+export async function listGoodsReceipts(params?: { per_page?: number }): Promise<Paginated<GoodsReceiptNote>> {
+    const { data } = await api.get<Paginated<GoodsReceiptNote>>('/procurement/goods-receipts', { params });
     return data;
 }
 
@@ -106,6 +111,12 @@ export interface CreateGoodsReceiptPayload {
     purchase_order_id: number;
     warehouse_id: number;
     reference?: string;
+    /**
+     * The real date AND time the material was received, as plain
+     * `YYYY-MM-DD HH:mm` wall-clock text. Without it the backend stamps the
+     * receipt (and its stock movement) with the moment the form was submitted.
+     */
+    received_date: string;
     notes?: string;
     lines: {
         purchase_order_line_id: number;

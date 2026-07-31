@@ -10,6 +10,7 @@ use App\Modules\Inventory\Models\SerialNumber;
 use App\Modules\Inventory\Models\StockBalance;
 use App\Modules\Inventory\Models\StockMovement;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -175,6 +176,26 @@ class StockMovementService
             ->with(['item', 'warehouse'])
             ->orderBy('item_id')
             ->paginate($perPage);
+    }
+
+    /**
+     * Every material currently held at ONE warehouse, item-name ordered — the
+     * "what is in this location right now" read. Unpaginated on purpose: the
+     * callers are single-location screens (the factory day bin), where a
+     * page-1-of-N answer would understate the balance a supervisor is about
+     * to consume against.
+     *
+     * @return Collection<int, StockBalance>
+     */
+    public function balancesForWarehouse(int $warehouseId): Collection
+    {
+        return StockBalance::query()
+            ->with('item')
+            ->where('warehouse_id', $warehouseId)
+            ->join('items', 'items.id', '=', 'stock_balances.item_id')
+            ->orderBy('items.name')
+            ->select('stock_balances.*')
+            ->get();
     }
 
     /**

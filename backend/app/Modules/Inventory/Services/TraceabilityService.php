@@ -43,7 +43,9 @@ class TraceabilityService
     public function paginateLots(?int $itemId = null, ?int $grnId = null, int $perPage = 20): LengthAwarePaginator
     {
         return MaterialLot::query()
-            ->with(['item', 'bags'])
+            // grn + goodsReceiptLine: the register shows each lot's receipt,
+            // its price and the date+time it was received (read-only).
+            ->with(['item', 'bags', 'grn', 'goodsReceiptLine'])
             ->when($itemId, fn ($query) => $query->where('item_id', $itemId))
             ->when($grnId, fn ($query) => $query->where('grn_id', $grnId))
             ->orderByDesc('received_date')
@@ -53,7 +55,7 @@ class TraceabilityService
 
     public function loadLot(MaterialLot $lot): MaterialLot
     {
-        return $lot->load(['item', 'bags', 'grn']);
+        return $lot->load(['item', 'bags', 'grn', 'goodsReceiptLine']);
     }
 
     /**

@@ -20,6 +20,16 @@ class ItemController extends Controller
         return ItemResource::collection($this->items->paginate($this->perPage($request)));
     }
 
+    /**
+     * One item by id — what the item detail page loads. Route-model binding
+     * resolves it (a soft-deleted item 404s, matching the index list), the
+     * same shape MaterialLotController/BatchController already use.
+     */
+    public function show(Item $item): ItemResource
+    {
+        return ItemResource::make($item);
+    }
+
     public function store(StoreItemRequest $request): ItemResource
     {
         return ItemResource::make($this->items->create($request->validated()));

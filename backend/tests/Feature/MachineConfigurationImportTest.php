@@ -194,7 +194,17 @@ class MachineConfigurationImportTest extends TestCase
 
         $this->assertNotNull($resolved, 'An approved imported row must be what the floor resolves.');
         $this->assertSame(ConfigurationStatus::Approved, $resolved->status);
-        $this->assertStringContainsString('owner instruction', (string) $resolved->confirmation_status);
+        $this->assertStringContainsString('Owner-approved', (string) $resolved->confirmation_status);
+
+        // The provenance line must FIT. SQLite silently stores an over-long
+        // string, so a passing test here proved nothing about MySQL, where the
+        // real import aborted on exactly this column. Assert the width instead
+        // of the storage engine's tolerance for it.
+        $this->assertLessThanOrEqual(
+            32,
+            strlen((string) $resolved->confirmation_status),
+            'confirmation_status is varchar(32) — a longer provenance line aborts the whole import on MySQL.',
+        );
     }
 
     public function test_a_row_a_person_already_touched_survives_a_bulk_approve(): void

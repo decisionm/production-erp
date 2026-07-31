@@ -20,6 +20,7 @@ import {
     Typography,
 } from 'antd';
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import BarcodeScanInput from '@/components/barcode/BarcodeScanInput';
 import { listUsers } from '@/features/access/api';
 import { useAuthStore } from '@/features/auth/store';
@@ -343,8 +344,11 @@ export default function BinBayLoadingPage() {
                 <Typography.Title level={3}>Bin Bay Loading</Typography.Title>
                 <Empty
                     description={
-                        'Lot and bag traceability is switched off for this deployment, so there is no bin bay to load. '
-                        + 'Turn on PROD_TRACEABILITY to start scanning bags into machines.'
+                        <>
+                            Lot and bag traceability is switched off for this deployment, so there is no bin bay to
+                            load. Turn on PROD_TRACEABILITY to start scanning bags into machines. Day-to-day loading
+                            happens on <Link to="/production/day-bin">Day Bin (factory)</Link>.
+                        </>
                     }
                 />
             </>
@@ -357,6 +361,14 @@ export default function BinBayLoadingPage() {
             <Typography.Paragraph type="secondary">
                 Material is loaded into a machine&apos;s day bin here, once — the batch screens read the bin, so nobody
                 is asked to declare the same bag again when a batch starts or finishes.
+            </Typography.Paragraph>
+            {/* This page is the OPTIONAL per-machine, bag-by-bag detail. The
+                plain central path — one factory day bin, no barcode, no
+                machine choice — is Day Bin (factory), and that is where the
+                floor loads material day to day. */}
+            <Typography.Paragraph type="secondary" style={{ marginTop: -8 }}>
+                Loading the factory&apos;s one central day bin instead (no barcode, no machine)?{' '}
+                <Link to="/production/day-bin">Go to Day Bin (factory)</Link>.
             </Typography.Paragraph>
             <Alert
                 type="info"

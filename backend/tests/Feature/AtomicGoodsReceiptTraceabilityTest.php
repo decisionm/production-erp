@@ -150,6 +150,57 @@ class AtomicGoodsReceiptTraceabilityTest extends TestCase
         Event::assertDispatchedTimes(GoodsReceiptNoteReceived::class, 1);
     }
 
+    /**
+     * The store team enters the real date AND time the lorry was unloaded, so
+     * the receipt must keep the time it was given (it used to be stamped with
+     * whatever "now" happened to be when the form was submitted). The lot
+     * register then shows that receipt's price and exact date+time.
+     */
+    public function test_a_received_datetime_is_kept_on_the_receipt_and_its_stock_movement(): void
+    {
+        [$order, $line, , $warehouse] = $this->purchase();
+        $payload = $this->payload($order, $line, $warehouse);
+        $payload['received_date'] = '2026-07-30 14:35:00';
+
+        $grnId = $this->postJson('/api/v1/procurement/goods-receipts', $payload)
+            ->assertSuccessful()
+            ->json('data.id');
+
+        $grn = GoodsReceiptNote::query()->findOrFail($grnId);
+        $this->assertSame('2026-07-30 14:35:00', $grn->received_date->format('Y-m-d H:i:s'));
+
+        // The ledger entry carries the same moment, not the submit time.
+        $movement = StockMovement::query()->sole();
+        $this->assertSame('2026-07-30 14:35:00', $movement->movement_date->format('Y-m-d H:i:s'));
+
+        // material_lots.received_date is a date column (FIFO index): the
+        // datetime is narrowed to its day rather than corrupting the column.
+        $lot = MaterialLot::query()->sole();
+        $this->assertSame('2026-07-30', $lot->received_date->toDateString());
+
+        $this->getJson("/api/v1/inventory/material-lots?grn_id={$grnId}")
+            ->assertSuccessful()
+            ->assertJsonPath('data.0.receipt.goods_receipt_note_id', $grnId)
+            ->assertJsonPath('data.0.receipt.purchase_order_id', $order->id)
+            ->assertJsonPath('data.0.receipt.unit_cost', '100.0000')
+            ->assertJsonPath('data.0.receipt.received_at', $grn->received_date->toIso8601String());
+    }
+
+    public function test_a_grn_without_a_received_date_still_posts_stamped_now(): void
+    {
+        [$order, $line, , $warehouse] = $this->purchase();
+        $payload = $this->payload($order, $line, $warehouse);
+        unset($payload['received_date']);
+
+        $grnId = $this->postJson('/api/v1/procurement/goods-receipts', $payload)
+            ->assertSuccessful()
+            ->json('data.id');
+
+        $this->assertNotNull(GoodsReceiptNote::query()->findOrFail($grnId)->received_date);
+        $this->assertSame(1, StockMovement::query()->count());
+        $this->assertSame(10, MaterialBag::query()->count());
+    }
+
     public function test_a_legacy_grn_client_without_a_receipt_key_still_posts_once(): void
     {
         [$order, $line, , $warehouse] = $this->purchase();

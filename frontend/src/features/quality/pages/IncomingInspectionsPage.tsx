@@ -30,7 +30,10 @@ export default function IncomingInspectionsPage() {
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['quality', 'incoming-inspections'], queryFn: listIncomingInspections });
-    const { data: receipts } = useQuery({ queryKey: ['procurement', 'goods-receipts'], queryFn: listGoodsReceipts });
+    const { data: receipts } = useQuery({
+        queryKey: ['procurement', 'goods-receipts'],
+        queryFn: () => listGoodsReceipts(),
+    });
 
     const lineOptions = useMemo(
         () =>

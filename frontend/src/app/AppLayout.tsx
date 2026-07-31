@@ -78,24 +78,30 @@ const allNavItems: NavGroup[] = [
         label: 'Production',
         module: 'production',
         children: [
-            { key: '/production/live-monitor', label: 'Live Monitor' },
+            // Floor-first ordering: the daily-use pages a supervisor actually
+            // touches come first, setup/reference pages after.
             { key: '/production/shift-production', label: 'Shift Floor' },
-            { key: '/production/bin-bay', label: 'Bin Bay Loading' },
-            { key: '/production/shift-summary', label: 'Shift Summary' },
-            { key: '/production/reports', label: 'Reports' },
             { key: '/production/approve-production', label: 'Approve Production' },
-            { key: '/production/work-centers', label: 'Work Centers' },
+            { key: '/production/live-monitor', label: 'Live Monitor' },
             { key: '/production/standards', label: 'Product Standards' },
             { key: '/production/configuration', label: 'Configuration' },
+            { key: '/production/bin-bay', label: 'Bin Bay Loading' },
             { key: '/production/boms', label: 'Bills of Material' },
-            { key: '/production/routings', label: 'Routings' },
-            { key: '/production/work-orders', label: 'Work Orders' },
-            { key: '/production/mrp', label: 'MRP' },
-            { key: '/production/capacity', label: 'Capacity Planning' },
-            { key: '/production/subcontract-orders', label: 'Subcontract Orders' },
+            { key: '/production/shift-summary', label: 'Shift Summary' },
+            { key: '/production/reports', label: 'Reports' },
+            { key: '/production/work-centers', label: 'Work Centers' },
+            // Routings, Work Orders, MRP, Capacity Planning, Subcontract
+            // Orders, and Rework Orders are deliberately NOT linked here.
+            // WorkOrderService completes work orders by calling
+            // recordIssue/recordReceipt directly (real stock movements)
+            // completely outside the Supervisor -> PM -> Accountant -> Tally
+            // approval chain, and MRP/Capacity render empty/wrong with no
+            // BOMs or routings behind them. The routes still exist (App.tsx)
+            // for a deliberate direct URL visit; do not re-add these nav
+            // entries without first wiring the approval chain into
+            // WorkOrderService.
             { key: '/production/scrap-reasons', label: 'Scrap Reasons' },
             { key: '/production/molds', label: 'Molds' },
-            { key: '/production/rework-orders', label: 'Rework Orders' },
             { key: '/production/shifts', label: 'Shifts' },
         ],
     },

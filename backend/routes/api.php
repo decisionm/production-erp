@@ -47,6 +47,7 @@ use App\Modules\Production\Http\Controllers\BomController;
 use App\Modules\Production\Http\Controllers\CapacityPlanController;
 use App\Modules\Production\Http\Controllers\DayBinController;
 use App\Modules\Production\Http\Controllers\DowntimeReasonController;
+use App\Modules\Production\Http\Controllers\FactoryDayBinController;
 use App\Modules\Production\Http\Controllers\FactorySettingController;
 use App\Modules\Production\Http\Controllers\MachineDowntimeLogController;
 use App\Modules\Production\Http\Controllers\MoldChangeLogController;
@@ -127,7 +128,9 @@ Route::prefix('v1')->group(function () {
         });
 
         Route::prefix('inventory')->middleware('module:inventory')->group(function () {
-            Route::apiResource('items', ItemController::class)->only(['index', 'store', 'update']);
+            // `show` exists so an item's own page can load that one item by id
+            // instead of hunting for it in the first page of the index list.
+            Route::apiResource('items', ItemController::class)->only(['index', 'store', 'update', 'show']);
             Route::apiResource('warehouses', WarehouseController::class)->only(['index', 'store', 'update']);
 
             Route::get('stock-balances', [StockBalanceController::class, 'index']);
@@ -301,6 +304,15 @@ Route::prefix('v1')->group(function () {
 
         Route::prefix('production')->middleware('module:production')->group(function () {
             Route::get('settings', [ProductionSettingsController::class, 'show']);
+            // Which warehouse IS the factory day bin (app_settings). A PUT
+            // needs production.manage, the GET above needs only .view — the
+            // module guard settles that, same as Tally's settings pair.
+            Route::put('settings/day-bin-warehouse', [ProductionSettingsController::class, 'updateDayBinWarehouse']);
+            // The central factory day bin: the warehouse and its current
+            // per-material balances, readable without picking a machine.
+            // NOT inside the traceability group below on purpose — the plain
+            // central path exists whether or not the bag/barcode detail does.
+            Route::get('factory-day-bin', [FactoryDayBinController::class, 'show']);
             Route::apiResource('work-centers', WorkCenterController::class)->only(['index', 'store', 'update']);
 
             Route::apiResource('boms', BomController::class)->only(['index', 'store']);

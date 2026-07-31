@@ -20,6 +20,7 @@ import {
     createShiftStockCount,
     getBinBayAvailability,
     getEntryDayBinSummary,
+    getFactoryDayBin,
     listMachineDowntimeLogs,
     listAllMolds,
     listMoldChangeLogs,
@@ -579,6 +580,20 @@ export default function ShiftProductionEntryPage() {
     // this full-list fetch doesn't collide with the paginated list-page caches.
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
     const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses', 'all'], queryFn: listAllWarehouses });
+    // The FACTORY DAY BIN — the central warehouse raw material sits in once it
+    // leaves the store. Read here for two reasons: consumption lines default
+    // to issuing FROM it (so completing a batch reduces it automatically, no
+    // new maths), and the supervisor is shown its live balance beside the kg
+    // they type. Not traceability-gated, and `warehouse: null` (nobody has
+    // named it yet) simply means every field behaves as it did before.
+    const { data: factoryDayBin } = useQuery({
+        queryKey: ['production', 'factory-day-bin'],
+        queryFn: getFactoryDayBin,
+        // A login without production.view 403s — a normal answer, not an
+        // error worth retrying or shouting about.
+        retry: false,
+        staleTime: 60 * 1000,
+    });
     const { data: scrapReasons } = useQuery({ queryKey: ['production', 'scrap-reasons', 'all'], queryFn: listAllScrapReasons });
     const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: listAllEmployees });
     const { data: entries, isLoading: entriesLoading } = useQuery({
@@ -759,6 +774,9 @@ export default function ShiftProductionEntryPage() {
         queryClient.invalidateQueries({ queryKey: ['production', 'shift-production-entries'] });
         queryClient.invalidateQueries({ queryKey: ['production', 'active-batches'] });
         queryClient.invalidateQueries({ queryKey: ['inventory', 'stock-balances'] });
+        // A completed batch issued material out of the day bin — the balance
+        // shown beside the consumption rows must fall, not go stale.
+        queryClient.invalidateQueries({ queryKey: ['production', 'factory-day-bin'] });
     };
     const invalidateDowntime = () => queryClient.invalidateQueries({ queryKey: ['production', 'machine-downtime-logs'] });
     const invalidateMoldChange = () => queryClient.invalidateQueries({ queryKey: ['production', 'mold-change-logs'] });
@@ -1281,6 +1299,76 @@ export default function ShiftProductionEntryPage() {
     const mbKgWatch = completeForm.watch('mb_kg');
     const scrapsWatch = completeForm.watch('scraps');
     const consumptionsWatch = completeForm.watch('material_consumptions');
+    const resinItemIdWatch = completeForm.watch('resin_item_id');
+    const mbItemIdWatch = completeForm.watch('mb_item_id');
+
+    // ---- The factory day bin, on the completion form -----------------------
+    // Every consumption line already carries its own warehouse, so issuing a
+    // line FROM the day-bin warehouse is what makes the bin fall when a batch
+    // completes. Nothing below changes a kg the supervisor types or any
+    // formula — it only picks the default location and shows the balance.
+    const dayBinWarehouseId = factoryDayBin?.warehouse?.id ?? null;
+    const dayBinBalances = useMemo(() => {
+        const balances = new Map<number, number>();
+        for (const row of factoryDayBin?.materials ?? []) {
+            const parsed = parseFloat(row.quantity_kg);
+            if (!Number.isNaN(parsed)) balances.set(row.item_id, parsed);
+        }
+        return balances;
+    }, [factoryDayBin]);
+    /** What the factory day bin holds of a material; null = nothing tracked there. */
+    const dayBinKgFor = useCallback(
+        (itemId: number | null | undefined): number | null =>
+            itemId === null || itemId === undefined ? null : dayBinBalances.get(itemId) ?? null,
+        [dayBinBalances],
+    );
+
+    // Default every consumption line's warehouse to the day bin — but only
+    // for a material the bin actually HOLDS. Defaulting to an empty bin would
+    // turn Complete Batch into an insufficient-stock refusal, and a blocked
+    // completion is never an acceptable price for a tidier default: those
+    // lines stay exactly as they are today (blank, supervisor picks).
+    // Never overwrites a value already there, so a manual pick stands.
+    useEffect(() => {
+        if (dayBinWarehouseId === null || !completingEntry) return;
+
+        const applyDefault = (
+            field: 'resin_warehouse_id' | 'mb_warehouse_id' | `material_consumptions.${number}.warehouse_id`,
+            itemId: number | null | undefined,
+        ) => {
+            const held = dayBinKgFor(itemId);
+            if (held === null || held <= 0) return;
+            if (completeForm.getValues(field) != null) return;
+            completeForm.setValue(field, dayBinWarehouseId);
+        };
+
+        applyDefault('resin_warehouse_id', resinItemIdWatch);
+        applyDefault('mb_warehouse_id', mbItemIdWatch);
+        (consumptionsWatch ?? []).forEach((line, index) => {
+            applyDefault(`material_consumptions.${index}.warehouse_id`, line?.item_id);
+        });
+    }, [dayBinWarehouseId, dayBinKgFor, completingEntry, resinItemIdWatch, mbItemIdWatch, consumptionsWatch, completeForm]);
+
+    /**
+     * "Day bin: 1250.5 Kg" beside a consumption row, so the supervisor watches
+     * the balance fall as batches complete — plus a plain warning when they
+     * are about to issue more than the bin holds (the backend would refuse
+     * it). Never changes the typed figure.
+     */
+    const dayBinHint = (itemId: number | null | undefined, typedKg: number | null | undefined, warehouseId: number | null | undefined): ReactNode => {
+        if (dayBinWarehouseId === null || itemId === null || itemId === undefined) return null;
+        const held = dayBinKgFor(itemId);
+        if (held === null) return null;
+        const issuingFromBin = warehouseId === dayBinWarehouseId;
+        const short = issuingFromBin && typedKg != null && typedKg > held;
+
+        return (
+            <Typography.Text type={short ? 'danger' : 'secondary'} style={{ fontSize: 12 }}>
+                Day bin: {fmtNum(held, 4)}
+                {short && ' — more than the day bin holds; load it or pick another location'}
+            </Typography.Text>
+        );
+    };
 
     // Packing auto-fill from the item's packing master (nos_per_tray /
     // nos_per_box). Auto-writes never mark the field dirty, so the dirty flag
@@ -2846,201 +2934,6 @@ export default function ShiftProductionEntryPage() {
                         <Controller name="batch_number" control={completeForm.control} render={({ field }) => <Input {...field} />} />
                     </Form.Item>
 
-                    {/* Box-first: boxes are what the floor physically counts.
-                        Pieces derive from boxes × pcs/box + loose, and stay
-                        editable for corrections. */}
-                    <Row gutter={16}>
-                        <Col span={12}>
-                            <Form.Item
-                                label="Good Boxes"
-                                validateStatus={completeForm.formState.errors.no_of_box ? 'error' : ''}
-                                help={completeForm.formState.errors.no_of_box?.message}
-                                extra={usePackingLines ? 'total cartons across the packing lines' : undefined}
-                            >
-                                <Controller
-                                    name="no_of_box"
-                                    control={completeForm.control}
-                                    render={({ field }) => (
-                                        // With packing lines the carton total is the sum of
-                                        // the lines and is not separately typeable — that is
-                                        // exactly how the same cartons would get counted
-                                        // under two modes.
-                                        <InputNumber {...field} size="large" min={0} disabled={usePackingLines} style={{ width: '100%' }} />
-                                    )}
-                                />
-                            </Form.Item>
-                        </Col>
-                        <Col span={12}>
-                            <Form.Item label="Loose Pieces (optional)" extra={usePackingLines ? 'pieces in no container at all' : undefined}>
-                                <Controller
-                                    name="loose_pieces"
-                                    control={completeForm.control}
-                                    render={({ field }) => (
-                                        <InputNumber
-                                            {...field}
-                                            size="large"
-                                            min={0}
-                                            style={{ width: '100%' }}
-                                            onChange={(value) => {
-                                                field.onChange(value);
-                                                if (usePackingLines) recomputePackingTotals();
-                                            }}
-                                        />
-                                    )}
-                                />
-                            </Form.Item>
-                        </Col>
-                    </Row>
-
-                    <Row gutter={16}>
-                        <Col span={12}>
-                            <Form.Item
-                                label="Quantity Produced (Nos)"
-                                validateStatus={completeForm.formState.errors.quantity_produced ? 'error' : ''}
-                                help={
-                                    // The field is derived (and disabled) when packing lines
-                                    // drive it, so "Must be greater than 0" would point at
-                                    // something the supervisor cannot edit. Point at the
-                                    // lines, which is where the fix actually is.
-                                    completeForm.formState.errors.quantity_produced
-                                        ? usePackingLines
-                                            ? 'Fill in the cartons and pieces on the packing lines below — this total comes from them.'
-                                            : completeForm.formState.errors.quantity_produced.message
-                                        : undefined
-                                }
-                                extra={
-                                    usePackingLines
-                                        ? 'sum of the packing lines + loose pieces'
-                                        : completingEntry?.item.nos_per_box
-                                          ? `= boxes × ${completingEntry.item.nos_per_box} pcs/box + loose — editable`
-                                          : showPouchFields
-                                            ? `= pouches × ${completingItem?.nos_per_pouch} pcs/pouch + loose — editable`
-                                            : undefined
-                                }
-                            >
-                                <Controller
-                                    name="quantity_produced"
-                                    control={completeForm.control}
-                                    render={({ field }) => (
-                                        // Derived from the lines when they exist — a
-                                        // separately-typed total is the one figure that
-                                        // could silently disagree with what was packed.
-                                        <InputNumber {...field} size="large" min={0} disabled={usePackingLines} style={{ width: '100%' }} />
-                                    )}
-                                />
-                            </Form.Item>
-                        </Col>
-                        <Col span={12}>
-                            <Form.Item label="Quantity Produced (Kg)">
-                                <Input size="large" disabled value={previewProducedKg ?? (nominalWeight ? '—' : 'No nominal weight set')} />
-                            </Form.Item>
-                        </Col>
-                    </Row>
-
-                    <Row gutter={16}>
-                        <Col span={12}>
-                            <Form.Item label="Quantity Rejected (Nos)">
-                                <Controller
-                                    name="quantity_scrap"
-                                    control={completeForm.control}
-                                    render={({ field }) => <InputNumber {...field} size="large" min={0} style={{ width: '100%' }} />}
-                                />
-                            </Form.Item>
-                        </Col>
-                        <Col span={12}>
-                            <Form.Item label="Quantity Rejected (Kg)">
-                                <Input size="large" disabled value={previewRejectionKg ?? '—'} />
-                            </Form.Item>
-                        </Col>
-                    </Row>
-
-                    {!!quantityScrap && quantityScrap > 0 && (
-                        <Form.Item label="Rejection Reason">
-                            <Controller
-                                name="scrap_reason_id"
-                                control={completeForm.control}
-                                render={({ field }) => <Select {...field} options={scrapReasonOptions} showSearch optionFilterProp="label" allowClear />}
-                            />
-                        </Form.Item>
-                    )}
-
-                    <Form.Item
-                        label="QC Rejection (Kg) — optional"
-                        validateStatus={completeForm.formState.errors.qc_rejection_kg ? 'error' : ''}
-                        help={completeForm.formState.errors.qc_rejection_kg?.message}
-                        extra="QC's weighed figure — overrides the calculated rejection kg when present"
-                    >
-                        <Controller
-                            name="qc_rejection_kg"
-                            control={completeForm.control}
-                            render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} suffix="Kg" />}
-                        />
-                    </Form.Item>
-
-                    <Typography.Text strong>Run Details</Typography.Text>
-                    <Row gutter={16} style={{ marginTop: 8 }}>
-                        <Col xs={12} sm={8}>
-                            <Form.Item
-                                label="Running Hours"
-                                validateStatus={completeForm.formState.errors.running_hours ? 'error' : ''}
-                                help={completeForm.formState.errors.running_hours?.message}
-                                extra="default: full shift"
-                            >
-                                <Controller
-                                    name="running_hours"
-                                    control={completeForm.control}
-                                    render={({ field }) => <InputNumber {...field} min={0} max={24} step={0.5} style={{ width: '100%' }} />}
-                                />
-                            </Form.Item>
-                        </Col>
-                        <Col xs={12} sm={8}>
-                            <Form.Item
-                                label="Actual Cycle Time (s)"
-                                validateStatus={completeForm.formState.errors.actual_cycle_time ? 'error' : ''}
-                                help={completeForm.formState.errors.actual_cycle_time?.message}
-                            >
-                                <Controller
-                                    name="actual_cycle_time"
-                                    control={completeForm.control}
-                                    render={({ field }) => (
-                                        <InputNumber
-                                            {...field}
-                                            min={0}
-                                            step={0.1}
-                                            style={{ width: '100%' }}
-                                            placeholder={
-                                                completingEntry?.standard_cycle_time
-                                                    ? `std ${fmtNum(toNum(completingEntry.standard_cycle_time))}`
-                                                    : undefined
-                                            }
-                                        />
-                                    )}
-                                />
-                            </Form.Item>
-                        </Col>
-                        <Col xs={12} sm={8}>
-                            <Form.Item
-                                label="Active Cavities"
-                                validateStatus={completeForm.formState.errors.active_cavities ? 'error' : ''}
-                                help={completeForm.formState.errors.active_cavities?.message}
-                                extra={completingEntry?.standard_cavities ? `std: ${completingEntry.standard_cavities}` : undefined}
-                            >
-                                <Controller
-                                    name="active_cavities"
-                                    control={completeForm.control}
-                                    render={({ field }) => <InputNumber {...field} min={1} style={{ width: '100%' }} />}
-                                />
-                            </Form.Item>
-                        </Col>
-                    </Row>
-
-                    <Typography.Text strong>Packing</Typography.Text>
-
-                    {/* Multi-mode packing lines. The modes come from THIS
-                        batch's standard, so a tray-only product is never
-                        asked about pouches. One mode is auto-selected with no
-                        picker; a standard carrying both lets the supervisor
-                        add the second as its own line when the run used it. */}
                     {usePackingLines && (
                         <>
                             <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
@@ -3279,6 +3172,210 @@ export default function ShiftProductionEntryPage() {
                         </>
                     )}
 
+                    {/* Box-first: boxes are what the floor physically counts.
+                        Pieces derive from boxes × pcs/box + loose, and stay
+                        editable for corrections.
+
+                        These sit BELOW the packing lines on purpose. When lines
+                        drive them both fields are read-only totals, and while
+                        they sat above the card that feeds them the drawer
+                        opened on two greyed-out zeros with no visible way in —
+                        the owner reported it as "why could I not enter
+                        anything". Outputs never precede the inputs they are
+                        computed from. Without packing lines they are the real
+                        entry fields and this is simply the old order. */}
+                    <Row gutter={16}>
+                        <Col span={12}>
+                            <Form.Item
+                                label="Good Boxes"
+                                validateStatus={completeForm.formState.errors.no_of_box ? 'error' : ''}
+                                help={completeForm.formState.errors.no_of_box?.message}
+                                extra={usePackingLines ? 'total cartons across the packing lines' : undefined}
+                            >
+                                <Controller
+                                    name="no_of_box"
+                                    control={completeForm.control}
+                                    render={({ field }) => (
+                                        // With packing lines the carton total is the sum of
+                                        // the lines and is not separately typeable — that is
+                                        // exactly how the same cartons would get counted
+                                        // under two modes.
+                                        <InputNumber {...field} size="large" min={0} disabled={usePackingLines} style={{ width: '100%' }} />
+                                    )}
+                                />
+                            </Form.Item>
+                        </Col>
+                        <Col span={12}>
+                            <Form.Item label="Loose Pieces (optional)" extra={usePackingLines ? 'pieces in no container at all' : undefined}>
+                                <Controller
+                                    name="loose_pieces"
+                                    control={completeForm.control}
+                                    render={({ field }) => (
+                                        <InputNumber
+                                            {...field}
+                                            size="large"
+                                            min={0}
+                                            style={{ width: '100%' }}
+                                            onChange={(value) => {
+                                                field.onChange(value);
+                                                if (usePackingLines) recomputePackingTotals();
+                                            }}
+                                        />
+                                    )}
+                                />
+                            </Form.Item>
+                        </Col>
+                    </Row>
+
+                    <Row gutter={16}>
+                        <Col span={12}>
+                            <Form.Item
+                                label="Quantity Produced (Nos)"
+                                validateStatus={completeForm.formState.errors.quantity_produced ? 'error' : ''}
+                                help={
+                                    // The field is derived (and disabled) when packing lines
+                                    // drive it, so "Must be greater than 0" would point at
+                                    // something the supervisor cannot edit. Point at the
+                                    // lines, which is where the fix actually is.
+                                    completeForm.formState.errors.quantity_produced
+                                        ? usePackingLines
+                                            ? 'Fill in the cartons and pieces on the packing lines below — this total comes from them.'
+                                            : completeForm.formState.errors.quantity_produced.message
+                                        : undefined
+                                }
+                                extra={
+                                    usePackingLines
+                                        ? 'sum of the packing lines + loose pieces'
+                                        : completingEntry?.item.nos_per_box
+                                          ? `= boxes × ${completingEntry.item.nos_per_box} pcs/box + loose — editable`
+                                          : showPouchFields
+                                            ? `= pouches × ${completingItem?.nos_per_pouch} pcs/pouch + loose — editable`
+                                            : undefined
+                                }
+                            >
+                                <Controller
+                                    name="quantity_produced"
+                                    control={completeForm.control}
+                                    render={({ field }) => (
+                                        // Derived from the lines when they exist — a
+                                        // separately-typed total is the one figure that
+                                        // could silently disagree with what was packed.
+                                        <InputNumber {...field} size="large" min={0} disabled={usePackingLines} style={{ width: '100%' }} />
+                                    )}
+                                />
+                            </Form.Item>
+                        </Col>
+                        <Col span={12}>
+                            <Form.Item label="Quantity Produced (Kg)">
+                                <Input size="large" disabled value={previewProducedKg ?? (nominalWeight ? '—' : 'No nominal weight set')} />
+                            </Form.Item>
+                        </Col>
+                    </Row>
+
+                    <Row gutter={16}>
+                        <Col span={12}>
+                            <Form.Item label="Quantity Rejected (Nos)">
+                                <Controller
+                                    name="quantity_scrap"
+                                    control={completeForm.control}
+                                    render={({ field }) => <InputNumber {...field} size="large" min={0} style={{ width: '100%' }} />}
+                                />
+                            </Form.Item>
+                        </Col>
+                        <Col span={12}>
+                            <Form.Item label="Quantity Rejected (Kg)">
+                                <Input size="large" disabled value={previewRejectionKg ?? '—'} />
+                            </Form.Item>
+                        </Col>
+                    </Row>
+
+                    {!!quantityScrap && quantityScrap > 0 && (
+                        <Form.Item label="Rejection Reason">
+                            <Controller
+                                name="scrap_reason_id"
+                                control={completeForm.control}
+                                render={({ field }) => <Select {...field} options={scrapReasonOptions} showSearch optionFilterProp="label" allowClear />}
+                            />
+                        </Form.Item>
+                    )}
+
+                    <Form.Item
+                        label="QC Rejection (Kg) — optional"
+                        validateStatus={completeForm.formState.errors.qc_rejection_kg ? 'error' : ''}
+                        help={completeForm.formState.errors.qc_rejection_kg?.message}
+                        extra="QC's weighed figure — overrides the calculated rejection kg when present"
+                    >
+                        <Controller
+                            name="qc_rejection_kg"
+                            control={completeForm.control}
+                            render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} suffix="Kg" />}
+                        />
+                    </Form.Item>
+
+                    <Typography.Text strong>Run Details</Typography.Text>
+                    <Row gutter={16} style={{ marginTop: 8 }}>
+                        <Col xs={12} sm={8}>
+                            <Form.Item
+                                label="Running Hours"
+                                validateStatus={completeForm.formState.errors.running_hours ? 'error' : ''}
+                                help={completeForm.formState.errors.running_hours?.message}
+                                extra="default: full shift"
+                            >
+                                <Controller
+                                    name="running_hours"
+                                    control={completeForm.control}
+                                    render={({ field }) => <InputNumber {...field} min={0} max={24} step={0.5} style={{ width: '100%' }} />}
+                                />
+                            </Form.Item>
+                        </Col>
+                        <Col xs={12} sm={8}>
+                            <Form.Item
+                                label="Actual Cycle Time (s)"
+                                validateStatus={completeForm.formState.errors.actual_cycle_time ? 'error' : ''}
+                                help={completeForm.formState.errors.actual_cycle_time?.message}
+                            >
+                                <Controller
+                                    name="actual_cycle_time"
+                                    control={completeForm.control}
+                                    render={({ field }) => (
+                                        <InputNumber
+                                            {...field}
+                                            min={0}
+                                            step={0.1}
+                                            style={{ width: '100%' }}
+                                            placeholder={
+                                                completingEntry?.standard_cycle_time
+                                                    ? `std ${fmtNum(toNum(completingEntry.standard_cycle_time))}`
+                                                    : undefined
+                                            }
+                                        />
+                                    )}
+                                />
+                            </Form.Item>
+                        </Col>
+                        <Col xs={12} sm={8}>
+                            <Form.Item
+                                label="Active Cavities"
+                                validateStatus={completeForm.formState.errors.active_cavities ? 'error' : ''}
+                                help={completeForm.formState.errors.active_cavities?.message}
+                                extra={completingEntry?.standard_cavities ? `std: ${completingEntry.standard_cavities}` : undefined}
+                            >
+                                <Controller
+                                    name="active_cavities"
+                                    control={completeForm.control}
+                                    render={({ field }) => <InputNumber {...field} min={1} style={{ width: '100%' }} />}
+                                />
+                            </Form.Item>
+                        </Col>
+                    </Row>
+
+                    <Typography.Text strong>Packing</Typography.Text>
+
+                    {/* Multi-mode packing lines. The modes come from THIS
+                        batch's standard, so a tray-only product is never
+                        asked about pouches. One mode is auto-selected with no
+                        picker; a standard carrying both lets the supervisor
+                        add the second as its own line when the run used it. */}
                     {/* Legacy path — products with no imported standard. Byte
                         for byte the pre-packing-lines field set: tray fields
                         for tray-packed items (or items with no standards at
@@ -3393,6 +3490,23 @@ export default function ShiftProductionEntryPage() {
                         consumes — pickers scoped to resins / masterbatches so
                         the right item is one tap, not a 642-item search. Rows
                         without a quantity are simply not sent. */}
+                    {/* Where consumption comes OUT of. With a factory day bin
+                        configured the rows below default to it, so completing
+                        the batch reduces the bin automatically; without one,
+                        one plain line says so and nothing changes. */}
+                    {dayBinWarehouseId === null ? (
+                        <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
+                            No factory day bin chosen — pick the "From" warehouse yourself, as today.{' '}
+                            <Link to="/production/day-bin">Choose one in Day Bin (factory)</Link>.
+                        </Typography.Text>
+                    ) : (
+                        <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
+                            Material is issued from the factory day bin ({factoryDayBin?.warehouse?.name}) by default —
+                            change "From" for anything taken straight off the store.{' '}
+                            <Link to="/production/day-bin">Open Day Bin (factory)</Link>
+                        </Typography.Text>
+                    )}
+
                     <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
                         Resin (kg)
                     </Typography.Text>
@@ -3434,6 +3548,7 @@ export default function ShiftProductionEntryPage() {
                                 render={({ field }) => <InputNumber {...field} size="large" min={0} placeholder="Kg" suffix="Kg" style={{ width: '100%' }} />}
                             />
                         </Col>
+                        <Col xs={24}>{dayBinHint(resinItemIdWatch, resinKgWatch, completeForm.watch('resin_warehouse_id'))}</Col>
                     </Row>
 
                     <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
@@ -3478,6 +3593,7 @@ export default function ShiftProductionEntryPage() {
                                 render={({ field }) => <InputNumber {...field} size="large" min={0} placeholder="Kg" suffix="Kg" style={{ width: '100%' }} />}
                             />
                         </Col>
+                        <Col xs={24}>{dayBinHint(mbItemIdWatch, mbKgWatch, completeForm.watch('mb_warehouse_id'))}</Col>
                     </Row>
 
                     <Space style={{ justifyContent: 'space-between', width: '100%', marginTop: 12 }}>
@@ -3532,6 +3648,13 @@ export default function ShiftProductionEntryPage() {
                             </Col>
                             <Col xs={24} sm={3}>
                                 <Button danger block onClick={() => materialFields.remove(index)}>Remove</Button>
+                            </Col>
+                            <Col xs={24}>
+                                {dayBinHint(
+                                    selectedItemId,
+                                    completeForm.watch(`material_consumptions.${index}.quantity_issued_kg`),
+                                    completeForm.watch(`material_consumptions.${index}.warehouse_id`),
+                                )}
                             </Col>
                         </Row>
                         );

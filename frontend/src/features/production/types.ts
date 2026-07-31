@@ -1076,3 +1076,37 @@ export interface ProductionStandardRow {
     confirmation_status: string | null;
     packagings: StandardPackaging[];
 }
+
+// ---------------------------------------------------------------------------
+// The FACTORY DAY BIN — the central place raw material sits after it leaves
+// the store and before a machine runs.
+//
+// It is simply a WAREHOUSE, which is why there are no balances of its own
+// here: `quantity_kg` is the ordinary stock balance for (material, day-bin
+// warehouse). Loading it is the existing store → warehouse stock transfer,
+// and consumption at batch completion reduces it because every consumption
+// line already carries its own warehouse.
+//
+// Distinct from DayBinState / DayBinMovement above, which are the optional
+// PER-MACHINE bag-level ledger (the barcode bin bay). This is the simple
+// central figure that is always visible without picking a machine.
+// ---------------------------------------------------------------------------
+
+/** One material's current balance in the factory day bin. */
+export interface FactoryDayBinMaterial {
+    item: Item | null;
+    item_id: number;
+    /** 4dp decimal string. The item's own `uom` says what the unit is. */
+    quantity_kg: string;
+    average_cost: string;
+}
+
+/**
+ * GET /production/factory-day-bin. `warehouse: null` means nobody has named
+ * the day-bin warehouse yet — a normal state, not an error: every screen then
+ * behaves exactly as it did before the day bin existed.
+ */
+export interface FactoryDayBin {
+    warehouse: Warehouse | null;
+    materials: FactoryDayBinMaterial[];
+}
