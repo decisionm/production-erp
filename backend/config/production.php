@@ -147,8 +147,6 @@ return [
      * The defaults below are DELIBERATELY NOT all-blocking, and the reason is
      * master-data coverage, not a judgement about which fields matter:
      *
-     *   - consumption_recipe defaults to 'warn' because no product carries a
-     *     BOM yet. Blocking on it would refuse every batch on the floor.
      *   - colour defaults to 'warn' because it drives a suggestion (which
      *     masterbatch) and the scrap-item split, neither of which stops a
      *     shift from being recorded truthfully.
@@ -182,7 +180,6 @@ return [
             'cycle_time' => env('PROD_READINESS_CYCLE_TIME', 'block'),
             'cavities' => env('PROD_READINESS_CAVITIES', 'block'),
             'packing' => env('PROD_READINESS_PACKING', 'block'),
-            'consumption_recipe' => env('PROD_READINESS_RECIPE', 'warn'),
             'colour' => env('PROD_READINESS_COLOUR', 'warn'),
             'tally_item' => env('PROD_READINESS_TALLY_ITEM', 'block'),
             'tally_godown' => env('PROD_READINESS_TALLY_GODOWN', 'block'),

@@ -2,7 +2,6 @@
 
 namespace App\Modules\Production\Services;
 
-use App\Modules\Production\Models\ProductionConfiguration;
 use App\Modules\Production\Models\ProductionStandard;
 use App\Modules\Production\Models\ProductionStandardPackaging;
 use Illuminate\Database\Eloquent\Collection;
@@ -10,17 +9,11 @@ use Illuminate\Database\Eloquent\Collection;
 /**
  * Which product standards a machine may run today, and which one applies.
  *
- * Watch mode is the operating state until machine-specific settings exist:
- * a product standard is offered on EVERY active machine, and the absence of
- * an approved machine-product configuration is a warning, never a refusal. The
- * factory has 86 standards and no machine column; blocking on the machine's
- * own settings would stop production entirely while producing no new
- * information.
- *
- * That notice is only for machines whose own settings are still missing. Once
- * an approved configuration exists for the machine and product, it is the
- * governing standard and the caller passes it to warningsFor() — which then
- * says nothing, because there is nothing left to warn about.
+ * A product standard is offered on EVERY active machine, and the absence of
+ * an approved machine-product configuration is not even a warning — running
+ * on the product standard is the normal case. The factory's workbook has no
+ * machine column; blocking or nagging on machine-specific settings would
+ * interrupt every start while producing no new information.
  *
  * What the app does instead is record which machine actually ran which
  * standard. After a week of shifts that record IS the machine-product
@@ -106,11 +99,6 @@ class ProductionStandardResolver
      * Advisory notes for an intended run. Never blocking — every one of
      * these is a "you should know", not a "you may not".
      *
-     * $configuration is the APPROVED machine-product configuration governing
-     * the run, when the caller has resolved one. Pass it: it is the difference
-     * between telling a supervisor their machine's settings are missing and
-     * telling them so when they are not.
-     *
      * @return list<array{code: string, message: string}>
      */
     public function warningsFor(
@@ -118,7 +106,6 @@ class ProductionStandardResolver
         ?ProductionStandardPackaging $packaging,
         int $itemId,
         ?int $workCenterId = null,
-        ?ProductionConfiguration $configuration = null,
     ): array {
         $warnings = [];
 
@@ -131,16 +118,16 @@ class ProductionStandardResolver
             return $warnings;
         }
 
-        // The standard is a product-level figure that no one has yet confirmed
-        // for THIS machine. Silent once an approved configuration exists — the
-        // supervisor was being told the settings were missing while they were
-        // sitting right there, governing the run, and read it as an error.
-        if ($configuration === null) {
-            $warnings[] = [
-                'code' => 'machine_mapping_unconfirmed',
-                'message' => "This machine's own settings for this product are not saved yet, so the factory product standard is being used. Nothing is blocked.",
-            ];
-        }
+        // Running on the factory product standard is the NORMAL case, so it
+        // gets no notice at all. This used to warn "no approved machine
+        // mapping yet" (later "machine's own settings not saved yet") on every
+        // start without a configuration — which is most starts — and the owner
+        // read it as an error every single time, because a yellow box IS an
+        // error to the person it interrupts. Which figures govern the run is
+        // already visible in the preview's own numbers and in the green
+        // configuration banner when a machine override exists; the batch
+        // snapshot records the source either way. A warning must mean
+        // "something is off", or the one that matters drowns.
 
         if ($standard->status === 'unresolved') {
             $warnings[] = ['code' => 'standard_unresolved', 'message' => (string) $standard->unresolved_reason];

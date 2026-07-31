@@ -36,7 +36,6 @@ use App\Modules\Production\Models\WorkCenter;
 class ProductReadinessService
 {
     public function __construct(
-        private readonly BomService $boms,
     ) {}
 
     /**
@@ -53,7 +52,6 @@ class ProductReadinessService
         'cycle_time' => 'Standard cycle time',
         'cavities' => 'Standard cavities',
         'packing' => 'Packing configuration (pieces per box)',
-        'consumption_recipe' => 'Consumption recipe (resin, masterbatch, consumables)',
         'colour' => 'Colour',
         'tally_item' => 'Tally stock item mapping',
         'tally_godown' => 'Tally godown mapping (warehouse)',
@@ -199,9 +197,15 @@ class ProductReadinessService
             $failures['colour'] = 'No colour — the masterbatch suggestion and the amber/clear scrap item cannot be resolved.';
         }
 
-        if (! $this->hasConsumptionRecipe($item)) {
-            $failures['consumption_recipe'] = 'No material recipe saved yet, so the expected resin/masterbatch card stays empty. Starting, completing, expected-vs-actual and Tally are NOT affected — enter consumption as weighed, as usual.';
-        }
+        // A missing consumption recipe is deliberately NOT a finding. The
+        // factory decided recipes come after go-live (the masterbatch dosing
+        // is an open question with the factory, not a figure to invent), so
+        // for now EVERY product lacks one — and a notice that fires on every
+        // product on every start is not information, it is wallpaper. The
+        // owner read it as an error three times in one night. The expected-
+        // materials card simply stays empty until a recipe exists; when
+        // recipes become real masters, restore a check here alongside a UI
+        // that can act on it.
 
         // A LOCAL- fixture has no Tally GUID BY CONSTRUCTION — it was
         // fabricated here precisely because Tally does not carry the product
@@ -224,18 +228,6 @@ class ProductReadinessService
         }
 
         return $failures;
-    }
-
-    /**
-     * A recipe means an active BOM that actually has at least one line — an
-     * empty BOM header is not a recipe, and treating it as one would let the
-     * gate pass a product whose expected consumption is still unknowable.
-     */
-    private function hasConsumptionRecipe(Item $item): bool
-    {
-        $bom = $this->boms->activeFor($item->id);
-
-        return $bom !== null && $bom->lines->isNotEmpty();
     }
 
     private function positive(mixed $value): bool

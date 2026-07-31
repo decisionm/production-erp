@@ -122,8 +122,6 @@ class MachineCavityCapabilityTest extends TestCase
         );
 
         $this->assertContains('machine_cavity_restricted', $codes);
-        // Still advisory: it travels with the watch-mode notes, not the gate.
-        $this->assertContains('machine_mapping_unconfirmed', $codes);
     }
 
     public function test_the_resolver_omits_the_warning_on_an_allowed_machine(): void
