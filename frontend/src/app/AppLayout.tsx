@@ -81,11 +81,17 @@ const allNavItems: NavGroup[] = [
             // Floor-first ordering: the daily-use pages a supervisor actually
             // touches come first, setup/reference pages after.
             { key: '/production/shift-production', label: 'Shift Floor' },
+            // The two bin pages sit together, simple one first. Day Bin is the
+            // factory's single central balance loaded by an ordinary transfer;
+            // Bin Bay is the optional bag-by-bag barcode detail. Day Bin had a
+            // route but no link at all, so the page existed and nobody could
+            // reach it by clicking.
+            { key: '/production/day-bin', label: 'Day Bin' },
+            { key: '/production/bin-bay', label: 'Bin Bay Loading' },
             { key: '/production/approve-production', label: 'Approve Production' },
             { key: '/production/live-monitor', label: 'Live Monitor' },
             { key: '/production/standards', label: 'Product Standards' },
             { key: '/production/configuration', label: 'Configuration' },
-            { key: '/production/bin-bay', label: 'Bin Bay Loading' },
             { key: '/production/boms', label: 'Bills of Material' },
             { key: '/production/shift-summary', label: 'Shift Summary' },
             { key: '/production/reports', label: 'Reports' },
