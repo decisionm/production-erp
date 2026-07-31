@@ -50,6 +50,21 @@ class ShiftProductionEntryResource extends JsonResource
             'production_standard_id' => $this->production_standard_id,
             'production_configuration_id' => $this->production_configuration_id,
             'packaging_mode' => $this->packaging_mode,
+            // WHICH COLOUR THIS RUN ACTUALLY MADE — read back out of the
+            // snapshot startBatch froze it into, so a later item-master edit
+            // can never restate it.
+            //
+            // Surfaced because colour picks the masterbatch, and until now it
+            // was write-only: the supervisor's answer went into
+            // config_snapshot at Start and no client could ever read it back.
+            // The completion drawer needs it to ask the preview for the
+            // masterbatch of the colour THIS run is recorded as making,
+            // rather than falling back to the item master's colour — which
+            // for most bottle items is blank, and for a mislabelled one is
+            // simply a different colour's material.
+            //
+            // Null is a real answer ("nobody stated a colour"), never "".
+            'colour' => $this->config_snapshot['colour'] ?? null,
             'cycle_time_source' => $this->cycle_time_source,
             'cavities_source' => $this->cavities_source,
             'override_reason' => $this->override_reason,

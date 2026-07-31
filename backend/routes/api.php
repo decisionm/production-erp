@@ -367,6 +367,14 @@ Route::prefix('v1')->group(function () {
             Route::post('downtime-reasons', [DowntimeReasonController::class, 'store']);
             Route::put('downtime-reasons/{downtime_reason}', [DowntimeReasonController::class, 'update']);
 
+            // Typed settings a factory changes without a deploy. One of them
+            // is load-bearing for the completion screen and easy to miss, so
+            // it is named here: `masterbatch_colour_map` (data_type json) is
+            // the colour → masterbatch item id map the pre-selected
+            // masterbatch is resolved from —
+            // {"Amber": 121, "Milk White": 120}. Unseeded on purpose;
+            // RunMaterialSuggestionService says why a name scan is not
+            // allowed to stand in for it.
             Route::get('factory-settings', [FactorySettingController::class, 'index']);
             Route::post('factory-settings', [FactorySettingController::class, 'upsert']);
 

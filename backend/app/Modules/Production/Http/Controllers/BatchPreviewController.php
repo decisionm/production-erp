@@ -14,6 +14,7 @@ use App\Modules\Production\Services\MasterbatchDosingService;
 use App\Modules\Production\Services\ProductionConfigurationService;
 use App\Modules\Production\Services\ProductionStandardResolver;
 use App\Modules\Production\Services\ProductReadinessService;
+use App\Modules\Production\Services\RunMaterialSuggestionService;
 use Illuminate\Http\JsonResponse;
 
 /**
@@ -32,6 +33,7 @@ class BatchPreviewController extends Controller
         private readonly ProductionStandardResolver $standards,
         private readonly ProductionConfigurationService $configurations,
         private readonly MasterbatchDosingService $masterbatchDosings,
+        private readonly RunMaterialSuggestionService $materialSuggestions,
     ) {}
 
     public function __invoke(BatchPreviewRequest $request): JsonResponse
@@ -78,6 +80,22 @@ class BatchPreviewController extends Controller
             ? (int) $data['quantity_produced']
             : $estimation['expected_pieces'];
 
+        // WHICH resin and WHICH masterbatch this run consumes, so the two
+        // material boxes arrive already chosen. Quoted against the SAME
+        // bottle count as the masterbatch_dosing block below — two bottle
+        // bases in one response would be the screen disagreeing with itself.
+        // The supervisor's own colour, when they have stated one, outranks the
+        // configuration and the item master exactly as it does at Start Batch
+        // — so the masterbatch offered here is the one for the colour this run
+        // is RECORDED as running, not the one the item master happens to hold.
+        $suggestions = $this->materialSuggestions->forRun(
+            $item,
+            $configuration,
+            $standard,
+            $dosingBottles,
+            $data['colour'] ?? null,
+        );
+
         return response()->json([
             'data' => [
                 // Assessed against the SAME resolved standard/packaging the
@@ -106,6 +124,26 @@ class BatchPreviewController extends Controller
                     $this->masterbatchDosings->candidatesFor($item->id),
                     $dosingBottles,
                 ),
+                // The two pre-selected materials, each with the grams per
+                // bottle and a sentence saying where the choice came from.
+                //
+                // Both carry `item: null` freely — no masterbatch for a Clear
+                // bottle, and no material at all where the masters cannot
+                // answer without guessing. A null with a reason the screen
+                // prints is the point: the alternative that shipped was the
+                // wrong-colour masterbatch pre-selected by first name match.
+                //
+                // The resin block deliberately has NO suggested_kg: the resin
+                // total is production kg + rejection kg + lumps (the factory's
+                // paper arithmetic, verified 11 rows of 11), and grams ×
+                // bottles would be light by the scrap mass every shift. The
+                // masterbatch total IS grams × bottles ÷ 1000 — the owner's
+                // own rule for the colour — computed in the engine.
+                //
+                // Advisory. Nothing here is stored: completion saves exactly
+                // the lines submitted, and Tally carries those.
+                'suggested_resin' => $suggestions['resin'],
+                'suggested_masterbatch' => $suggestions['masterbatch'],
                 // Named so the screen can SAY the machine's own approved
                 // figures are in use, rather than leaving the supervisor to
                 // wonder why the numbers differ from the standards card.

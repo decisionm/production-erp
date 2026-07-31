@@ -41,6 +41,22 @@ class BatchPreviewRequest extends FormRequest
             // shape the floor can legitimately send. Truncated to a whole
             // count where it is read — a fractional bottle does not exist.
             'quantity_produced' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            // Which colour is running, when the supervisor has said.
+            //
+            // Colour picks the masterbatch, and the masters frequently cannot
+            // answer it — most bottle items carry no `colour`, which is why
+            // Start Batch ASKS. That typed answer wins over the configuration
+            // and the item master there (StartBatchRequest carries the same
+            // field, and it is frozen into the entry's config_snapshot), so it
+            // has to be able to reach the preview too: without it the
+            // completion drawer would resolve the masterbatch against a
+            // WEAKER colour than the run was started with, and offer a
+            // different material than the one the run is recorded as using.
+            //
+            // Optional, and no default. A colour nobody stated is null ("not
+            // known"), which the suggestion answers with a sentence — never a
+            // guess.
+            'colour' => ['sometimes', 'nullable', 'string', 'max:64'],
         ];
     }
 }

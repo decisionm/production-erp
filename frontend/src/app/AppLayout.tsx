@@ -314,11 +314,11 @@ export default function AppLayout({ children }: PropsWithChildren) {
             >
                 <div
                     style={{
-                        height: 56,
                         margin: 12,
                         display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: collapsed ? 'center' : 'flex-start',
+                        flexDirection: 'column',
+                        alignItems: collapsed ? 'center' : 'flex-start',
+                        gap: 4,
                         overflow: 'hidden',
                     }}
                 >
@@ -343,6 +343,24 @@ export default function AppLayout({ children }: PropsWithChildren) {
                             style={{ height: collapsed ? 30 : 38, width: 'auto', display: 'block' }}
                         />
                     </div>
+                    {/* Under the logo, on the owner's instruction, and hidden when
+                        the sider is collapsed — at that width it would either wrap
+                        or crowd the mark it is meant to sit quietly beneath. It
+                        stays on the login page either way, so a collapsed sider
+                        never loses the attribution entirely. */}
+                    {!collapsed && (
+                        <Typography.Text
+                            style={{
+                                color: 'rgba(255,255,255,0.45)',
+                                fontSize: 11,
+                                letterSpacing: '0.04em',
+                                paddingLeft: 2,
+                                whiteSpace: 'nowrap',
+                            }}
+                        >
+                            Powered by Balin
+                        </Typography.Text>
+                    )}
                 </div>
                 <Menu
                     theme="dark"
