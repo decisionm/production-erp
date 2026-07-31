@@ -2,8 +2,10 @@
 
 namespace App\Modules\Production\Http\Requests;
 
+use App\Modules\Production\Http\Requests\Concerns\ValidatesDowntimeEvents;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 /**
  * Shift handover (complete-and-continue): the incoming shift plus the
@@ -13,6 +15,8 @@ use Illuminate\Validation\Rule;
  */
 class HandoverRequest extends FormRequest
 {
+    use ValidatesDowntimeEvents;
+
     public function authorize(): bool
     {
         return true;
@@ -58,6 +62,21 @@ class HandoverRequest extends FormRequest
             'completion.scraps.*.quantity_nos' => ['nullable', 'numeric', 'gte:0'],
             'completion.scraps.*.quantity_kg' => ['nullable', 'numeric', 'gte:0'],
             'completion.scraps.*.scrap_reason_id' => ['nullable', 'integer', 'exists:scrap_reasons,id'],
+
+            // Downtime logged with the outgoing segment's completion — same
+            // shape and cross-checks as CompleteBatchRequest, via the shared
+            // trait, so a handover completion can never dodge them.
+            ...$this->downtimeEventRules('completion.downtime_events'),
         ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator) {
+            $downtime = $this->input('completion.downtime_events');
+            if (is_array($downtime) && $downtime !== []) {
+                $this->validateDowntimeEvents($validator, $downtime, 'completion.downtime_events');
+            }
+        });
     }
 }

@@ -56,6 +56,7 @@ class ShiftProductionEntryService
                 'shift', 'workCenter', 'item', 'warehouse', 'scrapReason', 'operator',
                 'materialConsumptions.item' => fn ($query) => $query->withTrashed(),
                 'scraps.scrapReason', 'approvedBy',
+                'downtimeEvents.reason',
                 'tallySyncEntries',
             ])
             ->when($status, function ($query) use ($status) {
@@ -366,6 +367,7 @@ class ShiftProductionEntryService
      *     running_hours?: ?string, qc_rejection_kg?: ?string,
      *     material_consumptions?: array<int, array{item_id: int, warehouse_id: int, quantity_issued_kg: string}>,
      *     scraps?: array<int, array{type: string, quantity_nos?: string, quantity_kg?: string, scrap_reason_id?: int}>,
+     *     downtime_events?: array<int, array{downtime_reason_id: int, minutes: string|float|int, note?: ?string}>,
      * }  $data
      */
     public function completeBatch(ShiftProductionEntry $entry, array $data, ?int $completedBy): ShiftProductionEntry
@@ -468,6 +470,18 @@ class ShiftProductionEntryService
                 ]);
             }
 
+            // Downtime logged with the completion — power cuts, mould
+            // changes, breakdowns the supervisor reports alongside the
+            // counts (owner, 30-Jul: "…i want to do this for efficiency").
+            // Recorded through the downtime service so the reason's own
+            // rules hold; record() stamps known_before_start = false by
+            // construction — these lines explain the run's hours in
+            // productionMetrics(), they never rewrite the Start-time
+            // target that planned downtime shaped.
+            foreach ($data['downtime_events'] ?? [] as $line) {
+                $this->downtime->record($entry, $line, $completedBy);
+            }
+
             $unitCost = $this->stock->currentAverageCost($entry->item_id, $entry->warehouse_id);
             $this->stock->recordReceipt(
                 itemId: $entry->item_id,
@@ -482,6 +496,7 @@ class ShiftProductionEntryService
                 'shift', 'workCenter', 'item', 'warehouse', 'scrapReason', 'operator',
                 'materialConsumptions.item' => fn ($query) => $query->withTrashed(),
                 'scraps.scrapReason',
+                'downtimeEvents.reason',
             ]);
         });
     }
@@ -794,11 +809,13 @@ class ShiftProductionEntryService
      * @return array{
      *     expected_pieces: ?string, expected_boxes: ?int, expected_pouches: ?int,
      *     actual_boxes: ?int, actual_pouches: ?int,
-     *     actual_pieces: ?string, efficiency_pct: ?float,
+     *     actual_pieces: ?string, efficiency_pct: ?float, efficiency_band: ?string,
+     *     downtime_minutes_total: string, net_running_hours: ?string,
      *     rejection_kg_production: ?string, rejection_kg_qc: ?string,
      *     rejection_diff_kg: ?string, lumps_kg: string, issued_kg: string,
      *     good_production_kg: ?string, confirmed_rejection_kg: ?string,
-     *     reconciliation_unaccounted_kg: ?string,
+     *     reconciliation_unaccounted_kg: ?string, unaccounted_band: ?string,
+     *     blocks_approval: bool,
      * }|null
      */
     public function productionMetrics(ShiftProductionEntry $entry): ?array
@@ -813,6 +830,7 @@ class ShiftProductionEntryService
             // must not blank its UOM and silently reclassify already-issued
             // kg (mirrors the BOM side in expectedConsumptionKg()).
             'materialConsumptions.item' => fn ($query) => $query->withTrashed(),
+            'downtimeEvents.reason',
         ]);
 
         // Expected pieces = 3600/CT × active cavities × running hours (WB2's
@@ -824,11 +842,33 @@ class ShiftProductionEntryService
         $cavities = $entry->active_cavities;
         $hours = $entry->running_hours !== null ? (string) $entry->running_hours : null;
 
+        // Downtime logged AT COMPLETION nets out of the hours before the
+        // WB2 formula (owner's rule, 30-Jul: a power cut or mould change
+        // must not count against efficiency — the paper report nets B/D
+        // time out of the day the same way). Only completion-recorded
+        // events count (known_before_start = false): planned downtime
+        // attached at Start already shaped that screen's adjusted target,
+        // and netting it here too would double-count it. Reasons flagged
+        // reduces_runtime = false are excluded, mirroring
+        // ProductionDowntimeService::hoursFor(). With no such events the
+        // hours string is left completely untouched, so a batch without
+        // downtime lines computes byte-identically to before this existed.
+        $downtimeMinutes = $this->completionDowntimeMinutes($entry);
+        $netHours = $hours;
+        if ($hours !== null && bccomp($downtimeMinutes, '0', 2) === 1) {
+            $netHours = bcsub($hours, bcdiv($downtimeMinutes, '60', 6), 6);
+            if (bccomp($netHours, '0', 6) === -1) {
+                // Floored at zero — expected output goes honest-null; the
+                // raw typed figure stays on running_hours untouched.
+                $netHours = '0';
+            }
+        }
+
         $expectedPiecesRaw = null;
         if ($cycleTime !== null && bccomp($cycleTime, '0', 4) === 1
             && $cavities !== null && $cavities > 0
-            && $hours !== null && bccomp($hours, '0', 4) === 1) {
-            $expectedPiecesRaw = bcdiv(bcmul(bcmul('3600', (string) $cavities, 4), $hours, 4), $cycleTime, 8);
+            && $netHours !== null && bccomp($netHours, '0', 4) === 1) {
+            $expectedPiecesRaw = bcdiv(bcmul(bcmul('3600', (string) $cavities, 4), $netHours, 4), $cycleTime, 8);
         }
 
         // Expected boxes = ROUND(expected_pieces / pack, 0) — WB2 col W.
@@ -853,13 +893,19 @@ class ShiftProductionEntryService
             $expectedPouches = (int) $this->applyPackingRounding(bcdiv($expectedPiecesRaw, (string) $nosPerPouch, 8), 0);
         }
 
-        // Efficiency = actual boxes / expected boxes × 100 — WB2 col Y.
-        // Boxes are what the floor physically counts (box-first, Conflict
-        // C2), so the ratio is boxes-based, not pieces-based.
+        // Efficiency = actual PIECES / expected pieces × 100 — piece-grain,
+        // not the WB2 col Y box ratio it used to be. The owner's live batch
+        // proved the box grain wrong (30-Jul screenshot): 14,322 actual
+        // pieces against 13,333 expected — a machine running over standard
+        // — displayed as "Efficiency 75%" because 3 full boxes were divided
+        // by 4 expected, throwing away 5,208 loose pieces and compounding
+        // two roundings. Boxes are still reported alongside; only the ratio
+        // moved to the honest grain.
         $actualBoxes = $entry->no_of_box;
+        $actualPieces = $entry->quantity_produced !== null ? (string) $entry->quantity_produced : null;
         $efficiency = null;
-        if ($expectedBoxes !== null && $expectedBoxes > 0 && $actualBoxes !== null) {
-            $efficiency = round($actualBoxes / $expectedBoxes * 100, 1);
+        if ($expectedPiecesRaw !== null && bccomp($expectedPiecesRaw, '0', 8) === 1 && $actualPieces !== null) {
+            $efficiency = round((float) bcmul(bcdiv($actualPieces, $expectedPiecesRaw, 8), '100', 8), 1);
         }
 
         // Rejection: production-side calculated kg vs QC's weighed kg (WB2
@@ -920,9 +966,16 @@ class ShiftProductionEntryService
             'expected_pouches' => $expectedPouches,
             'actual_boxes' => $actualBoxes,
             'actual_pouches' => $entry->no_of_pouches,
-            'actual_pieces' => $entry->quantity_produced !== null ? (string) $entry->quantity_produced : null,
+            'actual_pieces' => $actualPieces,
             'efficiency_pct' => $efficiency,
             'efficiency_band' => $efficiencyBand,
+            // The netted-downtime pair, so the screen can say "expected 4
+            // boxes for 7.50 net hours (30 min downtime)". Total is the
+            // completion-recorded, runtime-reducing minutes actually netted
+            // above; net hours is what fed the formula (floored at zero) —
+            // the raw typed figure stays on running_hours.
+            'downtime_minutes_total' => $downtimeMinutes,
+            'net_running_hours' => $netHours !== null ? $this->bcRoundHalfUp($netHours, 2) : null,
             'rejection_kg_production' => $rejectionProduction,
             'rejection_kg_qc' => $rejectionQc,
             'rejection_diff_kg' => $rejectionProduction !== null && $rejectionQc !== null
@@ -936,6 +989,35 @@ class ShiftProductionEntryService
             'unaccounted_band' => $unaccountedBand,
             'blocks_approval' => $blocksApproval,
         ];
+    }
+
+    /**
+     * Sum of the downtime minutes logged at completion (known_before_start
+     * = false) whose reason actually stops the machine (reduces_runtime) —
+     * the figure productionMetrics() nets out of running hours. Reads the
+     * loaded relation, never a fresh query: metrics also run against
+     * in-memory entries (tests, previews), where an unsaved entry's null id
+     * must match nothing.
+     */
+    private function completionDowntimeMinutes(ShiftProductionEntry $entry): string
+    {
+        $total = '0.00';
+        foreach ($entry->downtimeEvents as $event) {
+            if ($event->known_before_start) {
+                continue;
+            }
+
+            // A missing reason row counts (fail-safe toward netting what
+            // the supervisor logged); an explicit reduces_runtime = false
+            // reason does not — same rule as ProductionDowntimeService::hoursFor().
+            if ($event->reason !== null && ! $event->reason->reduces_runtime) {
+                continue;
+            }
+
+            $total = bcadd($total, (string) $event->minutes, 2);
+        }
+
+        return $total;
     }
 
     /**

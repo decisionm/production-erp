@@ -205,11 +205,11 @@ class CanonicalProductionFlowTest extends TestCase
         // = 11,705 pieces; /810 -> 14.45 -> ROUND 14 boxes.
         $this->assertSame(14, $metrics['expected_boxes']);
         $this->assertSame(10, $metrics['actual_boxes']);
-        // 10/14 = 71.428…; the approval display carries 1 dp. The engine's
-        // boxEfficiency() gives 71.43 at 2 dp — same number, different
-        // presentation boundary. Not unified here on purpose: changing the
-        // rounding would move the figure shown on already-approved entries.
-        $this->assertSame(71.4, $metrics['efficiency_pct']);
+        // Piece-grain efficiency: 8100 actual pieces against the unfloored
+        // expectation 144000/12.3 = 11707.3171 → 69.187… → 69.2 at 1 dp.
+        // (The old 10/14 box ratio read 71.4 — the box grain compounded
+        // two roundings; see CompletionDowntimeTest for the owner's case.)
+        $this->assertSame(69.2, $metrics['efficiency_pct']);
         // 8100 x 12.9g = 104.49 kg good.
         $this->assertSame('104.4900', $metrics['good_production_kg']);
         // QC weighed the rejection, so QC wins over the piece-derived figure.

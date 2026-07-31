@@ -56,6 +56,10 @@ class ShiftProductionEntryResource extends JsonResource
             'calculation_version' => $this->calculation_version,
             'material_consumptions' => ShiftMaterialConsumptionResource::collection($this->whenLoaded('materialConsumptions')),
             'scraps' => ShiftScrapResource::collection($this->whenLoaded('scraps')),
+            // Downtime logged against this batch — planned at Start plus
+            // the completion-time lines whose minutes net out of running
+            // hours in metrics.downtime_minutes_total below.
+            'downtime_events' => ProductionDowntimeEventResource::collection($this->whenLoaded('downtimeEvents')),
             // Expected-output engine inputs. standard_* are Start Batch
             // snapshots from the item master (never editable after start);
             // the actuals are shop-floor entries.

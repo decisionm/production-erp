@@ -2,6 +2,7 @@
 
 namespace App\Modules\Production\Http\Requests;
 
+use App\Modules\Production\Http\Requests\Concerns\ValidatesDowntimeEvents;
 use App\Modules\Production\Models\ProductionStandardPackaging;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use Illuminate\Foundation\Http\FormRequest;
@@ -10,6 +11,8 @@ use Illuminate\Validation\Validator;
 
 class CompleteBatchRequest extends FormRequest
 {
+    use ValidatesDowntimeEvents;
+
     /**
      * How much two piece counts may differ and still be called equal.
      * quantity_produced arrives as a numeric string ("420", "420.0") while
@@ -72,6 +75,14 @@ class CompleteBatchRequest extends FormRequest
             'scraps.*.quantity_kg' => ['nullable', 'numeric', 'gte:0'],
             'scraps.*.scrap_reason_id' => ['nullable', 'integer', 'exists:scrap_reasons,id'],
 
+            // Downtime logged with the completion (owner, 30-Jul: "power
+            // outage and mold change they need add with timing … i want to
+            // do this for efficiency"). Lines persist to
+            // production_downtime_events and their minutes net out of
+            // running hours in productionMetrics(). Shape and cross-checks
+            // live in ValidatesDowntimeEvents, shared with HandoverRequest.
+            ...$this->downtimeEventRules('downtime_events'),
+
             // Multi-mode packing lines. A product's standard exposes only the
             // packaging modes its Excel row actually carries, and a run may
             // genuinely use more than one of them (part of the shift packed
@@ -110,12 +121,14 @@ class CompleteBatchRequest extends FormRequest
     {
         $validator->after(function (Validator $validator) {
             $lines = $this->input('packing_lines');
-
-            if (! is_array($lines) || $lines === []) {
-                return;
+            if (is_array($lines) && $lines !== []) {
+                $this->validatePackingLines($validator, $lines);
             }
 
-            $this->validatePackingLines($validator, $lines);
+            $downtime = $this->input('downtime_events');
+            if (is_array($downtime) && $downtime !== []) {
+                $this->validateDowntimeEvents($validator, $downtime, 'downtime_events');
+            }
         });
     }
 

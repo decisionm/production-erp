@@ -74,7 +74,9 @@ class ReportEndpointsTest extends TestCase
         };
 
         // Machine A row 1 — WB2 row 6 standards: CT 10.6 × 5 cav × 8 h /
-        // pack 840 → 16 expected boxes; actual 7 → 43.75 → 43.8.
+        // pack 840 → 16 expected boxes. Row efficiency is piece-grain:
+        // 5880/13584.9057 = 43.283… → 43.3 (the 7/16 boxes feed only the
+        // totals-row ratio, which stays the WB2 box formula).
         $a1 = $entry([
             'work_center_id' => $machineA->id, 'item_id' => $bottleA->id,
             'batch_number' => '20260727-M01-001',
@@ -98,8 +100,8 @@ class ReportEndpointsTest extends TestCase
         ]);
         $a2->materialConsumptions()->create(['item_id' => $resin->id, 'warehouse_id' => $rmStore->id, 'quantity_issued_kg' => '50']);
 
-        // Machine B row 1 — CT 12 × 5 × 8 h / pack 1500 → 8 expected;
-        // actual 7 → 87.5.
+        // Machine B row 1 — CT 12 × 5 × 8 h / pack 1500 → 8 expected
+        // boxes; piece-grain 10500/12000 = 87.5.
         $b1 = $entry([
             'work_center_id' => $machineB->id, 'item_id' => $bottleB->id,
             'batch_number' => '20260727-M02-001',
@@ -111,8 +113,11 @@ class ReportEndpointsTest extends TestCase
         $b1->materialConsumptions()->create(['item_id' => $resin->id, 'warehouse_id' => $rmStore->id, 'quantity_issued_kg' => '110']);
         $b1->scraps()->create(['type' => 'lumps', 'quantity_kg' => '1']);
 
-        // Machine B row 2 — CT 12 × 5 × 7 h / pack 1500 → 7 expected;
-        // actual 6 → 85.7. No QC weighing → production figure confirms.
+        // Machine B row 2 — CT 12 × 5 × 7 h / pack 1500 → 7 expected
+        // boxes; piece-grain 6300/10500 = 60.0 (the 6 counted boxes imply
+        // 9000 pieces — this fixture's deliberate box/piece mismatch is
+        // exactly what the piece grain exposes). No QC weighing →
+        // production figure confirms.
         $b2 = $entry([
             'work_center_id' => $machineB->id, 'item_id' => $bottleB->id,
             'batch_number' => '20260727-M02-002',
@@ -164,7 +169,7 @@ class ReportEndpointsTest extends TestCase
             ->assertJsonPath('data.rows.0.rejection_kg_production', '7.7529')
             ->assertJsonPath('data.rows.0.rejection_kg_qc', '7.7500')
             ->assertJsonPath('data.rows.0.lumps_kg', '0.5500')
-            ->assertJsonPath('data.rows.0.efficiency_pct', 43.8);
+            ->assertJsonPath('data.rows.0.efficiency_pct', 43.3);
 
         // The missing-standards entry reports its actuals with null
         // expectations — never a fake number.
@@ -174,7 +179,8 @@ class ReportEndpointsTest extends TestCase
             ->assertJsonPath('data.rows.1.efficiency_pct', null);
 
         $response->assertJsonPath('data.rows.2.efficiency_pct', 87.5)
-            ->assertJsonPath('data.rows.3.efficiency_pct', 85.7);
+            // 60.0 arrives as integer 60 after the JSON round-trip.
+            ->assertJsonPath('data.rows.3.efficiency_pct', 60);
 
         // Column totals: plain sums (the missing-standards entry's actual
         // boxes and pieces DO count here — only the ratio excludes them).
@@ -187,10 +193,11 @@ class ReportEndpointsTest extends TestCase
             ->assertJsonPath('data.totals.rejection_kg_qc', '9.7500')
             ->assertJsonPath('data.totals.lumps_kg', '1.7500');
 
-        // THE rule: 20/31 = 64.516… → 64.5 (ratio of sums). The average of
-        // the row percentages would be (43.8 + 87.5 + 85.7) / 3 = 72.3 —
-        // asserting 64.5 proves the aggregation is the WB2 totals-row
-        // formula, not the naive mean.
+        // THE rule: 20/31 = 64.516… → 64.5 (ratio of BOX sums — the WB2
+        // totals-row formula, deliberately untouched by the piece-grain
+        // row change). The average of the piece-grain row percentages
+        // would be (43.3 + 87.5 + 60.0) / 3 = 63.6 — asserting 64.5
+        // proves the aggregation is the totals-row ratio, not a mean.
         $response->assertJsonPath('data.totals.efficiency_pct', 64.5);
     }
 
