@@ -52,6 +52,53 @@ return [
     ],
 
     /*
+     * Stock behaviour on the COMPLETION path — and nowhere else.
+     *
+     * THE INCIDENT (owner's screenshot, 30-Jul). A real shift's completion
+     * was refused with:
+     *
+     *   "Could not complete batch — Insufficient stock for item #592 at
+     *    warehouse #10: available 0.0000, requested 118.998."
+     *
+     * The day bin held zero RECORDED stock because no opening stock had been
+     * entered for it yet. The shift genuinely consumed that resin whether or
+     * not the computer knew any had arrived, so the refusal did not prevent
+     * anything — it only prevented the truth being written down, at 6am, by
+     * the one person who was standing next to the machine.
+     *
+     * This is the same philosophy pinned all over this codebase: THE BATCH
+     * CAN STILL RUN. The readiness gate warns and lets the batch start
+     * (see 'readiness' below); the cavity rule warns and lets the mould run;
+     * the material-shortage prompt at Start records the answer instead of
+     * refusing it; an over-100% efficiency shouts and still approves. A
+     * paperwork gap must never become lost production. Tally itself permits
+     * negative stock for exactly this reason.
+     *
+     * So with this ON (the default) a completion whose consumption exceeds
+     * the recorded balance ISSUES ANYWAY, drives the balance negative, and
+     * records the shortfall on the entry — surfaced as metrics
+     * .stock_shortfalls so approval can flag it loudly. It is a flag, never
+     * a gate: the ACCOUNTANT fixes the stock (a missed receipt, an opening
+     * balance never entered), because the stock record is what was wrong,
+     * not the supervisor's account of the shift.
+     *
+     * Set PROD_ALLOW_NEGATIVE_ON_COMPLETION=false to restore the hard block
+     * for a factory that would rather stop the completion than carry a
+     * negative bin. The message it refuses with is now readable (see
+     * InsufficientStockException), but it is still a refusal — choose it
+     * deliberately.
+     *
+     * Scope is exactly the completion path (completeBatch, and therefore
+     * handover). Work orders, rework, subcontract, deliveries and
+     * maintenance issues keep their hard block whatever this says: they are
+     * planned movements against a known store, not a supervisor writing
+     * down what a running machine already ate.
+     */
+    'stock' => [
+        'allow_negative_on_completion' => (bool) env('PROD_ALLOW_NEGATIVE_ON_COMPLETION', true),
+    ],
+
+    /*
      * Machine capability by cavity count.
      *
      * The factory's rule (30-Jul): a mould running `cavity_threshold` cavities

@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Checkbox, Col, Descriptions, Drawer, Form, Input, InputNumber, type InputRef, Modal, Radio, Row, Select, Space, Table, Tag, TimePicker, Typography } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Descriptions, Drawer, Form, Input, InputNumber, type InputRef, message, Modal, Radio, Row, Select, Space, Table, Tag, TimePicker, Typography } from 'antd';
 import dayjs from 'dayjs';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -60,6 +60,7 @@ import type {
     SuggestedPackingMaterial,
     WorkCenter,
 } from '@/features/production/types';
+import { readStockShortfalls } from '@/features/production/types';
 import { currentShift, justEndedShift, productionDateFor } from '@/features/production/shiftClock';
 import { roundPer, useProductionSettings } from '@/features/production/packing';
 import { itemLabel } from '@/lib/itemLabel';
@@ -3075,19 +3076,44 @@ export default function ShiftProductionEntryPage() {
 
             return completeBatch(completingEntry.id, payload);
         },
-        onSuccess: () => {
+        onSuccess: (entry) => {
             invalidate();
             setCompletingEntry(null);
             completeForm.reset({ material_consumptions: [], scraps: [], packing_lines: [], downtime_events: [] });
             // The packing edits belong to the batch that just went in — the
             // next one recalculates from its own cartons and trays.
             setPackingEdits({});
+
+            // The batch WENT IN. A material whose recorded stock could not
+            // cover it is not the supervisor's problem to solve at 6am, and
+            // this deliberately is not a modal and not a gate: one line, said
+            // once, so the floor knows the office has been told rather than
+            // wondering whether the entry took.
+            //
+            // Nothing at all on the ordinary path — a toast on every single
+            // completion would train everyone to dismiss the one that matters.
+            const shortfalls = readStockShortfalls(entry);
+            if (shortfalls.length > 0) {
+                const named = [...new Set(shortfalls.map((line) => line.item))].join(', ');
+                message.warning(
+                    `Batch completed. Recorded stock went negative for ${named} — accounts will see it at approval and correct the stock.`,
+                    10,
+                );
+            }
         },
         onError: (error: any) => {
             const body = error?.response?.data;
             // A refused submission changes nothing: the drawer stays open with
             // every entered figure intact, and the message says what to fix
             // rather than just what was wrong.
+            //
+            // A business-rule refusal (a short store on a deployment with
+            // negative stock switched off, say) arrives as a 422 carrying ONLY
+            // `message` — no `errors` — so it falls to the branch below and is
+            // printed exactly as the server wrote it. Keep it that way: the
+            // server is the one place that knows which item, which store and
+            // which figures, and a sentence reworded here is a sentence that
+            // stops matching what the backend can actually explain.
             const fieldMessages: string[] = body?.errors ? (Object.values(body.errors).flat() as string[]) : [];
             Modal.error({
                 title: 'Could not complete batch',
