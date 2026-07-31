@@ -617,6 +617,32 @@ class ProductionStandardImportService
                     'cycle_time' => $variant['cycle_time'],
                 ]);
 
+                // A variant imported UNLINKED (item_id null) and linked later —
+                // a MouldItemMap entry added after the factory confirms a name —
+                // must ADOPT its existing row, not gain a sibling. Without this,
+                // the second import found nothing at the new item-keyed identity
+                // (the old row sits at item_id NULL), inserted a fresh row, and
+                // the standards page showed the same mould twice: once linked,
+                // once orphaned "not attached", forever. Adoption is only for
+                // the FIRST item of a fan-out; any further colour variants of
+                // the same mould are genuinely new rows.
+                if (! $standard->exists && $item !== null && $item === $targets[0]) {
+                    $orphan = ProductionStandard::withTrashed()
+                        ->whereNull('item_id')
+                        ->where([
+                            'source_product_name' => $variant['source_product_name'],
+                            'cavities' => $variant['cavities'],
+                            'unit_weight_grams' => $variant['unit_weight_grams'],
+                            'cycle_time' => $variant['cycle_time'],
+                        ])
+                        ->first();
+
+                    if ($orphan !== null) {
+                        $standard = $orphan;
+                        $standard->item_id = $item->id;
+                    }
+                }
+
                 $standard->fill([
                     'cycle_time_raw' => $variant['cycle_time_raw'],
                     'carton_spec' => $variant['carton_spec'],
