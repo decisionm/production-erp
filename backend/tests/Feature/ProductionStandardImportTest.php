@@ -215,6 +215,34 @@ class ProductionStandardImportTest extends TestCase
         );
     }
 
+    public function test_a_row_imported_unlinked_adopts_its_item_when_the_link_arrives(): void
+    {
+        // The go-live sequence: the whole workbook is loaded first so the
+        // standards page shows every product, most rows unlinked; Tally links
+        // arrive one by one as the factory confirms names. The later import
+        // must ADOPT the existing null-item row — a sibling row would show the
+        // same mould twice, once linked and once orphaned, forever.
+        $this->import();
+        $unlinked = ProductionStandard::where('source_product_name', '90ML RIB')->get();
+        $this->assertCount(1, $unlinked);
+        $this->assertNull($unlinked->first()->item_id);
+        $rowId = $unlinked->first()->id;
+
+        // The factory confirms the name: the item now exists, exactly as the
+        // sheet spells it (the name-index fallback links on the exact name).
+        $item = Item::create([
+            'sku' => '90ML RIB', 'name' => '90ML RIB', 'uom' => 'NOS',
+            'is_active' => true, 'tally_stock_item_guid' => 'g-adopt',
+        ]);
+
+        $this->import();
+
+        $rows = ProductionStandard::where('source_product_name', '90ML RIB')->get();
+        $this->assertCount(1, $rows, 'The re-import must adopt the unlinked row, not add a sibling.');
+        $this->assertSame($rowId, $rows->first()->id);
+        $this->assertSame($item->id, $rows->first()->item_id);
+    }
+
     public function test_the_dry_run_writes_nothing(): void
     {
         $result = $this->import(write: false);
