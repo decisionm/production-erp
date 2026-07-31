@@ -1,0 +1,93 @@
+name: Reset test data
+
+# Clears the rehearsal batches from the LIVE database so a real first day starts
+# from a clean floor. Runs over the same SSH key the deploy uses.
+#
+# DEFAULTS TO A DRY RUN. The dry run reports exactly what would go — how many
+# batches, how many stock movements, and the number of every Tally voucher it is
+# about to orphan — and changes nothing. Writing is a separate, deliberate act
+# that requires typing the confirmation phrase below.
+#
+# What it never touches: products, production standards, machine configurations,
+# downtime reasons, factory settings, warehouses, shifts, users, moulds, or the
+# imported workbook.
+#
+# WHAT IT CANNOT DO: unsend a Tally voucher. A batch that reached Accountant
+# approval has already posted into the factory's live books, and only a person
+# in Tally can remove it. The command names those voucher numbers precisely so
+# that work does not get forgotten.
+
+on:
+  workflow_dispatch:
+    inputs:
+      write:
+        description: 'Actually delete. Leave false for a dry run that changes nothing.'
+        type: boolean
+        default: false
+      confirm:
+        description: 'To delete, type exactly:  DELETE TEST DATA  (ignored on a dry run)'
+        type: string
+        default: ''
+      since:
+        description: 'Only production dates on or after this (YYYY-MM-DD). Blank = every batch.'
+        type: string
+        default: ''
+
+concurrency:
+  group: reset-test-data
+  cancel-in-progress: false
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Refuse a write without the typed confirmation
+        if: ${{ inputs.write }}
+        run: |
+          if [ "${{ inputs.confirm }}" != "DELETE TEST DATA" ]; then
+            echo "::error::Write refused. To delete, set write=true AND type DELETE TEST DATA in the confirm box. A dry run (write=false) needs no confirmation."
+            exit 1
+          fi
+          echo "::warning::DELETING rehearsal data from the LIVE database. Ensure a database backup exists."
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # ssh-keyscan can exit 0 having collected nothing, so check the output
+          # rather than the exit code (the same trap the deploy hit).
+          keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Re-running often clears a transient failure; otherwise check hPanel → Advanced → SSH Access and whether brute-force protection has banned the runner."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      - name: Run it
+        run: |
+          set -o pipefail
+          FLAGS=""
+          [ "${{ inputs.write }}" = "true" ] && FLAGS="$FLAGS --write --force"
+          # Sanitised to digits and dashes: a date cannot smuggle shell.
+          SINCE=$(printf '%s' "${{ inputs.since }}" | tr -cd '0-9-')
+          [ -n "$SINCE" ] && FLAGS="$FLAGS --since=$SINCE"
+
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && /opt/alt/php84/usr/bin/php artisan production:reset-test-data $FLAGS" \
+            2>&1 | tee reset-output.txt
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Reset test data"
+            echo
+            echo "write: \`${{ inputs.write }}\` · since: \`${{ inputs.since }}\`"
+            echo
+            echo '```'
+            cat reset-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
