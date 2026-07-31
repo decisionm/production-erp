@@ -382,6 +382,14 @@ export interface CompleteBatchPayload {
      * returned) computable on a normal completion.
      */
     closing_day_bin?: { item_id: number; quantity_kg: number }[];
+    /**
+     * Downtime during THIS run — reason + minutes, the note carrying the
+     * picked from–to window ("14:30–15:00 — power cut"). Matches
+     * ValidatesDowntimeEvents: production_downtime_events stores minutes,
+     * not clock times. The backend nets these minutes out of running hours
+     * before judging efficiency, mirroring the paper report's B/D section.
+     */
+    downtime_events?: { downtime_reason_id: number; minutes: number; note?: string }[];
 }
 
 export async function completeBatch(id: number, payload: CompleteBatchPayload): Promise<ShiftProductionEntry> {

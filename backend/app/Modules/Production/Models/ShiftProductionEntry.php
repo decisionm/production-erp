@@ -176,4 +176,15 @@ class ShiftProductionEntry extends Model
     {
         return $this->hasMany(DayBinMovement::class);
     }
+
+    /**
+     * Downtime logged against this batch: planned events attached at Start
+     * (known_before_start = true) and events the supervisor adds at
+     * completion — power cuts, mould changes — which net out of running
+     * hours in productionMetrics().
+     */
+    public function downtimeEvents(): HasMany
+    {
+        return $this->hasMany(ProductionDowntimeEvent::class);
+    }
 }

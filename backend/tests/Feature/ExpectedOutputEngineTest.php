@@ -19,10 +19,12 @@ use Tests\TestCase;
 
 /**
  * The expected-output engine (SHIFT-REDESIGN-FORMULAS.md #22-24, #9/#10/#20):
- * expected pieces/boxes from the molding standards, boxes-based efficiency,
- * QC-vs-production rejection, and the issued-kg reconciliation. Every fixture
- * below is lifted from the workbooks (WB1/WB2) — see the formula dictionary's
- * §4 worked examples.
+ * expected pieces/boxes from the molding standards, PIECE-grain efficiency
+ * (actual pieces / expected pieces — the box ratio threw away loose pieces
+ * and compounded two roundings; see CompletionDowntimeTest for the owner's
+ * live case), QC-vs-production rejection, and the issued-kg reconciliation.
+ * Every fixture below is lifted from the workbooks (WB1/WB2) — see the
+ * formula dictionary's §4 worked examples.
  */
 class ExpectedOutputEngineTest extends TestCase
 {
@@ -66,7 +68,10 @@ class ExpectedOutputEngineTest extends TestCase
     public function test_wb2_row_6_ct_10_6_five_cavities_full_shift_pack_840(): void
     {
         // WB2 row 6: CT=10.6, CAV=5, HRS=8, PACK=840 → 13584.9056… pieces,
-        // 16.1725… → 16 boxes; actual 7 boxes → 43.75 → 43.8 at 1dp.
+        // 16.1725… → 16 boxes. Efficiency is piece-grain: 5880 actual
+        // pieces / 13584.9057 expected = 43.283… → 43.3 at 1dp (the old
+        // box ratio 7/16 read 43.8 — close here only because this run has
+        // no loose pieces).
         $metrics = $this->metrics($this->completedEntry(
             attributes: [
                 'standard_cycle_time' => '10.6',
@@ -82,7 +87,7 @@ class ExpectedOutputEngineTest extends TestCase
         $this->assertSame(16, $metrics['expected_boxes']);
         $this->assertSame(7, $metrics['actual_boxes']);
         $this->assertSame('5880', $metrics['actual_pieces']);
-        $this->assertSame(43.8, $metrics['efficiency_pct']);
+        $this->assertSame(43.3, $metrics['efficiency_pct']);
     }
 
     public function test_wb2_row_7_ct_12_five_cavities_full_shift_pack_1040(): void
@@ -126,14 +131,18 @@ class ExpectedOutputEngineTest extends TestCase
 
     public function test_addendum_fixture_expected_15_actual_13_is_86_7_percent(): void
     {
-        // The addendum fixture: expected 15 boxes, actual 13 → 86.666… →
-        // 86.7 at 1dp. CT=12, CAV=5, HRS=8 → 12000 pieces; pack 800 → 15.
+        // The addendum fixture: CT=12, CAV=5, HRS=8 → 12000 pieces; pack
+        // 800 → 15 boxes. Piece-grain efficiency: 13 boxes × 800 = 10400
+        // actual pieces / 12000 = 86.666… → 86.7 at 1dp (numerically the
+        // same as the old 13/15 box ratio because the count is exact
+        // whole boxes).
         $metrics = $this->metrics($this->completedEntry(
             attributes: [
                 'standard_cycle_time' => '12',
                 'active_cavities' => 5,
                 'running_hours' => '8',
                 'no_of_box' => 13,
+                'quantity_produced' => '10400',
             ],
             itemAttributes: ['nos_per_box' => 800],
         ));
@@ -348,8 +357,8 @@ class ExpectedOutputEngineTest extends TestCase
             ->assertJsonPath('data.metrics.expected_pieces', '10867.92')
             ->assertJsonPath('data.metrics.expected_boxes', 13)
             ->assertJsonPath('data.metrics.actual_boxes', 7)
-            // 7/13 × 100 = 53.846… → 53.8.
-            ->assertJsonPath('data.metrics.efficiency_pct', 53.8);
+            // Piece-grain: 5880/10867.9245 × 100 = 54.103… → 54.1.
+            ->assertJsonPath('data.metrics.efficiency_pct', 54.1);
 
         $this->assertDatabaseHas('shift_production_entries', [
             'id' => $entryId,

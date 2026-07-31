@@ -24,6 +24,7 @@ import {
     getBinBayAvailability,
     getEntryDayBinSummary,
     getFactoryDayBin,
+    listDowntimeReasons,
     listMachineDowntimeLogs,
     listAllMolds,
     listMoldChangeLogs,
@@ -38,11 +39,13 @@ import {
     openDowntimeLog,
     openMoldChangeLog,
     getBatchPreview,
+    saveDowntimeReason,
     startBatch,
 } from '@/features/production/api';
 import type {
     BinBayAvailability,
     BinBayRequirementComponent,
+    DowntimeReason,
     EntryDayBinMaterialSummary,
     MachineDowntimeLog,
     MaterialBag,
@@ -97,6 +100,35 @@ function shiftLengthHours(shift: Shift | null | undefined): number | null {
     let minutes = eh * 60 + em - (sh * 60 + sm);
     if (minutes <= 0) minutes += 24 * 60;
     return Math.round((minutes / 60) * 100) / 100;
+}
+
+/**
+ * Minutes between two "HH:mm" picks on a downtime line. A "to" earlier than
+ * "from" crossed midnight (Night shift) — same convention as
+ * shiftLengthHours, except equal times mean 0 minutes, not a full day.
+ * Null (line ignored) while either pick is missing or unparseable.
+ */
+function downtimeLineMinutes(fromTime: string | null | undefined, toTime: string | null | undefined): number | null {
+    if (!fromTime || !toTime) return null;
+    const [fh, fm] = fromTime.split(':').map(Number);
+    const [th, tm] = toTime.split(':').map(Number);
+    if ([fh, fm, th, tm].some((n) => Number.isNaN(n))) return null;
+    let minutes = th * 60 + tm - (fh * 60 + fm);
+    if (minutes < 0) minutes += 24 * 60;
+    return minutes;
+}
+
+/**
+ * A code for a downtime reason typed on the shift floor: "compressor trip"
+ * → "DT-COMPRESSOR-TRIP". The backend requires code (unique, max 32) but a
+ * supervisor should only ever have to type the words.
+ */
+function downtimeReasonCode(description: string): string {
+    const slug = description
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    return `DT-${slug}`.slice(0, 32).replace(/-+$/, '');
 }
 
 /**
@@ -206,7 +238,11 @@ function blankPackingLine(packaging: StandardPackaging): PackingLineValues {
 // Structural (sku+name) so both full Items and the day-bin aggregates'
 // item-lite slices ({id, name, sku}) classify the same way.
 const isMasterbatchItem = (item: Pick<Item, 'sku' | 'name'>): boolean => /master ?batch/i.test(`${item.sku} ${item.name}`);
-const isResinItem = (item: Pick<Item, 'sku' | 'name'>): boolean => /resin/i.test(`${item.sku} ${item.name}`);
+// The whole raw-material family, not just the word "resin" — the live
+// catalogue names its PET raw material without it (owner screenshot: an
+// empty Resin picker on every completion).
+const isResinItem = (item: Pick<Item, 'sku' | 'name'>): boolean =>
+    /resin|granule|polymer|pet\s*(chip|raw)/i.test(`${item.sku} ${item.name}`);
 const isClearColour = (colour: string | null | undefined): boolean => /^clear$/i.test((colour ?? '').trim());
 
 /**
@@ -353,6 +389,20 @@ const completeBatchSchema = z.object({
             }),
         )
         .optional(),
+    // Downtime lines for THIS run — reason + from/to clock times + optional
+    // note. All-empty lines are allowed here (an added-then-abandoned line
+    // must not block completion) and dropped from the payload; a line that
+    // says anything is forced complete in superRefine below.
+    downtime_events: z
+        .array(
+            z.object({
+                downtime_reason_id: z.number().nullish(),
+                from_time: z.string().optional(),
+                to_time: z.string().optional(),
+                note: z.string().max(255, 'Max 255 characters').optional(),
+            }),
+        )
+        .optional(),
     // One line per packaging mode actually used this run. Empty for products
     // with no imported standard — those complete through the plain tray/box
     // fields exactly as they did before packing lines existed.
@@ -386,6 +436,32 @@ const completeBatchSchema = z.object({
     };
     requireRow(data.resin_kg, data.resin_item_id, data.resin_warehouse_id, 'resin_item_id', 'resin_warehouse_id');
     requireRow(data.mb_kg, data.mb_item_id, data.mb_warehouse_id, 'mb_item_id', 'mb_warehouse_id');
+
+    // A downtime line that says anything must say everything — reason and
+    // both clock times — or its minutes are unknowable and it would be
+    // silently dropped from the payload.
+    (data.downtime_events ?? []).forEach((line, index) => {
+        const touched =
+            line.downtime_reason_id != null || !!line.from_time || !!line.to_time || (line.note ?? '').trim() !== '';
+        if (!touched) return;
+        if (line.downtime_reason_id == null) {
+            ctx.addIssue({ code: 'custom', path: ['downtime_events', index, 'downtime_reason_id'], message: 'Pick the reason' });
+        }
+        if (!line.from_time) {
+            ctx.addIssue({ code: 'custom', path: ['downtime_events', index, 'from_time'], message: 'From time' });
+        }
+        if (!line.to_time) {
+            ctx.addIssue({ code: 'custom', path: ['downtime_events', index, 'to_time'], message: 'To time' });
+        }
+        // The backend refuses minutes <= 0 — surface it on the field instead.
+        if (line.from_time && line.to_time && downtimeLineMinutes(line.from_time, line.to_time) === 0) {
+            ctx.addIssue({
+                code: 'custom',
+                path: ['downtime_events', index, 'to_time'],
+                message: 'To equals From — enter when it actually ended',
+            });
+        }
+    });
 
     // Packing lines. Errors land on the offending FIELD, so the drawer stays
     // open with every entered value intact and the message says what to do —
@@ -613,6 +689,12 @@ export default function ShiftProductionEntryPage() {
         staleTime: 60 * 1000,
     });
     const { data: scrapReasons } = useQuery({ queryKey: ['production', 'scrap-reasons', 'all'], queryFn: listAllScrapReasons });
+    // The GLOBAL downtime reason list — shared with Production Configuration
+    // (same query key), so a reason saved from either screen appears in both.
+    const { data: downtimeReasons } = useQuery({
+        queryKey: ['production', 'downtime-reasons'],
+        queryFn: () => listDowntimeReasons(),
+    });
     const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: listAllEmployees });
     const { data: entries, isLoading: entriesLoading } = useQuery({
         queryKey: ['production', 'shift-production-entries'],
@@ -723,8 +805,12 @@ export default function ShiftProductionEntryPage() {
     }, [items, configuredItemIds]);
     // Focused pickers for the two fixed consumption rows — a supervisor
     // filling "Resin (kg)" should only ever see resins, not all 642 items.
+    const resinMatches = items?.data.filter((i) => i.is_active && isResinItem(i)) ?? [];
+    // When the family matcher finds NOTHING on the live catalogue, fall back
+    // to every active item (still searchable) — a scoped-but-empty dropdown
+    // is a dead end that blocks the whole completion.
     const resinOptions =
-        items?.data.filter((i) => i.is_active && isResinItem(i)).map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
+        resinMatches.length > 0 ? resinMatches.map((i) => ({ value: i.id, label: itemLabel(i) })) : itemOptions;
     const mbOptions =
         items?.data.filter((i) => i.is_active && isMasterbatchItem(i)).map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
     const moldOptions =
@@ -738,6 +824,8 @@ export default function ShiftProductionEntryPage() {
             .filter((warehouse) => warehouse.is_active)
             .map((warehouse) => ({ value: warehouse.id, label: `${warehouse.code} — ${warehouse.name}` })) ?? [];
     const scrapReasonOptions = scrapReasons?.data.map((r) => ({ value: r.id, label: `${r.code} — ${r.name}` })) ?? [];
+    const downtimeReasonOptions =
+        downtimeReasons?.data.filter((r) => r.is_active).map((r) => ({ value: r.id, label: r.description })) ?? [];
     const employeeOptions =
         employees?.data
             .filter((employee) => employee.status === 'active')
@@ -1318,11 +1406,12 @@ export default function ShiftProductionEntryPage() {
 
     const completeForm = useForm<CompleteBatchFormValues>({
         resolver: zodResolver(completeBatchSchema),
-        defaultValues: { material_consumptions: [], scraps: [] },
+        defaultValues: { material_consumptions: [], scraps: [], downtime_events: [] },
     });
     const materialFields = useFieldArray({ control: completeForm.control, name: 'material_consumptions' });
     const scrapFields = useFieldArray({ control: completeForm.control, name: 'scraps' });
     const packingFields = useFieldArray({ control: completeForm.control, name: 'packing_lines' });
+    const downtimeFields = useFieldArray({ control: completeForm.control, name: 'downtime_events' });
     // Bumped whenever a packing figure changes, purely to force the derived
     // read-outs below to re-render. Deliberately NOT a watch of
     // 'packing_lines': react-hook-form hands back the same array reference
@@ -1343,6 +1432,37 @@ export default function ShiftProductionEntryPage() {
     const consumptionsWatch = completeForm.watch('material_consumptions');
     const resinItemIdWatch = completeForm.watch('resin_item_id');
     const mbItemIdWatch = completeForm.watch('mb_item_id');
+    const downtimeEventsWatch = completeForm.watch('downtime_events');
+
+    // The plain "Lumps (kg)" field beside the rejection figures and the scrap
+    // line list are ONE entry path: the field reads and writes the single
+    // scraps line of type 'lumps' — created, updated and removed here — so
+    // however the figure is entered it exists exactly once.
+    const lumpsLineIndex = (scrapsWatch ?? []).findIndex((s) => s?.type === 'lumps');
+    const setLumpsKgValue = (value: number | null) => {
+        const lines = completeForm.getValues('scraps') ?? [];
+        const index = lines.findIndex((s) => s?.type === 'lumps');
+        if (index === -1) {
+            if (value === null) return;
+            scrapFields.append({ type: 'lumps', quantity_nos: undefined, quantity_kg: value, scrap_reason_id: undefined });
+            return;
+        }
+        const line = lines[index];
+        if (value === null && !line.quantity_nos && !line.scrap_reason_id) {
+            scrapFields.remove(index);
+            return;
+        }
+        // update() rather than setValue on the nested path, so the scraps
+        // array gets a NEW identity and everything watching it recomputes —
+        // see applyDayBinConsumption for why nested setValue would not.
+        scrapFields.update(index, { ...line, quantity_kg: value ?? undefined });
+    };
+
+    // Manual-edit latches for the resin auto-calculation: a supervisor-typed
+    // figure, or a real day-bin weighment, takes the field over permanently
+    // for the batch (both reset when the drawer opens for the next one).
+    const resinKgTouchedRef = useRef(false);
+    const resinKgWeighedRef = useRef(false);
 
     // ---- The factory day bin, on the completion form -----------------------
     // Every consumption line already carries its own warehouse, so issuing a
@@ -1390,6 +1510,24 @@ export default function ShiftProductionEntryPage() {
             applyDefault(`material_consumptions.${index}.warehouse_id`, line?.item_id);
         });
     }, [dayBinWarehouseId, dayBinKgFor, completingEntry, resinItemIdWatch, mbItemIdWatch, consumptionsWatch, completeForm]);
+
+    // With exactly ONE candidate in a fixed-row picker there is nothing to
+    // choose — pre-pick it, only while the field is untouched and empty
+    // (same contract as every other prefill in this drawer). Clear products
+    // never get a masterbatch pick: no masterbatch goes into Clear.
+    const soleResinItemId = resinOptions.length === 1 ? resinOptions[0].value : null;
+    const soleMbItemId = mbOptions.length === 1 ? mbOptions[0].value : null;
+    useEffect(() => {
+        if (!completingEntry) return;
+        const applySole = (field: 'resin_item_id' | 'mb_item_id', id: number | null) => {
+            if (id === null) return;
+            if (completeForm.getFieldState(field).isDirty) return;
+            if (completeForm.getValues(field) != null) return;
+            completeForm.setValue(field, id);
+        };
+        applySole('resin_item_id', soleResinItemId);
+        if (!isClearColour(completingEntry.item.colour)) applySole('mb_item_id', soleMbItemId);
+    }, [completingEntry, soleResinItemId, soleMbItemId, completeForm]);
 
     /**
      * "Day bin: 1250.5 Kg" beside a consumption row, so the supervisor watches
@@ -1672,6 +1810,9 @@ export default function ShiftProductionEntryPage() {
             if (consumed === null || consumed < 0) return;
             if (completeForm.getFieldState(kgField).isDirty) return;
             completeForm.setValue(kgField, Math.round(consumed * 10000) / 10000);
+            // A weighed day-bin figure outranks the calculated estimate —
+            // latch so the live resin auto-calculation stops overwriting it.
+            if (target === 'resin') resinKgWeighedRef.current = true;
         },
         [completeForm],
     );
@@ -1713,6 +1854,19 @@ export default function ShiftProductionEntryPage() {
     // the drawer stays exactly as it was.
     const usePackingLines = packingModes.length > 0;
 
+    // Live totals computed at RENDER, not inside the useMemo below: nested
+    // edits keep the watched arrays' identity (see applyDayBinConsumption),
+    // so a primitive total is the only dependency that actually changes.
+    const lumpsKgLive = (scrapsWatch ?? []).reduce((sum, s) => sum + (s?.type === 'lumps' ? (s.quantity_kg ?? 0) : 0), 0);
+    // Reasons flagged reduces_runtime = false are excluded from the netting,
+    // mirroring the backend's completionDowntimeMinutes; an un-picked reason
+    // still counts, since every seeded reason reduces runtime.
+    const downtimeMinutes = (downtimeEventsWatch ?? []).reduce((sum, line) => {
+        const reason = downtimeReasons?.data.find((r) => r.id === line?.downtime_reason_id);
+        if (reason && !reason.reduces_runtime) return sum;
+        return sum + (downtimeLineMinutes(line?.from_time, line?.to_time) ?? 0);
+    }, 0);
+
     // Everything the pre-submit results panel shows, computed live from the
     // form + the entry's Start Batch snapshots. Frontend duplicate of the
     // contract formulas — the backend metrics block is authoritative once
@@ -1721,7 +1875,11 @@ export default function ShiftProductionEntryPage() {
         if (!completingEntry) return null;
         const ct = toNum(completingEntry.standard_cycle_time);
         const cavities = activeCavitiesWatch ?? completingEntry.active_cavities ?? completingEntry.standard_cavities ?? null;
-        const hours = runningHoursWatch ?? null;
+        // Downtime typed below comes off the hours BEFORE any expected-output
+        // arithmetic — the paper report nets B/D and idle time out of the day
+        // the same way. Unrounded, floored at zero: mirrors the backend rule.
+        const grossHours = runningHoursWatch ?? null;
+        const hours = grossHours !== null ? Math.max(grossHours - downtimeMinutes / 60, 0) : null;
         // Form's corrected pack size wins over the master (mirrors backend).
         const nosPerBox = nosPerBoxWatch ?? completingEntry.item.nos_per_box ?? null;
         // Pouch standard has no per-run correction field — always the master's.
@@ -1731,15 +1889,23 @@ export default function ShiftProductionEntryPage() {
         const rejProdKg = nominalWeight && quantityScrap ? (quantityScrap * nominalWeight) / 1000 : null;
         const qcKg = qcRejectionWatch ?? null;
         const rejDiffKg = rejProdKg !== null && qcKg !== null ? rejProdKg - qcKg : null;
-        const lumpsKg = (scrapsWatch ?? []).reduce((sum, s) => sum + (s?.type === 'lumps' ? (s.quantity_kg ?? 0) : 0), 0);
+        const lumpsKg = lumpsKgLive;
         const issuedKg =
             (resinKgWatch ?? 0) + (mbKgWatch ?? 0) + (consumptionsWatch ?? []).reduce((sum, c) => sum + (c?.quantity_issued_kg ?? 0), 0);
         const confirmedRejKg = qcKg ?? rejProdKg;
         const unaccountedKg = issuedKg > 0 && goodKg !== null ? issuedKg - goodKg - (confirmedRejKg ?? 0) - lumpsKg : null;
         const actualBoxes = goodBoxesWatch ?? null;
         const actualPouches = pouchesWatch ?? null;
-        const efficiencyPct = expected?.boxes && actualBoxes !== null ? Math.round((actualBoxes / expected.boxes) * 1000) / 10 : null;
-        return { ct, cavities, hours, nosPerBox, nosPerPouch, expected, goodKg, rejProdKg, qcKg, rejDiffKg, lumpsKg, issuedKg, unaccountedKg, actualBoxes, actualPouches, efficiencyPct };
+        // Efficiency at the PIECES grain. Boxes-vs-boxes compounded two
+        // roundings and dropped loose pieces entirely (live screenshot:
+        // 14,322 pcs against 13,333 expected read "75%" because 3 good boxes
+        // ÷ 4 expected boxes). Boxes stay visible above as context only.
+        const actualPieces = quantityProduced ?? null;
+        const efficiencyPct =
+            expected && expected.pieces > 0 && actualPieces !== null
+                ? Math.round((actualPieces / expected.pieces) * 1000) / 10
+                : null;
+        return { ct, cavities, hours, grossHours, downtimeMinutes, nosPerBox, nosPerPouch, expected, goodKg, rejProdKg, qcKg, rejDiffKg, lumpsKg, issuedKg, unaccountedKg, actualBoxes, actualPouches, actualPieces, efficiencyPct };
     }, [
         completingEntry,
         nominalWeight,
@@ -1752,9 +1918,27 @@ export default function ShiftProductionEntryPage() {
         qcRejectionWatch,
         resinKgWatch,
         mbKgWatch,
-        scrapsWatch,
+        lumpsKgLive,
+        downtimeMinutes,
         consumptionsWatch,
     ]);
+
+    // Resin auto-calculation (the factory rule, verified line-for-line
+    // against the 17.7.24 paper report): resin consumed = production kg +
+    // rejection kg + lumps kg, all from bottle weight. Prefills LIVE as the
+    // quantities are typed; a manual edit or a weighed day-bin figure takes
+    // the field over permanently for this batch (the two latches above).
+    // Masterbatch is deliberately NEVER estimated — actual weighed entry
+    // only (owner decision pending the factory dosing answer).
+    const resinCalcKg =
+        results && results.goodKg !== null
+            ? Math.round((results.goodKg + (results.rejProdKg ?? 0) + results.lumpsKg) * 10000) / 10000
+            : null;
+    useEffect(() => {
+        if (!completingEntry || resinCalcKg === null) return;
+        if (resinKgTouchedRef.current || resinKgWeighedRef.current) return;
+        completeForm.setValue('resin_kg', resinCalcKg);
+    }, [resinCalcKg, completingEntry, completeForm]);
 
     const completeMutation = useMutation({
         mutationFn: (values: CompleteBatchFormValues) => {
@@ -1775,6 +1959,7 @@ export default function ShiftProductionEntryPage() {
                 material_consumptions,
                 closing_day_bin,
                 packing_lines,
+                downtime_events,
                 ...rest
             } = values;
             // The fixed resin/MB rows are ordinary consumption lines on the
@@ -1810,6 +1995,28 @@ export default function ShiftProductionEntryPage() {
                 override_reason: (line.override_reason ?? '').trim() || undefined,
             }));
 
+            // Downtime lines → the backend contract: reason + MINUTES
+            // (production_downtime_events stores minutes, no from/to
+            // columns), with the picked from–to window folded into the note
+            // — the trait's own docblock wants exactly that timing text, and
+            // it is what satisfies requires_note reasons like DT-POWER.
+            // Incomplete lines were either refused by the schema or are the
+            // abandoned-empty kind, which the filter drops.
+            const downtimeEvents = (downtime_events ?? [])
+                .filter((line) => line.downtime_reason_id != null && line.from_time && line.to_time)
+                .map((line) => {
+                    const minutes = downtimeLineMinutes(line.from_time, line.to_time) ?? 0;
+                    const noteText = (line.note ?? '').trim();
+                    return {
+                        downtime_reason_id: line.downtime_reason_id as number,
+                        minutes,
+                        note: noteText ? `${line.from_time}–${line.to_time} — ${noteText}` : `${line.from_time}–${line.to_time}`,
+                    };
+                })
+                // Backend rule: minutes gt:0 — the schema already refused
+                // equal picks, this is belt-and-braces.
+                .filter((line) => line.minutes > 0);
+
             // Built as a variable, not an inline literal: packing_lines is a
             // real part of the wire contract that the shared
             // CompleteBatchPayload type has not been widened for yet.
@@ -1818,6 +2025,7 @@ export default function ShiftProductionEntryPage() {
                 material_consumptions: consumptions,
                 closing_day_bin: closing.length > 0 ? closing : undefined,
                 packing_lines: packingLines.length > 0 ? packingLines : undefined,
+                downtime_events: downtimeEvents.length > 0 ? downtimeEvents : undefined,
                 // Cleared InputNumbers emit null — omit rather than send null.
                 running_hours: running_hours ?? undefined,
                 qc_rejection_kg: qc_rejection_kg ?? undefined,
@@ -1830,7 +2038,7 @@ export default function ShiftProductionEntryPage() {
         onSuccess: () => {
             invalidate();
             setCompletingEntry(null);
-            completeForm.reset({ material_consumptions: [], scraps: [], packing_lines: [] });
+            completeForm.reset({ material_consumptions: [], scraps: [], packing_lines: [], downtime_events: [] });
         },
         onError: (error: any) => {
             const body = error?.response?.data;
@@ -1855,6 +2063,49 @@ export default function ShiftProductionEntryPage() {
                     ) : (
                         (body?.message ?? 'Someone may have already completed this batch — refresh and try again.')
                     ),
+            });
+        },
+    });
+
+    // Inline "add a new reason" for the Downtime section — the list is
+    // GLOBAL (the same one Production Configuration manages): once saved it
+    // is available on every batch, and it is auto-picked here immediately.
+    const [newDowntimeReasonText, setNewDowntimeReasonText] = useState('');
+    const createDowntimeReasonMutation = useMutation({
+        mutationFn: (description: string) =>
+            saveDowntimeReason({
+                code: downtimeReasonCode(description),
+                description,
+                // Reasons discovered at completion are by nature unplanned;
+                // the office can reclassify in Production Configuration.
+                planning_type: 'unplanned',
+                requires_note: false,
+                selectable_at_start: false,
+                is_active: true,
+                confirmation_status: 'To Confirm',
+            }),
+        onSuccess: (reason) => {
+            // Show the new option NOW (the refetch confirms it after) so the
+            // auto-pick below never renders a bare id.
+            queryClient.setQueryData<{ data: DowntimeReason[] }>(['production', 'downtime-reasons'], (old) =>
+                old ? { ...old, data: [...old.data, reason] } : old,
+            );
+            queryClient.invalidateQueries({ queryKey: ['production', 'downtime-reasons'] });
+            setNewDowntimeReasonText('');
+            // Auto-pick: fill the first line still missing a reason, else
+            // start a new line with it — the timing is still theirs to type.
+            const lines = completeForm.getValues('downtime_events') ?? [];
+            const emptyIndex = lines.findIndex((l) => l?.downtime_reason_id == null);
+            if (emptyIndex >= 0) {
+                downtimeFields.update(emptyIndex, { ...lines[emptyIndex], downtime_reason_id: reason.id });
+            } else {
+                downtimeFields.append({ downtime_reason_id: reason.id, from_time: '', to_time: '', note: undefined });
+            }
+        },
+        onError: (error: any) => {
+            Modal.error({
+                title: 'Could not save the reason',
+                content: error?.response?.data?.message ?? 'It may already exist — check the list, or try different words.',
             });
         },
     });
@@ -2168,6 +2419,11 @@ export default function ShiftProductionEntryPage() {
                             setFinishingMoldChangeLog(moldChange);
                         } else if (running) {
                             setCompletingEntry(running);
+                            // A fresh batch gets a fresh resin field: the
+                            // auto-calculation runs again until this batch's
+                            // own manual edit or weighed figure latches it.
+                            resinKgTouchedRef.current = false;
+                            resinKgWeighedRef.current = false;
                             // Prefill Nos/Tray and Nos/Box from the item's packing
                             // master when set — for items without standards both are
                             // undefined and this reset is identical to before.
@@ -2178,6 +2434,7 @@ export default function ShiftProductionEntryPage() {
                             completeForm.reset({
                                 material_consumptions: [],
                                 scraps: [],
+                                downtime_events: [],
                                 // Cleared per batch — the modes are re-read from
                                 // THIS batch's standard once its preview lands.
                                 packing_lines: [],
@@ -3418,6 +3675,20 @@ export default function ShiftProductionEntryPage() {
                                 <Input size="large" disabled value={previewRejectionKg ?? '—'} />
                             </Form.Item>
                         </Col>
+                        {/* Not a form field: reads/writes the single scraps
+                            line of type 'lumps' (see setLumpsKgValue), so
+                            this and the scrap list below are one entry path. */}
+                        <Col span={12}>
+                            <Form.Item label="Lumps (Kg)" extra="Melted waste, weighed — counts into resin consumed">
+                                <InputNumber
+                                    size="large"
+                                    min={0}
+                                    style={{ width: '100%' }}
+                                    value={lumpsLineIndex >= 0 ? completeForm.watch(`scraps.${lumpsLineIndex}.quantity_kg`) ?? null : null}
+                                    onChange={(value) => setLumpsKgValue(value === null || value === undefined ? null : Number(value))}
+                                />
+                            </Form.Item>
+                        </Col>
                     </Row>
 
                     {!!quantityScrap && quantityScrap > 0 && (
@@ -3500,7 +3771,11 @@ export default function ShiftProductionEntryPage() {
                         </Col>
                     </Row>
 
-                    <Typography.Text strong>Packing</Typography.Text>
+                    {/* display:block on the section headings: with the legacy
+                        packing row hidden, two adjacent inline strong texts
+                        collapsed into one line reading "PackingMaterial
+                        Consumption" (owner screenshot). */}
+                    <Typography.Text strong style={{ display: 'block', marginTop: 8 }}>Packing</Typography.Text>
 
                     {/* Multi-mode packing lines. The modes come from THIS
                         batch's standard, so a tray-only product is never
@@ -3541,7 +3816,7 @@ export default function ShiftProductionEntryPage() {
                         </Col>
                     </Row>
 
-                    <Typography.Text strong>Material Consumption</Typography.Text>
+                    <Typography.Text strong style={{ display: 'block', marginTop: 16 }}>Material Consumption</Typography.Text>
 
                     {/* Phase 6: the day-bin computed figure that prefilled the
                         Resin/MB rows below, with its formula spelled out. The
@@ -3632,8 +3907,8 @@ export default function ShiftProductionEntryPage() {
                         </Typography.Text>
                     ) : (
                         <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
-                            Material is issued from the factory day bin ({factoryDayBin?.warehouse?.name}) by default —
-                            change "From" for anything taken straight off the store.{' '}
+                            "From" is where the material came out of. It is already set to the day bin for you —
+                            change it only if this material came straight from the store.{' '}
                             <Link to="/production/day-bin">Open Day Bin (factory)</Link>
                         </Typography.Text>
                     )}
@@ -3676,9 +3951,31 @@ export default function ShiftProductionEntryPage() {
                             <Controller
                                 name="resin_kg"
                                 control={completeForm.control}
-                                render={({ field }) => <InputNumber {...field} size="large" min={0} placeholder="Kg" suffix="Kg" style={{ width: '100%' }} />}
+                                render={({ field }) => (
+                                    <InputNumber
+                                        {...field}
+                                        size="large"
+                                        min={0}
+                                        placeholder="Kg"
+                                        suffix="Kg"
+                                        style={{ width: '100%' }}
+                                        onChange={(value) => {
+                                            // A manual edit wins permanently for this
+                                            // batch — the auto-calculation backs off.
+                                            resinKgTouchedRef.current = true;
+                                            field.onChange(value);
+                                        }}
+                                    />
+                                )}
                             />
                         </Col>
+                        {resinCalcKg !== null && results && (
+                            <Col xs={24}>
+                                <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                                    {`= ${fmtNum(results.goodKg)} production + ${fmtNum(results.rejProdKg ?? 0)} rejection + ${fmtNum(results.lumpsKg)} lumps — edit if the weighed figure differs`}
+                                </Typography.Text>
+                            </Col>
+                        )}
                         <Col xs={24}>{dayBinHint(resinItemIdWatch, resinKgWatch, completeForm.watch('resin_warehouse_id'))}</Col>
                     </Row>
 
@@ -3839,6 +4136,148 @@ export default function ShiftProductionEntryPage() {
                         </Row>
                     ))}
 
+                    {/* Downtime this run — power outage, mold change,
+                        breakdown — each with its timing. The minutes come off
+                        Running Hours before the expected output is computed,
+                        so efficiency judges only the time the machine could
+                        actually run ("i want to do this for efficiency"). */}
+                    <Space style={{ justifyContent: 'space-between', width: '100%', marginTop: 16 }}>
+                        <Typography.Text strong>Downtime</Typography.Text>
+                        <Button
+                            size="small"
+                            onClick={() =>
+                                downtimeFields.append({
+                                    downtime_reason_id: undefined,
+                                    from_time: '',
+                                    to_time: '',
+                                    note: undefined,
+                                })
+                            }
+                        >
+                            Add Downtime
+                        </Button>
+                    </Space>
+                    <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                        Power outage, mold change, breakdown — with from/to times. These minutes come off the
+                        running hours before efficiency is judged.
+                    </Typography.Text>
+                    {downtimeFields.fields.map((field, index) => {
+                        const lineErrors = completeForm.formState.errors.downtime_events?.[index];
+                        const minutes = downtimeLineMinutes(
+                            completeForm.watch(`downtime_events.${index}.from_time`),
+                            completeForm.watch(`downtime_events.${index}.to_time`),
+                        );
+                        return (
+                            <Row key={field.id} gutter={[8, 8]} align="top" style={{ marginTop: 8 }}>
+                                <Col xs={24} sm={9}>
+                                    <Form.Item
+                                        style={{ marginBottom: 0 }}
+                                        validateStatus={lineErrors?.downtime_reason_id ? 'error' : ''}
+                                        help={lineErrors?.downtime_reason_id?.message}
+                                    >
+                                        <Controller
+                                            name={`downtime_events.${index}.downtime_reason_id`}
+                                            control={completeForm.control}
+                                            render={({ field }) => (
+                                                <Select
+                                                    {...field}
+                                                    size="large"
+                                                    options={downtimeReasonOptions}
+                                                    showSearch
+                                                    optionFilterProp="label"
+                                                    allowClear
+                                                    style={{ width: '100%' }}
+                                                    placeholder="Reason…"
+                                                />
+                                            )}
+                                        />
+                                    </Form.Item>
+                                </Col>
+                                <Col xs={8} sm={4}>
+                                    <Form.Item
+                                        style={{ marginBottom: 0 }}
+                                        validateStatus={lineErrors?.from_time ? 'error' : ''}
+                                        help={lineErrors?.from_time?.message}
+                                    >
+                                        <Controller
+                                            name={`downtime_events.${index}.from_time`}
+                                            control={completeForm.control}
+                                            render={({ field }) => (
+                                                <TimePicker
+                                                    size="large"
+                                                    format="HH:mm"
+                                                    placeholder="From"
+                                                    style={{ width: '100%' }}
+                                                    value={field.value ? dayjs(field.value, 'HH:mm') : null}
+                                                    onChange={(_, timeString) =>
+                                                        field.onChange((Array.isArray(timeString) ? timeString[0] : timeString) || '')
+                                                    }
+                                                />
+                                            )}
+                                        />
+                                    </Form.Item>
+                                </Col>
+                                <Col xs={8} sm={4}>
+                                    <Form.Item
+                                        style={{ marginBottom: 0 }}
+                                        validateStatus={lineErrors?.to_time ? 'error' : ''}
+                                        help={lineErrors?.to_time?.message}
+                                    >
+                                        <Controller
+                                            name={`downtime_events.${index}.to_time`}
+                                            control={completeForm.control}
+                                            render={({ field }) => (
+                                                <TimePicker
+                                                    size="large"
+                                                    format="HH:mm"
+                                                    placeholder="To"
+                                                    style={{ width: '100%' }}
+                                                    value={field.value ? dayjs(field.value, 'HH:mm') : null}
+                                                    onChange={(_, timeString) =>
+                                                        field.onChange((Array.isArray(timeString) ? timeString[0] : timeString) || '')
+                                                    }
+                                                />
+                                            )}
+                                        />
+                                    </Form.Item>
+                                </Col>
+                                <Col xs={8} sm={4} style={{ alignSelf: 'center', textAlign: 'center' }}>
+                                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                        {minutes !== null ? `${minutes} min` : ''}
+                                    </Typography.Text>
+                                </Col>
+                                <Col xs={24} sm={3}>
+                                    <Button danger block onClick={() => downtimeFields.remove(index)}>Remove</Button>
+                                </Col>
+                                <Col xs={24}>
+                                    <Controller
+                                        name={`downtime_events.${index}.note`}
+                                        control={completeForm.control}
+                                        render={({ field }) => <Input {...field} maxLength={255} placeholder="Note (optional)" />}
+                                    />
+                                </Col>
+                            </Row>
+                        );
+                    })}
+                    {/* A reason missing from the list is typed once, saved to
+                        the GLOBAL list, and auto-picked — "once saved
+                        globally we can take it here". */}
+                    <Space.Compact style={{ width: '100%', marginTop: 8 }}>
+                        <Input
+                            value={newDowntimeReasonText}
+                            onChange={(e) => setNewDowntimeReasonText(e.target.value)}
+                            placeholder="Reason not in the list? Type it here…"
+                            maxLength={120}
+                        />
+                        <Button
+                            loading={createDowntimeReasonMutation.isPending}
+                            disabled={newDowntimeReasonText.trim() === ''}
+                            onClick={() => createDowntimeReasonMutation.mutate(newDowntimeReasonText.trim())}
+                        >
+                            Save reason
+                        </Button>
+                    </Space.Compact>
+
                     <Form.Item
                         label="Helper name (optional)"
                         style={{ marginTop: 16 }}
@@ -3868,6 +4307,10 @@ export default function ShiftProductionEntryPage() {
                                         results.expected.pouches !== null ? ` · ${results.expected.pouches} pouches` : ''
                                     }${results.expected.boxes !== null ? ` · ${results.expected.boxes} boxes` : ''}`}
                                     formula={`3600 / ${fmtNum(results.ct)} s × ${results.cavities} cavities × ${fmtNum(results.hours)} h${
+                                        results.downtimeMinutes > 0
+                                            ? ` (${fmtNum(results.grossHours)} h − ${results.downtimeMinutes} min downtime)`
+                                            : ''
+                                    }${
                                         results.expected.pouches !== null && results.nosPerPouch ? ` ÷ ${results.nosPerPouch} pcs/pouch` : ''
                                     }${results.expected.boxes !== null && results.nosPerBox ? ` ÷ ${results.nosPerBox} pcs/box` : ''}`}
                                 />
@@ -3896,7 +4339,16 @@ export default function ShiftProductionEntryPage() {
                                             {efficiencyTag(results.efficiencyPct)}
                                         </Space>
                                     }
-                                    formula={`${results.actualBoxes} boxes ÷ ${results.expected?.boxes} expected × 100`}
+                                    // Pieces, not boxes: boxes-vs-boxes compounds two
+                                    // roundings and drops the loose pieces entirely.
+                                    formula={`${(results.actualPieces ?? 0).toLocaleString('en-IN')} pcs ÷ ${fmtNum(
+                                        results.expected?.pieces ?? null,
+                                        0,
+                                    )} expected × 100${
+                                        results.downtimeMinutes > 0
+                                            ? ` — ${fmtNum(results.hours)} h net of ${results.downtimeMinutes} min downtime`
+                                            : ''
+                                    }`}
                                 />
                             )}
                             {results.goodKg !== null && (
