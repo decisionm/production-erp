@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 import { listAllWarehouses } from '@/features/inventory/api';
 import { getFactoryDayBin, loadFactoryDayBin } from '@/features/production/api';
 import type { FactoryDayBinMaterial, FactoryDayBinSummaryRow } from '@/features/production/types';
+import { guessRawMaterialStoreId } from '@/features/production/warehouses';
 import { itemLabel } from '@/lib/itemLabel';
 
 /** "10.6000" → "10.6"; "—" for null/unparseable. */
@@ -17,17 +18,6 @@ function fmtKg(v: string | null | undefined): string {
 function toNum(v: string | null | undefined): number {
     const n = parseFloat(v ?? '');
     return Number.isNaN(n) ? 0 : n;
-}
-
-/** The warehouse material normally goes back to — the main/raw-material store. */
-function guessStoreWarehouseId(
-    warehouses: { id: number; code: string; name: string; is_active: boolean }[],
-    dayBinId: number | null,
-): number | undefined {
-    const candidates = warehouses.filter((w) => w.is_active && w.id !== dayBinId);
-    const named = candidates.find((w) => /\bstore\b|\bmain\b|\braw\b|\brm\b/i.test(`${w.code} ${w.name}`));
-
-    return (named ?? candidates[0])?.id;
 }
 
 interface DayBinDrawerProps {
@@ -129,11 +119,14 @@ export default function DayBinDrawer({ open, onClose }: DayBinDrawerProps) {
         [warehouses, binWarehouse],
     );
 
-    // Default the destination to the main store once the list lands, never
-    // overwriting a choice already made.
+    // Default the destination to the raw-material store once the list lands,
+    // never overwriting a choice already made — and leaving it EMPTY when the
+    // masters do not say which warehouse that is. The previous rule preferred
+    // any name containing "store" and so offered FG Store, the bottle
+    // warehouse, as the place to send resin back to.
     useEffect(() => {
         if (!open || warehouses === undefined || returnWarehouseId !== null) return;
-        const storeId = guessStoreWarehouseId(warehouses.data, binWarehouse?.id ?? null);
+        const storeId = guessRawMaterialStoreId(warehouses.data, binWarehouse?.id ?? null);
         if (storeId !== undefined) setReturnWarehouseId(storeId);
     }, [open, warehouses, binWarehouse, returnWarehouseId]);
 

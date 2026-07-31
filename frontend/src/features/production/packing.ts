@@ -31,6 +31,25 @@ export interface ProductionSettings {
      * GET /production/factory-day-bin instead, which carries this id too.
      */
     day_bin_warehouse_id?: number | null;
+    /**
+     * The factory's machine rule, published by the backend so a screen can
+     * STATE which machines a product runs on: a mould below
+     * `cavity_threshold` cavities runs on any machine, at or above it only on
+     * `restricted_machines`.
+     *
+     * Published rather than expanded into product-machine rows on purpose. The
+     * rule answers every product from the cavity count a screen already has,
+     * whereas rows would need approving one by one and would then outrank the
+     * workbook they were copied from the moment a figure was corrected there.
+     *
+     * Optional — an older backend does not send it, and a deployment that has
+     * not named its high-cavity machines sends an empty list. In both cases a
+     * screen must say nothing rather than guess a machine name.
+     */
+    machine_capability?: {
+        cavity_threshold: number;
+        restricted_machines: { id: number; name: string }[];
+    } | null;
 }
 
 export function useProductionSettings(): ProductionSettings | undefined {

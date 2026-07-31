@@ -3,6 +3,7 @@ import { Alert, Card, Col, Input, Row, Segmented, Space, Table, Tag, Tooltip, Ty
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listProductionStandards } from '@/features/production/api';
+import { useProductionSettings } from '@/features/production/packing';
 import type { ProductionStandardRow } from '@/features/production/types';
 import { itemLabel } from '@/lib/itemLabel';
 
@@ -63,11 +64,21 @@ export default function ProductStandardsPage() {
     const [page, setPage] = useState(1);
     const [scope, setScope] = useState<'mapped' | 'all'>('all');
     const [search, setSearch] = useState('');
+    const [cavityBand, setCavityBand] = useState<'any' | 'below' | 'atOrAbove'>('any');
 
     const { data, isLoading } = useQuery({
         queryKey: ['production', 'standards', page, scope],
         queryFn: () => listProductionStandards({ page, per_page: 100, matched_only: scope === 'mapped' }),
     });
+
+    // The factory's machine rule, from the backend that also enforces it — so
+    // the machines this page names cannot disagree with the machines Start
+    // Batch allows. Absent on an older backend, in which case the column stays
+    // silent rather than guessing.
+    const settings = useProductionSettings();
+    const rule = settings?.machine_capability ?? null;
+    const threshold = rule?.cavity_threshold ?? null;
+    const restrictedNames = (rule?.restricted_machines ?? []).map((m) => m.name);
 
     const rows = data?.data ?? [];
 
@@ -75,14 +86,22 @@ export default function ProductStandardsPage() {
     // page of a hundred at most, and typing is instant this way.
     const visible = useMemo(() => {
         const q = search.trim().toLowerCase();
-        if (q === '') return rows;
-        return rows.filter(
-            (r) =>
-                r.source_product_name.toLowerCase().includes(q) ||
-                (r.item?.name ?? '').toLowerCase().includes(q) ||
-                (r.item?.sku ?? '').toLowerCase().includes(q),
-        );
-    }, [rows, search]);
+        return rows.filter((r) => {
+            if (q !== '') {
+                const hit =
+                    r.source_product_name.toLowerCase().includes(q) ||
+                    (r.item?.name ?? '').toLowerCase().includes(q) ||
+                    (r.item?.sku ?? '').toLowerCase().includes(q);
+                if (!hit) return false;
+            }
+            if (cavityBand === 'any' || threshold === null) return true;
+            // A blank cavity count belongs to neither band. It is the figure
+            // the rule is decided on, so a row without one cannot be claimed
+            // for either side.
+            if (r.cavities === null || r.cavities === undefined) return false;
+            return cavityBand === 'below' ? r.cavities < threshold : r.cavities >= threshold;
+        });
+    }, [rows, search, cavityBand, threshold]);
 
     const mappedCount = rows.filter((r) => r.item !== null).length;
     const needsAnswer = rows.filter((r) => r.status === 'unresolved').length;
@@ -101,19 +120,30 @@ export default function ProductStandardsPage() {
 
             {/* The distinction that explains two Start Batch notices. Stated here
                 because this is the page people arrive at looking for it. */}
+            {/* Rewritten once the machine rule became visible in the table
+                above. The old text told people configurations were empty and
+                explained two Start Batch notices that have since been deleted —
+                a page that describes the app as it was last week is worse than
+                one that says nothing. */}
             <Alert
                 type="info"
                 showIcon
                 style={{ marginBottom: 16 }}
-                message="This is not the same as Production Configuration"
+                message="Which machines a product runs on"
                 description={
                     <>
-                        A <b>standard</b> is what a product runs to wherever it runs — that is this page.{' '}
-                        A <b>configuration</b> (<Link to="/production/configuration">Production Configuration</Link>) is
-                        a machine + product + mould approval, and there are none yet, which is what “No approved
-                        machine–product mapping” means on Start Batch. A <b>recipe</b> (
-                        <Link to="/production/boms">Bills of Material</Link>) is how much resin and masterbatch go into
-                        one bottle — that is the “No active consumption recipe” notice.
+                        {threshold !== null && restrictedNames.length > 0 ? (
+                            <>
+                                The <b>MACHINES</b> column is the factory's own rule, not a list anyone maintains: under{' '}
+                                {threshold} cavities a mould runs on <b>any</b> machine, and at {threshold} or more it is
+                                set up on <b>{restrictedNames.join(' or ')}</b>. Change the rule on{' '}
+                                <Link to="/production/configuration">Configuration → Machines &amp; Capabilities</Link> and
+                                this column follows.{' '}
+                            </>
+                        ) : null}
+                        A <b>standard</b> (this page) is what a product runs to wherever it runs. A{' '}
+                        <b>configuration</b> (<Link to="/production/configuration">Configuration</Link>) is only needed
+                        for an exception — a product that runs differently on one machine than the workbook says.
                     </>
                 }
             />
@@ -171,6 +201,20 @@ export default function ProductStandardsPage() {
                     onChange={(e) => setSearch(e.target.value)}
                     style={{ width: 320 }}
                 />
+                {/* The cavity bands the machine rule actually splits on, so the
+                    high-cavity group can be read as a group — that is the list
+                    someone checks when they want to know what Machine 10 runs. */}
+                {threshold !== null && restrictedNames.length > 0 && (
+                    <Segmented
+                        value={cavityBand}
+                        onChange={(v) => setCavityBand(v as 'any' | 'below' | 'atOrAbove')}
+                        options={[
+                            { value: 'any', label: 'Any cavities' },
+                            { value: 'below', label: `Under ${threshold} — all machines` },
+                            { value: 'atOrAbove', label: `${threshold}+ — ${restrictedNames.join('/')} only` },
+                        ]}
+                    />
+                )}
             </Space>
 
             <Table<ProductionStandardRow>
@@ -198,10 +242,12 @@ export default function ProductStandardsPage() {
                     },
                     {
                         title: 'PRODUCT',
+                        sorter: (a, b) => a.source_product_name.localeCompare(b.source_product_name),
                         render: (_, r) => <Typography.Text strong>{r.source_product_name}</Typography.Text>,
                     },
                     {
                         title: 'Tally item it applies to',
+                        sorter: (a, b) => (a.item?.name ?? '').localeCompare(b.item?.name ?? ''),
                         render: (_, r) =>
                             r.item ? (
                                 itemLabel(r.item)
@@ -211,11 +257,52 @@ export default function ProductStandardsPage() {
                                 </Tooltip>
                             ),
                     },
-                    { title: 'NO. OF CAVITY', align: 'right', render: (_, r) => r.cavities ?? '—' },
-                    { title: 'WT. (g)', align: 'right', render: (_, r) => fmt(r.unit_weight_grams) },
+                    {
+                        title: 'NO. OF CAVITY',
+                        align: 'right',
+                        sorter: (a, b) => (a.cavities ?? -1) - (b.cavities ?? -1),
+                        render: (_, r) => r.cavities ?? '—',
+                    },
+                    {
+                        // Which machines this product may run on — the factory's
+                        // own rule (below the threshold, anywhere; at or above
+                        // it, the named machines), applied to this row's cavity
+                        // count. Computed, never stored: the rule is one
+                        // sentence, and storing it per product-machine pair
+                        // would mean ~790 rows to approve that then outrank the
+                        // workbook the moment a figure is corrected there.
+                        title: 'MACHINES',
+                        sorter: (a, b) => (a.cavities ?? -1) - (b.cavities ?? -1),
+                        render: (_, r) => {
+                            if (threshold === null || restrictedNames.length === 0) return '—';
+                            if (r.cavities === null || r.cavities === undefined) {
+                                return (
+                                    <Tooltip title="No cavity count on this standard, and the rule is decided on cavities — so which machines this runs on is not something the app can answer yet.">
+                                        <Typography.Text type="secondary">needs a cavity count</Typography.Text>
+                                    </Tooltip>
+                                );
+                            }
+                            return r.cavities >= threshold ? (
+                                <Tooltip title={`${r.cavities} cavities — at or above ${threshold}, so this mould is set up on ${restrictedNames.join(' or ')}.`}>
+                                    <Tag color="gold">{restrictedNames.join(' or ')} only</Tag>
+                                </Tooltip>
+                            ) : (
+                                <Tooltip title={`${r.cavities} cavities — below ${threshold}, so any machine can run it.`}>
+                                    <Tag color="green">All machines</Tag>
+                                </Tooltip>
+                            );
+                        },
+                    },
+                    {
+                        title: 'WT. (g)',
+                        align: 'right',
+                        sorter: (a, b) => parseFloat(a.unit_weight_grams ?? '-1') - parseFloat(b.unit_weight_grams ?? '-1'),
+                        render: (_, r) => fmt(r.unit_weight_grams),
+                    },
                     {
                         title: 'CYCLE TIME (s)',
                         align: 'right',
+                        sorter: (a, b) => parseFloat(a.cycle_time ?? '-1') - parseFloat(b.cycle_time ?? '-1'),
                         render: (_, r) =>
                             r.cycle_time_raw && r.cycle_time_raw !== r.cycle_time ? (
                                 <Tooltip title={`The workbook cell held "${r.cycle_time_raw}" — split into separate variants rather than averaged.`}>

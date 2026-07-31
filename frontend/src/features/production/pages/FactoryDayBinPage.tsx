@@ -33,6 +33,7 @@ import {
     setDayBinWarehouse,
 } from '@/features/production/api';
 import { useProductionSettings } from '@/features/production/packing';
+import { guessRawMaterialStoreId } from '@/features/production/warehouses';
 import type {
     FactoryDayBinLoadRow,
     FactoryDayBinUnopenedBags,
@@ -69,17 +70,6 @@ interface BalanceRow {
     bin_kg: string;
     store_kg: string | null;
     unopened_bags: FactoryDayBinUnopenedBags | null;
-}
-
-/** The warehouse a load would normally come from — the main/raw-material store. */
-function guessStoreWarehouseId(
-    warehouses: { id: number; code: string; name: string; is_active: boolean }[],
-    dayBinId: number | null,
-): number | undefined {
-    const candidates = warehouses.filter((w) => w.is_active && w.id !== dayBinId);
-    const named = candidates.find((w) => /\bstore\b|\bmain\b|\braw\b|\brm\b/i.test(`${w.code} ${w.name}`));
-
-    return (named ?? candidates[0])?.id;
 }
 
 /**
@@ -212,15 +202,38 @@ export default function FactoryDayBinPage() {
         return rows;
     }, [dayBin]);
 
-    // Default the manual load's source to the main store once the panel is
-    // open and the list has landed, never overwriting a choice already made.
+    /**
+     * Which warehouse the manually-loaded material came OUT of.
+     *
+     * undefined means the warehouse names do not say — several plausible
+     * stores, or none — and the field then stays EMPTY with a hint asking the
+     * person. The rule this replaced preferred any name containing "store",
+     * which on this factory's masters is FG Store, the finished-goods godown:
+     * the form offered to book PET resin out of the bottle warehouse. A
+     * pre-filled field reads as "the system knows", so no answer beats a wrong
+     * one. The whole rule lives in warehouses.ts, shared with the Shift Floor
+     * bin drawer so the two screens cannot disagree about it.
+     */
+    const guessedSourceId = useMemo(
+        () => guessRawMaterialStoreId(warehouses?.data, dayBinWarehouse?.id ?? null),
+        [warehouses, dayBinWarehouse],
+    );
+
+    // Fill the source ONCE — the first time the panel is open with the list in
+    // hand. Once deliberately: gating only on "the field is empty right now"
+    // would re-fill it after somebody had CLEARED it (a warehouse refetch is
+    // enough to re-run this), putting a warehouse nobody chose into a stock
+    // movement.
+    const sourceDefaulted = useRef(false);
     useEffect(() => {
+        if (sourceDefaulted.current) return;
         if (!manualOpen || !configured || warehouses === undefined) return;
         if (manualForm.getFieldValue('from_warehouse_id') !== undefined) return;
+        if (guessedSourceId === undefined) return;
 
-        const storeId = guessStoreWarehouseId(warehouses.data, dayBinWarehouse?.id ?? null);
-        if (storeId !== undefined) manualForm.setFieldsValue({ from_warehouse_id: storeId });
-    }, [manualOpen, configured, warehouses, dayBinWarehouse, manualForm]);
+        sourceDefaulted.current = true;
+        manualForm.setFieldsValue({ from_warehouse_id: guessedSourceId });
+    }, [manualOpen, configured, warehouses, guessedSourceId, manualForm]);
 
     const chooseWarehouse = useMutation({
         mutationFn: (warehouseId: number | null) => setDayBinWarehouse(warehouseId),

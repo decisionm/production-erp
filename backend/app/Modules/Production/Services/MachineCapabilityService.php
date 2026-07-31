@@ -36,6 +36,41 @@ class MachineCapabilityService
         return (int) config('production.machine_capability.cavity_threshold', 6);
     }
 
+    /**
+     * The restricted machines as {id, name}, for screens that need to SAY the
+     * rule rather than test one cavity count against it.
+     *
+     * The factory's rule — under the threshold runs anywhere, at or above it
+     * runs on specific machines — was enforced everywhere and displayed
+     * nowhere, so no screen could answer "which machines does this product run
+     * on?". The owner asked for that mapping as data, and the honest answer is
+     * that it is a rule, not a table: publishing it lets Product Standards
+     * compute the answer per product without minting one row per
+     * product-machine pair (roughly 790 of them) that would then drift from
+     * the workbook the moment a cycle time was corrected.
+     *
+     * Ordered by the machine's own display sequence so the names read the way
+     * the floor is walked.
+     *
+     * @return list<array{id: int, name: string}>
+     */
+    public function restrictedMachines(): array
+    {
+        $ids = $this->restrictedWorkCenterIds();
+
+        if ($ids === []) {
+            return [];
+        }
+
+        return WorkCenter::query()
+            ->whereIn('id', $ids)
+            ->orderBy('display_sequence')
+            ->orderBy('id')
+            ->get(['id', 'name'])
+            ->map(fn (WorkCenter $machine) => ['id' => (int) $machine->id, 'name' => (string) $machine->name])
+            ->all();
+    }
+
     public function isEnforced(): bool
     {
         return (bool) config('production.machine_capability.enforced', false);
