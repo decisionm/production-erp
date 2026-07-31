@@ -18,6 +18,7 @@ import {
     Typography,
 } from 'antd';
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { listAllItems } from '@/features/inventory/api';
 import {
     approveProductionConfiguration,
@@ -39,8 +40,13 @@ import type { DowntimeReason, ImportResult, ProductionConfiguration, WorkCenter 
 import { itemLabel } from '@/lib/itemLabel';
 
 /**
- * The Production Configuration area — where the factory's real values are
- * entered and approved without a code deploy.
+ * Machine Setup — where the factory's real machine-side values are entered and
+ * approved without a code deploy.
+ *
+ * This page is NOT the product list. Every product's agreed weight, cycle time,
+ * cavities and packing live on Product Standards (/production/standards); the
+ * first tab here holds only the machine-by-machine EXCEPTIONS to those figures
+ * and is where they get approved.
  *
  * The organising rule of this screen: nothing here is a production standard
  * until someone approves it. Imported and hand-entered rows are drafts, the
@@ -50,17 +56,26 @@ import { itemLabel } from '@/lib/itemLabel';
 export default function ProductionConfigurationPage() {
     return (
         <div style={{ padding: 24 }}>
-            <Typography.Title level={3}>Production Configuration</Typography.Title>
+            <Typography.Title level={3}>Machine Setup</Typography.Title>
             <Typography.Paragraph type="secondary" style={{ maxWidth: 820 }}>
-                Machine, product, mould and colour together decide the cycle time and cavities a batch runs
-                at. Only <Typography.Text strong>approved</Typography.Text> configurations reach the shop
-                floor — everything else stays a draft.
+                What the office sets up behind the machines — machine exceptions, machine capabilities,
+                downtime reasons and factory settings. A product's agreed weight, cycle time, cavities and
+                packing live on <Link to="/production/standards">Product Standards</Link>. An exception here
+                overrides those figures on one machine, and it reaches the shop floor only once{' '}
+                <Typography.Text strong>approved</Typography.Text>.
             </Typography.Paragraph>
 
             <Tabs
                 defaultActiveKey="configurations"
                 items={[
-                    { key: 'configurations', label: 'Machine–Product Configurations', children: <ConfigurationsTab /> },
+                    // The tab keeps its key (and stays the default) — only its
+                    // NAME changed. "Machine–Product Configurations" read like a
+                    // second product list and competed with Product Standards;
+                    // the owner said three times the two pages confused them.
+                    // Standards is where every product's figures live; this tab
+                    // is only the machine-by-machine exceptions and their
+                    // approval, so its name now says that.
+                    { key: 'configurations', label: 'Machine Exceptions', children: <ConfigurationsTab /> },
                     { key: 'machines', label: 'Machines & Capabilities', children: <MachinesTab /> },
                     { key: 'downtime', label: 'Downtime Reasons', children: <DowntimeReasonsTab /> },
                     { key: 'settings', label: 'Factory Settings', children: <SettingsTab /> },
@@ -192,6 +207,24 @@ function ConfigurationsTab() {
 
     return (
         <>
+            {/* A person landing here needs to know why this tab exists at all
+                when Product Standards carries the products: this is where a
+                machine-specific exception is created and approved. */}
+            <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message="This tab is only for machine exceptions"
+                description={
+                    <>
+                        Every product's agreed weight, cycle time, cavities and packing live on{' '}
+                        <Link to="/production/standards">Product Standards</Link> — a row here is only needed
+                        when a product runs differently on one machine than the workbook says, and this is
+                        where that exception gets approved.
+                    </>
+                }
+            />
+
             <Space style={{ marginBottom: 16 }} wrap>
                 <Input.Search
                     placeholder="Search product…"

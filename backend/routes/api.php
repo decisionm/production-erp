@@ -362,6 +362,17 @@ Route::prefix('v1')->group(function () {
             // ordering is irrelevant — it is a sibling, not an override.
             Route::get('standards/coverage', [ProductionStandardController::class, 'coverage']);
             Route::post('standards/import', [ProductionStandardController::class, 'import']);
+            // Finishing the import's job one row at a time, from the page:
+            // which Tally item does this factory product name mean, and add a
+            // product the workbook never carried. Both are inside the
+            // module:production group, so the GET needs .view and the POSTs
+            // need .manage without either route saying so.
+            //
+            // Declared after standards/coverage and standards/import so the
+            // literal segments are never shadowed by the {standard} binding.
+            Route::get('standards/{standard}/item-candidates', [ProductionStandardController::class, 'itemCandidates']);
+            Route::post('standards/{standard}/attach-item', [ProductionStandardController::class, 'attachItem']);
+            Route::post('standards', [ProductionStandardController::class, 'store']);
 
             Route::get('downtime-reasons', [DowntimeReasonController::class, 'index']);
             Route::post('downtime-reasons', [DowntimeReasonController::class, 'store']);

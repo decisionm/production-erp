@@ -90,7 +90,10 @@ const allNavItems: NavGroup[] = [
             { key: '/production/approve-production', label: 'Approve Production' },
             { key: '/production/live-monitor', label: 'Live Monitor' },
             { key: '/production/standards', label: 'Product Standards' },
-            { key: '/production/configuration', label: 'Configuration' },
+            // "Configuration" said nothing — it read like a second Product
+            // Standards. This destination is machine setup: exceptions,
+            // machine capabilities, downtime reasons, factory settings.
+            { key: '/production/configuration', label: 'Machine Setup' },
             { key: '/production/boms', label: 'Bills of Material' },
             { key: '/production/shift-summary', label: 'Shift Summary' },
             { key: '/production/reports', label: 'Reports' },
