@@ -89,10 +89,19 @@ const BAND_TAG: Record<string, ReactElement> = {
     ok: <Tag color="green">OK</Tag>,
     watch: <Tag color="orange">Watch</Tag>,
     investigate: <Tag color="red">Investigate</Tag>,
+    // Deliberately not a grade — the run beat a standard it cannot beat, so
+    // either the entry or the standard is wrong and someone must look before
+    // signing. Red, like Investigate, because that is what it asks for.
+    over_standard: <Tag color="red">Over 100% — check entry or standard</Tag>,
 };
 
+// BAND_TAG is keyed by `string`, so an unmapped band would type-check happily
+// and render `undefined`. `?? null` keeps a band this build has never heard of
+// from silently blanking a tag that used to be there.
+const bandTag = (band: string) => BAND_TAG[band] ?? null;
+
 const varianceTag = (pct: number | null, band?: 'ok' | 'watch' | 'investigate' | null) => {
-    if (band) return BAND_TAG[band];
+    if (band) return bandTag(band);
     if (pct === null) return null;
     const abs = Math.abs(pct);
     if (abs <= 2) return BAND_TAG.ok;
@@ -100,8 +109,31 @@ const varianceTag = (pct: number | null, band?: 'ok' | 'watch' | 'investigate' |
     return BAND_TAG.investigate;
 };
 
-const efficiencyTag = (pct: number | null, band?: 'ok' | 'watch' | 'investigate' | null) => {
-    if (band) return BAND_TAG[band];
+/**
+ * Efficiency is actual pieces ÷ what the standard cycle time says the machine
+ * could have made, so 100% is a ceiling, not a target to beat. Anything above
+ * it means a number is wrong — the produced count, the hours, the cavities, or
+ * a standard cycle time set slower than the machine really runs.
+ *
+ * Fallback only: the live threshold is backend `production.tolerances`
+ * .efficiency_over, served by /production/settings, so a deployment that later
+ * allows a small measurement margin doesn't leave this screen shouting at runs
+ * the backend calls fine. 100 is what it defaults to, and what is used while
+ * settings load or against a backend too old to send it.
+ */
+const EFFICIENCY_CEILING_PCT = 100;
+
+/**
+ * The PERCENTAGE decides "over standard", before the band: 107% satisfies
+ * efficiency_ok (95), so a band-first read paints it green "OK" — which is
+ * exactly how an impossible figure reached the approvers unquestioned, and
+ * still would for any entry banded by a backend older than this rule.
+ * Compared with `>`, not `>=`, mirroring the backend: a dead-on 100.0 is the
+ * standard being met, not beaten.
+ */
+const efficiencyTag = (pct: number | null, band?: ProductionMetrics['efficiency_band'], ceiling = EFFICIENCY_CEILING_PCT) => {
+    if (pct !== null && pct > ceiling) return BAND_TAG.over_standard;
+    if (band) return bandTag(band);
     if (pct === null) return null;
     if (pct >= 95) return BAND_TAG.ok;
     if (pct >= 85) return BAND_TAG.watch;
@@ -249,6 +281,9 @@ function comparison(expected: ReactNode, actual: ReactNode, note?: string): Reac
  * rather than hiding the row.
  */
 function ExpectedVsActualSection({ row, metrics }: { row: ShiftProductionEntry; metrics: ProductionMetrics | null }) {
+    // Same cached query the page already uses — the over-100% threshold is
+    // deployment config, so it is read, never assumed.
+    const efficiencyCeiling = useProductionSettings()?.tolerances?.efficiency_over ?? EFFICIENCY_CEILING_PCT;
     const missing = missingExpectedInputs(row);
     const weight = row.item?.nominal_weight_grams;
     const expectedKg = metrics ? piecesToKg(metrics.expected_pieces, weight) : null;
@@ -301,12 +336,28 @@ function ExpectedVsActualSection({ row, metrics }: { row: ShiftProductionEntry; 
                 </Descriptions.Item>
                 <Descriptions.Item label="Efficiency">
                     {metrics?.efficiency_pct !== null && metrics !== null ? (
-                        <Space size={6}>
-                            {`${metrics.efficiency_pct}%`}
-                            {efficiencyTag(metrics.efficiency_pct, metrics.efficiency_band)}
-                        </Space>
+                        <>
+                            <Space size={6}>
+                                {`${metrics.efficiency_pct}%`}
+                                {efficiencyTag(metrics.efficiency_pct, metrics.efficiency_band, efficiencyCeiling)}
+                            </Space>
+                            {/* The tag says something is wrong; this says what
+                                to do about it, on the screen where it is signed
+                                off. Never blocks approval — the approver may
+                                well decide the run really was that fast and the
+                                standard is what needs correcting. */}
+                            {metrics.efficiency_pct > efficiencyCeiling && (
+                                <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
+                                    A machine cannot beat its own standard. Check the produced count, hours and cavities; if
+                                    they are right, the standard cycle time is set too slow and should be corrected on Product
+                                    Standards.
+                                </Typography.Text>
+                            )}
+                        </>
                     ) : (
-                        <Typography.Text type="secondary">— actual cartons ÷ expected cartons</Typography.Text>
+                        // Pieces, not cartons: the ratio moved to the piece
+                        // grain (loose pieces were being thrown away).
+                        <Typography.Text type="secondary">— actual pieces ÷ expected pieces</Typography.Text>
                     )}
                 </Descriptions.Item>
                 <Descriptions.Item label="Rejection">

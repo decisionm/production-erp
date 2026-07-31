@@ -612,12 +612,92 @@ function suggestMasterbatchByColour(items: Item[] | undefined, colour: string | 
     return NO_PICK;
 }
 
-const efficiencyTag = (pct: number | null) => {
+/**
+ * The ceiling on efficiency — where the screen stops reporting a grade and
+ * starts asking a question.
+ *
+ * Efficiency is actual pieces ÷ the pieces the STANDARD cycle time says the
+ * machine could have made in those hours. A machine cannot beat its own
+ * standard, so anything above 100 means one of the inputs is wrong — the
+ * produced count, the running hours, the cavities — or the standard cycle
+ * time is set slower than the machine really runs.
+ *
+ * Compared with `>`, never `>=`, mirroring the backend: both sides of the
+ * ratio are rounded to 1dp, so a dead-on run showing 100.0 is the standard
+ * being met, not beaten, and must not raise the alarm.
+ *
+ * FALLBACK VALUE ONLY. The live threshold is backend
+ * `production.tolerances.efficiency_over`, served by /production/settings and
+ * read below — the same reason packing_rounding is read rather than assumed:
+ * this panel and the backend must never disagree about the same batch, and a
+ * deployment that later allows a small measurement margin must not leave this
+ * screen shouting at runs the backend calls fine. 100 is what that config
+ * defaults to, and what is used while settings load or against a backend too
+ * old to send it.
+ */
+const EFFICIENCY_CEILING_PCT = 100;
+
+/** True when a percentage has crossed the ceiling and needs querying. */
+const isOverStandard = (pct: number | null | undefined, ceiling = EFFICIENCY_CEILING_PCT) =>
+    pct !== null && pct !== undefined && pct > ceiling;
+
+const efficiencyTag = (pct: number | null, ceiling = EFFICIENCY_CEILING_PCT) => {
     if (pct === null) return null;
+    // Checked BEFORE the bands: 107% is >= 95 and would otherwise be painted
+    // green "OK", which is how an impossible figure got signed off unnoticed.
+    if (isOverStandard(pct, ceiling)) return <Tag color="red">Over 100%</Tag>;
     if (pct >= 95) return <Tag color="green">OK</Tag>;
     if (pct >= 85) return <Tag color="orange">Watch</Tag>;
     return <Tag color="red">Investigate</Tag>;
 };
+
+/**
+ * "12.2 s · cavities: 5" — the frozen Start Batch standard that every expected
+ * figure in the completion drawer is computed from, so the supervisor can see
+ * what the machine is being measured against instead of inferring it.
+ *
+ * Null (renders nothing) when the batch carries no standard cycle time: a
+ * dash here would read as "the standard is zero" rather than "never set".
+ * `activeCavities` is the live form value, so the line never contradicts the
+ * Active Cavities box a few rows below it.
+ */
+function standardBasisText(entry: ShiftProductionEntry, activeCavities: number | null): string | null {
+    const ct = toNum(entry.standard_cycle_time);
+    if (ct === null) return null;
+    const standard = entry.standard_cavities;
+    const parts = [`${fmtNum(ct)} s`];
+    if (standard !== null) {
+        parts.push(
+            activeCavities !== null && activeCavities !== standard
+                ? `cavities: ${standard} standard, ${activeCavities} running`
+                : `cavities: ${standard}`,
+        );
+    } else if (activeCavities !== null) {
+        parts.push(`cavities: ${activeCavities} running`);
+    }
+    return parts.join(' · ');
+}
+
+/**
+ * The completion drawer's header line: what this batch is being measured
+ * against, stated before anything is typed. The owner's question — "how can
+ * efficiency be more than 100%" — is unanswerable on a screen that never shows
+ * the cycle time the expectation came from. Renders nothing for a batch with
+ * no standard, where the expected figures are dashes anyway.
+ */
+function StandardBasisLine({ entry, activeCavities }: { entry: ShiftProductionEntry; activeCavities: number | null }) {
+    const text = standardBasisText(entry, activeCavities);
+    if (text === null) return null;
+    return (
+        <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginBottom: 12 }}>
+            Standard cycle time:{' '}
+            <Typography.Text strong style={{ fontSize: 12 }}>
+                {text}
+            </Typography.Text>{' '}
+            — every expected figure below is computed from it.
+        </Typography.Text>
+    );
+}
 
 /** One row of the pre-submit results panel: value + its business formula. */
 function ResultRow({ label, value, formula, danger }: { label: string; value: ReactNode; formula?: string; danger?: boolean }) {
@@ -1273,6 +1353,9 @@ export default function ShiftProductionEntryPage() {
     const invalidateMoldChange = () => queryClient.invalidateQueries({ queryKey: ['production', 'mold-change-logs'] });
 
     const settings = useProductionSettings();
+    // The over-100% ceiling as the BACKEND rules it, so the pre-submit panel
+    // and the approvers' screen never disagree about the same batch.
+    const efficiencyCeiling = settings?.tolerances?.efficiency_over ?? EFFICIENCY_CEILING_PCT;
     // Phase 6 master switch: anything traceability-related renders/fetches ONLY
     // when the backend says so — with the flag off (or an older backend that
     // doesn't send the field) this page is byte-for-byte today's UI.
@@ -4304,6 +4387,14 @@ export default function ShiftProductionEntryPage() {
                 }
             >
                 <Form layout="vertical">
+                    {/* Frozen at Start Batch, so it is the same standard the
+                        approvers will be shown against this batch. */}
+                    {completingEntry && (
+                        <StandardBasisLine
+                            entry={completingEntry}
+                            activeCavities={activeCavitiesWatch ?? completingEntry.active_cavities ?? null}
+                        />
+                    )}
                     <Form.Item label="Batch Number (optional)">
                         <Controller name="batch_number" control={completeForm.control} render={({ field }) => <Input {...field} />} />
                     </Form.Item>
@@ -4863,6 +4954,16 @@ export default function ShiftProductionEntryPage() {
                                 label="Actual Cycle Time (s)"
                                 validateStatus={completeForm.formState.errors.actual_cycle_time ? 'error' : ''}
                                 help={completeForm.formState.errors.actual_cycle_time?.message}
+                                // The standard sits beside the actual so the pair
+                                // reads as expectation vs what the machine really
+                                // ran — and so a machine running faster than its
+                                // standard is visible here, where the over-100%
+                                // warning below says to look.
+                                extra={
+                                    completingEntry?.standard_cycle_time
+                                        ? `std: ${fmtNum(toNum(completingEntry.standard_cycle_time))} s`
+                                        : undefined
+                                }
                             >
                                 <Controller
                                     name="actual_cycle_time"
@@ -5671,6 +5772,45 @@ export default function ShiftProductionEntryPage() {
                         inputs are hidden — never a fake 0. */}
                     {results && (
                         <Card size="small" title="Results — check before you submit" style={{ marginTop: 8 }}>
+                            {/* Over 100% is impossible against a correct
+                                standard, so it is said out loud here — in the
+                                words the owner used — while the entry can
+                                still be fixed. A WARNING, never a gate: the
+                                figures on this screen are what actually came
+                                off the machine, and refusing the batch would
+                                only push the shift to type something untrue.
+                                The links open in a new tab so nothing typed
+                                into this drawer is lost on the way. */}
+                            {isOverStandard(results.efficiencyPct, efficiencyCeiling) && (
+                                <Alert
+                                    type="warning"
+                                    showIcon
+                                    style={{ marginBottom: 12 }}
+                                    message={`More than 100% (${results.efficiencyPct}%) — a machine cannot produce more than its standard allows`}
+                                    description={
+                                        <>
+                                            <Typography.Paragraph style={{ marginBottom: 8 }}>
+                                                Check the produced count, the running hours and the cavities
+                                                {results.cavities !== null ? ` (${results.cavities} this run)` : ''}. If they are all
+                                                right, the standard cycle time
+                                                {results.ct !== null ? ` of ${fmtNum(results.ct)} s` : ''} is set slower than this
+                                                machine really runs and should be corrected.
+                                            </Typography.Paragraph>
+                                            <Space wrap size={8}>
+                                                <Link to="/production/standards" target="_blank" rel="noreferrer">
+                                                    <Button size="small">Product Standards</Button>
+                                                </Link>
+                                                <Link to="/production/configuration" target="_blank" rel="noreferrer">
+                                                    <Button size="small">Machine Exceptions</Button>
+                                                </Link>
+                                            </Space>
+                                            <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
+                                                You can still submit this batch — this is a warning, not a block.
+                                            </Typography.Text>
+                                        </>
+                                    }
+                                />
+                            )}
                             {results.expected && (
                                 <ResultRow
                                     label="Expected output"
@@ -5707,7 +5847,7 @@ export default function ShiftProductionEntryPage() {
                                     value={
                                         <Space size={6}>
                                             {`${results.efficiencyPct}%`}
-                                            {efficiencyTag(results.efficiencyPct)}
+                                            {efficiencyTag(results.efficiencyPct, efficiencyCeiling)}
                                         </Space>
                                     }
                                     // Pieces, not boxes: boxes-vs-boxes compounds two

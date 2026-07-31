@@ -20,8 +20,26 @@ return [
         // Unaccounted material (kg) beyond which the figure is flagged.
         'unaccounted_kg' => (float) env('PROD_TOL_UNACCOUNTED_KG', 0.5),
 
-        // Efficiency % bands: >= ok -> ok, >= watch -> watch, else
-        // investigate.
+        // Efficiency % bands, checked in this order: > over -> over_standard,
+        // >= ok -> ok, >= watch -> watch, else investigate.
+        //
+        // efficiency_over DEFAULTS TO EXACTLY 100, and that is a physical
+        // fact rather than a tuning knob. The owner's words (30-Jul): "the
+        // efficiency should not go more than 100%. if a machine can produce
+        // a certain [amount] of material how can it be more than that". A
+        // run measured above its own standard is therefore not a triumph,
+        // it is evidence that one of the inputs is wrong — produced count,
+        // running hours, cavities, or (most often) a standard cycle time
+        // set slower than the machine really runs. The band exists so every
+        // screen can say so LOUDLY; it never blocks anything, because the
+        // pieces were genuinely made and the shift must still be recorded.
+        //
+        // The env override exists so the factory can later allow a small
+        // measurement margin (say 102) without a deploy — a deliberate
+        // decision made against real shifts, not a default anyone should
+        // drift into. Raising it does not make over-standard runs correct,
+        // it only widens the noise floor before we shout about them.
+        'efficiency_over' => (float) env('PROD_TOL_EFFICIENCY_OVER', 100),
         'efficiency_ok' => (float) env('PROD_TOL_EFFICIENCY_OK', 95),
         'efficiency_watch' => (float) env('PROD_TOL_EFFICIENCY_WATCH', 85),
 

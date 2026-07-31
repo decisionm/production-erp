@@ -35,6 +35,11 @@ use Tests\TestCase;
  *      13,333 expected) read "75%" under the old box ratio while the
  *      machine was actually running at ~107% — pinned below with exactly
  *      those figures.
+ *   4. Anything ABOVE the standard bands as 'over_standard' (owner, 30-Jul:
+ *      "the efficiency should not go more than 100%") — a warning that an
+ *      input needs correcting, outranking ok/watch/investigate, never a
+ *      block. Boundary (exactly 100 = ok) and the configurable threshold
+ *      are pinned below alongside the unchanged sub-100 bands.
  */
 class CompletionDowntimeTest extends TestCase
 {
@@ -209,7 +214,106 @@ class CompletionDowntimeTest extends TestCase
             // 14322 / 13333.333… × 100 = 107.415 → 107.4. The old box
             // ratio (3/4 = 75.0) threw the 5,208 loose pieces away and
             // told the owner an over-standard run was failing.
-            ->assertJsonPath('data.metrics.efficiency_pct', 107.4);
+            ->assertJsonPath('data.metrics.efficiency_pct', 107.4)
+            // The PCT IS UNCHANGED and always was right — what changed is
+            // the DISPLAY RULE, by owner instruction (30-Jul): "the
+            // efficiency should not go more than 100%. if a machine can
+            // produce a certain [amount] of material how can it be more
+            // than that … if it was high, then we need to display error to
+            // correct the entry, maybe standard cycle time can be reduced".
+            // So 107.4 no longer bands as the greenest 'ok'; it bands as
+            // over_standard, which every screen renders as a loud warning
+            // to check produced count / hours / cavities, and failing those
+            // to correct the standard cycle time. Do NOT re-band this to
+            // 'ok' — the number being over 100 IS the finding.
+            ->assertJsonPath('data.metrics.efficiency_band', 'over_standard')
+            // …and it stays a WARNING, never a gate. blocks_approval keys
+            // only off unaccounted_blocking_kg; an over-standard run must
+            // remain approvable, because the pieces were genuinely made.
+            ->assertJsonPath('data.metrics.blocks_approval', false);
+    }
+
+    // =================================================================
+    // (3c) The over-100 band: boundary, precedence, config override
+    // =================================================================
+
+    public function test_exactly_one_hundred_percent_is_ok_not_over_standard(): void
+    {
+        $this->actAs();
+        // runningBatch() defaults: CT 12 × 5 cavities × 8 h = 12,000
+        // expected pieces. Producing exactly 12,000 is the standard MET,
+        // not beaten — the boundary is strict `>`, so this must stay 'ok'.
+        [$entry] = $this->runningBatch();
+
+        $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/complete", [
+            'quantity_produced' => '12000',
+            'no_of_box' => 11,
+            'nos_per_box' => 1040,
+            'running_hours' => '8',
+        ])->assertOk()
+            ->assertJsonPath('data.metrics.expected_pieces', '12000.00')
+            // 100 not 100.0 — a whole-number float decodes as an int over
+            // JSON, same as the other whole percentages in the suite.
+            ->assertJsonPath('data.metrics.efficiency_pct', 100)
+            ->assertJsonPath('data.metrics.efficiency_band', 'ok');
+    }
+
+    public function test_a_hair_over_one_hundred_is_over_standard_and_the_threshold_is_configurable(): void
+    {
+        $this->actAs();
+        // 12,060 against 12,000 expected = 100.5 — barely over, and still
+        // over: the default tolerance is exactly 100 because a machine
+        // cannot beat its own standard.
+        [$entry] = $this->runningBatch();
+
+        $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/complete", [
+            'quantity_produced' => '12060',
+            'no_of_box' => 11,
+            'nos_per_box' => 1040,
+            'running_hours' => '8',
+        ])->assertOk()
+            ->assertJsonPath('data.metrics.efficiency_pct', 100.5)
+            ->assertJsonPath('data.metrics.efficiency_band', 'over_standard');
+
+        // Same batch, same 100.5 — a factory that later decides to allow a
+        // 5% measurement margin moves the boundary from .env alone, with no
+        // deploy and no code change, and the identical figure bands 'ok'.
+        config(['production.tolerances.efficiency_over' => 105.0]);
+        $metrics = app(ShiftProductionEntryService::class)
+            ->productionMetrics($entry->fresh());
+
+        $this->assertSame(100.5, $metrics['efficiency_pct'], 'The pct is a fact; only the band is configurable');
+        $this->assertSame('ok', $metrics['efficiency_band']);
+    }
+
+    public function test_bands_below_one_hundred_are_untouched_by_the_over_standard_rule(): void
+    {
+        $this->actAs();
+        [$entry] = $this->runningBatch();
+
+        // 11,500 / 12,000 = 95.8 → 'ok' (>= efficiency_ok 95).
+        $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/complete", [
+            'quantity_produced' => '11500',
+            'no_of_box' => 11,
+            'nos_per_box' => 1040,
+            'running_hours' => '8',
+        ])->assertOk()
+            ->assertJsonPath('data.metrics.efficiency_pct', 95.8)
+            ->assertJsonPath('data.metrics.efficiency_band', 'ok');
+
+        $service = app(ShiftProductionEntryService::class);
+
+        // 10,800 / 12,000 = 90.0 → 'watch' (>= 85, < 95).
+        $entry->update(['quantity_produced' => '10800']);
+        $metrics = $service->productionMetrics($entry->fresh());
+        $this->assertSame(90.0, $metrics['efficiency_pct']);
+        $this->assertSame('watch', $metrics['efficiency_band']);
+
+        // 9,600 / 12,000 = 80.0 → 'investigate' (< 85).
+        $entry->update(['quantity_produced' => '9600']);
+        $metrics = $service->productionMetrics($entry->fresh());
+        $this->assertSame(80.0, $metrics['efficiency_pct']);
+        $this->assertSame('investigate', $metrics['efficiency_band']);
     }
 
     // =================================================================

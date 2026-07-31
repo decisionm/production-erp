@@ -2,6 +2,27 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
+
+// A human-readable build stamp, baked in at build time. The app is an
+// installed PWA, so after a deploy the browser keeps running its saved copy
+// until the background update lands — which made "I still don't see the
+// change" undiagnosable: neither the owner nor the tooling could say WHICH
+// version a screen was. The stamp (commit + build date, e.g. "7b5d09b ·
+// 01 Aug 14:32") renders in the sidebar footer, so "what does the footer
+// say?" replaces guessing about caches.
+const buildStamp = (() => {
+    let commit = 'dev';
+    try {
+        commit = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
+    } catch {
+        // Building outside a git checkout (or with git unavailable) is not an
+        // error worth failing the build over — the date still identifies it.
+    }
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${commit} · ${pad(now.getDate())}/${pad(now.getMonth() + 1)} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+})();
 
 // The Laravel app is the single deployable unit: this build writes
 // straight into backend/public/build, and Laravel's catch-all route
@@ -76,6 +97,9 @@ export default defineConfig(({ command }) => ({
             },
         }),
     ],
+    define: {
+        __BUILD_STAMP__: JSON.stringify(buildStamp),
+    },
     resolve: {
         alias: {
             '@': path.resolve(__dirname, 'src'),
