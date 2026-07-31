@@ -3,15 +3,21 @@
 namespace App\Modules\Production\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Production\Http\Requests\AttachProductionStandardItemRequest;
 use App\Modules\Production\Http\Requests\ImportProductionStandardsRequest;
+use App\Modules\Production\Http\Requests\StoreProductionStandardRequest;
 use App\Modules\Production\Models\ProductionStandard;
 use App\Modules\Production\Services\ProductionStandardImportService;
+use App\Modules\Production\Services\ProductionStandardService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class ProductionStandardController extends Controller
 {
-    public function __construct(private readonly ProductionStandardImportService $import) {}
+    public function __construct(
+        private readonly ProductionStandardImportService $import,
+        private readonly ProductionStandardService $standards,
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -68,6 +74,74 @@ class ProductionStandardController extends Controller
             ->values();
 
         return response()->json(['data' => $rows]);
+    }
+
+    /**
+     * The Tally items this standard's factory product name most resembles.
+     *
+     * 62 standards carry no item, and the page has to offer a way to finish
+     * that job without a re-import. The ranking is the import diagnostic's own
+     * — same scoring, same size-first ordering — so the app and the console
+     * never disagree about the same question.
+     *
+     * `attached_to_same_product` is the one thing the ranking cannot know and
+     * the person choosing needs: whether another standard of THIS product name
+     * already points at that item. It is not a refusal — a mould covers every
+     * colour of its bottle, and two variants legitimately share an item — but
+     * seeing it is how a supervisor tells "the sibling variant" from "I am
+     * about to pick the wrong bottle".
+     */
+    public function itemCandidates(ProductionStandard $standard): JsonResponse
+    {
+        $candidates = $this->import->itemCandidates((string) $standard->source_product_name);
+
+        $takenByThisProduct = ProductionStandard::query()
+            ->where('source_product_name', $standard->source_product_name)
+            ->whereKeyNot($standard->getKey())
+            ->whereNotNull('item_id')
+            ->pluck('item_id')
+            ->all();
+
+        return response()->json([
+            'data' => [
+                'standard_id' => $standard->id,
+                'source_product_name' => $standard->source_product_name,
+                'candidates' => array_map(fn (array $candidate) => $candidate + [
+                    'attached_to_same_product' => in_array($candidate['id'], $takenByThisProduct, true),
+                ], $candidates),
+            ],
+        ]);
+    }
+
+    /**
+     * Attach a Tally item to a standard that has none.
+     *
+     * No detach counterpart, deliberately. Detaching would leave a row the
+     * importer then treats as unmatched, and its orphan-adoption rule would
+     * re-attach it on the next import of the workbook — so a detach would
+     * appear to work and then silently undo itself. Until there is a way to
+     * record "this row is deliberately unattached" that survives an import,
+     * offering the button would be offering a lie.
+     */
+    public function attachItem(AttachProductionStandardItemRequest $request, ProductionStandard $standard): JsonResponse
+    {
+        $standard = $this->standards->attachItem(
+            $standard,
+            (int) $request->validated()['item_id'],
+            $request->user(),
+        );
+
+        return response()->json(['data' => $standard]);
+    }
+
+    /**
+     * Add a standard for a product the workbook never carried.
+     */
+    public function store(StoreProductionStandardRequest $request): JsonResponse
+    {
+        $standard = $this->standards->create($request->validated(), $request->user());
+
+        return response()->json(['data' => $standard], 201);
     }
 
     /**

@@ -2,6 +2,7 @@ import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
 import type {
     ProductionStandardRow,
+    StandardItemCandidate,
     BatchPreview,
     BinBayAvailabilityResponse,
     BinBayHistoryRow,
@@ -304,18 +305,115 @@ export interface StandardCoverageRow {
 }
 
 /**
- * The imported factory product master, paginated. Read-only — the only writer
- * is the import command, so this is a window onto master data rather than an
- * editing surface.
+ * The imported factory product master, paginated.
+ *
+ * The standards index returns a RAW Laravel paginator
+ * (`response()->json($standards)`), which puts `total`/`current_page` at the
+ * top level — there is no `meta` envelope, unlike every endpoint here that
+ * goes through a JsonResource collection. Readers that trusted `meta.total`
+ * silently fell back to "however many rows came back", which pinned the pager
+ * at one page and made the tail of a 103-row master unreachable.
+ *
+ * So normalise here rather than at each call site, and accept both shapes:
+ * the day the backend wraps this in a ProductionStandardResource, `meta`
+ * appears and this keeps working untouched.
  */
+type WirePage<T> = { data: T[]; meta?: Paginated<T>['meta'] } & Partial<Paginated<T>['meta']>;
+
 export async function listProductionStandards(params: {
     page?: number;
     per_page?: number;
     status?: string;
     matched_only?: boolean;
 } = {}): Promise<Paginated<ProductionStandardRow>> {
-    const { data } = await api.get<Paginated<ProductionStandardRow>>('/production/standards', { params });
-    return data;
+    const { data } = await api.get<WirePage<ProductionStandardRow>>('/production/standards', { params });
+    const rows = data.data ?? [];
+
+    return {
+        data: rows,
+        meta: data.meta ?? {
+            current_page: data.current_page ?? 1,
+            last_page: data.last_page ?? 1,
+            per_page: data.per_page ?? rows.length,
+            total: data.total ?? rows.length,
+        },
+    };
+}
+
+/**
+ * Tally items that might be the one an unattached standard means, scored by
+ * name similarity — the same machinery the import's `--diagnose` prints, asked
+ * one row at a time.
+ *
+ * Deliberately NOT fetched per table row: the backend re-queries every active
+ * item on each call with no caching, so this belongs behind an opened dialog,
+ * never in a column render.
+ */
+export async function listStandardItemCandidates(standardId: number): Promise<StandardItemCandidate[]> {
+    const { data } = await api.get<{
+        data: { standard_id: number; source_product_name: string; candidates: StandardItemCandidate[] };
+    }>(`/production/standards/${standardId}/item-candidates`);
+    return data.data?.candidates ?? [];
+}
+
+/**
+ * Attach a Tally item to a standard that has none.
+ *
+ * The row must KEEP ITS IDENTITY — the import's adoption rule exists because a
+ * variant imported unlinked and linked later has to become the linked row
+ * rather than gain a sibling, or the same mould shows twice (once attached,
+ * once "not attached"). That rule lives in the backend; this endpoint is the
+ * by-hand equivalent of it.
+ */
+export async function attachStandardItem(standardId: number, itemId: number): Promise<ProductionStandardRow> {
+    const { data } = await api.post<{ data: ProductionStandardRow }>(
+        `/production/standards/${standardId}/attach-item`,
+        { item_id: itemId },
+    );
+    return data.data;
+}
+
+/**
+ * Add a product standard by hand — for a product the workbook does not carry,
+ * so it can be set up without waiting for a re-import.
+ *
+ * FLAT, not a nested `packagings` array: the packing counts use the importer's
+ * own row-key names so the backend derives the packaging rows from them with
+ * the same code path the workbook import uses. One derivation, so a hand-added
+ * product cannot end up packed by different arithmetic than an imported one.
+ *
+ * Cavities, weight and cycle time are REQUIRED here while the importer accepts
+ * them blank — the importer must not lose a real product over a blank cell,
+ * but a person filling in a form can simply be told which figure is missing.
+ * Every expected-output number is derived from those three.
+ *
+ * `item_id` is left off by the page on purpose: a hand-added standard starts
+ * unattached and gains its item through the same candidates-and-confirm flow
+ * as an imported one, so there is exactly one way that decision is ever made.
+ */
+export interface CreateProductionStandardPayload {
+    source_product_name: string;
+    cavities: number;
+    unit_weight_grams: number;
+    cycle_time: number;
+    item_id?: number | null;
+    carton_spec?: string | null;
+    tray_spec?: string | null;
+    pouch_spec?: string | null;
+    nos_per_pouch?: number | null;
+    pouches_per_box?: number | null;
+    pouch_nos_per_box?: number | null;
+    nos_per_tray?: number | null;
+    trays_per_box?: number | null;
+    tray_nos_per_box?: number | null;
+    notes?: string | null;
+}
+
+export async function createProductionStandard(
+    payload: CreateProductionStandardPayload,
+): Promise<ProductionStandardRow> {
+    const { data } = await api.post<{ data: ProductionStandardRow }>('/production/standards', payload);
+    return data.data;
 }
 
 export async function listStandardCoverage(): Promise<{ data: StandardCoverageRow[] }> {

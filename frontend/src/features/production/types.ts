@@ -1191,6 +1191,82 @@ export interface ProductionStandardRow {
     source_reference: string | null;
     confirmation_status: string | null;
     packagings: StandardPackaging[];
+
+    /**
+     * WHERE each packing-material spec came from, keyed by the column it
+     * describes — `carton_spec`, `tray_spec`, `pouch_spec`. A column ABSENT
+     * from the map came from the workbook verbatim and needs no caveat.
+     *
+     * The workbook leaves these blank on some rows and the factory fills them
+     * by knowing the family ("375ML KIDNEY packs in the same carton as the
+     * 500ML KIDNEY"). The inference is recorded alongside the value rather
+     * than inside it — writing "HM 30.5*49 (inferred)" into the string would
+     * corrupt the value the packing-materials build is about to consume — so
+     * this map is the only thing that can tell a guess from a stated figure.
+     *
+     * Optional: a backend that has not run the fill omits it, and every cell
+     * then renders as plain text.
+     */
+    spec_provenance?: Partial<Record<StandardSpecColumn, StandardSpecProvenance>> | null;
+
+    /**
+     * Who attached the Tally item to this standard, and when.
+     *
+     * `item_attached_by` is a users FK, so it serialises as a bare id unless
+     * the relation is eager-loaded — hence the union. The page shows a NAME or
+     * nothing: "attached by 7" is worse than silence.
+     */
+    item_attached_by?: number | { id: number; name?: string | null } | null;
+    item_attached_at?: string | null;
+}
+
+/** The three workbook columns an inference may ever fill. */
+export type StandardSpecColumn = 'carton_spec' | 'tray_spec' | 'pouch_spec';
+
+/**
+ * One packing spec's origin, exactly as the backend stores it. `inferred` is
+ * only ever true today — a stated value has no entry at all — but it is read
+ * rather than assumed, so a later "confirmed by the factory" entry can be
+ * recorded here without this page mislabelling it as a guess.
+ */
+export interface StandardSpecProvenance {
+    inferred?: boolean;
+    value?: string;
+    /** The SL.NO. of the row the fill was taken from, e.g. "58". */
+    from_source_reference?: string;
+    /** That row's product name, e.g. "500ML KIDNEY". */
+    from_product?: string;
+    /** The evidence, in a sentence — shown to the person reading the cell. */
+    reason?: string;
+    inferred_by?: string;
+    inferred_on?: string;
+}
+
+/**
+ * A Tally item the backend offers as a possible match for an unattached
+ * standard, scored by NAME SIMILARITY ONLY (the import's --diagnose
+ * machinery: PHP `similar_text` over normalised names, plus whether the
+ * leading size token agrees). It is a shortlist to read, never a decision —
+ * the person attaching makes that.
+ */
+export interface StandardItemCandidate {
+    /** The item's id — the value the attach endpoint takes. */
+    id: number;
+    name: string;
+    sku?: string | null;
+    /** 0–100. Higher is a closer NAME, not a more correct product. */
+    score: number;
+    /** The leading size figure agrees, e.g. "500" in both "500ML ROUND" names. */
+    same_size?: boolean;
+    /**
+     * Another standard of this same product name already points at this item.
+     *
+     * Not a refusal — one mould covers every colour of its bottle, so two
+     * variants legitimately share an item. It is the one thing name-similarity
+     * cannot know, and it is how a person tells "this is the sibling variant"
+     * from "I am about to pick the wrong bottle".
+     */
+    attached_to_same_product?: boolean;
 }
 
 // ---------------------------------------------------------------------------

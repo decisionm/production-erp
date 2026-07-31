@@ -4,6 +4,7 @@ namespace App\Modules\Production\Services;
 
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Production\Data\MouldItemMap;
+use App\Modules\Production\Data\PackingSpecInferences;
 use App\Modules\Production\Data\ProductMasterCorrections;
 use App\Modules\Production\Models\ProductionStandard;
 use App\Modules\Production\Models\ProductionStandardPackaging;
@@ -267,18 +268,31 @@ class ProductionStandardImportService
                             'unresolved_notes' => $unresolved,
                             'source_reference' => (string) ($row['sl_no'] ?? ''),
                             // Packaging-material specs from the sheet's three
-                            // right-hand columns. First non-blank wins: a
-                            // pouch row and its tray sibling describe the same
-                            // product, so a later row must not blank a spec an
-                            // earlier one supplied.
-                            'carton_spec' => $this->textOrNull($row['carton_spec'] ?? null),
-                            'tray_spec' => $this->textOrNull($row['tray_spec'] ?? null),
-                            'pouch_spec' => $this->textOrNull($row['pouch_spec'] ?? null),
+                            // right-hand columns, filled by the loop below.
+                            'carton_spec' => null,
+                            'tray_spec' => null,
+                            'pouch_spec' => null,
+                            // Which of those three, if any, this software
+                            // inferred rather than read. See PackingSpecInferences.
+                            'spec_provenance' => [],
                             'packagings' => [],
                         ];
-                    } else {
-                        foreach (['carton_spec', 'tray_spec', 'pouch_spec'] as $specKey) {
-                            $variants[$key][$specKey] ??= $this->textOrNull($row[$specKey] ?? null);
+                    }
+
+                    // First non-blank wins, and this runs on the first sighting
+                    // AND on every sibling row — a pouch row and its tray
+                    // sibling describe the same product, so whichever of them
+                    // carries the spec supplies it and the other must not blank
+                    // it back out.
+                    foreach ($this->specsFromRow($row) as $specKey => $spec) {
+                        if ($variants[$key][$specKey] !== null || $spec['value'] === null) {
+                            continue;
+                        }
+
+                        $variants[$key][$specKey] = $spec['value'];
+
+                        if ($spec['provenance'] !== null) {
+                            $variants[$key]['spec_provenance'][$specKey] = $spec['provenance'];
                         }
                     }
 
@@ -438,6 +452,12 @@ class ProductionStandardImportService
                     $sameSize = $size !== null && preg_match('/\b'.preg_quote($size, '/').'\s*(ml|cc|gm|gms)?\b/', $name) === 1;
 
                     return [
+                        // The id rides along so the same ranking can be OFFERED
+                        // (the standards page attaches one of these) and not
+                        // only printed. Resolving the name back to an id at the
+                        // far end would pick a coin-flip winner wherever the
+                        // catalogue spells two items alike.
+                        'id' => $item->id,
                         'name' => (string) $item->name,
                         'sku' => (string) $item->sku,
                         'score' => (int) round($percent),
@@ -458,6 +478,57 @@ class ProductionStandardImportService
             'sample_item_names' => $products->take(10)->pluck('name')->map(fn ($n) => (string) $n)->all(),
             'unmatched' => $unmatched,
         ];
+    }
+
+    /**
+     * The catalogue items one factory product name most resembles.
+     *
+     * The standards page's "which Tally item is this?" list. Deliberately the
+     * SAME ranking the import's --diagnose path prints, obtained by calling it
+     * rather than by re-deriving it: a suggestion list that scores differently
+     * from the diagnostic would make the two disagree about the same question
+     * in front of the same person.
+     *
+     * The one thing it adds is the exact match. matchReport() reports what did
+     * NOT match and skips a family the catalogue already carries verbatim —
+     * correct for a diagnostic, useless for a picker, which must still offer
+     * the obvious answer. That case is prepended at 100.
+     *
+     * @return list<array{id: int, name: string, sku: string, score: int, same_size: bool}>
+     */
+    public function itemCandidates(string $product): array
+    {
+        // No sl_no: a synthetic row must not pick up a factory correction or a
+        // packing-spec inference filed against whatever row number it landed on.
+        $report = $this->matchReport([['product' => $product]]);
+
+        $candidates = $report['unmatched'][0]['candidates'] ?? [];
+
+        $exact = Item::query()
+            ->where('is_active', true)
+            ->get(['id', 'name', 'sku'])
+            ->first(fn (Item $item) => $this->normaliseName((string) $item->name) === $this->normaliseName($product));
+
+        if ($exact !== null) {
+            array_unshift($candidates, [
+                'id' => $exact->id,
+                'name' => (string) $exact->name,
+                'sku' => (string) $exact->sku,
+                'score' => 100,
+                'same_size' => true,
+            ]);
+        }
+
+        $seen = [];
+
+        return array_values(array_filter($candidates, function (array $candidate) use (&$seen) {
+            if (isset($seen[$candidate['id']])) {
+                return false;
+            }
+            $seen[$candidate['id']] = true;
+
+            return true;
+        }));
     }
 
     /**
@@ -643,11 +714,41 @@ class ProductionStandardImportService
                     }
                 }
 
+                // The mirror image, and it appeared the moment the standards
+                // page grew an "attach a Tally item" button: a row the importer
+                // cannot match (targets = [null]) whose item was attached BY A
+                // PERSON in the app. The lookup above asks for item_id null,
+                // does not find it any more, and inserts a fresh unlinked
+                // sibling — so the page shows the mould twice, once attached
+                // and once "not attached", one re-import after somebody did the
+                // work. Reuse the row instead: a person's decision outranks the
+                // importer's inability to guess.
+                //
+                // Narrow on purpose. Only when the importer matched NOTHING,
+                // and only against a row stamped with item_attached_at, which
+                // nothing but the attach endpoint writes.
+                if (! $standard->exists && $item === null) {
+                    $attached = ProductionStandard::withTrashed()
+                        ->whereNotNull('item_attached_at')
+                        ->where([
+                            'source_product_name' => $variant['source_product_name'],
+                            'cavities' => $variant['cavities'],
+                            'unit_weight_grams' => $variant['unit_weight_grams'],
+                            'cycle_time' => $variant['cycle_time'],
+                        ])
+                        ->first();
+
+                    if ($attached !== null) {
+                        $standard = $attached;
+                    }
+                }
+
                 $standard->fill([
                     'cycle_time_raw' => $variant['cycle_time_raw'],
                     'carton_spec' => $variant['carton_spec'],
                     'tray_spec' => $variant['tray_spec'],
                     'pouch_spec' => $variant['pouch_spec'],
+                    'spec_provenance' => $variant['spec_provenance'] === [] ? null : $variant['spec_provenance'],
                     'status' => $variant['status'],
                     'unresolved_reason' => $variant['unresolved_reason'],
                     'source' => 'ERPPRO29072026',
@@ -687,12 +788,58 @@ class ProductionStandardImportService
     }
 
     /**
+     * The three packing-material specs a source row supplies, each with its
+     * provenance when it did not come from the sheet.
+     *
+     * The sheet's own value always wins. An inference is consulted ONLY where
+     * the cell is blank, and when one is used it is carried alongside the value
+     * rather than baked into it — the string has to stay exactly what a
+     * supervisor would read off a carton.
+     *
+     * Applying inferences here rather than only in a data migration is what
+     * makes a re-import reproduce them. Without it the importer's `fill()`
+     * would write the workbook's blank straight back over a filled cell, and
+     * the specs would quietly disappear the next time the factory sends a
+     * master.
+     *
+     * @param  array<string, mixed>  $row
+     * @return array<string, array{value: ?string, provenance: ?array<string, mixed>}>
+     */
+    private function specsFromRow(array $row): array
+    {
+        $inferred = PackingSpecInferences::forRow($row) ?? [];
+        $out = [];
+
+        foreach (PackingSpecInferences::SPEC_COLUMNS as $column) {
+            $stated = $this->textOrNull($row[$column] ?? null);
+
+            if ($stated !== null || ! isset($inferred[$column])) {
+                $out[$column] = ['value' => $stated, 'provenance' => null];
+
+                continue;
+            }
+
+            $out[$column] = [
+                'value' => $this->textOrNull($inferred[$column]['value']),
+                'provenance' => PackingSpecInferences::provenance($inferred[$column]),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
      * Packaging options present on one source row.
+     *
+     * Public because the hand-add path on the standards page derives its
+     * packaging rows from exactly the same counts, and re-deriving
+     * containers-per-box in a second place is how the two answers start to
+     * disagree — see innersPerBox() for the case where they already did.
      *
      * @param  array<string, mixed>  $row
      * @return list<array<string, mixed>>
      */
-    private function packagings(array $row): array
+    public function packagings(array $row): array
     {
         $out = [];
 

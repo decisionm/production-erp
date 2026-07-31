@@ -17,13 +17,17 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 #[Fillable([
     'item_id', 'source_product_name', 'cavities', 'unit_weight_grams',
     'cycle_time', 'cycle_time_raw', 'carton_spec', 'tray_spec', 'pouch_spec',
-    'status', 'unresolved_reason',
+    'spec_provenance', 'status', 'unresolved_reason',
     'source', 'source_reference', 'confirmation_status', 'notes',
     'approved_by', 'approved_at', 'created_by',
+    'item_attached_by', 'item_attached_at',
 ])]
 class ProductionStandard extends Model
 {
     use SoftDeletes;
+
+    /** A standard added by hand in the app, not read out of the factory workbook. */
+    public const SOURCE_MANUAL = 'MANUAL';
 
     protected function casts(): array
     {
@@ -32,6 +36,8 @@ class ProductionStandard extends Model
             'unit_weight_grams' => 'decimal:4',
             'cycle_time' => 'decimal:2',
             'approved_at' => 'datetime',
+            'spec_provenance' => 'array',
+            'item_attached_at' => 'datetime',
         ];
     }
 
@@ -48,6 +54,11 @@ class ProductionStandard extends Model
     public function approvedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'approved_by');
+    }
+
+    public function itemAttachedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'item_attached_by');
     }
 
     /** A short human label distinguishing sibling variants of one product. */

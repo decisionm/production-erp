@@ -28,7 +28,14 @@ namespace App\Modules\Production\Data;
  * resolves under test — a person can read this file against the owner's
  * message and check every number without running anything.
  *
- * Open with the factory before this reaches a voucher:
+ * ANSWERED by the owner, 31 Jul 2026 evening:
+ *  - Tape is dosed in METRES PER BOX — this table's unit, confirmed.
+ *  - FILM IS PER CARTON: the pouch film ("the final pouch is like the cover
+ *    for all") wraps the carton's contents once, so film consumption counts
+ *    CARTONS, not pouches. Recorded here because this file is where the
+ *    packing-materials build starts reading.
+ *
+ * Still open with the factory before tape reaches a voucher:
  *  - Tally's tape items are counted in "Nos" on the daily Stock Journals
  *    (e.g. "Packing Tape - Transparent 720 Nos"). Is a "No" a metre, or a
  *    piece/strip? The conversion from metres depends on the answer.
