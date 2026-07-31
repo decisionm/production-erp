@@ -227,7 +227,15 @@ class ImportMachineConfigurations extends Command
         }
 
         $this->newLine();
-        $this->line('Every imported row is DRAFT. Drafts never affect a run — approve them on the Configuration page.');
+
+        // Must follow --approve. This line said "every imported row is DRAFT"
+        // unconditionally, so the run that actually approved 46 rows on the
+        // live instance closed by announcing it had approved none — the one
+        // sentence an operator reads to know what just happened, contradicting
+        // the thing that just happened.
+        $this->line($this->option('approve')
+            ? 'Rows this import wrote are APPROVED and now govern the floor. Rows a person had already approved or retired were left untouched.'
+            : 'Every imported row is DRAFT. Drafts never affect a run — approve them on the Configuration page.');
 
         return self::SUCCESS;
     }

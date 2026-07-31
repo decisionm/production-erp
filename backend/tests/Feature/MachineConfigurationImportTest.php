@@ -207,6 +207,23 @@ class MachineConfigurationImportTest extends TestCase
         );
     }
 
+    public function test_the_closing_line_says_what_the_import_actually_did(): void
+    {
+        // The operator's one-line summary. It used to announce "every imported
+        // row is DRAFT" even on an --approve run that had just approved every
+        // row, which is the only sentence someone reads to know whether the
+        // floor changed.
+        $this->seedFloor();
+
+        $this->artisan('production:import-machine-configurations --write --approve')
+            ->expectsOutputToContain('APPROVED and now govern the floor')
+            ->assertExitCode(0);
+
+        $this->artisan('production:import-machine-configurations --write')
+            ->expectsOutputToContain('is DRAFT')
+            ->assertExitCode(0);
+    }
+
     public function test_a_row_a_person_already_touched_survives_a_bulk_approve(): void
     {
         // Bulk approval must never overwrite an individual decision — a row
