@@ -243,6 +243,44 @@ class StockMovementService
             ->first()?->average_cost ?? '0.0000');
     }
 
+    /**
+     * Every ISSUE movement stamped with one reference (e.g. "SPE #12") —
+     * the cross-module read Production uses to price a completed batch's
+     * consumption lines off the unit_cost each issue recorded at the moment
+     * it happened. The reference alone is NOT unique (the same entry's FG
+     * receipt shares it), so callers match further by item/warehouse.
+     *
+     * @return Collection<int, StockMovement>
+     */
+    public function issuesForReference(string $reference): Collection
+    {
+        return StockMovement::query()
+            ->where('reference', $reference)
+            ->where('type', StockMovementType::Issue)
+            ->orderBy('id')
+            ->get();
+    }
+
+    /**
+     * Every transfer INTO one warehouse on one calendar date, newest first,
+     * with item and the acting user loaded — the "today's loads into the
+     * factory day bin" read. Filtered on type+warehouse+date, never on the
+     * reference string: manual transfer forms may leave reference empty.
+     *
+     * @return Collection<int, StockMovement>
+     */
+    public function transfersIntoWarehouseOn(int $warehouseId, string $date): Collection
+    {
+        return StockMovement::query()
+            ->with(['item', 'createdBy'])
+            ->where('warehouse_id', $warehouseId)
+            ->where('type', StockMovementType::TransferIn)
+            ->whereDate('movement_date', $date)
+            ->orderByDesc('movement_date')
+            ->orderByDesc('id')
+            ->get();
+    }
+
     public function paginateMovements(?int $itemId = null, ?int $warehouseId = null, int $perPage = 20): LengthAwarePaginator
     {
         return StockMovement::query()

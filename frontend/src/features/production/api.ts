@@ -26,6 +26,7 @@ import type {
     MrpNetRequirement,
     PowerInterruptionLog,
     ProductionReport,
+    RawMaterialOption,
     ReconciliationReportRow,
     ReworkOrder,
     Routing,
@@ -1108,4 +1109,18 @@ export interface LoadFactoryDayBinPayload {
  */
 export async function loadFactoryDayBin(payload: LoadFactoryDayBinPayload): Promise<void> {
     await api.post('/inventory/stock-movements/transfers', payload);
+}
+
+/**
+ * The materials the Day Bin page may load — raw material only (resin,
+ * masterbatch: everything bought by the kg), NEVER the bottle list.
+ *
+ * The backend decides what counts: this is the day bin's own picker route,
+ * which returns active kg-uom items with their current store kg. The kg filter
+ * is deliberately not re-derived here — one definition of "raw material",
+ * server-side, is why the endpoint exists.
+ */
+export async function listRawMaterials(): Promise<RawMaterialOption[]> {
+    const { data } = await api.get<{ data: RawMaterialOption[] }>('/production/factory-day-bin/raw-materials');
+    return data.data;
 }

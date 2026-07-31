@@ -6,7 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Modules\Inventory\Http\Resources\MaterialBagResource;
 use App\Modules\Inventory\Http\Resources\WarehouseResource;
 use App\Modules\Production\Http\Requests\LoadFactoryDayBinBagRequest;
+use App\Modules\Production\Http\Resources\FactoryDayBinLoadResource;
 use App\Modules\Production\Http\Resources\FactoryDayBinMaterialResource;
+use App\Modules\Production\Http\Resources\FactoryDayBinSummaryResource;
+use App\Modules\Production\Http\Resources\RawMaterialPickerResource;
 use App\Modules\Production\Services\FactoryDayBinService;
 use Illuminate\Http\JsonResponse;
 
@@ -38,7 +41,24 @@ class FactoryDayBinController extends Controller
                 ? WarehouseResource::make($snapshot['warehouse'])
                 : null,
             'materials' => FactoryDayBinMaterialResource::collection($snapshot['materials']),
+            // The owner's one-look block: per raw material bin vs store vs
+            // bags, plus every load into the bin today. Both empty until a
+            // bin is configured — same "normal state" rule as warehouse:null.
+            'summary' => FactoryDayBinSummaryResource::collection($snapshot['summary']),
+            'todays_loads' => FactoryDayBinLoadResource::collection($snapshot['todays_loads']),
         ]]);
+    }
+
+    /**
+     * The Day Bin page's picker: active kg-uom items (the raw materials —
+     * resin and masterbatch count in kg; bottles and caps count in Nos and
+     * never appear) with their current store kg.
+     */
+    public function rawMaterials(): JsonResponse
+    {
+        return response()->json([
+            'data' => RawMaterialPickerResource::collection($this->dayBin->rawMaterials()),
+        ]);
     }
 
     /**

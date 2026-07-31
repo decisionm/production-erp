@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Drawer, InputNumber, message, Modal, Select, Space, Table, Tag, Typography } from 'antd';
-import { useEffect, useState } from 'react';
-import BarcodeScanInput from '@/components/barcode/BarcodeScanInput';
+import { Alert, Button, Drawer, InputNumber, message, Select, Space, Typography } from 'antd';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getDayBin, getMaterialBagPickList, returnDayBin } from '@/features/production/api';
-import type { DayBinLoadedBag, ShiftProductionEntry, WorkCenter } from '@/features/production/types';
+import { listAllWarehouses } from '@/features/inventory/api';
+import { getFactoryDayBin, loadFactoryDayBin } from '@/features/production/api';
+import type { FactoryDayBinMaterial, FactoryDayBinSummaryRow } from '@/features/production/types';
 import { itemLabel } from '@/lib/itemLabel';
 
 /** "10.6000" → "10.6"; "—" for null/unparseable. */
@@ -14,252 +14,306 @@ function fmtKg(v: string | null | undefined): string {
     return Number.isNaN(n) ? '—' : String(parseFloat(n.toFixed(4)));
 }
 
+function toNum(v: string | null | undefined): number {
+    const n = parseFloat(v ?? '');
+    return Number.isNaN(n) ? 0 : n;
+}
+
+/** The warehouse material normally goes back to — the main/raw-material store. */
+function guessStoreWarehouseId(
+    warehouses: { id: number; code: string; name: string; is_active: boolean }[],
+    dayBinId: number | null,
+): number | undefined {
+    const candidates = warehouses.filter((w) => w.is_active && w.id !== dayBinId);
+    const named = candidates.find((w) => /\bstore\b|\bmain\b|\braw\b|\brm\b/i.test(`${w.code} ${w.name}`));
+
+    return (named ?? candidates[0])?.id;
+}
+
 interface DayBinDrawerProps {
-    workCenter: WorkCenter | null;
-    /** The running segment movements attach to — null when the machine is idle. */
-    entry: ShiftProductionEntry | null;
     open: boolean;
     onClose: () => void;
 }
 
 /**
- * The per-machine day-bin ledger (Phase 6 traceability). Rendered ONLY when
- * settings.traceability_enabled is true — the parent gates it, so with the
- * flag off this file contributes nothing to the visible UI.
+ * THE FACTORY DAY BIN, seen from the machine card. ONE bin feeds all ten
+ * machines by crane — there is no per-machine bin, so this drawer takes no
+ * work center and never puts a machine name in its title. It used to read
+ * GET /production/work-centers/{id}/day-bin and call itself
+ * "Day Bin — Machine 1", which is the thing the owner rejected outright.
  *
- * LOADING IS NOT DONE HERE. Bags are scanned into a machine's day bin once, at
- * the central bay, on the PET Resin Bag Loading page. This drawer used to offer
- * a Load mode as well, which made the production floor a second place to do the
- * same thing — and asking the same question twice is how the bin and the batch
- * end up disagreeing about what is in the machine. The factory's own workflow
- * spec requires the duplicate control to be gone from production pages, leaving
- * them a read-only view of the balance.
+ * The read is the SAME single source the Day Bin page uses —
+ * getFactoryDayBin() / GET /production/factory-day-bin, on the same query key
+ * so both surfaces refresh together:
+ *   materials  the bin warehouse's own stock balances (kg in the bin now),
+ *   summary    per raw material, bin vs store kg plus the registered bags
+ *              still holding material — rendered only where the backend
+ *              sends it (a row with no summary shows the bin figure alone,
+ *              never a "0 kg in store" it cannot know).
  *
- * What remains is per-machine by nature and has no equivalent at the bay:
- *   Return — POST /production/day-bin/return; kg + material required, the bag
- *            optional (a scan resolves it to material_bag_id — the backend
- *            takes ids, not barcodes, on returns)
- *   Balance and bag list — read-only, and the figures Complete Batch's
- *            closing-weight prefill reads from the same ledger.
+ * LOADING IS NOT DONE HERE and is not done per machine: bags are scanned in
+ * once for the whole factory with Load Material on the Shift Floor (or on the
+ * Day Bin page). Balances here are read-only.
  *
- * Scanner-gun-first: the barcode input is a plain autofocused text field
- * (hardware scanners type + Enter), with camera scan as BarcodeScanInput's
- * built-in fallback.
+ * RETURNS — material coming back out of the bin — are a real need and stay,
+ * central like everything else: a plain stock transfer day-bin warehouse →
+ * store, the exact mirror of the load, through Inventory's existing transfer
+ * endpoint (loadFactoryDayBin, the same function the Day Bin page's manual
+ * load posts).
+ *
+ * Why NOT POST /production/day-bin/return: that endpoint appends to the
+ * PER-MACHINE day_bin_movements ledger, whose `return` rows are load-bearing
+ * (DayBinLedgerService::consumptionFor subtracts returned_kg, segmentHeadroom
+ * caps closing counts by it, and four backend test files assert it) — so the
+ * ledger and every reader of it are left completely untouched. But it cannot
+ * serve the central bin: it requires a work_center_id this drawer no longer
+ * has, and its guard refuses any return above balanceFor(machine, item),
+ * which is 0.0000 now that loads are central (POST /day-bin/load-bag writes a
+ * warehouse transfer and deliberately no ledger row). A ledger return here
+ * would fail every time.
  */
-export default function DayBinDrawer({ workCenter, entry, open, onClose }: DayBinDrawerProps) {
-    const [weighedKg, setWeighedKg] = useState<number | null>(null);
+export default function DayBinDrawer({ open, onClose }: DayBinDrawerProps) {
     const [returnItemId, setReturnItemId] = useState<number | null>(null);
+    const [returnWarehouseId, setReturnWarehouseId] = useState<number | null>(null);
+    const [returnKg, setReturnKg] = useState<number | null>(null);
     const queryClient = useQueryClient();
 
+    // The one central read — same key as the Day Bin page, so a load done
+    // there is on screen here and vice versa.
     const { data: dayBin, isLoading } = useQuery({
-        queryKey: ['production', 'day-bin', workCenter?.id],
-        queryFn: () => getDayBin(workCenter!.id),
-        enabled: open && workCenter !== null,
+        queryKey: ['production', 'factory-day-bin'],
+        queryFn: getFactoryDayBin,
+        enabled: open,
         refetchInterval: 20000,
     });
 
+    // Where a return goes. Inventory's read: a production-only login 403s on
+    // it, which is a normal answer — balances still show, the return form
+    // just says why it cannot offer a destination.
+    const { data: warehouses, isError: warehousesUnavailable } = useQuery({
+        queryKey: ['inventory', 'warehouses', 'all'],
+        queryFn: listAllWarehouses,
+        enabled: open,
+        retry: false,
+    });
+
+    const binWarehouse = dayBin?.warehouse ?? null;
     const materials = dayBin?.materials ?? [];
 
-    // Returns need a material; when only one is in the bin it IS the answer.
+    /**
+     * summary keyed by item_id — joined by id, never by position: `materials`
+     * is every balance row in the bin warehouse (zero rows kept) while
+     * `summary` is the kg-uom raw materials in the bin OR the store, in name
+     * order. Different sets, different order.
+     */
+    const summaryByItem = useMemo(() => {
+        const map = new Map<number, FactoryDayBinSummaryRow>();
+        for (const row of dayBin?.summary ?? []) map.set(row.item_id, row);
+        return map;
+    }, [dayBin]);
+
+    const materialLabel = (m: FactoryDayBinMaterial) => (m.item ? itemLabel(m.item) : `Item #${m.item_id}`);
+
+    // A return needs a material; when only one is in the bin it IS the answer.
     useEffect(() => {
-        if (materials.length === 1 && returnItemId === null) {
-            setReturnItemId(materials[0].item.id);
-        }
+        if (materials.length === 1 && returnItemId === null) setReturnItemId(materials[0].item_id);
     }, [materials, returnItemId]);
 
-    const invalidate = () => {
-        queryClient.invalidateQueries({ queryKey: ['production', 'day-bin', workCenter?.id] });
-        if (entry) queryClient.invalidateQueries({ queryKey: ['production', 'entry-day-bin', entry.id] });
-    };
+    // The bin can never be its own destination — the transfer endpoint
+    // refuses from === to, so it must not be offerable.
+    const destinationOptions = useMemo(
+        () =>
+            (warehouses?.data ?? [])
+                .filter((w) => w.is_active && w.id !== binWarehouse?.id)
+                .map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })),
+        [warehouses, binWarehouse],
+    );
+
+    // Default the destination to the main store once the list lands, never
+    // overwriting a choice already made.
+    useEffect(() => {
+        if (!open || warehouses === undefined || returnWarehouseId !== null) return;
+        const storeId = guessStoreWarehouseId(warehouses.data, binWarehouse?.id ?? null);
+        if (storeId !== undefined) setReturnWarehouseId(storeId);
+    }, [open, warehouses, binWarehouse, returnWarehouseId]);
+
+    const selected = materials.find((m) => m.item_id === returnItemId) ?? null;
+    const availableKg = selected !== null ? toNum(selected.quantity_kg) : 0;
+    const overBalance = returnKg !== null && returnKg > availableKg;
 
     const returnMutation = useMutation({
-        mutationFn: returnDayBin,
-        onSuccess: (movement) => {
-            invalidate();
-            setWeighedKg(null);
-            const bag = movement.material_bag;
-            message.success(`Returned ${fmtKg(movement.quantity_kg)} kg${bag ? ` to bag ${bag.barcode}` : ''}`);
+        mutationFn: (values: { item_id: number; to_warehouse_id: number; quantity: number }) =>
+            loadFactoryDayBin({
+                item_id: values.item_id,
+                from_warehouse_id: binWarehouse!.id,
+                to_warehouse_id: values.to_warehouse_id,
+                quantity: values.quantity,
+                reference: 'Day bin return',
+            }),
+        onSuccess: (_data, values) => {
+            message.success(`Returned ${fmtKg(String(values.quantity))} kg to the store`);
+            setReturnKg(null);
+            queryClient.invalidateQueries({ queryKey: ['production', 'factory-day-bin'] });
+            queryClient.invalidateQueries({ queryKey: ['inventory', 'stock-balances'] });
         },
         onError: (error: any) => {
-            Modal.error({ title: 'Could not return material', content: error?.response?.data?.message ?? 'Unknown error' });
+            if (error?.response?.status === 403) {
+                message.error('You do not have permission to move stock (needs Inventory: Manage).');
+                return;
+            }
+            message.error(error?.response?.data?.message ?? 'Could not return the material');
         },
     });
 
-    /**
-     * Returns go to the backend by bag ID, so a scanned barcode is resolved
-     * locally: bags at this machine first (the aggregate lists them), then
-     * the item's in-store pick list (a partially loaded bag lives there).
-     */
-    const handleReturnScan = async (code: string) => {
-        if (!workCenter) return;
-        if (!weighedKg || weighedKg <= 0) {
-            message.warning('Enter the kg going back before scanning the bag.');
-            return;
-        }
-        for (const material of materials) {
-            const bag = material.loaded_bags.find((b) => b.barcode === code);
-            if (bag) {
-                returnMutation.mutate({
-                    work_center_id: workCenter.id,
-                    item_id: material.item.id,
-                    quantity_kg: weighedKg,
-                    material_bag_id: bag.id,
-                    shift_production_entry_id: entry?.id,
-                });
-                return;
-            }
-        }
-        if (returnItemId === null) {
-            message.warning('Pick the material first — that bag is not at this machine.');
-            return;
-        }
-        try {
-            const pickList = await getMaterialBagPickList(returnItemId);
-            const bag = pickList.find((b) => b.barcode === code);
-            if (!bag) {
-                Modal.error({
-                    title: 'Bag not found',
-                    content: `No bag with barcode "${code}" is at this machine or in the store for the selected material.`,
-                });
-                return;
-            }
-            returnMutation.mutate({
-                work_center_id: workCenter.id,
-                item_id: returnItemId,
-                quantity_kg: weighedKg,
-                material_bag_id: bag.id,
-                shift_production_entry_id: entry?.id,
-            });
-        } catch (error: any) {
-            Modal.error({ title: 'Could not look up the bag', content: error?.response?.data?.message ?? 'Unknown error' });
-        }
-    };
-
-    const submitting = returnMutation.isPending;
-
-    const loadedBags: (DayBinLoadedBag & { itemSku: string })[] = materials.flatMap((m) =>
-        m.loaded_bags.map((b) => ({ ...b, itemSku: m.item.sku })),
-    );
+    const canReturn =
+        binWarehouse !== null &&
+        returnItemId !== null &&
+        returnWarehouseId !== null &&
+        returnKg !== null &&
+        returnKg > 0 &&
+        !overBalance;
 
     return (
-        <Drawer
-            title={`Day Bin — ${workCenter?.name ?? ''}`}
-            open={open}
-            onClose={onClose}
-            width="min(100vw, 480px)"
-            destroyOnHidden
-        >
-            {entry ? (
-                <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-                    Running: <Typography.Text strong>{entry.item.sku}</Typography.Text>
-                    {entry.batch_number ? ` · Batch ${entry.batch_number}` : ''}
-                </Typography.Paragraph>
-            ) : (
-                <Alert
-                    type="warning"
-                    showIcon
-                    style={{ marginBottom: 12 }}
-                    message="No batch running — movements will be logged against the machine only."
-                />
-            )}
-
-            {/* Loading happens once, centrally. Naming where instead of just
-                refusing: a supervisor who finds no Load button here needs to
-                know the bay is the place, not go hunting. */}
+        <Drawer title="Day Bin — factory" open={open} onClose={onClose} width="min(100vw, 480px)" destroyOnHidden>
+            {/* One bin, one scan point. Naming WHERE rather than only refusing:
+                a supervisor who finds no Load button here needs to know the
+                factory scans material in once, not per machine. */}
             <Alert
                 type="info"
                 showIcon
                 style={{ marginBottom: 12 }}
-                message="Bags are loaded at the bay, not here"
+                message="One bin for all machines"
                 description={
                     <>
-                        Scan bags into this machine on the{' '}
-                        <Link to="/production/bin-bay">PET Resin Bag Loading</Link> page. This view is the
-                        balance, plus returning material that comes back out.
+                        Resin is scanned in once for the whole factory — use <Typography.Text strong>Load
+                        Material</Typography.Text> at the top of this Shift Floor page, not per machine. The{' '}
+                        <Link to="/production/day-bin">Day Bin page</Link> shows the full picture: what is in the bin,
+                        what is still in the store and everything loaded today. This drawer is the balance, plus
+                        sending material back to the store.
                     </>
                 }
             />
 
-            <Typography.Text strong>Return material to store</Typography.Text>
+            {binWarehouse === null && !isLoading && (
+                <Alert
+                    type="warning"
+                    showIcon
+                    style={{ marginBottom: 12 }}
+                    message="No day-bin warehouse named yet"
+                    description={
+                        <>
+                            Name the warehouse that is the factory day bin on the{' '}
+                            <Link to="/production/day-bin">Day Bin page</Link> — until then there is no balance to
+                            show and nothing to return.
+                        </>
+                    }
+                />
+            )}
+
+            <Typography.Text strong>In the bin now</Typography.Text>
+            {materials.length === 0 && (
+                <Typography.Paragraph type="secondary" style={{ marginTop: 4 }}>
+                    {isLoading
+                        ? 'Loading…'
+                        : binWarehouse === null
+                          ? 'Not configured.'
+                          : 'The day bin is empty — load material before starting a batch.'}
+                </Typography.Paragraph>
+            )}
+            {materials.map((m) => {
+                const summary = summaryByItem.get(m.item_id);
+                const bags = summary?.unopened_bags ?? null;
+                const unit = m.item?.uom ?? 'Kg';
+
+                return (
+                    <div key={m.item_id} style={{ padding: '6px 0' }}>
+                        <Space style={{ justifyContent: 'space-between', width: '100%' }}>
+                            <Typography.Text>{materialLabel(m)}</Typography.Text>
+                            <Typography.Text strong style={{ whiteSpace: 'nowrap' }}>
+                                {fmtKg(m.quantity_kg)} {unit}
+                            </Typography.Text>
+                        </Space>
+                        {/* Store kg and bags only where the backend actually
+                            sends the summary row — an unknown store balance
+                            must never read as an empty store. */}
+                        {summary !== undefined && (
+                            <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                                In store {fmtKg(summary.store_kg)} {unit}
+                                {bags !== null && bags !== undefined
+                                    ? ` · ${bags.count} unopened bag${bags.count === 1 ? '' : 's'} (${fmtKg(bags.kg)} ${unit})`
+                                    : ''}
+                            </Typography.Text>
+                        )}
+                    </div>
+                );
+            })}
+
+            <Typography.Text strong style={{ display: 'block', marginTop: 20 }}>
+                Return material to store
+            </Typography.Text>
+            <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginBottom: 8 }}>
+                Weigh what comes out of the bin. This moves it from the day bin back to the store — the mirror of
+                Load Material, not a consumption.
+            </Typography.Text>
+
+            {warehousesUnavailable && (
+                <Alert
+                    type="warning"
+                    showIcon
+                    style={{ marginBottom: 8 }}
+                    message="Cannot list the store warehouses with this login (needs Inventory access), so material cannot be returned from here."
+                />
+            )}
 
             <Select
                 value={returnItemId}
                 onChange={(v) => setReturnItemId(v)}
                 placeholder="Material going back"
-                style={{ width: '100%', marginBottom: 8, marginTop: 8 }}
-                options={materials.map((m) => ({ value: m.item.id, label: itemLabel(m.item) }))}
+                style={{ width: '100%', marginBottom: 8 }}
+                disabled={binWarehouse === null || materials.length === 0}
+                options={materials.map((m) => ({ value: m.item_id, label: materialLabel(m) }))}
             />
 
-            <BarcodeScanInput
-                onScan={(code) => void handleReturnScan(code)}
-                placeholder="Scan bag to return to (optional)…"
-                style={{ marginBottom: 8 }}
+            <Select
+                value={returnWarehouseId}
+                onChange={(v) => setReturnWarehouseId(v)}
+                placeholder="Store it goes back to"
+                style={{ width: '100%', marginBottom: 8 }}
+                disabled={binWarehouse === null || destinationOptions.length === 0}
+                options={destinationOptions}
             />
 
             <Space style={{ width: '100%', marginBottom: 4 }}>
                 <InputNumber
                     min={0}
                     step={0.1}
-                    value={weighedKg}
-                    onChange={(v) => setWeighedKg(v)}
+                    value={returnKg}
+                    onChange={(v) => setReturnKg(v)}
                     suffix="Kg"
                     style={{ width: 200 }}
                     placeholder="Kg going back"
+                    disabled={binWarehouse === null}
                 />
                 <Button
-                    disabled={!weighedKg || weighedKg <= 0 || returnItemId === null}
-                    loading={submitting}
+                    disabled={!canReturn}
+                    loading={returnMutation.isPending}
                     onClick={() => {
-                        if (!workCenter || !weighedKg || returnItemId === null) return;
+                        if (!canReturn) return;
                         returnMutation.mutate({
-                            work_center_id: workCenter.id,
-                            item_id: returnItemId,
-                            quantity_kg: weighedKg,
-                            shift_production_entry_id: entry?.id,
+                            item_id: returnItemId!,
+                            to_warehouse_id: returnWarehouseId!,
+                            quantity: returnKg!,
                         });
                     }}
                 >
-                    Return without bag
+                    Return to store
                 </Button>
             </Space>
-            <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginBottom: 16 }}>
-                Weigh what goes back; scan the bag it returns to, or use “Return without bag”.
-            </Typography.Text>
-
-            <Typography.Text strong>Current balance</Typography.Text>
-            {materials.length === 0 && (
-                <Typography.Paragraph type="secondary" style={{ marginTop: 4 }}>
-                    {isLoading ? 'Loading…' : 'Day bin is empty — load a bag at the bay before starting a batch.'}
-                </Typography.Paragraph>
-            )}
-            {materials.map((m) => (
-                <div key={m.item.id} style={{ padding: '6px 0' }}>
-                    <Space style={{ justifyContent: 'space-between', width: '100%' }}>
-                        <Typography.Text>{m.item.sku} — {m.item.name}</Typography.Text>
-                        <Typography.Text strong style={{ whiteSpace: 'nowrap' }}>{fmtKg(m.balance_kg)} kg</Typography.Text>
-                    </Space>
-                </div>
-            ))}
-
-            {loadedBags.length > 0 && (
-                <>
-                    <Typography.Text strong style={{ display: 'block', marginTop: 16 }}>
-                        Bags in this day bin
-                    </Typography.Text>
-                    <Table<DayBinLoadedBag & { itemSku: string }>
-                        rowKey="id"
-                        size="small"
-                        pagination={false}
-                        style={{ marginTop: 8 }}
-                        dataSource={loadedBags}
-                        columns={[
-                            { title: 'Barcode', dataIndex: 'barcode', render: (v: string) => <Typography.Text code>{v}</Typography.Text> },
-                            { title: 'Lot', render: (_, b) => b.lot?.supplier_lot_no ?? '—' },
-                            { title: 'Item', dataIndex: 'itemSku' },
-                            { title: 'Left (kg)', render: (_, b) => <Tag>{fmtKg(b.remaining_kg)}</Tag> },
-                        ]}
-                    />
-                </>
+            {overBalance && selected !== null && (
+                <Typography.Text type="danger" style={{ display: 'block', fontSize: 12 }}>
+                    Only {fmtKg(selected.quantity_kg)} {selected.item?.uom ?? 'Kg'} of {materialLabel(selected)} is in
+                    the bin.
+                </Typography.Text>
             )}
         </Drawer>
     );

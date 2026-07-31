@@ -1092,9 +1092,30 @@ export interface ProductionStandardRow {
 // central figure that is always visible without picking a machine.
 // ---------------------------------------------------------------------------
 
-/** One material's current balance in the factory day bin. */
+/**
+ * Registered bags of one material still HOLDING material (remaining_kg > 0) —
+ * a bag someone has already poured part of counts here with whatever is
+ * actually left in it, not with its original weight. Column on the summary
+ * row below; see FactoryDayBinService::rawMaterialSummary.
+ */
+export interface FactoryDayBinUnopenedBags {
+    count: number;
+    /** Their summed remaining kg — 4dp decimal string. Named `kg` on the wire. */
+    kg: string;
+}
+
+/**
+ * One material's current balance in the factory day bin — the ordinary stock
+ * balance for (material, day-bin warehouse), since the bin IS a warehouse.
+ */
 export interface FactoryDayBinMaterial {
-    item: Item | null;
+    /**
+     * Optional because the backend serves it through `whenLoaded('item')`,
+     * which drops the key rather than sending null. Both readers that build
+     * these rows eager-load it, so in practice it is always there — but
+     * `item_id` is what a row is identified by.
+     */
+    item?: Item;
     item_id: number;
     /** 4dp decimal string. The item's own `uom` says what the unit is. */
     quantity_kg: string;
@@ -1102,13 +1123,87 @@ export interface FactoryDayBinMaterial {
 }
 
 /**
+ * The owner's one-look row per RAW MATERIAL (kg-uom items only — bottles and
+ * caps count in Nos and never appear): what is in the bin, what is still in
+ * the store, and how many bags are still holding material.
+ *
+ * A SEPARATE top-level array from `materials`, not merged into it: its row set
+ * is "kg items with a balance in the bin OR the store", so it can both omit a
+ * non-kg material sitting in the bin and include a material the bin has none
+ * of. The page unions the two by `item_id` for exactly that reason.
+ */
+export interface FactoryDayBinSummaryRow {
+    item: Item;
+    item_id: number;
+    /** The bin warehouse's own balance — 4dp decimal string. */
+    bin_kg: string;
+    /** Summed balance across the Tally-linked godowns other than the bin. */
+    store_kg: string;
+    unopened_bags: FactoryDayBinUnopenedBags;
+}
+
+/**
+ * One load INTO the day-bin warehouse today — a transfer_in stock movement
+ * landing in the bin, newest first.
+ */
+export interface FactoryDayBinLoadRow {
+    /** stock_movements.id. */
+    id: number;
+    /**
+     * ISO8601 stock_movements.movement_date — when it physically went in.
+     * Nullable on the wire, and `dayjs(null)` would quietly read as "now",
+     * so every reader must guard it.
+     */
+    time: string | null;
+    /** Served through `whenLoaded('item')` — see FactoryDayBinMaterial.item. */
+    item?: Item;
+    quantity_kg: string;
+    /**
+     * The scanned bag's barcode, parsed back out of the fixed reference a bag
+     * load stamps; null for manual (no-barcode) loads.
+     */
+    bag_barcode: string | null;
+    /**
+     * Who loaded it — the authenticated user's NAME, already resolved. A
+     * plain string, not an object: the id is deliberately not exposed here.
+     */
+    user: string | null;
+    /** The movement's free-text reference ("Day bin load — bag …", or the form's). */
+    reference: string | null;
+}
+
+/**
  * GET /production/factory-day-bin. `warehouse: null` means nobody has named
  * the day-bin warehouse yet — a normal state, not an error: every screen then
  * behaves exactly as it did before the day bin existed.
+ *
+ * All three arrays are always present. They come back EMPTY (never absent)
+ * while no bin is configured, and an empty `summary`/`todays_loads` on a
+ * configured bin simply means nobody has loaded it yet today.
  */
 export interface FactoryDayBin {
     warehouse: Warehouse | null;
     materials: FactoryDayBinMaterial[];
+    summary: FactoryDayBinSummaryRow[];
+    todays_loads: FactoryDayBinLoadRow[];
+}
+
+/**
+ * One choice in the Day Bin page's raw-material picker, from
+ * GET /production/factory-day-bin/raw-materials — every ACTIVE kg-uom item.
+ *
+ * Deliberately NOT an `Item`: the backend sends a slim four-field projection
+ * with the display string already built as `label`, so nothing here needs
+ * `itemLabel()` (and passing this shape to it would silently render blanks —
+ * every field `itemLabel` reads is optional, so it type-checks).
+ */
+export interface RawMaterialOption {
+    id: number;
+    /** The item's name, ready to show. */
+    label: string;
+    uom: string;
+    /** Current store kg — 4dp decimal string. */
+    store_kg: string;
 }
 
 /**

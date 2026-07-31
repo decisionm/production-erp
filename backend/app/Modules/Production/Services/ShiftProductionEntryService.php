@@ -786,6 +786,81 @@ class ShiftProductionEntryService
     }
 
     /**
+     * What the batch's consumed material actually COST — each line priced at
+     * the unit cost its own stock ISSUE movement recorded at the moment of
+     * issue (the moving-average cost then, stamped by recordIssue), never at
+     * today's average. Pure read, no writes. Null for a batch that hasn't
+     * completed (nothing has been issued yet).
+     *
+     * Matching: completeBatch stamps every movement of one entry with
+     * reference "SPE #{id}", shared by the consumption issues AND the FG
+     * receipt — so lines match on reference + type=issue + item + warehouse.
+     * Duplicate (item, warehouse) consumption lines pair off against the
+     * issue movements in creation order, one each, so nothing is counted
+     * twice.
+     *
+     * Null-safety rule: a line whose movement is missing, or whose movement
+     * carries no cost, prices at null — and total_cost is null whenever ANY
+     * line is unpriced. A total that silently omitted a line would read as
+     * "the batch cost this much" while understating it; no price is ever
+     * guessed.
+     *
+     * @return array{
+     *     lines: list<array{item_id: int, item_name: ?string, warehouse_id: int,
+     *         quantity_issued_kg: string, unit_cost: ?string, cost: ?string}>,
+     *     total_cost: ?string,
+     * }|null
+     */
+    public function materialCost(ShiftProductionEntry $entry): ?array
+    {
+        if ($entry->batch_status !== BatchStatus::Completed) {
+            return null;
+        }
+
+        // withTrashed for the same reason as consumptionVariance(): a master
+        // cleanup that soft-deletes a material must not blank its name here.
+        $entry->loadMissing([
+            'materialConsumptions.item' => fn ($query) => $query->withTrashed(),
+        ]);
+
+        // One pool per (item, warehouse); each line shift()s its own movement.
+        $pool = $this->stock->issuesForReference("SPE #{$entry->id}")
+            ->groupBy(fn ($movement) => "{$movement->item_id}@{$movement->warehouse_id}");
+
+        $lines = [];
+        $total = '0.0000';
+        $everyLinePriced = true;
+
+        foreach ($entry->materialConsumptions as $consumption) {
+            $movement = $pool->get("{$consumption->item_id}@{$consumption->warehouse_id}")?->shift();
+            $unitCost = $movement?->unit_cost;
+            $cost = $unitCost !== null
+                ? bcmul((string) $consumption->quantity_issued_kg, (string) $unitCost, 4)
+                : null;
+
+            $lines[] = [
+                'item_id' => $consumption->item_id,
+                'item_name' => $consumption->item?->name,
+                'warehouse_id' => $consumption->warehouse_id,
+                'quantity_issued_kg' => (string) $consumption->quantity_issued_kg,
+                'unit_cost' => $unitCost !== null ? (string) $unitCost : null,
+                'cost' => $cost,
+            ];
+
+            if ($cost === null) {
+                $everyLinePriced = false;
+            } else {
+                $total = bcadd($total, $cost, 4);
+            }
+        }
+
+        return [
+            'lines' => $lines,
+            'total_cost' => $everyLinePriced ? $total : null,
+        ];
+    }
+
+    /**
      * The expected-output engine (SHIFT-REDESIGN-FORMULAS.md #22-24 and the
      * QC/reconciliation rows #9/#10/#20) — the "did the machine produce what
      * physics says it should" block, distinct from consumptionVariance()'s

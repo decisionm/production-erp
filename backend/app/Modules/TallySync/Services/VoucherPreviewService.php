@@ -4,6 +4,7 @@ namespace App\Modules\TallySync\Services;
 
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\Warehouse;
+use App\Modules\Inventory\Services\TallyGodownResolver;
 use App\Modules\Production\Models\ShiftProductionEntry;
 
 /**
@@ -24,6 +25,7 @@ class VoucherPreviewService
 {
     public function __construct(
         private readonly TallySyncService $sync,
+        private readonly TallyGodownResolver $godowns,
     ) {}
 
     /**
@@ -103,7 +105,12 @@ class VoucherPreviewService
             $godown = Warehouse::query()->where('name', $godownName)->first();
             if ($godown === null) {
                 $problems[] = "No warehouse named \"{$godownName}\" exists.";
-            } elseif ($godown->tally_guid === null) {
+            } elseif ($this->godowns->resolve($godown) === null) {
+                // Judged by the SAME resolver the payload builder used: a
+                // warehouse without its own tally_guid is fine when it
+                // aliases to a Tally-known godown (the internal day bin
+                // posting under its parent / the sole company godown).
+                // Only a genuinely unresolvable godown is flagged.
                 $problems[] = "Godown \"{$godownName}\" does not exist in Tally.";
             }
         }

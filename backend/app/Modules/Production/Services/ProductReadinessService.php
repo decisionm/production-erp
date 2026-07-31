@@ -4,6 +4,7 @@ namespace App\Modules\Production\Services;
 
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\Warehouse;
+use App\Modules\Inventory\Services\TallyGodownResolver;
 use App\Modules\Production\Models\ProductionStandard;
 use App\Modules\Production\Models\ProductionStandardPackaging;
 use App\Modules\Production\Models\WorkCenter;
@@ -36,6 +37,7 @@ use App\Modules\Production\Models\WorkCenter;
 class ProductReadinessService
 {
     public function __construct(
+        private readonly TallyGodownResolver $godowns,
     ) {}
 
     /**
@@ -219,7 +221,12 @@ class ProductReadinessService
             $failures['tally_item'] = 'The product does not exist in Tally — any voucher naming it will be rejected.';
         }
 
-        if ($warehouse !== null && $warehouse->tally_guid === null) {
+        // Judged by the SAME TallyGodownResolver the voucher payload and its
+        // preview use, so the gate can never refuse a warehouse whose lines
+        // would in fact post fine (the internal factory day bin aliasing to
+        // its parent godown / the sole company godown), nor pass one whose
+        // voucher would die. Only a warehouse NOTHING can stand in for fails.
+        if ($warehouse !== null && $this->godowns->resolve($warehouse) === null) {
             $failures['tally_godown'] = "The warehouse \"{$warehouse->name}\" has no Tally godown — any voucher issuing from or receiving into it will be rejected.";
         }
 

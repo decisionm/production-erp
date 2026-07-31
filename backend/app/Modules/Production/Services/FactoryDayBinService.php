@@ -6,8 +6,10 @@ use App\Models\User;
 use App\Modules\Core\Services\AppSettingService;
 use App\Modules\Inventory\Exceptions\BagOverloadException;
 use App\Modules\Inventory\Models\Enums\MaterialBagStatus;
+use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\MaterialBag;
 use App\Modules\Inventory\Models\StockBalance;
+use App\Modules\Inventory\Models\StockMovement;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Inventory\Services\WarehouseService;
@@ -47,6 +49,13 @@ class FactoryDayBinService
      * so renaming the godown in Tally cannot silently unconfigure the bin.
      */
     public const SETTING_KEY = 'production_day_bin_warehouse_id';
+
+    /**
+     * Reference prefix a bag-scan load stamps on its stock transfer
+     * ("Day bin load — bag {barcode}"). One definition: loadBag() writes it
+     * and the today's-loads read parses the barcode back out of it.
+     */
+    public const BAG_LOAD_REFERENCE_PREFIX = 'Day bin load — bag ';
 
     public function __construct(
         private readonly AppSettingService $settings,
@@ -176,7 +185,7 @@ class FactoryDayBinService
                 fromWarehouseId: $bag->current_warehouse_id,
                 toWarehouseId: $warehouse->id,
                 quantity: $quantity,
-                reference: "Day bin load — bag {$bag->barcode}",
+                reference: self::BAG_LOAD_REFERENCE_PREFIX.$bag->barcode,
                 notes: $notes,
                 createdBy: $recordedBy,
             );
@@ -202,7 +211,17 @@ class FactoryDayBinService
      * whole read answers `warehouse: null` when no bin is configured yet, so
      * the screen can prompt instead of failing.
      *
-     * @return array{warehouse: ?Warehouse, materials: Collection<int, StockBalance>}
+     * `summary` and `todays_loads` are the owner's one-look answer: per raw
+     * material, what is in the bin vs still in the store (plus bags), and
+     * every load that went into the bin today with who did it. Both empty
+     * (not an error) until a bin is configured — there is no bin to summarize.
+     *
+     * @return array{
+     *     warehouse: ?Warehouse,
+     *     materials: Collection<int, StockBalance>,
+     *     summary: Collection<int, array{item: Item, bin_kg: string, store_kg: string, unopened_bags: array{count: int, kg: string}}>,
+     *     todays_loads: Collection<int, StockMovement>,
+     * }
      */
     public function snapshot(): array
     {
@@ -216,6 +235,120 @@ class FactoryDayBinService
                 // supervisor needs before starting, and hiding the line reads
                 // as "material we don't track here".
                 : $this->stock->balancesForWarehouse($warehouse->id),
+            'summary' => $warehouse === null ? collect() : $this->rawMaterialSummary($warehouse),
+            'todays_loads' => $warehouse === null
+                ? collect()
+                : $this->stock->transfersIntoWarehouseOn($warehouse->id, now()->toDateString()),
         ];
+    }
+
+    /**
+     * The owner's per-material picture, restricted to RAW MATERIALS (kg-uom
+     * items — the only raw-material signal this database carries; bottles
+     * and caps count in Nos and never belong here): every kg item with a
+     * balance row in the bin OR in the store, item-name ordered, each with
+     *
+     *   bin_kg        — the bin warehouse's own stock balance,
+     *   store_kg      — summed balances across Tally-linked warehouses other
+     *                   than the bin (the REAL godowns; the bin itself is an
+     *                   internal ERP location Tally never sees),
+     *   unopened_bags — count and remaining kg of registered bags still
+     *                   holding material (remaining_kg > 0; a partially
+     *                   poured bag counts with what is actually left in it).
+     *
+     * @return Collection<int, array{item: Item, bin_kg: string, store_kg: string, unopened_bags: array{count: int, kg: string}}>
+     */
+    private function rawMaterialSummary(Warehouse $bin): Collection
+    {
+        $storeWarehouseIds = $this->storeWarehouseIds($bin);
+
+        $binByItem = StockBalance::query()
+            ->where('warehouse_id', $bin->id)
+            ->get()
+            ->keyBy('item_id');
+
+        $storeByItem = StockBalance::query()
+            ->whereIn('warehouse_id', $storeWarehouseIds)
+            ->get()
+            ->groupBy('item_id');
+
+        // Only items that actually sit in the bin or the store — then the
+        // kg-uom filter cuts the set down to raw materials.
+        $items = Item::query()
+            ->kgUom()
+            ->whereIn('id', $binByItem->keys()->merge($storeByItem->keys())->unique())
+            ->orderBy('name')
+            ->get();
+
+        $bagsByItem = MaterialBag::query()
+            ->join('material_lots', 'material_lots.id', '=', 'material_bags.material_lot_id')
+            ->whereIn('material_lots.item_id', $items->pluck('id'))
+            ->where('material_bags.remaining_kg', '>', 0)
+            ->get(['material_bags.*', 'material_lots.item_id as lot_item_id'])
+            ->groupBy('lot_item_id');
+
+        return $items->map(function (Item $item) use ($binByItem, $storeByItem, $bagsByItem) {
+            $storeKg = ($storeByItem->get($item->id) ?? collect())
+                ->reduce(fn (string $carry, StockBalance $balance) => bcadd($carry, (string) $balance->quantity, 4), '0.0000');
+
+            $bags = $bagsByItem->get($item->id) ?? collect();
+
+            return [
+                'item' => $item,
+                'bin_kg' => bcadd((string) ($binByItem->get($item->id)?->quantity ?? '0'), '0', 4),
+                'store_kg' => $storeKg,
+                'unopened_bags' => [
+                    'count' => $bags->count(),
+                    'kg' => $bags->reduce(fn (string $carry, MaterialBag $bag) => bcadd($carry, (string) $bag->remaining_kg, 4), '0.0000'),
+                ],
+            ];
+        })->values();
+    }
+
+    /**
+     * The Day Bin page's raw-material picker: every ACTIVE kg-uom item with
+     * its current store kg (same store definition as the summary above —
+     * Tally-linked warehouses excluding the bin), item-name ordered. Items
+     * with no stock at all still list at 0 kg: the picker's job is "what
+     * could be loaded", and hiding an out-of-stock resin reads as "not a
+     * material we track".
+     *
+     * @return Collection<int, array{item: Item, store_kg: string}>
+     */
+    public function rawMaterials(): Collection
+    {
+        $storeWarehouseIds = $this->storeWarehouseIds($this->warehouse());
+
+        $storeByItem = StockBalance::query()
+            ->whereIn('warehouse_id', $storeWarehouseIds)
+            ->get()
+            ->groupBy('item_id');
+
+        return Item::query()
+            ->kgUom()
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get()
+            ->map(fn (Item $item) => [
+                'item' => $item,
+                'store_kg' => ($storeByItem->get($item->id) ?? collect())
+                    ->reduce(fn (string $carry, StockBalance $balance) => bcadd($carry, (string) $balance->quantity, 4), '0.0000'),
+            ])
+            ->values();
+    }
+
+    /**
+     * The warehouses "store kg" means: Tally-linked ones (the real godowns
+     * the accountant's books know), never the bin itself — the bin is the
+     * internal location the store figure is being contrasted WITH.
+     *
+     * @return Collection<int, int>
+     */
+    private function storeWarehouseIds(?Warehouse $bin): Collection
+    {
+        return Warehouse::query()
+            ->whereNotNull('tally_guid')
+            ->when($bin !== null, fn ($query) => $query->where('id', '!=', $bin->id))
+            ->pluck('id');
     }
 }

@@ -1,10 +1,44 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Col, DatePicker, Empty, Form, InputNumber, Row, Select, Space, Table, Tag, Typography, message } from 'antd';
+import {
+    Alert,
+    Button,
+    Card,
+    Col,
+    Collapse,
+    DatePicker,
+    Descriptions,
+    Empty,
+    Form,
+    Input,
+    InputNumber,
+    Row,
+    Select,
+    Space,
+    Table,
+    Tag,
+    Typography,
+    message,
+} from 'antd';
+import type { InputRef } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
-import { useEffect, useMemo, useState } from 'react';
-import { listAllItems, listAllWarehouses } from '@/features/inventory/api';
-import { getFactoryDayBin, loadFactoryDayBin, setDayBinWarehouse } from '@/features/production/api';
-import type { FactoryDayBinMaterial } from '@/features/production/types';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useAuthStore } from '@/features/auth/store';
+import { listAllWarehouses } from '@/features/inventory/api';
+import {
+    findMaterialBagByBarcode,
+    getFactoryDayBin,
+    listRawMaterials,
+    loadBagToFactoryDayBin,
+    loadFactoryDayBin,
+    setDayBinWarehouse,
+} from '@/features/production/api';
+import { useProductionSettings } from '@/features/production/packing';
+import type {
+    FactoryDayBinLoadRow,
+    FactoryDayBinUnopenedBags,
+    MaterialBag,
+} from '@/features/production/types';
+import type { Item } from '@/features/inventory/types';
 import { itemLabel } from '@/lib/itemLabel';
 
 /** "1250.5000" → "1250.5"; "—" for null/unparseable. */
@@ -14,7 +48,30 @@ function fmtQty(value: string | null | undefined): string {
     return Number.isNaN(parsed) ? '—' : String(parseFloat(parsed.toFixed(4)));
 }
 
-/** The warehouse the bay would normally draw from — the main/raw-material store. */
+/** The SKU line under a material name — or null when it just repeats the name. */
+function skuLine(item: { sku: string; name: string }): string | null {
+    const bare = (v: string) => v.toLowerCase().replace(/\s+/g, '');
+    return item.sku.trim() === '' || bare(item.sku) === bare(item.name) ? null : item.sku;
+}
+
+/**
+ * One row of the balances table — the union of the day-bin read's `summary`
+ * and `materials` arrays, keyed by item_id.
+ *
+ * `store_kg`/`unopened_bags` are null for a material the `summary` array does
+ * not cover, and null means UNKNOWN, never zero: an unknown store balance
+ * shown as 0 reads as "the store is out of it", which would stop a shift for
+ * no reason.
+ */
+interface BalanceRow {
+    item_id: number;
+    item?: Item;
+    bin_kg: string;
+    store_kg: string | null;
+    unopened_bags: FactoryDayBinUnopenedBags | null;
+}
+
+/** The warehouse a load would normally come from — the main/raw-material store. */
 function guessStoreWarehouseId(
     warehouses: { id: number; code: string; name: string; is_active: boolean }[],
     dayBinId: number | null,
@@ -26,48 +83,78 @@ function guessStoreWarehouseId(
 }
 
 /**
- * THE FACTORY DAY BIN — the central, always-visible answer to "what material
- * is in the factory right now, ready to run".
+ * THE FACTORY DAY BIN — the owner's material control room, and the floor's
+ * one scan point for material coming out of the store.
  *
- * The design in one line: the day bin is simply a WAREHOUSE. So this page has
- * no arithmetic of its own —
+ * Top to bottom, in the order the floor uses it:
  *
- *  - the table is that warehouse's ordinary stock balances,
- *  - the form posts the ordinary store → warehouse stock transfer,
- *  - and nothing here consumes anything: consumption happens on the Shift
- *    Floor at Complete Batch, where each material line is issued FROM this
- *    warehouse and so reduces this table automatically.
+ *  1. SCAN — a barcode input built for a USB scanner gun: the gun types the
+ *     code and presses Enter (lookup), the bag shows itself (material, SKU,
+ *     kg remaining), and Enter again loads the whole bag — kg editable first
+ *     for a part bag. Focus returns to the input after every load so bags
+ *     scan one after another without touching the mouse. Same lookup + same
+ *     POST /production/day-bin/load-bag the Shift Floor's Load Material
+ *     modal uses — one flow, two doors.
+ *  2. BALANCES — one row per raw material: in the day bin now, still in the
+ *     store, bags still holding material. The bin figures are that
+ *     warehouse's ordinary stock balances (the day bin IS a warehouse — no
+ *     second arithmetic). The row set is the UNION of the read's two arrays:
+ *     `summary` (kg-uom materials in the bin or the store, with all three
+ *     figures) plus any `materials` row it doesn't cover — a non-kg material
+ *     sitting in the bin still has to be visible, with "—" where the store
+ *     and bag figures are genuinely unknown rather than zero.
+ *  3. MANUAL LOAD (collapsed) — for unlabelled bags and opening stock: raw
+ *     materials only (the backend's kg-uom picker — never the bottle list),
+ *     posting the EXISTING store → bin stock transfer. A location move,
+ *     never a consumption, never a Tally post.
+ *  4. LOADED TODAY — every load into the bin today with time, material, kg,
+ *     bag and who. Always shown once a bin is named: an empty list is the
+ *     normal morning state and says so in one plain line.
  *
- * No barcode, no bag scan, no machine choice. The per-machine bag-level
- * ledger (Bin Bay Loading) still exists untouched for factories that want
- * that detail later — this is the simple central path.
+ * Consumption never happens here: Complete Batch on the Shift Floor issues
+ * each material line FROM this warehouse, so the balances fall by themselves.
  *
  * Until someone names the day-bin warehouse, the page shows one plain line
  * asking for it and nothing else in the ERP changes behaviour.
  */
 export default function FactoryDayBinPage() {
     const queryClient = useQueryClient();
-    const [form] = Form.useForm();
+    const [manualForm] = Form.useForm();
+    const currentUser = useAuthStore((s) => s.user);
     const [pickingWarehouse, setPickingWarehouse] = useState<number | null>(null);
+    const [manualOpenKeys, setManualOpenKeys] = useState<string[]>([]);
+    const manualOpen = manualOpenKeys.includes('manual');
+
+    // ----- Scan state: plain state, not a form — the driver is a barcode gun.
+    const scanInputRef = useRef<InputRef>(null);
+    const [scanCode, setScanCode] = useState('');
+    const [scannedBag, setScannedBag] = useState<MaterialBag | null>(null);
+    const [scanKg, setScanKg] = useState<number | null>(null);
+    const [scanError, setScanError] = useState<string | null>(null);
+    const [scanSuccess, setScanSuccess] = useState<string | null>(null);
 
     const { data: dayBin, isLoading } = useQuery({
         queryKey: ['production', 'factory-day-bin'],
         queryFn: getFactoryDayBin,
     });
-    // The material/warehouse pick-lists are Inventory's reads. A production-only
-    // login 403s on them — a normal answer, not a crash: the balances above
-    // still show and one plain line explains why the pickers are empty.
+    // Scanning resolves barcodes to bags, which only exist with the
+    // traceability flag on (the routes 404 with it off) — same master switch
+    // the Shift Floor's Load Material button obeys.
+    const settings = useProductionSettings();
+    const traceabilityEnabled = settings?.traceability_enabled === true;
+    // The warehouse/material pick-lists are Inventory's reads. A production-only
+    // login 403s on them — a normal answer, not a crash: the balances still
+    // show and one plain line explains why the pickers are empty.
     const { data: warehouses, isError: warehousesUnavailable } = useQuery({
         queryKey: ['inventory', 'warehouses', 'all'],
         queryFn: listAllWarehouses,
         retry: false,
     });
-    const { data: items, isError: itemsUnavailable } = useQuery({
-        queryKey: ['inventory', 'items', 'all'],
-        queryFn: listAllItems,
+    const { data: rawMaterials, isError: rawMaterialsUnavailable } = useQuery({
+        queryKey: ['production', 'raw-materials'],
+        queryFn: listRawMaterials,
         retry: false,
     });
-    const inventoryReadsUnavailable = warehousesUnavailable || itemsUnavailable;
 
     const dayBinWarehouse = dayBin?.warehouse ?? null;
     const configured = dayBinWarehouse !== null;
@@ -85,20 +172,55 @@ export default function FactoryDayBinPage() {
         () => warehouseOptions.filter((option) => option.value !== dayBinWarehouse?.id),
         [warehouseOptions, dayBinWarehouse],
     );
-    const itemOptions = useMemo(
-        () => (items?.data ?? []).filter((i) => i.is_active).map((i) => ({ value: i.id, label: itemLabel(i) })),
-        [items],
+    // Raw materials ONLY — resin and masterbatch, everything bought by the
+    // kg. Deliberately never the full items master: a day bin holding
+    // "1 Litre Pet Bottle" is a booking mistake this Select refuses to allow.
+    //
+    // The picker route already sends the display string as `label`; NOT
+    // itemLabel(), which reads `sku`/`name` this shape does not carry and
+    // would render every option blank without failing a type-check.
+    const rawMaterialOptions = useMemo(
+        () => (rawMaterials ?? []).map((option) => ({ value: option.id, label: option.label })),
+        [rawMaterials],
     );
 
-    // Default the source to the main store once the lists land, without ever
-    // overwriting a choice the user has already made.
+    // The balances table's row set: `summary` first (the backend name-orders
+    // it) and then any material in the bin it left out — never fewer rows
+    // than either array alone.
+    const balanceRows = useMemo<BalanceRow[]>(() => {
+        const rows: BalanceRow[] = (dayBin?.summary ?? []).map((row) => ({
+            item_id: row.item_id,
+            item: row.item,
+            bin_kg: row.bin_kg,
+            store_kg: row.store_kg,
+            unopened_bags: row.unopened_bags,
+        }));
+
+        const covered = new Set(rows.map((row) => row.item_id));
+        for (const material of dayBin?.materials ?? []) {
+            if (covered.has(material.item_id)) continue;
+            covered.add(material.item_id);
+            rows.push({
+                item_id: material.item_id,
+                item: material.item,
+                bin_kg: material.quantity_kg,
+                store_kg: null,
+                unopened_bags: null,
+            });
+        }
+
+        return rows;
+    }, [dayBin]);
+
+    // Default the manual load's source to the main store once the panel is
+    // open and the list has landed, never overwriting a choice already made.
     useEffect(() => {
-        if (!configured || warehouses === undefined) return;
-        if (form.getFieldValue('from_warehouse_id') !== undefined) return;
+        if (!manualOpen || !configured || warehouses === undefined) return;
+        if (manualForm.getFieldValue('from_warehouse_id') !== undefined) return;
 
         const storeId = guessStoreWarehouseId(warehouses.data, dayBinWarehouse?.id ?? null);
-        if (storeId !== undefined) form.setFieldsValue({ from_warehouse_id: storeId });
-    }, [configured, warehouses, dayBinWarehouse, form]);
+        if (storeId !== undefined) manualForm.setFieldsValue({ from_warehouse_id: storeId });
+    }, [manualOpen, configured, warehouses, dayBinWarehouse, manualForm]);
 
     const chooseWarehouse = useMutation({
         mutationFn: (warehouseId: number | null) => setDayBinWarehouse(warehouseId),
@@ -119,7 +241,87 @@ export default function FactoryDayBinPage() {
         },
     });
 
-    const load = useMutation({
+    // ----- Scan flow: lookup on Enter, load on the next Enter (or the button).
+
+    const bagLookup = useMutation({
+        mutationFn: findMaterialBagByBarcode,
+        onSuccess: (bag, barcode) => {
+            if (!bag) {
+                setScannedBag(null);
+                setScanKg(null);
+                setScanError(`No open bag with barcode "${barcode}" in the store.`);
+                return;
+            }
+            setScannedBag(bag);
+            // Prefill the whole bag; the field stays editable for a part bag.
+            setScanKg(Number(bag.remaining_kg));
+            setScanError(null);
+            // Back to the gun: Enter now loads, or the next scan replaces.
+            scanInputRef.current?.focus();
+        },
+        onError: (error: any) => {
+            setScannedBag(null);
+            setScanKg(null);
+            setScanError(error?.response?.data?.message ?? 'Could not look up that barcode.');
+        },
+    });
+
+    const bagLoad = useMutation({
+        mutationFn: loadBagToFactoryDayBin,
+        onSuccess: (result, payload) => {
+            // Compose the confirmation from the response where it answers,
+            // falling back to what was scanned — never a blank.
+            const material = result?.day_bin?.item ?? result?.bag?.lot?.item ?? scannedBag?.lot?.item ?? null;
+            const balance = result?.day_bin?.quantity_kg;
+            setScanSuccess(
+                `Loaded ${payload.quantity_kg} kg of ${material ? itemLabel(material) : 'material'}` +
+                    `${balance ? ` — day bin now holds ${balance} kg` : ''}.`,
+            );
+            setScannedBag(null);
+            setScanKg(null);
+            setScanError(null);
+            // The bag lost kg and the bin gained it — every surface quoting
+            // either must move.
+            queryClient.invalidateQueries({ queryKey: ['production', 'factory-day-bin'] });
+            queryClient.invalidateQueries({ queryKey: ['inventory', 'stock-balances'] });
+            queryClient.invalidateQueries({ queryKey: ['production', 'material-bags', 'pick-list'] });
+            // Back to the gun: the next bag scans without a tap.
+            scanInputRef.current?.focus();
+        },
+        onError: (error: any) => {
+            setScanError(error?.response?.data?.message ?? 'Could not load the bag into the day bin.');
+        },
+    });
+
+    const submitBagLoad = () => {
+        if (!scannedBag || !scanKg || scanKg <= 0 || !currentUser || bagLoad.isPending) return;
+        bagLoad.mutate({
+            barcode: scannedBag.barcode,
+            quantity_kg: scanKg,
+            // Recorded as a note; the audit identity is the login either way.
+            supervisor_id: currentUser.id,
+        });
+    };
+
+    /**
+     * One Enter key, two meanings: a typed/scanned code looks the bag up; an
+     * EMPTY Enter with a bag on screen loads it — so gun-scan → Enter loads
+     * the whole bag with no other touch.
+     */
+    const submitScan = () => {
+        const code = scanCode.trim();
+        if (code !== '') {
+            setScanCode('');
+            setScanSuccess(null);
+            bagLookup.mutate(code);
+            return;
+        }
+        if (scannedBag) submitBagLoad();
+    };
+
+    // ----- Manual (no-barcode) load: the existing store → bin transfer.
+
+    const manualLoad = useMutation({
         mutationFn: (values: { item_id: number; from_warehouse_id: number; quantity: number; loaded_at?: Dayjs }) =>
             loadFactoryDayBin({
                 item_id: values.item_id,
@@ -131,9 +333,9 @@ export default function FactoryDayBinPage() {
             }),
         onSuccess: () => {
             message.success('Loaded into the day bin');
-            // Keep only the source warehouse and time — the bay usually loads
+            // Keep the source and time — unlabelled stock usually arrives as
             // several materials from the same store in one go.
-            form.setFieldsValue({ item_id: undefined, quantity: undefined });
+            manualForm.setFieldsValue({ item_id: undefined, quantity: undefined });
             queryClient.invalidateQueries({ queryKey: ['production', 'factory-day-bin'] });
             queryClient.invalidateQueries({ queryKey: ['inventory', 'stock-balances'] });
         },
@@ -147,31 +349,99 @@ export default function FactoryDayBinPage() {
         },
     });
 
-    const columns = [
+    // ----- Tables ----------------------------------------------------------
+
+    const balanceColumns = [
         {
             title: 'Material',
             key: 'material',
-            render: (_: unknown, row: FactoryDayBinMaterial) =>
+            render: (_: unknown, row: BalanceRow) =>
                 row.item ? (
                     <Space direction="vertical" size={0}>
                         <Typography.Text strong>{row.item.name}</Typography.Text>
-                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                            {row.item.sku}
-                        </Typography.Text>
+                        {skuLine(row.item) !== null && (
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                {skuLine(row.item)}
+                            </Typography.Text>
+                        )}
                     </Space>
                 ) : (
                     <Typography.Text type="secondary">Item #{row.item_id}</Typography.Text>
                 ),
         },
         {
-            title: 'In day bin now',
-            key: 'quantity',
+            title: 'In day bin',
+            key: 'in_bin',
             align: 'right' as const,
-            render: (_: unknown, row: FactoryDayBinMaterial) => (
+            render: (_: unknown, row: BalanceRow) => (
                 <Typography.Text strong style={{ fontSize: 18 }}>
-                    {fmtQty(row.quantity_kg)} <Typography.Text type="secondary">{row.item?.uom ?? 'Kg'}</Typography.Text>
+                    {fmtQty(row.bin_kg)} <Typography.Text type="secondary">{row.item?.uom ?? 'Kg'}</Typography.Text>
                 </Typography.Text>
             ),
+        },
+        {
+            title: 'In store',
+            key: 'in_store',
+            align: 'right' as const,
+            // "—" (not 0) for a material the summary doesn't cover — an
+            // unknown store balance must never read as an empty store.
+            render: (_: unknown, row: BalanceRow) =>
+                row.store_kg === null ? (
+                    <Typography.Text type="secondary">—</Typography.Text>
+                ) : (
+                    <Typography.Text>
+                        {fmtQty(row.store_kg)} <Typography.Text type="secondary">{row.item?.uom ?? 'Kg'}</Typography.Text>
+                    </Typography.Text>
+                ),
+        },
+        {
+            title: 'Unopened bags',
+            key: 'unopened',
+            align: 'right' as const,
+            render: (_: unknown, row: BalanceRow) =>
+                row.unopened_bags === null ? (
+                    <Typography.Text type="secondary">—</Typography.Text>
+                ) : (
+                    <Typography.Text>
+                        {row.unopened_bags.count} <Typography.Text type="secondary">·</Typography.Text>{' '}
+                        {fmtQty(row.unopened_bags.kg)} <Typography.Text type="secondary">kg</Typography.Text>
+                    </Typography.Text>
+                ),
+        },
+    ];
+
+    const loadColumns = [
+        {
+            title: 'Time',
+            key: 'time',
+            // Guarded: dayjs(null) silently means "now", which would print a
+            // believable but invented clock time.
+            render: (_: unknown, row: FactoryDayBinLoadRow) =>
+                row.time === null ? <Typography.Text type="secondary">—</Typography.Text> : dayjs(row.time).format('HH:mm'),
+        },
+        {
+            title: 'Material',
+            key: 'material',
+            render: (_: unknown, row: FactoryDayBinLoadRow) =>
+                row.item ? itemLabel(row.item) : <Typography.Text type="secondary">—</Typography.Text>,
+        },
+        {
+            title: 'Kg',
+            key: 'kg',
+            align: 'right' as const,
+            render: (_: unknown, row: FactoryDayBinLoadRow) => fmtQty(row.quantity_kg),
+        },
+        {
+            title: 'Bag',
+            key: 'bag',
+            render: (_: unknown, row: FactoryDayBinLoadRow) =>
+                row.bag_barcode ?? <Typography.Text type="secondary">no barcode</Typography.Text>,
+        },
+        {
+            title: 'Who',
+            key: 'who',
+            render: (_: unknown, row: FactoryDayBinLoadRow) =>
+                row.user ?? <Typography.Text type="secondary">—</Typography.Text>,
         },
     ];
 
@@ -182,18 +452,18 @@ export default function FactoryDayBinPage() {
                     Day Bin (factory)
                 </Typography.Title>
                 <Typography.Text type="secondary">
-                    One central bin for the whole factory. Load raw material here whenever it is needed; production
-                    consumption reduces it automatically at Complete Batch. Loading moves material between locations —
-                    it does not consume anything and posts nothing to Tally.
+                    Material control room: scan bags in at the top, see what the factory can run right now, and check
+                    every load made today. Machines empty the bin by themselves at Complete Batch — nothing is consumed
+                    here, and loading posts nothing to Tally.
                 </Typography.Text>
             </Space>
 
-            {inventoryReadsUnavailable && (
+            {warehousesUnavailable && (
                 <Alert
                     type="warning"
                     showIcon
-                    message="You can see the day bin but not load it"
-                    description="Choosing a warehouse and moving material both read and write Inventory, which this login does not have. Ask for Inventory access (View to pick, Manage to load)."
+                    message="You can see the day bin but not set it up or load it by hand"
+                    description="Choosing a warehouse and moving material both need Inventory access, which this login does not have. Ask for Inventory access (View to pick, Manage to load)."
                 />
             )}
 
@@ -234,6 +504,72 @@ export default function FactoryDayBinPage() {
 
             {configured && (
                 <>
+                    {traceabilityEnabled && (
+                        <Card size="small" title="Scan a bag in">
+                            <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+                                The scanner types the code and presses Enter by itself — the bag shows below. Enter
+                                again (or the button) loads the whole bag; lower the kg first for a part bag.
+                            </Typography.Paragraph>
+                            {scanSuccess && (
+                                <Alert type="success" showIcon message={scanSuccess} style={{ marginBottom: 12 }} />
+                            )}
+                            {scanError && (
+                                <Alert type="error" showIcon message={scanError} style={{ marginBottom: 12 }} />
+                            )}
+                            <Input
+                                ref={scanInputRef}
+                                autoFocus
+                                size="large"
+                                value={scanCode}
+                                onChange={(e) => setScanCode(e.target.value)}
+                                onPressEnter={submitScan}
+                                placeholder="Scan or type the bag barcode, then Enter"
+                                style={{ maxWidth: 480 }}
+                            />
+                            {bagLookup.isPending && (
+                                <Typography.Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0 }}>
+                                    Looking up the bag…
+                                </Typography.Paragraph>
+                            )}
+                            {scannedBag && (
+                                <div style={{ marginTop: 12, maxWidth: 480 }}>
+                                    <Descriptions size="small" column={1} bordered style={{ marginBottom: 12 }}>
+                                        <Descriptions.Item label="Bag">{scannedBag.barcode}</Descriptions.Item>
+                                        <Descriptions.Item label="Material">
+                                            {scannedBag.lot?.item ? itemLabel(scannedBag.lot.item) : '—'}
+                                        </Descriptions.Item>
+                                        <Descriptions.Item label="Remaining in bag (kg)">
+                                            {fmtQty(scannedBag.remaining_kg)}
+                                        </Descriptions.Item>
+                                    </Descriptions>
+                                    <Form layout="vertical" component="div">
+                                        <Form.Item
+                                            label="Kg to load"
+                                            extra="The whole bag unless you lower it for a part bag."
+                                        >
+                                            <InputNumber
+                                                min={0.001}
+                                                max={Number(scannedBag.remaining_kg)}
+                                                value={scanKg}
+                                                onChange={(value) => setScanKg(value)}
+                                                style={{ width: '100%' }}
+                                            />
+                                        </Form.Item>
+                                    </Form>
+                                    <Button
+                                        type="primary"
+                                        block
+                                        onClick={submitBagLoad}
+                                        loading={bagLoad.isPending}
+                                        disabled={!scanKg || scanKg <= 0}
+                                    >
+                                        Load into Day Bin
+                                    </Button>
+                                </div>
+                            )}
+                        </Card>
+                    )}
+
                     <Card
                         size="small"
                         title={
@@ -241,7 +577,9 @@ export default function FactoryDayBinPage() {
                                 <span>
                                     Day bin: {dayBinWarehouse.code} — {dayBinWarehouse.name}
                                 </span>
-                                {dayBinWarehouse.tally_guid === null && <Tag color="orange">Not a Tally godown</Tag>}
+                                {dayBinWarehouse.tally_guid === null && (
+                                    <Tag>Internal bin — Tally keeps seeing the main godown</Tag>
+                                )}
                             </Space>
                         }
                         extra={
@@ -267,102 +605,145 @@ export default function FactoryDayBinPage() {
                             </Space>
                         }
                     >
-                        {dayBinWarehouse.tally_guid === null && (
-                            <Alert
-                                type="warning"
-                                showIcon
-                                style={{ marginBottom: 12 }}
-                                message="This warehouse does not exist in Tally yet"
-                                description="Consumption vouchers name the godown material came out of, so Tally will refuse a voucher issued from a godown it does not know. Pull godowns from Tally, or pick a warehouse that came from Tally."
-                            />
-                        )}
-                        <Table
+                        <Table<BalanceRow>
                             rowKey={(row) => row.item_id}
                             size="middle"
                             loading={isLoading}
-                            columns={columns}
-                            dataSource={dayBin?.materials ?? []}
+                            columns={balanceColumns}
+                            dataSource={balanceRows}
                             pagination={false}
+                            scroll={{ x: 'max-content' }}
+                            // A bin nobody has loaded yet is a normal state:
+                            // one plain line, never a table full of blanks.
                             locale={{
                                 emptyText: (
-                                    <Empty description="Nothing in the day bin yet — load material below." />
+                                    <Typography.Text type="secondary">
+                                        {traceabilityEnabled
+                                            ? 'Nothing in the day bin yet — scan a bag in above.'
+                                            : 'Nothing in the day bin yet — load material below.'}
+                                    </Typography.Text>
                                 ),
                             }}
                         />
                     </Card>
 
-                    <Card size="small" title="Load material into the day bin">
-                        <Form
-                            form={form}
-                            layout="vertical"
-                            onFinish={(values) => load.mutate(values)}
-                            initialValues={{ loaded_at: dayjs() }}
-                        >
-                            <Row gutter={[12, 0]}>
-                                <Col xs={24} md={8}>
-                                    <Form.Item
-                                        name="item_id"
-                                        label="Material"
-                                        rules={[{ required: true, message: 'Pick the material' }]}
+                    <Collapse
+                        activeKey={manualOpenKeys}
+                        onChange={(keys) => setManualOpenKeys(keys as string[])}
+                        items={[
+                            {
+                                key: 'manual',
+                                label: 'Load without a barcode — unlabelled bags or opening stock',
+                                children: (
+                                    <Form
+                                        form={manualForm}
+                                        layout="vertical"
+                                        onFinish={(values) => manualLoad.mutate(values)}
+                                        initialValues={{ loaded_at: dayjs() }}
                                     >
-                                        <Select
-                                            size="large"
-                                            options={itemOptions}
-                                            showSearch
-                                            optionFilterProp="label"
-                                            placeholder="Resin / Masterbatch / …"
-                                        />
-                                    </Form.Item>
-                                </Col>
-                                <Col xs={12} md={4}>
-                                    <Form.Item
-                                        name="quantity"
-                                        label="Quantity"
-                                        rules={[
-                                            { required: true, message: 'Enter the quantity' },
-                                            // The transfer endpoint requires gt:0 — say so here
-                                            // rather than letting the floor read a 422.
-                                            {
-                                                validator: (_, value) =>
-                                                    value === undefined || value === null || value > 0
-                                                        ? Promise.resolve()
-                                                        : Promise.reject(new Error('Must be more than zero')),
-                                            },
-                                        ]}
-                                    >
-                                        <InputNumber size="large" min={0} style={{ width: '100%' }} placeholder="Kg" />
-                                    </Form.Item>
-                                </Col>
-                                <Col xs={12} md={6}>
-                                    <Form.Item name="loaded_at" label="Date & time">
-                                        <DatePicker
-                                            size="large"
-                                            showTime
-                                            format="DD MMM YYYY HH:mm"
-                                            style={{ width: '100%' }}
-                                        />
-                                    </Form.Item>
-                                </Col>
-                                <Col xs={24} md={6}>
-                                    <Form.Item
-                                        name="from_warehouse_id"
-                                        label="From"
-                                        rules={[{ required: true, message: 'Pick where it came from' }]}
-                                    >
-                                        <Select
-                                            size="large"
-                                            options={sourceOptions}
-                                            showSearch
-                                            optionFilterProp="label"
-                                            placeholder="Store…"
-                                        />
-                                    </Form.Item>
-                                </Col>
-                            </Row>
-                            <Button type="primary" size="large" htmlType="submit" loading={load.isPending}>
-                                Load into day bin
-                            </Button>
-                        </Form>
+                                        <Row gutter={[12, 0]}>
+                                            <Col xs={24} md={8}>
+                                                <Form.Item
+                                                    name="item_id"
+                                                    label="Material"
+                                                    extra={
+                                                        rawMaterialsUnavailable
+                                                            ? 'Could not load the raw-material list — reload the page, or ask for Production access if this keeps happening.'
+                                                            : undefined
+                                                    }
+                                                    rules={[{ required: true, message: 'Pick the material' }]}
+                                                >
+                                                    <Select
+                                                        size="large"
+                                                        options={rawMaterialOptions}
+                                                        showSearch
+                                                        optionFilterProp="label"
+                                                        placeholder="Resin / Masterbatch / …"
+                                                        notFoundContent={
+                                                            <Empty
+                                                                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                                                                description="No raw materials (kg items) found"
+                                                            />
+                                                        }
+                                                    />
+                                                </Form.Item>
+                                            </Col>
+                                            <Col xs={12} md={4}>
+                                                <Form.Item
+                                                    name="quantity"
+                                                    label="Kg"
+                                                    rules={[
+                                                        { required: true, message: 'Enter the kg' },
+                                                        // The transfer endpoint requires gt:0 — say so here
+                                                        // rather than letting the floor read a 422.
+                                                        {
+                                                            validator: (_, value) =>
+                                                                value === undefined || value === null || value > 0
+                                                                    ? Promise.resolve()
+                                                                    : Promise.reject(new Error('Must be more than zero')),
+                                                        },
+                                                    ]}
+                                                >
+                                                    <InputNumber
+                                                        size="large"
+                                                        min={0}
+                                                        style={{ width: '100%' }}
+                                                        placeholder="Kg"
+                                                    />
+                                                </Form.Item>
+                                            </Col>
+                                            <Col xs={12} md={6}>
+                                                <Form.Item name="loaded_at" label="Date & time">
+                                                    <DatePicker
+                                                        size="large"
+                                                        showTime
+                                                        format="DD MMM YYYY HH:mm"
+                                                        style={{ width: '100%' }}
+                                                    />
+                                                </Form.Item>
+                                            </Col>
+                                            <Col xs={24} md={6}>
+                                                <Form.Item
+                                                    name="from_warehouse_id"
+                                                    label="From"
+                                                    rules={[{ required: true, message: 'Pick where it came from' }]}
+                                                >
+                                                    <Select
+                                                        size="large"
+                                                        options={sourceOptions}
+                                                        showSearch
+                                                        optionFilterProp="label"
+                                                        placeholder="Store…"
+                                                    />
+                                                </Form.Item>
+                                            </Col>
+                                        </Row>
+                                        <Button type="primary" size="large" htmlType="submit" loading={manualLoad.isPending}>
+                                            Load into Day Bin
+                                        </Button>
+                                    </Form>
+                                ),
+                            },
+                        ]}
+                    />
+
+                    <Card size="small" title="Loaded today">
+                        <Table<FactoryDayBinLoadRow>
+                            rowKey={(row) => row.id}
+                            size="small"
+                            loading={isLoading}
+                            columns={loadColumns}
+                            dataSource={dayBin?.todays_loads ?? []}
+                            pagination={false}
+                            scroll={{ x: 'max-content' }}
+                            locale={{
+                                emptyText: (
+                                    <Typography.Text type="secondary">
+                                        Nothing loaded into the day bin yet today.
+                                    </Typography.Text>
+                                ),
+                            }}
+                        />
                     </Card>
                 </>
             )}

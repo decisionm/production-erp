@@ -4,6 +4,7 @@ namespace App\Modules\TallySync\Services;
 
 use App\Modules\Finance\Models\JournalEntry;
 use App\Modules\Inventory\Models\Item;
+use App\Modules\Inventory\Services\TallyGodownResolver;
 use App\Modules\Procurement\Models\GoodsReceiptNote;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
 use App\Modules\Production\Models\Shift;
@@ -28,7 +29,17 @@ use Illuminate\Support\Facades\DB;
  */
 class TallySyncService
 {
-    public function __construct(private readonly TallyLedgerMappingService $ledgerMappings) {}
+    /**
+     * Every godown name written into a payload goes through $godowns
+     * (TallyGodownResolver): an internal warehouse Tally has never heard of
+     * (the factory day bin) posts under its parent godown's name — or, in
+     * this one-godown factory, under the single Tally-linked godown — so
+     * the accountant's books keep seeing exactly the godowns Tally knows.
+     */
+    public function __construct(
+        private readonly TallyLedgerMappingService $ledgerMappings,
+        private readonly TallyGodownResolver $godowns,
+    ) {}
 
     public function enqueueSalesInvoice(Invoice $invoice): TallySyncEntry
     {
@@ -108,7 +119,7 @@ class TallySyncService
             'voucher_number' => "GRN-{$note->id}",
             'party_ledger' => $note->purchaseOrder?->vendor?->name,
             'party_gstin' => $note->purchaseOrder?->vendor?->gstin,
-            'godown' => $note->warehouse?->name,
+            'godown' => $this->godowns->resolveName($note->warehouse),
             'narration' => $note->notes,
             'lines' => $lines,
             'total_amount' => $totalAmount,
@@ -137,7 +148,7 @@ class TallySyncService
             'voucher_number' => "DN-{$delivery->id}",
             'party_ledger' => $delivery->salesOrder?->customer?->name,
             'party_gstin' => $delivery->salesOrder?->customer?->gstin,
-            'godown' => $delivery->warehouse?->name,
+            'godown' => $this->godowns->resolveName($delivery->warehouse),
             'narration' => $delivery->notes,
             'lines' => $lines,
         ]);
@@ -203,11 +214,15 @@ class TallySyncService
 
         // Each consumption line names its own godown (the RM store it was
         // issued from) — without it the agent falls back to the voucher's
-        // FG godown and Tally deducts resin from the wrong store.
+        // FG godown and Tally deducts resin from the wrong store. Resolved
+        // through TallyGodownResolver: a line issued from the internal
+        // factory day bin posts under the godown Tally actually knows (the
+        // bin's parent / the sole company godown), because the bin is an
+        // ERP-only location the accountant's books must never see.
         $consumed = $entry->materialConsumptions->map(fn ($consumption) => [
             'item' => $consumption->item->name,
             'quantity' => $consumption->quantity_issued_kg,
-            'godown' => $consumption->warehouse?->name,
+            'godown' => $this->godowns->resolveName($consumption->warehouse),
         ])->all();
 
         $produced = [[
@@ -244,7 +259,7 @@ class TallySyncService
             'voucher_date' => $entry->production_date?->toDateString(),
             'voucher_number' => "SPE-{$entry->id}",
             'batch_number' => $entry->batch_number,
-            'godown' => $entry->warehouse?->name,
+            'godown' => $this->godowns->resolveName($entry->warehouse),
             'narration' => trim(implode('. ', array_filter([$entry->notes, $scrapNote !== '' ? "Scrap — {$scrapNote}" : null]))),
             'produced' => $produced,
             'consumed' => $consumed,
@@ -394,6 +409,12 @@ class TallySyncService
     {
         $members->loadMissing(['item', 'warehouse', 'shift', 'materialConsumptions.item', 'materialConsumptions.warehouse']);
 
+        // Godown names resolve through TallyGodownResolver, same as the
+        // per-batch payload: a line issued from the internal day bin books
+        // under its parent godown's name (the accountant's single godown),
+        // never under a warehouse Tally has never heard of. Aggregation
+        // still keys on the REAL warehouse_id — two internal bins aliasing
+        // to the same godown stay separate lines, which Tally sums anyway.
         $consumed = [];
         $produced = [];
         foreach ($members as $member) {
@@ -402,7 +423,7 @@ class TallySyncService
                 $consumed[$key] = [
                     'item' => $consumption->item->name,
                     'quantity' => bcadd($consumed[$key]['quantity'] ?? '0.0000', (string) $consumption->quantity_issued_kg, 4),
-                    'godown' => $consumption->warehouse?->name,
+                    'godown' => $this->godowns->resolveName($consumption->warehouse),
                 ];
             }
 
@@ -410,7 +431,7 @@ class TallySyncService
             $produced[$key] = [
                 'item' => $member->item->name,
                 'quantity' => bcadd($produced[$key]['quantity'] ?? '0.0000', (string) $member->quantity_produced, 4),
-                'godown' => $member->warehouse?->name,
+                'godown' => $this->godowns->resolveName($member->warehouse),
             ];
         }
 

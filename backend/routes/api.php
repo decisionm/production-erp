@@ -313,6 +313,10 @@ Route::prefix('v1')->group(function () {
             // NOT inside the traceability group below on purpose — the plain
             // central path exists whether or not the bag/barcode detail does.
             Route::get('factory-day-bin', [FactoryDayBinController::class, 'show']);
+            // The Day Bin page's raw-material picker: active kg-uom items
+            // with their current store kg. Plain masters+balances read —
+            // like the bin read above, never traceability-gated.
+            Route::get('factory-day-bin/raw-materials', [FactoryDayBinController::class, 'rawMaterials']);
             Route::apiResource('work-centers', WorkCenterController::class)->only(['index', 'store', 'update']);
 
             Route::apiResource('boms', BomController::class)->only(['index', 'store']);

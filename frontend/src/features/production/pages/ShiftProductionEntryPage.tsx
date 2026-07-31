@@ -238,11 +238,14 @@ function blankPackingLine(packaging: StandardPackaging): PackingLineValues {
 // Structural (sku+name) so both full Items and the day-bin aggregates'
 // item-lite slices ({id, name, sku}) classify the same way.
 const isMasterbatchItem = (item: Pick<Item, 'sku' | 'name'>): boolean => /master ?batch/i.test(`${item.sku} ${item.name}`);
-// The whole raw-material family, not just the word "resin" — the live
-// catalogue names its PET raw material without it (owner screenshot: an
-// empty Resin picker on every completion).
+// The whole raw-material family, not just the word "resin" — this factory's
+// own Tally books (Transactions.xml, July 2026) name the PET raw material
+// "PET Polyster Chips" and "Relpet", neither of which contains "resin",
+// "polymer" or an adjacent "pet chip". Both spellings are matched literally:
+// a generic pattern already missed them once, and the cost of that miss was
+// an empty Resin picker on every completion of go-live morning.
 const isResinItem = (item: Pick<Item, 'sku' | 'name'>): boolean =>
-    /resin|granule|polymer|pet\s*(chip|raw)/i.test(`${item.sku} ${item.name}`);
+    /resin|granul|polym|poly\s*e?ster|relpet|pet\s*(chip|raw)|\bchips\b/i.test(`${item.sku} ${item.name}`);
 const isClearColour = (colour: string | null | undefined): boolean => /^clear$/i.test((colour ?? '').trim());
 
 /**
@@ -649,9 +652,12 @@ export default function ShiftProductionEntryPage() {
     const [loadBagError, setLoadBagError] = useState<{ text: string; needsWarehouse: boolean } | null>(null);
     const loadBagInputRef = useRef<InputRef>(null);
     const currentUser = useAuthStore((s) => s.user);
+    // The central day-bin view. A plain boolean, not a machine + entry: there
+    // is ONE bin feeding all the machines, so the drawer has no per-machine
+    // target to carry (it reads GET /production/factory-day-bin).
+    const [dayBinOpen, setDayBinOpen] = useState(false);
     // Phase 6 traceability targets — only ever set from UI that itself only
     // renders when settings.traceability_enabled is true.
-    const [dayBinTarget, setDayBinTarget] = useState<{ workCenter: WorkCenter; entry: ShiftProductionEntry } | null>(null);
     const [handoverEntry, setHandoverEntry] = useState<ShiftProductionEntry | null>(null);
     const queryClient = useQueryClient();
     const navigate = useNavigate();
@@ -2538,12 +2544,15 @@ export default function ShiftProductionEntryPage() {
                                         {/* Phase 6 traceability actions — invisible unless the
                                             backend flag is on, so with it off this card is
                                             exactly the pre-traceability UI. */}
+                                        {/* Opens the CENTRAL bin, not "this machine's bin" —
+                                            one bin feeds every machine, so no machine or
+                                            batch is handed to the drawer. */}
                                         {running && traceabilityEnabled && (
                                             <Button
                                                 block
                                                 onClick={(e) => {
                                                     e.stopPropagation();
-                                                    setDayBinTarget({ workCenter: wc, entry: running });
+                                                    setDayBinOpen(true);
                                                 }}
                                             >
                                                 Materials
@@ -4624,12 +4633,7 @@ export default function ShiftProductionEntryPage() {
                 flag is on; with it off the tree is identical to today's. */}
             {traceabilityEnabled && (
                 <>
-                    <DayBinDrawer
-                        workCenter={dayBinTarget?.workCenter ?? null}
-                        entry={dayBinTarget?.entry ?? null}
-                        open={dayBinTarget !== null}
-                        onClose={() => setDayBinTarget(null)}
-                    />
+                    <DayBinDrawer open={dayBinOpen} onClose={() => setDayBinOpen(false)} />
                     <HandoverModal
                         entry={handoverEntry}
                         incomingShift={effectiveShift}

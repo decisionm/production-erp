@@ -146,6 +146,12 @@ class ProductReadinessGateTest extends TestCase
     {
         $this->supervisor();
         $item = $this->readyItem();
+        // A SECOND Tally-linked godown: with several real godowns, an
+        // unlinked, unparented warehouse is genuinely ambiguous and must
+        // still be refused. (In a ONE-godown system the alias rule now
+        // resolves such a warehouse to the sole godown instead — that path
+        // is covered by GodownAliasingTest.)
+        Warehouse::create(['code' => 'RM', 'name' => 'RM Store', 'is_active' => true, 'tally_guid' => 'gd-rm-0001']);
         $seeded = Warehouse::create(['code' => 'FG-STORE', 'name' => 'Finished Goods Store', 'is_active' => true]);
 
         $this->postJson('/api/v1/production/shift-production-entries', [
