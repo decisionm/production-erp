@@ -14,7 +14,17 @@ export default defineConfig(({ command }) => ({
         react(),
         VitePWA({
             registerType: 'autoUpdate',
-            includeAssets: ['favicon.ico', 'apple-touch-icon.png'],
+            includeAssets: [
+                'swaashpet-favicon.png',
+                'swaashpet-apple-touch-icon.png',
+                'swaashpet-logo.png',
+                'swaashpet-mark.png',
+                // Precached too, so the installed-app icon resolves from the
+                // cache and never depends on a live fetch.
+                'swaashpet-icon-192.png',
+                'swaashpet-icon-512.png',
+                'swaashpet-maskable-512.png',
+            ],
             // The app is served at the site root (/login, /production/...), while
             // its assets — and the service worker — live under /build/. The SW
             // is registered at this root scope; the `.htaccess` sends
@@ -23,10 +33,15 @@ export default defineConfig(({ command }) => ({
             // of only from /build/.
             scope: '/',
             manifest: {
-                name: 'Manufacturing ERP',
-                short_name: 'ERP',
-                description: 'Inventory, Production, Procurement, Sales, Finance and HRMS for manufacturing.',
-                theme_color: '#1677ff',
+                name: 'SWAASHPET POLYMERS',
+                // Android home screens truncate at roughly 12 characters, so the
+                // installed icon drops "POLYMERS" — same casing as `name` so the
+                // launcher label and the splash screen read consistently.
+                short_name: 'SWAASHPET',
+                description: 'Production, stores and compliance for Swaashpet Polymers Private Limited.',
+                // Brand navy from the logo artwork (#0A145B) — the Android status
+                // bar and task switcher would otherwise clash with it.
+                theme_color: '#0A145B',
                 background_color: '#ffffff',
                 display: 'standalone',
                 // Root scope + start page: install is offered from anywhere in
@@ -34,10 +49,14 @@ export default defineConfig(({ command }) => ({
                 // at its real root.
                 start_url: '/',
                 scope: '/',
+                // The logo is a wide lockup (335x148), so the icons carry only the
+                // chevron mark, centred on square white canvases — Chrome would
+                // otherwise crop the wordmark badly. The maskable one pulls the
+                // mark further in so it survives Android's circle/squircle mask.
                 icons: [
-                    { src: '/build/icon-192.png', sizes: '192x192', type: 'image/png' },
-                    { src: '/build/icon-512.png', sizes: '512x512', type: 'image/png' },
-                    { src: '/build/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+                    { src: '/build/swaashpet-icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+                    { src: '/build/swaashpet-icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+                    { src: '/build/swaashpet-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
                 ],
             },
             workbox: {

@@ -19,6 +19,7 @@ import type {
     MachineDowntimeLog,
     MaterialBag,
     MaterialBagStatus,
+    MasterbatchDosing,
     MaterialLot,
     Mold,
     MoldChangeLog,
@@ -320,6 +321,28 @@ export async function listProductionStandards(params: {
 export async function listStandardCoverage(): Promise<{ data: StandardCoverageRow[] }> {
     const { data } = await api.get<{ data: StandardCoverageRow[] }>('/production/standards/coverage');
     return data;
+}
+
+export interface MasterbatchDosingParams {
+    /** The PRODUCT (the bottle) — item_id everywhere means the thing produced. */
+    item_id?: number;
+    /** The masterbatch material. Naming it narrows the answer to one row or none. */
+    masterbatch_item_id?: number;
+    /** Bottles made — makes each row carry its `suggested_kg` for that count. */
+    quantity_produced?: number;
+}
+
+/**
+ * What masterbatch dosing applies here — grams per bottle from the factory's
+ * master. Read-only, so it is safe to call while the completion form is being
+ * filled.
+ *
+ * An empty array means NO dosing is set for that pair: the caller prefills
+ * nothing and says nothing extra. It is never an error and never a zero.
+ */
+export async function listMasterbatchDosings(params: MasterbatchDosingParams): Promise<MasterbatchDosing[]> {
+    const { data } = await api.get<{ data: MasterbatchDosing[] }>('/production/masterbatch-dosings', { params });
+    return data.data;
 }
 
 export interface BatchPreviewParams {

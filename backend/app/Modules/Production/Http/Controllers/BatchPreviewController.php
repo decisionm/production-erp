@@ -6,9 +6,11 @@ use App\Http\Controllers\Controller;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Production\Http\Requests\BatchPreviewRequest;
+use App\Modules\Production\Http\Resources\MasterbatchDosingResource;
 use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\WorkCenter;
 use App\Modules\Production\Services\BatchEstimationService;
+use App\Modules\Production\Services\MasterbatchDosingService;
 use App\Modules\Production\Services\ProductionConfigurationService;
 use App\Modules\Production\Services\ProductionStandardResolver;
 use App\Modules\Production\Services\ProductReadinessService;
@@ -29,6 +31,7 @@ class BatchPreviewController extends Controller
         private readonly BatchEstimationService $estimation,
         private readonly ProductionStandardResolver $standards,
         private readonly ProductionConfigurationService $configurations,
+        private readonly MasterbatchDosingService $masterbatchDosings,
     ) {}
 
     public function __invoke(BatchPreviewRequest $request): JsonResponse
@@ -55,20 +58,53 @@ class BatchPreviewController extends Controller
             ? $this->configurations->resolve($workCenter->id, $item->id)
             : null;
 
+        $estimation = $this->estimation->estimate(
+            $item,
+            $shift,
+            $data['planned_hours'] ?? null,
+            $data['active_cavities'] ?? $configuration?->default_cavities ?? $standard?->cavities,
+            $standard,
+            $packaging,
+            $configuration,
+        );
+
+        // The bottle count the masterbatch kg is quoted against: what the
+        // supervisor has actually counted if they sent it (the completion
+        // drawer calls this endpoint), otherwise the run's expected pieces so
+        // Start Batch can still say what the colour should come to. Echoed
+        // back inside each dosing block as `bottles`, so the screen can state
+        // the basis instead of showing an unexplained kg.
+        $dosingBottles = array_key_exists('quantity_produced', $data) && $data['quantity_produced'] !== null
+            ? (int) $data['quantity_produced']
+            : $estimation['expected_pieces'];
+
         return response()->json([
             'data' => [
                 // Assessed against the SAME resolved standard/packaging the
                 // estimation below uses, so the two halves of this response
                 // can never contradict each other.
                 'readiness' => $this->readiness->assess($item, $warehouse, $workCenter, $standard, $packaging, $configuration),
-                'estimation' => $this->estimation->estimate(
-                    $item,
-                    $shift,
-                    $data['planned_hours'] ?? null,
-                    $data['active_cavities'] ?? $configuration?->default_cavities ?? $standard?->cavities,
-                    $standard,
-                    $packaging,
-                    $configuration,
+                'estimation' => $estimation,
+                // Masterbatch prefill: grams per bottle from the dosing
+                // master × these bottles ÷ 1000, computed in
+                // ProductionCalculationEngine so this screen and any future
+                // report cannot disagree.
+                //
+                // A LIST, one entry per masterbatch that has a figure, keyed
+                // by its item — NOT a single "the" masterbatch derived from
+                // the product's colour. Matching a colour against masterbatch
+                // item names is the hardcoded-name-list trap
+                // FactoryDayBinService already documents; the screen knows
+                // which masterbatch it scanned or picked and matches on the
+                // item id. Empty list = no dosing set = prefill nothing, and
+                // the field stays blank rather than showing 0.
+                //
+                // Advisory only. Nothing here is stored: the completion
+                // endpoint saves exactly the consumption the supervisor
+                // submits, which is the figure Tally receives.
+                'masterbatch_dosing' => MasterbatchDosingResource::listForBottles(
+                    $this->masterbatchDosings->candidatesFor($item->id),
+                    $dosingBottles,
                 ),
                 // Named so the screen can SAY the machine's own approved
                 // figures are in use, rather than leaving the supervisor to

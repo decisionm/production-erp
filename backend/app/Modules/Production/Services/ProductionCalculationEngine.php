@@ -263,6 +263,55 @@ class ProductionCalculationEngine
     }
 
     /**
+     * Masterbatch kg for a bottle count, at a dosing of grams per bottle:
+     *
+     *     kg = bottles × grams_per_bottle ÷ 1000
+     *
+     * THE ONLY implementation of this multiplication. The completion screen's
+     * prefill, the Start Batch preview and any future consumption report all
+     * read it from here, so they cannot quote different kg for the same shift.
+     *
+     * Null in, null out — and null means "no dosing is set", which is NOT
+     * zero. Zero would tell the floor the factory has said this colour needs
+     * no masterbatch. Nobody has said that about anything.
+     *
+     * Presentation boundary (the engine header promises each method names its
+     * own): HALF-UP at 4dp, which DIVERGES from piecesToKg() above — that one
+     * truncates. On the factory's own figures the two differ: 13,333 bottles
+     * × 0.25 g = 3,333.25 g = 3.33325 kg, which is 3.3333 half-up and 3.3332
+     * truncated. Half-up is correct HERE because this figure is an input
+     * suggestion reconciled against a weighed bin: truncation is biased one
+     * way every single time, so it would systematically understate input and
+     * show a standing phantom shortage in the variance. piecesToKg is left
+     * exactly as it is — it is pinned cell-for-cell to the factory workbook,
+     * and "consistency" is not a reason to move an approved number.
+     *
+     * @param  int|null  $bottles  pieces produced (good bottles), not kg
+     * @param  string|null  $gramsPerBottle  the dosing master's figure, in GRAMS
+     */
+    public function masterbatchKg(?int $bottles, ?string $gramsPerBottle): ?string
+    {
+        if ($bottles === null || $gramsPerBottle === null) {
+            return null;
+        }
+
+        // A dosing of zero or less is not a dosing. The write endpoint
+        // already refuses it; this is the arithmetic refusing to turn a bad
+        // master row into a confident 0.0000 kg on the floor's screen.
+        if ($bottles < 0 || bccomp($gramsPerBottle, '0', 4) !== 1) {
+            return null;
+        }
+
+        // Grams first at 8dp, then kg at 8dp, and only then rounded — so the
+        // rounding happens once, at the boundary, not twice on the way.
+        $kg = bcdiv(bcmul((string) $bottles, $gramsPerBottle, 8), '1000', 8);
+
+        // bcadd truncates at its scale, so +0.00005 before truncating to 4dp
+        // IS round-half-up. (Verified: 3.33325 → 3.3333, 3.33324 → 3.3332.)
+        return bcadd($kg, '0.00005', 4);
+    }
+
+    /**
      * Material reconciliation.
      *
      * variance = (resin + masterbatch + other polymer) − (good + rejection + lumps)

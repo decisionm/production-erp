@@ -50,6 +50,7 @@ use App\Modules\Production\Http\Controllers\DowntimeReasonController;
 use App\Modules\Production\Http\Controllers\FactoryDayBinController;
 use App\Modules\Production\Http\Controllers\FactorySettingController;
 use App\Modules\Production\Http\Controllers\MachineDowntimeLogController;
+use App\Modules\Production\Http\Controllers\MasterbatchDosingController;
 use App\Modules\Production\Http\Controllers\MoldChangeLogController;
 use App\Modules\Production\Http\Controllers\MoldController;
 use App\Modules\Production\Http\Controllers\MrpController;
@@ -368,6 +369,18 @@ Route::prefix('v1')->group(function () {
 
             Route::get('factory-settings', [FactorySettingController::class, 'index']);
             Route::post('factory-settings', [FactorySettingController::class, 'upsert']);
+
+            // Masterbatch dosing — grams per bottle, master data. The factory
+            // gave amber (0.25 g/bottle) on 31-Jul; white and red/brown are
+            // still unset, and unset means the floor prefills nothing. The
+            // POST exists so the next figure is entered by a person in the
+            // app instead of shipped in a deploy. The GET answers "what
+            // applies to this product, and what kg is that for these
+            // bottles" — the group's module:production guard gives it .view
+            // and holds the writes to .manage, same as factory-settings.
+            Route::get('masterbatch-dosings', [MasterbatchDosingController::class, 'index']);
+            Route::post('masterbatch-dosings', [MasterbatchDosingController::class, 'store']);
+            Route::delete('masterbatch-dosings/{masterbatch_dosing}', [MasterbatchDosingController::class, 'destroy']);
 
             Route::get('shift-production-entries/active', [ShiftProductionEntryController::class, 'active']);
             // Readiness + estimation for an intended run, before it starts.
