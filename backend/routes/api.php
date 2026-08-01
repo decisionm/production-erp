@@ -345,6 +345,15 @@ Route::prefix('v1')->group(function () {
             // with their current store kg. Plain masters+balances read —
             // like the bin read above, never traceability-gated.
             Route::get('factory-day-bin/raw-materials', [FactoryDayBinController::class, 'rawMaterials']);
+            // The day-bin reconciliation for one date (?date=YYYY-MM-DD,
+            // today when absent): per material opening + loaded − consumed
+            // = expected closing. This is where "is any material missing?"
+            // is now asked — centrally, once a day — instead of per batch,
+            // where the figure was ~0 by construction. Past dates included:
+            // yesterday's numbers are the accountant's morning question.
+            // Plain movements+balances read, so outside the traceability
+            // gate like its two neighbours above.
+            Route::get('factory-day-bin/reconciliation', [FactoryDayBinController::class, 'reconciliation']);
             Route::apiResource('work-centers', WorkCenterController::class)->only(['index', 'store', 'update']);
 
             Route::apiResource('boms', BomController::class)->only(['index', 'store']);

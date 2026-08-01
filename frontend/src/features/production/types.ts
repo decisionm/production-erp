@@ -1758,6 +1758,76 @@ export interface FactoryDayBin {
 }
 
 /**
+ * One raw material's day-bin reconciliation row for a chosen date, from
+ * GET /production/factory-day-bin/reconciliation. Mirrors
+ * FactoryDayBinReconciliationResource field for field.
+ *
+ * THIS IS WHERE "IS ANY MATERIAL MISSING?" IS ASKED. It replaced the
+ * per-batch unaccounted figure, which was ~0 by construction: nothing weighs
+ * a fixed quantity of resin out to each machine, so a batch's consumption is
+ * DERIVED from its output (good kg + rejection kg + lumps kg) and "issued
+ * minus consumed" could only ever be an arithmetic identity. The real
+ * question is central and daily, against the one bin every machine draws
+ * from.
+ *
+ * Every figure is a 4dp decimal STRING, never a number — the same way the
+ * rest of the shift engine speaks about kg, so a JSON parse cannot quietly
+ * restate a stock quantity.
+ *
+ * There is deliberately NO actual/physical field. The expected side is all
+ * the server offers; the genuine check is a count a person walks out and
+ * takes, which the page holds in local state and subtracts client-side.
+ * Nothing about a count is stored or sent anywhere.
+ */
+export interface FactoryDayBinReconciliationRow {
+    /**
+     * Always present — the resource builds it with `ItemResource::make()`
+     * directly, NOT through `whenLoaded`, so unlike FactoryDayBinMaterial's
+     * `item` this one is never absent.
+     */
+    item: Item;
+    item_id: number;
+    /** The bin balance at 00:00 on the date, derived by rolling the ledger back. */
+    opening_kg: string;
+    /** Transfers INTO the bin on the date — bag scans and manual loads alike. */
+    loaded_kg: string;
+    /** Issues OUT of the bin on the date — batch consumption lines and manual issues. */
+    consumed_kg: string;
+    /**
+     * opening + loaded − consumed. NOT a check on its own: for an ordinary
+     * day it equals the bin's live balance by construction, because opening
+     * was derived by subtracting the very movements added back here. Only a
+     * physical count can disagree with it.
+     */
+    expected_closing_kg: string;
+    /**
+     * Normally '0.0000'. Non-zero means material moved through the bin by
+     * neither route — a receipt booked straight into the bin, or a transfer
+     * back out to the store. Signed. When it is non-zero the full identity
+     * is `live = expected_closing + other_movements`, so a physical count
+     * must be compared against THAT sum or the page invents a discrepancy
+     * it cannot explain.
+     */
+    other_movements_kg: string;
+}
+
+/**
+ * GET /production/factory-day-bin/reconciliation?date=YYYY-MM-DD (today when
+ * the date is absent). `warehouse: null` means no bin is configured — the
+ * same normal state the plain day-bin read answers with.
+ *
+ * `materials` omits any material the date has nothing to say about (no
+ * movement on the date and nothing in the bin at 00:00), so an empty array
+ * is a real answer, not a failure.
+ */
+export interface FactoryDayBinReconciliation {
+    /** The date actually reconciled, 'YYYY-MM-DD' — echoed back by the server. */
+    date: string;
+    warehouse: Warehouse | null;
+    materials: FactoryDayBinReconciliationRow[];
+}
+
+/**
  * One choice in the Day Bin page's raw-material picker, from
  * GET /production/factory-day-bin/raw-materials — every ACTIVE kg-uom item.
  *

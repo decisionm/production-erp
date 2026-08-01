@@ -2613,11 +2613,11 @@ export default function ShiftProductionEntryPage() {
         // ONLY KG-FAMILY LINES JOIN A KILOGRAM SUM. The "Other materials
         // (exceptions)" repeater accepts any item and files the figure in that
         // item's own unit — so a shift issuing 25 kg of resin and 500 cartons
-        // previewed "525.5 kg issued" and, through the subtraction below,
-        // "502.0 kg unaccounted": a fabricated half-tonne loss, in red, on the
-        // screen a supervisor reads before submitting. The server had already
-        // filtered the cartons out (consumedMassKg) and would file 2.0, so the
-        // preview was also contradicting the figure the batch actually got.
+        // previewed "525.5 kg issued": a fabricated half-tonne, on the screen a
+        // supervisor reads before submitting, and contradicting the 25.0 the
+        // batch actually got (the server had already filtered the cartons out
+        // in consumedMassKg). Counting a carton as a kilogram is wrong wherever
+        // the sum is shown, so the filter stays.
         //
         // Resin and masterbatch are added unconditionally: both pickers are
         // kg-uom items by construction (the raw-material picker filters to the
@@ -2637,8 +2637,13 @@ export default function ShiftProductionEntryPage() {
                         : sum,
                 0,
             );
-        const confirmedRejKg = qcKg ?? rejProdKg;
-        const unaccountedKg = issuedKg > 0 && goodKg !== null ? issuedKg - goodKg - (confirmedRejKg ?? 0) - lumpsKg : null;
+        // No per-batch "unaccounted" figure is computed here any more, and the
+        // panel shows none. Nothing weighs a fixed quantity of resin out to a
+        // machine: consumption is DERIVED from output (production + rejection +
+        // lumps), so "issued − consumed" was an arithmetic identity sitting at
+        // ~0 and dressed up as a check. Missing material is a CENTRAL question
+        // now — the Factory Day Bin page compares one day's opening, loads and
+        // total batch consumption against a physical count of the bin.
         const actualBoxes = goodBoxesWatch ?? null;
         const actualPouches = pouchesWatch ?? null;
         // Efficiency at the PIECES grain. Boxes-vs-boxes compounded two
@@ -2650,7 +2655,7 @@ export default function ShiftProductionEntryPage() {
             expected && expected.pieces > 0 && actualPieces !== null
                 ? Math.round((actualPieces / expected.pieces) * 1000) / 10
                 : null;
-        return { ct, cavities, hours, grossHours, downtimeMinutes, nosPerBox, nosPerPouch, expected, goodKg, rejProdKg, qcKg, rejDiffKg, lumpsKg, issuedKg, unaccountedKg, actualBoxes, actualPouches, actualPieces, efficiencyPct };
+        return { ct, cavities, hours, grossHours, downtimeMinutes, nosPerBox, nosPerPouch, expected, goodKg, rejProdKg, qcKg, rejDiffKg, lumpsKg, issuedKg, actualBoxes, actualPouches, actualPieces, efficiencyPct };
     }, [
         completingEntry,
         nominalWeight,
@@ -2710,6 +2715,27 @@ export default function ShiftProductionEntryPage() {
         if (resinKgTouchedRef.current || resinKgWeighedRef.current) return;
         completeForm.setValue('resin_kg', resinCalcKg);
     }, [resinCalcKg, completingEntry, completeForm]);
+
+    /**
+     * THE ONE MATERIAL FIGURE THE RESULTS PANEL STATES PER BATCH: the resin
+     * this batch consumed, in kg. It replaced the "Unaccounted" row, which was
+     * ~0 by construction and only ever confused the floor.
+     *
+     * It is the VALUE OF THE KG BOX — the figure that actually posts as the
+     * consumption line (see the resin row assembled for submission below) —
+     * not the raw formula, so the panel can never preview a number different
+     * from the one the batch gets.
+     *
+     * "(calculated)" is claimed only while the box still holds the formula's
+     * own answer. That is decided by comparing NUMERICALLY against
+     * resinCalcKg, never by reading resinKgTouchedRef/resinKgWeighedRef: a ref
+     * does not trigger a render, so a label keyed on one would keep saying
+     * "calculated" over a figure the supervisor had just typed over. Epsilon
+     * rather than ===, because both sides have been through 4dp rounding.
+     */
+    const resinShownKg = resinKgWatch ?? null;
+    const resinIsCalculated =
+        resinShownKg !== null && resinCalcKg !== null && Math.abs(resinShownKg - resinCalcKg) < 0.0001;
 
     // ---- Masterbatch dosing ------------------------------------------------
     // The factory's own figure, in GRAMS PER BOTTLE ("for master amber 0.25 is
@@ -6279,7 +6305,31 @@ export default function ShiftProductionEntryPage() {
                                 <ResultRow label="Rejection difference" value={`${fmtNum(results.rejDiffKg)} kg`} formula="production − QC" />
                             )}
                             {results.lumpsKg > 0 && <ResultRow label="Lumps" value={`${fmtNum(results.lumpsKg)} kg`} formula="sum of lump scrap lines" />}
-                            {results.issuedKg > 0 && (
+                            {/* Sits directly under the three figures it is made
+                                of. This is the batch's material answer now —
+                                there is no "unaccounted" row beneath it,
+                                because subtracting these same three from a
+                                consumption derived from them could only ever
+                                give zero. */}
+                            {resinShownKg !== null && resinShownKg > 0 && (
+                                <ResultRow
+                                    label={resinIsCalculated ? 'Resin consumed (calculated)' : 'Resin consumed (entered)'}
+                                    value={`${fmtNum(resinShownKg)} kg`}
+                                    formula={
+                                        resinIsCalculated
+                                            ? 'production kg + rejection kg + lumps kg, at the bottle weight above'
+                                            : 'set by hand or from a day-bin weighment — the kg box wins for this batch'
+                                    }
+                                />
+                            )}
+                            {/* Only when it is a DIFFERENT number from the resin
+                                line above. A clear run takes no masterbatch
+                                (hideMbRow) and usually has no other kg lines, so
+                                the two figures are identical — and the panel was
+                                printing the same 25 kg twice under two labels,
+                                which reads as two facts. */}
+                            {results.issuedKg > 0 &&
+                                (resinShownKg === null || Math.abs(results.issuedKg - resinShownKg) > 0.0001) && (
                                 <ResultRow
                                     label="Material issued"
                                     value={`${fmtNum(results.issuedKg)} kg`}
@@ -6289,14 +6339,6 @@ export default function ShiftProductionEntryPage() {
                                     // their own units — they are listed, just
                                     // not weighed.
                                     formula="resin + masterbatch + kg materials only — Nos/other-unit lines are issued but not weighed"
-                                />
-                            )}
-                            {results.unaccountedKg !== null && (
-                                <ResultRow
-                                    label="Unaccounted"
-                                    value={`${fmtNum(results.unaccountedKg)} kg`}
-                                    formula="issued (kg materials only) − good − rejection (QC wins) − lumps"
-                                    danger={Math.abs(results.unaccountedKg) > 0.5}
                                 />
                             )}
                         </Card>
