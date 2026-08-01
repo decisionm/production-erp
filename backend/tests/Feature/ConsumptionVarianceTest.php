@@ -229,6 +229,49 @@ class ConsumptionVarianceTest extends TestCase
         $this->assertSame(25.0, $variance['variance_pct']);
     }
 
+    /**
+     * The same mass filter, pinned on the RECONCILIATION block — issued_kg
+     * and reconciliation_unaccounted_kg, the pair the completion drawer
+     * shows before submit and the approval drawer shows after.
+     *
+     * This is the arithmetic the frontend's pre-submit "Material issued" /
+     * "Unaccounted" memo mirrors. That memo was summing every consumption
+     * line's quantity into one kilogram figure, so a shift that issued 25 kg
+     * of resin and 500 cartons previewed 525.5 kg issued and 502.0 kg
+     * unaccounted — a fabricated half-tonne loss on screen, against a server
+     * that had already filtered the cartons out and would file 2.0. Pinning
+     * both numbers here gives the screen one contract to agree with.
+     */
+    public function test_a_nos_unit_line_is_excluded_from_issued_kg_and_the_unaccounted_figure(): void
+    {
+        $entry = $this->completedEntry(
+            itemAttributes: ['nominal_weight_grams' => '20.0000'],
+            entryAttributes: ['quantity_produced_kg' => '20.0000', 'quantity_rejection_kg' => '2'],
+        );
+        // "Kgs." with the trailing dot is how Tally's masters spell it on the
+        // live books — it must still count as kg.
+        $masterbatch = Item::create(['sku' => 'MB-BLUE', 'name' => 'Masterbatch Blue', 'uom' => 'Kgs.']);
+        $carton = Item::create(['sku' => 'CTN-24', 'name' => 'Corrugated Carton 24', 'uom' => 'Nos.']);
+
+        foreach ([[$this->resin, '25'], [$masterbatch, '0.5'], [$carton, '500']] as [$item, $quantity]) {
+            $entry->materialConsumptions()->create([
+                'item_id' => $item->id,
+                'warehouse_id' => $this->rmStore->id,
+                'quantity_issued_kg' => $quantity,
+            ]);
+        }
+        $entry->scraps()->create(['type' => 'lumps', 'quantity_kg' => '1.5']);
+
+        $metrics = app(ShiftProductionEntryService::class)->productionMetrics($entry);
+
+        // 25 + 0.5 — the 500 cartons are issued and stocked in their own
+        // unit, they are simply not kilograms.
+        $this->assertSame('25.5000', $metrics['issued_kg']);
+        // 25.5 − 20 good − 2 rejection − 1.5 lumps = 2.0. Summing the
+        // cartons would read 502.0000.
+        $this->assertSame('2.0000', $metrics['reconciliation_unaccounted_kg']);
+    }
+
     public function test_a_soft_deleted_consumption_master_still_counts_toward_the_kg_actual(): void
     {
         // Mirrors the BOM-side rule: a master cleanup trashing the resin

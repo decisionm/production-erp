@@ -69,6 +69,14 @@ function useShiftOptions() {
 // ---------------------------------------------------------------------------
 // Production tab — one row per completed entry; pinned totals row aggregated
 // as ratio-of-sums (formula dictionary row 24), never an average of row %s.
+//
+// Rows and the "Day total" beneath them are the SAME grain: Σ actual pieces ÷
+// Σ expected pieces. They used to disagree — rows in pieces, the total in
+// boxes — which put two efficiencies on one screen that could not be compared
+// and nothing said so. The grain is named ONCE, in the Efficiency column
+// header, with the formula spelled out in the caption below the table; the
+// cells stay bare percentages so a shop-floor tablet isn't reading "(pcs)"
+// twenty times down a column.
 // ---------------------------------------------------------------------------
 
 function ProductionTab() {
@@ -95,7 +103,7 @@ function ProductionTab() {
 
     const exportCsv = () => {
         const csv = toCsv(
-            ['Date', 'Shift', 'Machine', 'Item', 'Batch', 'Running Hrs', 'Expected Boxes', 'Actual Boxes', 'Expected Pcs', 'Actual Pcs', 'Good Kg', 'Rejection Kg', 'Lumps Kg', 'Efficiency %'],
+            ['Date', 'Shift', 'Machine', 'Item', 'Batch', 'Running Hrs', 'Expected Boxes', 'Actual Boxes', 'Expected Pcs', 'Actual Pcs', 'Good Kg', 'Rejection Kg', 'Lumps Kg', 'Efficiency % (pcs)'],
             [
                 ...rows.map((r) => [
                     r.production_date,
@@ -123,7 +131,12 @@ function ProductionTab() {
                           '',
                           totals.expected_boxes,
                           totals.actual_boxes,
-                          // No expected_pieces total server-side (per-row metric only).
+                          // The totals row's denominator (Σ eligible expected
+                          // pieces) is not on the wire — the server sends the
+                          // finished ratio, not its parts — so this cell stays
+                          // blank rather than summing the row column, which
+                          // would include rows the ratio excluded and read as
+                          // a denominator that does not produce the % beside it.
                           '',
                           totals.actual_pieces,
                           totals.good_production_kg,
@@ -196,7 +209,9 @@ function ProductionTab() {
                     { title: 'Rej. Kg', dataIndex: 'rejection_kg_production', align: 'right', render: fmtKg },
                     { title: 'Lumps Kg', dataIndex: 'lumps_kg', align: 'right', render: fmtKg },
                     {
-                        title: 'Efficiency',
+                        // The one place the grain is named — rows and the
+                        // pinned Day total are both pieces ÷ pieces.
+                        title: 'Efficiency (pcs)',
                         align: 'right',
                         render: (_, r) => (
                             <Space size={6}>
@@ -224,8 +239,9 @@ function ProductionTab() {
                 }
             />
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                Day-total efficiency = Σ actual boxes ÷ Σ expected boxes × 100 (ratio of sums) — deliberately not the
-                average of the per-row percentages.
+                Day-total efficiency = Σ actual pieces ÷ Σ expected pieces × 100 (ratio of sums) — the same grain as
+                every row above it, deliberately not the average of the per-row percentages. Rows with no recorded
+                standard join neither sum. Boxes are reported as plain column totals only.
             </Typography.Text>
         </Space>
     );

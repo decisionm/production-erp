@@ -160,6 +160,17 @@ class ApprovalDrawerContractTest extends TestCase
         $this->assertArrayHasKey('warehouse', $line, "{$where}: consumption line has no warehouse — row.warehouse.code throws and blanks the drawer");
         $this->assertSame('RM-PET', $line['item']['sku']);
         $this->assertSame('DAY-BIN', $line['warehouse']['code']);
+        // The unit the quantity cell prints beside the figure. Both drawers
+        // read the line's OWN item uom now — the column used to be headed a
+        // blanket "Kg", so 500 cartons read as half a tonne of cardboard —
+        // and both fall back to "Kg" when the key is absent. That fallback is
+        // deliberate (it matches the server's kg-family default for an
+        // unlabelled master) and it means a dropped `uom`, or a future detail
+        // endpoint that forgets to eager-load materialConsumptions.item, would
+        // silently reinstate the old lie with nothing failing. So the key is
+        // pinned here rather than left to the eager load's good behaviour.
+        $this->assertArrayHasKey('uom', $line['item'], "{$where}: consumption line item has no uom — every line falls back to \"Kg\"");
+        $this->assertSame('Kgs', $line['item']['uom']);
         // Numeric compare: the column has no decimal cast, so the driver
         // decides the wire type (MySQL hands back "215.5000", SQLite 215.5).
         // The cell only prints it, so either is fine — the figure is what

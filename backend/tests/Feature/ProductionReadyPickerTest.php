@@ -294,11 +294,13 @@ class ProductionReadyPickerTest extends TestCase
         // ShiftProductionEntryApproved listener, and faking the event would
         // make this pass with the guard deleted.
         $approver = User::factory()->create();
+        // Four-eyes: the accountant gate refuses the PM's own account.
+        $accountant = User::factory()->create();
         $entry = $this->completedEntry($this->localFixtureItem());
 
         $service = app(ShiftProductionEntryService::class);
         $service->pmApprove($entry, $approver->id);
-        $approved = $service->accountantApprove($entry->fresh(), $approver->id);
+        $approved = $service->accountantApprove($entry->fresh(), $accountant->id);
 
         $this->assertSame(ShiftProductionEntryStatus::Approved->value, $approved->status->value);
         $this->assertSame(0, TallySyncEntry::count(), 'A product Tally does not know must never be queued to it.');
@@ -310,11 +312,12 @@ class ProductionReadyPickerTest extends TestCase
         // The negative control for the test above. Without it, that test
         // would pass just as well if approval queued nothing for ANY item.
         $approver = User::factory()->create();
+        $accountant = User::factory()->create();
         $entry = $this->completedEntry($this->unconfiguredItem());
 
         $service = app(ShiftProductionEntryService::class);
         $service->pmApprove($entry, $approver->id);
-        $service->accountantApprove($entry->fresh(), $approver->id);
+        $service->accountantApprove($entry->fresh(), $accountant->id);
 
         $this->assertSame(1, TallySyncEntry::count());
     }
@@ -329,15 +332,16 @@ class ProductionReadyPickerTest extends TestCase
         config(['tally-sync.voucher_granularity' => 'shift']);
 
         $approver = User::factory()->create();
+        $accountant = User::factory()->create();
         $service = app(ShiftProductionEntryService::class);
 
         $fixture = $this->completedEntry($this->localFixtureItem());
         $service->pmApprove($fixture, $approver->id);
-        $service->accountantApprove($fixture->fresh(), $approver->id);
+        $service->accountantApprove($fixture->fresh(), $accountant->id);
 
         $real = $this->completedEntry($this->unconfiguredItem());
         $service->pmApprove($real, $approver->id);
-        $service->accountantApprove($real->fresh(), $approver->id);
+        $service->accountantApprove($real->fresh(), $accountant->id);
 
         $voucher = TallySyncEntry::query()->sole();
         $this->assertSame([$real->id], $voucher->payload['entry_ids']);

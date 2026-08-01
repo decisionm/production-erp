@@ -501,8 +501,10 @@ class MasterbatchDosingTest extends TestCase
         ])->assertOk();
 
         $service = app(ShiftProductionEntryService::class);
+        // Four-eyes: the accountant gate refuses the PM's own account.
+        $accountant = User::factory()->create();
         $service->pmApprove($entry->fresh(), $approver->id);
-        $service->accountantApprove($entry->fresh(), $approver->id);
+        $service->accountantApprove($entry->fresh(), $accountant->id);
 
         $voucher = TallySyncEntry::query()->sole();
         $amberLine = collect($voucher->payload['consumed'])->firstWhere('item', 'Master Batch Amber');

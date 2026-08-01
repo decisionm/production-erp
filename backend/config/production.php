@@ -52,6 +52,41 @@ return [
     ],
 
     /*
+     * FOUR EYES ON THE APPROVAL CHAIN.
+     *
+     * The plant manager verifies the shift, the accountant reconciles it and
+     * posts it to Tally. Two gates are only two gates if two people clear
+     * them. Until this existed nothing stopped one account doing both: the
+     * PM stage became a formality, and the audit trail recorded the same
+     * name in both signature columns — which is precisely the evidence an
+     * auditor asks for and precisely what it would fail to be.
+     *
+     * With this false (the default) the accountant approver must be a
+     * DIFFERENT user from the plant-manager approver, and the refusal says
+     * so in plain words. Set PROD_APPROVALS_ALLOW_SAME_USER=true for a
+     * genuine one-person office where the owner really is both roles — a
+     * deliberate decision, written down in .env where anyone can see it,
+     * rather than a control nobody noticed was missing.
+     *
+     * THERE IS DELIBERATELY NO ADMINISTRATOR EXEMPTION, and that omission is
+     * the whole point rather than an oversight. "Let admins sign twice" is
+     * the obvious next thought and it would swallow the rule entire: in this
+     * deployment the people who approve shifts are the same handful who hold
+     * the Administrator role, so exempting them would mean the rule binds
+     * nobody capable of breaking it. A one-person office relaxes it with the
+     * flag above — in the open, for everyone — not silently for whoever
+     * happens to carry a role.
+     *
+     * Scope is the accountant gate only. pmApprove needs no such check:
+     * it is the FIRST gate, so there is no earlier signature to collide
+     * with, and the supervisor who ran the batch is already kept out of
+     * both gates by the endpoint's role permissions.
+     */
+    'approvals' => [
+        'allow_same_user' => (bool) env('PROD_APPROVALS_ALLOW_SAME_USER', false),
+    ],
+
+    /*
      * Stock behaviour on the COMPLETION path — and nowhere else.
      *
      * THE INCIDENT (owner's screenshot, 30-Jul). A real shift's completion

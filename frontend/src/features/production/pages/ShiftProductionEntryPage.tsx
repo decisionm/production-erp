@@ -481,6 +481,29 @@ function packingUnitLabel(unit: string): string {
 }
 
 /**
+ * Does this material's own UOM put it in the KILOGRAM family — i.e. may its
+ * quantity be added to a figure printed in kg?
+ *
+ * Mirrors the backend's isMassUom() exactly, and it has to: the pre-submit
+ * memo is a preview of numbers the server is about to compute, and a preview
+ * that answers a different question is worse than no preview. Lowercased,
+ * trailing dot stripped, because Tally's masters spell it "Kgs." on 90+ live
+ * items and an un-normalised compare drops every one of them out of the kg
+ * sums.
+ *
+ * Blank/unknown counts as kg, deliberately — the same fail-safe direction the
+ * server takes (ConsumptionVarianceTest: "a consumption line whose master has
+ * no uom counts as kg"). Silently dropping a real resin line from the
+ * reconciliation is the worse of the two wrong answers.
+ */
+function isKgFamilyUom(uom: string | null | undefined): boolean {
+    const raw = (uom ?? '').trim();
+    if (raw === '') return true;
+
+    return ['kg', 'kgs', 'kilogram', 'kilograms'].includes(raw.toLowerCase().replace(/\.$/, ''));
+}
+
+/**
  * The stated basis, or the one this kind is counted against by settled fact.
  *
  * The backend states `per_carton` / `per_tray`; the fallbacks below cover only
@@ -2582,8 +2605,33 @@ export default function ShiftProductionEntryPage() {
         const qcKg = qcRejectionWatch ?? null;
         const rejDiffKg = rejProdKg !== null && qcKg !== null ? rejProdKg - qcKg : null;
         const lumpsKg = lumpsKgLive;
+        // ONLY KG-FAMILY LINES JOIN A KILOGRAM SUM. The "Other materials
+        // (exceptions)" repeater accepts any item and files the figure in that
+        // item's own unit — so a shift issuing 25 kg of resin and 500 cartons
+        // previewed "525.5 kg issued" and, through the subtraction below,
+        // "502.0 kg unaccounted": a fabricated half-tonne loss, in red, on the
+        // screen a supervisor reads before submitting. The server had already
+        // filtered the cartons out (consumedMassKg) and would file 2.0, so the
+        // preview was also contradicting the figure the batch actually got.
+        //
+        // Resin and masterbatch are added unconditionally: both pickers are
+        // kg-uom items by construction (the raw-material picker filters to the
+        // kg family server-side), and their fields are typed in kg.
+        //
+        // A line whose item isn't in `items` yet resolves to undefined and is
+        // COUNTED — same fail-safe direction as a blank UOM, see isKgFamilyUom.
+        // The non-kg lines are not hidden: each keeps its own row above with
+        // its own unit suffix. They are shown, just not summed into kilograms.
         const issuedKg =
-            (resinKgWatch ?? 0) + (mbKgWatch ?? 0) + (consumptionsWatch ?? []).reduce((sum, c) => sum + (c?.quantity_issued_kg ?? 0), 0);
+            (resinKgWatch ?? 0) +
+            (mbKgWatch ?? 0) +
+            (consumptionsWatch ?? []).reduce(
+                (sum, c) =>
+                    isKgFamilyUom(items?.data.find((i) => i.id === c?.item_id)?.uom)
+                        ? sum + (c?.quantity_issued_kg ?? 0)
+                        : sum,
+                0,
+            );
         const confirmedRejKg = qcKg ?? rejProdKg;
         const unaccountedKg = issuedKg > 0 && goodKg !== null ? issuedKg - goodKg - (confirmedRejKg ?? 0) - lumpsKg : null;
         const actualBoxes = goodBoxesWatch ?? null;
@@ -2613,6 +2661,9 @@ export default function ShiftProductionEntryPage() {
         lumpsKgLive,
         downtimeMinutes,
         consumptionsWatch,
+        // The kg/non-kg split of the exception lines is read off the item
+        // master, so the memo must recompute when that list arrives.
+        items,
     ]);
 
     // Box 2, grams per bottle. For resin that is the bottle's own unit weight —
@@ -5580,8 +5631,26 @@ export default function ShiftProductionEntryPage() {
                         // Show the quantity in the selected material's own unit —
                         // resin/masterbatch are Kg, but caps/cartons/trays are Nos
                         // (factory answer: UOM comes from the item master).
+                        //
+                        // The label is decided by the SAME predicate that decides
+                        // whether the figure joins the kg sums below, so the two
+                        // can never disagree — a line printed "Kg" is a line the
+                        // "Material issued" total counted, and a line printed in
+                        // anything else is one it left out. (Reading the raw uom
+                        // through packingUnitLabel alone would print a master
+                        // spelled "KILOGRAMS" verbatim while still weighing it.)
+                        //
+                        // Everything non-kg goes through packingUnitLabel so the
+                        // master's spelling ("NOS", "Nos.") lands in the same
+                        // vocabulary the packing rows above already print — an
+                        // exception row reading "500 NOS" beside a carton row
+                        // reading "24 Nos" is the "two different screens" look
+                        // that helper exists to prevent — and an unrecognised
+                        // unit prints as the master wrote it, so a metre item
+                        // still reads "m".
                         const selectedItemId = completeForm.watch(`material_consumptions.${index}.item_id`);
-                        const selectedUom = items?.data.find((i) => i.id === selectedItemId)?.uom ?? 'Kg';
+                        const selectedRawUom = items?.data.find((i) => i.id === selectedItemId)?.uom;
+                        const selectedUom = isKgFamilyUom(selectedRawUom) ? 'Kg' : packingUnitLabel(selectedRawUom ?? '');
                         return (
                         <Row key={field.id} gutter={[8, 8]} align="middle" style={{ marginTop: 8 }}>
                             {/* The exception lines no longer carry a source
@@ -5947,13 +6016,22 @@ export default function ShiftProductionEntryPage() {
                             )}
                             {results.lumpsKg > 0 && <ResultRow label="Lumps" value={`${fmtNum(results.lumpsKg)} kg`} formula="sum of lump scrap lines" />}
                             {results.issuedKg > 0 && (
-                                <ResultRow label="Material issued" value={`${fmtNum(results.issuedKg)} kg`} formula="resin + masterbatch + other lines" />
+                                <ResultRow
+                                    label="Material issued"
+                                    value={`${fmtNum(results.issuedKg)} kg`}
+                                    // Says what it counted AND what it left
+                                    // out. The cartons and caps are still on
+                                    // screen in their own rows above with
+                                    // their own units — they are listed, just
+                                    // not weighed.
+                                    formula="resin + masterbatch + kg materials only — Nos/other-unit lines are issued but not weighed"
+                                />
                             )}
                             {results.unaccountedKg !== null && (
                                 <ResultRow
                                     label="Unaccounted"
                                     value={`${fmtNum(results.unaccountedKg)} kg`}
-                                    formula="issued − good − rejection (QC wins) − lumps"
+                                    formula="issued (kg materials only) − good − rejection (QC wins) − lumps"
                                     danger={Math.abs(results.unaccountedKg) > 0.5}
                                 />
                             )}

@@ -48,6 +48,60 @@ jobs:
         working-directory: frontend
         run: npm run build   # writes into ../backend/public/build (see vite.config.ts)
 
+      # --- The gate: nothing ships until the suite is green ---
+      #
+      # This job used to rsync straight after the frontend build. Pull requests
+      # run ci.yml, so the only thing standing between a broken commit and the
+      # factory's live instance was the habit of opening a PR — a direct push to
+      # main (or a "Run workflow" click) deployed code no test had ever seen.
+      # The same checks now run here, in this job, BEFORE the rsync step: any
+      # non-zero exit fails the job and the server is never touched.
+      #
+      # Deliberately identical to ci.yml's `app` job rather than a second
+      # invention that could drift from it — same PHP version, same extensions,
+      # same commands. Two notes on why it looks the way it does:
+      #   * It sits AFTER the frontend build on purpose (ci.yml's header explains
+      #     it: a smoke test hits "/" and 500s if backend/public/build/index.html
+      #     does not exist yet).
+      #   * The suite runs on in-memory sqlite because backend/phpunit.xml pins
+      #     DB_CONNECTION=sqlite / DB_DATABASE=":memory:". That is why no database
+      #     is configured here — configuring one would override the pinned values
+      #     and test against something production is not.
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          # composer.lock pins Symfony v8 packages that require PHP >= 8.4.1
+          php-version: '8.4'
+          extensions: mbstring, bcmath, pdo_sqlite, sqlite3, zip
+          coverage: none
+
+      # Dev dependencies included — pint and phpunit are the point of this gate.
+      # They cannot leak into production: vendor/ is rsync-excluded below and is
+      # rebuilt on the server with --no-dev by scripts/deploy.sh.
+      - name: Install composer dependencies
+        working-directory: backend
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Pint (style)
+        working-directory: backend
+        run: ./vendor/bin/pint --test
+
+      # The .env written here is the runner's throwaway testing env, never the
+      # server's — .env is on the rsync --exclude list below.
+      - name: Backend tests
+        working-directory: backend
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+          php artisan test
+
+      # Names the failure instead of leaving a red X to interpret. Only fires if
+      # something above went red, in which case the rsync below never ran.
+      - name: Explain a failed gate
+        if: failure()
+        run: |
+          echo "::error::Deploy aborted BEFORE the rsync — the pre-deploy gate failed, so the server still runs the previous release and nothing was copied to it. Open the first red step above: 'Type-check frontend' / 'Build frontend' means the SPA does not compile, 'Pint (style)' means PHP style (run ./vendor/bin/pint in backend/ and push), 'Backend tests' means the suite is red (reproduce with php artisan test in backend/). Fix on a branch and merge — re-running this workflow on the same commit will fail again."
+
       # --- Ship it ---
       - name: Set up SSH
         run: |

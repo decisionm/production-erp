@@ -18,6 +18,7 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Builds an XML-agnostic intermediate payload per voucher and queues it —
@@ -461,6 +462,17 @@ class TallySyncService
 
         // First delivery closes the merge window (see the shift-voucher
         // merge query). Unacked vouchers keep reappearing on later polls.
+        //
+        // The rows are READ BEFORE THEY ARE STAMPED on purpose, and the
+        // agent depends on it: the delivered_at each entry carries in this
+        // response is its value as of the moment of this poll — null the
+        // first time it is handed out, set on every re-poll. That is the
+        // agent's idempotency line ("have I been given this voucher
+        // before?"), the one thing standing between a lost acknowledgement
+        // and the same voucher posted twice into live books. Stamp first
+        // and every delivery looks like a re-delivery; drop the mass
+        // update's ->whereNull() and a re-delivery looks brand new. Keep
+        // this ordering. Covered by VoucherPostedOnceTest.
         TallySyncEntry::query()
             ->whereIn('id', $entries->pluck('id'))
             ->whereNull('delivered_at')
@@ -487,8 +499,36 @@ class TallySyncService
         return $entry;
     }
 
+    /**
+     * The agent reporting that Tally rejected this voucher.
+     *
+     * Refused, loudly but harmlessly, once the voucher is already synced:
+     * "failed" is what puts the Retry button on the dashboard, and retrying
+     * a voucher Tally has already accepted posts it into the live books a
+     * second time. The only way a synced entry can be reported failed is a
+     * confused/duplicated report — a stale agent replaying an old queue, or
+     * an ack that succeeded on a connection whose response never arrived —
+     * and in every one of those cases the books already hold the voucher.
+     *
+     * Note the guard is on SYNCED, not on delivered: every entry the agent
+     * can report on has been delivered to it by definition (pending()
+     * stamps delivered_at on the way out), so refusing delivered entries
+     * would silence real Tally rejections ("Stock Item does not exist")
+     * entirely — the one thing SyncFailureVisibilityTest exists to protect.
+     */
     public function markFailed(TallySyncEntry $entry, string $errorMessage): TallySyncEntry
     {
+        if ($entry->isInTally()) {
+            logger()->warning('Tally sync failure ignored: that voucher is already in Tally.', [
+                'tally_sync_entry_id' => $entry->id,
+                'voucher_number' => $entry->voucherNumber(),
+                'synced_at' => $entry->synced_at?->toIso8601String(),
+                'reported_error' => $errorMessage,
+            ]);
+
+            return $entry;
+        }
+
         $entry->update([
             'status' => TallySyncStatus::Failed,
             'error_message' => $errorMessage,
@@ -498,11 +538,39 @@ class TallySyncService
         return $entry;
     }
 
+    /**
+     * Put a voucher back in the queue for the agent to post again.
+     *
+     * Refuses outright once the voucher is in Tally — see markFailed(). By
+     * the time anyone can click Retry the money is in someone's books, so
+     * the honest answer is "go look at Tally", not a second voucher.
+     *
+     * Clearing delivered_at is what actually re-arms the agent: the agent
+     * refuses to rebuild a voucher for any entry that arrives already
+     * stamped as delivered (it cannot tell a lost ack from a lost post),
+     * so a re-queue that left the stamp in place would be a Retry button
+     * that quietly does nothing. Nulling it makes each retry a ONE-SHOT
+     * posting authorisation — pending() re-stamps on the very next poll, so
+     * the guard closes again by itself.
+     *
+     * @throws ValidationException 422 naming the voucher to check in Tally
+     */
     public function retry(TallySyncEntry $entry): TallySyncEntry
     {
+        if ($entry->isInTally()) {
+            $synced = $entry->synced_at?->format('d M Y H:i');
+
+            throw ValidationException::withMessages([
+                'entry' => "This voucher is already in Tally as {$entry->voucherNumber()}"
+                    .($synced !== null ? " (synced {$synced})" : '')
+                    .' — check Tally before anything else. Re-queueing it would post the same voucher twice.',
+            ]);
+        }
+
         $entry->update([
             'status' => TallySyncStatus::Pending,
             'error_message' => null,
+            'delivered_at' => null,
         ]);
 
         return $entry;
