@@ -929,6 +929,15 @@ type FinalPacking =
     | {
           mode: 'tray';
           approved: number;
+          /**
+           * The approved pieces counted STRAIGHT INTO TRAYS, ignoring the carton
+           * grouping — 2,154 at 120 is 17. It is the figure a packer checks
+           * against a bench: they fill trays, and the cartons are what the full
+           * trays are then stacked into. Printing only the carton decomposition
+           * ("3 cartons · 2 trays") made the approver multiply and add to get
+           * back to the number they were actually approving.
+           */
+          fullTrays: number;
           cartons: number;
           trays: number;
           partialTray: number;
@@ -936,6 +945,40 @@ type FinalPacking =
           perBox: number;
       }
     | { mode: 'pouch'; approved: number; pouches: number; loose: number; perPouch: number };
+
+/**
+ * "3 cartons + 2 trays + partial" — the same approved pieces, grouped the way
+ * they physically leave the floor.
+ *
+ * Zero terms are DROPPED rather than printed: "0 cartons + 2 trays" invites the
+ * reader to wonder which carton went missing, when the honest answer is that a
+ * short run never filled one. And with NO full carton the grouping is dropped
+ * whole: it would then be the tray sentence beside it, said a second time in
+ * different words, which reads as a second fact.
+ */
+function cartonGrouping(packing: Extract<FinalPacking, { mode: 'tray' }>): string {
+    if (packing.cartons <= 0) return '';
+    const parts: string[] = [`${packing.cartons} ${packing.cartons === 1 ? 'carton' : 'cartons'}`];
+    if (packing.trays > 0) parts.push(`${packing.trays} ${packing.trays === 1 ? 'tray' : 'trays'}`);
+    if (packing.partialTray > 0) parts.push('partial');
+    return parts.join(' + ');
+}
+
+/**
+ * "17 full trays + 1 tray of 114 (3 cartons + 2 trays + partial)".
+ *
+ * The trays first, because that is the count a packer can walk up to a bench
+ * and check; the cartons in brackets, because that is how the same pieces get
+ * stacked to leave. Every term that came to nothing is omitted, so a run of 50
+ * reads "1 tray of 50" rather than "0 full trays + 1 tray of 50 ()".
+ */
+function trayFinalPackingText(packing: Extract<FinalPacking, { mode: 'tray' }>): string {
+    const parts: string[] = [];
+    if (packing.fullTrays > 0) parts.push(`${packing.fullTrays} full ${packing.fullTrays === 1 ? 'tray' : 'trays'}`);
+    if (packing.partialTray > 0) parts.push(`1 tray of ${packing.partialTray}`);
+    const grouping = cartonGrouping(packing);
+    return grouping ? `${parts.join(' + ')} (${grouping})` : parts.join(' + ');
+}
 
 function finalPackingAfterQuality(row: ShiftProductionEntry): FinalPacking | null {
     // The APPROVED figure, read off the server's own net — never
@@ -980,6 +1023,11 @@ function finalPackingAfterQuality(row: ShiftProductionEntry): FinalPacking | nul
     return {
         mode: 'tray',
         approved,
+        // Deliberately its own division rather than cartons × trays-per-carton
+        // + trays: identical arithmetic (perBox % perTray === 0 is checked
+        // above), but stated against the approved figure itself, which is the
+        // number this whole read-out exists to explain.
+        fullTrays: Math.floor(approved / perTray),
         cartons,
         trays,
         partialTray: afterCartons - trays * perTray,
@@ -1429,15 +1477,7 @@ export default function ApproveProductionPage() {
                                             Final packing of the {detailFinalPacking.approved.toLocaleString('en-IN')}{' '}
                                             approved:{' '}
                                             {detailFinalPacking.mode === 'tray' ? (
-                                                <>
-                                                    {detailFinalPacking.cartons} full{' '}
-                                                    {detailFinalPacking.cartons === 1 ? 'carton' : 'cartons'} ·{' '}
-                                                    {detailFinalPacking.trays} full{' '}
-                                                    {detailFinalPacking.trays === 1 ? 'tray' : 'trays'}
-                                                    {detailFinalPacking.partialTray > 0
-                                                        ? ` · 1 tray of ${detailFinalPacking.partialTray}`
-                                                        : ''}
-                                                </>
+                                                trayFinalPackingText(detailFinalPacking)
                                             ) : (
                                                 <>
                                                     {detailFinalPacking.pouches} full{' '}

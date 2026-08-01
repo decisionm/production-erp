@@ -2307,10 +2307,15 @@ class ShiftProductionEntryService
      * nominal weight; no BOM and no weight means no norm, so the expected-
      * side numbers are null while actual/rejection/scrap still report.
      *
+     * The norm is MACHINE THROUGHPUT — approved output plus QC-rejected plus
+     * production-rejected pieces, at the run's frozen weight, plus lumps kg.
+     * See expectedConsumptionKg() for why, and for what it was before.
+     * A batch whose supervisor followed that formula lands on 0.0000 here.
+     *
      * @return array{
-     *     norm_source: ?string, expected_kg: ?string, actual_kg: string,
-     *     variance_kg: ?string, variance_pct: ?float, rejection_kg: string,
-     *     scrap_kg: string, unaccounted_kg: ?string,
+     *     norm_source: ?string, norm_basis: ?string, expected_kg: ?string,
+     *     actual_kg: string, variance_kg: ?string, variance_pct: ?float,
+     *     rejection_kg: string, scrap_kg: string, unaccounted_kg: ?string,
      * }|null
      */
     public function consumptionVariance(ShiftProductionEntry $entry): ?array
@@ -2342,7 +2347,7 @@ class ShiftProductionEntryService
             ? bcadd((string) $entry->quantity_rejection_kg, '0', 4)
             : '0';
 
-        [$normSource, $expected] = $this->expectedConsumptionKg($entry);
+        [$normSource, $normBasis, $expected] = $this->expectedConsumptionKg($entry);
 
         $variancePct = null;
         if ($expected !== null && bccomp($expected, '0', 4) !== 0) {
@@ -2351,6 +2356,11 @@ class ShiftProductionEntryService
 
         return [
             'norm_source' => $normSource,
+            // The machine-readable tier stays 'bom'/'item_weight' — clients
+            // and tests key off those strings. norm_basis is the sentence
+            // the approver reads, and it is what changed: the norm is no
+            // longer "what came out", it is what went through.
+            'norm_basis' => $normBasis,
             'expected_kg' => $expected,
             'actual_kg' => $actual,
             'variance_kg' => $expected !== null ? bcsub($actual, $expected, 4) : null,
@@ -2366,9 +2376,13 @@ class ShiftProductionEntryService
             })(),
             'rejection_kg' => $rejection,
             'scrap_kg' => $scrap,
-            'unaccounted_kg' => $expected !== null
-                ? bcsub(bcsub(bcsub($actual, $expected, 4), $rejection, 4), $scrap, 4)
-                : null,
+            // Deliberately EQUAL to variance_kg now, and kept as its own key
+            // only because the shape is on the wire. It used to subtract
+            // rejection and scrap from the gap because the norm ignored
+            // them; the norm covers both today, so subtracting them again
+            // would count the same kilograms twice and report a loss as a
+            // surplus. What the norm cannot explain is simply what is left.
+            'unaccounted_kg' => $expected !== null ? bcsub($actual, $expected, 4) : null,
         ];
     }
 
@@ -2813,13 +2827,6 @@ class ShiftProductionEntryService
     }
 
     /**
-     * Resolve the consumption norm: [norm_source, expected_kg]. A lazy
-     * per-entry BOM lookup — approval lists are small pages, so this stays
-     * simpler than a batch preload.
-     *
-     * @return array{0: ?string, 1: ?string}
-     */
-    /**
      * Record the day-bin closing weights for a segment.
      *
      * The single path for BOTH normal completion and handover. Consumption is
@@ -2851,10 +2858,66 @@ class ShiftProductionEntryService
         }
     }
 
+    /**
+     * Resolve the consumption norm: [norm_source, norm_basis, expected_kg].
+     * A lazy per-entry BOM lookup — approval lists are small pages, so this
+     * stays simpler than a batch preload.
+     *
+     * THE NORM IS MACHINE THROUGHPUT, NOT APPROVED OUTPUT. Every piece the
+     * machine moulded was moulded out of the same resin, whoever later
+     * refused it, so the norm counts all three fates plus the resin that
+     * never became a piece at all:
+     *
+     *     (approved output + QC-rejected pieces + production-rejected pieces)
+     *         × the run's frozen unit weight  +  lumps kg
+     *
+     * which is the factory's own arithmetic, and on the weight tier below is
+     * textually the pieces side of refuseStaleMaterialLines() with the QC
+     * term added (that path runs with the QC columns cleared, so it has no
+     * third fate to count). The two must not drift apart: the guard would
+     * then refuse a correction whose figures this norm calls perfect.
+     *
+     * Netting the norm to approved output only — what it did until this was
+     * fixed — charged the supervisor for resin they never lost. A batch that
+     * followed the formula exactly, with real rejects and real lumps, read
+     * as a +3.6% "Watch" on the approval screen and there was nothing to
+     * find. Now such a batch reads 0.0000 and the bands fire only on a
+     * genuine hand-override of the kilograms.
+     *
+     * BEFORE AND AFTER THE QUALITY CHECK BOTH WORK, without a branch. The
+     * check nets quantity_produced down and files the count it removed in
+     * quality_rejected_nos, so net + QC-rejected is the packed count either
+     * way; before a check quality_rejected_nos is null and quantity_produced
+     * IS the packed count. So the check moves approved FG and never moves
+     * this norm — which is the point: QC rejects are inside the packed count
+     * and were never extra resin.
+     *
+     * Both tiers norm on throughput. A kg-type BOM line is a per-piece rate
+     * like the weight is; leaving the BOM tier on net output would keep this
+     * exact defect alive for every product that has one.
+     *
+     * @return array{0: ?string, 1: ?string, 2: ?string}
+     */
     private function expectedConsumptionKg(ShiftProductionEntry $entry): array
     {
-        $produced = $entry->quantity_produced !== null ? (string) $entry->quantity_produced : null;
-        $hasProduced = $produced !== null && bccomp($produced, '0', 4) !== 0;
+        // Nulls coalesce BEFORE the cast — bcadd('') is a fatal, and an
+        // unchecked batch has null in quality_rejected_nos by definition.
+        $throughput = bcadd(
+            bcadd(
+                (string) ($entry->quantity_produced ?? '0'),
+                (string) ($entry->quality_rejected_nos ?? '0'),
+                4,
+            ),
+            (string) ($entry->quantity_scrap ?? '0'),
+            4,
+        );
+
+        // Lumps are weighed, not counted, so they join the norm in kg rather
+        // than through the unit weight — and they belong to it even on a
+        // batch whose piece counts are all zero.
+        $lumps = $this->lumpsKgOfScraps($entry->scraps);
+
+        $hasOutput = bccomp($throughput, '0', 4) !== 0 || bccomp($lumps, '0', 4) !== 0;
 
         if ($bom = $this->activeBomFor($entry->item_id)) {
             // Soft-deleted component masters still carry their UOM — this is
@@ -2875,7 +2938,11 @@ class ShiftProductionEntryService
             // A BOM with no kg-type lines (caps/cartons only) provides no
             // mass norm — fall through to the item weight, don't claim 0.
             if (bccomp($kgPerUnit, '0', 4) === 1) {
-                return ['bom', $hasProduced ? bcmul($produced, $kgPerUnit, 4) : null];
+                return [
+                    'bom',
+                    'throughput at BOM rate + lumps',
+                    $hasOutput ? bcadd(bcmul($throughput, $kgPerUnit, 4), $lumps, 4) : null,
+                ];
             }
         }
 
@@ -2888,10 +2955,16 @@ class ShiftProductionEntryService
         // test already reads that string.
         $weightGrams = $this->resolvedUnitWeightGrams($entry, $entry->item);
         if ($weightGrams !== null) {
-            return ['item_weight', $hasProduced ? bcdiv(bcmul($produced, $weightGrams, 4), '1000', 4) : null];
+            return [
+                'item_weight',
+                'throughput at standard weight + lumps',
+                $hasOutput
+                    ? bcadd(bcdiv(bcmul($throughput, $weightGrams, 4), '1000', 4), $lumps, 4)
+                    : null,
+            ];
         }
 
-        return [null, null];
+        return [null, null, null];
     }
 
     /**

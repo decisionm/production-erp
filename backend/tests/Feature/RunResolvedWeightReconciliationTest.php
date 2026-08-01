@@ -182,11 +182,22 @@ class RunResolvedWeightReconciliationTest extends TestCase
         // product showed a blank expected/variance pair.
         $variance = app(ShiftProductionEntryService::class)->consumptionVariance($entry);
         $this->assertSame('item_weight', $variance['norm_source']);
-        $this->assertSame('104.4900', $variance['expected_kg']);
+        // The norm is what went THROUGH the machine: (8,100 packed + 160
+        // rejected) × 12.9 g = 106.554 kg, plus the 1.65 kg of lumps. It
+        // used to read 104.4900 — the approved pieces alone — which billed
+        // the shift for its rejects and its lumps twice over: once here as
+        // "excess consumption", once again in the of-which line below it.
+        $this->assertSame('108.2040', $variance['expected_kg']);
         $this->assertSame('110.0000', $variance['actual_kg']);
-        $this->assertSame('5.5100', $variance['variance_kg']);
-        $this->assertSame(5.3, $variance['variance_pct']);
-        $this->assertSame('investigate', $variance['variance_band']);
+        // 5.5100 before. The 1.796 kg left is the same figure the
+        // reconciliation calls unaccounted, and now the two agree exactly
+        // rather than telling the accountant two different numbers.
+        $this->assertSame('1.7960', $variance['variance_kg']);
+        $this->assertSame(1.7, $variance['variance_pct']);
+        // Was 'investigate' on a 5.3% that the rejects and lumps had
+        // manufactured; the real gap is 1.7%, and the unaccounted band below
+        // is what still (correctly) shouts about the 1.796 kg itself.
+        $this->assertSame('ok', $variance['variance_band']);
         $this->assertSame('1.7960', $variance['unaccounted_kg']);
     }
 
@@ -229,7 +240,9 @@ class RunResolvedWeightReconciliationTest extends TestCase
 
         $variance = app(ShiftProductionEntryService::class)->consumptionVariance($entry);
         $this->assertSame('item_weight', $variance['norm_source']);
-        $this->assertSame('20.0000', $variance['expected_kg']);
+        // (1000 + 50 rejected) × 20 g. Was 20.0000 — the 50 rejected pieces
+        // were moulded from the same resin and belong in the norm.
+        $this->assertSame('21.0000', $variance['expected_kg']);
     }
 
     public function test_a_run_with_no_weight_anywhere_reports_null_kg_never_zero(): void

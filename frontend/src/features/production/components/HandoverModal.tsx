@@ -138,9 +138,17 @@ export default function HandoverModal({ entry, incomingShift, productionDate, on
 
                 {materials.length > 0 && (
                     <>
-                        <Typography.Text strong>Closing day-bin weighment</Typography.Text>
+                        {/* The stored field is still closing_day_bin and the
+                            backend contract is unchanged — only the words are.
+                            Nobody in this factory puts a bin on a scale, so a
+                            heading asking for a "day-bin weighment", and a
+                            sentence under it saying "weigh what is left in the
+                            machine's day bin", described a step that does not
+                            exist. What the outgoing supervisor actually reports
+                            is the material still sitting on the machine. */}
+                        <Typography.Text strong>Closing material on the machine (kg)</Typography.Text>
                         <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 8 }}>
-                            Weigh what is left in the machine's day bin per material — this closes the outgoing
+                            What is left on the machine per material — this closes the outgoing
                             segment's consumption and opens the incoming one with the same figure.
                         </Typography.Paragraph>
                         {materials.map((m) => (

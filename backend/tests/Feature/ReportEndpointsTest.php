@@ -332,8 +332,12 @@ class ReportEndpointsTest extends TestCase
             ->assertJsonPath('data.rows.2.lumps_kg', '0.5500')
             // QC weighed A1's rejection, so QC wins as confirmed.
             ->assertJsonPath('data.rows.2.confirmed_rejection_kg', '7.7500')
-            // Issue-vs-norm variance rides along: (80−70.56)/70.56 → 13.4.
-            ->assertJsonPath('data.rows.2.variance_pct', 13.4)
+            // Issue-vs-norm variance rides along. The norm is throughput at
+            // standard weight plus lumps — A1 rejected no pieces on the
+            // floor, so 5,880 × 12 g + 0.55 kg of lumps = 71.11 kg, and
+            // (80−71.11)/71.11 → 12.5. It read 13.4 while the norm ignored
+            // the lumps, which were resin that had genuinely melted.
+            ->assertJsonPath('data.rows.2.variance_pct', 12.5)
             ->assertJsonPath('data.rows.2.variance_band', 'investigate')
             ->assertJsonPath('data.rows.3.batch_number', '20260727-M01-002')
             ->assertJsonPath('data.rows.3.reconciliation_unaccounted_kg', '-0.4000')

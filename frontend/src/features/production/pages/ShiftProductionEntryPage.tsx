@@ -2377,6 +2377,27 @@ export default function ShiftProductionEntryPage() {
     // balance, which is the part the supervisor actually needs to see.
 
     /**
+     * What THIS batch has already taken out for a material, and therefore hands
+     * back the moment a correction saves — zero on a first completion, which has
+     * issued nothing yet.
+     *
+     * SUMMED, not found: a batch may carry more than one line for the same
+     * material (a second issue mid-run), and picking the first would credit back
+     * less than the correction actually reverses — which is the same red refusal
+     * this exists to stop, only quieter.
+     */
+    const alreadyIssuedKgFor = useCallback(
+        (itemId: number): number => {
+            if (!amending || completingEntry === null) return 0;
+            return (completingEntry.material_consumptions ?? []).reduce(
+                (sum, line) => (line.item?.id === itemId ? sum + (toNum(line.quantity_issued_kg) ?? 0) : sum),
+                0,
+            );
+        },
+        [amending, completingEntry],
+    );
+
+    /**
      * NO ROW IN THIS DRAWER ASKS WHERE THE MATERIAL CAME FROM — not resin, not
      * masterbatch, not packing film, not an exception line.
      *
@@ -2409,12 +2430,32 @@ export default function ShiftProductionEntryPage() {
      * question: the material is still issued from the bin, and the bin has to
      * be loaded for the figures to reconcile. It names that and where to fix
      * it, because there is no longer a picker to hand the problem to.
+     *
+     * ON A CORRECTION, "what is available" includes what this batch itself
+     * already took — see `alreadyIssuedKgFor`. That is not a softening of the
+     * warning; it is what the server does. Both branches below are measured
+     * against that total, so a correction only ever sees the empty-bin sentence
+     * or the red line when the CORRECTED figure genuinely cannot be issued.
      */
     const dayBinHint = (itemId: number | null | undefined, typedKg: number | null | undefined): ReactNode => {
         if (dayBinWarehouseId === null || itemId === null || itemId === undefined) return null;
         const held = dayBinKgFor(itemId);
+        // A CORRECTION RE-ISSUES WHAT IT FIRST GAVE BACK.
+        //
+        // amendCompletion reverses this batch's own consumption before it
+        // re-books the corrected figure, so the kilograms this batch already
+        // took are in the bin again by the time the new figure is charged
+        // against it. Ignoring that made the drawer refuse, in red, a
+        // correction that retyped the same 25 kg it had itself issued — naming
+        // a shortfall of material that never has to move, and sending the
+        // supervisor to a page with nothing to do there.
+        //
+        // Zero outside a correction, so a first completion's arithmetic is
+        // untouched.
+        const ownIssue = alreadyIssuedKgFor(itemId);
+        const available = (held ?? 0) + ownIssue;
 
-        if (held === null || held <= 0) {
+        if (available <= 0) {
             const material = items?.data.find((candidate) => candidate.id === itemId);
             return (
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -2426,17 +2467,22 @@ export default function ShiftProductionEntryPage() {
 
         // The bin holds this material, so the server issues this line FROM the
         // bin — that is the whole of consumptionSource's rule. The shortfall is
-        // therefore a straight comparison against what the bin holds. It used
-        // to be gated on the row's warehouse field matching the bin; with that
-        // field gone, keeping the gate would have silently switched this
-        // warning off for every row, which is the opposite of what removing a
-        // question should cost.
-        const short = typedKg != null && typedKg > held;
+        // therefore a comparison against what the bin will hold at the moment
+        // this line posts: its balance, plus anything this same batch is about
+        // to give back. It used to be gated on the row's warehouse field
+        // matching the bin; with that field gone, keeping the gate would have
+        // silently switched this warning off for every row, which is the
+        // opposite of what removing a question should cost.
+        const short = typedKg != null && typedKg > available;
 
         return (
             <Typography.Text type={short ? 'danger' : 'secondary'} style={{ fontSize: 12 }}>
-                Day bin: {fmtNum(held, 4)}
-                {short && ' — more than the day bin holds; load it in Day Bin (factory) before completing'}
+                Day bin: {fmtNum(held ?? 0, 4)}
+                {ownIssue > 0 && ` + ${fmtNum(ownIssue, 4)} this batch already issued and gives back on saving`}
+                {short &&
+                    (ownIssue > 0
+                        ? ' — more than that, so this much cannot be issued'
+                        : ' — more than the bin holds, so this much cannot be issued')}
             </Typography.Text>
         );
     };
@@ -2629,6 +2675,44 @@ export default function ShiftProductionEntryPage() {
         // Only meaningful with a single mode — two modes have two different
         // pieces-per-carton, and no single value would be true.
         completeForm.setValue('nos_per_box', lines.length === 1 ? (lines[0].nos_per_box ?? null) : null);
+
+        // PIECES PER TRAY — the figure that was silently never sent.
+        //
+        // Every sibling above is written from the lines; this one was not, so a
+        // tray-packed batch completed through the packing lines stored
+        // `nos_per_tray = null` beside a perfectly good `no_of_trays = 18`. The
+        // approver's Packing line then read "—/tray × 18 trays" while the pcs
+        // per carton beside it (written on the line above) was right, and every
+        // later correction faithfully re-sent the null it had loaded. It also
+        // took the approve screen's after-quality decomposition down with it:
+        // that whole read-out bails when pcs/tray is missing, so a run with QC
+        // rejects showed nothing at all.
+        //
+        // Taken from the line's OWN editable box, not from the standard: that
+        // is the size the supervisor confirmed for this run.
+        //
+        // WRITTEN ONLY WHEN THE LINE'S ARITHMETIC RECONCILES — one line, tray
+        // mode, and a trays-per-carton step (boxFirstStep, itself only set when
+        // the standard's carton is a whole number of trays). That is the same
+        // gate the tray COUNT above is derived through, so the pair always
+        // multiply back to the pieces. Anything looser and the two figures
+        // stored side by side would disagree. In every other case the field is
+        // LEFT ALONE rather than nulled — it already carries the item master's
+        // figure from the drawer's own prefill, and erasing a true one to
+        // assert nothing would be the same defect facing the other way.
+        const soleLine = lines.length === 1 ? lines[0] : undefined;
+        if (soleLine && soleLine.mode !== 'tray') {
+            // The one line this run used packs no trays at all (pouches, or
+            // straight into the carton). A pcs/tray left over from the item
+            // master — or from a mode the supervisor switched away from
+            // mid-drawer — would describe a container this batch never filled,
+            // printed on the approver's line beside the "— trays" that proves
+            // it. The tray COUNT is already nulled two lines above for exactly
+            // this reason; the size has to follow it.
+            completeForm.setValue('nos_per_tray', null);
+        } else if (soleLine && boxFirstStep(soleLine) !== null && soleLine.nos_per_inner) {
+            completeForm.setValue('nos_per_tray', soleLine.nos_per_inner);
+        }
     }, [completeForm, packagingForLine]);
 
     // Seed the first line. One mode means no question is asked; several means
@@ -2658,6 +2742,46 @@ export default function ShiftProductionEntryPage() {
         // and recomputePackingTotals are rebuilt every render, and listing
         // them would re-seed the line on every keystroke.
     }, [packingModes, completingEntry, completingPackagingMode, completeForm]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    /**
+     * THE ONE FIGURE A CORRECTION CAN STILL RECOVER: pieces per tray, on a batch
+     * completed before it was being stored.
+     *
+     * Those batches are real and are sitting in the approver's queue right now,
+     * reading "—/tray × 18 trays". Neither the entry nor the item master can
+     * answer for them — the tray size lives on the production standard the run
+     * was started against, which is exactly what `packingModes` holds. So the
+     * correction drawer, which exists to put recorded figures right, offers it.
+     *
+     * IT ONLY EVER FILLS A BLANK, and that is what separates it from the
+     * suggestions this drawer refuses on an amendment (see the packing auto-fill
+     * effect). Those would overwrite a counted figure with a derived one. There
+     * is nothing here to overwrite: the box is empty, the alternative is a
+     * correction that re-saves the same blank, and the supervisor sees the
+     * figure in an editable box before anything is submitted. A value the
+     * supervisor has touched — including one they deliberately cleared — is
+     * theirs and is left alone.
+     *
+     * Not run on a first completion: those go through the packing lines, which
+     * write the figure themselves.
+     *
+     * GATED ON THE BATCH HAVING TRAYED ANYTHING. `packingModes` lists every
+     * packaging the product's variant offers, not the one this run used — a
+     * product that can be trayed OR pouched has a tray mode sitting there while
+     * a pouch-packed batch is being corrected. Filling pcs/tray from it would
+     * assert a tray size for a run that packed none, which is the invention this
+     * whole file refuses. A recorded tray COUNT is the proof that the run trayed,
+     * and it is exactly what the broken batches still carry (18 trays, no size).
+     */
+    useEffect(() => {
+        if (!amending || !completingEntry) return;
+        if ((completingEntry.no_of_trays ?? 0) <= 0) return;
+        if (completeForm.getFieldState('nos_per_tray').isDirty) return;
+        if (hasPackStd(completeForm.getValues('nos_per_tray'))) return;
+        const trayStandard = packingModes.find((p) => p.mode === 'tray')?.nos_per_tray ?? null;
+        if (!hasPackStd(trayStandard)) return;
+        completeForm.setValue('nos_per_tray', trayStandard);
+    }, [amending, completingEntry, packingModes, completeForm]);
 
     /** Modes not yet on a line — what "Add packing line" may still offer. */
     const unusedPackingModes = useMemo(() => {
@@ -2901,7 +3025,29 @@ export default function ShiftProductionEntryPage() {
             completingItem.nos_per_pouch,
             completingItem.pouches_per_box,
         ].some(hasPackStd);
-    const showTrayFields = hasPackStd(completingItem?.nos_per_tray) || !hasAnyPackagingStandard;
+    // THE ENTRY'S OWN FIGURE OPENS THE BOX TOO. A product whose tray size lives
+    // on its production standard rather than on the item master has
+    // `item.nos_per_tray` null and `item.nos_per_box` set — so this test used to
+    // come out false and the Nos/Tray box was not on screen at all. On a first
+    // completion that is harmless (the packing lines own the counts and now
+    // write the figure back). On a CORRECTION the packing lines are switched
+    // off, these boxes are the whole form, and hiding this one meant the
+    // recorded pcs/tray could be neither seen nor fixed. A batch that stored one
+    // is a batch that has one, whatever the master forgot to say. In-progress
+    // entries carry null here, so nothing new appears on a first completion.
+    // The third term is the box that the recovery effect above fills, and it
+    // carries that effect's gate word for word: a correction, on a batch that
+    // recorded trays. Without it the effect would write a figure into a field
+    // nobody can see, which is the one thing worse than the blank; with a looser
+    // gate the box would appear on pouch-packed corrections that have no trays
+    // to describe. Nothing new on a first completion either way.
+    const showTrayFields =
+        hasPackStd(completingItem?.nos_per_tray) ||
+        hasPackStd(completingEntry?.nos_per_tray) ||
+        (amending &&
+            (completingEntry?.no_of_trays ?? 0) > 0 &&
+            hasPackStd(packingModes.find((p) => p.mode === 'tray')?.nos_per_tray)) ||
+        !hasAnyPackagingStandard;
     const showPouchFields = hasPackStd(completingItem?.nos_per_pouch);
     // The standard's packaging rows win when they exist: they are the only
     // source that knows which modes this product genuinely has. Without them
@@ -3478,7 +3624,16 @@ export default function ShiftProductionEntryPage() {
                 quantity_produced: toNum(entry.quantity_produced) ?? undefined,
                 quantity_scrap: toNum(entry.quantity_scrap) ?? undefined,
                 scrap_reason_id: entry.scrap_reason?.id ?? undefined,
-                nos_per_tray: entry.nos_per_tray ?? undefined,
+                // The item master is a FALLBACK here, never an override: it is
+                // read only when the batch stored no tray size of its own. That
+                // is not the "an amendment is not a suggestion" case — there is
+                // no recorded figure to overwrite, and the alternative is a
+                // correction that re-sends the blank it was handed and leaves
+                // the approver reading "—/tray" for ever. It is also exactly
+                // what a first completion prefills from (openCompleteDrawer),
+                // and the box stays editable, so nothing is asserted that the
+                // supervisor cannot see and change before saving.
+                nos_per_tray: entry.nos_per_tray ?? entry.item.nos_per_tray ?? undefined,
                 no_of_trays: entry.no_of_trays ?? undefined,
                 nos_per_box: entry.nos_per_box ?? undefined,
                 no_of_box: entry.no_of_box ?? undefined,
@@ -6342,11 +6497,17 @@ export default function ShiftProductionEntryPage() {
                         every batch that did not hand over. */}
                     {traceabilityEnabled && entryDayBin?.has_movements && (
                         <>
+                            {/* Same wording fix as HandoverModal, same reason:
+                                the column is still closing_day_bin and the
+                                figure still closes the consumption formula, but
+                                "weigh what is still in the bin" asked for a
+                                weighment this factory does not do. The material
+                                sits on the machine and that is what is reported. */}
                             <Typography.Text strong style={{ display: 'block', marginTop: 16 }}>
-                                Left in the day bin at end of run
+                                Left on the machine at end of run
                             </Typography.Text>
                             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                Weigh what is still in the bin. Leave blank if it was not counted — a blank
+                                What is still on the machine. Leave blank if it was not counted — a blank
                                 stays &ldquo;not counted&rdquo; rather than becoming zero.
                             </Typography.Text>
                             {entryDayBin.materials.map((material, index) => (
@@ -6393,7 +6554,7 @@ export default function ShiftProductionEntryPage() {
                             type="info"
                             showIcon
                             style={{ marginTop: 8 }}
-                            message="Prefilled from day-bin weighments — correct if wrong"
+                            message="Prefilled from what was left on the machine — correct if wrong"
                             description={entryDayBin.materials
                                 .filter((m) => m.consumption_kg !== null)
                                 .map((m) => (
@@ -7243,7 +7404,13 @@ export default function ShiftProductionEntryPage() {
                                     formula={
                                         resinIsCalculated
                                             ? 'production kg + rejection kg + lumps kg, at the bottle weight above'
-                                            : 'set by hand or from a day-bin weighment — the kg box wins for this batch'
+                                            // No bin is ever put on a scale in this
+                                            // factory, so "from a day-bin weighment"
+                                            // named a step nobody performs. What is
+                                            // true of this branch is only that the
+                                            // figure came from the box rather than
+                                            // from the arithmetic.
+                                            : 'typed by hand — the kg box wins for this batch'
                                     }
                                 />
                             )}
