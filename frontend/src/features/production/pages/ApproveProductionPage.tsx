@@ -118,6 +118,35 @@ const packingStandardNote = (row: ShiftProductionEntry, mode?: PackingRounding):
     return parts.length > 0 ? `standard: ${parts.join(' · ')}` : null;
 };
 
+/**
+ * The trays this entry packed that are NOT inside its cartons, and what they
+ * came to in pieces — the part the "N/box × N boxes" sentence leaves out.
+ * 3 cartons + 2 loose trays of a 600/carton, 120/tray product is 1800 + 240,
+ * and printing only the 1800 beside "Produced 2040" reads as a 240-piece hole
+ * in a count that is in fact correct.
+ *
+ * Derived, never stored: trays over = no_of_trays − no_of_box × trays/carton,
+ * with trays/carton itself divided out of the entry's own pack sizes. Null —
+ * and the sentence stays exactly as it was — unless every figure is present
+ * AND the answer lands inside one carton's worth. That bound is the guard for
+ * a multi-mode run, where no_of_box is the batch's cartons across every mode
+ * while no_of_trays belongs to the tray line alone: their difference there is
+ * not a tray remainder and must not be printed as one.
+ */
+const looseTraysOver = (row: ShiftProductionEntry): { trays: number; pieces: number } | null => {
+    const perTray = row.nos_per_tray;
+    const perBox = row.nos_per_box;
+    const trays = row.no_of_trays;
+    const boxes = row.no_of_box;
+    if (!perTray || perTray < 1 || !perBox || perBox < 1) return null;
+    if (trays === null || boxes === null || boxes < 0) return null;
+    if (perBox % perTray !== 0) return null;
+    const traysPerCarton = perBox / perTray;
+    const over = trays - boxes * traysPerCarton;
+    if (over <= 0 || over >= traysPerCarton) return null;
+    return { trays: over, pieces: over * perTray };
+};
+
 // Bands are ruled server-side from config/production.php tolerances — the
 // UI only colour-maps them. Client thresholds remain solely as a fallback
 // for rows cached before bands existed.
@@ -829,6 +858,12 @@ export default function ApproveProductionPage() {
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['production', 'shift-production-entries'] });
 
+    // The open batch's trays over its cartons, worked out once for the Packing
+    // line below (null on any row where the figures don't reconcile).
+    const detailLooseTrays = detailRow === null ? null : looseTraysOver(detailRow);
+    // Quality reduced the produced figure but not the packing counts.
+    const detailQualityRejected = (readQuality(detailRow)?.rejected_nos ?? 0) > 0;
+
     // ------------------------------------------------------------------
     // Detail-drawer context. All three are READ-ONLY endpoints — opening the
     // drawer must never move an entry a step closer to Tally.
@@ -1070,6 +1105,11 @@ export default function ApproveProductionPage() {
                             <Descriptions.Item label="Packing">
                                 {detailRow.nos_per_tray ?? '—'}/tray × {detailRow.no_of_trays ?? '—'} trays,{' '}
                                 {detailRow.nos_per_box ?? '—'}/box × {detailRow.no_of_box ?? '—'} boxes
+                                {/* The cartons alone are not the count. Trays over
+                                    them are pieces too, and without them this line
+                                    reads short of Produced by exactly their worth. */}
+                                {detailLooseTrays &&
+                                    ` + ${detailLooseTrays.trays} loose trays (${detailLooseTrays.pieces} pcs)`}
                                 {/* Pouch/loose figures only exist for pouch-packed items /
                                     Wave A entries — appended so older rows render unchanged. */}
                                 {detailRow.no_of_pouches != null &&
@@ -1078,6 +1118,15 @@ export default function ApproveProductionPage() {
                                 {packingStandardNote(detailRow, settings?.packing_rounding) && (
                                     <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
                                         {packingStandardNote(detailRow, settings?.packing_rounding)}
+                                    </Typography.Text>
+                                )}
+                                {/* Quality reduced Produced but not the packing counts —
+                                    those record what physically left the floor. Two
+                                    figures that legitimately disagree, said once, here,
+                                    where both are on screen together. */}
+                                {detailQualityRejected && (
+                                    <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                                        Packing counts show what was packed (gross); produced is net of quality rejection.
                                     </Typography.Text>
                                 )}
                             </Descriptions.Item>

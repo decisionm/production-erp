@@ -398,20 +398,27 @@ class PackingLinesTest extends TestCase
     }
 
     // -----------------------------------------------------------------
-    // Tray-first counting
+    // Box-first counting
     //
-    // The floor counts TRAYS, not cartons: "5 tray = 1 carton boxes, then
-    // 600 units based on 120 PER TRAY, SO FIVE TRAY SO 600". The SPA turns
-    // a tray count into the pair this API already speaks — whole cartons in
-    // `boxes`, the trays over in `loose_inner` — so these rules need no
-    // change at all. The three tests below are what says so out loud:
-    // a full carton, a part carton, and a count that does not add up.
+    // The floor counts CARTONS, on its own request after a day of counting
+    // trays: "we need to calculate by boxes not the tray". Trays are the
+    // arithmetic the drawer shows — whole cartons in `boxes`, any trays not
+    // yet in a carton in `loose_inner`. That pair is the SAME wire contract
+    // either direction is entered from, which is why these rules never
+    // moved: the owner's "5 tray = 1 carton boxes, then 600 units based on
+    // 120 PER TRAY" still lands on exactly the payload asserted below.
+    //
+    // The test NAMES below still read tray-first. They are left alone on
+    // purpose: each one pins a wire-level case (a full carton, a part
+    // carton, a count that does not add up, and loose inners that make a
+    // whole carton), and renaming them would churn the record of what the
+    // API accepted without changing a single assertion.
     // -----------------------------------------------------------------
 
     public function test_five_trays_of_120_is_one_carton_of_600_pieces(): void
     {
-        // The owner's own example, exactly: 5 trays × 120 = 600 pieces and
-        // 1 carton, with the carton DERIVED from the tray count.
+        // The owner's own example, exactly: 1 carton of 600 is 5 trays × 120,
+        // whichever end of it the supervisor typed.
         $this->actingAsProduction();
         $item = $this->item('BTL-170');
         $standard = $this->standardFor($item, [
@@ -529,6 +536,69 @@ class PackingLinesTest extends TestCase
             ->assertJsonValidationErrors(['no_of_box']);
 
         $this->assertSame(BatchStatus::InProgress, $entry->fresh()->batch_status);
+    }
+
+    public function test_loose_trays_that_fill_a_whole_carton_are_refused(): void
+    {
+        // 7 loose trays at 5 trays/carton is not 7 loose trays — it is
+        // 1 carton + 2. Accepted as typed, the pieces would still add up
+        // (840) while no_of_box said 0, so the carton and the master box it
+        // consumes would vanish from stock. The message names the fix.
+        $this->actingAsProduction();
+        $item = $this->item('BTL-170');
+        $standard = $this->standardFor($item, [
+            ['mode' => ProductionStandardPackaging::MODE_TRAY,
+                'nos_per_tray' => 120, 'trays_per_box' => 5, 'nos_per_box' => 600],
+        ]);
+        $entry = $this->inProgressEntry($item, $standard);
+        $tray = $standard->packagings->firstWhere('mode', 'tray');
+
+        $response = $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/complete", [
+            'quantity_produced' => '840',
+            'no_of_box' => 0,
+            'packing_lines' => [[
+                'mode' => 'tray', 'production_standard_packaging_id' => $tray->id,
+                'boxes' => 0, 'nos_per_box' => 600, 'loose_inner' => 7, 'nos_per_inner' => 120,
+                'derived_pieces' => 840, 'actual_pieces' => 840,
+            ]],
+        ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors(['packing_lines.0.loose_inner']);
+        // Array access, not json('errors.packing_lines.0.loose_inner'): the
+        // key IS the dotted string, and data_get would read it as a path.
+        $this->assertSame(
+            '7 loose trays is a full carton or more (5 trays/carton) — count the full cartons as cartons.',
+            $response->json('errors')['packing_lines.0.loose_inner'][0],
+        );
+        $this->assertSame(BatchStatus::InProgress, $entry->fresh()->batch_status);
+    }
+
+    public function test_loose_trays_one_short_of_a_carton_are_accepted(): void
+    {
+        // The boundary the rule must not cross. 4 trays at 5/carton is a
+        // genuine part carton — 480 pieces against 0 cartons — and refusing
+        // it would make the last hour of a shift unrecordable.
+        $this->actingAsProduction();
+        $item = $this->item('BTL-170');
+        $standard = $this->standardFor($item, [
+            ['mode' => ProductionStandardPackaging::MODE_TRAY,
+                'nos_per_tray' => 120, 'trays_per_box' => 5, 'nos_per_box' => 600],
+        ]);
+        $entry = $this->inProgressEntry($item, $standard);
+        $tray = $standard->packagings->firstWhere('mode', 'tray');
+
+        $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/complete", [
+            'quantity_produced' => '480',
+            'no_of_box' => 0,
+            'packing_lines' => [[
+                'mode' => 'tray', 'production_standard_packaging_id' => $tray->id,
+                'boxes' => 0, 'nos_per_box' => 600, 'loose_inner' => 4, 'nos_per_inner' => 120,
+                'derived_pieces' => 480, 'actual_pieces' => 480,
+            ]],
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.quantity_produced', fn ($v) => (float) $v === 480.0)
+            ->assertJsonPath('data.no_of_box', 0);
     }
 
     // -----------------------------------------------------------------
