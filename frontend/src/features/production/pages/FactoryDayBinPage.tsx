@@ -28,9 +28,11 @@ import { listAllWarehouses } from '@/features/inventory/api';
 import {
     findMaterialBagByBarcode,
     getFactoryDayBin,
-    getFactoryDayBinReconciliation,
+    getMachineResinEstimates,
     listRawMaterials,
+    listWorkCenters,
     loadBagToFactoryDayBin,
+    machineLabel,
     factoryStoreLabel,
     loadFactoryDayBin,
     resolveFactoryStore,
@@ -39,8 +41,8 @@ import {
 import { useProductionSettings } from '@/features/production/packing';
 import type {
     FactoryDayBinLoadRow,
-    FactoryDayBinReconciliationRow,
     FactoryDayBinUnopenedBags,
+    MachineResinMaterial,
     MaterialBag,
 } from '@/features/production/types';
 import type { Item } from '@/features/inventory/types';
@@ -52,16 +54,6 @@ function fmtQty(value: string | null | undefined): string {
     const parsed = parseFloat(value);
     return Number.isNaN(parsed) ? '—' : String(parseFloat(parsed.toFixed(4)));
 }
-
-/**
- * How far a physical count may sit from the expected figure and still be
- * called a match: 50 grams. A bin is counted with a floor scale and a tape on
- * part-bags, so demanding exact equality would paint every honest count red
- * and teach the accountant to ignore the colour. Stated on screen in as many
- * words, because a tolerance nobody knows about is just a lie with a
- * threshold.
- */
-const COUNT_MATCH_TOLERANCE_KG = 0.05;
 
 /** The SKU line under a material name — or null when it just repeats the name. */
 function skuLine(item: { sku: string; name: string }): string | null {
@@ -87,39 +79,59 @@ interface BalanceRow {
 }
 
 /**
- * THE FACTORY DAY BIN — the owner's material control room, and the floor's
- * one scan point for material coming out of the store.
+ * MATERIAL ON THE FLOOR, BY MACHINE — the owner's material control room, and
+ * the floor's one scan point for material coming out of the store.
+ *
+ * WHAT THE OWNER RULED (31-Jul, decisive, and it replaced the design this
+ * page was first built for): "Our factory does not use a Day Bin warehouse or
+ * an evening physical bin weight. Replace that idea with estimated resin
+ * remaining for each machine: previous carryover plus barcode-scanned loads
+ * minus calculated consumption." And: "Scanning a bag means material was
+ * loaded into the selected machine; it does not mean the whole quantity was
+ * consumed."
+ *
+ * So the day's reconciliation is GONE — card, physical-count boxes, tolerance
+ * and all. It asked for a weight nobody in this factory takes, which made it
+ * a question the screen could never get an answer to. In its place, the
+ * per-machine estimate. The route and the setting keep the "day bin" name
+ * because renaming a live surface mid-freeze costs more than it explains; the
+ * BEHAVIOUR is per machine.
  *
  * Top to bottom, in the order the floor uses it:
  *
- *  1. SCAN — a barcode input built for a USB scanner gun: the gun types the
- *     code and presses Enter (lookup), the bag shows itself (material, SKU,
- *     kg remaining), and Enter again loads the whole bag — kg editable first
- *     for a part bag. Focus returns to the input after every load so bags
- *     scan one after another without touching the mouse. Same lookup + same
- *     POST /production/day-bin/load-bag the Shift Floor's Load Material
+ *  1. SCAN — a barcode input built for a USB scanner gun, and a MACHINE the
+ *     bag is being loaded into. The gun types the code and presses Enter
+ *     (lookup), the bag shows itself (material, SKU, kg remaining), and Enter
+ *     again loads the whole bag — kg editable first for a part bag. The
+ *     machine stays put between bags (a stack goes into one machine) and is
+ *     required: an unattributed load overstates every machine except the one
+ *     that burnt the material. Same POST the Shift Floor's Load Material
  *     modal uses — one flow, two doors.
- *  2. BALANCES — one row per raw material: in the day bin now, still in the
- *     store, bags still holding material. The bin figures are that
- *     warehouse's ordinary stock balances (the day bin IS a warehouse — no
+ *  2. ESTIMATED REMAINING, PER MACHINE — scanned in, calculated out, and what
+ *     should still be on it. Negative is shown, not hidden: it is the one
+ *     figure here worth acting on.
+ *  3. WHAT IS OUT OF THE STORE — one row per raw material: on the floor now,
+ *     still in the store, bags still holding material. The floor figures are
+ *     the WIP warehouse's ordinary stock balances (it IS a warehouse — no
  *     second arithmetic). The row set is the UNION of the read's two arrays:
- *     `summary` (kg-uom materials in the bin or the store, with all three
+ *     `summary` (kg-uom materials out or in the store, with all three
  *     figures) plus any `materials` row it doesn't cover — a non-kg material
- *     sitting in the bin still has to be visible, with "—" where the store
- *     and bag figures are genuinely unknown rather than zero.
- *  3. MANUAL LOAD (collapsed) — for unlabelled bags and opening stock: raw
+ *     still has to be visible, with "—" where the store and bag figures are
+ *     genuinely unknown rather than zero.
+ *  4. MANUAL LOAD (collapsed) — for unlabelled bags and opening stock: raw
  *     materials only (the backend's kg-uom picker — never the bottle list),
- *     posting the EXISTING store → bin stock transfer. A location move,
- *     never a consumption, never a Tally post.
- *  4. LOADED TODAY — every load into the bin today with time, material, kg,
- *     bag and who. Always shown once a bin is named: an empty list is the
- *     normal morning state and says so in one plain line.
+ *     posting the EXISTING store → WIP stock transfer. A location move, never
+ *     a consumption, never a Tally post. It writes no machine attribution, so
+ *     it does not feed the estimate above — said on screen in one line.
+ *  5. LOADED TODAY — every load today with time, material, kg, bag and who.
+ *     Always shown once the warehouse is named: an empty list is the normal
+ *     morning state and says so in one plain line.
  *
  * Consumption never happens here: Complete Batch on the Shift Floor issues
  * each material line FROM this warehouse, so the balances fall by themselves.
  *
- * Until someone names the day-bin warehouse, the page shows one plain line
- * asking for it and nothing else in the ERP changes behaviour.
+ * Until someone names the warehouse, the page shows one plain line asking for
+ * it and nothing else in the ERP changes behaviour.
  */
 export default function FactoryDayBinPage() {
     const queryClient = useQueryClient();
@@ -134,6 +146,13 @@ export default function FactoryDayBinPage() {
     const [scanCode, setScanCode] = useState('');
     const [scannedBag, setScannedBag] = useState<MaterialBag | null>(null);
     const [scanKg, setScanKg] = useState<number | null>(null);
+    /**
+     * THE MACHINE THE BAG IS GOING INTO — required, and deliberately NOT
+     * cleared after a load: a stack of bags is emptied into one machine, and
+     * re-picking it between every scan is how the wrong machine gets credited
+     * on bag four. Cleared only by the person changing it.
+     */
+    const [scanMachineId, setScanMachineId] = useState<number | null>(null);
     const [scanError, setScanError] = useState<string | null>(null);
     const [scanSuccess, setScanSuccess] = useState<string | null>(null);
 
@@ -163,36 +182,34 @@ export default function FactoryDayBinPage() {
     const dayBinWarehouse = dayBin?.warehouse ?? null;
     const configured = dayBinWarehouse !== null;
 
-    // ----- The day's reconciliation: the CENTRAL "is any material missing?"
-    // check. Defaults to today; yesterday is one click back, because
-    // "what did we end last night with?" is the accountant's morning question
-    // and the answer must not require a report run.
-    const [reconDate, setReconDate] = useState<Dayjs>(() => dayjs());
-    const reconDateKey = reconDate.format('YYYY-MM-DD');
-    /**
-     * The physical counts, keyed by item_id. LOCAL STATE ONLY — never sent,
-     * never stored. A count is how the accountant interrogates the ERP's
-     * figure, not a stock record: booking it would silently overwrite a
-     * balance the movements are the authority on.
-     *
-     * Cleared whenever the date changes. Left standing, yesterday's typed
-     * count would sit against today's expected closing and report a
-     * discrepancy that never happened.
-     */
-    const [counts, setCounts] = useState<Record<number, number | null>>({});
-
+    // ----- ESTIMATED RESIN REMAINING, PER MACHINE. Not date-scoped and not
+    // countable: it is a running figure per (machine, material), counted from
+    // the first bag scanned into that machine. No date picker, because there
+    // is no daily closing to pick — and no count box, because this factory
+    // takes no physical bin weight.
     const {
-        data: reconciliation,
-        isLoading: reconLoading,
-        isError: reconUnavailable,
+        data: machineResin,
+        isLoading: machineResinLoading,
+        isError: machineResinUnavailable,
     } = useQuery({
-        // The date is part of the key: without it every date would serve the
-        // first one fetched, from cache, under a picker that says otherwise.
-        queryKey: ['production', 'factory-day-bin', 'reconciliation', reconDateKey],
-        queryFn: () => getFactoryDayBinReconciliation(reconDateKey),
-        enabled: configured,
+        queryKey: ['production', 'machine-resin'],
+        queryFn: () => getMachineResinEstimates(),
         retry: false,
     });
+
+    // The machine picker for the scan. ACTIVE machines only — a retired one
+    // cannot be loaded, and offering it would book an attribution nobody can
+    // act on. A 403 here leaves the list empty, and the scan panel says so
+    // rather than letting a bag be loaded with no machine.
+    const { data: workCenters, isError: workCentersUnavailable } = useQuery({
+        queryKey: ['production', 'work-centers', 'active'],
+        queryFn: () => listWorkCenters(true),
+        retry: false,
+    });
+    const machineOptions = useMemo(
+        () => (workCenters?.data ?? []).map((machine) => ({ value: machine.id, label: machineLabel(machine) })),
+        [workCenters],
+    );
 
     const warehouseOptions = useMemo(
         () =>
@@ -324,33 +341,46 @@ export default function FactoryDayBinPage() {
         mutationFn: loadBagToFactoryDayBin,
         onSuccess: (result, payload) => {
             // Compose the confirmation from the response where it answers,
-            // falling back to what was scanned — never a blank.
+            // falling back to what was scanned — never a blank. The MACHINE is
+            // named back: the whole point of the scan is which machine got it,
+            // and a confirmation that omits it cannot be checked.
             const material = result?.day_bin?.item ?? result?.bag?.lot?.item ?? scannedBag?.lot?.item ?? null;
-            const balance = result?.day_bin?.quantity_kg;
+            const machine = (workCenters?.data ?? []).find((wc) => wc.id === payload.work_center_id);
             setScanSuccess(
                 `Loaded ${payload.quantity_kg} kg of ${material ? itemLabel(material) : 'material'}` +
-                    `${balance ? ` — day bin now holds ${balance} kg` : ''}.`,
+                    `${machine ? ` into ${machineLabel(machine)}` : ''}.`,
             );
             setScannedBag(null);
             setScanKg(null);
             setScanError(null);
-            // The bag lost kg and the bin gained it — every surface quoting
-            // either must move.
+            // The machine is NOT cleared — the next bag off the same pallet
+            // goes into the same machine.
+            // The bag lost kg, the floor gained it, and one machine's estimate
+            // moved — every surface quoting any of those must refetch.
             queryClient.invalidateQueries({ queryKey: ['production', 'factory-day-bin'] });
+            queryClient.invalidateQueries({ queryKey: ['production', 'machine-resin'] });
             queryClient.invalidateQueries({ queryKey: ['inventory', 'stock-balances'] });
             queryClient.invalidateQueries({ queryKey: ['production', 'material-bags', 'pick-list'] });
             // Back to the gun: the next bag scans without a tap.
             scanInputRef.current?.focus();
         },
         onError: (error: any) => {
-            setScanError(error?.response?.data?.message ?? 'Could not load the bag into the day bin.');
+            setScanError(error?.response?.data?.message ?? 'Could not load the bag.');
         },
     });
 
     const submitBagLoad = () => {
-        if (!scannedBag || !scanKg || scanKg <= 0 || !currentUser || bagLoad.isPending) return;
+        if (!scannedBag || !scanKg || scanKg <= 0 || scanMachineId === null || !currentUser || bagLoad.isPending) {
+            // A missing machine is the one blocked case worth naming: the
+            // button is disabled for it, but Enter reaches here too.
+            if (scannedBag && scanMachineId === null) {
+                setScanError('Pick the machine this bag was loaded into.');
+            }
+            return;
+        }
         bagLoad.mutate({
             barcode: scannedBag.barcode,
+            work_center_id: scanMachineId,
             quantity_kg: scanKg,
             // Recorded as a note; the audit identity is the login either way.
             supervisor_id: currentUser.id,
@@ -428,7 +458,7 @@ export default function FactoryDayBinPage() {
                 ),
         },
         {
-            title: 'In day bin',
+            title: 'On the floor',
             key: 'in_bin',
             align: 'right' as const,
             render: (_: unknown, row: BalanceRow) => (
@@ -469,47 +499,20 @@ export default function FactoryDayBinPage() {
     ];
 
     /**
-     * The difference between a typed physical count and what the bin SHOULD
-     * hold. This is the only real check on the page — every other figure in the
-     * row is derived from the movement ledger and so cannot disagree with it.
+     * One machine's estimate table. Same columns for every machine, so the
+     * eye reads down a column across cards.
      *
-     * COMPARED AGAINST expected_closing + other_movements, never expected
-     * closing alone. The server defines expected closing strictly as
-     * opening + loaded − consumed; material that moved by neither route — a
-     * receipt booked straight into the bin, a transfer back out to the store —
-     * lands in `other_movements_kg` instead, and the bin's live balance is
-     * their SUM. Subtracting a count from the bare expected figure would invent
-     * a shortfall on exactly the days somebody had already accounted for one,
-     * which is the false alarm this whole change exists to stop.
+     * NEGATIVE IS PRINTED, in red, with the reason beside it. The estimate is
+     * scanned-in minus calculated-out, and consumption is derived from output
+     * rather than weighed — so a negative figure means the machine ran on
+     * material nobody scanned. That is the one line on this page worth acting
+     * on, and clamping it at zero would erase exactly it.
      */
-    const countVerdict = (row: FactoryDayBinReconciliationRow, count: number | null) => {
-        if (count === null || Number.isNaN(count)) return null;
-        const expected = parseFloat(row.expected_closing_kg) + parseFloat(row.other_movements_kg);
-        if (Number.isNaN(expected)) return null;
-
-        const diff = count - expected;
-        if (Math.abs(diff) <= COUNT_MATCH_TOLERANCE_KG) {
-            return <Typography.Text type="success">matches</Typography.Text>;
-        }
-        // The sign is spelled with the character, not left to a formatter, and
-        // the word beside it says which way the gap runs — "−4.8" alone has
-        // been read as "4.8 spare" often enough to be worth six characters.
-        return diff < 0 ? (
-            <Typography.Text type="danger" strong>
-                −{fmtQty(Math.abs(diff).toFixed(4))} kg missing
-            </Typography.Text>
-        ) : (
-            <Typography.Text type="warning" strong>
-                +{fmtQty(diff.toFixed(4))} kg extra
-            </Typography.Text>
-        );
-    };
-
-    const reconColumns = [
+    const machineResinColumns = [
         {
             title: 'Material',
             key: 'material',
-            render: (_: unknown, row: FactoryDayBinReconciliationRow) => (
+            render: (_: unknown, row: MachineResinMaterial) => (
                 <Space direction="vertical" size={0}>
                     <Typography.Text strong>{row.item.name}</Typography.Text>
                     {skuLine(row.item) !== null && (
@@ -521,47 +524,35 @@ export default function FactoryDayBinPage() {
             ),
         },
         {
-            title: 'Opening',
-            key: 'opening',
-            align: 'right' as const,
-            render: (_: unknown, row: FactoryDayBinReconciliationRow) => fmtQty(row.opening_kg),
-        },
-        {
-            title: 'Loaded',
+            title: 'Scanned in',
             key: 'loaded',
             align: 'right' as const,
-            render: (_: unknown, row: FactoryDayBinReconciliationRow) => fmtQty(row.loaded_kg),
+            render: (_: unknown, row: MachineResinMaterial) => fmtQty(row.loaded_kg),
         },
         {
-            title: 'Consumed',
+            title: 'Calculated out',
             key: 'consumed',
             align: 'right' as const,
-            render: (_: unknown, row: FactoryDayBinReconciliationRow) => fmtQty(row.consumed_kg),
+            render: (_: unknown, row: MachineResinMaterial) => fmtQty(row.consumed_kg),
         },
         {
-            title: 'Expected closing',
-            key: 'expected',
+            title: 'Estimated remaining',
+            key: 'remaining',
             align: 'right' as const,
-            render: (_: unknown, row: FactoryDayBinReconciliationRow) => {
-                const other = parseFloat(row.other_movements_kg);
-                const hasOther = !Number.isNaN(other) && other !== 0;
+            render: (_: unknown, row: MachineResinMaterial) => {
+                const remaining = parseFloat(row.estimated_remaining_kg);
+                const short = !Number.isNaN(remaining) && remaining < 0;
                 return (
                     <Space direction="vertical" size={0} align="end">
-                        <Typography.Text strong style={{ fontSize: 16 }}>
-                            {fmtQty(row.expected_closing_kg)}{' '}
+                        <Typography.Text strong type={short ? 'danger' : undefined} style={{ fontSize: 18 }}>
+                            {fmtQty(row.estimated_remaining_kg)}{' '}
                             <Typography.Text type="secondary">{row.item.uom}</Typography.Text>
                         </Typography.Text>
-                        {/* Normally absent. When it is not, the count is being
-                            compared against expected + this — so the row names
-                            BOTH the movement and the figure a count is actually
-                            measured against, rather than reporting a gap the
-                            screen cannot explain. */}
-                        {hasOther && (
+                        {/* Quiet, not an alarm: it is a likely explanation, not
+                            a verdict, and the fix is a scan somebody missed. */}
+                        {short && (
                             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                {other > 0 ? '+' : '−'}
-                                {fmtQty(Math.abs(other).toFixed(4))} kg by another route (booked into the bin, or
-                                returned to the store) — a count is compared against{' '}
-                                {fmtQty((parseFloat(row.expected_closing_kg) + other).toFixed(4))} kg
+                                more consumed than scanned in — a bag was probably not scanned
                             </Typography.Text>
                         )}
                     </Space>
@@ -569,26 +560,13 @@ export default function FactoryDayBinPage() {
             },
         },
         {
-            title: 'Physical count (kg)',
-            key: 'count',
-            align: 'right' as const,
-            render: (_: unknown, row: FactoryDayBinReconciliationRow) => (
-                <InputNumber
-                    min={0}
-                    step={0.1}
-                    style={{ width: 140 }}
-                    placeholder="weigh the bin"
-                    value={counts[row.item_id] ?? null}
-                    onChange={(value) => setCounts((prev) => ({ ...prev, [row.item_id]: value }))}
-                />
-            ),
-        },
-        {
-            title: 'Difference',
-            key: 'difference',
-            render: (_: unknown, row: FactoryDayBinReconciliationRow) =>
-                countVerdict(row, counts[row.item_id] ?? null) ?? (
+            title: 'Last load',
+            key: 'last_load',
+            render: (_: unknown, row: MachineResinMaterial) =>
+                row.last_load_at === null ? (
                     <Typography.Text type="secondary">—</Typography.Text>
+                ) : (
+                    dayjs(row.last_load_at).format('DD MMM HH:mm')
                 ),
         },
     ];
@@ -632,12 +610,12 @@ export default function FactoryDayBinPage() {
         <Space direction="vertical" size="large" style={{ width: '100%' }}>
             <Space direction="vertical" size={0}>
                 <Typography.Title level={3} style={{ marginBottom: 0 }}>
-                    Day Bin (factory)
+                    Day Bin — material on the floor, by machine
                 </Typography.Title>
                 <Typography.Text type="secondary">
-                    Material control room: scan bags in at the top, see what the factory can run right now, and check
-                    every load made today. Machines empty the bin by themselves at Complete Batch — nothing is consumed
-                    here, and loading posts nothing to Tally.
+                    Scan each bag into the machine it was loaded into, and see what should still be on that machine:
+                    what was scanned in, less what its batches calculated out. Nothing is consumed here and loading
+                    posts nothing to Tally — Complete Batch on the Shift Floor takes the material out by itself.
                 </Typography.Text>
             </Space>
 
@@ -688,10 +666,12 @@ export default function FactoryDayBinPage() {
             {configured && (
                 <>
                     {traceabilityEnabled && (
-                        <Card size="small" title="Scan a bag in">
+                        <Card size="small" title="Scan a bag into a machine">
                             <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-                                The scanner types the code and presses Enter by itself — the bag shows below. Enter
-                                again (or the button) loads the whole bag; lower the kg first for a part bag.
+                                Pick the machine first, then scan — the machine stays put so a whole pallet goes in one
+                                bag after another. The scanner types the code and presses Enter by itself; Enter again
+                                (or the button) loads the whole bag, and lowering the kg loads a part bag with the rest
+                                left in it.
                             </Typography.Paragraph>
                             {scanSuccess && (
                                 <Alert type="success" showIcon message={scanSuccess} style={{ marginBottom: 12 }} />
@@ -699,6 +679,37 @@ export default function FactoryDayBinPage() {
                             {scanError && (
                                 <Alert type="error" showIcon message={scanError} style={{ marginBottom: 12 }} />
                             )}
+                            {/* THE MACHINE, ABOVE THE BARCODE — it is the one
+                                field the gun cannot fill in, and a scan with no
+                                machine is a load nothing can be attributed to. */}
+                            <Form layout="vertical" component="div" style={{ maxWidth: 480 }}>
+                                <Form.Item
+                                    label="Machine"
+                                    required
+                                    extra={
+                                        workCentersUnavailable
+                                            ? 'The machine list could not be loaded — reload the page, or ask for Production access if this keeps happening.'
+                                            : 'Which machine this bag was emptied into. Stays selected between bags.'
+                                    }
+                                >
+                                    <Select
+                                        size="large"
+                                        style={{ width: '100%' }}
+                                        placeholder="Choose the machine…"
+                                        options={machineOptions}
+                                        showSearch
+                                        optionFilterProp="label"
+                                        value={scanMachineId ?? undefined}
+                                        onChange={(value) => {
+                                            setScanMachineId(value);
+                                            setScanError(null);
+                                        }}
+                                        notFoundContent={
+                                            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No active machines" />
+                                        }
+                                    />
+                                </Form.Item>
+                            </Form>
                             <Input
                                 ref={scanInputRef}
                                 autoFocus
@@ -744,21 +755,81 @@ export default function FactoryDayBinPage() {
                                         block
                                         onClick={submitBagLoad}
                                         loading={bagLoad.isPending}
-                                        disabled={!scanKg || scanKg <= 0}
+                                        disabled={!scanKg || scanKg <= 0 || scanMachineId === null}
                                     >
-                                        Load into Day Bin
+                                        {scanMachineId === null ? 'Pick a machine first' : 'Load into machine'}
                                     </Button>
                                 </div>
                             )}
                         </Card>
                     )}
 
+                    {/* ESTIMATED RESIN REMAINING, PER MACHINE — the owner's
+                        replacement for the day's reconciliation. First, because
+                        it is the question the floor actually asks ("how much is
+                        left on MC-03?"), and because the balances below answer a
+                        different one (where the stock is, in the books). */}
+                    <Card size="small" title="Estimated resin remaining, per machine">
+                        <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+                            Carryover plus every bag scanned into the machine, less what its batches calculated out —
+                            resin consumed is (pieces packed and sent to QC + pieces rejected during production) × the
+                            standard weight per piece, plus lumps. Counted from the first bag scanned into that
+                            machine, so material burnt before anyone scanned is deliberately not subtracted. It is an
+                            estimate, not a weight: nothing here is weighed.
+                        </Typography.Paragraph>
+
+                        {machineResinUnavailable ? (
+                            <Typography.Text type="secondary">
+                                The per-machine estimate could not be loaded. Everything else on this page is
+                                unaffected.
+                            </Typography.Text>
+                        ) : machineResinLoading ? (
+                            <Typography.Text type="secondary">Working out what is left on each machine…</Typography.Text>
+                        ) : (machineResin ?? []).length === 0 ? (
+                            // NOT "the machines are empty". The server answers
+                            // with no rows at all until something has been
+                            // scanned, and printing zeros would be a reading
+                            // nobody took.
+                            //
+                            // The second sentence depends on whether there IS a
+                            // scan panel: with barcode traceability off the card
+                            // above does not render, and pointing at it would
+                            // send somebody looking for a control this
+                            // deployment does not have.
+                            <Typography.Text type="secondary">
+                                No bag has been scanned into a machine yet, so there is no baseline to estimate
+                                against — this is not a reading of empty machines.{' '}
+                                {traceabilityEnabled
+                                    ? 'It fills in from the first scan above.'
+                                    : 'Barcode scanning is switched off for this factory, so nothing feeds it: material still moves out of the store below, but with no machine recorded against it.'}
+                            </Typography.Text>
+                        ) : (
+                            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                                {(machineResin ?? []).map((machine) => (
+                                    <div key={machine.work_center_id}>
+                                        <Typography.Text strong style={{ display: 'block', marginBottom: 4 }}>
+                                            {machineLabel(machine.work_center)}
+                                        </Typography.Text>
+                                        <Table<MachineResinMaterial>
+                                            rowKey={(row) => row.item_id}
+                                            size="small"
+                                            columns={machineResinColumns}
+                                            dataSource={machine.materials}
+                                            pagination={false}
+                                            scroll={{ x: 'max-content' }}
+                                        />
+                                    </div>
+                                ))}
+                            </Space>
+                        )}
+                    </Card>
+
                     <Card
                         size="small"
                         title={
                             <Space wrap>
                                 <span>
-                                    Day bin: {dayBinWarehouse.code} — {dayBinWarehouse.name}
+                                    Out of the store, on the floor: {dayBinWarehouse.code} — {dayBinWarehouse.name}
                                 </span>
                                 {dayBinWarehouse.tally_guid === null && (
                                     <Tag>Internal bin — Tally keeps seeing the main godown</Tag>
@@ -802,100 +873,12 @@ export default function FactoryDayBinPage() {
                                 emptyText: (
                                     <Typography.Text type="secondary">
                                         {traceabilityEnabled
-                                            ? 'Nothing in the day bin yet — scan a bag in above.'
-                                            : 'Nothing in the day bin yet — load material below.'}
+                                            ? 'Nothing has left the store yet — scan a bag into a machine above.'
+                                            : 'Nothing has left the store yet — load material below.'}
                                     </Typography.Text>
                                 ),
                             }}
                         />
-                    </Card>
-
-                    {/* THE DAY'S RECONCILIATION — the central replacement for
-                        the per-batch "unaccounted kg" figure the owner had
-                        removed. Directly under the balances, because it is the
-                        same materials asked a harder question. */}
-                    <Card
-                        size="small"
-                        title="Is anything missing? — the day's check"
-                        extra={
-                            <Space wrap>
-                                <Button
-                                    size="small"
-                                    onClick={() => {
-                                        setReconDate(dayjs().subtract(1, 'day'));
-                                        setCounts({});
-                                    }}
-                                >
-                                    Yesterday
-                                </Button>
-                                <DatePicker
-                                    size="small"
-                                    allowClear={false}
-                                    value={reconDate}
-                                    format="DD MMM YYYY"
-                                    // A future date would be answered with
-                                    // balances rolled forward past every
-                                    // movement that has not happened yet — a
-                                    // confident figure about nothing.
-                                    disabledDate={(current) => current.isAfter(dayjs(), 'day')}
-                                    onChange={(value) => {
-                                        if (!value) return;
-                                        setReconDate(value);
-                                        // Yesterday's count must not stand
-                                        // against today's expected closing.
-                                        setCounts({});
-                                    }}
-                                />
-                            </Space>
-                        }
-                    >
-                        <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-                            What the bin started with, what went in, what the batches took out, and what should therefore
-                            be left. Weigh the bin and type the count to see the gap. Resin consumption is calculated per
-                            batch (production + rejection + lumps), so a single batch can never show a shortfall — this is
-                            where missing material shows up.
-                        </Typography.Paragraph>
-
-                        {reconUnavailable ? (
-                            <Typography.Text type="secondary">
-                                The day's check could not be loaded. The balances above are unaffected.
-                            </Typography.Text>
-                        ) : (
-                            <>
-                                <Table<FactoryDayBinReconciliationRow>
-                                    rowKey={(row) => row.item_id}
-                                    size="middle"
-                                    loading={reconLoading}
-                                    columns={reconColumns}
-                                    dataSource={reconciliation?.materials ?? []}
-                                    pagination={false}
-                                    scroll={{ x: 'max-content' }}
-                                    // The backend omits any material the date
-                                    // has nothing to say about, so an empty
-                                    // table is a real answer about a quiet day.
-                                    locale={{
-                                        emptyText: (
-                                            <Typography.Text type="secondary">
-                                                Nothing moved through the bin on {reconDate.format('DD MMM YYYY')}, and it
-                                                held nothing that morning.
-                                            </Typography.Text>
-                                        ),
-                                    }}
-                                />
-                                {/* The quiet line. A count is a question put to
-                                    the ERP, not an entry in it — said plainly so
-                                    nobody types one expecting the balance to
-                                    move, and nobody hunts for where it was
-                                    filed. */}
-                                <Typography.Text type="secondary" style={{ display: 'block', marginTop: 12, fontSize: 12 }}>
-                                    Counts are a check, not a record — nothing here is saved, and the bin's balance is
-                                    unchanged by what you type. Within {COUNT_MATCH_TOLERANCE_KG} kg reads as a match. The
-                                    count must be the bin as it stood at the END of {reconDate.format('DD MMM YYYY')}: on a
-                                    past date, weighing the bin now measures material loaded since, not that day's closing.
-                                    To correct a real gap, book the stock movement that explains it.
-                                </Typography.Text>
-                            </>
-                        )}
                     </Card>
 
                     <Collapse
@@ -912,6 +895,21 @@ export default function FactoryDayBinPage() {
                                         onFinish={(values) => manualLoad.mutate(values)}
                                         initialValues={{ loaded_at: dayjs() }}
                                     >
+                                        {/* WHAT THIS DOOR CANNOT DO. A manual
+                                            load is a plain stock transfer with
+                                            no machine on it, so it moves the
+                                            balance below but not any machine's
+                                            estimate above. Said here rather
+                                            than discovered later, when a
+                                            machine's estimate reads short by
+                                            exactly a load somebody made. */}
+                                        <Typography.Text
+                                            type="secondary"
+                                            style={{ display: 'block', fontSize: 12, marginBottom: 8 }}
+                                        >
+                                            No machine is recorded on a manual load, so it does not raise any machine's
+                                            estimated remaining — scan the bag above whenever it carries a barcode.
+                                        </Typography.Text>
                                         <Row gutter={[12, 0]}>
                                             <Col xs={24} md={8}>
                                                 <Form.Item
@@ -1010,7 +1008,7 @@ export default function FactoryDayBinPage() {
                                             disabled={!factoryStore}
                                             loading={manualLoad.isPending}
                                         >
-                                            Load into Day Bin
+                                            Load out of the store
                                         </Button>
                                     </Form>
                                 ),
@@ -1030,7 +1028,7 @@ export default function FactoryDayBinPage() {
                             locale={{
                                 emptyText: (
                                     <Typography.Text type="secondary">
-                                        Nothing loaded into the day bin yet today.
+                                        Nothing has been loaded out of the store yet today.
                                     </Typography.Text>
                                 ),
                             }}

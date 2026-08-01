@@ -54,9 +54,13 @@ class ConsumptionVarianceTest extends TestCase
 
     public function test_item_weight_norm_happy_path_appears_on_the_approval_list(): void
     {
+        // 100 production-rejected pieces at 20 g each ARE the 2 kg rejection
+        // figure — the fixture used to carry the kg with no pieces behind
+        // it, which no longer reads as a coherent shift now that the norm
+        // counts those pieces as resin that went through the machine.
         $entry = $this->completedEntry(
             itemAttributes: ['nominal_weight_grams' => '20.0000'],
-            entryAttributes: ['quantity_rejection_kg' => '2'],
+            entryAttributes: ['quantity_scrap' => '100', 'quantity_rejection_kg' => '2'],
         );
         $entry->materialConsumptions()->create([
             'item_id' => $this->resin->id,
@@ -74,12 +78,16 @@ class ConsumptionVarianceTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.0.variance', [
                 'norm_source' => 'item_weight',
-                'expected_kg' => '20.0000',
+                'norm_basis' => 'throughput at standard weight + lumps',
+                // (1000 packed + 100 rejected) × 20 g = 22 kg, + 1.5 kg of
+                // lumps. It used to read 20.0000 — netting the norm to the
+                // approved 1000 pieces charged the shift for the 100 pieces
+                // it moulded and the lumps it made, both of which really
+                // came out of the same resin.
+                'expected_kg' => '23.5000',
                 'actual_kg' => '25.0000',
-                'variance_kg' => '5.0000',
-                // JSON numbers carry no zero fraction — 25.0 goes over the
-                // wire as 25 and decodes as int.
-                'variance_pct' => 25,
+                'variance_kg' => '1.5000',
+                'variance_pct' => 6.4,
                 'variance_band' => 'investigate',
                 'rejection_kg' => '2.0000',
                 'scrap_kg' => '1.5000',
@@ -101,6 +109,7 @@ class ConsumptionVarianceTest extends TestCase
 
         $this->assertSame([
             'norm_source' => null,
+            'norm_basis' => null,
             'expected_kg' => null,
             'actual_kg' => '10.0000',
             'variance_kg' => null,
@@ -307,5 +316,127 @@ class ConsumptionVarianceTest extends TestCase
         $variance = app(ShiftProductionEntryService::class)->consumptionVariance($entry);
 
         $this->assertSame('7.0000', $variance['actual_kg']);
+    }
+
+    // =================================================================
+    // THE NORM IS THROUGHPUT, NOT APPROVED OUTPUT.
+    //
+    // One shift, told twice — once after its quality check and once before
+    // it. 2,000 pieces packed and sent to QC, of which QC refused 150; 250
+    // more rejected on the production floor; 3 kg of lumps. At 20 g a piece
+    // the machine therefore ran (1,850 + 150 + 250) × 20 g = 45 kg of resin
+    // into pieces and 3 kg into lumps, and the store issued exactly 48 kg.
+    //
+    // That shift is formula-perfect and must read 0.0000. Under the old
+    // net-only norm it read 48 − 37 = +11 kg, and the approver was sent to
+    // investigate resin that had never gone missing.
+    // =================================================================
+
+    /**
+     * The checked shift: gross packed count split into approved FG and QC
+     * rejects, with production rejects and lumps beside them.
+     *
+     * KNOWN DISAGREEMENT ONE CARD DOWN, deliberately not pinned here.
+     * productionMetrics() confirms rejection as `qc_rejection_kg ?? production`
+     * — written when the two were rival MEASUREMENTS of the same rejects, and
+     * now wrong, because since the quality gate they are different
+     * POPULATIONS. On this batch it keeps QC's 3 kg and drops the 5 kg of
+     * floor rejects, so reconciliation_unaccounted_kg reads 5.0000
+     * 'investigate' (verified) on the same shift this card calls 0.0000 'ok'.
+     * That is a productionMetrics fix, outside the norm; asserting the 5 here
+     * would cement a figure believed wrong.
+     */
+    private function formulaPerfectCheckedEntry(string $issuedKg): ShiftProductionEntry
+    {
+        $entry = $this->completedEntry(
+            itemAttributes: ['nominal_weight_grams' => '20.0000'],
+            entryAttributes: [
+                // The quality check netted 150 pieces off the packed 2,000
+                // and filed the count it removed — it moves approved FG, and
+                // it must not move a single gram of the resin norm.
+                'quantity_produced' => '1850',
+                'gross_quantity_produced' => '2000',
+                'quality_rejected_nos' => 150,
+                'quantity_produced_kg' => '37.0000',
+                'qc_rejection_kg' => '3.0000',
+                // Rejected at the machine, never packed.
+                'quantity_scrap' => '250',
+                'quantity_rejection_kg' => '5.0000',
+            ],
+        );
+        $entry->scraps()->create(['type' => 'lumps', 'quantity_kg' => '3']);
+        $entry->materialConsumptions()->create([
+            'item_id' => $this->resin->id,
+            'warehouse_id' => $this->rmStore->id,
+            'quantity_issued_kg' => $issuedKg,
+        ]);
+
+        return $entry;
+    }
+
+    public function test_a_formula_perfect_batch_with_rejects_and_lumps_has_zero_variance(): void
+    {
+        $variance = app(ShiftProductionEntryService::class)
+            ->consumptionVariance($this->formulaPerfectCheckedEntry('48'));
+
+        $this->assertSame('item_weight', $variance['norm_source']);
+        $this->assertSame('throughput at standard weight + lumps', $variance['norm_basis']);
+        // 2,250 pieces × 20 g = 45 kg + 3 kg lumps.
+        $this->assertSame('48.0000', $variance['expected_kg']);
+        $this->assertSame('48.0000', $variance['actual_kg']);
+        $this->assertSame('0.0000', $variance['variance_kg']);
+        $this->assertSame(0.0, $variance['variance_pct']);
+        // Not 'watch'. The supervisor followed the formula, and the screen
+        // must say so — that is the whole defect this replaces.
+        $this->assertSame('ok', $variance['variance_band']);
+        $this->assertSame('0.0000', $variance['unaccounted_kg']);
+    }
+
+    public function test_a_hand_override_that_really_added_two_kilograms_is_still_flagged(): void
+    {
+        // The same shift with 50 kg typed against it. Two kilograms of resin
+        // genuinely left the store beyond the formula, and widening the norm
+        // must not have blunted the bands: this is the case they exist for.
+        $variance = app(ShiftProductionEntryService::class)
+            ->consumptionVariance($this->formulaPerfectCheckedEntry('50'));
+
+        $this->assertSame('48.0000', $variance['expected_kg']);
+        $this->assertSame('2.0000', $variance['variance_kg']);
+        // 2 / 48 = 4.17%.
+        $this->assertSame(4.2, $variance['variance_pct']);
+        $this->assertSame('watch', $variance['variance_band']);
+        $this->assertNotSame('ok', $variance['variance_band']);
+    }
+
+    public function test_an_unchecked_batch_norms_on_the_packed_count_and_still_zeroes(): void
+    {
+        // The SAME shift an hour earlier, before QC touched it: no check, so
+        // quality_rejected_nos is null and quantity_produced still IS the
+        // 2,000 packed pieces. The norm must land on the identical 48 kg —
+        // the resin was in the machine long before anyone certified it.
+        $entry = $this->completedEntry(
+            itemAttributes: ['nominal_weight_grams' => '20.0000'],
+            entryAttributes: [
+                'quantity_produced' => '2000',
+                'quantity_produced_kg' => '40.0000',
+                'quantity_scrap' => '250',
+                'quantity_rejection_kg' => '5.0000',
+            ],
+        );
+        $entry->scraps()->create(['type' => 'lumps', 'quantity_kg' => '3']);
+        $entry->materialConsumptions()->create([
+            'item_id' => $this->resin->id,
+            'warehouse_id' => $this->rmStore->id,
+            'quantity_issued_kg' => '48',
+        ]);
+
+        $this->assertNull($entry->quality_rejected_nos);
+        $this->assertNull($entry->gross_quantity_produced);
+
+        $variance = app(ShiftProductionEntryService::class)->consumptionVariance($entry);
+
+        $this->assertSame('48.0000', $variance['expected_kg']);
+        $this->assertSame('0.0000', $variance['variance_kg']);
+        $this->assertSame('ok', $variance['variance_band']);
     }
 }

@@ -11,6 +11,9 @@ use App\Modules\Inventory\Models\MaterialLot;
 use App\Modules\Inventory\Models\StockBalance;
 use App\Modules\Inventory\Models\StockMovement;
 use App\Modules\Inventory\Models\Warehouse;
+use App\Modules\Production\Models\DayBinMovement;
+use App\Modules\Production\Models\Enums\DayBinMovementType;
+use App\Modules\Production\Models\WorkCenter;
 use App\Modules\Production\Services\FactoryDayBinService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -45,6 +48,8 @@ class FactoryDayBinBagLoadTest extends TestCase
 
     private StockBalance $storeResin;
 
+    private WorkCenter $machine;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -54,6 +59,8 @@ class FactoryDayBinBagLoadTest extends TestCase
         $this->store = Warehouse::create(['code' => 'WH-RM', 'name' => 'Raw Material Store']);
         $this->dayBin = Warehouse::create(['code' => 'WH-DAYBIN', 'name' => 'Factory Day Bin']);
         $this->resin = Item::create(['sku' => 'PET-RESIN', 'name' => 'PET Resin', 'uom' => 'KGS']);
+        // A scan names the machine the bag was emptied into (owner, 31-Jul).
+        $this->machine = WorkCenter::create(['code' => 'MC-01', 'name' => 'Machine 1']);
 
         $this->storeResin = StockBalance::create([
             'item_id' => $this->resin->id,
@@ -115,6 +122,7 @@ class FactoryDayBinBagLoadTest extends TestCase
 
         $response = $this->postJson('/api/v1/production/day-bin/load-bag', [
             'barcode' => 'LOT1-B1',
+            'work_center_id' => $this->machine->id,
         ])->assertOk();
 
         // The response answers the two questions the scanner has: what is
@@ -131,8 +139,24 @@ class FactoryDayBinBagLoadTest extends TestCase
         $this->assertSame('75.0000', $this->storeResin->fresh()->quantity);
         $this->assertSame('0.0000', $bag->fresh()->remaining_kg);
         $this->assertSame(MaterialBagStatus::Consumed, $bag->fresh()->status);
-        // Central load: no machine was picked, so none is stamped.
-        $this->assertNull($bag->fresh()->day_bin_work_center_id);
+        // A WHOLE bag physically goes to the machine, so the machine is
+        // stamped on it. This assertion USED to require null, back when the
+        // scan was central and picked no machine; the owner's 31-Jul ruling
+        // ("scanning a bag means material was loaded into the selected
+        // machine") inverted it, and the same rule already governed the
+        // per-machine path in TraceabilityService::loadBagToDayBin.
+        $this->assertSame($this->machine->id, $bag->fresh()->day_bin_work_center_id);
+
+        // AND the ledger row that makes the per-machine estimate possible.
+        $movement = DayBinMovement::query()->sole();
+        $this->assertSame($this->machine->id, $movement->work_center_id);
+        $this->assertSame($this->resin->id, $movement->item_id);
+        $this->assertSame(DayBinMovementType::Load, $movement->type);
+        $this->assertSame('25.0000', $movement->quantity_kg);
+        $this->assertSame($bag->id, $movement->material_bag_id);
+        // A load is into a MACHINE, not into a batch — the floor scans
+        // before Start Batch as often as during a run.
+        $this->assertNull($movement->shift_production_entry_id);
 
         // The record is the EXISTING transfer pair, referencing the bag —
         // created_by is the authenticated user (the audit identity).
@@ -154,6 +178,7 @@ class FactoryDayBinBagLoadTest extends TestCase
 
         $this->postJson('/api/v1/production/day-bin/load-bag', [
             'barcode' => 'LOT1-B1',
+            'work_center_id' => $this->machine->id,
             'supervisor_id' => $supervisor->id,
         ])->assertOk();
 
@@ -172,6 +197,7 @@ class FactoryDayBinBagLoadTest extends TestCase
 
         $this->postJson('/api/v1/production/day-bin/load-bag', [
             'barcode' => 'LOT1-B1',
+            'work_center_id' => $this->machine->id,
             'quantity_kg' => '10.5',
         ])->assertOk()
             ->assertJsonPath('data.bag.remaining_kg', '14.5000')
@@ -182,6 +208,34 @@ class FactoryDayBinBagLoadTest extends TestCase
         $this->assertSame('89.5000', $this->storeResin->fresh()->quantity);
         $this->assertSame('14.5000', $bag->fresh()->remaining_kg);
         $this->assertSame(MaterialBagStatus::InStore, $bag->fresh()->status);
+        // The BAG is still in the store, so it carries no machine — but the
+        // 10.5 kg that came out of it did go into one, and the ledger says
+        // so. That split is the whole point: the pointer is a location, the
+        // ledger row is a quantity.
+        $this->assertNull($bag->fresh()->day_bin_work_center_id);
+        $movement = DayBinMovement::query()->sole();
+        $this->assertSame($this->machine->id, $movement->work_center_id);
+        $this->assertSame('10.5000', $movement->quantity_kg);
+    }
+
+    public function test_a_scan_without_a_machine_is_refused_and_nothing_moves(): void
+    {
+        $this->actingAsProduction();
+        $this->configureBin();
+        $bag = $this->bag();
+
+        $this->postJson('/api/v1/production/day-bin/load-bag', ['barcode' => 'LOT1-B1'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors([
+                'work_center_id' => 'Pick the machine this bag was loaded into.',
+            ]);
+
+        // An unattributed load would overstate the estimated remaining of
+        // every machine except the one that actually burnt the material, so
+        // it is refused rather than recorded against nobody.
+        $this->assertSame('25.0000', $bag->fresh()->remaining_kg);
+        $this->assertSame(0, StockMovement::count());
+        $this->assertSame(0, DayBinMovement::count());
     }
 
     // (c) more than the bag holds ---------------------------------------------
@@ -194,6 +248,7 @@ class FactoryDayBinBagLoadTest extends TestCase
 
         $response = $this->postJson('/api/v1/production/day-bin/load-bag', [
             'barcode' => 'LOT1-B1',
+            'work_center_id' => $this->machine->id,
             'quantity_kg' => '30',
         ])->assertUnprocessable();
 
@@ -214,6 +269,7 @@ class FactoryDayBinBagLoadTest extends TestCase
 
         $this->postJson('/api/v1/production/day-bin/load-bag', [
             'barcode' => 'NO-SUCH-BAG',
+            'work_center_id' => $this->machine->id,
         ])->assertUnprocessable()
             ->assertJsonValidationErrors([
                 'barcode' => 'Unknown bag barcode — no registered bag carries this code.',
@@ -231,6 +287,7 @@ class FactoryDayBinBagLoadTest extends TestCase
 
         $this->postJson('/api/v1/production/day-bin/load-bag', [
             'barcode' => 'LOT1-B1',
+            'work_center_id' => $this->machine->id,
         ])->assertUnprocessable()
             ->assertJsonValidationErrors(['day_bin']);
 
@@ -252,6 +309,7 @@ class FactoryDayBinBagLoadTest extends TestCase
 
         $response = $this->postJson('/api/v1/production/day-bin/load-bag', [
             'barcode' => 'LOT1-B1',
+            'work_center_id' => $this->machine->id,
         ])->assertUnprocessable();
 
         $this->assertStringContainsString('already consumed', $response->json('message'));
@@ -270,8 +328,10 @@ class FactoryDayBinBagLoadTest extends TestCase
         $this->configureBin();
         $this->bag();
 
-        $this->postJson('/api/v1/production/day-bin/load-bag', ['barcode' => 'LOT1-B1'])
-            ->assertNotFound();
+        $this->postJson('/api/v1/production/day-bin/load-bag', [
+            'barcode' => 'LOT1-B1',
+            'work_center_id' => $this->machine->id,
+        ])->assertNotFound();
 
         $this->assertSame(0, StockMovement::count());
     }

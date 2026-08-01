@@ -14,6 +14,8 @@ import { listAllItems, listAllWarehouses } from '@/features/inventory/api';
 import type { Item } from '@/features/inventory/types';
 import HandoverModal from '@/features/production/components/HandoverModal';
 import {
+    amendBatch,
+    listPendingEntries,
     closeDowntimeLog,
     closeMoldChangeLog,
     completeBatch,
@@ -36,6 +38,8 @@ import {
     listShifts,
     listWorkCenters,
     loadBagToFactoryDayBin,
+    machineLabel,
+    getFactoryWarehouseSettings,
     openDowntimeLog,
     openMoldChangeLog,
     getBatchPreview,
@@ -60,12 +64,17 @@ import type {
     SuggestedPackingMaterial,
     WorkCenter,
 } from '@/features/production/types';
-import { readStockShortfalls } from '@/features/production/types';
+import {
+    canAmendCompletion,
+    isAwaitingCorrection,
+    readReturnReason,
+    readStockShortfalls,
+} from '@/features/production/types';
 import { currentShift, justEndedShift, productionDateFor } from '@/features/production/shiftClock';
 import { roundPer, useProductionSettings } from '@/features/production/packing';
 import { itemLabel } from '@/lib/itemLabel';
 import {
-    buildStartBatchRecipeUrl,
+    buildStartBatchStandardUrl,
     hasStartBatchResume,
     parseStartBatchResume,
     type StartBatchResumeDraft,
@@ -90,6 +99,65 @@ function toNum(v: string | null | undefined): number | null {
 /** Display helper: trims trailing zeros, "—" for missing. */
 function fmtNum(n: number | null | undefined, dp = 2): string {
     return n === null || n === undefined || Number.isNaN(n) ? '—' : String(parseFloat(n.toFixed(dp)));
+}
+
+/** Whole pieces with Indian grouping — "12,500". "—" when there is no figure. */
+function fmtPieces(v: string | number | null | undefined): string {
+    const n = typeof v === 'number' ? v : toNum(v as string | null | undefined);
+    return n === null || Number.isNaN(n) ? '—' : n.toLocaleString('en-IN');
+}
+
+/**
+ * The one breakpoint this screen changes shape at.
+ *
+ * The rest of the page is laid out with antd's own responsive Col spans, which
+ * need no JS. The Completed Today list is the exception: below this width it
+ * stops being a table at all and becomes cards, and a component cannot render
+ * two different DOM shapes off a CSS media query alone. 768px is antd's own
+ * `md` boundary, so the switch happens on the same line as every Col around it.
+ *
+ * Subscribes rather than reading once — a tablet rotated mid-shift is a real
+ * event on this floor, and a list that keeps yesterday's shape until reload is
+ * exactly the horizontal-scroll problem this exists to end.
+ */
+const NARROW_QUERY = '(max-width: 767px)';
+
+function useIsNarrowScreen(): boolean {
+    const [narrow, setNarrow] = useState<boolean>(
+        () => typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+            ? window.matchMedia(NARROW_QUERY).matches
+            : false,
+    );
+
+    useEffect(() => {
+        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+        const mql = window.matchMedia(NARROW_QUERY);
+        const onChange = (event: MediaQueryListEvent) => setNarrow(event.matches);
+        setNarrow(mql.matches);
+        mql.addEventListener('change', onChange);
+        return () => mql.removeEventListener('change', onChange);
+    }, []);
+
+    return narrow;
+}
+
+/**
+ * A completion-time downtime note, read back into the from/to boxes it was
+ * typed in.
+ *
+ * The events table has no clock columns — the drawer folds the picked window
+ * into the note ("14:30–15:00 — power cut") and the minutes are what is
+ * stored. An amendment re-books the completion from the form, so a line that
+ * cannot be read back would be silently dropped from the corrected batch.
+ * Anything that does not match the shape it was written in keeps its whole
+ * text as the note, and the amender re-picks the window rather than losing
+ * the line.
+ */
+function parseDowntimeNote(note: string | null): { from?: string; to?: string; text: string } {
+    const raw = (note ?? '').trim();
+    const match = /^(\d{1,2}:\d{2})[–-](\d{1,2}:\d{2})(?:\s+—\s+(.*))?$/.exec(raw);
+    if (!match) return { text: raw };
+    return { from: match[1], to: match[2], text: (match[3] ?? '').trim() };
 }
 
 /**
@@ -841,6 +909,11 @@ const completeBatchSchema = z.object({
     mb_kg: z.number().min(0).nullish(),
     helper_name: z.string().max(120, 'Max 120 characters').optional(),
     notes: z.string().optional(),
+    // Only ever filled on an amendment, and optional there too — the backend's
+    // own rule (AmendBatchRequest): a supervisor fixing their own typo on
+    // their own batch, before anyone else has seen it, is not asked to justify
+    // it. It is destructured out of an ordinary completion's payload.
+    amendment_reason: z.string().max(500, 'Max 500 characters').optional(),
     // No warehouse on an exception line. It was required here, and with the
     // picker gone that rule would have failed every added row on a field the
     // supervisor cannot see or fill — a drawer that refuses to submit and
@@ -1048,6 +1121,52 @@ const stockCountSchema = z.object({
 });
 type StockCountFormValues = z.infer<typeof stockCountSchema>;
 
+/**
+ * Where each readiness gap is actually closed, said in one line beside the
+ * gap itself.
+ *
+ * The backend's `detail` explains what the missing field COSTS ("expected
+ * output and efficiency cannot be calculated") — which is the right thing for
+ * it to say, because the consequence is a fact about the figure and not about
+ * this ERP's screens. What it cannot know is which page writes it, and a
+ * supervisor holding a blocked Start Batch needs precisely that. So the two
+ * sentences sit together: what is missing, and who fixes it.
+ *
+ * The four run figures all live on the product standard, which is why
+ * "Configure this item" goes there and nowhere else — see
+ * buildStartBatchStandardUrl. A code with no entry here simply shows the
+ * backend's own detail, so a check added server-side never renders a blank.
+ */
+const READINESS_FIX: Record<string, string> = {
+    item_active: 'Reactivate the product on the item master.',
+    uom: 'Set the unit of measure on the item master.',
+    weight: 'Recorded on the product standard — Configure this item.',
+    cycle_time: 'Recorded on the product standard — Configure this item.',
+    cavities: 'Recorded on the product standard — Configure this item.',
+    packing: 'Pieces per carton is recorded on the product standard — Configure this item.',
+    colour: 'Set on the item master; you can also state it for this run below.',
+    tally_item: 'Attach this product to its Tally stock item — Configure this item.',
+    tally_godown: 'The warehouse needs a Tally godown — an administrator maps it in warehouse settings.',
+    machine_active: 'The machine is switched off — reactivate it under Work Centres.',
+};
+
+function ReadinessFindings({ findings }: { findings: { code: string; label: string; detail: string }[] }) {
+    return (
+        <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+            {findings.map((f) => (
+                <li key={f.code} style={{ marginBottom: 4 }}>
+                    <Typography.Text strong>{f.label}</Typography.Text> — {f.detail}
+                    {READINESS_FIX[f.code] ? (
+                        <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                            {READINESS_FIX[f.code]}
+                        </Typography.Text>
+                    ) : null}
+                </li>
+            ))}
+        </ul>
+    );
+}
+
 const approvalColor: Record<ShiftProductionEntryStatus, string> = {
     pending: 'processing',
     pm_approved: 'cyan',
@@ -1133,6 +1252,40 @@ export default function ShiftProductionEntryPage() {
     const [startProductionDateOverride, setStartProductionDateOverride] = useState<string | null>(null);
     const [startResumeNotice, setStartResumeNotice] = useState<StartBatchResumeOutcome | null>(null);
     const [completingEntry, setCompletingEntry] = useState<ShiftProductionEntry | null>(null);
+    // The SAME drawer, re-opened on a batch that was already completed. Held as
+    // an id rather than a second entry object so there is exactly one source of
+    // truth for what is on screen (`completingEntry`) and this only answers
+    // "is what is on screen a correction?".
+    const [amendEntryId, setAmendEntryId] = useState<number | null>(null);
+    // Compared against the open entry, not merely "is it set": a stale id left
+    // behind by a closed drawer must never turn the next ordinary completion
+    // into an amendment of a different batch.
+    const amending = completingEntry !== null && amendEntryId === completingEntry.id;
+    /**
+     * THE ANSWER TO THE STALE-MATERIAL REFUSAL, and it only exists once that
+     * refusal has actually happened.
+     *
+     * The server refuses a correction whose piece counts moved while its
+     * material kilograms did not (refuseStaleMaterialLines), because the drawer
+     * latches the previously issued kg and the screen would otherwise show one
+     * arithmetic while the batch got another. Its 422 ends by telling the
+     * supervisor to "send it again confirming the kilograms are right as typed
+     * if that is genuinely what the store issued" — a weighed 130 kg beside a
+     * piece miscount is a real and legitimate case.
+     *
+     * Until this existed there was no way to send it again: the flag the server
+     * reads (`material_kg_confirmed`) was accepted by AmendBatchRequest and
+     * emitted by nothing, so that supervisor was permanently blocked by a
+     * message telling them to do something the screen could not do.
+     *
+     * OFFERED ONLY AFTER THE REFUSAL, never up front. A checkbox sitting there
+     * before anything went wrong is a checkbox that gets ticked out of habit,
+     * which would put back exactly the silent wrong figure the guard exists to
+     * stop. `staleMaterialRefused` is set by the mutation's own error handler
+     * and both are cleared whenever a drawer opens or closes.
+     */
+    const [staleMaterialRefused, setStaleMaterialRefused] = useState(false);
+    const [materialKgConfirmed, setMaterialKgConfirmed] = useState(false);
     const [reportingDownMachine, setReportingDownMachine] = useState<WorkCenter | null>(null);
     const [closingDowntimeLog, setClosingDowntimeLog] = useState<MachineDowntimeLog | null>(null);
     const [startingMoldChangeMachine, setStartingMoldChangeMachine] = useState<WorkCenter | null>(null);
@@ -1147,6 +1300,16 @@ export default function ShiftProductionEntryPage() {
     const [loadBagBarcode, setLoadBagBarcode] = useState('');
     const [scannedLoadBag, setScannedLoadBag] = useState<MaterialBag | null>(null);
     const [loadBagKg, setLoadBagKg] = useState<number | null>(null);
+    /**
+     * WHICH MACHINE THE BAG WENT INTO — required, by the owner's ruling
+     * (31-Jul): "Scanning a bag means material was loaded into the selected
+     * machine." Defaulted when the floor is unambiguous (exactly one machine
+     * running, or the card that opened the modal), otherwise left empty: a
+     * guess here credits the wrong machine's estimate, and nothing on any
+     * screen would say so. Deliberately NOT cleared between bags — a pallet
+     * goes into one machine — only when the modal is opened.
+     */
+    const [loadBagMachineId, setLoadBagMachineId] = useState<number | null>(null);
     const [loadBagSupervisorId, setLoadBagSupervisorId] = useState<number | null>(null);
     const [loadBagSuccess, setLoadBagSuccess] = useState<string | null>(null);
     const [loadBagError, setLoadBagError] = useState<{ text: string; needsWarehouse: boolean } | null>(null);
@@ -1162,6 +1325,9 @@ export default function ShiftProductionEntryPage() {
     const [handoverEntry, setHandoverEntry] = useState<ShiftProductionEntry | null>(null);
     const queryClient = useQueryClient();
     const navigate = useNavigate();
+    // Phone or tablet-in-portrait. The Completed Today list is the only thing
+    // on this page that changes shape rather than merely reflowing.
+    const isNarrow = useIsNarrowScreen();
     const [searchParams, setSearchParams] = useSearchParams();
     const resumeQuery = searchParams.toString();
     const resumeFlowRequested = useMemo(
@@ -1196,6 +1362,25 @@ export default function ShiftProductionEntryPage() {
         staleTime: 60 * 1000,
     });
     const { data: scrapReasons } = useQuery({ queryKey: ['production', 'scrap-reasons', 'all'], queryFn: listAllScrapReasons });
+    /**
+     * A REASON ADDED MOMENTS AGO MUST BE IN THE LIST WHEN THE DRAWER OPENS.
+     *
+     * This screen is opened once and left open for a whole shift, so the
+     * reason list it fetched at 06:00 is the one a supervisor is still picking
+     * from at 13:00 — while somebody in the office has just added the reason
+     * they were told to use, on another screen, and phoned to say so. Refetched
+     * on OPEN rather than polled: the list changes when a person decides
+     * something, not on a clock, and the moment it matters is the moment the
+     * drawer appears.
+     *
+     * Keyed on the entry's ID, not the object: the entry is re-read every 20
+     * seconds and a new object identity each time would refetch on a loop.
+     */
+    const completingEntryId = completingEntry?.id ?? null;
+    useEffect(() => {
+        if (completingEntryId === null) return;
+        queryClient.invalidateQueries({ queryKey: ['production', 'scrap-reasons', 'all'] });
+    }, [completingEntryId, queryClient]);
     // The GLOBAL downtime reason list — shared with Production Configuration
     // (same query key), so a reason saved from either screen appears in both.
     const { data: downtimeReasons } = useQuery({
@@ -1210,6 +1395,30 @@ export default function ShiftProductionEntryPage() {
         // fixed assignment — poll so one supervisor's screen reflects what
         // another just did. See PRODUCTION-SUPERVISOR-UX-PLAN.md §2.
         refetchInterval: 20000,
+    });
+    /**
+     * The WHOLE pending list, on its own query and deliberately not filtered
+     * to today.
+     *
+     * `entries` above is page 1 of 20 of a newest-first list of everything —
+     * roughly one day's work on a ten-machine three-shift floor. Both of the
+     * things this page now has to say about a completed batch outlive that
+     * window: quality can send back a batch produced two nights ago, and the
+     * night shift's own batches file under yesterday's production date and are
+     * still theirs to correct at 06:45 when the clock has already rolled to
+     * Day. Reading either off page 1 of today would hide exactly the batches
+     * somebody is standing there holding.
+     *
+     * Polled more slowly than the floor state: these change when a person at a
+     * desk decides something, not when a machine does.
+     */
+    const { data: pendingEntries } = useQuery({
+        queryKey: ['production', 'shift-production-entries', 'pending-all'],
+        queryFn: listPendingEntries,
+        refetchInterval: 60000,
+        // A login without production.view 403s — a normal answer here, and one
+        // that must leave the rest of the floor screen working.
+        retry: false,
     });
     // Authoritative machine-running state — every in-progress batch across
     // all shifts/dates, unpaginated. Distinct from `entries` (a paginated,
@@ -1345,6 +1554,63 @@ export default function ShiftProductionEntryPage() {
     // missing answer is actually fixed, so every "we could not resolve it"
     // line below points at the same page.
     const warehouseSettingsLink = <Link to="/inventory/warehouses">Warehouses</Link>;
+
+    /**
+     * WHERE FINISHED GOODS ACTUALLY LAND, as the office set it.
+     *
+     * The same settings read the Production Configuration card writes — and
+     * read BEFORE the sole-Tally-linked heuristic, which is the fallback the
+     * SERVER only reaches when nothing is stored. Quoting the heuristic first
+     * is what made the Start drawer announce "No single Tally-linked store is
+     * set up yet" on a factory where somebody had already chosen the store:
+     * a confident wrong answer about a question that was already settled.
+     *
+     * A 403 (a login without the production module) is a normal answer here
+     * and leaves the heuristic in charge, exactly as before.
+     */
+    const { data: factoryWarehouseSettings } = useQuery({
+        queryKey: ['production', 'factory-warehouse-settings'],
+        queryFn: getFactoryWarehouseSettings,
+        retry: false,
+        staleTime: 60 * 1000,
+    });
+    /**
+     * The stored setting first, then what the server says it RESOLVES to
+     * today (setting, else the single Tally-linked warehouse). Both come off
+     * the same read, so the line can never disagree with the resolver the
+     * completion actually uses.
+     */
+    const finishedGoodsWarehouseId =
+        factoryWarehouseSettings?.finished_goods_warehouse_id ??
+        factoryWarehouseSettings?.finished_goods_resolved_warehouse_id ??
+        null;
+    const finishedGoodsWarehouseName = useMemo(() => {
+        if (finishedGoodsWarehouseId === null) return null;
+        const named = (warehouses?.data ?? []).find((w) => w.id === finishedGoodsWarehouseId);
+        return named ? `${named.code} — ${named.name}` : null;
+    }, [warehouses, finishedGoodsWarehouseId]);
+    /**
+     * The Start drawer's one line about where the bottles go.
+     *
+     * THREE STATES, NOT TWO. "A store is set but this login cannot read the
+     * warehouse list" (a floor login 403s on Inventory) is NOT the same as
+     * "no store is set" — printing the setup warning for a naming failure is
+     * the exact false alarm this line was fixed to stop. So a configured store
+     * we cannot name still says a store is configured.
+     */
+    const finishedGoodsLine: ReactNode =
+        finishedGoodsWarehouseName !== null ? (
+            `Finished goods go to ${finishedGoodsWarehouseName}.`
+        ) : finishedGoodsWarehouseId !== null ? (
+            'Finished goods go to the store chosen in Production settings.'
+        ) : factoryStoreName ? (
+            `Finished goods go to ${factoryStoreName}.`
+        ) : (
+            <>
+                Finished goods go to the factory store. No store is chosen in Production settings and no single
+                Tally-linked store could be worked out — check {warehouseSettingsLink}.
+            </>
+        );
     const scrapReasonOptions = scrapReasons?.data.map((r) => ({ value: r.id, label: `${r.code} — ${r.name}` })) ?? [];
     const downtimeReasonOptions =
         downtimeReasons?.data.filter((r) => r.is_active).map((r) => ({ value: r.id, label: r.description })) ?? [];
@@ -1397,6 +1663,22 @@ export default function ShiftProductionEntryPage() {
         return map;
     }, [activeBatches]);
 
+    /**
+     * The machine to default a bag load to: the one that is running, when
+     * EXACTLY one is. Null with none or several — a load credited to the wrong
+     * machine silently moves two estimates the wrong way, and no screen would
+     * ever say so, which is worth one tap to avoid.
+     */
+    const soleRunningMachineId = useMemo(
+        () => (runningByMachine.size === 1 ? [...runningByMachine.keys()][0] : null),
+        [runningByMachine],
+    );
+    /** Active machines, for the Load Material picker. */
+    const machineOptions = useMemo(
+        () => (workCenters?.data ?? []).map((machine) => ({ value: machine.id, label: machineLabel(machine) })),
+        [workCenters],
+    );
+
     const openDowntimeByMachine = useMemo(() => {
         const map = new Map<number, MachineDowntimeLog>();
         for (const log of downtimeLogs?.data ?? []) {
@@ -1416,6 +1698,26 @@ export default function ShiftProductionEntryPage() {
     const completedToday = (entries?.data ?? [])
         .filter((e) => e.batch_status === 'completed' && e.production_date === today)
         .slice(0, 15);
+
+    const awaitingCorrection = (pendingEntries ?? []).filter(isAwaitingCorrection);
+
+    /**
+     * Completed batches the floor may still correct that Completed Today does
+     * not show — an earlier production date, or simply past the fifteenth row.
+     *
+     * The predicate is the entry's own state, so this list is exactly "what the
+     * backend would still accept an amendment for" minus the ones already
+     * standing in the amber panel above. Without it the Edit door existed only
+     * for today's first fifteen batches while the server went on allowing the
+     * rest — an offer that disappears at 06:45 for the shift that is still
+     * writing its paperwork.
+     */
+    const correctableEarlier = (pendingEntries ?? []).filter(
+        (entry) =>
+            canAmendCompletion(entry)
+            && !isAwaitingCorrection(entry)
+            && !completedToday.some((shown) => shown.id === entry.id),
+    );
 
     // A grid outage can happen more than once in a shift — this is a list,
     // not a single per-shift value, so every "Log Power Interruption" adds
@@ -1568,13 +1870,13 @@ export default function ShiftProductionEntryPage() {
         selectedStandardId
         ?? (batchPreview?.variants?.length === 1 ? batchPreview.variants[0].id : undefined);
     const startBatchRecipeDraft = useMemo<StartBatchResumeDraft | null>(() => {
-        if (!startingMachine || !effectiveShiftId || !startItemId || !startWarehouseId) return null;
+        if (!startingMachine || !effectiveShiftId || !startItemId) return null;
         return {
             machine_id: startingMachine.id,
             shift_id: effectiveShiftId,
             production_date: startProductionDate,
             item_id: startItemId,
-            warehouse_id: startWarehouseId,
+            warehouse_id: startWarehouseId ?? undefined,
             operator_id: startOperatorId,
             active_cavities: startActiveCavities ?? undefined,
             standard_id: resolvedStartStandardId,
@@ -1646,9 +1948,11 @@ export default function ShiftProductionEntryPage() {
         const machine = workCenters.data.find((candidate) => candidate.id === draft.machine_id && candidate.is_active);
         const shift = shifts.data.find((candidate) => candidate.id === draft.shift_id && candidate.is_active);
         const item = items.data.find((candidate) => candidate.id === draft.item_id && candidate.is_active);
-        const warehouse = warehouses.data.find(
-            (candidate) => candidate.id === draft.warehouse_id && candidate.is_active,
-        );
+        // The store travels only when the screen had resolved one; absent, the
+        // reopened drawer resolves it afresh like any other open.
+        const warehouseOk =
+            draft.warehouse_id === undefined
+            || warehouses.data.some((candidate) => candidate.id === draft.warehouse_id && candidate.is_active);
         const operatorExists =
             draft.operator_id === undefined
             || employees.data.some(
@@ -1667,7 +1971,7 @@ export default function ShiftProductionEntryPage() {
                         ? 'The selected shift is no longer active.'
                         : !item
                             ? 'The selected product is no longer active.'
-                            : !warehouse
+                            : !warehouseOk
                                 ? 'The selected finished-goods warehouse no longer exists.'
                                 : !operatorExists
                                     ? 'The selected operator is no longer available.'
@@ -2073,6 +2377,27 @@ export default function ShiftProductionEntryPage() {
     // balance, which is the part the supervisor actually needs to see.
 
     /**
+     * What THIS batch has already taken out for a material, and therefore hands
+     * back the moment a correction saves — zero on a first completion, which has
+     * issued nothing yet.
+     *
+     * SUMMED, not found: a batch may carry more than one line for the same
+     * material (a second issue mid-run), and picking the first would credit back
+     * less than the correction actually reverses — which is the same red refusal
+     * this exists to stop, only quieter.
+     */
+    const alreadyIssuedKgFor = useCallback(
+        (itemId: number): number => {
+            if (!amending || completingEntry === null) return 0;
+            return (completingEntry.material_consumptions ?? []).reduce(
+                (sum, line) => (line.item?.id === itemId ? sum + (toNum(line.quantity_issued_kg) ?? 0) : sum),
+                0,
+            );
+        },
+        [amending, completingEntry],
+    );
+
+    /**
      * NO ROW IN THIS DRAWER ASKS WHERE THE MATERIAL CAME FROM — not resin, not
      * masterbatch, not packing film, not an exception line.
      *
@@ -2105,12 +2430,32 @@ export default function ShiftProductionEntryPage() {
      * question: the material is still issued from the bin, and the bin has to
      * be loaded for the figures to reconcile. It names that and where to fix
      * it, because there is no longer a picker to hand the problem to.
+     *
+     * ON A CORRECTION, "what is available" includes what this batch itself
+     * already took — see `alreadyIssuedKgFor`. That is not a softening of the
+     * warning; it is what the server does. Both branches below are measured
+     * against that total, so a correction only ever sees the empty-bin sentence
+     * or the red line when the CORRECTED figure genuinely cannot be issued.
      */
     const dayBinHint = (itemId: number | null | undefined, typedKg: number | null | undefined): ReactNode => {
         if (dayBinWarehouseId === null || itemId === null || itemId === undefined) return null;
         const held = dayBinKgFor(itemId);
+        // A CORRECTION RE-ISSUES WHAT IT FIRST GAVE BACK.
+        //
+        // amendCompletion reverses this batch's own consumption before it
+        // re-books the corrected figure, so the kilograms this batch already
+        // took are in the bin again by the time the new figure is charged
+        // against it. Ignoring that made the drawer refuse, in red, a
+        // correction that retyped the same 25 kg it had itself issued — naming
+        // a shortfall of material that never has to move, and sending the
+        // supervisor to a page with nothing to do there.
+        //
+        // Zero outside a correction, so a first completion's arithmetic is
+        // untouched.
+        const ownIssue = alreadyIssuedKgFor(itemId);
+        const available = (held ?? 0) + ownIssue;
 
-        if (held === null || held <= 0) {
+        if (available <= 0) {
             const material = items?.data.find((candidate) => candidate.id === itemId);
             return (
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -2122,17 +2467,22 @@ export default function ShiftProductionEntryPage() {
 
         // The bin holds this material, so the server issues this line FROM the
         // bin — that is the whole of consumptionSource's rule. The shortfall is
-        // therefore a straight comparison against what the bin holds. It used
-        // to be gated on the row's warehouse field matching the bin; with that
-        // field gone, keeping the gate would have silently switched this
-        // warning off for every row, which is the opposite of what removing a
-        // question should cost.
-        const short = typedKg != null && typedKg > held;
+        // therefore a comparison against what the bin will hold at the moment
+        // this line posts: its balance, plus anything this same batch is about
+        // to give back. It used to be gated on the row's warehouse field
+        // matching the bin; with that field gone, keeping the gate would have
+        // silently switched this warning off for every row, which is the
+        // opposite of what removing a question should cost.
+        const short = typedKg != null && typedKg > available;
 
         return (
             <Typography.Text type={short ? 'danger' : 'secondary'} style={{ fontSize: 12 }}>
-                Day bin: {fmtNum(held, 4)}
-                {short && ' — more than the day bin holds; load it in Day Bin (factory) before completing'}
+                Day bin: {fmtNum(held ?? 0, 4)}
+                {ownIssue > 0 && ` + ${fmtNum(ownIssue, 4)} this batch already issued and gives back on saving`}
+                {short &&
+                    (ownIssue > 0
+                        ? ' — more than that, so this much cannot be issued'
+                        : ' — more than the bin holds, so this much cannot be issued')}
             </Typography.Text>
         );
     };
@@ -2144,6 +2494,12 @@ export default function ShiftProductionEntryPage() {
     // manual, exactly as before the packing master existed.
     useEffect(() => {
         if (!completingEntry || !quantityProduced || quantityProduced <= 0) return;
+        // AN AMENDMENT IS NOT A SUGGESTION. Every box in that drawer was loaded
+        // from what the batch actually recorded, and a suggestion computed from
+        // the master would overwrite a real counted figure with a derived one —
+        // the reset() that loads them leaves no field dirty, so the usual
+        // "the user touched this" guard below cannot tell them apart.
+        if (amending) return;
         // Superseded by the packing lines whenever the product's standard
         // declares its modes — those own the counts and derive the total the
         // other way round.
@@ -2159,7 +2515,7 @@ export default function ShiftProductionEntryPage() {
         suggest('no_of_trays', completingEntry.item.nos_per_tray);
         suggest('no_of_pouches', completingEntry.item.nos_per_pouch);
         suggest('no_of_box', completingEntry.item.nos_per_box);
-    }, [quantityProduced, completingEntry, completeForm]);
+    }, [quantityProduced, completingEntry, completeForm, amending]);
 
     // The inverse direction, with box-first precedence: Good Boxes × pcs/box
     // + loose derives Quantity Produced when a pack size is known; otherwise
@@ -2178,6 +2534,11 @@ export default function ShiftProductionEntryPage() {
     const nosPerBoxWatch = completeForm.watch('nos_per_box');
     useEffect(() => {
         if (!completingEntry) return;
+        // Same reason as the effect above: on an amendment the quantity on
+        // screen is the quantity the batch was completed with, and re-deriving
+        // it from a loaded box count would rewrite the very figure the
+        // supervisor opened this drawer to look at.
+        if (amending) return;
         // Same hand-off as above: with packing lines in play the total comes
         // from the lines, not from a single box count.
         if (packingModes.length > 0) return;
@@ -2202,7 +2563,7 @@ export default function ShiftProductionEntryPage() {
         ) {
             completeForm.setValue('quantity_produced', pouchesWatch * nosPerPouch! + loose);
         }
-    }, [goodBoxesWatch, pouchesWatch, loosePiecesWatch, nosPerBoxWatch, completingEntry, completeForm]);
+    }, [goodBoxesWatch, pouchesWatch, loosePiecesWatch, nosPerBoxWatch, completingEntry, completeForm, amending]);
 
     // ------------------------------------------------------------------
     // Packing lines: which modes this batch's standard actually offers, and
@@ -2314,6 +2675,44 @@ export default function ShiftProductionEntryPage() {
         // Only meaningful with a single mode — two modes have two different
         // pieces-per-carton, and no single value would be true.
         completeForm.setValue('nos_per_box', lines.length === 1 ? (lines[0].nos_per_box ?? null) : null);
+
+        // PIECES PER TRAY — the figure that was silently never sent.
+        //
+        // Every sibling above is written from the lines; this one was not, so a
+        // tray-packed batch completed through the packing lines stored
+        // `nos_per_tray = null` beside a perfectly good `no_of_trays = 18`. The
+        // approver's Packing line then read "—/tray × 18 trays" while the pcs
+        // per carton beside it (written on the line above) was right, and every
+        // later correction faithfully re-sent the null it had loaded. It also
+        // took the approve screen's after-quality decomposition down with it:
+        // that whole read-out bails when pcs/tray is missing, so a run with QC
+        // rejects showed nothing at all.
+        //
+        // Taken from the line's OWN editable box, not from the standard: that
+        // is the size the supervisor confirmed for this run.
+        //
+        // WRITTEN ONLY WHEN THE LINE'S ARITHMETIC RECONCILES — one line, tray
+        // mode, and a trays-per-carton step (boxFirstStep, itself only set when
+        // the standard's carton is a whole number of trays). That is the same
+        // gate the tray COUNT above is derived through, so the pair always
+        // multiply back to the pieces. Anything looser and the two figures
+        // stored side by side would disagree. In every other case the field is
+        // LEFT ALONE rather than nulled — it already carries the item master's
+        // figure from the drawer's own prefill, and erasing a true one to
+        // assert nothing would be the same defect facing the other way.
+        const soleLine = lines.length === 1 ? lines[0] : undefined;
+        if (soleLine && soleLine.mode !== 'tray') {
+            // The one line this run used packs no trays at all (pouches, or
+            // straight into the carton). A pcs/tray left over from the item
+            // master — or from a mode the supervisor switched away from
+            // mid-drawer — would describe a container this batch never filled,
+            // printed on the approver's line beside the "— trays" that proves
+            // it. The tray COUNT is already nulled two lines above for exactly
+            // this reason; the size has to follow it.
+            completeForm.setValue('nos_per_tray', null);
+        } else if (soleLine && boxFirstStep(soleLine) !== null && soleLine.nos_per_inner) {
+            completeForm.setValue('nos_per_tray', soleLine.nos_per_inner);
+        }
     }, [completeForm, packagingForLine]);
 
     // Seed the first line. One mode means no question is asked; several means
@@ -2321,6 +2720,15 @@ export default function ShiftProductionEntryPage() {
     // default) and let the supervisor add the other if the run used both.
     useEffect(() => {
         if (!completingEntry || packingModes.length === 0) return;
+        // NEVER ON AN AMENDMENT. Packing lines are a completion-time
+        // cross-check (the backend validates that they add up to the piece
+        // count and to no_of_box) and are not stored on the entry — nothing
+        // reads them back. Seeding a blank line here would send zero cartons
+        // against a loaded piece count and the server would refuse the
+        // correction with an arithmetic complaint about a line the supervisor
+        // never filled in. An amendment therefore edits the batch totals
+        // directly, which are the figures that were actually recorded.
+        if (amending) return;
         if (((completeForm.getValues('packing_lines') ?? []) as PackingLineValues[]).length > 0) return;
         const initial =
             packingModes.length === 1
@@ -2334,6 +2742,46 @@ export default function ShiftProductionEntryPage() {
         // and recomputePackingTotals are rebuilt every render, and listing
         // them would re-seed the line on every keystroke.
     }, [packingModes, completingEntry, completingPackagingMode, completeForm]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    /**
+     * THE ONE FIGURE A CORRECTION CAN STILL RECOVER: pieces per tray, on a batch
+     * completed before it was being stored.
+     *
+     * Those batches are real and are sitting in the approver's queue right now,
+     * reading "—/tray × 18 trays". Neither the entry nor the item master can
+     * answer for them — the tray size lives on the production standard the run
+     * was started against, which is exactly what `packingModes` holds. So the
+     * correction drawer, which exists to put recorded figures right, offers it.
+     *
+     * IT ONLY EVER FILLS A BLANK, and that is what separates it from the
+     * suggestions this drawer refuses on an amendment (see the packing auto-fill
+     * effect). Those would overwrite a counted figure with a derived one. There
+     * is nothing here to overwrite: the box is empty, the alternative is a
+     * correction that re-saves the same blank, and the supervisor sees the
+     * figure in an editable box before anything is submitted. A value the
+     * supervisor has touched — including one they deliberately cleared — is
+     * theirs and is left alone.
+     *
+     * Not run on a first completion: those go through the packing lines, which
+     * write the figure themselves.
+     *
+     * GATED ON THE BATCH HAVING TRAYED ANYTHING. `packingModes` lists every
+     * packaging the product's variant offers, not the one this run used — a
+     * product that can be trayed OR pouched has a tray mode sitting there while
+     * a pouch-packed batch is being corrected. Filling pcs/tray from it would
+     * assert a tray size for a run that packed none, which is the invention this
+     * whole file refuses. A recorded tray COUNT is the proof that the run trayed,
+     * and it is exactly what the broken batches still carry (18 trays, no size).
+     */
+    useEffect(() => {
+        if (!amending || !completingEntry) return;
+        if ((completingEntry.no_of_trays ?? 0) <= 0) return;
+        if (completeForm.getFieldState('nos_per_tray').isDirty) return;
+        if (hasPackStd(completeForm.getValues('nos_per_tray'))) return;
+        const trayStandard = packingModes.find((p) => p.mode === 'tray')?.nos_per_tray ?? null;
+        if (!hasPackStd(trayStandard)) return;
+        completeForm.setValue('nos_per_tray', trayStandard);
+    }, [amending, completingEntry, packingModes, completeForm]);
 
     /** Modes not yet on a line — what "Add packing line" may still offer. */
     const unusedPackingModes = useMemo(() => {
@@ -2527,6 +2975,16 @@ export default function ShiftProductionEntryPage() {
             const selectedItemId = completeForm.getValues(itemField);
             if (selectedItemId != null && selectedItemId !== material.item.id) return;
             if (completeForm.getFieldState(kgField).isDirty) return;
+            // AND NOT OVER A KILOGRAM THAT IS ALREADY A RECORDED FACT. The
+            // latch is set by the kg box's own onChange — which also marks the
+            // field dirty, so for an ordinary completion this test never
+            // decides anything the line above did not. It decides the
+            // amendment case: openAmendDrawer loads the kilograms the store
+            // actually issued and latches them, and reset() leaves no field
+            // dirty, so without this the bin's opening−closing arithmetic would
+            // quietly replace an issued figure with a derived one on a batch
+            // being corrected.
+            if (target === 'resin' ? resinKgTouchedRef.current : mbKgTouchedRef.current) return;
             completeForm.setValue(kgField, Math.round(consumed * 10000) / 10000);
             // A weighed day-bin figure outranks the calculated estimate —
             // latch so the live auto-calculation stops overwriting it. Both
@@ -2567,12 +3025,39 @@ export default function ShiftProductionEntryPage() {
             completingItem.nos_per_pouch,
             completingItem.pouches_per_box,
         ].some(hasPackStd);
-    const showTrayFields = hasPackStd(completingItem?.nos_per_tray) || !hasAnyPackagingStandard;
+    // THE ENTRY'S OWN FIGURE OPENS THE BOX TOO. A product whose tray size lives
+    // on its production standard rather than on the item master has
+    // `item.nos_per_tray` null and `item.nos_per_box` set — so this test used to
+    // come out false and the Nos/Tray box was not on screen at all. On a first
+    // completion that is harmless (the packing lines own the counts and now
+    // write the figure back). On a CORRECTION the packing lines are switched
+    // off, these boxes are the whole form, and hiding this one meant the
+    // recorded pcs/tray could be neither seen nor fixed. A batch that stored one
+    // is a batch that has one, whatever the master forgot to say. In-progress
+    // entries carry null here, so nothing new appears on a first completion.
+    // The third term is the box that the recovery effect above fills, and it
+    // carries that effect's gate word for word: a correction, on a batch that
+    // recorded trays. Without it the effect would write a figure into a field
+    // nobody can see, which is the one thing worse than the blank; with a looser
+    // gate the box would appear on pouch-packed corrections that have no trays
+    // to describe. Nothing new on a first completion either way.
+    const showTrayFields =
+        hasPackStd(completingItem?.nos_per_tray) ||
+        hasPackStd(completingEntry?.nos_per_tray) ||
+        (amending &&
+            (completingEntry?.no_of_trays ?? 0) > 0 &&
+            hasPackStd(packingModes.find((p) => p.mode === 'tray')?.nos_per_tray)) ||
+        !hasAnyPackagingStandard;
     const showPouchFields = hasPackStd(completingItem?.nos_per_pouch);
     // The standard's packaging rows win when they exist: they are the only
     // source that knows which modes this product genuinely has. Without them
     // the drawer stays exactly as it was.
-    const usePackingLines = packingModes.length > 0;
+    // Off during an amendment for the reason the seeding effect states: the
+    // per-mode lines are not stored and cannot be read back, so a correction is
+    // entered against the batch totals. Turning it off is what un-disables
+    // Quantity Produced and the carton/tray boxes, which is exactly where those
+    // recorded totals are loaded.
+    const usePackingLines = packingModes.length > 0 && !amending;
 
     // Live totals computed at RENDER, not inside the useMemo below: nested
     // edits keep the watched arrays' identity (see applyDayBinConsumption),
@@ -2641,9 +3126,10 @@ export default function ShiftProductionEntryPage() {
         // panel shows none. Nothing weighs a fixed quantity of resin out to a
         // machine: consumption is DERIVED from output (production + rejection +
         // lumps), so "issued − consumed" was an arithmetic identity sitting at
-        // ~0 and dressed up as a check. Missing material is a CENTRAL question
-        // now — the Factory Day Bin page compares one day's opening, loads and
-        // total batch consumption against a physical count of the bin.
+        // ~0 and dressed up as a check. Missing material is asked PER MACHINE
+        // instead — the Day Bin page holds bags scanned into a machine against
+        // what its batches calculated out, and a negative estimated remaining
+        // is the answer. Nothing is weighed anywhere in that comparison.
         const actualBoxes = goodBoxesWatch ?? null;
         const actualPouches = pouchesWatch ?? null;
         // Efficiency at the PIECES grain. Boxes-vs-boxes compounded two
@@ -2975,6 +3461,16 @@ export default function ShiftProductionEntryPage() {
      * this product in nothing, and never anything that blocks completion.
      */
     const packingRows = useMemo(() => {
+        // THE ONE PLACE AN AMENDMENT MUST NOT RE-ESTIMATE. These rows compute
+        // carton/tray/film/tape quantities from the counts on screen, and the
+        // mutation appends them to the payload as consumption lines. On an
+        // amendment the counts on screen are loaded from a batch whose packing
+        // material was ALREADY issued and is already in the consumption rows
+        // below — recomputing it here would send the same cartons twice, and
+        // the correction would book double the packaging the run used. The
+        // recorded lines stay editable as ordinary material rows, which is
+        // where the real issued quantities are.
+        if (amending) return [];
         const round4 = (n: number) => Math.round(n * 10000) / 10000;
         const counts: Record<PackingBasis, { count: number | null; word: string }> = {
             carton: { count: goodBoxesWatch ?? null, word: 'cartons' },
@@ -3034,6 +3530,7 @@ export default function ShiftProductionEntryPage() {
             };
         });
     }, [
+        amending,
         packingSuggestions,
         packingEdits,
         goodBoxesWatch,
@@ -3060,6 +3557,205 @@ export default function ShiftProductionEntryPage() {
      * refusal now names a store the factory configured once rather than one a
      * supervisor picked mid-shift.
      */
+    /**
+     * Re-open a completed batch in the completion drawer, loaded with what it
+     * actually recorded.
+     *
+     * WHY THE SAME DRAWER. The correction the owner asked for is not a new
+     * form — it is the completion, retyped, and the server treats it exactly
+     * that way (amendCompletion reverses the first completion and re-runs the
+     * ordinary completeBatch on the payload). A second "edit figures" screen
+     * would be a second set of rules about the same numbers, and the first
+     * time the two disagreed the books would follow whichever one the
+     * supervisor happened to use.
+     *
+     * WHAT IS LOADED, AND WHY IT MATTERS THAT IT IS ALL OF IT. Nothing left
+     * out of this payload is "kept" — it is not re-booked. So every figure the
+     * entry carries is loaded back: the counts, the hours, the cycle time, the
+     * cavities, the recorded scrap, the material lines at the kilograms they
+     * were issued at, and the downtime logged with the completion (planned
+     * downtime from Start Batch belongs to the run, not to the completion, and
+     * the server keeps it — so it is deliberately not loaded here, or it would
+     * be filed a second time).
+     *
+     * The material lines are split back into the two fixed rows the drawer
+     * expects wherever they can be recognised, and everything else — including
+     * the cartons, trays and film — lands in the ordinary material rows at the
+     * quantity actually issued. That is the honest place for them: the packing
+     * card recomputes from pack sizes, and a recomputed carton figure is not
+     * the one that went out of the store.
+     */
+    const openAmendDrawer = useCallback(
+        (entry: ShiftProductionEntry) => {
+            const lines = entry.material_consumptions ?? [];
+            const resinLine = lines.find((line) => line.item && isResinItem(line.item));
+            const mbLine = lines.find(
+                (line) => line.id !== resinLine?.id && line.item && isMasterbatchItem(line.item),
+            );
+            const otherLines = lines.filter((line) => line.id !== resinLine?.id && line.id !== mbLine?.id);
+
+            setCompletingEntry(entry);
+            setAmendEntryId(entry.id);
+            // A fresh correction has not been refused yet, and last
+            // correction's confirmation is not an answer about this one's
+            // kilograms.
+            setStaleMaterialRefused(false);
+            setMaterialKgConfirmed(false);
+            // No packing edit survives into a correction — the packing rows are
+            // switched off for it entirely (see the packingRows memo).
+            setPackingEdits({});
+
+            // A loaded kilogram figure is a WEIGHED one: it is what the store
+            // actually issued. Latching the rows that were loaded stops the
+            // estimator from overwriting them with a figure derived from the
+            // bottle weight. Rows that were NOT loaded stay unlatched, so a
+            // masterbatch added during the correction still gets its dosing
+            // suggestion exactly as it would on a first completion.
+            resinKgTouchedRef.current = resinLine !== undefined;
+            resinKgWeighedRef.current = false;
+            mbKgTouchedRef.current = mbLine !== undefined;
+            mbKgWeighedRef.current = false;
+            resinGramsTouchedRef.current = false;
+            mbGramsTouchedRef.current = false;
+            mbLastItemIdRef.current = undefined;
+
+            completeForm.reset({
+                batch_number: entry.batch_number ?? undefined,
+                quantity_produced: toNum(entry.quantity_produced) ?? undefined,
+                quantity_scrap: toNum(entry.quantity_scrap) ?? undefined,
+                scrap_reason_id: entry.scrap_reason?.id ?? undefined,
+                // The item master is a FALLBACK here, never an override: it is
+                // read only when the batch stored no tray size of its own. That
+                // is not the "an amendment is not a suggestion" case — there is
+                // no recorded figure to overwrite, and the alternative is a
+                // correction that re-sends the blank it was handed and leaves
+                // the approver reading "—/tray" for ever. It is also exactly
+                // what a first completion prefills from (openCompleteDrawer),
+                // and the box stays editable, so nothing is asserted that the
+                // supervisor cannot see and change before saving.
+                nos_per_tray: entry.nos_per_tray ?? entry.item.nos_per_tray ?? undefined,
+                no_of_trays: entry.no_of_trays ?? undefined,
+                nos_per_box: entry.nos_per_box ?? undefined,
+                no_of_box: entry.no_of_box ?? undefined,
+                no_of_pouches: entry.no_of_pouches ?? undefined,
+                loose_pieces: entry.loose_pieces ?? undefined,
+                running_hours: toNum(entry.running_hours) ?? undefined,
+                actual_cycle_time: toNum(entry.actual_cycle_time) ?? undefined,
+                active_cavities: entry.active_cavities ?? entry.standard_cavities ?? undefined,
+                qc_rejection_kg: toNum(entry.qc_rejection_kg) ?? undefined,
+                helper_name: entry.helper_name ?? undefined,
+                notes: entry.notes ?? undefined,
+                resin_item_id: resinLine?.item?.id ?? undefined,
+                resin_kg: toNum(resinLine?.quantity_issued_kg) ?? undefined,
+                mb_item_id: mbLine?.item?.id ?? undefined,
+                mb_kg: toNum(mbLine?.quantity_issued_kg) ?? undefined,
+                material_consumptions: otherLines
+                    .filter((line) => line.item?.id != null && toNum(line.quantity_issued_kg) !== null)
+                    .map((line) => ({
+                        item_id: line.item!.id,
+                        quantity_issued_kg: toNum(line.quantity_issued_kg) as number,
+                    })),
+                scraps: (entry.scraps ?? []).map((scrap) => ({
+                    type: scrap.type,
+                    quantity_nos: toNum(scrap.quantity_nos) ?? undefined,
+                    quantity_kg: toNum(scrap.quantity_kg) ?? undefined,
+                    scrap_reason_id: scrap.scrap_reason?.id ?? undefined,
+                })),
+                downtime_events: (entry.downtime_events ?? [])
+                    // Completion downtime only — see the docblock above.
+                    .filter((event) => event.known_before_start === false)
+                    .map((event) => {
+                        const parsed = parseDowntimeNote(event.note);
+                        return {
+                            downtime_reason_id: event.downtime_reason_id,
+                            from_time: parsed.from,
+                            to_time: parsed.to,
+                            note: parsed.text || undefined,
+                        };
+                    }),
+                // Never seeded on a correction — the server's own validation
+                // would refuse a blank line against a loaded piece count.
+                packing_lines: [],
+            });
+        },
+        [completeForm],
+    );
+
+    /**
+     * The correction door on one completed batch, or the sentence that says
+     * why there isn't one.
+     *
+     * DRIVEN OFF THE ROW, NOT OFF THE USER. Whether the floor may still change
+     * its own figures is a fact about the batch — completed, still pending, not
+     * yet checked — and `canAmendCompletion` reads exactly the fields the
+     * server's own guard reads. The server is still the gate (it refuses cases
+     * a list row cannot show, such as a batch already on a Tally voucher, and
+     * says so in words the drawer shows); this only decides whether offering
+     * the door is honest.
+     *
+     * ONCE QUALITY HAS THE BATCH THERE IS NO CONTROL AT ALL — a disabled
+     * button invites a tap and explains nothing. What replaces it is the one
+     * sentence that tells the supervisor what to do instead, which is not
+     * "wait" but "ask quality".
+     */
+    const correctionControlFor = (row: ShiftProductionEntry): ReactNode => {
+        if (canAmendCompletion(row)) {
+            const sentBack = isAwaitingCorrection(row);
+            return (
+                <Button
+                    size="small"
+                    type={sentBack ? 'primary' : 'default'}
+                    danger={sentBack}
+                    onClick={() => openAmendDrawer(row)}
+                >
+                    {sentBack ? 'Correct — sent back' : 'Edit figures'}
+                </Button>
+            );
+        }
+
+        if (row.batch_status === 'completed' && row.status === 'pending' && row.quality?.checked === true) {
+            return (
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    QC has this batch — ask QC to return it if a correction is needed.
+                </Typography.Text>
+            );
+        }
+
+        return null;
+    };
+
+    /**
+     * The Configure Item door out of Start Batch, and the way back in.
+     *
+     * It carries the whole setup — machine, shift, production date, product,
+     * finished-goods store, operator, cavities, the chosen standard and
+     * packaging, the stated colour — as allowlisted scalars, and the
+     * configuration page hands the same set back so this dialog reopens
+     * exactly as it was left. Never an arbitrary return URL: see
+     * startBatchResume.
+     *
+     * Dead until the draft resolves, with the reason on the button rather than
+     * in a toast after the tap. The draft needs a product and a store, which
+     * are the two things a supervisor can still be mid-way through choosing
+     * when the readiness verdict lands.
+     */
+    const configureItemAction = (
+        <Button
+            type="primary"
+            disabled={!startBatchRecipeDraft}
+            title={
+                startBatchRecipeDraft
+                    ? undefined
+                    : 'Choose the product first — it travels with you.'
+            }
+            onClick={() => {
+                if (startBatchRecipeDraft) navigate(buildStartBatchStandardUrl(startBatchRecipeDraft));
+            }}
+        >
+            Configure this item
+        </Button>
+    );
+
     const completeMutation = useMutation({
         mutationFn: (values: CompleteBatchFormValues) => {
             if (!completingEntry) throw new Error('No batch selected');
@@ -3083,6 +3779,10 @@ export default function ShiftProductionEntryPage() {
                 closing_day_bin,
                 packing_lines,
                 downtime_events,
+                // Belongs to the amend endpoint alone — never part of an
+                // ordinary completion's payload, so it is lifted out of ...rest
+                // rather than riding through it.
+                amendment_reason,
                 ...rest
             } = values;
             // The fixed resin/MB rows are ordinary consumption lines on the
@@ -3223,11 +3923,31 @@ export default function ShiftProductionEntryPage() {
                 active_cavities: active_cavities ?? undefined,
             };
 
+            // A correction goes through the amend door, which reverses what the
+            // first completion booked and then re-books this payload through
+            // the very same completeBatch() on the server — one path, one set
+            // of rules, no second way for figures to reach the books.
+            if (amending) {
+                return amendBatch(completingEntry.id, {
+                    ...payload,
+                    amendment_reason: (amendment_reason ?? '').trim() || undefined,
+                    // Sent ONLY when the supervisor ticked it after the
+                    // server's refusal — omitted, never `false`, so an
+                    // ordinary correction's payload is byte-for-byte what it
+                    // always was.
+                    material_kg_confirmed: materialKgConfirmed ? true : undefined,
+                });
+            }
+
             return completeBatch(completingEntry.id, payload);
         },
         onSuccess: (entry) => {
+            const wasAmendment = amending;
             invalidate();
             setCompletingEntry(null);
+            setAmendEntryId(null);
+            setStaleMaterialRefused(false);
+            setMaterialKgConfirmed(false);
             completeForm.reset({ material_consumptions: [], scraps: [], packing_lines: [], downtime_events: [] });
             // The packing edits belong to the batch that just went in — the
             // next one recalculates from its own cartons and trays.
@@ -3245,9 +3965,18 @@ export default function ShiftProductionEntryPage() {
             if (shortfalls.length > 0) {
                 const named = [...new Set(shortfalls.map((line) => line.item))].join(', ');
                 message.warning(
-                    `Batch completed. Recorded stock went negative for ${named} — accounts will see it at approval and correct the stock.`,
+                    `${wasAmendment ? 'Correction saved' : 'Batch completed'}. Recorded stock went negative for ${named} — accounts will see it at approval and correct the stock.`,
                     10,
                 );
+            }
+
+            // A correction DOES get its own line, unlike an ordinary
+            // completion. It goes back into the same queue it came from and
+            // looks, on every other screen, exactly like the batch that was
+            // already there — so without this the supervisor has no way to
+            // tell that the second submission is the one that stood.
+            if (wasAmendment) {
+                message.success('Corrected figures saved — the batch is back with quality for its check.', 6);
             }
         },
         onError: (error: any) => {
@@ -3264,6 +3993,19 @@ export default function ShiftProductionEntryPage() {
             // which figures, and a sentence reworded here is a sentence that
             // stops matching what the backend can actually explain.
             const fieldMessages: string[] = body?.errors ? (Object.values(body.errors).flat() as string[]) : [];
+
+            // THE ONE REFUSAL THAT HAS AN ANSWER ON THIS SCREEN. The server
+            // keys it on `material_consumptions` and only ever raises it from
+            // refuseStaleMaterialLines (the amend path's stale-kg guard), so
+            // seeing that key on a correction is what unlocks the confirmation
+            // checkbox in the drawer. Ticking it and saving again is the "send
+            // it again confirming the kilograms are right as typed" the
+            // server's own message asks for — before this, the sentence
+            // described a control that did not exist.
+            if (amending && body?.errors?.material_consumptions) {
+                setStaleMaterialRefused(true);
+            }
+
             Modal.error({
                 title: 'Could not complete batch',
                 content:
@@ -3479,12 +4221,21 @@ export default function ShiftProductionEntryPage() {
         },
     });
 
-    // ----- Central Load Material: scan a bag into the factory day bin -----
+    // ----- Load Material: scan a bag into a machine -----
 
-    const openLoadMaterial = () => {
+    /**
+     * `machineId` is the CONTEXT the door was opened with — the machine whose
+     * card started the flow. Absent (the page-level button), the modal
+     * defaults to the machine that is running when exactly one is: on a floor
+     * with a single machine turning, that is not a guess. With none or several
+     * running it stays empty and the load is blocked until somebody says
+     * which.
+     */
+    const openLoadMaterial = (machineId?: number | null) => {
         setLoadBagBarcode('');
         setScannedLoadBag(null);
         setLoadBagKg(null);
+        setLoadBagMachineId(machineId ?? soleRunningMachineId);
         setLoadBagSupervisorId(currentUser?.id ?? null);
         setLoadBagSuccess(null);
         setLoadBagError(null);
@@ -3524,26 +4275,33 @@ export default function ShiftProductionEntryPage() {
         mutationFn: loadBagToFactoryDayBin,
         onSuccess: (result, payload) => {
             // Compose the confirmation from the response where it answers,
-            // falling back to what was scanned — never a blank.
+            // falling back to what was scanned — never a blank. The MACHINE is
+            // named back, because which machine was credited is the whole
+            // point of the scan and a confirmation without it cannot be
+            // checked against what the supervisor meant.
             const material = result?.day_bin?.item ?? result?.bag?.lot?.item ?? scannedLoadBag?.lot?.item ?? null;
-            const balance = result?.day_bin?.quantity_kg;
+            const machine = (workCenters?.data ?? []).find((wc) => wc.id === payload.work_center_id);
             setLoadBagSuccess(
                 `Loaded ${payload.quantity_kg} kg of ${material ? itemLabel(material) : 'material'}` +
-                    `${balance ? ` — day bin now holds ${balance} kg` : ''}.`,
+                    `${machine ? ` into ${machineLabel(machine)}` : ''}.`,
             );
             setScannedLoadBag(null);
             setLoadBagKg(null);
             setLoadBagError(null);
-            // The bag lost kg and the central day bin gained it — every
-            // surface quoting either must move.
+            // The machine stays selected: the next bag off the same pallet
+            // goes into the same machine, and re-picking it every time is how
+            // bag four gets credited to the wrong one.
+            // The bag lost kg, the floor gained it, and one machine's estimate
+            // moved — every surface quoting any of those must refetch.
             queryClient.invalidateQueries({ queryKey: ['production', 'factory-day-bin'] });
+            queryClient.invalidateQueries({ queryKey: ['production', 'machine-resin'] });
             queryClient.invalidateQueries({ queryKey: ['inventory', 'stock-balances'] });
             queryClient.invalidateQueries({ queryKey: ['production', 'material-bags', 'pick-list'] });
             // Back to the gun: the next bag scans without a tap.
             loadBagInputRef.current?.focus();
         },
         onError: (error: any) => {
-            const text = error?.response?.data?.message ?? 'Could not load the bag into the day bin.';
+            const text = error?.response?.data?.message ?? 'Could not load the bag.';
             setLoadBagError({
                 text,
                 // The one setup failure a supervisor can actually fix: nobody
@@ -3558,8 +4316,16 @@ export default function ShiftProductionEntryPage() {
     const submitLoadBag = () => {
         const supervisorId = loadBagSupervisorId ?? currentUser?.id;
         if (!scannedLoadBag || !loadBagKg || loadBagKg <= 0 || !supervisorId) return;
+        if (loadBagMachineId === null) {
+            // The button is disabled for this, but the bag panel is reachable
+            // by keyboard — say which field is missing rather than doing
+            // nothing at all.
+            setLoadBagError({ text: 'Pick the machine this bag was loaded into.', needsWarehouse: false });
+            return;
+        }
         loadBagMutation.mutate({
             barcode: scannedLoadBag.barcode,
+            work_center_id: loadBagMachineId,
             quantity_kg: loadBagKg,
             supervisor_id: supervisorId,
         });
@@ -3599,6 +4365,54 @@ export default function ShiftProductionEntryPage() {
                     options={shiftOptions}
                 />
             </Form.Item>
+
+            {/* SENT BACK BY QUALITY — above the machine grid, because it is the
+                only list on this screen that is somebody's job right now and
+                ten machine cards of scrolling on a phone is the same as hiding
+                it. Rendered only when there is one: an empty amber panel
+                standing on the page every day is how a real one stops being
+                read. */}
+            {awaitingCorrection.length > 0 && (
+                <div style={{ marginBottom: 24 }}>
+                    <Typography.Title level={5} style={{ color: '#ad6800', marginBottom: 8 }}>
+                        Sent back by quality — correct and re-submit ({awaitingCorrection.length})
+                    </Typography.Title>
+                    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                        {awaitingCorrection.map((entry) => (
+                            <Card
+                                key={entry.id}
+                                size="small"
+                                style={{ borderColor: '#faad14', background: '#fffbe6' }}
+                            >
+                                <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                                    <div>
+                                        <Typography.Text strong>
+                                            {entry.batch_number ?? `Batch #${entry.id}`}
+                                        </Typography.Text>{' '}
+                                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                            {entry.work_center.name} · {itemLabel(entry.item)} ·{' '}
+                                            {entry.production_date} {entry.shift.name}
+                                        </Typography.Text>
+                                    </div>
+                                    {/* The reason IS the instruction. It is the only
+                                        thing quality tells the floor, so it is set in
+                                        the panel's own colour and never truncated. */}
+                                    <Typography.Text style={{ color: '#ad6800' }}>
+                                        {readReturnReason(entry) ?? 'No reason was recorded with this return.'}
+                                    </Typography.Text>
+                                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                        Recorded: {fmtPieces(entry.quantity_produced)} pcs ·{' '}
+                                        {fmtNum(toNum(entry.quantity_produced_kg))} kg
+                                    </Typography.Text>
+                                    <Button type="primary" onClick={() => openAmendDrawer(entry)}>
+                                        Correct this batch
+                                    </Button>
+                                </Space>
+                            </Card>
+                        ))}
+                    </Space>
+                </div>
+            )}
 
             <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
                 {/* Server already returns active-only; this filter stays as
@@ -3708,6 +4522,11 @@ export default function ShiftProductionEntryPage() {
                             message.info(completeElsewhere);
                         } else if (running) {
                             setCompletingEntry(running);
+                            // An ordinary completion is never gated by the
+                            // stale-material guard (it is amend-only), so this
+                            // clears any answer a previous correction left.
+                            setStaleMaterialRefused(false);
+                            setMaterialKgConfirmed(false);
                             // A fresh batch gets fresh resin and masterbatch
                             // fields: the auto-calculations run again until this
                             // batch's own manual edit or weighed figure latches
@@ -3917,9 +4736,11 @@ export default function ShiftProductionEntryPage() {
 
             <Space style={{ marginBottom: 32 }}>
                 {traceabilityEnabled && (
-                    // Deliberately page-level, not on any machine card: bags
-                    // feed the CENTRAL factory day bin, for all machines.
-                    <Button type="primary" onClick={openLoadMaterial}>
+                    // Page-level: one door for the whole floor, with the
+                    // machine chosen inside it (defaulted when exactly one is
+                    // running). Ten identical buttons on ten cards would be
+                    // ten doors to one room.
+                    <Button type="primary" onClick={() => openLoadMaterial()}>
                         Load Material
                     </Button>
                 )}
@@ -3930,29 +4751,190 @@ export default function ShiftProductionEntryPage() {
             </Space>
 
             <Typography.Title level={5}>Completed Today</Typography.Title>
-            <Table<ShiftProductionEntry>
-                scroll={{ x: 'max-content' }}
-                rowKey="id"
-                size="small"
-                loading={entriesLoading}
-                pagination={false}
-                dataSource={completedToday}
-                locale={{ emptyText: 'Nothing completed yet today.' }}
-                columns={[
-                    { title: 'Machine', render: (_, row) => row.work_center.name },
-                    { title: 'Shift', render: (_, row) => row.shift.name },
-                    { title: 'Item', render: (_, row) => itemLabel(row.item) },
-                    { title: 'Batch #', dataIndex: 'batch_number', render: (v: string | null) => v ?? '—' },
-                    { title: 'Produced', dataIndex: 'quantity_produced' },
-                    { title: 'Produced (Kg)', dataIndex: 'quantity_produced_kg', render: (v: string | null) => v ?? '—' },
-                    { title: 'Rejected', dataIndex: 'quantity_scrap' },
-                    {
-                        title: 'Approval',
-                        dataIndex: 'status',
-                        render: (status: ShiftProductionEntryStatus) => <Tag color={approvalColor[status]}>{status}</Tag>,
-                    },
-                ]}
-            />
+            {/* TWO SHAPES, ONE SET OF FACTS. The desktop table carries the six
+                columns a supervisor actually reads across (batch, product,
+                machine, pieces, kg, approval) with the figures right-aligned
+                and tabular so they line up down the column; shift and rejected
+                ride as secondary text under the columns they belong to rather
+                than being dropped. Below `md` it becomes cards, because a
+                seven-column grid on a 390px phone is either a horizontal
+                scroll nobody discovers or a column nobody can read — and this
+                list is read standing at a machine. No `scroll={{x}}` on either:
+                the point is that nothing lives off the side of the screen. */}
+            {isNarrow ? (
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    {entriesLoading && <Card size="small" loading />}
+                    {!entriesLoading && completedToday.length === 0 && (
+                        <Typography.Text type="secondary">Nothing completed yet today.</Typography.Text>
+                    )}
+                    {completedToday.map((row) => (
+                        <Card key={row.id} size="small">
+                            <div
+                                style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'flex-start',
+                                    gap: 8,
+                                }}
+                            >
+                                <div style={{ minWidth: 0 }}>
+                                    <Typography.Text strong style={{ wordBreak: 'break-word' }}>
+                                        {row.batch_number ?? `Batch #${row.id}`}
+                                    </Typography.Text>
+                                    <Typography.Text
+                                        type="secondary"
+                                        style={{ display: 'block', fontSize: 12, wordBreak: 'break-word' }}
+                                    >
+                                        {itemLabel(row.item)}
+                                    </Typography.Text>
+                                    <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                                        {row.work_center.name} · {row.shift.name}
+                                    </Typography.Text>
+                                </div>
+                                <Tag color={approvalColor[row.status]} style={{ marginInlineEnd: 0 }}>
+                                    {row.status}
+                                </Tag>
+                            </div>
+                            <div
+                                style={{
+                                    display: 'flex',
+                                    flexWrap: 'wrap',
+                                    gap: '4px 16px',
+                                    marginTop: 8,
+                                    fontVariantNumeric: 'tabular-nums',
+                                }}
+                            >
+                                <Typography.Text>
+                                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                        Produced{' '}
+                                    </Typography.Text>
+                                    <strong>{fmtPieces(row.quantity_produced)}</strong> pcs
+                                </Typography.Text>
+                                <Typography.Text>
+                                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                        Kg{' '}
+                                    </Typography.Text>
+                                    <strong>{fmtNum(toNum(row.quantity_produced_kg))}</strong>
+                                </Typography.Text>
+                                <Typography.Text>
+                                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                        Rejected{' '}
+                                    </Typography.Text>
+                                    <strong>{fmtPieces(row.quantity_scrap)}</strong>
+                                </Typography.Text>
+                            </div>
+                            <div style={{ marginTop: 8 }}>{correctionControlFor(row)}</div>
+                        </Card>
+                    ))}
+                </Space>
+            ) : (
+                <Table<ShiftProductionEntry>
+                    rowKey="id"
+                    size="small"
+                    loading={entriesLoading}
+                    pagination={false}
+                    dataSource={completedToday}
+                    locale={{ emptyText: 'Nothing completed yet today.' }}
+                    columns={[
+                        {
+                            title: 'Batch',
+                            render: (_, row) => (
+                                <>
+                                    <Typography.Text strong>{row.batch_number ?? `#${row.id}`}</Typography.Text>
+                                    <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                                        {row.shift.name}
+                                    </Typography.Text>
+                                </>
+                            ),
+                        },
+                        { title: 'Product', render: (_, row) => itemLabel(row.item) },
+                        { title: 'Machine', render: (_, row) => row.work_center.name },
+                        {
+                            title: 'Produced (pcs)',
+                            align: 'right',
+                            render: (_, row) => (
+                                <>
+                                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                        {fmtPieces(row.quantity_produced)}
+                                    </span>
+                                    <Typography.Text
+                                        type="secondary"
+                                        style={{ display: 'block', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}
+                                    >
+                                        {fmtPieces(row.quantity_scrap)} rejected
+                                    </Typography.Text>
+                                </>
+                            ),
+                        },
+                        {
+                            title: 'Produced (kg)',
+                            align: 'right',
+                            render: (_, row) => (
+                                <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                    {fmtNum(toNum(row.quantity_produced_kg))}
+                                </span>
+                            ),
+                        },
+                        {
+                            title: 'Approval',
+                            render: (_, row) => (
+                                <>
+                                    <Tag color={approvalColor[row.status]} style={{ marginInlineEnd: 0 }}>
+                                        {row.status}
+                                    </Tag>
+                                    <div style={{ marginTop: 4 }}>{correctionControlFor(row)}</div>
+                                </>
+                            ),
+                        },
+                    ]}
+                />
+            )}
+
+            {/* STILL THEIRS TO CORRECT, just not on today's list. The night
+                shift's batches file under yesterday's date and the clock rolls
+                to Day at 06:00 — without this the Edit door closed on the very
+                people still doing the paperwork, while the server went on
+                accepting their correction. Same control, same rule, said in one
+                quiet line rather than a second table. */}
+            {correctableEarlier.length > 0 && (
+                <div style={{ marginTop: 16 }}>
+                    <Typography.Text type="secondary">
+                        Completed earlier and still correctable — quality has not checked these yet.
+                    </Typography.Text>
+                    <Space direction="vertical" size={6} style={{ width: '100%', marginTop: 8 }}>
+                        {correctableEarlier.map((entry) => (
+                            <Card key={entry.id} size="small">
+                                <div
+                                    style={{
+                                        display: 'flex',
+                                        flexWrap: 'wrap',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        gap: 8,
+                                    }}
+                                >
+                                    <div style={{ minWidth: 0 }}>
+                                        <Typography.Text strong>
+                                            {entry.batch_number ?? `Batch #${entry.id}`}
+                                        </Typography.Text>
+                                        <Typography.Text
+                                            type="secondary"
+                                            style={{ display: 'block', fontSize: 12, wordBreak: 'break-word' }}
+                                        >
+                                            {entry.work_center.name} · {itemLabel(entry.item)} ·{' '}
+                                            {entry.production_date} {entry.shift.name} ·{' '}
+                                            <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                                {fmtPieces(entry.quantity_produced)} pcs
+                                            </span>
+                                        </Typography.Text>
+                                    </div>
+                                    {correctionControlFor(entry)}
+                                </div>
+                            </Card>
+                        ))}
+                    </Space>
+                </div>
+            )}
 
             <Modal
                 maskClosable={false}
@@ -4017,10 +4999,16 @@ export default function ShiftProductionEntryPage() {
                         type={startResumeNotice === 'created' ? 'success' : 'info'}
                         showIcon
                         style={{ marginBottom: 16 }}
+                        // Configuration-neutral wording on purpose: this notice
+                        // now serves two side trips (the product standard and
+                        // the consumption recipe), and the 'created' branch
+                        // claims only what it actually did — re-read this
+                        // product's readiness — rather than asserting that
+                        // something was saved on a page it cannot see.
                         message={
                             startResumeNotice === 'created'
-                                ? 'Recipe saved — readiness and material estimates were refreshed.'
-                                : 'Recipe was not changed — your Start Batch details were restored.'
+                                ? 'Back on Start Batch — this product was re-checked against the latest configuration.'
+                                : 'Nothing was changed — your Start Batch details were restored.'
                         }
                     />
                 )}
@@ -4115,13 +5103,16 @@ export default function ShiftProductionEntryPage() {
                             style={{ marginBottom: 16 }}
                             message={batchPreview.readiness.summary ?? 'This product is not production-ready.'}
                             description={
-                                <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
-                                    {batchPreview.readiness.blocking.map((f) => (
-                                        <li key={f.code}>
-                                            <Typography.Text strong>{f.label}</Typography.Text> — {f.detail}
-                                        </li>
-                                    ))}
-                                </ul>
+                                <>
+                                    <ReadinessFindings findings={batchPreview.readiness.blocking} />
+                                    {/* ONE door, carrying this machine, this
+                                        product, this shift and this date with it,
+                                        and it comes back here with all four still
+                                        chosen. A supervisor who has to retype the
+                                        setup after configuring is a supervisor who
+                                        starts the wrong batch. */}
+                                    <div style={{ marginTop: 12 }}>{configureItemAction}</div>
+                                </>
                             }
                         />
                     )}
@@ -4132,13 +5123,15 @@ export default function ShiftProductionEntryPage() {
                             style={{ marginBottom: 16 }}
                             message="Incomplete masters — the batch can still run"
                             description={
-                                <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
-                                    {batchPreview.readiness.warnings.map((f) => (
-                                        <li key={f.code}>
-                                            <Typography.Text strong>{f.label}</Typography.Text> — {f.detail}
-                                        </li>
-                                    ))}
-                                </ul>
+                                <>
+                                    <ReadinessFindings findings={batchPreview.readiness.warnings} />
+                                    {/* Offered here only when nothing is blocking:
+                                        under a blocking alert it would be the same
+                                        button twice, one line apart. */}
+                                    {batchPreview.readiness.ready && (
+                                        <div style={{ marginTop: 12 }}>{configureItemAction}</div>
+                                    )}
+                                </>
                             }
                         />
                     )}
@@ -4628,23 +5621,17 @@ export default function ShiftProductionEntryPage() {
                         </>
                     )}
                     {/* WHERE THE FINISHED BOTTLES LAND — stated in one line, not
-                        asked. There is one factory and one place inside it, so
-                        this was never a decision the supervisor could get right
-                        or wrong; the server resolves it and this line only
-                        reports what it will almost certainly pick. When the
-                        books do not name a single store the line says so and
+                        asked. This was never a decision the supervisor could
+                        get right or wrong; the server resolves it and this line
+                        only reports what it will pick. It reads the STORED
+                        setting first and the Tally-linked heuristic only after,
+                        so a store the office has chosen is named rather than
+                        denied. When nothing answers, the line says so and
                         points at the page where it is fixed — the start is not
                         blocked here, because the server arbitrates and refuses
                         with a message of its own if it truly cannot answer. */}
                     <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
-                        {factoryStoreName ? (
-                            `Finished goods go to ${factoryStoreName}.`
-                        ) : (
-                            <>
-                                Finished goods go to the factory store. No single Tally-linked store is set up yet —
-                                check {warehouseSettingsLink}.
-                            </>
-                        )}
+                        {finishedGoodsLine}
                     </Typography.Text>
                     <Form.Item label="Operator (optional)">
                         <Controller
@@ -4657,9 +5644,14 @@ export default function ShiftProductionEntryPage() {
             </Modal>
 
             <Drawer
-                title={`Complete Batch — ${completingEntry?.work_center.name} · ${completingEntry?.item.sku}`}
+                title={`${amending ? 'Correct Batch' : 'Complete Batch'} — ${completingEntry?.work_center.name} · ${completingEntry?.item.sku}`}
                 open={completingEntry !== null}
-                onClose={() => setCompletingEntry(null)}
+                onClose={() => {
+                    setCompletingEntry(null);
+                    setAmendEntryId(null);
+                    setStaleMaterialRefused(false);
+                    setMaterialKgConfirmed(false);
+                }}
                 width="min(100vw, 560px)"
                 destroyOnHidden
                 extra={
@@ -4668,11 +5660,90 @@ export default function ShiftProductionEntryPage() {
                         loading={completeMutation.isPending}
                         onClick={completeForm.handleSubmit((values) => completeMutation.mutate(values))}
                     >
-                        Complete Batch
+                        {amending ? 'Save Correction' : 'Complete Batch'}
                     </Button>
                 }
             >
                 <Form layout="vertical">
+                    {/* WHAT A CORRECTION ACTUALLY DOES, before anything is
+                        retyped. Said here rather than in a tooltip because the
+                        consequence is not obvious from the form: this is not an
+                        edit of a few fields, it is the whole completion booked
+                        again, and anything cleared out of it is unbooked. */}
+                    {amending && completingEntry && (
+                        <>
+                            <Alert
+                                type="warning"
+                                showIcon
+                                style={{ marginBottom: 16 }}
+                                message="Correcting a batch that has already been completed"
+                                description={
+                                    <>
+                                        {readReturnReason(completingEntry) ? (
+                                            <div style={{ marginBottom: 8 }}>
+                                                <Typography.Text strong>Quality sent this back:</Typography.Text>{' '}
+                                                <Typography.Text>{readReturnReason(completingEntry)}</Typography.Text>
+                                            </div>
+                                        ) : null}
+                                        Everything this batch recorded is loaded below. Saving reverses what the first
+                                        completion booked — the finished goods, the material issues, the scrap — and
+                                        books this form in its place, so a figure removed here is removed from the
+                                        books too. Closing bin weights are not stored on the batch and are asked for
+                                        again. Saving this records you as the person who counted the batch, so you can
+                                        no longer be the one who passes its quality check.
+                                    </>
+                                }
+                            />
+                            <Form.Item
+                                label="Why is it being corrected? (optional)"
+                                extra="Who corrected it and when are recorded either way — this is for the approver reading the batch later."
+                            >
+                                <Controller
+                                    name="amendment_reason"
+                                    control={completeForm.control}
+                                    render={({ field }) => (
+                                        <Input.TextArea
+                                            {...field}
+                                            value={field.value ?? ''}
+                                            rows={2}
+                                            maxLength={500}
+                                            placeholder="e.g. Recounted the pallet — 38 cartons, not 40."
+                                        />
+                                    )}
+                                />
+                            </Form.Item>
+                            {/* Only after the server has actually refused this
+                                correction for keeping the old kilograms. Shown
+                                up front it would be ticked out of habit, which
+                                is the silent wrong figure the guard exists to
+                                stop; shown here it is a direct answer to a
+                                sentence the supervisor has just read. */}
+                            {staleMaterialRefused && (
+                                <Alert
+                                    type="error"
+                                    showIcon
+                                    style={{ marginBottom: 16 }}
+                                    message="The counts moved but the material kilograms did not"
+                                    description={
+                                        <>
+                                            <Typography.Paragraph style={{ marginBottom: 8 }}>
+                                                Check the resin and masterbatch rows against the corrected counts. If
+                                                the kilograms below are genuinely what the store issued — a weighed
+                                                figure that did not change while a piece miscount did — say so and save
+                                                again.
+                                            </Typography.Paragraph>
+                                            <Checkbox
+                                                checked={materialKgConfirmed}
+                                                onChange={(event) => setMaterialKgConfirmed(event.target.checked)}
+                                            >
+                                                The kilograms are right as typed — this is what the store issued.
+                                            </Checkbox>
+                                        </>
+                                    }
+                                />
+                            )}
+                        </>
+                    )}
                     {/* Frozen at Start Batch, so it is the same standard the
                         approvers will be shown against this batch. */}
                     {completingEntry && (
@@ -5426,11 +6497,17 @@ export default function ShiftProductionEntryPage() {
                         every batch that did not hand over. */}
                     {traceabilityEnabled && entryDayBin?.has_movements && (
                         <>
+                            {/* Same wording fix as HandoverModal, same reason:
+                                the column is still closing_day_bin and the
+                                figure still closes the consumption formula, but
+                                "weigh what is still in the bin" asked for a
+                                weighment this factory does not do. The material
+                                sits on the machine and that is what is reported. */}
                             <Typography.Text strong style={{ display: 'block', marginTop: 16 }}>
-                                Left in the day bin at end of run
+                                Left on the machine at end of run
                             </Typography.Text>
                             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                Weigh what is still in the bin. Leave blank if it was not counted — a blank
+                                What is still on the machine. Leave blank if it was not counted — a blank
                                 stays &ldquo;not counted&rdquo; rather than becoming zero.
                             </Typography.Text>
                             {entryDayBin.materials.map((material, index) => (
@@ -5477,7 +6554,7 @@ export default function ShiftProductionEntryPage() {
                             type="info"
                             showIcon
                             style={{ marginTop: 8 }}
-                            message="Prefilled from day-bin weighments — correct if wrong"
+                            message="Prefilled from what was left on the machine — correct if wrong"
                             description={entryDayBin.materials
                                 .filter((m) => m.consumption_kg !== null)
                                 .map((m) => (
@@ -5850,7 +6927,16 @@ export default function ShiftProductionEntryPage() {
                     )}
 
                     <Space style={{ justifyContent: 'space-between', width: '100%', marginTop: 12 }}>
-                        <Typography.Text type="secondary">Other materials (exceptions)</Typography.Text>
+                        {/* On a correction these rows are not exceptions — they
+                            are every material this batch actually issued,
+                            cartons and trays included, at the kilograms the
+                            store recorded. Calling them exceptions there would
+                            invite a supervisor to delete them. */}
+                        <Typography.Text type="secondary">
+                            {amending
+                                ? 'Materials this batch issued — edit the kilograms, or remove a line to unbook it'
+                                : 'Other materials (exceptions)'}
+                        </Typography.Text>
                         <Button
                             size="small"
                             onClick={() =>
@@ -6318,7 +7404,13 @@ export default function ShiftProductionEntryPage() {
                                     formula={
                                         resinIsCalculated
                                             ? 'production kg + rejection kg + lumps kg, at the bottle weight above'
-                                            : 'set by hand or from a day-bin weighment — the kg box wins for this batch'
+                                            // No bin is ever put on a scale in this
+                                            // factory, so "from a day-bin weighment"
+                                            // named a step nobody performs. What is
+                                            // true of this branch is only that the
+                                            // figure came from the box rather than
+                                            // from the arithmetic.
+                                            : 'typed by hand — the kg box wins for this batch'
                                     }
                                 />
                             )}
@@ -6611,8 +7703,9 @@ export default function ShiftProductionEntryPage() {
                         destroyOnHidden
                     >
                         <Typography.Paragraph type="secondary">
-                            Central load for every machine: scan a bag and its kg move from the store into the
-                            factory day bin. The scanner types the code and presses Enter by itself.
+                            Scan a bag into the machine it was loaded into: its kg move out of the store, and that
+                            machine's estimated resin remaining goes up by them. The scanner types the code and
+                            presses Enter by itself; the machine stays selected between bags.
                         </Typography.Paragraph>
                         {loadBagSuccess && (
                             <Alert type="success" showIcon message={loadBagSuccess} style={{ marginBottom: 12 }} />
@@ -6631,6 +7724,30 @@ export default function ShiftProductionEntryPage() {
                             />
                         )}
                         <Form layout="vertical">
+                            {/* THE MACHINE, ABOVE THE BARCODE — the one field
+                                the scanner gun cannot fill in, and the one this
+                                load is meaningless without. */}
+                            <Form.Item
+                                label="Machine"
+                                required
+                                extra={
+                                    loadBagMachineId !== null && loadBagMachineId === soleRunningMachineId
+                                        ? 'Defaulted to the only machine running — change it if the bag went elsewhere.'
+                                        : 'Which machine this bag was emptied into.'
+                                }
+                            >
+                                <Select
+                                    value={loadBagMachineId ?? undefined}
+                                    onChange={(value) => {
+                                        setLoadBagMachineId(value);
+                                        setLoadBagError(null);
+                                    }}
+                                    options={machineOptions}
+                                    placeholder="Choose the machine…"
+                                    showSearch
+                                    optionFilterProp="label"
+                                />
+                            </Form.Item>
                             <Form.Item label="Bag barcode">
                                 <Input
                                     ref={loadBagInputRef}
@@ -6683,9 +7800,9 @@ export default function ShiftProductionEntryPage() {
                                 block
                                 onClick={submitLoadBag}
                                 loading={loadBagMutation.isPending}
-                                disabled={!scannedLoadBag || !loadBagKg || loadBagKg <= 0}
+                                disabled={!scannedLoadBag || !loadBagKg || loadBagKg <= 0 || loadBagMachineId === null}
                             >
-                                Load into Day Bin
+                                {loadBagMachineId === null ? 'Pick a machine first' : 'Load into machine'}
                             </Button>
                         </Form>
                     </Modal>

@@ -40,6 +40,7 @@ class TallySyncService
     public function __construct(
         private readonly TallyLedgerMappingService $ledgerMappings,
         private readonly TallyGodownResolver $godowns,
+        private readonly PackingVoucherLines $packing,
     ) {}
 
     public function enqueueSalesInvoice(Invoice $invoice): TallySyncEntry
@@ -200,7 +201,40 @@ class TallySyncService
     }
 
     /**
-     * The per-batch voucher payload, built WITHOUT writing anything.
+     * The per-batch voucher payload, built WITHOUT writing anything — ONE
+     * manufacturing/stock journal for the batch, in the shape the owner
+     * ruled on 30-Jul:
+     *
+     *   "one inward finished-product line using the QC-approved quantity, and
+     *    outward lines for resin, masterbatch and every packing material
+     *    actually used, including cartons, trays, film pouches and tape where
+     *    applicable. Raw materials from the agreed RM or machine-WIP location,
+     *    packing materials from the Packing Material Store, finished goods into
+     *    the FG Store."
+     *
+     * INWARD IS ALREADY NET OF QC REJECTS, and deliberately reads the entry's
+     * own `quantity_produced` rather than recomputing it: recordQualityCheck()
+     * nets that column at the gate (gross − rejected) and preserves what it
+     * netted in `gross_quantity_produced`, so this figure IS the QC-approved
+     * count on a checked batch and the packed count on a factory that has the
+     * quality stage switched off. Subtracting the rejects again here would take
+     * them off the voucher twice — the owner's own warning: "QC-rejected pieces
+     * are already part of the packed quantity."
+     *
+     * CORRECTIONS REPLACE, they never accumulate. Every figure below is read
+     * from the entry's LIVE rows, and amendCompletion() deletes the previous
+     * completion's consumption lines before re-booking the corrected ones (the
+     * reversal pairs live only in the append-only stock ledger). So a batch
+     * amended three times builds a voucher from the third calculation, not from
+     * the sum of three.
+     *
+     * NO SCRAP OUTPUT LINE. Rejected pieces and lumps stay recorded in the
+     * ERP's own stock and ride this payload as data and narration, but nothing
+     * on `produced`/`consumed` books them into Tally: the owner has not yet
+     * ruled whether they are kept as stock or discarded, and a scrap line
+     * posted on the wrong assumption is a real quantity in someone's books.
+     * The withholding is stated out loud on `withheld` rather than left as an
+     * absence nobody notices.
      *
      * Split out of enqueueShiftProductionEntry() so the pre-post preview and
      * the real post are produced by the same code — a preview built by a
@@ -213,6 +247,13 @@ class TallySyncService
     {
         $entry->loadMissing(['item', 'warehouse', 'materialConsumptions.item', 'materialConsumptions.warehouse', 'scraps.scrapReason']);
 
+        // Where packing materials post out of — one server-side answer for the
+        // whole voucher (PackingVoucherLines), null when this factory has not
+        // named a packing store yet. Null does NOT silently redirect the line:
+        // it keeps the godown it was issued from and the preview refuses to
+        // post the voucher until the store is named.
+        $packingStore = $this->packing->godownName();
+
         // Each consumption line names its own godown (the RM store it was
         // issued from) — without it the agent falls back to the voucher's
         // FG godown and Tally deducts resin from the wrong store. Resolved
@@ -220,22 +261,60 @@ class TallySyncService
         // factory day bin posts under the godown Tally actually knows (the
         // bin's parent / the sole company godown), because the bin is an
         // ERP-only location the accountant's books must never see.
-        $consumed = $entry->materialConsumptions->map(fn ($consumption) => [
-            'item' => $consumption->item->name,
-            'quantity' => $consumption->quantity_issued_kg,
-            'godown' => $this->godowns->resolveName($consumption->warehouse),
-        ])->all();
+        //
+        // A line the factory's packing-material master names — a carton, a
+        // tray, film, tape — posts out of the PACKING MATERIAL STORE instead,
+        // which is the owner's own split ("raw materials from the agreed RM or
+        // machine-WIP location, packing materials from the Packing Material
+        // Store"). The line SHAPE is untouched: same three keys, same one line
+        // per consumption; only the godown a packing line names changes.
+        //
+        // WHAT IS NOT DONE HERE: no submitted line is ever dropped, rewritten
+        // or recalculated. A supervisor who issued three rolls of tape issued
+        // three rolls of tape, and PackingMaterialMappingTest holds this
+        // module to that — the metres-vs-Nos question below is about the
+        // CALCULATED tape figure, never about a counted issue.
+        $consumed = [];
+        $withheld = [];
 
+        foreach ($entry->materialConsumptions as $consumption) {
+            $kind = $this->packing->kindFor((int) $consumption->item_id);
+
+            $consumed[] = [
+                'item' => $consumption->item->name,
+                'quantity' => $consumption->quantity_issued_kg,
+                'godown' => ($kind === null ? null : $packingStore)
+                    ?? $this->godowns->resolveName($consumption->warehouse),
+            ];
+        }
+
+        // The tape the run used, calculated from the exact metres-per-carton
+        // standard and withheld from posting — the owner asked for both.
+        $tape = $this->packing->calculatedTape($entry, $entry->materialConsumptions->pluck('item_id')->map(fn ($id) => (int) $id)->all());
+
+        if ($tape !== null) {
+            $withheld[] = $tape;
+        }
+
+        // SHAPE FROZEN — ['item', 'quantity'] and nothing else. The produced
+        // line carries no per-line godown on a Manufacturing Journal; the
+        // voucher-level 'godown' below is what the agent reads for it, and
+        // FactoryWarehouseResolutionTest asserts these exact keys so that a
+        // later "let's also name the godown per produced line" cannot slip in.
         $produced = [[
             'item' => $entry->item->name,
             'quantity' => $entry->quantity_produced,
         ]];
 
-        // Scraps ride along as data and as narration text: crediting regrind
-        // back into stock as a valued item needs the accountant's valuation
-        // rules (master plan Phase 1.5), which aren't codified yet — but the
-        // figures should still reach Tally's books in human-readable form
-        // rather than silently dropping off the voucher.
+        // Scraps ride along as DATA AND NARRATION ONLY — never as a stock line.
+        // Crediting rejected pieces or regrind back into Tally as a valued item
+        // needs an answer this factory has not given: the owner's ruling is
+        // "do not create a Tally scrap-output line until the owner confirms
+        // whether rejected pieces and lumps are physically kept as stock or
+        // discarded". Until then the figures reach the accountant in
+        // human-readable form and as an explicit withheld line, and the ERP's
+        // own scrap stock recording (QC's issue out of FG, the scrap receipt)
+        // is untouched — only the Tally side is held back.
         $scraps = $entry->scraps->map(fn ($scrap) => [
             'type' => $scrap->type->value,
             'quantity_nos' => $scrap->quantity_nos,
@@ -255,16 +334,94 @@ class TallySyncService
             })
             ->implode('; ');
 
+        $scrapWithheld = $this->withheldScrapLine($entry);
+
+        if ($scrapWithheld !== null) {
+            $withheld[] = $scrapWithheld;
+        }
+
         return [
             'voucher_type' => 'Manufacturing Journal',
             'voucher_date' => $entry->production_date?->toDateString(),
             'voucher_number' => "SPE-{$entry->id}",
             'batch_number' => $entry->batch_number,
+            // WHERE THE FINISHED GOODS LAND — the entry's own warehouse, which
+            // is the finished-goods role FactoryWarehouseResolver named when
+            // the batch STARTED and the warehouse its completion receipt was
+            // actually booked into. Deliberately not the resolver's answer
+            // today: a settings change after the shift must not make the
+            // voucher describe a godown the stock never went to.
             'godown' => $this->godowns->resolveName($entry->warehouse),
             'narration' => trim(implode('. ', array_filter([$entry->notes, $scrapNote !== '' ? "Scrap — {$scrapNote}" : null]))),
             'produced' => $produced,
             'consumed' => $consumed,
             'scraps' => $scraps,
+            // The packing-material store every packing line above posts out
+            // of, named once. Null means this factory has not got one yet —
+            // the preview turns that into a refusal, never into a guess.
+            'packing_store' => $packingStore,
+            // WHAT THIS VOUCHER DELIBERATELY DOES NOT POST, and why, in the
+            // factory's own words. An absence explains nothing; this list is
+            // how the accountant learns that the tape and the scrap are known,
+            // counted, and waiting on an answer rather than lost.
+            'withheld' => $withheld,
+        ];
+    }
+
+    /**
+     * The scrap this batch made, stated as a withheld line — never as stock.
+     *
+     * Rejected pieces and lumps are both real and both already recorded in the
+     * ERP's own stock; what is missing is the owner's answer to "are they kept
+     * as stock or thrown away", and the two answers book different vouchers.
+     * So the figure is carried, the reason is carried, and no line is posted.
+     *
+     * @return array{kind: string, item: ?string, quantity: string, unit: string, reason: string}|null
+     */
+    private function withheldScrapLine(ShiftProductionEntry $entry): ?array
+    {
+        $kg = '0.0000';
+        $scrapNos = '0';
+
+        foreach ($entry->scraps as $scrap) {
+            if ($scrap->quantity_kg !== null) {
+                $kg = bcadd($kg, (string) $scrap->quantity_kg, 4);
+            }
+
+            if ($scrap->quantity_nos !== null) {
+                $scrapNos = bcadd($scrapNos, (string) $scrap->quantity_nos, 0);
+            }
+        }
+
+        // Pieces rejected during the RUN, counted at completion rather than on
+        // a scrap row. Reported BESIDE the scrap-line pieces, never added to
+        // them: the owner's own distinction is that "packed pieces sent to QC
+        // and pieces rejected during production are separate", and a supervisor
+        // may also have entered a rejected-finished-good scrap line of their
+        // own — summing the two would quote a bigger rejection than happened.
+        $runNos = $entry->quantity_scrap === null ? '0' : bcadd('0', (string) $entry->quantity_scrap, 0);
+
+        $counted = array_values(array_filter([
+            bccomp($runNos, '0', 0) === 1 ? "{$runNos} pieces rejected during the run" : null,
+            bccomp($scrapNos, '0', 0) === 1 ? "{$scrapNos} pieces on its scrap lines" : null,
+            bccomp($kg, '0', 4) === 1 ? "{$kg} kg of lumps and scrap" : null,
+        ]));
+
+        if ($counted === []) {
+            return null;
+        }
+
+        return [
+            'kind' => PackingVoucherLines::WITHHELD_SCRAP,
+            'item' => null,
+            // Only the kg total is a summable figure; the piece counts are two
+            // different populations and are stated, not added, in the reason.
+            'quantity' => $kg,
+            'unit' => 'kg',
+            'reason' => 'This batch recorded '.implode(', ', $counted).'. No scrap line is posted to Tally: the '
+                .'owner has not yet said whether rejected pieces and lumps are kept as stock or thrown away, and '
+                .'the two answers make different vouchers. The scrap stays recorded in the ERP\'s own stock — only '
+                .'the Tally line is held back, and it can be added the day the answer comes.',
         ];
     }
 
@@ -416,15 +573,31 @@ class TallySyncService
         // never under a warehouse Tally has never heard of. Aggregation
         // still keys on the REAL warehouse_id — two internal bins aliasing
         // to the same godown stay separate lines, which Tally sums anyway.
+        // The SAME packing split the per-batch payload applies — cartons,
+        // trays, film and tape post out of the Packing Material Store, resin
+        // and masterbatch out of the location they were issued from (the
+        // owner, 30-Jul: "Raw materials from the agreed RM or machine-WIP
+        // location, packing materials from the Packing Material Store").
+        //
+        // It has to be applied HERE TOO and not only in buildBatchVoucherPayload:
+        // this is a second payload builder feeding the same Tally, chosen by
+        // config (tally-sync.voucher_granularity = 'shift'), and a rule that
+        // holds on one of two posting paths is not a rule. Null store means
+        // the line keeps the godown it was issued from — never a silent
+        // redirect — exactly as the batch path leaves it.
+        $packingStore = $this->packing->godownName();
+
         $consumed = [];
         $produced = [];
         foreach ($members as $member) {
             foreach ($member->materialConsumptions as $consumption) {
                 $key = "{$consumption->item_id}@{$consumption->warehouse_id}";
+                $kind = $this->packing->kindFor((int) $consumption->item_id);
                 $consumed[$key] = [
                     'item' => $consumption->item->name,
                     'quantity' => bcadd($consumed[$key]['quantity'] ?? '0.0000', (string) $consumption->quantity_issued_kg, 4),
-                    'godown' => $this->godowns->resolveName($consumption->warehouse),
+                    'godown' => ($kind === null ? null : $packingStore)
+                        ?? $this->godowns->resolveName($consumption->warehouse),
                 ];
             }
 

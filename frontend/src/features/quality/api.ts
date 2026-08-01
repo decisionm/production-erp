@@ -274,7 +274,20 @@ export async function listBatchQualityQueue(): Promise<BatchQualityQueue> {
         // `=== false`, not merely falsy: a backend without the gate sends no
         // `quality` block, and those batches are not "awaiting quality" — they
         // are batches from a world where this queue does not exist.
-        rows: gated.filter((row) => row.quality?.checked === false),
+        //
+        // AND NOT ONE THIS DESK ALREADY SENT BACK. returnToProduction() clears
+        // every quality_* column, on purpose — the batch has to be checked
+        // fresh once the floor has corrected it. That leaves it reading
+        // `checked: false`, indistinguishable here from a batch waiting for
+        // its first check, so without this second test a returned batch would
+        // sit in the queue asking to be checked again while production is
+        // still fixing it. `awaiting_correction` is the server's own answer to
+        // exactly that question (a return exists, no check since, still
+        // pending and completed) and it drops out of the queue the moment the
+        // floor amends it back.
+        rows: gated.filter(
+            (row) => row.quality?.checked === false && row.correction?.awaiting_correction !== true,
+        ),
         stageEnabled: all.length === 0 ? null : gated.length > 0,
         pendingCount: all.length,
     };
@@ -285,5 +298,40 @@ export async function createBatchQualityCheck(
     payload: CreateBatchQualityCheckPayload,
 ): Promise<ShiftProductionEntry> {
     const { data } = await api.post<{ data: ShiftProductionEntry }>(qualityCheckPath(entryId), payload);
+    return data.data;
+}
+
+/** The desk's other write: send the batch back to the floor instead of certifying it. */
+export const returnToProductionPath = (entryId: number): string =>
+    `/production/shift-production-entries/${entryId}/return-to-production`;
+
+/** The reason the backend enforces at 5 characters — mirrored so the box says so first. */
+export const RETURN_REASON_MIN_LENGTH = 5;
+
+/**
+ * Hand a completed batch back to production for correction.
+ *
+ * SAME BOUNDARY AS THE CHECK: a production path carrying QUALITY permission,
+ * registered outside the production group precisely so this desk needs
+ * quality.manage and not production.manage.
+ *
+ * THE REASON IS THE WHOLE PAYLOAD AND IT IS REQUIRED (min 5 characters,
+ * server-enforced). It is the only instruction the supervisor gets — a batch
+ * that reappears on the floor with no explanation is a batch that gets
+ * re-submitted unchanged.
+ *
+ * What it undoes depends on whether a check had been recorded: before one,
+ * only the batch's place in the queue changes; after one, the rejected bottles
+ * go back into finished goods, the scrap weight comes back out, and the
+ * figures are restored — the server reverses precisely what its own check
+ * booked, and this call carries none of that arithmetic.
+ */
+export async function returnBatchToProduction(
+    entryId: number,
+    reason: string,
+): Promise<ShiftProductionEntry> {
+    const { data } = await api.post<{ data: ShiftProductionEntry }>(returnToProductionPath(entryId), {
+        reason,
+    });
     return data.data;
 }

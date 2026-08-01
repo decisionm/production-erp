@@ -15,12 +15,15 @@ use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
 use App\Modules\Production\Models\Enums\ShiftScrapType;
 use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
+use App\Modules\Production\Models\ShiftScrap;
 use App\Modules\Production\Models\WorkCenter;
+use App\Modules\TallySync\Services\VoucherPreviewService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Fast shop-floor capture, modeled as a batch lifecycle rather than a
@@ -51,6 +54,11 @@ class ShiftProductionEntryService
         // Answers "which warehouse" so the floor is never asked — see the
         // class docblock on FactoryWarehouseResolver.
         private readonly FactoryWarehouseResolver $factoryWarehouses,
+        // What Tally would refuse, asked before the approval that posts.
+        // A cross-module READ through the other module's service, which is
+        // the rule (CLAUDE.md) — TallySync owns the voucher shape and
+        // nothing about it is duplicated here.
+        private readonly VoucherPreviewService $voucherPreview,
     ) {}
 
     public function paginate(int $perPage = 20, ?ShiftProductionEntryStatus $status = null): LengthAwarePaginator
@@ -614,6 +622,431 @@ class ShiftProductionEntryService
     }
 
     /**
+     * AMEND A COMPLETED BATCH — the floor's own correction of its own count,
+     * allowed only while the entry is still nobody else's (owner's rule: "in
+     * Production Pending, allow the factory user to edit the production entry
+     * until QC starts. Once QC has started, the production figures should no
+     * longer be edited directly; QC should return it to Production when
+     * correction is needed").
+     *
+     * IT IS A REVERSAL FOLLOWED BY THE ORDINARY COMPLETION, not a second
+     * recompute path. completeBatch() does a great deal more than write
+     * quantities — it converts pieces to kg at the run's frozen weight, books
+     * a finished-goods receipt, issues every consumption line out of the store
+     * or day bin it actually came from (negative-tolerant, and recording the
+     * shortfall when it goes negative), records closing day-bin counts,
+     * downtime and scrap. A parallel "edit the figures" path would have to
+     * reproduce all of that and would drift from it on the first change to
+     * either. So this method un-books what the wrong completion booked, puts
+     * the batch back to in_progress, and then calls completeBatch() itself.
+     * The corrected batch is completed by exactly the code that completes
+     * every other batch.
+     *
+     * AND IT IS ONE TRANSACTION, deliberately, rather than a reopen endpoint
+     * the floor then re-completes in a second request. A reopened entry is an
+     * in_progress row, and in_progress rows are load-bearing elsewhere:
+     * startBatch() refuses a new batch on a machine that has one, and the
+     * Shift Floor lists them as what is running right now. Reopening a batch
+     * on a machine that has since started its next run would put TWO
+     * in_progress rows on one machine — the invariant both of those depend on
+     * — and the floor would be shown a phantom running batch it could
+     * complete by mistake. Inside one transaction the intermediate state is
+     * never visible to anyone.
+     *
+     * AFTERWARDS THE WORLD EQUALS NEVER-HAVING-COMPLETED-WRONG: stock
+     * balances, consumption lines, scrap lines and completion downtime are
+     * what a single correct completion would have left. The stock LEDGER
+     * keeps both the wrong movements and their reversals, because that ledger
+     * is append-only by design and "these 130 kg were issued and given back"
+     * is the truth of what happened.
+     *
+     * WHY quality_checked_at IS THE GATE. It is the first moment the figures
+     * stop being production's own: the check certifies this count, nets it,
+     * and moves stock against it. After that the floor corrects through
+     * quality (returnToProduction), never behind its back.
+     *
+     * @param  array<string, mixed>  $data  a full completion payload, plus an
+     *                                      optional amendment_reason
+     */
+    public function amendCompletion(ShiftProductionEntry $entry, array $data, ?int $amendedBy): ShiftProductionEntry
+    {
+        $reason = $this->firstNonBlank([$data['amendment_reason'] ?? null]);
+
+        // The gate is read INSIDE the transaction so its row lock is actually
+        // held while the reversal below runs — see rowOpenForCorrection().
+        return DB::transaction(function () use ($entry, $data, $amendedBy, $reason) {
+            $row = $this->rowOpenForCorrection($entry);
+
+            if ($row->quality_checked_at !== null) {
+                throw new InvalidStatusTransitionException(
+                    'quality has already checked this batch, so its figures are no longer the floor\'s to change — ask quality to return it to production, then correct it',
+                );
+            }
+
+            // BEFORE ANY MUTATION: refuse a correction that moved the counts
+            // and left the material kg exactly as they were.
+            $this->refuseStaleMaterialLines($entry, $row, $data);
+
+            $this->reverseCompletionEffects($entry, $row, $amendedBy);
+
+            // The amendment trail, and the shortfall record the wrong
+            // completion left, on the entry's own frozen snapshot — written
+            // BEFORE the status flip and before completeBatch() runs, because
+            // completeBatch() writes that same column (stock_shortfalls) off
+            // the model it is handed.
+            $snapshot = $row->config_snapshot ?? [];
+            unset($snapshot['stock_shortfalls']);
+            $snapshot['amendments'] = [
+                ...array_values(array_filter((array) ($snapshot['amendments'] ?? []), 'is_array')),
+                [
+                    'amended_by' => $amendedBy,
+                    'amended_at' => now()->toIso8601String(),
+                    'reason' => $reason,
+                    // HOW MANY OF QUALITY'S RETURNS THIS AMENDMENT ANSWERS —
+                    // the one fact that lets correctionHistory() tell "sent
+                    // back and not yet fixed" from "sent back and fixed".
+                    // Nothing else can: a corrected batch is byte-for-byte the
+                    // state a returned one is in (pending, completed, no
+                    // check), and quality_returns is never cleared because it
+                    // is the audit trail. Counted, not timestamped: both
+                    // records stamp whole seconds, and a tie would either
+                    // strand the batch out of the quality queue forever or
+                    // hide a genuine return from the floor.
+                    'answered_returns' => count(
+                        array_filter((array) ($snapshot['quality_returns'] ?? []), 'is_array'),
+                    ),
+                    // What is being corrected, so the PM and the accountant
+                    // can see the movement rather than only the final figure.
+                    'previous_quantity_produced' => $row->quantity_produced !== null ? (string) $row->quantity_produced : null,
+                    'previous_completed_by' => $row->completed_by,
+                ],
+            ];
+            $entry->config_snapshot = $snapshot;
+            $entry->save();
+
+            // The same conditional UPDATE guard every other transition uses:
+            // if anyone checked, approved or amended this batch since the
+            // guards above read it, this affects nothing and the whole
+            // reversal rolls back.
+            $affected = ShiftProductionEntry::query()
+                ->whereKey($entry->id)
+                ->where('batch_status', BatchStatus::Completed->value)
+                ->where('status', ShiftProductionEntryStatus::Pending->value)
+                ->whereNull('quality_checked_at')
+                ->update(['batch_status' => BatchStatus::InProgress->value]);
+
+            if ($affected === 0) {
+                throw new InvalidStatusTransitionException(
+                    'this batch changed while the correction was being saved — open it again and check the figures before correcting',
+                );
+            }
+
+            return $this->completeBatch($entry->refresh(), $data, $amendedBy);
+        });
+    }
+
+    /**
+     * THE STALE-AMENDMENT REFUSAL — the browser smoke test's bug, made
+     * impossible to submit.
+     *
+     * WHAT WENT WRONG. The correction drawer opens with the stored material
+     * kg already in the boxes and LATCHES them, so the resin estimator does
+     * not overwrite a figure the store actually weighed out. Correct on its
+     * own. But a supervisor then fixes the piece count, watches every derived
+     * number on the panel move — good kg, rejection kg, the calculated resin
+     * total — and submits. The resin line that posts is the OLD one. The
+     * screen showed one arithmetic and the batch got another, and nothing
+     * anywhere said so.
+     *
+     * THE CHOICE MADE HERE: REFUSE, DO NOT RECOMPUTE. This module is
+     * advisory-by-construction — completeBatch stores exactly the
+     * material_consumptions rows it was handed, and every suggestion service
+     * in it carries a docblock swearing it never reaches a stored figure
+     * (RunMaterialSuggestionService, MasterbatchDosingService). A server that
+     * quietly replaced the submitted kg with its own would break that
+     * invariant to fix a client bug, and would then be inventing consumption
+     * figures on a shift nobody could audit. So the submitted figure stays
+     * the figure — but a correction whose material lines did not move while
+     * its output did is sent back with both numbers named, and the supervisor
+     * decides which one is true. That is the choice they were never given.
+     *
+     * IT FIRES ONLY ON THE EXACT SHAPE OF THE BUG, which is why it is a delta
+     * and not an absolute check:
+     *
+     *   - the output moved: (produced + rejected) pieces × the run's frozen
+     *     unit weight, plus lumps kg, differs from the stored figures by at
+     *     least production.tolerances.amend_material_drift_kg; AND
+     *   - the material lines did not: the submitted kg-family total equals
+     *     the stored kg-family total to the same tolerance.
+     *
+     * Comparing TOTALS rather than hunting for "the resin line" is deliberate
+     * and is what makes this safe. Masterbatch, and every other material,
+     * sits on both sides of the comparison and cancels — so nothing has to
+     * identify which line is which, and no name pattern or suggestion service
+     * (which answers null on ambiguity, and would silently stop guarding) is
+     * involved.
+     *
+     * DELIBERATELY AMEND-ONLY. A first completion has no previous state to
+     * have gone stale against, and gating one would be a floor-wide change to
+     * the path every shift runs through.
+     *
+     * THE ESCAPE HATCH is material_kg_confirmed: a weighed figure that
+     * genuinely did not change (the store issued 130 kg; the supervisor is
+     * fixing a piece miscount, not the material) is submitted again with that
+     * flag and goes through untouched. Until the drawer sends it, this case
+     * is a hard 422 — deliberate, on a frozen deploy, because the alternative
+     * is the silent wrong figure this exists to stop.
+     *
+     * @param  array<string, mixed>  $data  the amend payload
+     *
+     * @throws ValidationException 422 naming both figures
+     */
+    private function refuseStaleMaterialLines(ShiftProductionEntry $entry, ShiftProductionEntry $row, array $data): void
+    {
+        // filter_var, not === true: the 'boolean' rule VALIDATES the shape it
+        // accepts (true, 1, "1", "true", and their false twins) without
+        // casting it, so a strict comparison here would quietly re-refuse an
+        // amendment a supervisor had already confirmed — with a message
+        // telling them to confirm it.
+        if (filter_var($data['material_kg_confirmed'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
+            return;
+        }
+
+        $row->loadMissing([
+            'scraps',
+            // withTrashed for the same reason every other kg roll-up does it:
+            // a soft-deleted master must not lose its UOM and silently drop
+            // out of (or into) a kilogram sum.
+            'materialConsumptions.item' => fn ($query) => $query->withTrashed(),
+        ]);
+
+        // Nothing stored to have gone stale — a completion that issued no
+        // material has no figure to keep by mistake.
+        $storedMass = $this->consumedMassKg($row);
+        if (bccomp($storedMass, '0', 4) !== 1) {
+            return;
+        }
+
+        $tolerance = (string) config('production.tolerances.amend_material_drift_kg', 0.5);
+
+        // The pieces side of the formula, in kg. Rejected pieces are part of
+        // it because they were moulded from the same resin — the owner's
+        // arithmetic, unchanged: (packed pieces sent to QC + production
+        // rejected pieces) × standard weight + lumps.
+        $piecesBefore = bcadd(
+            (string) ($row->quantity_produced ?? '0'),
+            (string) ($row->quantity_scrap ?? '0'),
+            4,
+        );
+        $piecesAfter = bcadd(
+            (string) ($data['quantity_produced'] ?? '0'),
+            (string) ($data['quantity_scrap'] ?? '0'),
+            4,
+        );
+        $pieceDelta = bcsub($piecesAfter, $piecesBefore, 4);
+
+        $grams = $this->resolvedUnitWeightGrams($entry, Item::query()->find($entry->item_id));
+
+        // No resolved weight means the pieces cannot be turned into kg at
+        // all, so a changed count cannot be judged — say nothing rather than
+        // guess. (The lumps half below is still in kg and still judged.)
+        if ($grams === null && bccomp($pieceDelta, '0', 4) !== 0) {
+            return;
+        }
+
+        $pieceMassDelta = $grams !== null
+            ? bcdiv(bcmul($pieceDelta, $grams, 4), '1000', 4)
+            : '0.0000';
+
+        $lumpsDelta = bcsub(
+            $this->lumpsKgOfLines($data['scraps'] ?? []),
+            $this->lumpsKgOfScraps($row->scraps),
+            4,
+        );
+
+        $outputDelta = bcadd($pieceMassDelta, $lumpsDelta, 4);
+
+        // The output barely moved — this is a typo fix, not a recount.
+        if (bccomp($this->bcAbs($outputDelta), $tolerance, 4) !== 1) {
+            return;
+        }
+
+        $submittedMass = $this->massOfSubmittedLines($data['material_consumptions'] ?? []);
+
+        // The material lines DID move — the supervisor made a choice about
+        // them, whatever it was, and this method has no opinion on it.
+        if (bccomp($this->bcAbs(bcsub($submittedMass, $storedMass, 4)), $tolerance, 4) === 1) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'material_consumptions' => sprintf(
+                'The counts changed but the material kilograms did not. The corrected counts work out to %s kg '
+                .'of material, and the form still carries %s kg — the figure the first completion had. '
+                .'Check the resin and masterbatch rows against the new counts, or send it again confirming '
+                .'the kilograms are right as typed if that is genuinely what the store issued.',
+                bcadd($storedMass, $outputDelta, 4),
+                $submittedMass,
+            ),
+        ]);
+    }
+
+    /**
+     * The kg-family total of a SUBMITTED consumption payload, by exactly the
+     * rule consumedMassKg() applies to stored rows — including its fail-safe
+     * direction, where an item with a blank or unknown UOM is COUNTED. The
+     * two sides of the comparison must be measured the same way or the
+     * guard's own arithmetic would manufacture a difference.
+     *
+     * @param  array<int, array{item_id?: mixed, quantity_issued_kg?: mixed}>  $lines
+     */
+    private function massOfSubmittedLines(array $lines): string
+    {
+        $total = '0.0000';
+
+        foreach ($lines as $line) {
+            if (! is_array($line) || ! isset($line['item_id'])) {
+                continue;
+            }
+
+            $uom = Item::withTrashed()->find($line['item_id'])?->uom;
+            if ($uom !== null && trim($uom) !== '' && ! $this->isMassUom($uom)) {
+                continue;
+            }
+
+            $total = bcadd($total, (string) ($line['quantity_issued_kg'] ?? '0'), 4);
+        }
+
+        return $total;
+    }
+
+    /**
+     * Lumps kg out of a submitted scraps payload. Lumps are weighed, never
+     * counted, so only quantity_kg is read.
+     *
+     * @param  array<int, array{type?: mixed, quantity_kg?: mixed}>  $lines
+     */
+    private function lumpsKgOfLines(array $lines): string
+    {
+        $total = '0.0000';
+
+        foreach ($lines as $line) {
+            if (! is_array($line) || ($line['type'] ?? null) !== ShiftScrapType::Lumps->value) {
+                continue;
+            }
+
+            $total = bcadd($total, (string) ($line['quantity_kg'] ?? '0'), 4);
+        }
+
+        return $total;
+    }
+
+    /**
+     * Lumps kg off stored scrap rows — the same sum productionMetrics()
+     * takes, kept here so the guard reads the stored side identically.
+     *
+     * @param  iterable<int, ShiftScrap>  $scraps
+     */
+    private function lumpsKgOfScraps(iterable $scraps): string
+    {
+        $total = '0.0000';
+
+        foreach ($scraps as $scrap) {
+            if ($scrap->type === ShiftScrapType::Lumps && $scrap->quantity_kg !== null) {
+                $total = bcadd($total, (string) $scrap->quantity_kg, 4);
+            }
+        }
+
+        return $total;
+    }
+
+    /** |value| at 4dp, without going through a float. */
+    private function bcAbs(string $value): string
+    {
+        return bccomp($value, '0', 4) === -1 ? bcsub('0', $value, 4) : bcadd($value, '0', 4);
+    }
+
+    /**
+     * Un-book everything a completion booked, so the batch can be completed
+     * again from a clean slate.
+     *
+     * STOCK IS REVERSED WITH COMPENSATING MOVEMENTS, never by deleting the
+     * originals: stock_movements is an append-only ledger (see
+     * StockMovementService), and the balances it feeds belong to Inventory —
+     * Production reaches them through that service, not through its models.
+     * Each consumption line is received back at the unit cost ITS OWN issue
+     * recorded, so the moving average lands exactly where it started; the
+     * finished-goods receipt is issued back out.
+     *
+     * The finished-goods reversal is negative-tolerant unconditionally, even
+     * where completion's own permission would refuse: by the time a wrong
+     * count is being corrected, some of what it received may already have
+     * moved. Refusing then would leave the entry corrected and the ledger
+     * still carrying the wrong receipt, which is worse than a negative
+     * balance the accountant can see and fix (config/production.php 'stock').
+     *
+     * DAY-BIN COUNTS ARE LEFT ALONE, deliberately. A count is an absolute
+     * physical observation — somebody put the bin on a scale — and a wrong
+     * PIECE count does not make that weighing wrong. The ledger re-anchors on
+     * the latest count (DayBinLedgerService::balanceFor/closingFor), and the
+     * headroom guard a re-count must pass is opening + loaded − returned,
+     * which no count affects, so the corrected completion's own closing count
+     * simply supersedes. Deleting them would destroy a real weighing and
+     * would take mid-shift counts recorded from the floor screen with it.
+     */
+    private function reverseCompletionEffects(ShiftProductionEntry $entry, ShiftProductionEntry $row, ?int $userId): void
+    {
+        $reference = "SPE #{$entry->id}";
+
+        // One pool per (item, warehouse), popped from the END: the live
+        // consumption lines belong to the LATEST completion, which after an
+        // earlier amendment is not the first issue carrying this reference.
+        $pool = $this->stock->issuesForReference($reference)
+            ->groupBy(fn ($movement) => "{$movement->item_id}@{$movement->warehouse_id}");
+
+        foreach ($entry->materialConsumptions()->get() as $consumption) {
+            $unitCost = $pool->get("{$consumption->item_id}@{$consumption->warehouse_id}")?->pop()?->unit_cost;
+
+            $this->stock->recordReceipt(
+                itemId: $consumption->item_id,
+                warehouseId: $consumption->warehouse_id,
+                quantity: (string) $consumption->quantity_issued_kg,
+                unitCost: (string) ($unitCost ?? $this->stock->currentAverageCost(
+                    $consumption->item_id,
+                    $consumption->warehouse_id,
+                )),
+                reference: $reference.' amended',
+                createdBy: $userId,
+            );
+        }
+
+        $entry->materialConsumptions()->delete();
+
+        // The gross figure, because that is what completion received —
+        // belt-and-braces only: an amendment is refused once quality has
+        // netted anything, so gross is null here in practice.
+        $produced = $row->gross_quantity_produced ?? $row->quantity_produced;
+
+        if ($produced !== null && bccomp((string) $produced, '0', 4) === 1) {
+            $this->stock->recordIssue(
+                itemId: $entry->item_id,
+                warehouseId: $entry->warehouse_id,
+                quantity: (string) $produced,
+                reference: $reference.' amended',
+                createdBy: $userId,
+                allowNegative: true,
+            );
+        }
+
+        // Scrap lines and the downtime the supervisor logged WITH the
+        // completion go with it; planned downtime attached at Start Batch
+        // (known_before_start) belongs to the run, not to the completion, and
+        // stays.
+        $entry->scraps()->delete();
+        $entry->downtimeEvents()->where('known_before_start', false)->delete();
+    }
+
+    /**
      * Shift handover / segment continuation (Phase 6 traceability):
      * complete-and-continue in one transaction. The outgoing segment is
      * completed exactly as completeBatch would (same math, stock movements
@@ -939,7 +1372,13 @@ class ShiftProductionEntryService
         // through exactly the case being refused.
         $row = ShiftProductionEntry::query()
             ->whereKey($entry->id)
-            ->first(['id', 'status', 'batch_status', 'quantity_produced', 'quality_checked_at', 'completed_by']);
+            ->first([
+                'id', 'status', 'batch_status', 'quantity_produced', 'quality_checked_at', 'completed_by',
+                // The figures this check is about to overwrite. Read here so
+                // the effects record written at the end of the transaction can
+                // state what they WERE — see the quality_check_effects block.
+                'quantity_produced_kg', 'qc_rejection_kg',
+            ]);
 
         if ($row === null || $row->batch_status !== BatchStatus::Completed || $row->status !== ShiftProductionEntryStatus::Pending) {
             throw InvalidStatusTransitionException::make(
@@ -956,18 +1395,16 @@ class ShiftProductionEntryService
         // reverse movements that the accountant may already have reconciled
         // against.
         //
-        // AND THERE IS NO CORRECTION ROUTE TO POINT AT — checked, not assumed.
-        // reject() sets status to Rejected and leaves batch_status at
-        // Completed; nothing transitions OUT of Rejected, and completeBatch()
-        // requires InProgress, so a rejected batch cannot be re-completed or
-        // re-checked. Rejecting is how a batch leaves the chain, not how its
-        // figures get fixed. So the sentence below tells the checker the true
-        // thing (get it right first time; a mistake needs an administrator)
-        // rather than sending them down a route that would terminate the
-        // batch and still not correct the count.
+        // AND THE CORRECTION ROUTE IS NAMED. This used to end "ask an
+        // administrator", because at the time it was written there genuinely
+        // was nowhere to send anyone: reject() terminates a batch rather than
+        // fixing it, and completeBatch() requires InProgress. returnToProduction()
+        // is that missing route — it reverses this check's own stock effects,
+        // clears the figures and hands the batch back to the floor — so the
+        // sentence now points at it instead of at a person.
         if ($row->quality_checked_at !== null) {
             throw new InvalidStatusTransitionException(
-                'this batch has already had its quality check, and a check cannot be redone — ask an administrator to correct the figures',
+                'this batch has already had its quality check, and a check cannot be redone on top of itself — return it to production first, then check the corrected batch fresh',
             );
         }
 
@@ -994,7 +1431,7 @@ class ShiftProductionEntryService
         $rejected = (int) $data['rejected_nos'];
         $gross = (string) $row->quantity_produced;
 
-        return DB::transaction(function () use ($entry, $data, $checkedBy, $reviewed, $ok, $rejected, $gross) {
+        return DB::transaction(function () use ($entry, $row, $data, $checkedBy, $reviewed, $ok, $rejected, $gross) {
             // The weight THIS RUN was quoted and measured against, never the
             // item master's current column — see resolvedUnitWeightGrams().
             $item = Item::query()->find($entry->item_id);
@@ -1029,19 +1466,60 @@ class ShiftProductionEntryService
             // Same conditional-UPDATE guard as every other transition, plus
             // the null check that makes the double-check refusal above hold
             // under a genuine race rather than only in the common case.
+            //
+            // AND THE COUNT THIS CHECK WAS COMPUTED AGAINST. $gross was read
+            // before the transaction, and amendCompletion() can move
+            // quantity_produced on a batch that is still pending, still
+            // completed and still unchecked — it reverses the completion,
+            // re-runs it, and hands back a row passing every other guard here.
+            // A check that squeezed into that window would write
+            // `quantity_produced = staleGross − rejected` over the corrected
+            // figure and issue bottles out of finished goods against a count
+            // that no longer exists. Pinning the gross figure makes the
+            // amendment win and this check fail closed, which is the right way
+            // round: the corrected count is the true one, and the checker is
+            // told to look again.
             $affected = ShiftProductionEntry::query()
                 ->where('id', $entry->id)
                 ->where('status', ShiftProductionEntryStatus::Pending->value)
+                ->where('batch_status', BatchStatus::Completed->value)
+                ->where('quantity_produced', $gross)
                 ->whereNull('quality_checked_at')
                 ->update($columns);
 
             if ($affected === 0) {
+                // Deliberately not the "already checked" sentence the guard
+                // above throws: reaching here means the batch moved under the
+                // check — someone else checked it, or the floor corrected its
+                // figures — and the checker needs to re-read the count before
+                // certifying anything, not be told a check already exists.
                 throw new InvalidStatusTransitionException(
-                    'this batch has already had its quality check, and a check cannot be redone — ask an administrator to correct the figures',
+                    'this batch changed while the check was being saved — open it again and read the produced count before passing it',
                 );
             }
 
             $scrapNote = null;
+            // WHAT THIS CHECK ACTUALLY DID, recorded as it happens so
+            // returnToProduction() can undo exactly that and nothing else.
+            // Every one of these is conditional — the scrap receipt is
+            // skipped when no scrap item is configured or the run resolved
+            // no unit weight, and a supervisor-entered rejected_finished_good
+            // scrap line is indistinguishable from this stage's afterwards —
+            // so the reversal must not infer them from the final state. The
+            // pre-check figures are here for the same reason: qc_rejection_kg
+            // may have carried a weighed figure from completion that this
+            // check overwrote, and "restore to null" would erase it.
+            $effects = [
+                'fg_issue_nos' => null,
+                'scrap_item_id' => null,
+                'scrap_kg' => null,
+                'scrap_row_id' => null,
+                'pre_check' => [
+                    'quantity_produced' => $gross,
+                    'quantity_produced_kg' => $row->quantity_produced_kg !== null ? (string) $row->quantity_produced_kg : null,
+                    'qc_rejection_kg' => $row->qc_rejection_kg !== null ? (string) $row->qc_rejection_kg : null,
+                ],
+            ];
 
             if ($rejected > 0) {
                 // OUT OF FINISHED GOODS. Completion received the gross count
@@ -1065,6 +1543,8 @@ class ShiftProductionEntryService
                     createdBy: $checkedBy,
                     allowNegative: (bool) config('production.stock.allow_negative_on_completion', true),
                 );
+
+                $effects['fg_issue_nos'] = (string) $rejected;
 
                 // AND INTO SCRAP — "no, go to the rejected scrap only".
                 // Mass out of FG equals mass into scrap, both derived from
@@ -1092,17 +1572,25 @@ class ShiftProductionEntryService
                         reference: "QC #{$entry->id}",
                         createdBy: $checkedBy,
                     );
+
+                    $effects['scrap_item_id'] = $scrapItem->id;
+                    $effects['scrap_kg'] = $rejectedKg;
                 }
 
                 // The existing scrap bucket, not a new one: ShiftScrap rows
                 // of this type already ride the Tally voucher as data and
                 // narration, so the rejection reaches the accountant's
                 // voucher in words WITHOUT altering the payload's shape.
-                $entry->scraps()->create([
+                $scrapLine = $entry->scraps()->create([
                     'type' => ShiftScrapType::RejectedFinishedGood->value,
                     'quantity_nos' => $rejected,
                     'quantity_kg' => $rejectedKg,
                 ]);
+
+                // By id, not by type: the supervisor may have entered a
+                // rejected_finished_good line of their own at completion, and
+                // a return that deleted "the rejected line" would take theirs.
+                $effects['scrap_row_id'] = $scrapLine->id;
             }
 
             if ($scrapNote !== null) {
@@ -1122,6 +1610,17 @@ class ShiftProductionEntryService
                     ->update(['quality_scrap_note' => $scrapNote]);
             }
 
+            // Onto the entry's existing frozen snapshot, the same least-schema
+            // route stock_shortfalls and the material-shortage override took,
+            // and written through the model because config_snapshot is a cast
+            // array — the conditional UPDATE above stays the only writer of
+            // the lifecycle columns.
+            $entry->config_snapshot = [
+                ...($entry->config_snapshot ?? []),
+                'quality_check_effects' => $effects,
+            ];
+            $entry->save();
+
             return $entry->fresh([
                 'shift', 'workCenter', 'item', 'warehouse', 'scrapReason', 'operator',
                 'materialConsumptions.item' => fn ($query) => $query->withTrashed(),
@@ -1131,6 +1630,365 @@ class ShiftProductionEntryService
                 'qualityCheckedBy',
             ]);
         });
+    }
+
+    /**
+     * QUALITY RETURNS A BATCH TO PRODUCTION — the other half of the owner's
+     * rule. Once quality has the batch, production may not edit its figures
+     * behind them; when something is wrong, quality hands it back with a
+     * reason and the floor corrects it (amendCompletion) in the open.
+     *
+     * ALLOWED INSTEAD OF A CHECK, AND ALSO AFTER ONE. Before any check it is
+     * simply "these figures are wrong, fix them" — nothing of quality's to
+     * undo, and the floor's amend window (which closes at quality_checked_at)
+     * was never shut. After a check it is quality correcting THEMSELVES: the
+     * check's own stock effects are reversed, its counts cleared and the
+     * production figures restored to what they were before it netted them, so
+     * whatever comes back is checked fresh rather than checked on top of a
+     * half-applied rejection.
+     *
+     * REFUSED ONCE THE PLANT MANAGER HAS SIGNED. From pm_approved on, the
+     * batch has an approval on it and a desk that owns the correction:
+     * rejecting it back down the chain is that route, and it is the one that
+     * leaves a signature. Quality quietly unwinding an approved batch would
+     * make the PM's signature describe figures that no longer exist.
+     *
+     * WHAT IS RECORDED. The reason is required by the request, and lands on
+     * the entry's frozen snapshot with who returned it, when, and whether a
+     * check was cleared — the same least-schema route every other per-run
+     * audit fact takes here (material_shortage_override_reason,
+     * stock_shortfalls, opening_day_bin_basis). It is read back through
+     * correctionHistory() so the floor is told WHY their batch came back, and
+     * the whole history survives the correction rather than being overwritten
+     * by the next one.
+     */
+    public function returnToProduction(ShiftProductionEntry $entry, string $reason, ?int $returnedBy): ShiftProductionEntry
+    {
+        // Same stage-off refusal recordQualityCheck() makes, and for the same
+        // reason: with the stage stood down the chain must be exactly what it
+        // was before quality existed, and this endpoint would otherwise let
+        // one POST unwind a batch on a deployment that switched quality off.
+        if (! (bool) config('production.approvals.quality_stage_enabled', true)) {
+            throw new InvalidStatusTransitionException(
+                'the quality stage is switched off for this factory — completed batches go straight to the plant manager, so there is nothing for quality to return',
+            );
+        }
+
+        // Inside the transaction for the row lock, exactly as amendCompletion()
+        // does and for the same reason: this route also reverses stock before
+        // it reaches its conditional UPDATE.
+        return DB::transaction(function () use ($entry, $reason, $returnedBy) {
+            $row = $this->rowOpenForCorrection($entry);
+            $hadCheck = $row->quality_checked_at !== null;
+
+            // A check recorded BEFORE this correction feature existed wrote
+            // no quality_check_effects record, so what it moved cannot be
+            // safely un-moved: the FG side has a legacy fallback but the
+            // scrap receipt does not, and reversing half of a check leaves
+            // the scrap balance inflated with the audit line that would
+            // explain it deleted. Refuse only where that danger is real — a
+            // legacy check that rejected nothing moved no stock, and its
+            // return is a plain column clear.
+            if ($hadCheck
+                && ! is_array($row->config_snapshot['quality_check_effects'] ?? null)
+                && ($row->quality_rejected_nos ?? 0) > 0) {
+                throw new InvalidStatusTransitionException(
+                    'this batch\'s quality check was recorded before returns existed, so what it moved cannot be safely un-moved — reject the batch back to the supervisor instead, or let it continue as checked',
+                );
+            }
+
+            $columns = [
+                'quality_reviewed_nos' => null,
+                'quality_ok_nos' => null,
+                'quality_rejected_nos' => null,
+                'quality_checked_by' => null,
+                'quality_checked_at' => null,
+                'quality_note' => null,
+                'quality_scrap_note' => null,
+            ];
+
+            if ($hadCheck) {
+                $columns = [...$columns, ...$this->reverseQualityCheckEffects($entry, $row, $returnedBy)];
+            }
+
+            // The usual conditional UPDATE, scoped to the state the guards
+            // read — including whether a check was there — so a check
+            // recorded (or cleared) in the meantime loses rather than being
+            // silently reversed twice.
+            $affected = ShiftProductionEntry::query()
+                ->whereKey($entry->id)
+                ->where('status', ShiftProductionEntryStatus::Pending->value)
+                ->where('batch_status', BatchStatus::Completed->value)
+                ->when(
+                    $hadCheck,
+                    fn ($query) => $query->whereNotNull('quality_checked_at'),
+                    fn ($query) => $query->whereNull('quality_checked_at'),
+                )
+                ->update($columns);
+
+            if ($affected === 0) {
+                throw new InvalidStatusTransitionException(
+                    'this batch changed while the return was being saved — open it again and look at it before returning it',
+                );
+            }
+
+            $snapshot = $row->config_snapshot ?? [];
+            // The check that was just undone has no effects left to undo.
+            unset($snapshot['quality_check_effects']);
+            $snapshot['quality_returns'] = [
+                ...array_values(array_filter((array) ($snapshot['quality_returns'] ?? []), 'is_array')),
+                [
+                    'returned_by' => $returnedBy,
+                    'returned_at' => now()->toIso8601String(),
+                    'reason' => $reason,
+                    'cleared_quality_check' => $hadCheck,
+                ],
+            ];
+            $entry->config_snapshot = $snapshot;
+            $entry->save();
+
+            return $entry->fresh([
+                'shift', 'workCenter', 'item', 'warehouse', 'scrapReason', 'operator',
+                'materialConsumptions.item' => fn ($query) => $query->withTrashed(),
+                'materialConsumptions.warehouse' => fn ($query) => $query->withTrashed(),
+                'scraps.scrapReason',
+                'downtimeEvents.reason',
+            ]);
+        });
+    }
+
+    /**
+     * Undo a quality check's stock and scrap effects, and give back the
+     * columns that restore the production figures it netted.
+     *
+     * READ FROM THE RECORD THE CHECK WROTE, never inferred from the final
+     * state. Every effect is conditional: the scrap receipt is skipped when
+     * no scrap item is configured or the run resolved no unit weight, the
+     * check's own scrap LINE is indistinguishable by type from one the
+     * supervisor entered at completion, and qc_rejection_kg may have carried
+     * a weighed figure from completion that the check overwrote. Guessing any
+     * of those wrong leaves stock or an audit line quietly wrong, so
+     * recordQualityCheck() writes down what it did and this reads it back.
+     *
+     * Legacy rows checked before that record existed fall back to the gross
+     * figure — the one thing the final state does state unambiguously.
+     *
+     * @return array<string, mixed> columns restoring the pre-check figures
+     */
+    private function reverseQualityCheckEffects(ShiftProductionEntry $entry, ShiftProductionEntry $row, ?int $userId): array
+    {
+        $effects = $row->config_snapshot['quality_check_effects'] ?? null;
+        $effects = is_array($effects) ? $effects : [];
+
+        // The rejected bottles go back into finished goods — the exact
+        // counterpart of the issue the check made.
+        $fgNos = $effects['fg_issue_nos']
+            ?? (($row->quality_rejected_nos ?? 0) > 0 ? (string) $row->quality_rejected_nos : null);
+
+        if ($fgNos !== null && bccomp((string) $fgNos, '0', 4) === 1) {
+            $this->stock->recordReceipt(
+                itemId: $entry->item_id,
+                warehouseId: $entry->warehouse_id,
+                quantity: (string) $fgNos,
+                unitCost: $this->stock->currentAverageCost($entry->item_id, $entry->warehouse_id),
+                reference: "QC #{$entry->id} returned",
+                createdBy: $userId,
+            );
+        }
+
+        // And the scrap weight comes back out — only where the receipt
+        // genuinely happened.
+        if (($effects['scrap_item_id'] ?? null) !== null && ($effects['scrap_kg'] ?? null) !== null
+            && bccomp((string) $effects['scrap_kg'], '0', 4) === 1) {
+            $this->stock->recordIssue(
+                itemId: (int) $effects['scrap_item_id'],
+                warehouseId: $entry->warehouse_id,
+                quantity: (string) $effects['scrap_kg'],
+                reference: "QC #{$entry->id} returned",
+                createdBy: $userId,
+                // The scrap this receipt created may already have been moved
+                // on; see reverseCompletionEffects() for why a reversal is
+                // never refused on a balance.
+                allowNegative: true,
+            );
+        }
+
+        $scrapRowId = $effects['scrap_row_id'] ?? null;
+
+        if ($scrapRowId === null && ($row->quality_rejected_nos ?? 0) > 0) {
+            // Legacy only: the newest line matching what the check recorded.
+            $scrapRowId = $entry->scraps()
+                ->where('type', ShiftScrapType::RejectedFinishedGood->value)
+                ->where('quantity_nos', $row->quality_rejected_nos)
+                ->orderByDesc('id')
+                ->value('id');
+        }
+
+        if ($scrapRowId !== null) {
+            $entry->scraps()->whereKey($scrapRowId)->delete();
+        }
+
+        $preCheck = is_array($effects['pre_check'] ?? null) ? $effects['pre_check'] : [];
+
+        // Gross is what the supervisor counted; it is only written when the
+        // check actually netted something, so a zero-rejection check restores
+        // to the figures already on the row.
+        $produced = $preCheck['quantity_produced']
+            ?? ($row->gross_quantity_produced !== null ? (string) $row->gross_quantity_produced : null)
+            ?? ($row->quantity_produced !== null ? (string) $row->quantity_produced : null);
+
+        $producedKg = array_key_exists('quantity_produced_kg', $preCheck)
+            ? $preCheck['quantity_produced_kg']
+            : ($produced !== null
+                ? $this->toKg($produced, $this->resolvedUnitWeightGrams($entry, Item::query()->find($entry->item_id)))
+                : null);
+
+        return [
+            'quantity_produced' => $produced,
+            'quantity_produced_kg' => $producedKg,
+            // Restored, not blanked: the supervisor may have weighed a
+            // rejection at completion that the check overwrote.
+            'qc_rejection_kg' => $preCheck['qc_rejection_kg'] ?? null,
+            'gross_quantity_produced' => null,
+        ];
+    }
+
+    /**
+     * The shared gate both correction routes stand behind: the batch must be
+     * completed, still pending, still nobody's but production's and quality's,
+     * and not yet part of anything Tally has been told about.
+     *
+     * Every check reads the ROW rather than the caller's model, for the reason
+     * accountantApprove() spells out — the model in hand was loaded before this
+     * request, and a stale value here would wave through exactly the case being
+     * refused.
+     *
+     * AND IT TAKES THE ROW LOCK, because unlike every other transition here the
+     * two correction routes do destructive work (reversing stock, deleting
+     * consumption and scrap lines) BEFORE they reach their conditional UPDATE.
+     * A conditional UPDATE only protects what comes after it. Two amendments
+     * overlapping would both read the same live consumption lines, both receipt
+     * them back, and the second would then find the row restored to
+     * completed/pending/unchecked by the first and sail through its guard —
+     * double-reversing one completion's issues. Called as the first statement
+     * inside each route's transaction, the lock serialises them: the second
+     * waits, then reads the state the first actually left.
+     */
+    private function rowOpenForCorrection(ShiftProductionEntry $entry): ShiftProductionEntry
+    {
+        $row = ShiftProductionEntry::query()
+            ->whereKey($entry->id)
+            ->lockForUpdate()
+            ->first([
+                'id', 'status', 'batch_status', 'quantity_produced', 'quantity_produced_kg',
+                // quantity_scrap is load-bearing for refuseStaleMaterialLines():
+                // its pieces-before side is produced + rejected, and a column
+                // missing from this list silently reads null — which made the
+                // guard blame the supervisor for 0.612 kg that was never
+                // theirs (found by typing the figure into a real browser).
+                'quantity_scrap',
+                'gross_quantity_produced', 'qc_rejection_kg', 'quality_checked_at',
+                'quality_rejected_nos', 'completed_by', 'tally_sync_entry_id', 'config_snapshot',
+            ]);
+
+        if ($row === null || $row->batch_status !== BatchStatus::Completed) {
+            throw new InvalidStatusTransitionException(
+                'this batch is still running — there are no completed figures to correct yet',
+            );
+        }
+
+        if ($row->status !== ShiftProductionEntryStatus::Pending) {
+            throw new InvalidStatusTransitionException(match ($row->status) {
+                ShiftProductionEntryStatus::PmApproved => 'the plant manager has already approved this batch — it has to be rejected back to the floor before its figures can change',
+                ShiftProductionEntryStatus::AccountantApproved,
+                ShiftProductionEntryStatus::Approved => 'the accounts desk has already approved this batch and its voucher is on its way to Tally — its figures can no longer be changed here',
+                ShiftProductionEntryStatus::Synced => 'this batch is already in Tally — its figures can no longer be changed here; the correction has to be made in Tally',
+                ShiftProductionEntryStatus::Failed => 'this batch was approved and its Tally voucher failed — sort the voucher out; its figures can no longer be changed here',
+                ShiftProductionEntryStatus::Rejected => 'this batch was rejected back to the supervisor — a rejected batch is out of the chain and cannot be corrected',
+                default => 'this batch is no longer waiting for approval, so its figures can no longer be changed here',
+            });
+        }
+
+        // Belt and braces behind the status check above: a voucher only exists
+        // once the accountant has approved, so this cannot fire on its own
+        // today. It is here because "has anything been handed to Tally" is the
+        // question that actually matters, and a future path that enqueues
+        // earlier must not silently gain the right to rewrite a queued voucher
+        // underneath the agent.
+        if ($row->tally_sync_entry_id !== null || $entry->tallySyncEntries()->exists()) {
+            throw new InvalidStatusTransitionException(
+                'this batch is already on a Tally voucher — its figures can no longer be changed here',
+            );
+        }
+
+        // A handover child opens from THIS segment's closing counts
+        // (DayBinLedgerService::openingFor), so correcting a segment that has
+        // already handed over would restate the next shift's opening
+        // underneath it.
+        if ($entry->childSegments()->exists()) {
+            throw new InvalidStatusTransitionException(
+                'this batch was handed over to the next shift, and that shift opened from its closing weights — it can no longer be corrected on its own',
+            );
+        }
+
+        return $row;
+    }
+
+    /**
+     * What has been done to this batch's figures since it was completed:
+     * quality's returns (with the reason the floor has to read) and the
+     * floor's own amendments.
+     *
+     * Always present, all-empty rather than null, so a client can render
+     * "nothing to see" without telling a missing key apart from a null one —
+     * the same rule qualityCheck() follows.
+     *
+     * @return array{
+     *     awaiting_correction: bool, latest_return_reason: ?string,
+     *     returns: list<array<string, mixed>>, amendments: list<array<string, mixed>>,
+     * }
+     */
+    public function correctionHistory(ShiftProductionEntry $entry): array
+    {
+        $snapshot = $entry->config_snapshot ?? [];
+        $returns = array_values(array_filter((array) ($snapshot['quality_returns'] ?? []), 'is_array'));
+        $amendments = array_values(array_filter((array) ($snapshot['amendments'] ?? []), 'is_array'));
+        $latest = $returns === [] ? null : $returns[count($returns) - 1];
+
+        // How many returns the floor has already answered. Max rather than
+        // "the last amendment's", so a plain typo-fix amendment recorded
+        // before any return (answered_returns 0) can never pull the count back
+        // down and re-strand a batch that was already corrected.
+        $answered = 0;
+
+        foreach ($amendments as $amendment) {
+            $answered = max($answered, (int) ($amendment['answered_returns'] ?? 0));
+        }
+
+        return [
+            // Quality sent this back AND THE FLOOR HAS NOT YET RE-SUBMITTED
+            // IT: the flag the production queue needs to put the batch in
+            // front of the supervisor again.
+            //
+            // The amendment count is load-bearing, not decoration. An
+            // amendment leaves the batch in exactly the state a return leaves
+            // it in — pending, completed, no quality check — and it does not
+            // (and must not) clear quality_returns, which is the audit trail.
+            // Without this test the flag would latch true for the life of the
+            // batch, and the quality queue filters `awaiting_correction` OUT:
+            // the corrected batch would never be offered for a check, so
+            // quality_checked_at would never be set, so pmApprove's
+            // precondition would never be met and the batch would sit outside
+            // the approval chain with no route back into it.
+            'awaiting_correction' => $latest !== null
+                && count($returns) > $answered
+                && $entry->quality_checked_at === null
+                && $entry->status === ShiftProductionEntryStatus::Pending
+                && $entry->batch_status === BatchStatus::Completed,
+            'latest_return_reason' => $latest['reason'] ?? null,
+            'returns' => $returns,
+            'amendments' => $amendments,
+        ];
     }
 
     /**
@@ -1296,6 +2154,51 @@ class ShiftProductionEntryService
             throw new InvalidStatusTransitionException('the same person cannot give both approvals');
         }
 
+        // THE POSTING GATE'S OWN PRECONDITION (config, default off — see
+        // config/production.php 'require_postable_voucher' for why the
+        // default is a safety property rather than a preference).
+        //
+        // The owner: "If the Tally preview is invalid, posting must remain
+        // unavailable." This gate IS the posting moment, so the question is
+        // asked here, of the EXISTING preview service — which builds its
+        // payload with the same method the real post uses, so the gate can
+        // never judge a voucher different from the one that would be sent.
+        //
+        // Scoped to a row genuinely awaiting this gate, exactly like the
+        // four-eyes read above: a wrong-status call finds null here and falls
+        // through to advance(), which reports the real problem (the
+        // transition) rather than a voucher complaint about an entry that was
+        // never eligible. A LOCAL- fixture is exempt because no voucher is
+        // ever built for it (TallySyncService::isLocalFixtureEntry) — there
+        // is no posting for a posting gate to protect, and refusing would
+        // strand a real batch.
+        if ((bool) config('production.approvals.require_postable_voucher', false)) {
+            $awaiting = ShiftProductionEntry::query()
+                ->whereKey($entry->id)
+                ->where('status', ShiftProductionEntryStatus::PmApproved->value)
+                ->first();
+
+            if ($awaiting !== null && ! ($awaiting->item?->isLocalFixture() ?? false)) {
+                $preview = $this->voucherPreview->forShiftProductionEntry($awaiting);
+
+                if (! ($preview['postable'] ?? false)) {
+                    $problems = array_merge(
+                        $preview['problems'] ?? [],
+                        ...array_map(fn ($line) => $line['problems'] ?? [], $preview['lines'] ?? []),
+                    );
+
+                    // Factory words, and the actual reasons — an accountant
+                    // being told the button did nothing needs to know which
+                    // master to fix, not that a boolean was false.
+                    throw new InvalidStatusTransitionException(
+                        'this batch cannot be posted to Tally yet, so it cannot be approved: '
+                        .implode(' ', array_unique($problems))
+                        .' Fix the masters (or the Production settings they name) and approve it again.',
+                    );
+                }
+            }
+        }
+
         // Optional hard gate (config, default off): an unaccounted-material
         // figure at/over the blocking threshold cannot be posted — reject it
         // back to the floor or correct the entry first.
@@ -1420,10 +2323,15 @@ class ShiftProductionEntryService
      * nominal weight; no BOM and no weight means no norm, so the expected-
      * side numbers are null while actual/rejection/scrap still report.
      *
+     * The norm is MACHINE THROUGHPUT — approved output plus QC-rejected plus
+     * production-rejected pieces, at the run's frozen weight, plus lumps kg.
+     * See expectedConsumptionKg() for why, and for what it was before.
+     * A batch whose supervisor followed that formula lands on 0.0000 here.
+     *
      * @return array{
-     *     norm_source: ?string, expected_kg: ?string, actual_kg: string,
-     *     variance_kg: ?string, variance_pct: ?float, rejection_kg: string,
-     *     scrap_kg: string, unaccounted_kg: ?string,
+     *     norm_source: ?string, norm_basis: ?string, expected_kg: ?string,
+     *     actual_kg: string, variance_kg: ?string, variance_pct: ?float,
+     *     rejection_kg: string, scrap_kg: string, unaccounted_kg: ?string,
      * }|null
      */
     public function consumptionVariance(ShiftProductionEntry $entry): ?array
@@ -1455,7 +2363,7 @@ class ShiftProductionEntryService
             ? bcadd((string) $entry->quantity_rejection_kg, '0', 4)
             : '0';
 
-        [$normSource, $expected] = $this->expectedConsumptionKg($entry);
+        [$normSource, $normBasis, $expected] = $this->expectedConsumptionKg($entry);
 
         $variancePct = null;
         if ($expected !== null && bccomp($expected, '0', 4) !== 0) {
@@ -1464,6 +2372,11 @@ class ShiftProductionEntryService
 
         return [
             'norm_source' => $normSource,
+            // The machine-readable tier stays 'bom'/'item_weight' — clients
+            // and tests key off those strings. norm_basis is the sentence
+            // the approver reads, and it is what changed: the norm is no
+            // longer "what came out", it is what went through.
+            'norm_basis' => $normBasis,
             'expected_kg' => $expected,
             'actual_kg' => $actual,
             'variance_kg' => $expected !== null ? bcsub($actual, $expected, 4) : null,
@@ -1479,9 +2392,13 @@ class ShiftProductionEntryService
             })(),
             'rejection_kg' => $rejection,
             'scrap_kg' => $scrap,
-            'unaccounted_kg' => $expected !== null
-                ? bcsub(bcsub(bcsub($actual, $expected, 4), $rejection, 4), $scrap, 4)
-                : null,
+            // Deliberately EQUAL to variance_kg now, and kept as its own key
+            // only because the shape is on the wire. It used to subtract
+            // rejection and scrap from the gap because the norm ignored
+            // them; the norm covers both today, so subtracting them again
+            // would count the same kilograms twice and report a loss as a
+            // surplus. What the norm cannot explain is simply what is left.
+            'unaccounted_kg' => $expected !== null ? bcsub($actual, $expected, 4) : null,
         ];
     }
 
@@ -1496,8 +2413,16 @@ class ShiftProductionEntryService
      * reference "SPE #{id}", shared by the consumption issues AND the FG
      * receipt — so lines match on reference + type=issue + item + warehouse.
      * Duplicate (item, warehouse) consumption lines pair off against the
-     * issue movements in creation order, one each, so nothing is counted
-     * twice.
+     * issue movements one each, so nothing is counted twice.
+     *
+     * NEWEST FIRST within a pool, because an AMENDED batch has more than one
+     * completion's issues under that one reference (the ledger is append-only,
+     * so the wrong completion's issues and their reversals both stay). The
+     * live consumption lines are the latest completion's, and pairing from the
+     * front would have priced them against the superseded run's costs. Within
+     * a single completion the two orders are identical: an issue does not move
+     * the average cost, so every issue of one item at one warehouse in the
+     * same completion carries the same unit cost.
      *
      * Null-safety rule: a line whose movement is missing, whose movement
      * carries no cost, or which was issued out of a bin that had no recorded
@@ -1550,7 +2475,7 @@ class ShiftProductionEntryService
 
         foreach ($entry->materialConsumptions as $consumption) {
             $key = "{$consumption->item_id}@{$consumption->warehouse_id}";
-            $movement = $pool->get($key)?->shift();
+            $movement = $pool->get($key)?->pop();
             $unitCost = $movement?->unit_cost;
 
             if ($unitCost !== null && isset($unpriced[$key]) && bccomp((string) $unitCost, '0', 4) === 0) {
@@ -1918,13 +2843,6 @@ class ShiftProductionEntryService
     }
 
     /**
-     * Resolve the consumption norm: [norm_source, expected_kg]. A lazy
-     * per-entry BOM lookup — approval lists are small pages, so this stays
-     * simpler than a batch preload.
-     *
-     * @return array{0: ?string, 1: ?string}
-     */
-    /**
      * Record the day-bin closing weights for a segment.
      *
      * The single path for BOTH normal completion and handover. Consumption is
@@ -1956,10 +2874,66 @@ class ShiftProductionEntryService
         }
     }
 
+    /**
+     * Resolve the consumption norm: [norm_source, norm_basis, expected_kg].
+     * A lazy per-entry BOM lookup — approval lists are small pages, so this
+     * stays simpler than a batch preload.
+     *
+     * THE NORM IS MACHINE THROUGHPUT, NOT APPROVED OUTPUT. Every piece the
+     * machine moulded was moulded out of the same resin, whoever later
+     * refused it, so the norm counts all three fates plus the resin that
+     * never became a piece at all:
+     *
+     *     (approved output + QC-rejected pieces + production-rejected pieces)
+     *         × the run's frozen unit weight  +  lumps kg
+     *
+     * which is the factory's own arithmetic, and on the weight tier below is
+     * textually the pieces side of refuseStaleMaterialLines() with the QC
+     * term added (that path runs with the QC columns cleared, so it has no
+     * third fate to count). The two must not drift apart: the guard would
+     * then refuse a correction whose figures this norm calls perfect.
+     *
+     * Netting the norm to approved output only — what it did until this was
+     * fixed — charged the supervisor for resin they never lost. A batch that
+     * followed the formula exactly, with real rejects and real lumps, read
+     * as a +3.6% "Watch" on the approval screen and there was nothing to
+     * find. Now such a batch reads 0.0000 and the bands fire only on a
+     * genuine hand-override of the kilograms.
+     *
+     * BEFORE AND AFTER THE QUALITY CHECK BOTH WORK, without a branch. The
+     * check nets quantity_produced down and files the count it removed in
+     * quality_rejected_nos, so net + QC-rejected is the packed count either
+     * way; before a check quality_rejected_nos is null and quantity_produced
+     * IS the packed count. So the check moves approved FG and never moves
+     * this norm — which is the point: QC rejects are inside the packed count
+     * and were never extra resin.
+     *
+     * Both tiers norm on throughput. A kg-type BOM line is a per-piece rate
+     * like the weight is; leaving the BOM tier on net output would keep this
+     * exact defect alive for every product that has one.
+     *
+     * @return array{0: ?string, 1: ?string, 2: ?string}
+     */
     private function expectedConsumptionKg(ShiftProductionEntry $entry): array
     {
-        $produced = $entry->quantity_produced !== null ? (string) $entry->quantity_produced : null;
-        $hasProduced = $produced !== null && bccomp($produced, '0', 4) !== 0;
+        // Nulls coalesce BEFORE the cast — bcadd('') is a fatal, and an
+        // unchecked batch has null in quality_rejected_nos by definition.
+        $throughput = bcadd(
+            bcadd(
+                (string) ($entry->quantity_produced ?? '0'),
+                (string) ($entry->quality_rejected_nos ?? '0'),
+                4,
+            ),
+            (string) ($entry->quantity_scrap ?? '0'),
+            4,
+        );
+
+        // Lumps are weighed, not counted, so they join the norm in kg rather
+        // than through the unit weight — and they belong to it even on a
+        // batch whose piece counts are all zero.
+        $lumps = $this->lumpsKgOfScraps($entry->scraps);
+
+        $hasOutput = bccomp($throughput, '0', 4) !== 0 || bccomp($lumps, '0', 4) !== 0;
 
         if ($bom = $this->activeBomFor($entry->item_id)) {
             // Soft-deleted component masters still carry their UOM — this is
@@ -1980,7 +2954,11 @@ class ShiftProductionEntryService
             // A BOM with no kg-type lines (caps/cartons only) provides no
             // mass norm — fall through to the item weight, don't claim 0.
             if (bccomp($kgPerUnit, '0', 4) === 1) {
-                return ['bom', $hasProduced ? bcmul($produced, $kgPerUnit, 4) : null];
+                return [
+                    'bom',
+                    'throughput at BOM rate + lumps',
+                    $hasOutput ? bcadd(bcmul($throughput, $kgPerUnit, 4), $lumps, 4) : null,
+                ];
             }
         }
 
@@ -1993,10 +2971,16 @@ class ShiftProductionEntryService
         // test already reads that string.
         $weightGrams = $this->resolvedUnitWeightGrams($entry, $entry->item);
         if ($weightGrams !== null) {
-            return ['item_weight', $hasProduced ? bcdiv(bcmul($produced, $weightGrams, 4), '1000', 4) : null];
+            return [
+                'item_weight',
+                'throughput at standard weight + lumps',
+                $hasOutput
+                    ? bcadd(bcdiv(bcmul($throughput, $weightGrams, 4), '1000', 4), $lumps, 4)
+                    : null,
+            ];
         }
 
-        return [null, null];
+        return [null, null, null];
     }
 
     /**

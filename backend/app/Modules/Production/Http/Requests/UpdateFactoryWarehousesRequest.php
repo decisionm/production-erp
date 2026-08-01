@@ -7,11 +7,11 @@ use Illuminate\Validation\Rule;
 
 /**
  * Names the warehouses the floor is never asked about — the finished-goods
- * destination and the raw-material source.
+ * destination, the raw-material source and the Packing Material Store.
  *
  * Same settings shape as `PUT settings/day-bin-warehouse`: named values in,
- * the stored values echoed back. Both keys are optional so one role can be
- * set without disturbing the other; sending a key with `null` CLEARS that
+ * the stored values echoed back. Every key is optional so one role can be
+ * set without disturbing the others; sending a key with `null` CLEARS that
  * role, which is a real operation — it returns that role to the
  * single-Tally-linked-warehouse fallback rather than leaving it pointed at
  * something stale.
@@ -40,6 +40,16 @@ class UpdateFactoryWarehousesRequest extends FormRequest
                 Rule::exists('warehouses', 'id')->where('is_active', true),
             ],
             'raw_material_warehouse_id' => [
+                'sometimes',
+                'nullable',
+                'integer',
+                Rule::exists('warehouses', 'id')->where('is_active', true),
+            ],
+            // The Packing Material Store. Same shape as its two neighbours;
+            // the difference is what happens when it is NOT set, and that
+            // lives in the resolver: no fallback, so the Tally preview names
+            // the gap instead of issuing cartons from the resin godown.
+            'packing_material_warehouse_id' => [
                 'sometimes',
                 'nullable',
                 'integer',

@@ -72,6 +72,7 @@ use App\Modules\Production\Http\Controllers\VoucherPreviewController;
 use App\Modules\Production\Http\Controllers\WorkCenterController;
 use App\Modules\Production\Http\Controllers\WorkOrderController;
 use App\Modules\Quality\Http\Controllers\BatchQualityCheckController;
+use App\Modules\Quality\Http\Controllers\BatchReturnToProductionController;
 use App\Modules\Quality\Http\Controllers\CalibrationRecordController;
 use App\Modules\Quality\Http\Controllers\CapaController;
 use App\Modules\Quality\Http\Controllers\IncomingInspectionController;
@@ -323,6 +324,20 @@ Route::prefix('v1')->group(function () {
             BatchQualityCheckController::class,
         )->middleware('module:quality');
 
+        /*
+         * THE OTHER HALF OF THAT GATE: quality sending a batch back to the
+         * floor instead of certifying it. Registered here, beside the check
+         * and outside the production group, for exactly the reasons above —
+         * the quality desk performs it, so it carries module:quality and
+         * only that. Production's own correction of the same batch lives at
+         * .../amend inside the production group, and a user holding one
+         * module's permission cannot reach the other's route.
+         */
+        Route::post(
+            'production/shift-production-entries/{shift_production_entry}/return-to-production',
+            BatchReturnToProductionController::class,
+        )->middleware('module:quality');
+
         Route::prefix('production')->middleware('module:production')->group(function () {
             Route::get('settings', [ProductionSettingsController::class, 'show']);
             // Which warehouse IS the factory day bin (app_settings). A PUT
@@ -345,15 +360,18 @@ Route::prefix('v1')->group(function () {
             // with their current store kg. Plain masters+balances read —
             // like the bin read above, never traceability-gated.
             Route::get('factory-day-bin/raw-materials', [FactoryDayBinController::class, 'rawMaterials']);
-            // The day-bin reconciliation for one date (?date=YYYY-MM-DD,
-            // today when absent): per material opening + loaded − consumed
-            // = expected closing. This is where "is any material missing?"
-            // is now asked — centrally, once a day — instead of per batch,
-            // where the figure was ~0 by construction. Past dates included:
-            // yesterday's numbers are the accountant's morning question.
-            // Plain movements+balances read, so outside the traceability
-            // gate like its two neighbours above.
-            Route::get('factory-day-bin/reconciliation', [FactoryDayBinController::class, 'reconciliation']);
+            // ESTIMATED RESIN REMAINING PER MACHINE (optional
+            // ?work_center_id=): scanned loads into that machine minus the
+            // calculated consumption of its batches, per material, all time.
+            // This is where "how much is left on that machine?" is answered.
+            //
+            // It REPLACED factory-day-bin/reconciliation, which compared a
+            // derived expected closing against a physical bin weight — the
+            // owner has since ruled that this factory takes no such weight
+            // (31-Jul), so the read asked a question nobody answers. Plain
+            // ledger+consumption read, so outside the traceability gate like
+            // its two neighbours above.
+            Route::get('machine-resin', [FactoryDayBinController::class, 'machineResin']);
             Route::apiResource('work-centers', WorkCenterController::class)->only(['index', 'store', 'update']);
 
             Route::apiResource('boms', BomController::class)->only(['index', 'store']);
@@ -456,6 +474,12 @@ Route::prefix('v1')->group(function () {
             Route::get('shift-production-entries/preview', BatchPreviewController::class);
             Route::apiResource('shift-production-entries', ShiftProductionEntryController::class)->only(['index', 'store']);
             Route::post('shift-production-entries/{shift_production_entry}/complete', [ShiftProductionEntryController::class, 'complete']);
+            // Correcting a completed batch that quality has not touched yet —
+            // the floor's own fix, refused the moment the batch stops being
+            // theirs (a quality check, any approval, a Tally voucher, a shift
+            // that handed over from it). After a check it is quality who hands
+            // it back, at .../return-to-production above.
+            Route::post('shift-production-entries/{shift_production_entry}/amend', [ShiftProductionEntryController::class, 'amend']);
             // The 4-stage approval chain (Supervisor submits at completeBatch):
             // PM verifies → Accountant reconciles → MD final approval → Tally.
             Route::post('shift-production-entries/{shift_production_entry}/pm-approve', [ShiftProductionEntryController::class, 'pmApprove']);

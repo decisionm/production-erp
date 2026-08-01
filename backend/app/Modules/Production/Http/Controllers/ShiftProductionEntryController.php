@@ -3,6 +3,7 @@
 namespace App\Modules\Production\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Production\Http\Requests\AmendBatchRequest;
 use App\Modules\Production\Http\Requests\CompleteBatchRequest;
 use App\Modules\Production\Http\Requests\HandoverRequest;
 use App\Modules\Production\Http\Requests\RejectShiftProductionEntryRequest;
@@ -50,6 +51,20 @@ class ShiftProductionEntryController extends Controller
     {
         return ShiftProductionEntryResource::make(
             $this->entries->completeBatch($shiftProductionEntry, $request->validated(), $request->user()?->id),
+        );
+    }
+
+    /**
+     * Correcting a completed batch that is still waiting for quality — the
+     * floor's own fix to its own count. Same permission as completing it
+     * (this group's module:production ⇒ production.manage), because it is the
+     * same act by the same people; WHEN it is allowed to happen is a
+     * transition rule and lives in the service with the rest of them.
+     */
+    public function amend(AmendBatchRequest $request, ShiftProductionEntry $shiftProductionEntry): ShiftProductionEntryResource
+    {
+        return ShiftProductionEntryResource::make(
+            $this->entries->amendCompletion($shiftProductionEntry, $request->validated(), $request->user()?->id),
         );
     }
 

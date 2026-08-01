@@ -20,9 +20,14 @@ import {
     Tooltip,
     Typography,
 } from 'antd';
-import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { listAllItems } from '@/features/inventory/api';
+import {
+    buildStartBatchReturnUrl,
+    hasStartBatchResume,
+    parseStartBatchResume,
+} from '@/features/production/startBatchResume';
 import {
     attachStandardItem,
     createProductionStandard,
@@ -537,7 +542,7 @@ function DerivedPerBox({ per, count, unit }: { per?: number; count?: number; uni
     );
 }
 
-function NewStandardModal({ onClose }: { onClose: () => void }) {
+function NewStandardModal({ onClose, initialName }: { onClose: () => void; initialName?: string }) {
     const queryClient = useQueryClient();
     const [form] = Form.useForm<NewStandardForm>();
 
@@ -603,7 +608,17 @@ function NewStandardModal({ onClose }: { onClose: () => void }) {
                 any other row.
             </Typography.Paragraph>
 
-            <Form<NewStandardForm> form={form} layout="vertical" onFinish={submit} requiredMark={false}>
+            {/* Opened from a blocked Start Batch: the product is already known,
+                so it arrives typed. Still editable — the workbook's wording and
+                the item master's are not always the same, and only a person can
+                say which one the factory uses. */}
+            <Form<NewStandardForm>
+                form={form}
+                layout="vertical"
+                onFinish={submit}
+                requiredMark={false}
+                initialValues={initialName ? { source_product_name: initialName } : undefined}
+            >
                 <Form.Item
                     name="source_product_name"
                     label="Product name"
@@ -727,6 +742,46 @@ export default function ProductStandardsPage() {
     const [attaching, setAttaching] = useState<ProductionStandardRow | null>(null);
     const [adding, setAdding] = useState(false);
 
+    /**
+     * Arrived here from a blocked Start Batch.
+     *
+     * THE CONTEXT LIVES IN THE URL, not in memory, so a refresh in the middle
+     * of configuring does not strand the supervisor on a page with no way
+     * back. It is read through the shared allowlisted parser — every id is a
+     * scalar this app put there and nothing else is accepted; an arbitrary
+     * return URL is never honoured.
+     */
+    const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const resumeQuery = searchParams.toString();
+    const resumeDraft = useMemo(() => {
+        const params = new URLSearchParams(resumeQuery);
+        if (!hasStartBatchResume(params, 'configure')) return null;
+        return parseStartBatchResume(params)?.draft ?? null;
+    }, [resumeQuery]);
+
+    // Only fetched when somebody actually came from Start Batch. The key is
+    // the app-wide "every item" one, so on a warm cache this costs nothing.
+    const { data: allItems } = useQuery({
+        queryKey: ['inventory', 'items', 'all'],
+        queryFn: listAllItems,
+        enabled: resumeDraft !== null,
+    });
+    const resumeItem = resumeDraft
+        ? (allItems?.data.find((item) => item.id === resumeDraft.item_id) ?? null)
+        : null;
+
+    // Land ON the product, not on 86 rows of other people's products. Once
+    // per arrival: after that the search box is the supervisor's.
+    const prefilledSearchForRef = useRef<string | null>(null);
+    useEffect(() => {
+        if (!resumeDraft || !resumeItem) return;
+        if (prefilledSearchForRef.current === resumeQuery) return;
+        prefilledSearchForRef.current = resumeQuery;
+        setSearch(resumeItem.name);
+        setPage(1);
+    }, [resumeDraft, resumeItem, resumeQuery]);
+
     const { data, isLoading } = useQuery({
         queryKey: ['production', 'standards', page, scope],
         queryFn: () => listProductionStandards({ page, per_page: PER_PAGE, matched_only: scope === 'mapped' }),
@@ -789,6 +844,59 @@ export default function ProductStandardsPage() {
                 from the workbook and are corrected there; what is maintained here is which item a product is, and
                 products the workbook does not carry.
             </Typography.Paragraph>
+
+            {/* THE WAY BACK. A supervisor sent here by a blocked Start Batch has
+                a machine standing idle, and the worst outcome of this side trip
+                is that they fix the product and then have to rebuild the setup
+                from memory — machine, shift, date, store, cavities, colour. The
+                button carries all of it back and Start Batch reopens exactly as
+                it was left, having re-read this product's readiness. It sits at
+                the top because it is the only thing on this page that is about
+                the batch they are trying to start. */}
+            {resumeDraft && (
+                <Alert
+                    type="info"
+                    showIcon
+                    style={{ marginBottom: 16 }}
+                    message={
+                        resumeItem
+                            ? `Configuring ${itemLabel(resumeItem)} for a batch you were starting`
+                            : 'Configuring a product for a batch you were starting'
+                    }
+                    description={
+                        <>
+                            Add or attach this product&rsquo;s standard below — the cavities, weight, cycle time and
+                            pieces per carton are what Start Batch is waiting for. Then come back: your machine, shift,
+                            date and store are all still held.
+                            {/* THE COMMON CASE, AND THE ONE THAT LOOKS LIKE A
+                                BROKEN PAGE. The findings that block a start —
+                                weight, cycle time, cavities — fire precisely
+                                when the product has no standard at all, so the
+                                filtered table below is empty. An empty grid
+                                reads as "nothing to do here"; it is in fact the
+                                whole reason they were sent. */}
+                            {resumeItem && visible.length === 0 && !isLoading ? (
+                                <div style={{ marginTop: 8 }}>
+                                    <Typography.Text strong>
+                                        There is no standard for this product yet — that is what Start Batch is
+                                        missing.
+                                    </Typography.Text>{' '}
+                                    Use <b>New product standard</b> above; it opens with the product name already
+                                    filled in.
+                                </div>
+                            ) : null}
+                        </>
+                    }
+                    action={
+                        <Button
+                            type="primary"
+                            onClick={() => navigate(buildStartBatchReturnUrl(resumeDraft, 'created'), { replace: true })}
+                        >
+                            Back to Start Batch
+                        </Button>
+                    }
+                />
+            )}
 
             {/* The distinction that explains two Start Batch notices. Stated here
                 because this is the page people arrive at looking for it. */}
@@ -1090,7 +1198,12 @@ export default function ProductStandardsPage() {
             {attaching !== null && (
                 <AttachItemModal key={attaching.id} standard={attaching} onClose={() => setAttaching(null)} />
             )}
-            {adding && <NewStandardModal onClose={() => setAdding(false)} />}
+            {adding && (
+                <NewStandardModal
+                    onClose={() => setAdding(false)}
+                    initialName={resumeItem?.name ?? undefined}
+                />
+            )}
         </>
     );
 }
