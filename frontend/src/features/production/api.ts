@@ -1289,6 +1289,40 @@ export async function setDayBinWarehouse(warehouseId: number | null): Promise<nu
     return data.data.day_bin_warehouse_id;
 }
 
+/**
+ * The two warehouse ROLES Start Batch and completion resolve silently:
+ * where finished goods land, and where raw material issues from when the
+ * day bin cannot answer. `*_resolved_*` is what the resolver would use
+ * TODAY (setting, else the single Tally-linked warehouse); the plain ids
+ * are what is actually stored. Both are shown so the screen can honestly
+ * say "nothing set — resolving to X" versus "nothing set and nothing
+ * resolvable", which is the exact state that blocked the team's first
+ * batch: the backend refused to guess, correctly, but no screen existed
+ * to make the choice it asked for.
+ */
+export interface FactoryWarehouseSettings {
+    finished_goods_warehouse_id: number | null;
+    raw_material_warehouse_id: number | null;
+    finished_goods_resolved_warehouse_id: number | null;
+    raw_material_resolved_warehouse_id: number | null;
+}
+
+export async function getFactoryWarehouseSettings(): Promise<FactoryWarehouseSettings> {
+    const { data } = await api.get<{ data: FactoryWarehouseSettings }>('/production/settings');
+    return data.data as FactoryWarehouseSettings;
+}
+
+export async function setFactoryWarehouse(
+    role: 'finished_goods_warehouse_id' | 'raw_material_warehouse_id',
+    warehouseId: number | null,
+): Promise<FactoryWarehouseSettings> {
+    const { data } = await api.put<{ data: FactoryWarehouseSettings }>(
+        '/production/settings/factory-warehouses',
+        { [role]: warehouseId },
+    );
+    return data.data;
+}
+
 export interface LoadFactoryDayBinPayload {
     item_id: number;
     from_warehouse_id: number;

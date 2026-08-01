@@ -3,6 +3,7 @@ import {
     Alert,
     Button,
     Card,
+    message,
     Col,
     Form,
     Input,
@@ -19,7 +20,7 @@ import {
 } from 'antd';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { listAllItems } from '@/features/inventory/api';
+import { listAllItems, listAllWarehouses } from '@/features/inventory/api';
 import {
     approveProductionConfiguration,
     machineLabel,
@@ -34,6 +35,8 @@ import {
     listWorkCenters,
     saveDowntimeReason,
     saveFactorySetting,
+    getFactoryWarehouseSettings,
+    setFactoryWarehouse,
     updateWorkCenterCapability,
 } from '@/features/production/api';
 import type { DowntimeReason, ImportResult, ProductionConfiguration, WorkCenter } from '@/features/production/types';
@@ -575,6 +578,99 @@ function DowntimeReasonsTab() {
     );
 }
 
+/**
+ * The two warehouse ROLES the floor resolves silently. This card exists
+ * because its absence blocked the factory's first real batch: Start Batch
+ * refused (correctly) to guess where finished goods land, and its error
+ * said "name one in Production settings" — a place that, until this card,
+ * had no control to do so. The backend endpoint predates the screen.
+ */
+function FactoryWarehousesCard() {
+    const queryClient = useQueryClient();
+    const { data: settings } = useQuery({
+        queryKey: ['production', 'factory-warehouse-settings'],
+        queryFn: getFactoryWarehouseSettings,
+    });
+    const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses', 'all'], queryFn: listAllWarehouses });
+
+    const mutation = useMutation({
+        mutationFn: ({ role, warehouseId }: { role: 'finished_goods_warehouse_id' | 'raw_material_warehouse_id'; warehouseId: number | null }) =>
+            setFactoryWarehouse(role, warehouseId),
+        onSuccess: () => {
+            // The preview/readiness reads resolve through these settings, so
+            // stale caches would keep showing the refusal after it is fixed.
+            queryClient.invalidateQueries({ queryKey: ['production', 'factory-warehouse-settings'] });
+            queryClient.invalidateQueries({ queryKey: ['production', 'settings'] });
+            message.success('Saved — the floor uses this from the next action.');
+        },
+        onError: (error: any) =>
+            Modal.error({ title: 'Could not save', content: error?.response?.data?.message ?? 'Unexpected error.' }),
+    });
+
+    const options = (warehouses?.data ?? [])
+        .filter((w) => w.is_active)
+        .map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` }));
+
+    const describe = (stored: number | null | undefined, resolved: number | null | undefined): string => {
+        if (stored != null) return '';
+        if (resolved != null) {
+            const w = (warehouses?.data ?? []).find((x) => x.id === resolved);
+            return `Nothing set — currently resolving to ${w ? w.name : `warehouse #${resolved}`}.`;
+        }
+        return 'Nothing set and nothing resolvable — Start Batch is REFUSED until this is chosen.';
+    };
+
+    const row = (
+        label: string,
+        help: string,
+        role: 'finished_goods_warehouse_id' | 'raw_material_warehouse_id',
+        stored: number | null | undefined,
+        resolved: number | null | undefined,
+    ) => (
+        <div style={{ marginBottom: 12 }}>
+            <Typography.Text strong style={{ display: 'block' }}>{label}</Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>{help}</Typography.Text>
+            <Select
+                style={{ width: 360, maxWidth: '100%' }}
+                placeholder="Choose a warehouse…"
+                showSearch
+                optionFilterProp="label"
+                allowClear
+                value={stored ?? undefined}
+                options={options}
+                onChange={(v) => mutation.mutate({ role, warehouseId: v ?? null })}
+            />
+            {describe(stored, resolved) && (
+                <Typography.Text
+                    type={resolved == null && stored == null ? 'danger' : 'secondary'}
+                    style={{ fontSize: 12, display: 'block', marginTop: 4 }}
+                >
+                    {describe(stored, resolved)}
+                </Typography.Text>
+            )}
+        </div>
+    );
+
+    return (
+        <Card size="small" title="Factory warehouses" style={{ marginBottom: 16 }}>
+            {row(
+                'Finished-goods warehouse',
+                'Where produced bottles are booked when a batch completes. Start Batch is refused until this resolves.',
+                'finished_goods_warehouse_id',
+                settings?.finished_goods_warehouse_id,
+                settings?.finished_goods_resolved_warehouse_id,
+            )}
+            {row(
+                'Raw-material store',
+                'Where material issues from when the day bin cannot supply it. The day bin itself is named on the Day Bin page.',
+                'raw_material_warehouse_id',
+                settings?.raw_material_warehouse_id,
+                settings?.raw_material_resolved_warehouse_id,
+            )}
+        </Card>
+    );
+}
+
 function SettingsTab() {
     const queryClient = useQueryClient();
     const { data, isFetching } = useQuery({ queryKey: ['production', 'factory-settings'], queryFn: listFactorySettings });
@@ -586,6 +682,8 @@ function SettingsTab() {
     });
 
     return (
+        <>
+        <FactoryWarehousesCard />
         <Table
             rowKey="id"
             size="small"
@@ -635,6 +733,7 @@ function SettingsTab() {
                 ] as never
             }
         />
+        </>
     );
 }
 
