@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+/// <reference types="vite-plugin-pwa/client" />
 
 // Baked in by vite.config.ts's `define` at build time: short commit + build
 // date/time, shown in the sidebar footer so "which version are you on?" has

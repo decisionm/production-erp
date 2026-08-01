@@ -12,7 +12,9 @@ use App\Modules\Production\Models\ProductionStandard;
 use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\WorkCenter;
+use App\Modules\Production\Services\PackingItemMatcher;
 use App\Modules\Production\Services\PackingMaterialMappingService;
+use App\Modules\Production\Services\PackingMaterialSuggestionService;
 use App\Modules\Production\Services\ShiftProductionEntryService;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -666,6 +668,226 @@ class PackingMaterialMappingTest extends TestCase
         $this->getJson("/api/v1/production/shift-production-entries/preview?item_id={$this->bottle->id}")
             ->assertOk()
             ->assertJsonCount(0, 'data.suggested_packing');
+    }
+
+    // ------------------- (3a) metres are not Nos: the tape line is withheld --
+    //
+    // The tape suggestion is computed in METRES (100 cartons × 2.29 = 229 m)
+    // and the Tally item it points at is counted in Nos. The completion screen
+    // used to file that 229 as an ordinary consumption line, so 229 "Nos" of
+    // tape were issued against a real store and posted to the live books — a
+    // different number about a different thing, with nothing on screen saying
+    // so. Whether a Tally "No" is one metre or one whole roll has been open
+    // with the factory since the figures arrived (TapeMetresPerBox).
+    //
+    // These four tests pin the honest answer: the line is SHOWN with its
+    // metres and withheld from the payload until the factory settles the unit,
+    // and the moment they settle it — either way — it posts.
+
+    /** The suggestion for one kind, off the live preview endpoint. */
+    private function previewLine(string $kind): array
+    {
+        return collect(
+            $this->getJson("/api/v1/production/shift-production-entries/preview?item_id={$this->bottle->id}")
+                ->assertOk()
+                ->json('data.suggested_packing'),
+        )->keyBy('kind')->get($kind);
+    }
+
+    public function test_the_tape_line_is_shown_in_metres_and_withheld_from_stock_until_the_unit_is_settled(): void
+    {
+        $this->actingAsProduction();
+        $this->seedFixtureStandards();
+        app(PackingMaterialMappingService::class)->seedFromCatalogue();
+
+        $tape = $this->previewLine('tape');
+
+        // Still shown, still the factory's own figure, still in metres — this
+        // is not a quarantine. A supervisor who wants to know how much tape a
+        // 100-carton run eats can still read it off the screen.
+        $this->assertSame('Packing Tape - Transparent', $tape['item']['name']);
+        $this->assertSame(self::TAPE_170_ROUND, $tape['factor']);
+        $this->assertSame('m', $tape['unit']);
+
+        // ...and NOT filed. This one boolean is the whole fix: the screen obeys
+        // it rather than working the rule out again on its own side.
+        $this->assertFalse($tape['submit_as_stock']);
+
+        // The reason says both halves out loud — that the figure is metres,
+        // and that it is therefore going nowhere. A withheld number nobody was
+        // told about is worse than no number.
+        $this->assertStringContainsString('still open', $tape['reason']);
+        $this->assertStringContainsString('NOT posted to stock or Tally', $tape['reason']);
+        // ...and names the two ways the factory can end it, because a caveat
+        // with no exit is just an apology.
+        $this->assertStringContainsString('metres per unit', $tape['reason']);
+    }
+
+    public function test_the_carton_tray_and_film_lines_are_untouched_by_the_tape_rule(): void
+    {
+        $this->actingAsProduction();
+        $this->seedFixtureStandards();
+        app(PackingMaterialMappingService::class)->seedFromCatalogue();
+
+        $lines = collect(
+            $this->getJson("/api/v1/production/shift-production-entries/preview?item_id={$this->bottle->id}")
+                ->assertOk()
+                ->json('data.suggested_packing'),
+        )->keyBy('kind');
+
+        // THE TRAP THIS TEST EXISTS FOR. The tape rule compares a unit against
+        // items.uom, and every packing item in this factory's master reads
+        // "NOS" — INCLUDING the film, which Tally moves in Kgs. A rule written
+        // one degree more general than "tape" would find film's kg against the
+        // item's NOS, call it a mismatch, and drop the film line from every
+        // completion: the identical defect, new material, and nobody would see
+        // it because the row would still be on screen.
+        $this->assertTrue($lines['carton']['submit_as_stock']);
+        $this->assertTrue($lines['tray']['submit_as_stock']);
+        $this->assertTrue($lines['pouch_film']['submit_as_stock']);
+
+        // Their units and factors are exactly what they were — the fix adds a
+        // field, it does not renegotiate the arithmetic.
+        $this->assertSame(['1', 'nos'], [$lines['carton']['factor'], $lines['carton']['unit']]);
+        $this->assertSame(['1', 'nos'], [$lines['tray']['factor'], $lines['tray']['unit']]);
+        $this->assertSame('kg', $lines['pouch_film']['unit']);
+    }
+
+    public function test_a_tape_item_the_factory_recounts_in_metres_posts_its_metres_unconverted(): void
+    {
+        $this->actingAsProduction();
+        $this->seedFixtureStandards();
+        app(PackingMaterialMappingService::class)->seedFromCatalogue();
+
+        // One of the two answers, and the one that needs no new column: the
+        // factory corrects the tape item's unit in the masters. Now the
+        // mapping's metres ARE the Tally quantity and there is nothing to
+        // convert — the disagreement is simply over.
+        $this->catalogue['Packing Tape - Transparent']->update(['uom' => 'Mtr']);
+
+        $tape = $this->previewLine('tape');
+
+        $this->assertTrue($tape['submit_as_stock']);
+        // Unconverted, deliberately: 2.2900 m per box is what posts.
+        $this->assertSame(self::TAPE_170_ROUND, $tape['factor']);
+        $this->assertSame('m', $tape['unit']);
+        $this->assertStringContainsString('counted in Mtr', $tape['reason']);
+        $this->assertStringNotContainsString('NOT posted', $tape['reason']);
+    }
+
+    /**
+     * The suggestion service with `metres_per_unit` answered on the tape row.
+     *
+     * The answer has no COLUMN yet — the migration ships with the factory's
+     * figure, see PackingMaterialMapping's docblock — so the attribute is set
+     * in memory and handed to the service through a mapping resolver that
+     * returns that row. Everything downstream of resolve() is the real code
+     * path, which is the half worth proving: the day the column lands, the
+     * arithmetic and the flag are already right and already tested.
+     */
+    private function suggestionsWithTapeAnswer(ProductionStandard $standard, ?string $metresPerUnit): array
+    {
+        $tape = PackingMaterialMapping::query()
+            ->with('item')
+            ->where('spec_kind', PackingMaterialMapping::KIND_TAPE)
+            ->where('spec_value', '170ML')
+            ->firstOrFail();
+
+        $tape->setAttribute('metres_per_unit', $metresPerUnit);
+
+        $mappings = new class(app(PackingItemMatcher::class), $tape) extends PackingMaterialMappingService
+        {
+            public function __construct(PackingItemMatcher $matcher, private readonly PackingMaterialMapping $tape)
+            {
+                parent::__construct($matcher);
+            }
+
+            public function resolve(string $kind, ?string $spec): ?PackingMaterialMapping
+            {
+                // Only tape is substituted; the carton, tray and film rows
+                // resolve out of the database exactly as they do in
+                // production, so this test can still see them come back
+                // unchanged.
+                return $kind === PackingMaterialMapping::KIND_TAPE
+                    ? $this->tape
+                    : parent::resolve($kind, $spec);
+            }
+        };
+
+        return collect((new PackingMaterialSuggestionService($mappings))->forStandard($standard))
+            ->keyBy('kind')
+            ->all();
+    }
+
+    public function test_a_metres_per_unit_answer_converts_the_tape_factor_to_nos_and_lets_it_post(): void
+    {
+        $this->actingAsProduction();
+        $this->seedFixtureStandards();
+        app(PackingMaterialMappingService::class)->seedFromCatalogue();
+        $standard = ProductionStandard::query()->where('item_id', $this->bottle->id)->firstOrFail();
+
+        // The other answer: 65 m rolls. 2.2900 m of tape per box ÷ 65 m in a
+        // roll = 0.03523076 rolls per box, so the 100-carton run in the
+        // owner's own example is 100 × 0.03523076 = 3.523076 Nos — which the
+        // completion screen shows and submits at its usual 4dp, 3.5231 Nos.
+        //
+        // THE FACTOR CARRIES EIGHT PLACES, NOT FOUR, and that is the number
+        // worth checking here. At 4dp the factor would be 0.0352 and the same
+        // 100 cartons would come to 3.52 — a factor's rounding is multiplied
+        // by every carton in the shift, so it is kept fine and the PRODUCT is
+        // rounded. Nothing rounds to whole rolls: tape is genuinely consumed
+        // part way, and calling 3.5231 "4 rolls" would issue half a roll that
+        // never left the store.
+        $lines = $this->suggestionsWithTapeAnswer($standard, '65');
+
+        $this->assertSame('0.03523076', $lines['tape']['factor']);
+        $this->assertTrue($lines['tape']['submit_as_stock']);
+        // The unit flips WITH the factor — the pair is the whole point. A
+        // per-No factor still labelled "m" is the same class of lie as metres
+        // labelled Nos, pointing the other way.
+        $this->assertSame('nos', $lines['tape']['unit']);
+        $this->assertSame('nos', $lines['tape']['factor_unit']);
+        // Still counted per carton: what changed is the unit, not the basis.
+        $this->assertSame('cartons', $lines['tape']['quantity_basis']);
+
+        // The division is SHOWN. A bare 0.03523076 beside a carton count means
+        // nothing to the floor without the two figures that produced it.
+        $this->assertStringContainsString('2.2900 ÷ 65.0000 = 0.03523076', $lines['tape']['reason']);
+        $this->assertStringNotContainsString('NOT posted', $lines['tape']['reason']);
+
+        // 100 cartons × the factor = the owner's own worked example. Asserted
+        // at full scale rather than rounded here, because bcmath TRUNCATES and
+        // the drawer's round4() does not — 3.523076 reaches the payload as
+        // 3.5231 Nos, and rounding it with bcadd in this test would quietly
+        // assert 3.5230 and pin the wrong number.
+        $this->assertSame('3.52307600', bcmul('100', $lines['tape']['factor'], 8));
+
+        // And the other three are still exactly as they were.
+        $this->assertTrue($lines['carton']['submit_as_stock']);
+        $this->assertSame('nos', $lines['carton']['unit']);
+        $this->assertTrue($lines['tray']['submit_as_stock']);
+        $this->assertTrue($lines['pouch_film']['submit_as_stock']);
+    }
+
+    public function test_a_metres_per_unit_of_zero_is_not_an_answer_and_leaves_the_tape_withheld(): void
+    {
+        $this->actingAsProduction();
+        $this->seedFixtureStandards();
+        app(PackingMaterialMappingService::class)->seedFromCatalogue();
+        $standard = ProductionStandard::query()->where('item_id', $this->bottle->id)->firstOrFail();
+
+        // A zero here is a DIVISOR, and the hazard is not somebody typing a
+        // silly number — it is the division. The guard lives on the model
+        // rather than only in the write path so that a row predating the
+        // validation rule, or written by a seed, cannot reach it either. Zero
+        // means "not answered", which is the safe branch by construction.
+        foreach (['0', '0.0000', '-65'] as $notAnAnswer) {
+            $lines = $this->suggestionsWithTapeAnswer($standard, $notAnAnswer);
+
+            $this->assertFalse($lines['tape']['submit_as_stock'], "metres_per_unit {$notAnAnswer} must not count as an answer");
+            $this->assertSame(self::TAPE_170_ROUND, $lines['tape']['factor']);
+            $this->assertSame('m', $lines['tape']['unit']);
+        }
     }
 
     // --------------------------------- (4) the suggestion is POWERLESS ------

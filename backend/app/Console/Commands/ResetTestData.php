@@ -11,7 +11,7 @@ use App\Modules\Production\Models\ProductionDowntimeEvent;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use Illuminate\Console\Command;
-use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -38,6 +38,25 @@ use Illuminate\Support\Facades\DB;
  *
  * Defaults to a DRY RUN that reports and changes nothing. `--write` is a
  * separate, deliberate act.
+ *
+ * ## `--since` means SINCE, for every table
+ *
+ * The cutoff scopes EVERY deletion, not just the batches: bin and batch stock
+ * movements by `movement_date`, the day-bin ledger by `recorded_at`, material
+ * lots by `received_date` (and their bags with them), Tally entries through the
+ * batches they belong to. A `--since` that scoped only the batches would, two
+ * weeks after go-live, still take every bag, lot and bin row the factory ever
+ * made — and the balance recompute would then CONJURE stock back into the store,
+ * because the transfer that moved it out had been deleted underneath it.
+ *
+ * For the same reason a transfer PAIR lives or dies together: deleting one leg
+ * of a store→day-bin transfer leaves the recompute inventing (or losing) exactly
+ * that quantity. Legs are matched by `transfer_group`, and a group that straddles
+ * the cutoff is left entirely alone rather than half-deleted.
+ *
+ * A `--since` that is not a real YYYY-MM-DD date is REFUSED, never guessed at.
+ * "yesterday" silently becoming "everything" is the one mistake this command
+ * must not make.
  */
 class ResetTestData extends Command
 {
@@ -50,9 +69,21 @@ class ResetTestData extends Command
 
     public function handle(): int
     {
-        $since = $this->option('since') !== null
-            ? Carbon::parse((string) $this->option('since'))->toDateString()
-            : null;
+        $sinceOption = $this->option('since');
+
+        // Refused, not guessed at. Carbon::parse() would turn "yesterday" into a
+        // real date and an empty string into today — both of which read as a
+        // scoped run while deleting something else entirely. The workflow refuses
+        // the same shapes before it ever gets here; this is the second layer, and
+        // the only one a hand-typed command has.
+        if ($sinceOption !== null && ! $this->isCalendarDate(trim((string) $sinceOption))) {
+            $this->error('--since must be a calendar date in YYYY-MM-DD form — got "'.$sinceOption.'".');
+            $this->line('Nothing was read and nothing was deleted. Omit --since entirely to clear every batch.');
+
+            return self::FAILURE;
+        }
+
+        $since = $sinceOption !== null ? trim((string) $sinceOption) : null;
 
         $entries = ShiftProductionEntry::query()
             ->when($since !== null, fn ($q) => $q->whereDate('production_date', '>=', $since))
@@ -84,13 +115,36 @@ class ResetTestData extends Command
         // Day-bin loads and returns: the transfers into and out of the bin
         // warehouse, which are rehearsal too. Identified by the references the
         // day-bin service stamps rather than by warehouse, so a genuine
-        // opening-stock transfer someone made deliberately is left alone.
+        // opening-stock transfer someone made deliberately is left alone — and
+        // scoped by movement_date, so a load from before the cutoff (whose
+        // material a surviving batch already consumed) is not pulled out from
+        // under the recompute.
         $binMovementIds = StockMovement::query()
             ->where(function ($query) {
                 $query->where('reference', 'like', 'Day bin%')
                     ->orWhere('reference', 'like', '%day bin%');
             })
+            ->when($since !== null, fn ($q) => $q->whereDate('movement_date', '>=', $since))
             ->pluck('id');
+
+        [$deleteMovementIds, $straddlingGroups] = $this->wholeTransferGroupsOnly(
+            $movementIds->merge($binMovementIds)->unique(),
+            $since,
+        );
+
+        // The day-bin ledger, the lots and their bags: scoped the same way, each
+        // by the date column that means "when this happened" for that table.
+        $dayBinMovementIds = DayBinMovement::query()
+            ->when($since !== null, fn ($q) => $q->whereDate('recorded_at', '>=', $since))
+            ->pluck('id');
+
+        $lotIds = MaterialLot::query()
+            ->when($since !== null, fn ($q) => $q->whereDate('received_date', '>=', $since))
+            ->pluck('id');
+
+        // Bags follow their lot — the two are one intake, and the bag→lot key is
+        // restrictOnDelete, so a lot cannot go without them anyway.
+        $bagIds = MaterialBag::query()->whereIn('material_lot_id', $lotIds)->pluck('id');
 
         // status is cast to an enum, so it must be compared by ->value: casting
         // the enum object to a string throws, and the whole report died before
@@ -105,18 +159,33 @@ class ResetTestData extends Command
             ->where('syncable_type', ShiftProductionEntry::class)
             ->get();
 
+        // The scope line and the counts under it are one statement: every figure
+        // in the table is the figure UNDER THE CUTOFF, so what the operator reads
+        // here is exactly what a --write run would take.
+        $this->line($since !== null
+            ? "SCOPE: only records dated on or after {$since}. Everything earlier is left exactly as it is."
+            : 'SCOPE: every date — no --since given, so this clears the whole rehearsal.');
+        $this->newLine();
+
         $this->table(['what', 'count'], [
             ['production entries', $entries->count()],
             ['  of which approved or synced', $approved->count()],
             ['  still in progress', $entries->where('batch_status', 'in_progress')->count()],
             ['stock movements from those batches', $movementIds->unique()->count()],
             ['day-bin load/return movements', $binMovementIds->unique()->count()],
-            ['day-bin ledger rows', DayBinMovement::query()->count()],
+            ['stock movements deleted in total', $deleteMovementIds->count()],
+            ['day-bin ledger rows', $dayBinMovementIds->count()],
             ['downtime events', ProductionDowntimeEvent::query()->whereIn('shift_production_entry_id', $entryIds)->count()],
             ['queued/sent Tally vouchers', $vouchers->count()],
-            ['material lots', MaterialLot::query()->count()],
-            ['material bags', MaterialBag::query()->count()],
+            ['material lots', $lotIds->count()],
+            ['material bags', $bagIds->count()],
         ]);
+
+        if ($straddlingGroups->isNotEmpty()) {
+            $this->newLine();
+            $this->warn($straddlingGroups->count().' transfer(s) have one leg before the cutoff and one after.');
+            $this->warn('They are left ALONE, whole: deleting half a transfer would invent stock at one end and lose it at the other.');
+        }
 
         if ($vouchers->isNotEmpty()) {
             $this->newLine();
@@ -151,11 +220,11 @@ class ResetTestData extends Command
             return self::SUCCESS;
         }
 
-        DB::transaction(function () use ($entryIds, $movementIds, $binMovementIds, $vouchers) {
+        DB::transaction(function () use ($entryIds, $deleteMovementIds, $dayBinMovementIds, $lotIds, $bagIds, $vouchers) {
             // Children first, so nothing is orphaned even where the schema
             // would have allowed it.
             ProductionDowntimeEvent::query()->whereIn('shift_production_entry_id', $entryIds)->delete();
-            DayBinMovement::query()->delete();
+            DayBinMovement::query()->whereIn('id', $dayBinMovementIds)->delete();
 
             DB::table('shift_material_consumptions')->whereIn('shift_production_entry_id', $entryIds)->delete();
             DB::table('shift_scraps')->whereIn('shift_production_entry_id', $entryIds)->delete();
@@ -167,12 +236,12 @@ class ResetTestData extends Command
             ShiftProductionEntry::query()->whereIn('parent_entry_id', $entryIds)->update(['parent_entry_id' => null]);
             ShiftProductionEntry::query()->whereIn('id', $entryIds)->forceDelete();
 
-            StockMovement::query()->whereIn('id', $movementIds->merge($binMovementIds)->unique())->delete();
+            StockMovement::query()->whereIn('id', $deleteMovementIds)->delete();
 
             // Bags and lots are rehearsal intake. Bags first — they reference
             // the lot.
-            MaterialBag::query()->delete();
-            MaterialLot::query()->delete();
+            MaterialBag::query()->whereIn('id', $bagIds)->delete();
+            MaterialLot::query()->whereIn('id', $lotIds)->delete();
 
             $this->recomputeBalances();
         });
@@ -184,6 +253,83 @@ class ResetTestData extends Command
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * A real calendar date, written the one way this command accepts.
+     *
+     * Deliberately not Carbon::parse(): that accepts "yesterday", "+1 week" and
+     * the empty string, each of which would run a delete the operator did not
+     * describe. checkdate() on top of the shape check rejects 2026-02-31, which
+     * the regex alone would let through.
+     */
+    private function isCalendarDate(string $value): bool
+    {
+        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $value, $parts) !== 1) {
+            return false;
+        }
+
+        return checkdate((int) $parts[2], (int) $parts[3], (int) $parts[1]);
+    }
+
+    /**
+     * Expand a set of stock movements so that no transfer is half-deleted.
+     *
+     * A transfer is a PAIR — one transfer_out from the store, one transfer_in to
+     * the day bin, sharing a transfer_group. Delete one leg and the recompute
+     * believes the other: stock appears at one end or vanishes at the other, and
+     * a floor that trusts the figure would find out by running short mid-shift.
+     *
+     * So a group is all-or-nothing. Every leg of a touched group is pulled in —
+     * including one the reference match missed — EXCEPT where a leg falls before
+     * the cutoff, in which case the whole group stays. Nothing before --since is
+     * ever deleted, and no pair is ever left with one leg standing.
+     *
+     * @param  Collection<int, int>  $movementIds
+     * @return array{0: Collection<int, int>, 1: Collection<int, string>}
+     */
+    private function wholeTransferGroupsOnly(Collection $movementIds, ?string $since): array
+    {
+        $groups = StockMovement::query()
+            ->whereIn('id', $movementIds)
+            ->whereNotNull('transfer_group')
+            ->pluck('transfer_group')
+            ->unique();
+
+        if ($groups->isEmpty()) {
+            return [$movementIds->values(), collect()];
+        }
+
+        $legs = StockMovement::query()
+            ->whereIn('transfer_group', $groups)
+            ->get(['id', 'transfer_group', 'movement_date']);
+
+        $straddling = collect();
+        $keptLegIds = collect();
+        $extraLegIds = collect();
+
+        foreach ($legs->groupBy('transfer_group') as $group => $rows) {
+            $reachesBackPastCutoff = $since !== null && $rows->contains(
+                fn ($leg) => $leg->movement_date?->toDateString() < $since,
+            );
+
+            if ($reachesBackPastCutoff) {
+                $straddling->push((string) $group);
+                $keptLegIds = $keptLegIds->merge($rows->pluck('id'));
+
+                continue;
+            }
+
+            $extraLegIds = $extraLegIds->merge($rows->pluck('id'));
+        }
+
+        $deleteIds = $movementIds
+            ->reject(fn ($id) => $keptLegIds->contains($id))
+            ->merge($extraLegIds)
+            ->unique()
+            ->values();
+
+        return [$deleteIds, $straddling];
     }
 
     /**

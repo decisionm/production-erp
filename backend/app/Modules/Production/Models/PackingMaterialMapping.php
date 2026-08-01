@@ -35,11 +35,46 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  *    the item name states the weight of ONE piece ("…x120G" = 120 g). The
  *    film is consumed PER CARTON (owner, 31 Jul: the pouch film wraps a
  *    carton's contents once), so kg = cartons × grams ÷ 1000.
- *  - tape — `metres_per_box`, the owner's own unit (TapeMetresPerBox).
+ *  - tape — `metres_per_box`, the owner's own unit (TapeMetresPerBox), plus
+ *    `metres_per_unit`, the slot the factory's still-unanswered question lands
+ *    in (see below).
  *
  * A `tape` row's `spec_value` is the CARTON spec, not a tape name: tape is
  * dosed by the box it seals, so the lookup the screen performs is "what tape,
  * and how much, for a 170ML carton".
+ *
+ * ## `metres_per_unit` — the tape question, and the slot for its answer
+ *
+ * TapeMetresPerBox has carried an open question since the figures arrived:
+ * Tally counts "Packing Tape - Transparent" in Nos, and whether ONE No is a
+ * metre or a whole roll/strip is unanswered. Until it is answered, a tape
+ * suggestion is a length and the Tally item is a count of somethings, and
+ * filing 229 m as 229 Nos on a live voucher is not a rounding error, it is a
+ * different number about a different thing.
+ *
+ * So the tape line is DISPLAY-ONLY while the two units disagree — shown with
+ * its metres and its arithmetic, excluded from what the completion submits.
+ * `metres_per_unit` is where the answer lands: metres in ONE Tally unit (a
+ * 65 m roll → 65). With it set, metres_per_box ÷ metres_per_unit is a factor
+ * in Nos, the conversion is stated on screen, and the line posts like every
+ * other. The other shape the answer can take is the item's own unit being
+ * corrected to a length unit in the masters (LENGTH_UOM_VARIANTS below), in
+ * which case the metres already ARE the Tally quantity and nothing needs
+ * converting.
+ *
+ * WHICH OF THE TWO the factory gives is their call, and both are data — no
+ * deploy. PackingMaterialSuggestionService is the one place that reads them
+ * and the one place that decides; the screen obeys its `submit_as_stock`
+ * rather than re-deriving the rule.
+ *
+ * NOTE — `metres_per_unit` has no COLUMN yet. It is declared here (fillable,
+ * cast, read through metresPerUnit()) so the service, the screen and the tests
+ * are already built for the answer; the migration that adds the nullable
+ * decimal, the FormRequest rule that keeps it > 0 on the way in, and
+ * PackingMaterialMappingService::describe()'s exposure of it ship WITH the
+ * factory's answer. Declaring a cast for an absent column is inert — Eloquent
+ * reads it as null — and nothing mass-assigns the key, so no write can reach a
+ * column that is not there. The service treats null/≤0 as "not answered".
  *
  * ## Advisory, like everything upstream of a weighed figure
  *
@@ -50,7 +85,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  */
 #[Fillable([
     'spec_kind', 'spec_value', 'item_id', 'grams_per_piece', 'metres_per_box',
-    'note', 'set_by', 'set_at',
+    'metres_per_unit', 'note', 'set_by', 'set_at',
 ])]
 class PackingMaterialMapping extends Model
 {
@@ -97,6 +132,25 @@ class PackingMaterialMapping extends Model
         self::KIND_TAPE => ['basis' => 'per_carton', 'quantity_basis' => 'cartons', 'unit' => 'm', 'factor_unit' => 'm'],
     ];
 
+    /**
+     * The LENGTH-family spellings of `items.uom`, lowercased — the only unit
+     * an unconverted metres figure may legally be filed against.
+     *
+     * Deliberately narrow, and deliberately NOT a general uom check. Film's
+     * quantity unit is kg while every film item in this factory's master reads
+     * "NOS" (StorePackingMaterialMappingRequest refuses a uom rule for exactly
+     * that reason), so comparing KIND_BASIS['unit'] to items.uom across the
+     * board would drop the film line from every completion — the same defect
+     * this list exists to fix, in a different material. It is read for TAPE
+     * and nothing else.
+     *
+     * Mirrors Item::KG_UOM_VARIANTS in spirit: `uom` is Tally's raw free-text
+     * base unit, so the spellings have to be tolerated rather than assumed.
+     *
+     * @var list<string>
+     */
+    public const LENGTH_UOM_VARIANTS = ['m', 'm.', 'mt', 'mts', 'mtr', 'mtr.', 'mtrs', 'metre', 'metres', 'meter', 'meters'];
+
     protected function casts(): array
     {
         return [
@@ -105,6 +159,10 @@ class PackingMaterialMapping extends Model
             // multiplied into a quantity a person has to be able to check.
             'grams_per_piece' => 'decimal:4',
             'metres_per_box' => 'decimal:4',
+            // No column yet — see the class docblock. Cast so that the day the
+            // migration lands, the figure arrives as an exact string like its
+            // two neighbours rather than a float that has already drifted.
+            'metres_per_unit' => 'decimal:4',
             'set_at' => 'datetime',
         ];
     }
@@ -140,5 +198,42 @@ class PackingMaterialMapping extends Model
             self::KIND_TAPE => $this->metres_per_box === null ? null : (string) $this->metres_per_box,
             default => '1',
         };
+    }
+
+    /**
+     * Metres in ONE Tally unit of this tape, as a string, or null when the
+     * factory has not answered — which includes a zero or a negative.
+     *
+     * The > 0 guard lives here rather than only in a FormRequest on purpose:
+     * this figure is a DIVISOR, and the hazard is not a bad edit, it is a zero
+     * reaching the division and turning a tape line into an infinity or a
+     * fatal. A rule in the write path guards the typist; this guards the
+     * arithmetic, including a row that predates the rule or was written by a
+     * seed. Null here means "not answered", which is the safe branch:
+     * PackingMaterialSuggestionService leaves the line display-only.
+     */
+    public function metresPerUnit(): ?string
+    {
+        if ($this->spec_kind !== self::KIND_TAPE || $this->metres_per_unit === null) {
+            return null;
+        }
+
+        $value = (string) $this->metres_per_unit;
+
+        return bccomp($value, '0', 8) === 1 ? $value : null;
+    }
+
+    /**
+     * Does this row's Tally item COUNT IN A LENGTH — i.e. do the mapping's
+     * metres and the item's own unit already agree?
+     *
+     * Read for tape and nothing else (see LENGTH_UOM_VARIANTS). `true` is the
+     * other way the factory's answer can arrive: they correct the tape item's
+     * unit in the masters, the metres are the Tally quantity as they stand,
+     * and nothing needs converting.
+     */
+    public function itemCountsInLength(): bool
+    {
+        return in_array(strtolower(trim((string) $this->item?->uom)), self::LENGTH_UOM_VARIANTS, true);
     }
 }

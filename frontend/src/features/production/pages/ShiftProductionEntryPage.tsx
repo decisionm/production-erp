@@ -419,6 +419,13 @@ type PackingSuggestion = {
     gramsPerPiece: number | null;
     spec: string | null;
     reason: string | null;
+    /**
+     * May this row's quantity be FILED — sent as a consumption line, issued
+     * against a store, carried on a Tally voucher — or is it shown for the
+     * record only? The backend's answer, obeyed rather than re-derived here.
+     * See readPackingSuggestions() for why it is never worked out on this side.
+     */
+    submitAsStock: boolean;
 };
 
 /** A wire figure that may arrive as a decimal string, as a number, or not at all. */
@@ -509,10 +516,23 @@ function packingBasisOf(raw: SuggestedPackingMaterial, kind: PackingKind): Packi
  * TAPE IS QUOTED IN METRES, deliberately, even though this factory's Tally
  * books count "Packing Tape - Transparent" in Nos. Metres per box is the figure
  * the factory actually gave (the 13-row table), and whether a Tally "No" is one
- * metre or one strip is STILL OPEN with the owner. So the metre figure is shown
- * and submitted WITH ITS UNIT STATED rather than silently relabelled Nos — a
- * number is worth nothing if the screen and the voucher disagree about what it
- * counts. If the mapping ever states a metre unit of its own, that wins.
+ * metre or one strip is STILL OPEN with the owner.
+ *
+ * SHOWN WITH ITS UNIT STATED, AND — until that question is answered — NOT
+ * SUBMITTED. Stating the unit on screen was never enough on its own: the
+ * completion filed the metres as an ordinary consumption line anyway, so 100
+ * cartons of 170ML issued 229 "Nos" of tape against an item Tally counts in
+ * pieces and posted it to the live books. `submit_as_stock` is the backend's
+ * ruling on that, per row, and it is READ HERE AND OBEYED — never re-derived.
+ * The rule (which kinds, which unit families, what the factory has answered)
+ * belongs in one place, and that place is PackingMaterialSuggestionService;
+ * a second copy of it on this side is a second thing to get wrong.
+ *
+ * An ABSENT flag reads as `true`, which is deliberate and not a hedge. This
+ * frontend builds into `backend/public/build/` and ships with the API that
+ * serves it, so a preview without the field is one that predates the packing
+ * rows entirely — and defaulting tape to false there would be exactly the
+ * re-derivation the flag exists to prevent.
  */
 function readPackingSuggestions(raw: SuggestedPackingMaterial[] | null | undefined): PackingSuggestion[] {
     if (!Array.isArray(raw)) return [];
@@ -532,6 +552,11 @@ function readPackingSuggestions(raw: SuggestedPackingMaterial[] | null | undefin
         const factorIsGrams = /^g(ram)?s?$/i.test(wireText(row.factor_unit) ?? '');
         const gramsPerPiece = factorIsGrams ? factor : null;
         const perUnitStated = factorIsGrams ? null : factor;
+        // Widened locally rather than in the shared `SuggestedPackingMaterial`
+        // type: this is the only reader of the field, and the wire type is
+        // shared with screens that have no business knowing about it.
+        const submitAsStock = (row as SuggestedPackingMaterial & { submit_as_stock?: boolean | null })
+            .submit_as_stock;
         return {
             // The wire carries no row id — a suggestion is computed, not stored
             // — so identity is the kind, the item and the spec. Stable across a
@@ -542,10 +567,19 @@ function readPackingSuggestions(raw: SuggestedPackingMaterial[] | null | undefin
             label: { carton: 'Carton', tray: 'Tray', film: 'Film', tape: 'Tape', other: 'Packing material' }[kind],
             itemId,
             itemName: wireText(row.item?.name),
+            // The wire's unit, always — it is the unit the wire's own FACTOR is
+            // denominated in, and the two cannot be allowed to part company.
+            //
+            // Tape used to be pinned to metres here unless the wire said
+            // "metres" in so many words. That was right while metres were the
+            // only thing a tape row could carry, and wrong the moment the
+            // backend could convert one: a converted row arrives as a per-No
+            // factor with unit "nos", and forcing "m" over it would print
+            // rolls under a metre sign. The backend states one unit per row and
+            // this reads it; 'm' remains the fallback for a tape row whose
+            // preview said nothing at all.
             unit: packingUnitLabel(
-                kind === 'tape'
-                    ? (statedUnit && /^m(etre|eter)?s?$/i.test(statedUnit) ? statedUnit : 'm')
-                    : (statedUnit ?? (gramsPerPiece !== null ? 'kg' : 'nos')),
+                statedUnit ?? (kind === 'tape' ? 'm' : gramsPerPiece !== null ? 'kg' : 'nos'),
             ),
             basis,
             basisWord: wireText(row.quantity_basis),
@@ -573,6 +607,10 @@ function readPackingSuggestions(raw: SuggestedPackingMaterial[] | null | undefin
             // from row N" note when the workbook cell was filled rather than
             // stated — there is no separate provenance object on this wire.
             reason: wireText(row.reason),
+            // Only an explicit `false` withholds a line. Anything else — true,
+            // absent, null on an older payload — files it, which is how carton,
+            // tray and film keep behaving exactly as they did.
+            submitAsStock: submitAsStock !== false,
         };
     });
 }
@@ -2988,13 +3026,38 @@ export default function ShiftProductionEntryPage() {
             // and came to nothing.
             //
             // "No source to issue from" used to be a third, and its removal is
-            // the point of this change: with the store no longer asked, that
+            // the point of that change: with the store no longer asked, that
             // test was true for EVERY packing row, so every carton, tray, film
             // and tape line would have vanished from the payload without a
             // word — the precise "shown but not recorded" failure the old
             // picker existed to prevent.
+            //
+            // There IS a third now, and it is the opposite case — a row the
+            // backend has ruled may not be filed at all. Today that is the tape
+            // line and only the tape line: its factor is METRES (100 cartons ×
+            // 2.29 = 229 m) while Tally counts "Packing Tape - Transparent" in
+            // Nos, and until the factory says whether a No is a metre or a
+            // roll, sending that 229 would post 229 PIECES of tape to the live
+            // books — a different number about a different thing, arrived at
+            // silently. So the row stays on screen with its metres, its
+            // arithmetic and a note saying it is not posted, and it does not
+            // ride the wire.
+            //
+            // WHY THE FLAG AND NOT A `kind === 'tape'` TEST HERE: the answer
+            // that ends this is data on the mapping (metres per Tally unit, or
+            // a corrected item unit), and the day it arrives the same tape rows
+            // must start posting — converted — with nothing on this side
+            // touched. The backend rules; this obeys. `submitAsStock` is only
+            // ever false when the units genuinely disagree, so carton, tray and
+            // film are unaffected in every case.
             const packingConsumptions = packingRows
-                .filter((row) => row.itemId !== null && row.quantity !== null && row.quantity > 0)
+                .filter(
+                    (row) =>
+                        row.itemId !== null &&
+                        row.quantity !== null &&
+                        row.quantity > 0 &&
+                        row.submitAsStock,
+                )
                 .map((row) => ({
                     item_id: row.itemId as number,
                     quantity_issued_kg: row.quantity as number,
@@ -5376,6 +5439,26 @@ export default function ShiftProductionEntryPage() {
                                 // inferred from row N" to it rather than sending
                                 // a provenance object of its own.
                                 const note = [
+                                    // LEADS the line, and the whole line turns
+                                    // from grey to warning below, because this
+                                    // is the one caveat that changes what the
+                                    // number MEANS. The figure beside it is real
+                                    // and the arithmetic behind it is sound —
+                                    // it simply is not going anywhere. Reading
+                                    // "229 m" and assuming the tape was issued
+                                    // is precisely the misreading that put 229
+                                    // "Nos" of tape on the live books, so the
+                                    // disclaimer comes before the number rather
+                                    // than trailing after it.
+                                    //
+                                    // Driven by the server's ruling, not by the
+                                    // kind: the day the factory answers the unit
+                                    // question this sentence disappears on its
+                                    // own and the row starts posting, with
+                                    // nothing changed here.
+                                    row.submitAsStock
+                                        ? null
+                                        : 'NOT posted to stock or Tally until the tape unit is confirmed',
                                     row.arithmetic ??
                                         (row.perUnit === null
                                             ? `no per-${row.basis ?? 'carton'} figure mapped yet — enter what went in`
@@ -5383,14 +5466,11 @@ export default function ShiftProductionEntryPage() {
                                     // The mapping's sentence already names the
                                     // spec and carries the "spec inferred from
                                     // row N" note, so the spec is only spelled
-                                    // out here when nothing else says it.
+                                    // out here when nothing else says it. For a
+                                    // withheld tape row it also carries the two
+                                    // ways the factory can settle it, which is
+                                    // why no second copy of that is written here.
                                     row.reason ?? (row.spec ? `${row.label.toLowerCase()} spec “${row.spec}”` : null),
-                                    // Said out loud on the row rather than left
-                                    // for someone to notice on the voucher: the
-                                    // factory doses tape in metres per box, and
-                                    // whether a Tally tape "No" is one metre or
-                                    // one strip is still the owner's to answer.
-                                    row.kind === 'tape' ? 'metres, as the factory doses it — the Tally piece conversion is still open' : null,
                                     // The "not recorded until a packing store is
                                     // named above" caveat is gone with the
                                     // picker: these rows are always recorded
@@ -5398,7 +5478,20 @@ export default function ShiftProductionEntryPage() {
                                     // resolves. Leaving the sentence in would
                                     // have been a warning about a condition
                                     // that can no longer arise.
-                                    row.touched ? 'your figure, kept' : null,
+                                    //
+                                    // "Kept" only where keeping it means
+                                    // something. The box is read-only on a
+                                    // withheld row so this is all but
+                                    // unreachable — but a figure typed before a
+                                    // preview refetch flipped the flag would
+                                    // otherwise read "kept" directly after "NOT
+                                    // posted", which is the contradiction this
+                                    // whole change exists to remove.
+                                    row.touched
+                                        ? row.submitAsStock
+                                            ? 'your figure, kept'
+                                            : 'your earlier figure is kept on screen only'
+                                        : null,
                                 ]
                                     .filter((part): part is string => !!part)
                                     .join(' — ');
@@ -5419,6 +5512,21 @@ export default function ShiftProductionEntryPage() {
                                                 suffix={row.unit}
                                                 placeholder={row.unit}
                                                 style={{ width: '100%' }}
+                                                // A row that cannot be filed must
+                                                // not take a figure either. An
+                                                // editable box on a withheld line
+                                                // invites a supervisor to correct
+                                                // the tape metres and be told
+                                                // "your figure, kept" while the
+                                                // filter above drops it — the
+                                                // screen and the voucher
+                                                // disagreeing again, one step
+                                                // earlier. Read-only says the
+                                                // truth: this line is the
+                                                // factory's own arithmetic, shown
+                                                // for the record, going nowhere
+                                                // until the unit is settled.
+                                                disabled={!row.submitAsStock}
                                                 onChange={(value) =>
                                                     // A supervisor's figure owns
                                                     // this row for the rest of the
@@ -5431,7 +5539,19 @@ export default function ShiftProductionEntryPage() {
                                         </Col>
                                         {note && (
                                             <Col xs={24}>
-                                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                                {/* Warning-coloured, not grey, when
+                                                    the row is display-only. Every
+                                                    other note under this section is
+                                                    context; this one is the
+                                                    difference between a figure that
+                                                    is going to Tally and one that is
+                                                    not, and it has to be legible as
+                                                    that at a glance on a shop-floor
+                                                    tablet. */}
+                                                <Typography.Text
+                                                    type={row.submitAsStock ? 'secondary' : 'warning'}
+                                                    style={{ fontSize: 12 }}
+                                                >
                                                     {note}
                                                 </Typography.Text>
                                             </Col>
