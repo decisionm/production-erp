@@ -4735,40 +4735,68 @@ export default function ShiftProductionEntryPage() {
                                         <Row gutter={[8, 8]}>
                                             {step !== null ? (
                                                 <>
-                                                    {/* Tray-first. "5 tray = 1 carton boxes, then 600
-                                                        units based on 120 PER TRAY, SO FIVE TRAY SO
-                                                        600" — the floor counts trays, so trays are
-                                                        what it types. Cartons are arithmetic and are
-                                                        shown, never asked for; the trays left over a
-                                                        whole carton ride along in loose_inner, which
-                                                        is why the API contract needs no change. */}
+                                                    {/* BOX-FIRST, reverted on the factory's own request
+                                                        after a day of tray-first: "we need to calculate
+                                                        by boxes not the tray — if they produced this
+                                                        much box, how much product and how much per
+                                                        tray." The floor counts CARTONS; trays and
+                                                        pieces are arithmetic, shown never asked. A
+                                                        part-filled carton is entered as loose trays,
+                                                        which is the same loose_inner the API always
+                                                        took — the contract does not move for either
+                                                        direction of this argument, which is what made
+                                                        both flips one-file changes. */}
                                                     <Col xs={12} sm={8}>
                                                         <Form.Item
-                                                            label={`${innerName.charAt(0).toUpperCase()}${innerName.slice(1)}`}
+                                                            label="Cartons"
                                                             style={{ marginBottom: 0 }}
-                                                            extra={`counted this run · ${step} per carton`}
-                                                            validateStatus={lineErrors?.boxes || lineErrors?.loose_inner ? 'error' : ''}
-                                                            help={lineErrors?.boxes?.message ?? lineErrors?.loose_inner?.message}
+                                                            extra={`full cartons · ${step} ${innerName}/carton`}
+                                                            validateStatus={lineErrors?.boxes ? 'error' : ''}
+                                                            help={lineErrors?.boxes?.message}
                                                         >
-                                                            <InputNumber
-                                                                value={innerCount}
-                                                                size="large"
-                                                                min={0}
-                                                                precision={0}
-                                                                style={{ width: '100%' }}
-                                                                onChange={(value) => {
-                                                                    // Cleared means "not counted yet",
-                                                                    // which is not the same as a
-                                                                    // counted nothing — keep the pair
-                                                                    // empty rather than writing zeros.
-                                                                    const split =
-                                                                        value === null || value === undefined
-                                                                            ? { boxes: null, loose: null }
-                                                                            : splitInners(Number(value), step);
-                                                                    completeForm.setValue(`packing_lines.${index}.boxes`, split.boxes);
-                                                                    completeForm.setValue(`packing_lines.${index}.loose_inner`, split.loose);
-                                                                    recomputePackingTotals();
-                                                                }}
+                                                            <Controller
+                                                                name={`packing_lines.${index}.boxes`}
+                                                                control={completeForm.control}
+                                                                render={({ field: boxField }) => (
+                                                                    <InputNumber
+                                                                        {...boxField}
+                                                                        size="large"
+                                                                        min={0}
+                                                                        precision={0}
+                                                                        style={{ width: '100%' }}
+                                                                        onChange={(value) => {
+                                                                            boxField.onChange(value);
+                                                                            recomputePackingTotals();
+                                                                        }}
+                                                                    />
+                                                                )}
+                                                            />
+                                                        </Form.Item>
+                                                    </Col>
+                                                    <Col xs={12} sm={8}>
+                                                        <Form.Item
+                                                            label={`Loose ${innerName}`}
+                                                            style={{ marginBottom: 0 }}
+                                                            extra="not a full carton"
+                                                            validateStatus={lineErrors?.loose_inner ? 'error' : ''}
+                                                            help={lineErrors?.loose_inner?.message}
+                                                        >
+                                                            <Controller
+                                                                name={`packing_lines.${index}.loose_inner`}
+                                                                control={completeForm.control}
+                                                                render={({ field: looseField }) => (
+                                                                    <InputNumber
+                                                                        {...looseField}
+                                                                        size="large"
+                                                                        min={0}
+                                                                        precision={0}
+                                                                        style={{ width: '100%' }}
+                                                                        onChange={(value) => {
+                                                                            looseField.onChange(value);
+                                                                            recomputePackingTotals();
+                                                                        }}
+                                                                    />
+                                                                )}
                                                             />
                                                         </Form.Item>
                                                     </Col>
@@ -4822,17 +4850,23 @@ export default function ShiftProductionEntryPage() {
                                                         </Form.Item>
                                                     </Col>
                                                     <Col xs={12} sm={8}>
+                                                        {/* The derived direction flipped with the input:
+                                                            boxes are typed, so trays are the arithmetic
+                                                            the factory asked to SEE — "how much product
+                                                            and how much per tray" from the boxes. */}
                                                         <Form.Item
-                                                            label="Cartons"
+                                                            label={`${innerName.charAt(0).toUpperCase()}${innerName.slice(1)} — derived`}
                                                             style={{ marginBottom: 0 }}
                                                             extra={
                                                                 trayPieceSize !== null
-                                                                    ? `derived · ${line.nos_per_box ?? 0} pcs/carton`
+                                                                    ? `${trayPieceSize} pcs/${innerOne} · ${line.nos_per_box ?? 0} pcs/carton`
                                                                     : `enter pcs per ${innerOne}`
                                                             }
                                                         >
                                                             <Typography.Text strong style={{ display: 'block', fontSize: 16, lineHeight: '40px' }}>
-                                                                {cartonText ? `= ${cartonText}` : '—'}
+                                                                {trayPieceSize !== null
+                                                                    ? `= ${(line.boxes ?? 0) * step + (line.loose_inner ?? 0)} ${innerName}`
+                                                                    : '—'}
                                                             </Typography.Text>
                                                         </Form.Item>
                                                     </Col>
