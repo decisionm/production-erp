@@ -1681,6 +1681,22 @@ class ShiftProductionEntryService
             $row = $this->rowOpenForCorrection($entry);
             $hadCheck = $row->quality_checked_at !== null;
 
+            // A check recorded BEFORE this correction feature existed wrote
+            // no quality_check_effects record, so what it moved cannot be
+            // safely un-moved: the FG side has a legacy fallback but the
+            // scrap receipt does not, and reversing half of a check leaves
+            // the scrap balance inflated with the audit line that would
+            // explain it deleted. Refuse only where that danger is real — a
+            // legacy check that rejected nothing moved no stock, and its
+            // return is a plain column clear.
+            if ($hadCheck
+                && ! is_array($row->config_snapshot['quality_check_effects'] ?? null)
+                && ($row->quality_rejected_nos ?? 0) > 0) {
+                throw new InvalidStatusTransitionException(
+                    'this batch\'s quality check was recorded before returns existed, so what it moved cannot be safely un-moved — reject the batch back to the supervisor instead, or let it continue as checked',
+                );
+            }
+
             $columns = [
                 'quality_reviewed_nos' => null,
                 'quality_ok_nos' => null,

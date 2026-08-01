@@ -534,6 +534,78 @@ class BatchAmendmentAndQcReturnTest extends TestCase
         $this->assertCount(2, $again->json('data.correction.returns'));
     }
 
+    public function test_a_check_recorded_before_returns_existed_cannot_be_returned_if_it_moved_stock(): void
+    {
+        // THE DEPLOY-NIGHT ROW: a batch quality-checked before this feature
+        // shipped carries no quality_check_effects record. Its FG side has a
+        // legacy fallback but its scrap receipt does not — a return would
+        // reverse half the check and delete the audit line explaining the
+        // other half. The safe answer is a refusal that names the way out.
+        $this->actAsSupervisor();
+        $entryId = $this->startBatch();
+        $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/complete", $this->correctFigures())
+            ->assertOk();
+
+        $this->actAsChecker();
+        $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/quality-check", [
+            'reviewed_nos' => 500, 'ok_nos' => 300, 'rejected_nos' => 200, 'note' => 'Neck finish',
+        ])->assertOk();
+
+        // Simulate the pre-deploy world: the check happened, the record of
+        // what it moved did not.
+        $entry = ShiftProductionEntry::query()->findOrFail($entryId);
+        $snapshot = $entry->config_snapshot;
+        unset($snapshot['quality_check_effects']);
+        $entry->forceFill(['config_snapshot' => $snapshot])->save();
+
+        $scrapBefore = (string) $this->balance($this->scrap, $this->fg)?->quantity;
+        $fgBefore = (string) $this->balance($this->bottle, $this->fg)?->quantity;
+
+        $refused = $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/return-to-production", [
+            'reason' => 'Checked the wrong pallet — this batch was never inspected.',
+        ])->assertStatus(422);
+
+        $this->assertStringContainsString('before returns existed', $refused->json('message'));
+        $this->assertStringContainsString('reject the batch back to the supervisor', $refused->json('message'));
+
+        // REFUSED MEANS UNTOUCHED: stock, the scrap audit line, and the
+        // check itself all stand exactly as they were.
+        $this->assertSame($scrapBefore, (string) $this->balance($this->scrap, $this->fg)?->quantity);
+        $this->assertSame($fgBefore, (string) $this->balance($this->bottle, $this->fg)?->quantity);
+        $entry->refresh();
+        $this->assertNotNull($entry->quality_checked_at);
+        $this->assertSame(1, $entry->scraps()->where('type', ShiftScrapType::RejectedFinishedGood->value)->count());
+    }
+
+    public function test_a_legacy_check_that_rejected_nothing_returns_cleanly(): void
+    {
+        // The harmless twin: a pre-deploy check with zero rejects moved no
+        // stock, so its return is a plain column clear and must not be
+        // blocked alongside the dangerous case.
+        $this->actAsSupervisor();
+        $entryId = $this->startBatch();
+        $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/complete", $this->correctFigures())
+            ->assertOk();
+
+        $this->actAsChecker();
+        $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/quality-check", [
+            'reviewed_nos' => 500, 'ok_nos' => 500, 'rejected_nos' => 0, 'note' => 'All clean',
+        ])->assertOk();
+
+        $entry = ShiftProductionEntry::query()->findOrFail($entryId);
+        $snapshot = $entry->config_snapshot;
+        unset($snapshot['quality_check_effects']);
+        $entry->forceFill(['config_snapshot' => $snapshot])->save();
+
+        $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/return-to-production", [
+            'reason' => 'Wrong batch ticked in the log — recheck it properly.',
+        ])->assertOk();
+
+        $entry->refresh();
+        $this->assertNull($entry->quality_checked_at);
+        $this->assertNull($entry->quality_rejected_nos);
+    }
+
     public function test_quality_can_return_its_own_check_before_the_pm_signs_and_the_batch_is_checked_fresh(): void
     {
         $this->actAsSupervisor();
