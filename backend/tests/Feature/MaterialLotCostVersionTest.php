@@ -384,6 +384,15 @@ class MaterialLotCostVersionTest extends TestCase
         $this->assertSame('SUP-LOT-88', $payload['supplier_lot_no']);
         $this->assertCount(10, $payload['bags']);
 
+        // AND THE OLD DOOR IS SHUT TOO: the pre-existing receipt block keeps
+        // its provenance (which GRN, which PO, when) but its unit_cost —
+        // the same purchase rate the keys above protect — is absent for
+        // non-finance eyes. Found live: a sales-only login read 92.0000
+        // straight off this key while every new key was correctly gated.
+        $this->assertIsArray($payload['receipt']);
+        $this->assertArrayHasKey('goods_receipt_note_id', $payload['receipt']);
+        $this->assertArrayNotHasKey('unit_cost', $payload['receipt']);
+
         $this->getJson('/api/v1/inventory/material-lots')
             ->assertSuccessful()
             ->assertJsonMissingPath('data.0.receipt_rate_per_kg')

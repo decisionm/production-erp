@@ -44,18 +44,24 @@ class MaterialLotResource extends JsonResource
             'total_received_kg' => $this->total_received_kg,
             'bags' => MaterialBagResource::collection($this->whenLoaded('bags')),
             // Receipt provenance so the lot register can show — and link to —
-            // the goods receipt this lot arrived on, with the price paid and
-            // the exact date+time it was received. Only present when the
-            // caller eager-loaded the relations (the lot register does).
+            // the goods receipt this lot arrived on, and the exact date+time
+            // it was received. Only present when the caller eager-loaded the
+            // relations (the lot register does). The PRICE PAID rides along
+            // only for finance eyes: this key predates the rate gating below,
+            // and leaving it open handed the GRN purchase rate to any
+            // inventory viewer — the exact figure the owner limited to
+            // Owner and Accounts. Same gate, key absent (not null) otherwise.
             'receipt' => $this->when(
                 $this->relationLoaded('grn') && $this->grn !== null,
                 fn () => [
                     'goods_receipt_note_id' => $this->grn->id,
                     'purchase_order_id' => $this->grn->purchase_order_id,
                     'received_at' => $this->grn->received_date?->toIso8601String(),
-                    'unit_cost' => $this->relationLoaded('goodsReceiptLine')
-                        ? $this->goodsReceiptLine?->unit_cost
-                        : null,
+                    ...($showsCost ? [
+                        'unit_cost' => $this->relationLoaded('goodsReceiptLine')
+                            ? $this->goodsReceiptLine?->unit_cost
+                            : null,
+                    ] : []),
                 ],
             ),
             // Rate provenance and cost history — Owner/Accounts only, see

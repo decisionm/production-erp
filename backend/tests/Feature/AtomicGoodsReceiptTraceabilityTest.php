@@ -38,7 +38,12 @@ class AtomicGoodsReceiptTraceabilityTest extends TestCase
         Event::fake([GoodsReceiptNoteReceived::class]);
 
         $user = User::factory()->create(['is_active' => true]);
-        foreach (['procurement.manage', 'inventory.view', 'inventory.manage', 'production.manage'] as $permission) {
+        // finance.view rides along because this file asserts the lot
+        // register's receipt PRICE — a figure the cost-traceability wave
+        // limited to Owner/Accounts eyes (MaterialLotResource gates
+        // receipt.unit_cost on finance.*). The datetime assertions this
+        // file exists for are permission-blind either way.
+        foreach (['procurement.manage', 'inventory.view', 'inventory.manage', 'production.manage', 'finance.view'] as $permission) {
             Permission::findOrCreate($permission, 'web');
             $user->givePermissionTo($permission);
         }
