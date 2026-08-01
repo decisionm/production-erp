@@ -33,6 +33,15 @@ return new class extends Migration
 
     public function up(): void
     {
+        // RE-RUNNABLE: MySQL DDL is non-transactional, so a backfill that
+        // died mid-loop would leave this migration unrecorded and replayed —
+        // the create and the insert loop below must both survive that.
+        if (Schema::hasTable('material_cost_versions')) {
+            $this->backfillReceiptVersions();
+
+            return;
+        }
+
         Schema::create('material_cost_versions', function (Blueprint $table) {
             $table->id();
             $table->foreignId('material_lot_id')->constrained('material_lots')->cascadeOnDelete();
@@ -81,6 +90,14 @@ return new class extends Migration
 
         DB::table('material_lots')
             ->whereNotNull('receipt_rate_per_kg')
+            // Skip lots already carrying any version — the replay guard: a
+            // half-finished earlier run inserted some receipt versions, and
+            // inserting them twice would fork every later supersedes chain.
+            ->whereNotExists(function ($query): void {
+                $query->selectRaw('1')
+                    ->from('material_cost_versions')
+                    ->whereColumn('material_cost_versions.material_lot_id', 'material_lots.id');
+            })
             ->select('id', 'receipt_rate_per_kg', 'created_at')
             ->orderBy('id')
             ->chunk(500, function ($lots) use ($now): void {

@@ -29,13 +29,21 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('material_lots', function (Blueprint $table) {
-            $table->decimal('receipt_rate_per_kg', 15, 4)->nullable()->after('total_received_kg');
-            // 'grn' | 'po' | 'manual' | null. Deliberately a plain string,
-            // not an enum column: adding a provenance in future must not
-            // require an ALTER on a live factory's table.
-            $table->string('rate_source', 20)->nullable()->after('receipt_rate_per_kg');
-        });
+        // RE-RUNNABLE ON PURPOSE. MySQL DDL is non-transactional: if the
+        // backfill below ever died mid-loop, the migration would not be
+        // recorded and the next `artisan migrate` would replay this up() —
+        // which must then not trip over columns it already added. (The
+        // deploy takes a mysqldump before migrating either way; this makes
+        // the recovery story "just run it again" instead of "restore".)
+        if (! Schema::hasColumn('material_lots', 'receipt_rate_per_kg')) {
+            Schema::table('material_lots', function (Blueprint $table) {
+                $table->decimal('receipt_rate_per_kg', 15, 4)->nullable()->after('total_received_kg');
+                // 'grn' | 'po' | 'manual' | null. Deliberately a plain string,
+                // not an enum column: adding a provenance in future must not
+                // require an ALTER on a live factory's table.
+                $table->string('rate_source', 20)->nullable()->after('receipt_rate_per_kg');
+            });
+        }
 
         $this->backfill();
     }

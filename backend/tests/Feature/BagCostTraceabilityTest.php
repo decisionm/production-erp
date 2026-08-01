@@ -619,6 +619,40 @@ class BagCostTraceabilityTest extends TestCase
         $this->assertSame('0.0000', $second->fresh()->remaining_kg);
     }
 
+    public function test_a_scan_during_a_running_batch_is_never_gated_because_the_estimate_is_stale_by_construction(): void
+    {
+        // Consumption books at completeBatch, so mid-run the machine's
+        // estimate has not been charged for anything this batch has melted —
+        // a machine an hour into its shift "still holds" its whole first
+        // bag. Gating on that figure turned the routine second bag of a run
+        // into a demanded explanation (the diff audit's top finding: the
+        // floor would answer confirm_extra by reflex within a week and the
+        // signal would die). Between batches the figure is real and the
+        // gate speaks; during a run it stays silent.
+        $this->actingAsProduction();
+        app(FactoryDayBinService::class)->setWarehouseId($this->dayBin->id);
+
+        $this->startBatch();
+
+        $first = $this->bag('RUN-A-B1', '25.0000');
+        $second = $this->bag('RUN-B-B1', '25.0000');
+
+        $this->postJson('/api/v1/production/day-bin/load-bag', [
+            'barcode' => $first->barcode,
+            'work_center_id' => $this->machine->id,
+        ])->assertOk();
+
+        // 25 kg estimated on the machine — over the threshold — but the
+        // batch is running, so the top-up loads without a question and
+        // records no acknowledgement.
+        $this->postJson('/api/v1/production/day-bin/load-bag', [
+            'barcode' => $second->barcode,
+            'work_center_id' => $this->machine->id,
+        ])->assertOk();
+
+        $this->assertNull(DayBinMovement::query()->latest('id')->first()->balance_ack_reason);
+    }
+
     public function test_a_scan_below_the_threshold_is_never_asked_to_explain_itself(): void
     {
         $this->actingAsProduction();

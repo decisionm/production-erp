@@ -10,6 +10,7 @@ use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\DayBinMovementType;
 use App\Modules\Production\Models\ShiftMaterialConsumption;
 use App\Modules\Production\Models\ShiftProductionEntry;
+use App\Modules\Production\Models\WorkCenter;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
@@ -96,9 +97,13 @@ use Illuminate\Support\Collection;
  * invisible in every total.
  *
  * Because a reversed row is excluded from every layer-remaining sum, an
- * amended batch gives its layers back automatically: the world after a
- * correction equals a world in which the wrong completion never happened,
- * while the audit trail still records that it did.
+ * amended batch gives its layers back automatically: the KILOGRAMS after a
+ * correction equal a world in which the wrong completion never happened,
+ * while the audit trail still records that it did. The RATE attribution is
+ * looser, and honestly so: re-allocating an older batch walks the layers as
+ * they stand now, which can include bags loaded after that batch physically
+ * ran — a known, accepted tradeoff of not keeping per-batch layer
+ * snapshots, not a bug the arithmetic hides.
  *
  * ========================== PRICES ARE FROZEN ==========================
  *
@@ -137,6 +142,16 @@ class BagCostAllocationService
         if ($workCenterId === null) {
             return;
         }
+
+        // ONE ALLOCATOR PER MACHINE AT A TIME. Layer remainders are read
+        // with plain SELECTs below, and two transactions reading the same
+        // committed remainder would both draw it — an amendment of an older
+        // batch on this machine can run at the same wall-clock moment as a
+        // different batch completing on it. The work-center row is the lock
+        // the module already uses for exactly this class of race
+        // (startBatch, MaterialCostVersionService::append); taken here it
+        // serialises every allocator touching this machine's layers.
+        WorkCenter::query()->whereKey($workCenterId)->lockForUpdate()->first();
 
         if ($this->liveRows($entry)->exists()) {
             throw DuplicateAllocationException::make($entry->id);

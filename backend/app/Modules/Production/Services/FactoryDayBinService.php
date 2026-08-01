@@ -14,8 +14,10 @@ use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Inventory\Services\WarehouseService;
 use App\Modules\Production\Models\DayBinMovement;
+use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\DayBinMovementType;
 use App\Modules\Production\Models\ShiftMaterialConsumption;
+use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\WorkCenter;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -330,6 +332,25 @@ class FactoryDayBinService
     private function guardMachineBalance(int $workCenterId, int $itemId, ?string $ackReason): void
     {
         if ($ackReason !== null) {
+            return;
+        }
+
+        // THE GATE ONLY SPEAKS WHEN THE ESTIMATE CAN BE TRUSTED — between
+        // batches. Consumption is booked at completeBatch, so while a batch
+        // is running the estimate has not yet been charged for anything that
+        // run has melted: a machine an hour into its shift reads as still
+        // holding its whole first bag, and gating on that figure turned the
+        // routine second-bag-of-the-run scan into a demanded explanation
+        // (the live diff audit called it: operators would reflexively answer
+        // confirm_extra within a week and the signal would die). Between
+        // batches every completed run HAS been charged, the figure is real,
+        // and a bag's worth still showing is a genuine question.
+        $running = ShiftProductionEntry::query()
+            ->where('work_center_id', $workCenterId)
+            ->where('batch_status', BatchStatus::InProgress->value)
+            ->exists();
+
+        if ($running) {
             return;
         }
 
