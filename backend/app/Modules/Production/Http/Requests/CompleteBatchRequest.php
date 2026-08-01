@@ -193,6 +193,37 @@ class CompleteBatchRequest extends FormRequest
                 }
             }
 
+            // Loose inners are, by definition, the ones NOT yet in a carton.
+            // A full carton's worth of them is therefore a carton nobody
+            // counted: the piece total still comes out right (that arithmetic
+            // is mode-blind), but no_of_box understates, and with it the
+            // master boxes this run consumed. 7 loose trays at 5 trays/carton
+            // is 1 carton + 2, and it has to be entered that way.
+            //
+            // Only checkable when the line's own pack sizes say how many
+            // inners make a carton — nos_per_inner is absent on direct-box
+            // lines and on legacy payloads, and a carton that is not a whole
+            // number of inners (perBox % perInner) states no such figure.
+            // The modulo is guarded, never reached with a zero divisor.
+            if ($looseInner > 0 && $nosPerInner > 0 && $nosPerBox > 0 && $nosPerBox % $nosPerInner === 0) {
+                $innersPerCarton = intdiv($nosPerBox, $nosPerInner);
+                if ($innersPerCarton >= 1 && $looseInner >= $innersPerCarton) {
+                    // "a full carton or more", not "more than a full carton":
+                    // the rule fires at exactly one carton's worth too, and a
+                    // message that is false at its own boundary is the kind of
+                    // sentence this screen exists to stop printing.
+                    $noun = match ($mode) {
+                        ProductionStandardPackaging::MODE_POUCH => 'pouches',
+                        ProductionStandardPackaging::MODE_TRAY => 'trays',
+                        default => 'inner containers',
+                    };
+                    $validator->errors()->add(
+                        "packing_lines.{$index}.loose_inner",
+                        "{$looseInner} loose {$noun} is a full carton or more ({$innersPerCarton} {$noun}/carton) — count the full cartons as cartons.",
+                    );
+                }
+            }
+
             // The derived figure is recomputed here rather than trusted:
             // otherwise a client could send derived == actual and slip an
             // unexplained override past the reason requirement.

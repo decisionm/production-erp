@@ -216,9 +216,10 @@ function innersPerBox(packaging: StandardPackaging): number | null {
 
 /**
  * Trays (or pouches) that make one carton — the single figure that lets the
- * floor count TRAYS and have the cartons follow. "5 tray = 1 carton boxes,
- * then 600 units based on 120 PER TRAY, SO FIVE TRAY SO 600" is the whole
- * requirement, and this is the 5 in it.
+ * floor count CARTONS and have the trays follow. "5 tray = 1 carton boxes,
+ * then 600 units based on 120 PER TRAY, SO FIVE TRAY SO 600" is still the
+ * arithmetic, read from the carton end: this is the 5 in it, and it is also
+ * the step that says 7 loose trays are really one more carton plus 2.
  *
  * Returned ONLY when the imported standard reconciles with itself:
  * inners × pcs/inner must come to exactly pcs/carton. Deriving it by
@@ -226,9 +227,9 @@ function innersPerBox(packaging: StandardPackaging): number | null {
  * 5-per-box this file has always refused — 600 pcs/carton at 120 pcs/tray
  * IS five trays, whatever the sheet's trays_per_box column forgot to say.
  * But when the sheet states a different figure, or the carton is not a
- * whole number of trays, this returns null and the line stays carton-first:
- * a carton count the standard itself contradicts would post cartons the
- * factory never packed.
+ * whole number of trays, this returns null and the line carries no tray
+ * arithmetic at all: a tray figure the standard itself contradicts would
+ * show trays the factory never packed.
  */
 function innersPerCarton(packaging: StandardPackaging): number | null {
     const perBox = packaging.nos_per_box;
@@ -249,8 +250,9 @@ interface PackingLineValues {
     nos_per_inner?: number | null;
     /**
      * Trays/pouches per carton, fixed for the line from the standard (see
-     * innersPerCarton). Set = the floor types TRAYS and boxes/loose_inner
-     * are derived from it; null = this line falls back to counting cartons.
+     * innersPerCarton). Set = the line carries the tray arithmetic: trays are
+     * derived from the cartons typed, and loose trays that reach this figure
+     * fold into another carton. Null = the line is cartons and pieces only.
      * Never sent to the server — boxes and loose_inner already carry the
      * split, which is exactly what the API contract asks for.
      */
@@ -286,31 +288,18 @@ function blankPackingLine(packaging: StandardPackaging): PackingLineValues {
 
 /**
  * How many trays/pouches make a carton on this line, or null when the line
- * must be counted in cartons after all (direct-to-box, or a standard whose
- * carton is not a whole number of inner containers).
+ * has no tray arithmetic to do (direct-to-box, or a standard whose carton is
+ * not a whole number of inner containers).
  *
- * This is the ONE gate for tray-first entry: with it set, the supervisor
- * types trays and boxes/loose_inner are derived; without it, nothing about
- * the line changes from how it has always worked.
+ * This is the ONE gate for the tray side of a box-first line: with it set the
+ * supervisor types CARTONS, the trays are derived from them, and loose trays
+ * that reach it fold into another carton; without it, nothing about the line
+ * changes from how it has always worked.
  */
-function trayFirstStep(line: PackingLineValues | undefined): number | null {
+function boxFirstStep(line: PackingLineValues | undefined): number | null {
     if (!line || innerNoun(line.mode) === null) return null;
     const step = line.inners_per_box ?? null;
     return step !== null && step >= 1 ? step : null;
-}
-
-/**
- * A tray count split into whole cartons and the trays left over — the exact
- * pair the API contract wants (boxes + loose_inner), so the server's own
- * recompute, boxes × pcs/carton + loose × pcs/tray, lands on trays × pcs/tray
- * for every tray count. 5 trays → 1 carton, 0 over → 600 pcs. 7 → 1 carton,
- * 2 over → 840.
- */
-function splitInners(total: number, step: number): { boxes: number; loose: number } {
-    // Trays are counted, never measured — a half tray is a typo, and
-    // rounding it matches what the input itself shows the supervisor.
-    const whole = Math.max(0, Math.round(total));
-    return { boxes: Math.floor(whole / step), loose: whole % step };
 }
 
 /**
@@ -913,7 +902,7 @@ const completeBatchSchema = z.object({
                 nos_per_inner: z.number().int().min(1, 'At least 1').nullish(),
                 // Declared so it survives parsing — zod strips unknown keys
                 // before the refinements below run, and this is what tells
-                // them the line is counted in trays rather than cartons.
+                // them the line's trays derive from its carton count.
                 inners_per_box: z.number().int().min(1, 'At least 1').nullish(),
                 actual_pieces: z.number().int().min(0, 'Cannot be negative').nullish(),
                 override_reason: z.string().max(255, 'Max 255 characters').optional(),
@@ -981,11 +970,11 @@ const completeBatchSchema = z.object({
         }
 
         // Without a pack size no line total is computable — surfaced on the
-        // field the supervisor can actually see. A tray-first line has no
-        // pcs/carton box on screen (it derives from pcs/tray × trays per
+        // field the supervisor can actually see. A line with a tray step has
+        // no pcs/carton box on screen (it derives from pcs/tray × trays per
         // carton), so its complaint has to land on pcs/tray instead —
         // otherwise Complete Batch would refuse with nothing showing why.
-        const step = trayFirstStep(line);
+        const step = boxFirstStep(line);
         if (step !== null) {
             if ((line.nos_per_inner ?? 0) < 1 || (line.nos_per_box ?? 0) < 1) {
                 ctx.addIssue({
@@ -2307,11 +2296,12 @@ export default function ShiftProductionEntryPage() {
             boxes += line.boxes ?? 0;
 
             const packaging = packagingForLine(line);
-            // A tray-first line already holds the split the supervisor
-            // typed, so its own trays-per-carton is the honest divisor and
-            // the tray total comes back out exactly as entered. Carton-first
-            // lines keep reading the standard's stated figure, as before.
-            const perBox = trayFirstStep(line) ?? (packaging ? innersPerBox(packaging) : null);
+            // A line with a tray step holds the split the supervisor typed —
+            // whole cartons plus any loose trays — so that step is the honest
+            // multiplier and the tray total is exactly the figure its card
+            // showed. Lines without one keep reading the standard's stated
+            // trays-per-carton, as before.
+            const perBox = boxFirstStep(line) ?? (packaging ? innersPerBox(packaging) : null);
             const inners = (line.boxes ?? 0) * (perBox ?? 0) + (line.loose_inner ?? 0);
             if (line.mode === 'tray') trays += inners;
             if (line.mode === 'pouch') pouches += inners;
@@ -4685,10 +4675,12 @@ export default function ShiftProductionEntryPage() {
                                 const derived = linePieces(line);
                                 const actual = line.actual_pieces ?? derived;
                                 const lineErrors = completeForm.formState.errors.packing_lines?.[index];
-                                // Tray-first: the floor counts trays (or
-                                // pouches) and the cartons follow. Null keeps
-                                // the line exactly as it always was.
-                                const step = trayFirstStep(line);
+                                // Box-first: the floor counts cartons and the
+                                // trays (or pouches) follow from this step.
+                                // Null means the line has no tray arithmetic
+                                // — cartons and pieces, exactly as it always
+                                // was.
+                                const step = boxFirstStep(line);
                                 const innerName = inner ?? 'trays';
                                 const innerOne = innerNounOne(line.mode) ?? 'tray';
                                 const innerCount = step !== null ? lineInnerCount(line, step) : null;
@@ -4777,7 +4769,7 @@ export default function ShiftProductionEntryPage() {
                                                         <Form.Item
                                                             label={`Loose ${innerName}`}
                                                             style={{ marginBottom: 0 }}
-                                                            extra="not a full carton"
+                                                            extra={`not a full carton — ${step} makes one`}
                                                             validateStatus={lineErrors?.loose_inner ? 'error' : ''}
                                                             help={lineErrors?.loose_inner?.message}
                                                         >
@@ -4794,6 +4786,46 @@ export default function ShiftProductionEntryPage() {
                                                                         onChange={(value) => {
                                                                             looseField.onChange(value);
                                                                             recomputePackingTotals();
+                                                                        }}
+                                                                        onBlur={() => {
+                                                                            looseField.onBlur();
+                                                                            // Loose trays are the ones NOT in a
+                                                                            // carton, so a carton's worth of them
+                                                                            // is a carton nobody counted — the
+                                                                            // pieces would still add up while the
+                                                                            // carton, and the master box it eats,
+                                                                            // went missing. 7 at 5/carton folds to
+                                                                            // 1 more carton + 2, said out loud so
+                                                                            // the supervisor sees his own count
+                                                                            // change. (The server refuses the
+                                                                            // unfolded pair either way.)
+                                                                            //
+                                                                            // On BLUR, never per keystroke: folding
+                                                                            // mid-type would turn a supervisor
+                                                                            // typing "50" into one carton the
+                                                                            // instant the 5 landed.
+                                                                            const current = ((completeForm.getValues('packing_lines') ??
+                                                                                []) as PackingLineValues[])[index];
+                                                                            const typed = Math.round(Number(current?.loose_inner ?? 0));
+                                                                            if (!Number.isFinite(typed) || typed < step) return;
+                                                                            const added = Math.floor(typed / step);
+                                                                            const over = typed % step;
+                                                                            completeForm.setValue(
+                                                                                `packing_lines.${index}.boxes`,
+                                                                                (current?.boxes ?? 0) + added,
+                                                                            );
+                                                                            completeForm.setValue(`packing_lines.${index}.loose_inner`, over);
+                                                                            recomputePackingTotals();
+                                                                            // "+ 0" is the commonest case — a
+                                                                            // supervisor who filled exactly one
+                                                                            // carton's worth — and it reads like a
+                                                                            // glitch. Say the remainder only when
+                                                                            // there is one.
+                                                                            message.info(
+                                                                                `${typed} loose ${innerName} = ${added} more ${
+                                                                                    added === 1 ? 'carton' : 'cartons'
+                                                                                }${over > 0 ? ` + ${over}` : ''} — folded for you`,
+                                                                            );
                                                                         }}
                                                                     />
                                                                 )}
@@ -4939,10 +4971,12 @@ export default function ShiftProductionEntryPage() {
                                                     </Typography.Text>
                                                 </Col>
                                             )}
-                                            {/* Only a carton-first line asks for loose trays. On a
-                                                tray-first line the total trays already include them
-                                                — a second box for the ones over would count the same
-                                                trays twice. */}
+                                            {/* The loose-trays box for a line with NO tray step. The
+                                                step branch above has its own (with the fold that
+                                                turns a carton's worth back into a carton); this one
+                                                exists so a standard that never stated trays-per-carton
+                                                can still record trays not yet in a carton, priced at
+                                                the one figure it does have — pieces per tray. */}
                                             {step === null && inner !== null && (line.nos_per_inner ?? null) !== null && (
                                                 <Col xs={12} sm={8}>
                                                     <Form.Item
@@ -5008,8 +5042,8 @@ export default function ShiftProductionEntryPage() {
                                                 </>
                                             ) : step !== null ? (
                                                 <>
-                                                    {innerCount ?? 0} {innerName} counted · enter pcs per {innerOne} to get the
-                                                    pieces and the cartons
+                                                    {innerCount ?? 0} {innerName} from the cartons entered · enter pcs per{' '}
+                                                    {innerOne} to get the pieces
                                                 </>
                                             ) : (
                                                 <>
@@ -6186,12 +6220,20 @@ export default function ShiftProductionEntryPage() {
                                     value={`${quantityProduced.toLocaleString('en-IN')} pcs${
                                         results.actualPouches !== null && results.nosPerPouch ? ` · ${results.actualPouches} pouches` : ''
                                     }${results.actualBoxes !== null ? ` · ${results.actualBoxes} boxes` : ''}`}
+                                    // With packing lines on, this figure is not
+                                    // this caption's arithmetic at all — it is
+                                    // the sum recomputePackingTotals() posts
+                                    // from the line cards. Naming the wrong
+                                    // source sends a supervisor checking a
+                                    // pcs/box field the drawer is not using.
                                     formula={
-                                        results.nosPerBox && results.nosPerBox >= 1
-                                            ? 'good boxes × pcs/box + loose'
-                                            : results.nosPerPouch && results.nosPerPouch >= 1
-                                              ? 'pouches × pcs/pouch + loose'
-                                              : 'good boxes × pcs/box + loose'
+                                        usePackingLines
+                                            ? 'summed from the packing lines: cartons × pcs/carton + loose inners × pcs/inner, + loose pieces'
+                                            : results.nosPerBox && results.nosPerBox >= 1
+                                              ? 'good boxes × pcs/box + loose'
+                                              : results.nosPerPouch && results.nosPerPouch >= 1
+                                                ? 'pouches × pcs/pouch + loose'
+                                                : 'good boxes × pcs/box + loose'
                                     }
                                 />
                             )}
