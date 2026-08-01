@@ -1,0 +1,56 @@
+name: Tally sync status
+
+# Read-only triage for "is the Tally sync working?", runnable by anyone with
+# repo access, against the LIVE database, at any hour.
+#
+# Prints queue counts, the last time the factory agent collected anything,
+# the last time Tally accepted anything, the five most recent failure
+# messages, and a one-line verdict pointing at the layer that is stuck
+# (agent not polling vs Tally refusing vs healthy). The command it runs is
+# read-only by construction — one query family, no writes — so this workflow
+# needs no confirmation gates.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: tally-sync-status
+  cancel-in-progress: false
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # ssh-keyscan can exit 0 having collected nothing — check output,
+          # not exit code (the same trap every workflow here guards).
+          keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Re-running usually clears a transient failure."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      - name: Read the queue
+        run: |
+          set -o pipefail
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && /opt/alt/php84/usr/bin/php artisan tally:sync-status" \
+            2>&1 | tee status-output.txt
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Tally sync status"
+            echo
+            echo '```'
+            cat status-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
