@@ -151,12 +151,22 @@ class MachineResinEstimateTest extends TestCase
         ]);
     }
 
-    private function scan(string $barcode, WorkCenter $machine, ?string $quantityKg = null): void
+    /**
+     * $ackReason is the scan acknowledgement (see
+     * FactoryDayBinService::guardMachineBalance): once a machine's estimate
+     * still shows material, topping it up asks for one word explaining why.
+     * These scenes are about the ESTIMATE ARITHMETIC rather than that gate,
+     * so where a scan here is a genuine top-up of a machine that really does
+     * still hold resin, it passes 'confirm_extra' — which is exactly what
+     * the supervisor standing at that machine would answer.
+     */
+    private function scan(string $barcode, WorkCenter $machine, ?string $quantityKg = null, ?string $ackReason = null): void
     {
         $this->postJson('/api/v1/production/day-bin/load-bag', array_filter([
             'barcode' => $barcode,
             'work_center_id' => $machine->id,
             'quantity_kg' => $quantityKg,
+            'balance_ack_reason' => $ackReason,
         ]))->assertOk();
     }
 
@@ -293,8 +303,10 @@ class MachineResinEstimateTest extends TestCase
             ->assertOk();
 
         // A second shift on the same machine, days later — nothing is reset,
-        // nothing is opened, the figure simply carries.
-        $this->scan('BAG-B', $this->machineOne);
+        // nothing is opened, the figure simply carries. The machine still
+        // holds 400 kg of the first bag, so this top-up carries the
+        // acknowledgement the scan gate asks for.
+        $this->scan('BAG-B', $this->machineOne, ackReason: 'confirm_extra');
         $second = $this->startBatch($this->machineOne);
         $this->postJson("/api/v1/production/shift-production-entries/{$second}/complete", $this->figures(5000))
             ->assertOk();

@@ -35,11 +35,14 @@ import {
     machineLabel,
     factoryStoreLabel,
     loadFactoryDayBin,
+    readBalanceAckRefusal,
     resolveFactoryStore,
     setDayBinWarehouse,
 } from '@/features/production/api';
 import { useProductionSettings } from '@/features/production/packing';
+import { BALANCE_ACK_REASON_OPTIONS } from '@/features/production/types';
 import type {
+    BalanceAckReason,
     FactoryDayBinLoadRow,
     FactoryDayBinUnopenedBags,
     MachineResinMaterial,
@@ -155,6 +158,26 @@ export default function FactoryDayBinPage() {
     const [scanMachineId, setScanMachineId] = useState<number | null>(null);
     const [scanError, setScanError] = useState<string | null>(null);
     const [scanSuccess, setScanSuccess] = useState<string | null>(null);
+    /**
+     * THE REFUSED SCAN, awaiting one word.
+     *
+     * Set ONLY by a 422 from the server's balance gate, and holding the
+     * server's own sentence — this screen never decides on its own that a
+     * scan needs explaining, because the estimate the decision rests on
+     * lives on the server and a client-side copy of that rule would drift.
+     *
+     * ONE OBJECT, not three loose fields, and that is the correctness of it:
+     * the reason must never outlive the refusal that asked for it. The
+     * server's gate short-circuits whenever a reason is present, so a reason
+     * left lying in state would sail the NEXT scan straight past the check
+     * with nobody told. Cleared on success, on a new barcode, and on a
+     * change of machine — every path that makes the refusal stale.
+     */
+    const [scanAck, setScanAck] = useState<{
+        message: string;
+        reason: BalanceAckReason | null;
+        note: string;
+    } | null>(null);
 
     const { data: dayBin, isLoading } = useQuery({
         queryKey: ['production', 'factory-day-bin'],
@@ -327,6 +350,9 @@ export default function FactoryDayBinPage() {
             // Prefill the whole bag; the field stays editable for a part bag.
             setScanKg(Number(bag.remaining_kg));
             setScanError(null);
+            // A NEW BAG IS A NEW QUESTION. Whatever was being explained about
+            // the last one does not carry over to this one.
+            setScanAck(null);
             // Back to the gun: Enter now loads, or the next scan replaces.
             scanInputRef.current?.focus();
         },
@@ -353,6 +379,10 @@ export default function FactoryDayBinPage() {
             setScannedBag(null);
             setScanKg(null);
             setScanError(null);
+            // THE ACKNOWLEDGEMENT DIES WITH THE SCAN IT EXPLAINED. Left
+            // standing, it would be posted with the next bag and wave it
+            // through the gate unasked.
+            setScanAck(null);
             // The machine is NOT cleared — the next bag off the same pallet
             // goes into the same machine.
             // The bag lost kg, the floor gained it, and one machine's estimate
@@ -365,11 +395,35 @@ export default function FactoryDayBinPage() {
             scanInputRef.current?.focus();
         },
         onError: (error: any) => {
+            // THE BALANCE GATE, first: the server says this machine is still
+            // estimated to hold material and wants one word before it takes
+            // more. Its sentence names the figure, so it is shown as written
+            // rather than restated here — the estimate is the server's to
+            // quote and this screen has no business paraphrasing it.
+            const refusal = readBalanceAckRefusal(error);
+            if (refusal !== null) {
+                setScanError(null);
+                setScanAck({ message: refusal, reason: null, note: '' });
+                return;
+            }
+            // Anything else is an ordinary failure, and it SUPERSEDES any
+            // half-answered acknowledgement rather than sitting beside it.
+            setScanAck(null);
             setScanError(error?.response?.data?.message ?? 'Could not load the bag.');
         },
     });
 
-    const submitBagLoad = () => {
+    /**
+     * Post the scan. `ack` is present only on the resubmit of a scan the
+     * server already refused — never on a first attempt, because a reason
+     * sent up front turns the gate off for that scan.
+     *
+     * The payload is rebuilt from LIVE state on both passes, not replayed
+     * from a stashed copy, so a supervisor who lowers the kg while answering
+     * the question loads the kg they can see. Nothing here clears the bag on
+     * failure, which is what makes that safe.
+     */
+    const submitBagLoad = (ack?: { reason: BalanceAckReason; note: string }) => {
         if (!scannedBag || !scanKg || scanKg <= 0 || scanMachineId === null || !currentUser || bagLoad.isPending) {
             // A missing machine is the one blocked case worth naming: the
             // button is disabled for it, but Enter reaches here too.
@@ -384,6 +438,14 @@ export default function FactoryDayBinPage() {
             quantity_kg: scanKg,
             // Recorded as a note; the audit identity is the login either way.
             supervisor_id: currentUser.id,
+            ...(ack
+                ? {
+                      balance_ack_reason: ack.reason,
+                      // Blank stays ABSENT rather than going up as "": the
+                      // note is optional and an empty one is not a note.
+                      ...(ack.note.trim() !== '' ? { balance_ack_note: ack.note.trim() } : {}),
+                  }
+                : {}),
         });
     };
 
@@ -397,9 +459,17 @@ export default function FactoryDayBinPage() {
         if (code !== '') {
             setScanCode('');
             setScanSuccess(null);
+            // A new code supersedes an unanswered refusal even if the lookup
+            // then fails — clearing it here rather than only in the lookup's
+            // success path is what makes that true.
+            setScanAck(null);
             bagLookup.mutate(code);
             return;
         }
+        // WITH A QUESTION ON SCREEN, ENTER DOES NOTHING. Reposting without
+        // the reason only earns the same refusal back, and the answer being
+        // typed at that moment would be wiped by it.
+        if (scanAck !== null) return;
         if (scannedBag) submitBagLoad();
     };
 
@@ -703,6 +773,12 @@ export default function FactoryDayBinPage() {
                                         onChange={(value) => {
                                             setScanMachineId(value);
                                             setScanError(null);
+                                            // The refusal was about ONE machine's
+                                            // estimated remaining. Point at another
+                                            // machine and that question no longer
+                                            // applies — carrying the answer across
+                                            // would explain the wrong machine.
+                                            setScanAck(null);
                                         }}
                                         notFoundContent={
                                             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No active machines" />
@@ -750,14 +826,77 @@ export default function FactoryDayBinPage() {
                                             />
                                         </Form.Item>
                                     </Form>
+                                    {/* THE REFUSED SCAN. The server's sentence
+                                        first, word for word — it names the
+                                        estimated kg still on the machine, and
+                                        that figure is the whole reason anyone
+                                        is being asked. Then the four words,
+                                        and nothing else: NO WEIGHT IS ASKED
+                                        FOR HERE OR ANYWHERE. */}
+                                    {scanAck !== null && (
+                                        <Alert
+                                            type="warning"
+                                            showIcon
+                                            style={{ marginBottom: 12 }}
+                                            message="Say what happened to the material already on this machine"
+                                            description={
+                                                <Space direction="vertical" style={{ width: '100%' }}>
+                                                    <Typography.Text>{scanAck.message}</Typography.Text>
+                                                    <Select
+                                                        style={{ width: '100%' }}
+                                                        placeholder="What happened to it?"
+                                                        options={BALANCE_ACK_REASON_OPTIONS}
+                                                        value={scanAck.reason ?? undefined}
+                                                        onChange={(value) =>
+                                                            setScanAck((prev) =>
+                                                                prev === null ? prev : { ...prev, reason: value },
+                                                            )
+                                                        }
+                                                    />
+                                                    <Input.TextArea
+                                                        rows={2}
+                                                        maxLength={200}
+                                                        placeholder="Anything worth adding (optional)"
+                                                        value={scanAck.note}
+                                                        onChange={(e) =>
+                                                            setScanAck((prev) =>
+                                                                prev === null
+                                                                    ? prev
+                                                                    : { ...prev, note: e.target.value },
+                                                            )
+                                                        }
+                                                    />
+                                                </Space>
+                                            }
+                                        />
+                                    )}
                                     <Button
                                         type="primary"
                                         block
-                                        onClick={submitBagLoad}
+                                        onClick={() =>
+                                            scanAck !== null && scanAck.reason !== null
+                                                ? submitBagLoad({ reason: scanAck.reason, note: scanAck.note })
+                                                : submitBagLoad()
+                                        }
                                         loading={bagLoad.isPending}
-                                        disabled={!scanKg || scanKg <= 0 || scanMachineId === null}
+                                        disabled={
+                                            !scanKg ||
+                                            scanKg <= 0 ||
+                                            scanMachineId === null ||
+                                            // A pending refusal with no word picked
+                                            // yet: the button stays put and says
+                                            // what it wants, rather than firing a
+                                            // post that can only be refused again.
+                                            (scanAck !== null && scanAck.reason === null)
+                                        }
                                     >
-                                        {scanMachineId === null ? 'Pick a machine first' : 'Load into machine'}
+                                        {scanMachineId === null
+                                            ? 'Pick a machine first'
+                                            : scanAck !== null
+                                              ? scanAck.reason === null
+                                                  ? 'Pick a reason first'
+                                                  : 'Confirm and load into machine'
+                                              : 'Load into machine'}
                                     </Button>
                                 </div>
                             )}

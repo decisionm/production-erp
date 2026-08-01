@@ -38,14 +38,20 @@ use Illuminate\Validation\ValidationException;
  */
 class TraceabilityService
 {
-    public function __construct(private readonly DayBinLedgerService $dayBin) {}
+    public function __construct(
+        private readonly DayBinLedgerService $dayBin,
+        private readonly MaterialCostVersionService $costVersions,
+    ) {}
 
     public function paginateLots(?int $itemId = null, ?int $grnId = null, int $perPage = 20): LengthAwarePaginator
     {
         return MaterialLot::query()
             // grn + goodsReceiptLine: the register shows each lot's receipt,
             // its price and the date+time it was received (read-only).
-            ->with(['item', 'bags', 'grn', 'goodsReceiptLine'])
+            // costVersions: MaterialLotResource asks each lot for its current
+            // rate when a finance user is looking; without this the register
+            // would fire two extra queries per row.
+            ->with(['item', 'bags', 'grn', 'goodsReceiptLine', 'costVersions'])
             ->when($itemId, fn ($query) => $query->where('item_id', $itemId))
             ->when($grnId, fn ($query) => $query->where('grn_id', $grnId))
             ->orderByDesc('received_date')
@@ -55,7 +61,7 @@ class TraceabilityService
 
     public function loadLot(MaterialLot $lot): MaterialLot
     {
-        return $lot->load(['item', 'bags', 'grn', 'goodsReceiptLine']);
+        return $lot->load(['item', 'bags', 'grn', 'goodsReceiptLine', 'costVersions']);
     }
 
     /**
@@ -89,11 +95,21 @@ class TraceabilityService
      * request validation gives the friendly 422, the constraint is the
      * hard guard underneath.
      *
+     * receipt_rate_per_kg/rate_source are OPTIONAL and provenance-honest:
+     * GoodsReceiptService passes the rate the GRN line actually used, a lot
+     * registered by hand with no purchase behind it passes nothing, and
+     * "nothing" stays NULL rather than becoming a zero nobody meant. When a
+     * rate IS given the lot's opening 'receipt' cost version is written here
+     * — inside the same transaction, so a lot can never exist with a stamped
+     * rate and no history explaining it.
+     *
      * @param  array{
      *     grn_id?: ?int, goods_receipt_note_line_id?: ?int, item_id: int,
      *     supplier_lot_no?: ?string,
      *     received_date: string, bag_count: int,
      *     bag_weight_kg?: string|float|null, total_received_kg: string|float,
+     *     receipt_rate_per_kg?: string|float|null, rate_source?: ?string,
+     *     receipt_rate_note?: ?string,
      *     warehouse_id?: ?int, notes?: ?string,
      *     barcodes?: array<int, string>, bag_weights?: array<int, string|float>,
      * }  $data
@@ -101,6 +117,10 @@ class TraceabilityService
     public function createLot(array $data, ?int $createdBy): MaterialLot
     {
         return DB::transaction(function () use ($data, $createdBy) {
+            $rate = ($data['receipt_rate_per_kg'] ?? null) === null
+                ? null
+                : bcadd((string) $data['receipt_rate_per_kg'], '0', 4);
+
             $lot = MaterialLot::create([
                 'grn_id' => $data['grn_id'] ?? null,
                 'goods_receipt_note_line_id' => $data['goods_receipt_note_line_id'] ?? null,
@@ -110,9 +130,14 @@ class TraceabilityService
                 'bag_count' => $data['bag_count'],
                 'bag_weight_kg' => $data['bag_weight_kg'] ?? null,
                 'total_received_kg' => $data['total_received_kg'],
+                'receipt_rate_per_kg' => $rate,
+                // Only a real rate carries a source. No rate, no claim.
+                'rate_source' => $rate === null ? null : ($data['rate_source'] ?? null),
                 'notes' => $data['notes'] ?? null,
                 'created_by' => $createdBy,
             ]);
+
+            $this->costVersions->recordReceipt($lot, $createdBy, $data['receipt_rate_note'] ?? null);
 
             $count = (int) $data['bag_count'];
             $barcodes = array_values($data['barcodes'] ?? []);
@@ -133,14 +158,17 @@ class TraceabilityService
                 ]);
             }
 
-            return $lot->load(['item', 'bags']);
+            return $lot->load(['item', 'bags', 'costVersions']);
         });
     }
 
     public function paginateBags(?int $itemId = null, ?string $status = null, int $perPage = 20): LengthAwarePaginator
     {
         return MaterialBag::query()
-            ->with('lot.item')
+            // lot.costVersions: MaterialBagResource nests the lot, and a
+            // finance user's lot payload asks for its current rate. Without
+            // this the register lazy-loads twice per bag.
+            ->with(['lot.item', 'lot.costVersions'])
             ->when($itemId, fn ($query) => $query->whereHas('lot', fn ($lot) => $lot->where('item_id', $itemId)))
             ->when($status, fn ($query) => $query->where('status', $status))
             ->orderBy('id')
@@ -166,7 +194,9 @@ class TraceabilityService
             ->orderBy('material_lots.id')
             ->orderBy('material_bags.id')
             ->limit($limit)
-            ->with('lot.item')
+            // Same reason as paginateBags: the pick list is scanner-facing
+            // and returns up to 50 bags — two lazy queries each would be 100.
+            ->with(['lot.item', 'lot.costVersions'])
             ->get();
     }
 

@@ -25,6 +25,7 @@ use App\Modules\Inventory\Http\Controllers\BatchController;
 use App\Modules\Inventory\Http\Controllers\ItemController;
 use App\Modules\Inventory\Http\Controllers\MaterialBagController;
 use App\Modules\Inventory\Http\Controllers\MaterialLotController;
+use App\Modules\Inventory\Http\Controllers\MaterialLotCostVersionController;
 use App\Modules\Inventory\Http\Controllers\SerialNumberController;
 use App\Modules\Inventory\Http\Controllers\StockBalanceController;
 use App\Modules\Inventory\Http\Controllers\StockMovementController;
@@ -84,6 +85,7 @@ use App\Modules\Quality\Http\Controllers\SpcMeasurementController;
 use App\Modules\Sales\Http\Controllers\CustomerController;
 use App\Modules\Sales\Http\Controllers\DeliveryController;
 use App\Modules\Sales\Http\Controllers\InvoiceController;
+use App\Modules\Sales\Http\Controllers\SalesCostInsightController;
 use App\Modules\Sales\Http\Controllers\SalesOrderController;
 use App\Modules\TallySync\Http\Controllers\TallySettingsController;
 use App\Modules\TallySync\Http\Controllers\TallySyncAgentController;
@@ -164,6 +166,18 @@ Route::prefix('v1')->group(function () {
             });
         });
 
+        // A material lot's COST history lives at the lot's own URL but is
+        // gated on finance, not inventory — purchase rates are Owner and
+        // Accounts territory, not the store's. Hence a sibling group rather
+        // than a nested one: route-group middleware accumulates, so putting
+        // these inside the inventory group above would demand BOTH
+        // permissions and lock Accounts out of their own data.
+        // Append-only: there is no PUT and no DELETE here or anywhere.
+        Route::prefix('inventory')->middleware('module:finance')->group(function () {
+            Route::get('material-lots/{lot}/cost-versions', [MaterialLotCostVersionController::class, 'index']);
+            Route::post('material-lots/{lot}/cost-versions', [MaterialLotCostVersionController::class, 'store']);
+        });
+
         Route::prefix('procurement')->middleware('module:procurement')->group(function () {
             Route::apiResource('vendors', VendorController::class)->only(['index', 'store', 'update']);
 
@@ -182,6 +196,9 @@ Route::prefix('v1')->group(function () {
 
             Route::apiResource('sales-orders', SalesOrderController::class)->only(['index', 'store']);
             Route::post('sales-orders/{sales_order}/confirm', [SalesOrderController::class, 'confirm']);
+            // Honest cost visibility: an estimate for every line, an actual
+            // only where an approved batch really stands behind it. Read-only.
+            Route::get('sales-orders/{sales_order}/cost-insight', [SalesCostInsightController::class, 'show']);
 
             Route::apiResource('deliveries', DeliveryController::class)->only(['index', 'store']);
 

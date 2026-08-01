@@ -4,6 +4,7 @@ import type {
     Customer,
     Delivery,
     Invoice,
+    SalesCostInsight,
     SalesOrder,
 } from './types';
 
@@ -54,6 +55,19 @@ export async function createSalesOrder(payload: CreateSalesOrderPayload): Promis
 
 export async function confirmSalesOrder(id: number): Promise<SalesOrder> {
     const { data } = await api.post<{ data: SalesOrder }>(`/sales/sales-orders/${id}/confirm`);
+    return data.data;
+}
+
+/**
+ * What one order costs, estimate and actual kept apart.
+ *
+ * READ-ONLY and deliberately NOT part of the orders list: costing a line walks
+ * a FIFO pick list plus several moving-average lookups per distinct product,
+ * so this is fetched for ONE order when its drawer opens rather than N times
+ * to fill a column nobody has asked to sort by.
+ */
+export async function getSalesOrderCostInsight(id: number): Promise<SalesCostInsight> {
+    const { data } = await api.get<{ data: SalesCostInsight }>(`/sales/sales-orders/${id}/cost-insight`);
     return data.data;
 }
 

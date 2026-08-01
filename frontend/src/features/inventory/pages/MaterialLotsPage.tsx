@@ -3,6 +3,8 @@ import { Alert, Button, Drawer, Empty, Select, Space, Table, Tag, Typography } f
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import MaterialBagLabels from '@/features/inventory/components/MaterialBagLabels';
+import { hasModuleAccess } from '@/features/auth/permissions';
+import { useAuthStore } from '@/features/auth/store';
 import { listAllItems } from '@/features/inventory/api';
 import { listMaterialLots } from '@/features/production/api';
 import type { MaterialLot } from '@/features/production/types';
@@ -30,10 +32,19 @@ function fmtKg(value: string | null | undefined): string {
     return Number.isFinite(parsed) ? String(parseFloat(parsed.toFixed(4))) : '—';
 }
 
+/** A rupee-per-kg rate from its decimal string. Parsed only to display it. */
+function fmtRate(value: string | null | undefined): string {
+    if (value === null || value === undefined || value === '') return '—';
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return '—';
+    return `₹${parsed.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+}
+
 export default function MaterialLotsPage() {
     const [itemId, setItemId] = useState<number | null>(null);
     const [page, setPage] = useState(1);
     const [labelSelection, setLabelSelection] = useState<{ lot: MaterialLot; bagId?: number } | null>(null);
+    const user = useAuthStore((s) => s.user);
 
     const { data: items } = useQuery({
         queryKey: ['inventory', 'items', 'all'],
@@ -60,6 +71,24 @@ export default function MaterialLotsPage() {
         items?.data
             .filter((item) => item.is_active)
             .map((item) => ({ value: item.id, label: itemLabel(item) })) ?? [];
+
+    /**
+     * DOES THIS REGISTER CARRY RATES AT ALL — the server's answer, honoured
+     * locally.
+     *
+     * The rate keys are omitted entirely by MaterialLotResource for anyone
+     * without finance access, so their PRESENCE on a row is the server's own
+     * ruling arriving with the data, and it cannot go stale against a cached
+     * /auth/me the way a permission check alone can. It is paired with the
+     * finance permission, which can only ever make this stricter.
+     *
+     * When it is false the column does not exist. No greyed cells and no
+     * "ask for access" placeholder — a column advertising a number it will
+     * not show only sends somebody looking for it.
+     */
+    const lots = (data?.data ?? []) as LotWithReceipt[];
+    const showsRates =
+        hasModuleAccess(user, 'finance') && lots.some((lot) => lot.current_rate_per_kg !== undefined);
 
     return (
         <>
@@ -108,7 +137,7 @@ export default function MaterialLotsPage() {
                 <Table<LotWithReceipt>
                     rowKey="id"
                     loading={isLoading}
-                    dataSource={(data?.data ?? []) as LotWithReceipt[]}
+                    dataSource={lots}
                     scroll={{ x: 'max-content' }}
                     pagination={
                         data?.meta
@@ -183,6 +212,45 @@ export default function MaterialLotsPage() {
                             align: 'right',
                             render: (_, lot) => lot.receipt?.unit_cost ?? '—',
                         },
+                        // ONE COLUMN, and only for the logins the server sends
+                        // rates to. The GRN rate above is PROVISIONAL — the
+                        // purchase invoice and any landed cost land afterwards
+                        // and are appended as new versions, never written over
+                        // the original. This column is therefore the only place
+                        // that answers "what does this lot cost TODAY", and the
+                        // tag is how a reader knows the two figures differ
+                        // without opening anything.
+                        ...(showsRates
+                            ? [
+                                  {
+                                      title: 'Current rate / kg',
+                                      align: 'right' as const,
+                                      render: (_: unknown, lot: LotWithReceipt) => (
+                                          <Space direction="vertical" size={0} style={{ alignItems: 'flex-end' }}>
+                                              <span>{fmtRate(lot.current_rate_per_kg)}</span>
+                                              {lot.has_revisions === true && (
+                                                  <Space size={4} wrap style={{ justifyContent: 'flex-end' }}>
+                                                      <Tag color="gold">revised</Tag>
+                                                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                                          was {fmtRate(lot.receipt_rate_per_kg)}
+                                                      </Typography.Text>
+                                                  </Space>
+                                              )}
+                                              {/* Not a dash on its own. A lot with
+                                                  no rate at all is opening stock
+                                                  that was never bought through a
+                                                  receipt — a real answer, and one
+                                                  that must not read as "free". */}
+                                              {lot.current_rate_per_kg === null && (
+                                                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                                      no purchase rate on record
+                                                  </Typography.Text>
+                                              )}
+                                          </Space>
+                                      ),
+                                  },
+                              ]
+                            : []),
                         { title: 'Bags', dataIndex: 'bag_count', align: 'right' },
                         { title: 'Received kg', dataIndex: 'total_received_kg', align: 'right', render: fmtKg },
                         {
