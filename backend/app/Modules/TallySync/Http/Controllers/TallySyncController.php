@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\TallySync\Http\Resources\TallySyncEntryResource;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Services\TallySyncService;
+use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 /**
@@ -17,9 +18,17 @@ class TallySyncController extends Controller
 {
     public function __construct(private readonly TallySyncService $sync) {}
 
-    public function index(): AnonymousResourceCollection
+    /**
+     * `per_page` (the shared Controller::perPage clamp) so the dashboard can
+     * pull the whole queue in one request instead of the newest 20. It has to
+     * be able to: a failed voucher is only unmissable if the page can see
+     * every failed voucher, and the default first page hides anything older
+     * than the last 20 entries — which, on a busy day, is where a Tally
+     * rejection from yesterday morning quietly lives.
+     */
+    public function index(Request $request): AnonymousResourceCollection
     {
-        return TallySyncEntryResource::collection($this->sync->paginate());
+        return TallySyncEntryResource::collection($this->sync->paginate($this->perPage($request)));
     }
 
     /**
