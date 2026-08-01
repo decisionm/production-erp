@@ -44,6 +44,16 @@ class VoucherPostedOnceTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // Voucher-once semantics are downstream of the approval chain; the
+        // quality gate is not what this suite is about (see
+        // BatchQualityStageTest for it).
+        config(['production.approvals.quality_stage_enabled' => false]);
+    }
+
     private function actAsStaff(): void
     {
         $user = User::factory()->create(['is_active' => true]);

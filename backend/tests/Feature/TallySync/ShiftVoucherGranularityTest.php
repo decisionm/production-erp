@@ -49,6 +49,11 @@ class ShiftVoucherGranularityTest extends TestCase
     {
         parent::setUp();
 
+        // Voucher granularity (batch vs shift) is what this suite pins, well
+        // downstream of the approval gates. The quality gate is covered in
+        // BatchQualityStageTest.
+        config(['production.approvals.quality_stage_enabled' => false]);
+
         $this->shift = Shift::create(['name' => 'Morning', 'start_time' => '06:00', 'end_time' => '14:00']);
         $this->machine = WorkCenter::create(['code' => 'M-01', 'name' => 'Machine 1']);
         $this->bottle = Item::create(['sku' => 'BTL-500', 'name' => '500ml PET Bottle', 'uom' => 'NOS']);

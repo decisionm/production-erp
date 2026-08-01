@@ -61,6 +61,11 @@ class MasterbatchDosingTest extends TestCase
     {
         parent::setUp();
 
+        // Masterbatch dosing arithmetic is what this suite pins; it approves batches
+        // only to reach the posted figures. The quality gate is covered in
+        // BatchQualityStageTest.
+        config(['production.approvals.quality_stage_enabled' => false]);
+
         $this->rmStore = Warehouse::create(['code' => 'WH-RM', 'name' => 'Raw Material Store']);
         $this->fg = Warehouse::create(['code' => 'WH-FG', 'name' => 'Finished Goods']);
 

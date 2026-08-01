@@ -1,5 +1,6 @@
 import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
+import type { ShiftProductionEntry } from '@/features/production/types';
 import type { Capa, IncomingInspection, MeasuringInstrument, NonConformanceReport, SpcChart, SpcCharacteristic, SpcMeasurement } from './types';
 
 export async function listIncomingInspections(): Promise<Paginated<IncomingInspection>> {
@@ -168,5 +169,121 @@ export async function recordSpcMeasurement(
 
 export async function getSpcChart(characteristicId: number): Promise<SpcChart> {
     const { data } = await api.get<{ data: SpcChart }>(`/quality/spc-characteristics/${characteristicId}/chart`);
+    return data.data;
+}
+
+// ---------------------------------------------------------------------------
+// Batch quality check — the gate between Complete Batch and PM approval.
+//
+// The paths and field names below are the backend's ACTUAL contract
+// (BatchQualityCheckController + StoreBatchQualityCheckRequest), not a guess.
+// Two things about it are worth stating here, because both are easy to get
+// wrong from the frontend side:
+//
+// 1. THE WRITE LIVES AT A PRODUCTION PATH BUT CARRIES QUALITY PERMISSION. The
+//    route is registered outside the production group precisely so a QC
+//    checker needs quality.manage and NOT production.manage.
+//
+// 2. THERE IS NO DEDICATED QUEUE ENDPOINT, AND NO NEW STATUS. A checked and an
+//    unchecked batch are both status 'pending'; the queue is the ordinary
+//    approval list filtered on `quality.checked`. That list is production-
+//    gated, which is the one seam in this design — see listBatchQualityQueue.
+// ---------------------------------------------------------------------------
+
+/** POST the check for one entry. Returns the updated batch, net figure and all. */
+export const qualityCheckPath = (entryId: number): string =>
+    `/production/shift-production-entries/${entryId}/quality-check`;
+
+/** The list the queue is derived from. Requires production.view. */
+const PENDING_ENTRIES_PATH = '/production/shift-production-entries';
+
+/**
+ * Counts are whole BOTTLES, and the server means it: the request validates
+ * `integer`, not `numeric`, so that a decimal — which would mean a client had
+ * sent kilograms — is refused rather than quietly booked. The kg the books
+ * need is derived server-side from the run's frozen unit weight.
+ *
+ * The server re-checks `reviewed === ok + rejected` and `rejected <= produced`
+ * itself; the drawer enforces both before submit so the operator finds out at
+ * the keyboard rather than through a 422.
+ */
+export interface CreateBatchQualityCheckPayload {
+    reviewed_nos: number;
+    ok_nos: number;
+    rejected_nos: number;
+    note?: string;
+}
+
+/** The queue row IS a shift production entry — same resource, filtered. */
+export type BatchQualityQueueRow = ShiftProductionEntry;
+
+export interface BatchQualityQueue {
+    /** Unchecked, gate-on batches — what the desk actually works. */
+    rows: BatchQualityQueueRow[];
+    /**
+     * Does the gate apply at all? False when pending batches exist but none
+     * carries `stage_enabled` — i.e. the factory has stood the stage down.
+     * Null when there were no pending batches to tell either way.
+     */
+    stageEnabled: boolean | null;
+    /** Pending batches examined, gate or no gate. Distinguishes "none at all". */
+    pendingCount: number;
+}
+
+/**
+ * Completed batches still awaiting their quality check.
+ *
+ * WHY THIS PAGES RATHER THAN TAKING THE FIRST RESPONSE. The list is paginated
+ * at a fixed 20 and ordered NEWEST first server-side, while this queue is
+ * worked OLDEST first — so reading only page 1 would show the twenty most
+ * recent batches and hide exactly the ones that have been waiting longest.
+ * The page walks to the end and sorts afterwards. `meta.last_page` bounds the
+ * loop, with a hard cap as a second bound so a malformed meta cannot spin.
+ *
+ * Unchecked-only is decided HERE rather than by a query param because the
+ * backend has no such filter: `quality.checked` is the only thing separating a
+ * queued batch from a done one, both being status 'pending'.
+ *
+ * THE `stage_enabled` HALF OF THE FILTER IS LOAD-BEARING, not tidiness. With
+ * the stage stood down (PROD_QUALITY_STAGE_ENABLED=false) every pending batch
+ * still reports `checked: false`, so filtering on that alone would fill this
+ * queue with batches nobody is meant to check — every one of which would be
+ * refused on submit, since recordQualityCheck() turns away a check outright
+ * while the stage is off. With the stage off the queue must be empty, which is
+ * what "the chain is exactly what it was before this stage existed" means. The
+ * server guard is the real one; this filter is what stops the screen offering
+ * work that cannot be done.
+ */
+export async function listBatchQualityQueue(): Promise<BatchQualityQueue> {
+    const all: BatchQualityQueueRow[] = [];
+    let page = 1;
+    let lastPage = 1;
+
+    do {
+        const { data } = await api.get<Paginated<BatchQualityQueueRow>>(PENDING_ENTRIES_PATH, {
+            params: { status: 'pending', page },
+        });
+        all.push(...(data?.data ?? []));
+        lastPage = data?.meta?.last_page ?? 1;
+        page += 1;
+    } while (page <= lastPage && page <= 50);
+
+    const gated = all.filter((row) => row.quality?.stage_enabled === true);
+
+    return {
+        // `=== false`, not merely falsy: a backend without the gate sends no
+        // `quality` block, and those batches are not "awaiting quality" — they
+        // are batches from a world where this queue does not exist.
+        rows: gated.filter((row) => row.quality?.checked === false),
+        stageEnabled: all.length === 0 ? null : gated.length > 0,
+        pendingCount: all.length,
+    };
+}
+
+export async function createBatchQualityCheck(
+    entryId: number,
+    payload: CreateBatchQualityCheckPayload,
+): Promise<ShiftProductionEntry> {
+    const { data } = await api.post<{ data: ShiftProductionEntry }>(qualityCheckPath(entryId), payload);
     return data.data;
 }

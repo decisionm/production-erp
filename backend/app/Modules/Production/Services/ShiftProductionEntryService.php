@@ -20,6 +20,7 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Fast shop-floor capture, modeled as a batch lifecycle rather than a
@@ -69,6 +70,11 @@ class ShiftProductionEntryService
                 'scraps.scrapReason', 'approvedBy',
                 'downtimeEvents.reason',
                 'tallySyncEntries',
+                // The quality queue and the approval queue are the same list
+                // read at different stages, so the checker's name has to be
+                // in it — the PM's first question about a reduced figure is
+                // who reduced it.
+                'qualityCheckedBy',
             ])
             ->when($status, function ($query) use ($status) {
                 // The approval `status` column defaults to "pending" at row
@@ -466,6 +472,13 @@ class ShiftProductionEntryService
                     'running_hours' => $data['running_hours'] ?? null,
                     'qc_rejection_kg' => $data['qc_rejection_kg'] ?? null,
                     'notes' => $data['notes'] ?? $entry->notes,
+                    // WHO COUNTED THIS OUTPUT. Recorded because the quality
+                    // gate's four-eyes rule needs an earlier signature to
+                    // compare against, and created_by (who STARTED the run)
+                    // is a different question with a frequently different
+                    // answer — a batch begun by the day supervisor and
+                    // finished by the night one.
+                    'completed_by' => $completedBy,
                     'batch_status' => BatchStatus::Completed->value,
                     'status' => ShiftProductionEntryStatus::Pending->value,
                 ]);
@@ -844,11 +857,366 @@ class ShiftProductionEntryService
     }
 
     /**
+     * THE QUALITY GATE — every completed batch passes through it before the
+     * plant manager sees it (owner, 30-Jul): "all the machines will go to
+     * quality queue, and quality will do the check, add entry as how many
+     * reviewed, how many okay and how many rejected. This quality-rejected
+     * needs to add in the production as rejected by quality, so the total
+     * production will reduce if rejection, otherwise same, then go to next
+     * level."
+     *
+     * WHAT "THE TOTAL PRODUCTION WILL REDUCE" MEANS HERE, precisely, because
+     * it is the whole point of the stage and it is easy to implement as a
+     * display-only subtraction that fools everybody downstream:
+     *
+     *   quantity_produced itself becomes the NET figure, and the supervisor's
+     *   original count moves to gross_quantity_produced.
+     *
+     * Not a computed field, not a second column the reports would have to
+     * learn about — the one column every existing consumer already reads.
+     * The Tally voucher's produced line, the production reports, the shift
+     * summary and the approval screen therefore all carry net without any of
+     * them being taught about quality, which is the only way to be sure none
+     * of them is still quietly posting the gross figure to the books.
+     *
+     * THE REJECTION IS NOT A SECOND PRECEDENCE PATH. The rejected count is
+     * converted to kg at the run's frozen unit weight and written to the
+     * EXISTING qc_rejection_kg, so production.rejection_precedence ('qc' —
+     * "QC's figure outranks production's") consumes it exactly as it already
+     * consumes a supervisor-entered one. Nothing new decides which rejection
+     * figure wins, because a second thing deciding that is how two screens
+     * end up showing two different rejection totals.
+     *
+     * AND IT RECONCILES — WITH ONE NAMED EXCEPTION, measured rather than
+     * assumed. issued − net − rejected − lumps is arithmetically identical to
+     * issued − gross − lumps, so on a batch that carried NO earlier rejection
+     * figure the accountant's blocking number does not shift by a gram: the
+     * rejected bottles were always part of what came out of the machine, and
+     * this stage changes what they are called, not how much mass the shift
+     * accounts for.
+     *
+     * The exception is a batch whose supervisor ALREADY recorded a rejection
+     * at completion (quantity_scrap → quantity_rejection_kg, or a weighed
+     * qc_rejection_kg). Precedence is 'qc', so QC's figure REPLACES that one
+     * rather than joining it — which is the pre-existing rule, not something
+     * this stage decided — and the reconciliation therefore moves by the
+     * difference between the two. Measured on the fixture: a batch completed
+     * with qc_rejection_kg 1.5 reconciles at −0.5000 kg unaccounted; after a
+     * 200-piece check writes 2.5800 it reconciles at +1.0000. That is a
+     * 1.5000 kg swing — exactly the superseded figure — and it is pinned by
+     * test_a_supervisor_rejection_figure_is_superseded_not_added_to() so it
+     * can never drift unnoticed. It is the honest consequence of one rejection
+     * figure outranking another; the alternative (adding them) would assert
+     * the two count different bottles, which nobody at the factory has said.
+     *
+     * ZERO REJECTION IS A REAL RESULT, not a no-op: the counts and the
+     * checker are recorded and the gate opens, but not one figure on the
+     * entry moves — no netting, no rejection kg, no stock movement. "Otherwise
+     * same", in the owner's words.
+     *
+     * @param  array{reviewed_nos: int|string, ok_nos: int|string, rejected_nos: int|string, note?: ?string}  $data
+     */
+    public function recordQualityCheck(ShiftProductionEntry $entry, array $data, ?int $checkedBy): ShiftProductionEntry
+    {
+        // THE STAGE-OFF REFUSAL, and it belongs HERE rather than only in the
+        // screen that hides the button. With the stage stood down the promise
+        // is that the chain is exactly what it was before this stage existed;
+        // an endpoint that still accepted a check would let one POST net the
+        // production figure down and issue bottles out of finished goods on a
+        // deployment that had deliberately switched the gate off — and this
+        // API is a real product surface (CLAUDE.md §3), not the bundled SPA's
+        // private implementation, so "the frontend does not offer it" is not a
+        // guard. Refused before anything is read or written.
+        if (! (bool) config('production.approvals.quality_stage_enabled', true)) {
+            throw new InvalidStatusTransitionException(
+                'the quality stage is switched off for this factory — completed batches go straight to the plant manager',
+            );
+        }
+
+        // Every guard below reads the ROW, never the caller's copy — the same
+        // reasoning accountantApprove() spells out: the model in hand was
+        // loaded before this request, and a stale value here would wave
+        // through exactly the case being refused.
+        $row = ShiftProductionEntry::query()
+            ->whereKey($entry->id)
+            ->first(['id', 'status', 'batch_status', 'quantity_produced', 'quality_checked_at', 'completed_by']);
+
+        if ($row === null || $row->batch_status !== BatchStatus::Completed || $row->status !== ShiftProductionEntryStatus::Pending) {
+            throw InvalidStatusTransitionException::make(
+                'shift production entry quality check',
+                $row?->status->value ?? $entry->status->value,
+                'quality checked',
+            );
+        }
+
+        // A SECOND CHECK IS REFUSED, never silently superseded. Superseding
+        // reads as the kinder option until you follow the stock: the first
+        // check has already issued rejected bottles out of finished goods and
+        // received their weight as scrap, so a second one would have to
+        // reverse movements that the accountant may already have reconciled
+        // against.
+        //
+        // AND THERE IS NO CORRECTION ROUTE TO POINT AT — checked, not assumed.
+        // reject() sets status to Rejected and leaves batch_status at
+        // Completed; nothing transitions OUT of Rejected, and completeBatch()
+        // requires InProgress, so a rejected batch cannot be re-completed or
+        // re-checked. Rejecting is how a batch leaves the chain, not how its
+        // figures get fixed. So the sentence below tells the checker the true
+        // thing (get it right first time; a mistake needs an administrator)
+        // rather than sending them down a route that would terminate the
+        // batch and still not correct the count.
+        if ($row->quality_checked_at !== null) {
+            throw new InvalidStatusTransitionException(
+                'this batch has already had its quality check, and a check cannot be redone — ask an administrator to correct the figures',
+            );
+        }
+
+        // FOUR EYES, extended to this gate exactly as it binds the accountant.
+        // The person who counted the output at Complete Batch must not also
+        // be the person who certifies that count, or the check certifies
+        // itself. Same config flag relaxes it — see config/production.php.
+        if (
+            $row->completed_by !== null
+            && $checkedBy !== null
+            && (int) $row->completed_by === $checkedBy
+            && ! (bool) config('production.approvals.allow_same_user', false)
+        ) {
+            // Plain sentence, not ::make()'s status grammar: the person
+            // reading it is a QC checker being told why the button did
+            // nothing, and the reason is not a status problem.
+            throw new InvalidStatusTransitionException(
+                'the same person cannot complete a batch and pass its own quality check',
+            );
+        }
+
+        $reviewed = (int) $data['reviewed_nos'];
+        $ok = (int) $data['ok_nos'];
+        $rejected = (int) $data['rejected_nos'];
+        $gross = (string) $row->quantity_produced;
+
+        return DB::transaction(function () use ($entry, $data, $checkedBy, $reviewed, $ok, $rejected, $gross) {
+            // The weight THIS RUN was quoted and measured against, never the
+            // item master's current column — see resolvedUnitWeightGrams().
+            $item = Item::query()->find($entry->item_id);
+            $unitWeightGrams = $this->resolvedUnitWeightGrams($entry, $item);
+            $rejectedKg = $rejected > 0 ? $this->toKg((string) $rejected, $unitWeightGrams) : null;
+
+            $columns = [
+                'quality_reviewed_nos' => $reviewed,
+                'quality_ok_nos' => $ok,
+                'quality_rejected_nos' => $rejected,
+                'quality_checked_by' => $checkedBy,
+                'quality_checked_at' => now(),
+                'quality_note' => $data['note'] ?? null,
+            ];
+
+            if ($rejected > 0) {
+                $net = bcsub($gross, (string) $rejected, 4);
+                $columns['gross_quantity_produced'] = $gross;
+                $columns['quantity_produced'] = $net;
+                $columns['quantity_produced_kg'] = $this->toKg($net, $unitWeightGrams);
+
+                // Only when a kg figure genuinely resolved. A run with no
+                // unit weight cannot state its rejection in kg, and writing
+                // null here would ERASE a weighed figure the supervisor may
+                // have entered at completion — losing information in the name
+                // of recording some.
+                if ($rejectedKg !== null) {
+                    $columns['qc_rejection_kg'] = $rejectedKg;
+                }
+            }
+
+            // Same conditional-UPDATE guard as every other transition, plus
+            // the null check that makes the double-check refusal above hold
+            // under a genuine race rather than only in the common case.
+            $affected = ShiftProductionEntry::query()
+                ->where('id', $entry->id)
+                ->where('status', ShiftProductionEntryStatus::Pending->value)
+                ->whereNull('quality_checked_at')
+                ->update($columns);
+
+            if ($affected === 0) {
+                throw new InvalidStatusTransitionException(
+                    'this batch has already had its quality check, and a check cannot be redone — ask an administrator to correct the figures',
+                );
+            }
+
+            $scrapNote = null;
+
+            if ($rejected > 0) {
+                // OUT OF FINISHED GOODS. Completion received the gross count
+                // into the FG warehouse; these pieces are not sellable
+                // product and must stop being counted as it.
+                //
+                // allow_negative is the COMPLETION path's permission, reused
+                // deliberately rather than duplicated: this issue is that
+                // receipt's counterpart, reversing part of what completion
+                // booked. If the recorded balance cannot cover it, the
+                // bottles were still made and still rejected — that is a fact
+                // about the shift, and refusing it would strand the whole
+                // approval chain behind a stock-record problem the QC desk
+                // cannot fix (see config/production.php 'stock' for the
+                // incident that settled this).
+                $this->stock->recordIssue(
+                    itemId: $entry->item_id,
+                    warehouseId: $entry->warehouse_id,
+                    quantity: (string) $rejected,
+                    reference: "QC #{$entry->id}",
+                    createdBy: $checkedBy,
+                    allowNegative: (bool) config('production.stock.allow_negative_on_completion', true),
+                );
+
+                // AND INTO SCRAP — "no, go to the rejected scrap only".
+                // Mass out of FG equals mass into scrap, both derived from
+                // the one frozen unit weight, so the pair can never create
+                // stock on net.
+                $scrapItem = $this->resolveScrapItem();
+
+                if ($scrapItem === null) {
+                    $scrapNote = 'Scrap receipt skipped: no scrap item is configured (production.scrap.rejected_item_sku). The rejection is recorded and the bottles are out of finished goods; the scrap weight is not yet on any item.';
+                } elseif ($rejectedKg === null) {
+                    $scrapNote = 'Scrap receipt skipped: this run resolved no unit weight, so the rejected pieces cannot be converted to a scrap weight. The rejection is recorded and the bottles are out of finished goods.';
+                } else {
+                    $this->stock->recordReceipt(
+                        itemId: $scrapItem->id,
+                        warehouseId: $entry->warehouse_id,
+                        // At the scrap item's OWN running average, so
+                        // receiving this weight does not restate what the
+                        // factory's existing scrap is held at. Valuing it at
+                        // finished-goods cost would book rejected bottles as
+                        // if they were still worth a finished bottle; the
+                        // accountant's real scrap valuation rules are not
+                        // codified anywhere yet (Tally master plan §1.5).
+                        quantity: $rejectedKg,
+                        unitCost: $this->stock->currentAverageCost($scrapItem->id, $entry->warehouse_id),
+                        reference: "QC #{$entry->id}",
+                        createdBy: $checkedBy,
+                    );
+                }
+
+                // The existing scrap bucket, not a new one: ShiftScrap rows
+                // of this type already ride the Tally voucher as data and
+                // narration, so the rejection reaches the accountant's
+                // voucher in words WITHOUT altering the payload's shape.
+                $entry->scraps()->create([
+                    'type' => ShiftScrapType::RejectedFinishedGood->value,
+                    'quantity_nos' => $rejected,
+                    'quantity_kg' => $rejectedKg,
+                ]);
+            }
+
+            if ($scrapNote !== null) {
+                // Written onto the ENTRY, not only to the log: a skipped
+                // stock movement that lives in a log file is a skipped stock
+                // movement nobody finds. The approval screen shows this to
+                // the PM and the accountant before they sign.
+                Log::warning('Quality rejection recorded without a scrap receipt', [
+                    'shift_production_entry_id' => $entry->id,
+                    'rejected_nos' => $rejected,
+                    'rejected_kg' => $rejectedKg,
+                    'reason' => $scrapNote,
+                ]);
+
+                ShiftProductionEntry::query()
+                    ->whereKey($entry->id)
+                    ->update(['quality_scrap_note' => $scrapNote]);
+            }
+
+            return $entry->fresh([
+                'shift', 'workCenter', 'item', 'warehouse', 'scrapReason', 'operator',
+                'materialConsumptions.item' => fn ($query) => $query->withTrashed(),
+                'materialConsumptions.warehouse' => fn ($query) => $query->withTrashed(),
+                'scraps.scrapReason',
+                'downtimeEvents.reason',
+                'qualityCheckedBy',
+            ]);
+        });
+    }
+
+    /**
+     * The one scrap item quality rejections are received against, or null.
+     *
+     * There is deliberately no fallback and no guessing. This ERP has no
+     * scrap-item master and no colour → scrap-item mapping (the only
+     * colour-driven resolver it has picks MASTERBATCH, and its own docblock
+     * notes that a coloured non-masterbatch item — "an amber scrap, say" —
+     * lands in the ambiguous pool rather than resolving). Picking "the item
+     * whose name looks like scrap" would book real weight against a master
+     * chosen by string matching, and the factory would discover it as a Tally
+     * rejection days later. Null is the honest answer, and the caller records
+     * the rejection and says so on the entry.
+     *
+     * SKU first, then exact name — a factory that mirrors Tally's "Pet Scrap"
+     * as a plain item without a code can still name it. Soft-deleted items are
+     * excluded by the model's global scope: a retired master must not silently
+     * start receiving stock again.
+     */
+    private function resolveScrapItem(): ?Item
+    {
+        $configured = trim((string) (config('production.scrap.rejected_item_sku') ?? ''));
+
+        if ($configured === '') {
+            return null;
+        }
+
+        return Item::query()->where('sku', $configured)->first()
+            ?? Item::query()->where('name', $configured)->first();
+    }
+
+    /**
+     * The quality check as the approval screen needs to read it: the counts,
+     * who certified them, and — the part that matters when the figures are
+     * questioned — the BASIS on which a piece count became a weight.
+     *
+     * Returned even when no check has happened (all nulls, checked = false)
+     * so a client can render "awaiting quality" without having to tell a
+     * missing key apart from a null one.
+     *
+     * @return array<string, mixed>
+     */
+    public function qualityCheck(ShiftProductionEntry $entry): array
+    {
+        $checked = $entry->quality_checked_at !== null;
+        $unitWeightGrams = $this->resolvedUnitWeightGrams($entry, $entry->item);
+        $rejected = $entry->quality_rejected_nos;
+
+        return [
+            'checked' => $checked,
+            'stage_enabled' => (bool) config('production.approvals.quality_stage_enabled', true),
+            'reviewed_nos' => $entry->quality_reviewed_nos,
+            'ok_nos' => $entry->quality_ok_nos,
+            'rejected_nos' => $rejected,
+            'checked_at' => $entry->quality_checked_at?->toIso8601String(),
+            'note' => $entry->quality_note,
+            // The supervisor's count and what production now stands at, side
+            // by side — the subtraction the owner asked for, shown rather
+            // than implied.
+            'gross_quantity_produced' => $entry->gross_quantity_produced,
+            'net_quantity_produced' => $entry->quantity_produced,
+            // How the rejected pieces became kilograms. Named because this is
+            // the figure that reduces the books, and "why is the rejection
+            // 1.93 kg" must be answerable from the screen.
+            'rejection_kg' => $checked && $rejected > 0 ? $entry->qc_rejection_kg : null,
+            'rejection_kg_basis' => $checked && $rejected > 0
+                ? [
+                    'unit_weight_grams' => $unitWeightGrams,
+                    'source' => $unitWeightGrams === null
+                        ? null
+                        : (($entry->config_snapshot['unit_weight_grams'] ?? null) ? 'run_snapshot' : 'item_master'),
+                ]
+                : null,
+            // Null when the scrap receipt happened (or none was due); a
+            // sentence when it was deliberately skipped.
+            'scrap_note' => $entry->quality_scrap_note,
+        ];
+    }
+
+    /**
      * The approval chain, each stage a blocking gate: Supervisor submits
-     * (completeBatch → pending) → Plant Manager verifies → Accountant
-     * reconciles and posts → Tally. Every transition is the same
-     * conditional-UPDATE concurrency guard as the batch lifecycle: two
-     * approvers acting at once can't double-advance.
+     * (completeBatch → pending) → QUALITY checks and certifies the count →
+     * Plant Manager verifies → Accountant reconciles and posts → Tally. Every
+     * transition is the same conditional-UPDATE concurrency guard as the
+     * batch lifecycle: two approvers acting at once can't double-advance.
      *
      * THE ACCOUNTANT IS FINAL. There is no MD stage — it was removed, and this
      * docblock described it for longer than the code did. Left uncorrected it
@@ -856,6 +1224,31 @@ class ShiftProductionEntryService
      */
     public function pmApprove(ShiftProductionEntry $entry, int $signedBy): ShiftProductionEntry
     {
+        // THE QUALITY GATE, enforced here rather than as a status of its own.
+        // Adding a status between 'pending' and 'pm_approved' would have
+        // rewritten every queue filter, report and screen that reads the
+        // chain; making the check a PRECONDITION of this gate leaves all of
+        // them untouched and puts the refusal where the person who needs to
+        // read it is standing.
+        //
+        // Scoped to a row that is genuinely awaiting this gate: a call
+        // against a wrong-status entry finds nothing here and falls through
+        // to advance(), which reports the real problem (the transition)
+        // instead of complaining about a quality check for an entry that was
+        // never eligible anyway.
+        if ((bool) config('production.approvals.quality_stage_enabled', true)) {
+            $awaiting = ShiftProductionEntry::query()
+                ->whereKey($entry->id)
+                ->where('status', ShiftProductionEntryStatus::Pending->value)
+                ->first(['id', 'quality_checked_at']);
+
+            if ($awaiting !== null && $awaiting->quality_checked_at === null) {
+                throw new InvalidStatusTransitionException(
+                    'this batch is still in the quality queue — the quality check has to be recorded before it can be approved',
+                );
+            }
+        }
+
         return $this->advance($entry, ShiftProductionEntryStatus::Pending, ShiftProductionEntryStatus::PmApproved, [
             'plant_manager_signed_by' => $signedBy,
             'plant_manager_signed_at' => now(),
@@ -955,6 +1348,8 @@ class ShiftProductionEntryService
         return $entry->fresh([
             'shift', 'workCenter', 'item', 'warehouse',
             'plantManagerSignedBy', 'accountantSignedBy', 'approvedBy',
+            // Who certified the count each later gate is signing off on.
+            'qualityCheckedBy',
         ]);
     }
 

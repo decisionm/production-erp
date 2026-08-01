@@ -154,6 +154,9 @@ const allNavItems: NavGroup[] = [
         label: 'Quality',
         module: 'quality',
         children: [
+            // First in the group on purpose: it is the only one of these worked
+            // every single shift, and the factory opens it each morning.
+            { key: '/quality/production-qc', label: 'Production QC' },
             { key: '/quality/incoming-inspections', label: 'Incoming Inspections' },
             { key: '/quality/ncrs', label: 'Non-Conformance Reports' },
             { key: '/quality/capas', label: 'CAPA' },

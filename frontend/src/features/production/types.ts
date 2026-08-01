@@ -309,6 +309,137 @@ export function readStockShortfalls(
     }));
 }
 
+/**
+ * The quality gate's block on a shift production entry, exactly as
+ * ShiftProductionEntryResource serves it under the `quality` key.
+ *
+ * ALWAYS PRESENT, all-null before the check — the backend emits the block
+ * unconditionally so a client can tell "not checked yet" from "this backend
+ * has no gate at all" without having to tell a missing key from a null one.
+ * Optional here only for payloads that predate the gate.
+ *
+ * Counts (`*_nos`) are whole BOTTLES. `rejection_kg` is the kilogram figure
+ * the SERVER derives from them (pieces × the run's frozen unit weight); the
+ * frontend never does that conversion, because the gram weight is not its to
+ * choose.
+ */
+export interface EntryQuality {
+    /** Has quality checked this batch? The precondition the PM gate waits on. */
+    checked: boolean;
+    /**
+     * Is the gate switched on for this deployment
+     * (config `production.approvals.quality_stage_enabled`)?
+     *
+     * Served PER ENTRY rather than on /production/settings, so the flag and
+     * the check it governs always travel together and can never disagree.
+     */
+    stage_enabled: boolean;
+    reviewed_nos: number | null;
+    ok_nos: number | null;
+    rejected_nos: number | null;
+    checked_at: string | null;
+    note: string | null;
+    /** The supervisor's original count, before the gate reduced it. */
+    gross_quantity_produced: string | null;
+    /** What production now stands at — the same figure as `quantity_produced`. */
+    net_quantity_produced: string | null;
+    /** Kilograms the rejection removed; null when nothing was rejected. */
+    rejection_kg: string | null;
+    /**
+     * How the rejected pieces became kilograms. `unit_weight_grams` is a
+     * DECIMAL STRING, not a number — it comes off the run's frozen
+     * config_snapshot (or the item master) as `"12.9000"` and the server
+     * never casts it. Parse it with `readQuantity` before doing arithmetic.
+     */
+    rejection_kg_basis: { unit_weight_grams: string | null; source: string | null } | null;
+    /**
+     * Set when the rejected pieces were issued out of finished goods but their
+     * mass could NOT be received as scrap, because this ERP has no scrap-item
+     * master yet. A sentence to show the approver, not an error.
+     */
+    scrap_note: string | null;
+    /** whenLoaded — absent on payloads that don't eager-load the checker. */
+    checked_by?: { id: number; name: string } | null;
+}
+
+/**
+ * Is the quality gate switched on, according to this entry?
+ *
+ * OFF UNLESS THE ENTRY SAYS OTHERWISE, and the direction is the whole point.
+ * A payload from a backend that predates the gate carries no `quality` block
+ * at all; reading that as "on" would disable every approve button in the
+ * factory and stop the day's production reaching Tally. Absent block, absent
+ * flag, anything not literally `true` — all read as off, and with it off the
+ * approval page behaves exactly as it did before the gate existed.
+ *
+ * (The backend's own gate is deliberately fail-CLOSED — pmApprove() refuses an
+ * unchecked batch. That is the right default for a rule that protects the
+ * books. This reader governs only what the SCREEN draws, where guessing "on"
+ * from missing data would grey out buttons the server would happily accept.)
+ */
+export function readQualityStageEnabled(
+    entry: Pick<ShiftProductionEntry, 'quality'> | null | undefined,
+): boolean {
+    return entry?.quality?.stage_enabled === true;
+}
+
+/** The entry's quality block, or null on a backend that predates the gate. */
+export function readQuality(
+    entry: Pick<ShiftProductionEntry, 'quality'> | null | undefined,
+): EntryQuality | null {
+    return entry?.quality ?? null;
+}
+
+/** Has quality checked this batch? False also covers "this backend has no gate". */
+export function isQualityChecked(
+    entry: Pick<ShiftProductionEntry, 'quality'> | null | undefined,
+): boolean {
+    return entry?.quality?.checked === true;
+}
+
+/**
+ * Parse a decimal-string quantity into a number, or null when it is absent or
+ * not a plain number. Never returns NaN — a NaN would propagate silently into
+ * a production figure printed beside an approve button.
+ */
+export function readQuantity(raw: string | number | null | undefined): number | null {
+    if (raw === null || raw === undefined || raw === '') return null;
+    const n = typeof raw === 'number' ? raw : Number(raw);
+    return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * The net good production figure a PM is approving.
+ *
+ * READ, NEVER RECOMPUTED. When the check is recorded the server rewrites
+ * `quantity_produced` itself to the net figure — that is what "the total
+ * production will reduce" means, and it is what the voucher's produced line
+ * and every report then carry — preserving the supervisor's original count in
+ * `gross_quantity_produced`. Subtracting the rejected count here would deduct
+ * it a SECOND time and print a figure lower than the one actually posting to
+ * Tally.
+ */
+export function netProducedPieces(
+    entry: Pick<ShiftProductionEntry, 'quantity_produced' | 'quality'> | null | undefined,
+): number | null {
+    return readQuantity(entry?.quality?.net_quantity_produced ?? entry?.quantity_produced);
+}
+
+/**
+ * The supervisor's original count, before the gate reduced it. Falls back to
+ * `quantity_produced`, which IS the gross figure until a check is recorded.
+ */
+export function grossProducedPieces(
+    entry:
+        | Pick<ShiftProductionEntry, 'quantity_produced' | 'gross_quantity_produced' | 'quality'>
+        | null
+        | undefined,
+): number | null {
+    return readQuantity(
+        entry?.quality?.gross_quantity_produced ?? entry?.gross_quantity_produced ?? entry?.quantity_produced,
+    );
+}
+
 export interface ShiftProductionEntry {
     id: number;
     shift: Shift;
@@ -336,8 +467,17 @@ export interface ShiftProductionEntry {
      */
     colour?: string | null;
     batch_number: string | null;
+    /**
+     * NET of any quality rejection. The gate rewrites this column so every
+     * consumer — this screen, the reports, the Tally voucher's produced line
+     * — carries the same reduced figure without needing to know the gate
+     * exists. The supervisor's original count survives in
+     * `gross_quantity_produced`.
+     */
     quantity_produced: string | null;
     quantity_produced_kg: string | null;
+    /** The supervisor's count before the gate; null until a check happens. */
+    gross_quantity_produced?: string | null;
     quantity_scrap: string;
     quantity_rejection_kg: string | null;
     scrap_reason: ScrapReason | null;
@@ -360,6 +500,14 @@ export interface ShiftProductionEntry {
     running_hours: string | null;
     /** Entered at/after completion. */
     qc_rejection_kg: string | null;
+    /**
+     * The quality gate — the stage the owner asked for between Complete Batch
+     * and PM approval ("all the machines will go to quality queue"). Always
+     * served by a backend that has the gate, all-null before the check.
+     * Optional only for payloads that predate it; read through
+     * `readQuality` / `isQualityChecked` / `readQualityStageEnabled`.
+     */
+    quality?: EntryQuality | null;
     /**
      * Both collections are `whenLoaded` on the backend resource, and the
      * approval/reject/start endpoints deliberately don't load them — so they
@@ -795,6 +943,15 @@ export interface ProductionReportRow {
     good_production_kg: string | null;
     rejection_kg_production: string | null;
     rejection_kg_qc: string | null;
+    /**
+     * How many pieces quality REVIEWED — "so we know the analysis better
+     * tomorrow" (owner). Optional and NOT SERVED YET: ProductionReportService
+     * carries the quality rejection in kilograms (`rejection_kg_qc` above,
+     * which the gate now writes) but no piece counts, so this renders an em
+     * dash until the backend adds it. Declared here so the column exists and
+     * fills itself in the moment it does.
+     */
+    qc_reviewed_pieces?: string | null;
     lumps_kg: string;
     /** actual_boxes / expected_boxes × 100 — formula dictionary row 24. */
     efficiency_pct: number | null;
@@ -811,6 +968,8 @@ export interface ProductionReportTotals {
     good_production_kg: string;
     rejection_kg_production: string;
     rejection_kg_qc: string;
+    /** Day sum of the per-row reviewed count; not served yet, same as the row. */
+    qc_reviewed_pieces?: string | null;
     lumps_kg: string;
     /**
      * Σ actual_boxes / Σ expected_boxes × 100 — RATIO OF SUMS (formula

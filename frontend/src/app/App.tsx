@@ -51,6 +51,7 @@ import CapasPage from '@/features/quality/pages/CapasPage';
 import IncomingInspectionsPage from '@/features/quality/pages/IncomingInspectionsPage';
 import InstrumentsPage from '@/features/quality/pages/InstrumentsPage';
 import NonConformanceReportsPage from '@/features/quality/pages/NonConformanceReportsPage';
+import ProductionQcPage from '@/features/quality/pages/ProductionQcPage';
 import SpcChartPage from '@/features/quality/pages/SpcChartPage';
 import SpcCharacteristicsPage from '@/features/quality/pages/SpcCharacteristicsPage';
 import BatchesPage from '@/features/inventory/pages/BatchesPage';
@@ -131,6 +132,7 @@ export default function App() {
                                     <Route path="/finance/chart-of-accounts" element={<ChartOfAccountsPage />} />
                                     <Route path="/finance/journal-entries" element={<JournalEntriesPage />} />
                                     <Route path="/finance/reports" element={<ReportsPage />} />
+                                    <Route path="/quality/production-qc" element={<ProductionQcPage />} />
                                     <Route path="/quality/incoming-inspections" element={<IncomingInspectionsPage />} />
                                     <Route path="/quality/ncrs" element={<NonConformanceReportsPage />} />
                                     <Route path="/quality/capas" element={<CapasPage />} />

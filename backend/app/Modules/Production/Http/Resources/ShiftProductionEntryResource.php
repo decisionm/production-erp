@@ -30,8 +30,14 @@ class ShiftProductionEntryResource extends JsonResource
                 (bool) config('production.traceability_enabled'),
                 $this->parent_entry_id,
             ),
+            // NET of any quality rejection — the quality gate rewrites this
+            // column so that every consumer (this screen, the reports, the
+            // Tally voucher's produced line) carries the same reduced figure
+            // without having to know the gate exists. The supervisor's
+            // original count is preserved beside it.
             'quantity_produced' => $this->quantity_produced,
             'quantity_produced_kg' => $this->quantity_produced_kg,
+            'gross_quantity_produced' => $this->gross_quantity_produced,
             'quantity_scrap' => $this->quantity_scrap,
             'quantity_rejection_kg' => $this->quantity_rejection_kg,
             'scrap_reason' => ScrapReasonResource::make($this->whenLoaded('scrapReason')),
@@ -91,6 +97,16 @@ class ShiftProductionEntryResource extends JsonResource
             // two different blocks by design.
             'variance' => app(ShiftProductionEntryService::class)->consumptionVariance($this->resource),
             'metrics' => app(ShiftProductionEntryService::class)->productionMetrics($this->resource),
+            // The quality gate: the counts, the basis on which rejected
+            // pieces became kilograms, and whether the scrap receipt
+            // happened. Always present (all nulls before the check) so a
+            // client can say "awaiting quality" without telling a missing
+            // key apart from a null one. `checked_by` is a relation, so it
+            // rides the same whenLoaded rule as the other signatures.
+            'quality' => [
+                ...app(ShiftProductionEntryService::class)->qualityCheck($this->resource),
+                'checked_by' => UserResource::make($this->whenLoaded('qualityCheckedBy')),
+            ],
             // What the consumed material actually cost — each line at the
             // unit cost its own issue movement recorded, plus a total that
             // is null (never a partial figure) when any line is unpriced.

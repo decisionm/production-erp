@@ -27,6 +27,18 @@ class ApprovalChainTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // This suite pins the PM → accountant chain and its concurrency
+        // guards, which predate the quality gate and are unchanged by it.
+        // The gate itself — including that it is ON by default, and that
+        // turning it off restores exactly this chain — is covered end to end
+        // by BatchQualityStageTest.
+        config(['production.approvals.quality_stage_enabled' => false]);
+    }
+
     private function submittedEntry(): ShiftProductionEntry
     {
         $shift = Shift::create(['name' => 'Morning', 'start_time' => '06:00', 'end_time' => '14:00']);

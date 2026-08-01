@@ -62,6 +62,10 @@ class ProductionReadyPickerTest extends TestCase
     {
         parent::setUp();
 
+        // Product readiness is what this suite pins; approvals here are
+        // scaffolding. The quality gate is covered in BatchQualityStageTest.
+        config(['production.approvals.quality_stage_enabled' => false]);
+
         $this->shift = Shift::create(['name' => 'Morning', 'start_time' => '06:00', 'end_time' => '14:00']);
         $this->machine = WorkCenter::create(['code' => 'MC-01', 'name' => 'Machine 1', 'is_active' => true]);
         $this->fgStore = Warehouse::create([

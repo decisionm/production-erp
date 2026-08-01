@@ -71,6 +71,7 @@ use App\Modules\Production\Http\Controllers\SubcontractOrderController;
 use App\Modules\Production\Http\Controllers\VoucherPreviewController;
 use App\Modules\Production\Http\Controllers\WorkCenterController;
 use App\Modules\Production\Http\Controllers\WorkOrderController;
+use App\Modules\Quality\Http\Controllers\BatchQualityCheckController;
 use App\Modules\Quality\Http\Controllers\CalibrationRecordController;
 use App\Modules\Quality\Http\Controllers\CapaController;
 use App\Modules\Quality\Http\Controllers\IncomingInspectionController;
@@ -303,6 +304,24 @@ Route::prefix('v1')->group(function () {
 
             Route::apiResource('payslips', PayslipController::class)->only(['index', 'show']);
         });
+
+        /*
+         * THE QUALITY GATE on a production batch — deliberately OUTSIDE the
+         * production group below, though it sits at a production path.
+         *
+         * The path belongs with the batch's other lifecycle actions
+         * (complete, pm-approve, accountant-approve) because that is what it
+         * is: the stage between the first two. The PERMISSION belongs to
+         * quality, because the quality desk is who performs it, and a QC
+         * checker has no reason to hold production.manage — which is what
+         * this route would silently require if it were nested in the group.
+         * Registering it here is how it carries module:quality (POST ⇒
+         * quality.manage) and only that.
+         */
+        Route::post(
+            'production/shift-production-entries/{shift_production_entry}/quality-check',
+            BatchQualityCheckController::class,
+        )->middleware('module:quality');
 
         Route::prefix('production')->middleware('module:production')->group(function () {
             Route::get('settings', [ProductionSettingsController::class, 'show']);
