@@ -28,6 +28,7 @@ import { listAllWarehouses } from '@/features/inventory/api';
 import {
     findMaterialBagByBarcode,
     getFactoryDayBin,
+    getFactoryDayBinReconciliation,
     listRawMaterials,
     loadBagToFactoryDayBin,
     factoryStoreLabel,
@@ -38,6 +39,7 @@ import {
 import { useProductionSettings } from '@/features/production/packing';
 import type {
     FactoryDayBinLoadRow,
+    FactoryDayBinReconciliationRow,
     FactoryDayBinUnopenedBags,
     MaterialBag,
 } from '@/features/production/types';
@@ -50,6 +52,16 @@ function fmtQty(value: string | null | undefined): string {
     const parsed = parseFloat(value);
     return Number.isNaN(parsed) ? '—' : String(parseFloat(parsed.toFixed(4)));
 }
+
+/**
+ * How far a physical count may sit from the expected figure and still be
+ * called a match: 50 grams. A bin is counted with a floor scale and a tape on
+ * part-bags, so demanding exact equality would paint every honest count red
+ * and teach the accountant to ignore the colour. Stated on screen in as many
+ * words, because a tolerance nobody knows about is just a lie with a
+ * threshold.
+ */
+const COUNT_MATCH_TOLERANCE_KG = 0.05;
 
 /** The SKU line under a material name — or null when it just repeats the name. */
 function skuLine(item: { sku: string; name: string }): string | null {
@@ -150,6 +162,37 @@ export default function FactoryDayBinPage() {
 
     const dayBinWarehouse = dayBin?.warehouse ?? null;
     const configured = dayBinWarehouse !== null;
+
+    // ----- The day's reconciliation: the CENTRAL "is any material missing?"
+    // check. Defaults to today; yesterday is one click back, because
+    // "what did we end last night with?" is the accountant's morning question
+    // and the answer must not require a report run.
+    const [reconDate, setReconDate] = useState<Dayjs>(() => dayjs());
+    const reconDateKey = reconDate.format('YYYY-MM-DD');
+    /**
+     * The physical counts, keyed by item_id. LOCAL STATE ONLY — never sent,
+     * never stored. A count is how the accountant interrogates the ERP's
+     * figure, not a stock record: booking it would silently overwrite a
+     * balance the movements are the authority on.
+     *
+     * Cleared whenever the date changes. Left standing, yesterday's typed
+     * count would sit against today's expected closing and report a
+     * discrepancy that never happened.
+     */
+    const [counts, setCounts] = useState<Record<number, number | null>>({});
+
+    const {
+        data: reconciliation,
+        isLoading: reconLoading,
+        isError: reconUnavailable,
+    } = useQuery({
+        // The date is part of the key: without it every date would serve the
+        // first one fetched, from cache, under a picker that says otherwise.
+        queryKey: ['production', 'factory-day-bin', 'reconciliation', reconDateKey],
+        queryFn: () => getFactoryDayBinReconciliation(reconDateKey),
+        enabled: configured,
+        retry: false,
+    });
 
     const warehouseOptions = useMemo(
         () =>
@@ -425,6 +468,131 @@ export default function FactoryDayBinPage() {
         },
     ];
 
+    /**
+     * The difference between a typed physical count and what the bin SHOULD
+     * hold. This is the only real check on the page — every other figure in the
+     * row is derived from the movement ledger and so cannot disagree with it.
+     *
+     * COMPARED AGAINST expected_closing + other_movements, never expected
+     * closing alone. The server defines expected closing strictly as
+     * opening + loaded − consumed; material that moved by neither route — a
+     * receipt booked straight into the bin, a transfer back out to the store —
+     * lands in `other_movements_kg` instead, and the bin's live balance is
+     * their SUM. Subtracting a count from the bare expected figure would invent
+     * a shortfall on exactly the days somebody had already accounted for one,
+     * which is the false alarm this whole change exists to stop.
+     */
+    const countVerdict = (row: FactoryDayBinReconciliationRow, count: number | null) => {
+        if (count === null || Number.isNaN(count)) return null;
+        const expected = parseFloat(row.expected_closing_kg) + parseFloat(row.other_movements_kg);
+        if (Number.isNaN(expected)) return null;
+
+        const diff = count - expected;
+        if (Math.abs(diff) <= COUNT_MATCH_TOLERANCE_KG) {
+            return <Typography.Text type="success">matches</Typography.Text>;
+        }
+        // The sign is spelled with the character, not left to a formatter, and
+        // the word beside it says which way the gap runs — "−4.8" alone has
+        // been read as "4.8 spare" often enough to be worth six characters.
+        return diff < 0 ? (
+            <Typography.Text type="danger" strong>
+                −{fmtQty(Math.abs(diff).toFixed(4))} kg missing
+            </Typography.Text>
+        ) : (
+            <Typography.Text type="warning" strong>
+                +{fmtQty(diff.toFixed(4))} kg extra
+            </Typography.Text>
+        );
+    };
+
+    const reconColumns = [
+        {
+            title: 'Material',
+            key: 'material',
+            render: (_: unknown, row: FactoryDayBinReconciliationRow) => (
+                <Space direction="vertical" size={0}>
+                    <Typography.Text strong>{row.item.name}</Typography.Text>
+                    {skuLine(row.item) !== null && (
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            {skuLine(row.item)}
+                        </Typography.Text>
+                    )}
+                </Space>
+            ),
+        },
+        {
+            title: 'Opening',
+            key: 'opening',
+            align: 'right' as const,
+            render: (_: unknown, row: FactoryDayBinReconciliationRow) => fmtQty(row.opening_kg),
+        },
+        {
+            title: 'Loaded',
+            key: 'loaded',
+            align: 'right' as const,
+            render: (_: unknown, row: FactoryDayBinReconciliationRow) => fmtQty(row.loaded_kg),
+        },
+        {
+            title: 'Consumed',
+            key: 'consumed',
+            align: 'right' as const,
+            render: (_: unknown, row: FactoryDayBinReconciliationRow) => fmtQty(row.consumed_kg),
+        },
+        {
+            title: 'Expected closing',
+            key: 'expected',
+            align: 'right' as const,
+            render: (_: unknown, row: FactoryDayBinReconciliationRow) => {
+                const other = parseFloat(row.other_movements_kg);
+                const hasOther = !Number.isNaN(other) && other !== 0;
+                return (
+                    <Space direction="vertical" size={0} align="end">
+                        <Typography.Text strong style={{ fontSize: 16 }}>
+                            {fmtQty(row.expected_closing_kg)}{' '}
+                            <Typography.Text type="secondary">{row.item.uom}</Typography.Text>
+                        </Typography.Text>
+                        {/* Normally absent. When it is not, the count is being
+                            compared against expected + this — so the row names
+                            BOTH the movement and the figure a count is actually
+                            measured against, rather than reporting a gap the
+                            screen cannot explain. */}
+                        {hasOther && (
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                {other > 0 ? '+' : '−'}
+                                {fmtQty(Math.abs(other).toFixed(4))} kg by another route (booked into the bin, or
+                                returned to the store) — a count is compared against{' '}
+                                {fmtQty((parseFloat(row.expected_closing_kg) + other).toFixed(4))} kg
+                            </Typography.Text>
+                        )}
+                    </Space>
+                );
+            },
+        },
+        {
+            title: 'Physical count (kg)',
+            key: 'count',
+            align: 'right' as const,
+            render: (_: unknown, row: FactoryDayBinReconciliationRow) => (
+                <InputNumber
+                    min={0}
+                    step={0.1}
+                    style={{ width: 140 }}
+                    placeholder="weigh the bin"
+                    value={counts[row.item_id] ?? null}
+                    onChange={(value) => setCounts((prev) => ({ ...prev, [row.item_id]: value }))}
+                />
+            ),
+        },
+        {
+            title: 'Difference',
+            key: 'difference',
+            render: (_: unknown, row: FactoryDayBinReconciliationRow) =>
+                countVerdict(row, counts[row.item_id] ?? null) ?? (
+                    <Typography.Text type="secondary">—</Typography.Text>
+                ),
+        },
+    ];
+
     const loadColumns = [
         {
             title: 'Time',
@@ -640,6 +808,94 @@ export default function FactoryDayBinPage() {
                                 ),
                             }}
                         />
+                    </Card>
+
+                    {/* THE DAY'S RECONCILIATION — the central replacement for
+                        the per-batch "unaccounted kg" figure the owner had
+                        removed. Directly under the balances, because it is the
+                        same materials asked a harder question. */}
+                    <Card
+                        size="small"
+                        title="Is anything missing? — the day's check"
+                        extra={
+                            <Space wrap>
+                                <Button
+                                    size="small"
+                                    onClick={() => {
+                                        setReconDate(dayjs().subtract(1, 'day'));
+                                        setCounts({});
+                                    }}
+                                >
+                                    Yesterday
+                                </Button>
+                                <DatePicker
+                                    size="small"
+                                    allowClear={false}
+                                    value={reconDate}
+                                    format="DD MMM YYYY"
+                                    // A future date would be answered with
+                                    // balances rolled forward past every
+                                    // movement that has not happened yet — a
+                                    // confident figure about nothing.
+                                    disabledDate={(current) => current.isAfter(dayjs(), 'day')}
+                                    onChange={(value) => {
+                                        if (!value) return;
+                                        setReconDate(value);
+                                        // Yesterday's count must not stand
+                                        // against today's expected closing.
+                                        setCounts({});
+                                    }}
+                                />
+                            </Space>
+                        }
+                    >
+                        <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+                            What the bin started with, what went in, what the batches took out, and what should therefore
+                            be left. Weigh the bin and type the count to see the gap. Resin consumption is calculated per
+                            batch (production + rejection + lumps), so a single batch can never show a shortfall — this is
+                            where missing material shows up.
+                        </Typography.Paragraph>
+
+                        {reconUnavailable ? (
+                            <Typography.Text type="secondary">
+                                The day's check could not be loaded. The balances above are unaffected.
+                            </Typography.Text>
+                        ) : (
+                            <>
+                                <Table<FactoryDayBinReconciliationRow>
+                                    rowKey={(row) => row.item_id}
+                                    size="middle"
+                                    loading={reconLoading}
+                                    columns={reconColumns}
+                                    dataSource={reconciliation?.materials ?? []}
+                                    pagination={false}
+                                    scroll={{ x: 'max-content' }}
+                                    // The backend omits any material the date
+                                    // has nothing to say about, so an empty
+                                    // table is a real answer about a quiet day.
+                                    locale={{
+                                        emptyText: (
+                                            <Typography.Text type="secondary">
+                                                Nothing moved through the bin on {reconDate.format('DD MMM YYYY')}, and it
+                                                held nothing that morning.
+                                            </Typography.Text>
+                                        ),
+                                    }}
+                                />
+                                {/* The quiet line. A count is a question put to
+                                    the ERP, not an entry in it — said plainly so
+                                    nobody types one expecting the balance to
+                                    move, and nobody hunts for where it was
+                                    filed. */}
+                                <Typography.Text type="secondary" style={{ display: 'block', marginTop: 12, fontSize: 12 }}>
+                                    Counts are a check, not a record — nothing here is saved, and the bin's balance is
+                                    unchanged by what you type. Within {COUNT_MATCH_TOLERANCE_KG} kg reads as a match. The
+                                    count must be the bin as it stood at the END of {reconDate.format('DD MMM YYYY')}: on a
+                                    past date, weighing the bin now measures material loaded since, not that day's closing.
+                                    To correct a real gap, book the stock movement that explains it.
+                                </Typography.Text>
+                            </>
+                        )}
                     </Card>
 
                     <Collapse

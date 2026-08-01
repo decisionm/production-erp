@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Button, Col, DatePicker, Row, Select, Space, Table, Tabs, Tag, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { type ReactElement, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
     getProductionReport,
     getReconciliationReport,
@@ -287,8 +288,10 @@ function ProductionTab() {
 }
 
 // ---------------------------------------------------------------------------
-// Reconciliation tab — worst-unaccounted-first (server-ordered); band tags
-// straight off the server's unaccounted_band field.
+// Reconciliation tab — per-batch consumption breakdown. Consumption is
+// calculated (good + confirmed rejection + lumps), so there is no per-batch
+// unaccounted figure here by owner ruling — missing material is checked at
+// the central day bin, not per batch.
 // ---------------------------------------------------------------------------
 
 function ReconciliationTab() {
@@ -308,19 +311,17 @@ function ReconciliationTab() {
 
     const exportCsv = () => {
         const csv = toCsv(
-            ['Date', 'Shift', 'Machine', 'Item', 'Batch', 'Issued Kg', 'Good Kg', 'Confirmed Rejection Kg', 'Lumps Kg', 'Unaccounted Kg', 'Band'],
+            ['Date', 'Shift', 'Machine', 'Item', 'Batch', 'Good Kg', 'Confirmed Rejection Kg', 'Lumps Kg', 'Resin Consumed Kg'],
             dataSource.map((r) => [
                 r.production_date,
                 r.shift.name,
                 r.work_center.code,
                 itemLabel(r.item),
                 r.batch_number,
-                r.issued_kg,
                 r.good_production_kg,
                 r.confirmed_rejection_kg,
                 r.lumps_kg,
-                r.reconciliation_unaccounted_kg,
-                r.unaccounted_band ?? '',
+                r.issued_kg,
             ]),
         );
         downloadCsv(`reconciliation-report-${range[0]}-to-${range[1]}.csv`, csv);
@@ -369,26 +370,15 @@ function ReconciliationTab() {
                     { title: 'Machine', render: (_, r) => r.work_center.code },
                     { title: 'Item', render: (_, r) => itemLabel(r.item) },
                     { title: 'Batch', dataIndex: 'batch_number', render: (v: string | null) => v ?? '—' },
-                    { title: 'Issued Kg', dataIndex: 'issued_kg', align: 'right', render: fmtKg },
                     { title: 'Good Kg', dataIndex: 'good_production_kg', align: 'right', render: fmtKg },
                     { title: 'Rej. Kg', dataIndex: 'confirmed_rejection_kg', align: 'right', render: fmtKg },
                     { title: 'Lumps Kg', dataIndex: 'lumps_kg', align: 'right', render: fmtKg },
-                    {
-                        title: 'Unaccounted Kg',
-                        align: 'right',
-                        render: (_, r) =>
-                            r.unaccounted_band === 'investigate' ? (
-                                <Typography.Text type="danger" strong>{fmtKg(r.reconciliation_unaccounted_kg)}</Typography.Text>
-                            ) : (
-                                fmtKg(r.reconciliation_unaccounted_kg)
-                            ),
-                    },
-                    { title: 'Band', render: (_, r) => bandTag(r.unaccounted_band) ?? '—' },
+                    { title: 'Consumed Kg', dataIndex: 'issued_kg', align: 'right', render: fmtKg },
                 ]}
             />
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                Unaccounted = issued − good − confirmed rejection − lumps, worst first. Bands are ruled server-side
-                from the configured tolerances.
+                Consumed = good + confirmed rejection + lumps (calculated). Missing material is checked at the
+                central day bin — see the <Link to="/production/day-bin">Day Bin</Link> reconciliation card.
             </Typography.Text>
         </Space>
     );

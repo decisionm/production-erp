@@ -17,6 +17,7 @@ import type {
     EntryDayBinSummary,
     FactoryDayBin,
     FactoryDayBinLoadResult,
+    FactoryDayBinReconciliation,
     MachineDowntimeLog,
     MaterialBag,
     MaterialBagStatus,
@@ -1277,6 +1278,27 @@ export async function loadBinBay(payload: BinBayLoadPayload): Promise<DayBinMove
 /** What the factory day bin holds right now (warehouse null = not configured). */
 export async function getFactoryDayBin(): Promise<FactoryDayBin> {
     const { data } = await api.get<{ data: FactoryDayBin }>('/production/factory-day-bin');
+    return data.data;
+}
+
+/**
+ * The day bin's reconciliation for ONE date: per material, opening + loaded
+ * − consumed = expected closing. This is the central "is any material
+ * missing?" check that replaced the per-batch unaccounted figure.
+ *
+ * `date` MUST be 'YYYY-MM-DD'. The server round-trips it through that exact
+ * format and 422s on anything else, so a raw ISO timestamp is rejected —
+ * always hand it a `dayjs(...).format('YYYY-MM-DD')`. Omitted means today.
+ *
+ * Past dates are first-class: yesterday's figures are the accountant's
+ * morning question, and the server derives opening by rolling the ledger
+ * back rather than reading a historical balance it does not store.
+ */
+export async function getFactoryDayBinReconciliation(date?: string): Promise<FactoryDayBinReconciliation> {
+    const { data } = await api.get<{ data: FactoryDayBinReconciliation }>(
+        '/production/factory-day-bin/reconciliation',
+        { params: date ? { date } : undefined },
+    );
     return data.data;
 }
 

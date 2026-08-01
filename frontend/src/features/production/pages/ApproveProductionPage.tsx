@@ -206,9 +206,15 @@ const efficiencyTag = (pct: number | null, band?: ProductionMetrics['efficiency_
 };
 
 /**
- * Expected-vs-actual material use for a completed batch — the block the Plant
+ * Material use against the NORM for a completed batch — the block the Plant
  * Manager and Accountant scan to decide whether consumption needs questioning
- * before it posts to Tally. `unaccounted_kg` is the number to investigate.
+ * before it posts to Tally.
+ *
+ * This survives the removal of the per-batch unaccounted figure because it
+ * asks a different question. It compares consumption against the BOM or the
+ * product's standard weight, so it moves when the bottle weight drifts or a
+ * supervisor corrects the grams — a real signal. "Unaccounted" was
+ * consumption compared against itself.
  */
 function VarianceSection({ variance }: { variance: ConsumptionVariance }) {
     if (variance.norm_source === null) {
@@ -224,9 +230,6 @@ function VarianceSection({ variance }: { variance: ConsumptionVariance }) {
             </>
         );
     }
-
-    const unaccounted = variance.unaccounted_kg === null ? null : parseFloat(variance.unaccounted_kg);
-    const unaccountedHot = unaccounted !== null && !Number.isNaN(unaccounted) && Math.abs(unaccounted) > 0.5;
 
     return (
         <>
@@ -252,12 +255,15 @@ function VarianceSection({ variance }: { variance: ConsumptionVariance }) {
                     )}
                 </Descriptions.Item>
             </Descriptions>
-            {variance.unaccounted_kg !== null && (
+            {/* What the variance above is partly made of. The guard is on the
+                two figures actually PRINTED — it used to key on
+                unaccounted_kg, which is no longer shown, so the whole line
+                would have appeared and vanished on a number off-screen. Both
+                fields are always strings ("0" when none), so the test is
+                "is there anything to say", not "is it present". */}
+            {(parseFloat(variance.rejection_kg) !== 0 || parseFloat(variance.scrap_kg) !== 0) && (
                 <Typography.Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
-                    of which rejection {fmtKg(variance.rejection_kg)} kg · scrap {fmtKg(variance.scrap_kg)} kg ·{' '}
-                    <Typography.Text type={unaccountedHot ? 'danger' : 'secondary'} strong={unaccountedHot}>
-                        unaccounted {fmtSignedKg(variance.unaccounted_kg)} kg
-                    </Typography.Text>
+                    of which rejection {fmtKg(variance.rejection_kg)} kg · scrap {fmtKg(variance.scrap_kg)} kg
                 </Typography.Text>
             )}
             <Typography.Text type="secondary" style={{ display: 'block', marginTop: 4, fontSize: 12 }}>
@@ -363,7 +369,7 @@ function ExpectedVsActualSection({ row, metrics }: { row: ShiftProductionEntry; 
                     showIcon
                     style={{ marginBottom: 12 }}
                     message="Blocks approval"
-                    description="Unaccounted material is at/over the configured blocking tolerance — the accountant cannot post this entry until it is corrected or rejected back to the floor."
+                    description="This batch is at/over a configured blocking tolerance, so the accountant cannot post it until it is corrected or rejected back to the floor. Check the figures above against what the floor recorded; whether material is actually missing is a question for the day bin's daily count, not this batch."
                 />
             )}
             <Descriptions column={1} size="small" bordered>
@@ -442,44 +448,28 @@ function ExpectedVsActualSection({ row, metrics }: { row: ShiftProductionEntry; 
     );
 }
 
-/**
- * Material expected vs actual and the unaccounted figure — the number the
- * accountant investigates before it posts.
+/*
+ * THE "Material Reconciliation" SECTION IS GONE, deliberately.
+ *
+ * It printed "Issued / Good / Lumps" and, beneath it, an "Unaccounted" figure
+ * defined as issued − good − rejection − lumps. That figure was ~0 by
+ * construction: nothing weighs a fixed quantity of resin out to a machine, so
+ * a batch's issued kg IS good + rejection + lumps, and the subtraction could
+ * only ever return its own inputs. An accountant reading it as a loss figure
+ * was reading arithmetic, not material.
+ *
+ * With the unaccounted line removed the section held one row whose three
+ * figures are all already on screen — good kg and lumps in Expected vs Actual
+ * above, the issued total now captioned under the Material Consumption list
+ * below — so the section itself went with it rather than leaving a heading
+ * over a duplicate.
+ *
+ * The real question ("is any material missing?") is asked centrally and once a
+ * day on the Factory Day Bin page: opening + loaded − consumed against a
+ * PHYSICAL count of the bin. `metrics.reconciliation_unaccounted_kg` and
+ * `unaccounted_band` are still served and still read elsewhere (Reports); this
+ * is a display decision on the approval desk, not a change to the engine.
  */
-function MaterialVarianceSection({ metrics }: { metrics: ProductionMetrics | null }) {
-    if (metrics === null) return null;
-    const unaccounted = metrics.reconciliation_unaccounted_kg === null ? null : parseFloat(metrics.reconciliation_unaccounted_kg);
-    const hot = metrics.unaccounted_band
-        ? metrics.unaccounted_band === 'investigate'
-        : unaccounted !== null && !Number.isNaN(unaccounted) && Math.abs(unaccounted) > 0.5;
-
-    return (
-        <>
-            <Typography.Title level={5} style={{ marginTop: 16 }}>Material Reconciliation</Typography.Title>
-            <Descriptions column={1} size="small" bordered>
-                <Descriptions.Item label="Issued / Good / Lumps">
-                    {fmtKg(metrics.issued_kg)} / {fmtKg(metrics.good_production_kg)} / {fmtKg(metrics.lumps_kg)} kg
-                </Descriptions.Item>
-                <Descriptions.Item label="Unaccounted">
-                    {metrics.reconciliation_unaccounted_kg === null ? (
-                        <Typography.Text type="secondary">
-                            — needs both issued material lines and a produced quantity in kg
-                        </Typography.Text>
-                    ) : (
-                        <>
-                            <Typography.Text type={hot ? 'danger' : undefined} strong={hot}>
-                                {fmtSignedKg(metrics.reconciliation_unaccounted_kg)} kg
-                            </Typography.Text>
-                            <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
-                                issued − good − rejection (QC wins) − lumps
-                            </Typography.Text>
-                        </>
-                    )}
-                </Descriptions.Item>
-            </Descriptions>
-        </>
-    );
-}
 
 /**
  * The batch issued more of a material than the ledger recorded, so the balance
@@ -1157,8 +1147,6 @@ export default function ApproveProductionPage() {
 
                         <DowntimeSection row={detailRow} logs={downtimeLogs?.data} loading={downtimeLoading} />
 
-                        <MaterialVarianceSection metrics={detailRow.metrics} />
-
                         {detailRow.variance && <VarianceSection variance={detailRow.variance} />}
 
                         {(detailRow.material_consumptions ?? []).length > 0 && (
@@ -1189,6 +1177,21 @@ export default function ApproveProductionPage() {
                                         },
                                     ]}
                                 />
+                                {/* The kg total the deleted "Material
+                                    Reconciliation" section used to carry,
+                                    folded in under the lines it is the sum of.
+                                    The server's own kg-only figure: lines
+                                    counted in Nos are listed above but never
+                                    added to a kilogram total. */}
+                                {detailRow.metrics && (
+                                    <Typography.Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
+                                        Consumed on these lines: {fmtKg(detailRow.metrics.issued_kg)} kg of material counted in
+                                        kg — resin consumption is calculated as production + rejection + lumps, not weighed out
+                                        per machine. Whether any material is actually missing is checked once a day on the{' '}
+                                        <Link to="/production/day-bin">Factory Day Bin</Link>, against a physical count of the
+                                        bin.
+                                    </Typography.Text>
+                                )}
                             </>
                         )}
 

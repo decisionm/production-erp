@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Modules\Core\Services\AppSettingService;
 use App\Modules\Inventory\Exceptions\BagOverloadException;
 use App\Modules\Inventory\Models\Enums\MaterialBagStatus;
+use App\Modules\Inventory\Models\Enums\StockMovementType;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\MaterialBag;
 use App\Modules\Inventory\Models\StockBalance;
@@ -13,6 +14,7 @@ use App\Modules\Inventory\Models\StockMovement;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Inventory\Services\WarehouseService;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -314,6 +316,290 @@ class FactoryDayBinService
                 ],
             ];
         })->values();
+    }
+
+    /**
+     * THE DAY-BIN RECONCILIATION — the central check that replaces the
+     * per-batch "unaccounted kg" figure.
+     *
+     * WHY IT MOVED HERE. Nothing weighs out a fixed quantity of resin to
+     * each machine. A batch's resin consumption is DERIVED from its output
+     * (good kg + rejection kg + lumps kg), so a per-batch "issued minus
+     * consumed" was ~0 by construction — an arithmetic identity wearing the
+     * clothes of a check, and it only ever confused the people reading it.
+     * Missing material is a CENTRAL question, so it is asked once a day
+     * against the one bin every machine draws from:
+     *
+     *     opening + loaded − consumed   vs   what is PHYSICALLY in the bin
+     *
+     * Per raw material, for one calendar date:
+     *
+     *   opening_kg  — the bin balance at 00:00 on that date. This schema
+     *                 stores no historical balances (stock_balances holds
+     *                 only the CURRENT quantity), so it is derived by
+     *                 rolling the ledger back:
+     *
+     *                     opening = current_balance
+     *                             − Σ signed(every bin movement at or after
+     *                                        00:00 on the date, up to now)
+     *
+     *                 signed receipt +, transfer_in +, issue −,
+     *                 transfer_out − : the same signs that built the current
+     *                 balance in the first place, applied in reverse. The
+     *                 window is "at or AFTER the date", NOT "on the date" —
+     *                 for a past date every movement since must come off
+     *                 too, and that is exactly what makes yesterday's
+     *                 reconciliation (the accountant's morning question)
+     *                 come out right.
+     *
+     *   loaded_kg   — transfers INTO the bin on that date: store → bin,
+     *                 bag scan and manual transfer form alike.
+     *
+     *   consumed_kg — issues OUT of the bin on that date: batch consumption
+     *                 lines ("SPE #id") and any manual issue equally. There
+     *                 is deliberately no reference filter — material that
+     *                 left the bin left the bin, whoever booked it.
+     *
+     *   expected_closing_kg = opening + loaded − consumed.
+     *
+     * THE TAUTOLOGY, STATED PLAINLY SO NOBODY MISTAKES IT FOR A CHECK.
+     * expected_closing_kg is NOT a verification of anything. For today, and
+     * whenever the date's only bin movements are transfers-in and
+     * issues-out, it equals the bin's live stock balance BY CONSTRUCTION:
+     * opening was derived by subtracting the very movements that are added
+     * back here, so the two cannot disagree. Comparing them proves the
+     * arithmetic, not the material. The genuine check is the PHYSICAL COUNT
+     * a person walks out and takes — the frontend collects that number and
+     * compares it against expected_closing_kg client-side. This endpoint
+     * supplies the expected side only; it never stores or judges a count.
+     *
+     *   other_movements_kg — the one leak in the identity above, surfaced
+     *                 rather than hidden. A receipt booked straight into the
+     *                 bin, or a transfer back OUT of the bin to the store
+     *                 (both reachable through the ordinary
+     *                 /inventory/stock-movements/transfers form the Day Bin
+     *                 page already posts to), is neither a load nor
+     *                 consumption, so it sits in neither figure. Normally
+     *                 '0.0000'. When it is not, the full identity is
+     *
+     *                     live_balance = expected_closing + other_movements
+     *
+     *                 and the frontend can say so instead of reporting a
+     *                 physical-count discrepancy the screen cannot explain.
+     *
+     * TIMING BASIS, AND A DELIBERATE DIVERGENCE FROM THE REST OF THE MODULE.
+     * Batch consumption issues are stamped with the wall-clock moment they
+     * were recorded (ShiftProductionEntryService passes no movement date, so
+     * recordIssue defaults to now()). This read therefore bounds a day on
+     * stock_movements.movement_date — NOT on production_date, which is how
+     * every other day-scoped read in this module (ShiftSummaryService,
+     * ProductionReportService, ProductionDowntimeService) bounds one.
+     *
+     * That divergence is intended, for two reasons. A stock movement carries
+     * no production_date at all, so the column is not available here. More
+     * importantly, production_date is a SHIFT-ATTRIBUTION date: by factory
+     * convention an overnight shift files under the date it STARTED, so a
+     * batch keyed at 02:00 belongs to the previous day (see
+     * NightShiftProductionDateTest). What is physically in a bin at a given
+     * moment is a wall-clock fact, and this figure exists to be compared
+     * against a physical count taken at a wall-clock moment. Attributing the
+     * night's consumption backwards would make expected_closing describe a
+     * bin nobody could have looked into.
+     *
+     * WHERE THE DAY IS ACTUALLY CUT — do not read "midnight" as local
+     * midnight. The window is midnight to midnight in the APPLICATION
+     * timezone, and config/app.php hardcodes that to UTC (there is no
+     * APP_TIMEZONE override) while the factory runs IST. The cut therefore
+     * falls at 05:30 IST, not 00:00 IST, and a night shift's consumption
+     * splits across two reconciliation dates at that instant rather than
+     * landing whole on either.
+     *
+     * This does NOT affect the comparison the page exists for on TODAY's
+     * date. Wherever the boundary sits, the arithmetic collapses to
+     * expected_closing = live_balance − other_movements: opening is derived
+     * by subtracting the very movements added back afterwards, so every
+     * movement inside the window cancels and only the boundary-independent
+     * remainder survives. A count taken now therefore reconciles against now
+     * regardless of the cut — exactly when other_movements is '0.0000', and
+     * offset by it otherwise (the identity stated in the two paragraphs
+     * ABOVE). What the cut affects is only which past date a movement made
+     * between 00:00 and 05:30 IST is filed under. Straightening that out means
+     * setting app.timezone for the whole application — a global change that
+     * would move production_date too, well outside this endpoint — so it is
+     * recorded here rather than worked around locally.
+     *
+     * Materials with no movements on the date AND no opening balance are
+     * omitted — an all-zero row is noise on a page whose job is to make one
+     * real gap visible. Soft-deleted items are still listed: a retired
+     * master that somehow still holds bin stock is precisely the kind of
+     * material this page must not hide.
+     *
+     * `warehouse: null` (with an empty material list) when no bin is
+     * configured — the same normal state every other read here answers.
+     *
+     * @return array{
+     *     date: string,
+     *     warehouse: ?Warehouse,
+     *     materials: Collection<int, array{
+     *         item: Item,
+     *         opening_kg: string,
+     *         loaded_kg: string,
+     *         consumed_kg: string,
+     *         expected_closing_kg: string,
+     *         other_movements_kg: string,
+     *     }>,
+     * }
+     */
+    public function reconciliation(?string $date = null): array
+    {
+        $date = $this->resolveReconciliationDate($date);
+        $warehouse = $this->warehouse();
+
+        if ($warehouse === null) {
+            return ['date' => $date, 'warehouse' => null, 'materials' => collect()];
+        }
+
+        $dayStart = CarbonImmutable::parse($date)->startOfDay();
+        $dayEnd = $dayStart->addDay();
+
+        // ONE pass over every bin movement at or after 00:00 on the date.
+        // Aggregated in PHP with bcmath rather than SQL SUM() on purpose:
+        // the test database is SQLite, whose SUM() over a DECIMAL column
+        // comes back as a float, and a stock figure that has been through a
+        // float is not a stock figure this codebase is willing to print.
+        $movementsByItem = StockMovement::query()
+            ->where('warehouse_id', $warehouse->id)
+            ->where('movement_date', '>=', $dayStart)
+            ->orderBy('id')
+            ->get(['id', 'item_id', 'type', 'quantity', 'movement_date'])
+            ->groupBy('item_id');
+
+        $balanceByItem = StockBalance::query()
+            ->where('warehouse_id', $warehouse->id)
+            ->get()
+            ->keyBy('item_id');
+
+        $itemIds = $movementsByItem->keys()->merge($balanceByItem->keys())->unique();
+
+        $materials = Item::withTrashed()
+            ->whereIn('id', $itemIds)
+            ->orderBy('name')
+            ->get()
+            ->map(fn (Item $item) => $this->reconcileMaterial(
+                $item,
+                $movementsByItem->get($item->id) ?? collect(),
+                (string) ($balanceByItem->get($item->id)?->quantity ?? '0'),
+                $dayEnd,
+            ))
+            ->filter()
+            ->values();
+
+        return ['date' => $date, 'warehouse' => $warehouse, 'materials' => $materials];
+    }
+
+    /**
+     * One material's row, or null when the date has nothing to say about it
+     * (no movement on the date and nothing in the bin at 00:00).
+     *
+     * $movements is every bin movement for this item at or after 00:00 on
+     * the date — the ones before $dayEnd are the date's own, the rest are
+     * later history that exists only to be rolled back off the current
+     * balance.
+     *
+     * @param  Collection<int, StockMovement>  $movements
+     * @return array{
+     *     item: Item,
+     *     opening_kg: string,
+     *     loaded_kg: string,
+     *     consumed_kg: string,
+     *     expected_closing_kg: string,
+     *     other_movements_kg: string,
+     * }|null
+     */
+    private function reconcileMaterial(Item $item, Collection $movements, string $currentBalance, CarbonImmutable $dayEnd): ?array
+    {
+        $signedSinceDayStart = '0.0000';
+        $loaded = '0.0000';
+        $consumed = '0.0000';
+        $other = '0.0000';
+        $movedOnDate = false;
+
+        foreach ($movements as $movement) {
+            $quantity = bcadd((string) $movement->quantity, '0', 4);
+
+            // Every movement carries a POSITIVE quantity; the type is what
+            // says which way it went.
+            $signed = match ($movement->type) {
+                StockMovementType::Receipt, StockMovementType::TransferIn => $quantity,
+                StockMovementType::Issue, StockMovementType::TransferOut => bcsub('0', $quantity, 4),
+            };
+
+            $signedSinceDayStart = bcadd($signedSinceDayStart, $signed, 4);
+
+            if ($movement->movement_date->greaterThanOrEqualTo($dayEnd)) {
+                continue; // Later history: rolled back above, but not the date's own.
+            }
+
+            // A movement ON the date keeps the material on the page even
+            // when the figures net to zero (a 5 kg receipt and a 5 kg
+            // transfer back out is a day worth looking at, not an absence).
+            $movedOnDate = true;
+
+            match ($movement->type) {
+                StockMovementType::TransferIn => $loaded = bcadd($loaded, $quantity, 4),
+                StockMovementType::Issue => $consumed = bcadd($consumed, $quantity, 4),
+                default => $other = bcadd($other, $signed, 4),
+            };
+        }
+
+        $opening = bcsub(bcadd($currentBalance, '0', 4), $signedSinceDayStart, 4);
+
+        if (! $movedOnDate && bccomp($opening, '0', 4) === 0) {
+            return null;
+        }
+
+        return [
+            'item' => $item,
+            'opening_kg' => $opening,
+            'loaded_kg' => $loaded,
+            'consumed_kg' => $consumed,
+            'expected_closing_kg' => bcsub(bcadd($opening, $loaded, 4), $consumed, 4),
+            'other_movements_kg' => $other,
+        ];
+    }
+
+    /**
+     * The date being reconciled: the ?date=YYYY-MM-DD query value, or today
+     * when absent.
+     *
+     * Round-tripped through the format rather than merely parsed, so
+     * "2026-13-45" is refused instead of silently rolling over into
+     * February 2027 and answering with confident figures for a date nobody
+     * asked about. Validation lives here rather than in a FormRequest for
+     * the same reason loadBag's does: this is the layer that knows what a
+     * usable date means to the day bin.
+     */
+    private function resolveReconciliationDate(?string $date): string
+    {
+        $date = trim((string) $date);
+
+        if ($date === '') {
+            return CarbonImmutable::now()->toDateString();
+        }
+
+        try {
+            $parsed = CarbonImmutable::createFromFormat('Y-m-d', $date);
+        } catch (\Throwable) {
+            $parsed = null;
+        }
+
+        if ($parsed === null || $parsed->format('Y-m-d') !== $date) {
+            throw ValidationException::withMessages([
+                'date' => 'Give the date to reconcile as YYYY-MM-DD.',
+            ]);
+        }
+
+        return $date;
     }
 
     /**
