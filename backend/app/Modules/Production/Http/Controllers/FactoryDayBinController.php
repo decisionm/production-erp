@@ -112,6 +112,8 @@ class FactoryDayBinController extends Controller
             (int) $validated['work_center_id'],
             (int) $request->user()->id,
             isset($validated['supervisor_id']) ? (int) $validated['supervisor_id'] : null,
+            isset($validated['balance_ack_reason']) ? (string) $validated['balance_ack_reason'] : null,
+            isset($validated['balance_ack_note']) ? (string) $validated['balance_ack_note'] : null,
         );
 
         return response()->json(['data' => [

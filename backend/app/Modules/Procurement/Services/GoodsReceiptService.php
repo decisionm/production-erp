@@ -37,8 +37,10 @@ class GoodsReceiptService
                 'lines.item',
                 'lines.materialLots.item',
                 'lines.materialLots.bags',
+                'lines.materialLots.costVersions',
                 'materialLots.item',
                 'materialLots.bags',
+                'materialLots.costVersions',
                 'warehouse',
                 'purchaseOrder.vendor',
             ])
@@ -151,6 +153,30 @@ class GoodsReceiptService
                             'grn_id' => $grn->id,
                             'goods_receipt_note_line_id' => $grnLine->id,
                             'item_id' => $poLine->item_id,
+                            // The rate this receipt line actually used, carried
+                            // onto the lot so nobody has to re-derive it later
+                            // through a nullable join. PROVISIONAL by nature —
+                            // the purchase invoice and landed costs arrive
+                            // afterwards and are appended as cost versions;
+                            // this original number is never rewritten.
+                            'receipt_rate_per_kg' => $unitCost,
+                            // Always 'grn': the number is physically the GRN
+                            // line's unit_cost, whether the receipt named it
+                            // or defaulted it from the order. Labelling the
+                            // defaulted case 'po' was tempting and wrong — the
+                            // backfill cannot tell those apart for historical
+                            // rows, so the column would have meant one thing
+                            // before this migration and another after it.
+                            // 'po' stays reserved for what it says: a rate
+                            // that had to be reached from the purchase order
+                            // because no GRN line rate survived. The
+                            // entered-vs-defaulted nuance is not lost — it is
+                            // recorded in the receipt version's note below,
+                            // where an auditor reads it per lot anyway.
+                            'rate_source' => 'grn',
+                            'receipt_rate_note' => isset($lineData['unit_cost'])
+                                ? 'Goods receipt rate as entered on the receipt line.'
+                                : 'Goods receipt rate defaulted from the purchase order line price.',
                             // material_lots.received_date is a date column
                             // (FIFO index + whereDate queries), so a receipt
                             // datetime is narrowed to its calendar day here
@@ -353,8 +379,10 @@ class GoodsReceiptService
             'lines.item',
             'lines.materialLots.item',
             'lines.materialLots.bags',
+            'lines.materialLots.costVersions',
             'materialLots.item',
             'materialLots.bags',
+            'materialLots.costVersions',
             'warehouse',
             'purchaseOrder',
         ]);

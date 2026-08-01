@@ -560,6 +560,134 @@ export function grossProducedPieces(
     );
 }
 
+/**
+ * WHAT THIS BATCH'S RESIN COST, per bag layer — the finance-only detail
+ * behind `BatchCost.resin_cost`.
+ *
+ * One row per SLICE drawn out of one scanned load layer, oldest load first.
+ * A batch that drew from three part-empty bags has three rows here, each at
+ * that bag's own purchase rate — which is the whole point of the bag layer:
+ * two bags of the same resin bought a month apart do not cost the same, and
+ * a single blended average would say they did.
+ *
+ * `rate_per_kg`/`amount` are null when the bag's lot has no recorded
+ * purchase rate at all (opening stock, which was never bought through a
+ * GRN). That is a real state and it is why the whole batch total goes null
+ * rather than quietly costing that resin at zero.
+ */
+export interface BatchCostLayer {
+    day_bin_movement_id: number | null;
+    item_id: number;
+    item_name: string | null;
+    material_bag_id: number | null;
+    bag_barcode: string | null;
+    material_lot_id: number | null;
+    supplier_lot_no: string | null;
+    quantity_kg: string;
+    rate_per_kg: string | null;
+    amount: string | null;
+    /**
+     * How the rate above was arrived at — e.g. the bag's own purchase rate,
+     * or the stock average used as a fallback when a machine burnt more than
+     * was ever scanned into it. Rendered verbatim; this client does not
+     * enumerate the vocabulary, because a value it has never heard of must
+     * still reach the screen rather than being silently dropped.
+     */
+    rate_source: string | null;
+}
+
+/**
+ * A non-resin consumption line — masterbatch, packaging, anything the floor
+ * did not scan — priced exactly the way `material_cost` prices it, at the
+ * unit cost its own issue movement recorded.
+ */
+export interface BatchCostOtherLine {
+    item_id: number;
+    item_name: string | null;
+    warehouse_id: number;
+    quantity_issued_kg: string;
+    unit_cost: string | null;
+    cost: string | null;
+}
+
+/**
+ * WHAT THIS BATCH COST — resin priced off the bags its machine actually had
+ * scanned into it, everything else at its recorded issue cost.
+ *
+ * ALWAYS PRESENT on a completed-or-not entry: before completion every figure
+ * is null and `reason` says so in words. Never tell a null total apart from
+ * a missing key — read `reason` first and print it.
+ *
+ * EVERY MONEY FIELD IS A DECIMAL STRING OR NULL, never a number: these are
+ * bcmath figures on the wire and parsing them into JS floats to display them
+ * is how a paisa goes missing. null NEVER means zero — it means "this cannot
+ * be costed in full", and `reason` names which of the two ways it failed.
+ *
+ * `layers` and `other_lines` are ABSENT (not null, not empty) for anyone
+ * without finance.view/finance.manage — supplier rates are Owner and
+ * Accounts territory. Gate the breakdown on the KEY BEING PRESENT rather
+ * than on a permission check of your own: the server has already decided,
+ * and a second opinion here can only disagree with it.
+ */
+export interface BatchCost {
+    /**
+     * When this figure was READ, not when it was costed — the server stamps
+     * it at serialization. Label it as such; a batch costed last Tuesday and
+     * opened today shows today.
+     */
+    as_of: string;
+    /** Why a figure below is null, in a sentence. null when all is well. */
+    reason: string | null;
+    /**
+     * Which allocation pass produced these rows. Bumps on every amendment —
+     * an amended batch reverses run N and re-allocates as run N+1, so a
+     * number above 1 means this batch has been corrected.
+     */
+    allocation_run: number | null;
+    material_cost_total: string | null;
+    resin_cost: string | null;
+    other_cost: string | null;
+    cost_per_accepted_unit: string | null;
+    accepted_quantity: string | null;
+    /**
+     * Machine-readable provenance per figure; see `batchCostSourceLabel`.
+     *
+     * OPTIONAL because it is READ optionally, and the two must agree. The
+     * server always sends it — but this drawer has already been blanked once
+     * by an unguarded dereference of a key that was only sometimes there
+     * (see the material-consumption `From` column), and a missing source
+     * line is worth a dash, never a white screen over the approval queue.
+     */
+    sources?: {
+        resin_cost: string;
+        other_cost: string;
+        cost_per_accepted_unit: string;
+    };
+    /** Finance only — ABSENT otherwise. */
+    layers?: BatchCostLayer[];
+    /** Finance only — ABSENT otherwise. */
+    other_lines?: BatchCostOtherLine[];
+}
+
+/**
+ * The `sources` tokens in the words a plant manager reads. Unknown tokens
+ * fall through UNCHANGED rather than to a guess or a blank — a source line
+ * this client has not been taught is still better evidence than no line.
+ */
+export function batchCostSourceLabel(source: string | null | undefined): string {
+    if (!source) return '—';
+    switch (source) {
+        case 'bag_load_fifo_layers':
+            return 'the bags scanned into this machine, oldest load first';
+        case 'issue_unit_cost':
+            return 'the cost recorded when each material was issued';
+        case 'quantity_produced_qc_net':
+            return 'accepted pieces, after QC rejection';
+        default:
+            return source;
+    }
+}
+
 export interface ShiftProductionEntry {
     id: number;
     shift: Shift;
@@ -653,6 +781,13 @@ export interface ShiftProductionEntry {
      * completion.
      */
     metrics: ProductionMetrics | null;
+    /**
+     * What this batch cost, from the bags its resin actually came out of.
+     * Optional only because a backend that predates the costing layer omits
+     * it entirely; on a backend that has it, it is always an object (with
+     * nulls and a `reason` before completion), never null. See `BatchCost`.
+     */
+    batch_cost?: BatchCost | null;
     /** Latest Tally sync error — present only when status is "failed". */
     sync_error?: string | null;
     status: ShiftProductionEntryStatus;
@@ -948,6 +1083,34 @@ export interface MaterialLot {
     bag_weight_kg: string | null;
     total_received_kg: string | null;
     bags?: MaterialBag[];
+    /**
+     * ======================= THE FINANCE-ONLY RATE GROUP =======================
+     *
+     * These four keys are ABSENT — not null — unless the reading login holds
+     * finance.view or finance.manage. What a supplier charged per kg is
+     * Owner and Accounts territory; the store reads this same register for
+     * bags and kilograms and never sees them.
+     *
+     * THE OPTIONALITY IS LOAD-BEARING AND MUST NOT BE FLATTENED. `undefined`
+     * means "you are not shown rates"; `null` means "this lot genuinely has
+     * no known rate" — the honest state of opening stock, which was never
+     * bought through a goods receipt. Typing these as plain `string | null`
+     * still compiles and silently merges the two, which would make a store
+     * login's blank indistinguishable from a lot that cost nothing.
+     */
+    /** The ORIGINAL goods-receipt rate. Provisional, but never rewritten. */
+    receipt_rate_per_kg?: string | null;
+    /** Where that original rate came from; null means unknown, not zero. */
+    rate_source?: string | null;
+    /**
+     * The best rate known today — the latest appended cost version (invoice,
+     * landed cost, correction), falling back to the receipt rate when
+     * nothing has been appended. So it EQUALS the receipt rate on an
+     * unrevised lot rather than going null.
+     */
+    current_rate_per_kg?: string | null;
+    /** True once anything other than the original receipt rate was recorded. */
+    has_revisions?: boolean;
     notes: string | null;
     created_at: string;
 }
@@ -985,6 +1148,35 @@ export interface DayBinMovement {
     recorded_by?: { id: number; name: string } | null;
     recorded_at: string;
 }
+
+/**
+ * THE SCAN ACKNOWLEDGEMENT VOCABULARY — the four words the server accepts
+ * when it refuses a scan into a machine that is still estimated to hold
+ * material.
+ *
+ * These literals are validated server-side against a fixed list
+ * (FactoryDayBinService::ACK_REASONS); anything else is a 422. They are a
+ * union type and not `string` precisely so a typo is a compile error here
+ * rather than a rejected scan on the floor.
+ *
+ * NOTE WHAT IS NOT HERE: a weight. The gate never asks anyone to weigh
+ * anything — this factory does no routine day-bin weighing and no surface
+ * built on this type may introduce one.
+ */
+export type BalanceAckReason = 'confirm_extra' | 'spill' | 'return_to_store' | 'correction';
+
+/**
+ * The four words in the language the floor speaks, in the order the owner
+ * gave them. The server's refusal sentence ends with the RAW tokens (it
+ * names the vocabulary it will accept); this list is what the operator
+ * actually picks from.
+ */
+export const BALANCE_ACK_REASON_OPTIONS: { value: BalanceAckReason; label: string }[] = [
+    { value: 'confirm_extra', label: 'Extra material confirmed' },
+    { value: 'spill', label: 'Spill' },
+    { value: 'return_to_store', label: 'Returned to store' },
+    { value: 'correction', label: 'Needs correction' },
+];
 
 /** A bag currently sitting at the machine, as the day-bin aggregate reports it. */
 export interface DayBinLoadedBag {

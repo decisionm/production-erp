@@ -5,6 +5,7 @@ import dayjs from 'dayjs';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listUsers } from '@/features/access/api';
+import { hasModuleAccess } from '@/features/auth/permissions';
 import { useAuthStore } from '@/features/auth/store';
 import {
     accountantApproveShiftProductionEntry,
@@ -16,6 +17,7 @@ import {
     rejectShiftProductionEntry,
 } from '@/features/production/api';
 import type {
+    BatchCost,
     ConsumptionVariance,
     MachineDowntimeLog,
     ProductionMetrics,
@@ -26,6 +28,7 @@ import type {
     VoucherPreview,
 } from '@/features/production/types';
 import {
+    batchCostSourceLabel,
     grossProducedPieces,
     isQualityChecked,
     netProducedPieces,
@@ -206,6 +209,203 @@ const efficiencyTag = (pct: number | null, band?: ProductionMetrics['efficiency_
     if (pct >= 85) return BAND_TAG.watch;
     return BAND_TAG.investigate;
 };
+
+/**
+ * A rupee figure from a bcmath decimal STRING — never parsed for arithmetic,
+ * only for display, and only at the last moment.
+ *
+ * `dp` because the two kinds of figure on this block need different
+ * precision honestly: a batch total in paise (2), and a cost per bottle that
+ * is a fraction of a rupee and would round to "₹0.00" at two places (4).
+ *
+ * NULL IS NOT ZERO here and the caller must never let it become one — every
+ * null on this block has a `reason` sentence behind it.
+ */
+const fmtMoney = (v: string | null | undefined, dp: 2 | 4 = 2): string => {
+    if (v === null || v === undefined || v === '') return '—';
+    const n = parseFloat(v);
+    if (Number.isNaN(n)) return '—';
+    return `₹${n.toLocaleString('en-IN', { minimumFractionDigits: dp, maximumFractionDigits: dp })}`;
+};
+
+/**
+ * WHAT THIS BATCH COST — the block both approvers read before the batch
+ * posts, and the only place in the ERP that answers it from the bags the
+ * resin actually came out of.
+ *
+ * ============================ THE HONESTY RULES ============================
+ *
+ * A NULL FIGURE IS NEVER PRINTED AS A NUMBER. When the server cannot cost
+ * the batch in full it sends nulls plus one sentence saying which of the two
+ * ways it failed (resin from a bag with no purchase rate, or material issued
+ * with no recorded cost). That sentence is shown in place of the figures. A
+ * zero, or a bare em dash with nothing beside it, would tell the accountant
+ * this batch was free — on the very screen asking them to approve it.
+ *
+ * EVERY FIGURE NAMES ITS SOURCE, from the server's own `sources` map rather
+ * than a sentence written here, so a change in how a number is derived
+ * cannot leave a stale explanation sitting under it.
+ *
+ * THE AS-OF STAMP IS A READ STAMP. The server stamps it when the row is
+ * serialized, not when the batch was costed — so it is labelled as when the
+ * figures were read, which is what it honestly is.
+ *
+ * ========================= THE FINANCE BOUNDARY =========================
+ *
+ * The totals and the per-piece figure are for everyone who can approve a
+ * batch. The BREAKDOWN behind them — bag barcodes, supplier lot numbers and
+ * the rates paid — is Owner and Accounts territory, and the server already
+ * omits `layers`/`other_lines` entirely for anyone else.
+ *
+ * So the gate here is THE KEY BEING PRESENT, with the caller's finance
+ * permission checked alongside it. Presence is the authority: it is the
+ * server's own decision arriving with the data, and it cannot go stale
+ * against a cached /auth/me. The permission check can only ever make this
+ * stricter, never looser — the two disagreeing hides detail from a finance
+ * user rather than showing rates to a supervisor.
+ *
+ * Nothing renders in the detail's place for a non-finance user: no locked
+ * panel, no "ask for access" shell. A block that advertises a number it will
+ * not show invites someone to go looking for it.
+ */
+function BatchCostSection({ cost, showsDetail }: { cost: BatchCost; showsDetail: boolean }) {
+    const layers = cost.layers ?? [];
+    const otherLines = cost.other_lines ?? [];
+    // Present AND permitted. See the class note: presence is the server's
+    // ruling, the permission is this client honouring the same rule locally.
+    const detail = showsDetail && (cost.layers !== undefined || cost.other_lines !== undefined);
+
+    return (
+        <>
+            <Typography.Title level={5} style={{ marginTop: 16 }}>Batch cost</Typography.Title>
+
+            {/* THE SENTENCE FIRST when there is one — before any figure, so
+                nobody reads a partial split as a complete answer. */}
+            {cost.reason !== null && (
+                <Alert
+                    type="info"
+                    showIcon
+                    style={{ marginBottom: 12 }}
+                    message="This batch is not fully costed"
+                    description={cost.reason}
+                />
+            )}
+
+            <Descriptions column={1} size="small" bordered>
+                <Descriptions.Item label="Material cost">
+                    <Space direction="vertical" size={0}>
+                        <Typography.Text strong>{fmtMoney(cost.material_cost_total)}</Typography.Text>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            resin drawn from the bags, plus every other material this batch consumed
+                        </Typography.Text>
+                    </Space>
+                </Descriptions.Item>
+                <Descriptions.Item label="Resin">
+                    <Space direction="vertical" size={0}>
+                        <Typography.Text>{fmtMoney(cost.resin_cost)}</Typography.Text>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            from {batchCostSourceLabel(cost.sources?.resin_cost)}
+                        </Typography.Text>
+                    </Space>
+                </Descriptions.Item>
+                <Descriptions.Item label="Everything else">
+                    <Space direction="vertical" size={0}>
+                        <Typography.Text>{fmtMoney(cost.other_cost)}</Typography.Text>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            masterbatch, packaging and the rest — from{' '}
+                            {batchCostSourceLabel(cost.sources?.other_cost)}
+                        </Typography.Text>
+                    </Space>
+                </Descriptions.Item>
+                <Descriptions.Item label="Cost per accepted piece">
+                    <Space direction="vertical" size={0}>
+                        <Typography.Text strong>{fmtMoney(cost.cost_per_accepted_unit, 4)}</Typography.Text>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            material cost ÷ {batchCostSourceLabel(cost.sources?.cost_per_accepted_unit)}
+                            {cost.accepted_quantity !== null
+                                ? ` (${fmtKg(cost.accepted_quantity)} pcs)`
+                                : ''}
+                        </Typography.Text>
+                    </Space>
+                </Descriptions.Item>
+            </Descriptions>
+
+            <Typography.Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
+                Read {dayjs(cost.as_of).format('DD MMM YYYY HH:mm')}
+                {/* An amended batch is re-costed from scratch as a new run.
+                    Saying so is the difference between "this changed" and
+                    "somebody changed something and did not say". */}
+                {cost.allocation_run !== null && cost.allocation_run > 1
+                    ? ` · recosted after amendment (allocation run ${cost.allocation_run})`
+                    : ''}
+                . These rates are for reading only: stock is still valued at moving average in the books, and no rate
+                here reaches Tally.
+            </Typography.Text>
+
+            {detail && layers.length > 0 && (
+                <>
+                    <Typography.Text strong style={{ display: 'block', marginTop: 16 }}>
+                        Which bags the resin came out of
+                    </Typography.Text>
+                    <Table
+                        size="small"
+                        rowKey={(row, index) => `${row.day_bin_movement_id ?? 'fallback'}-${index}`}
+                        pagination={false}
+                        style={{ marginTop: 8 }}
+                        dataSource={layers}
+                        columns={[
+                            { title: 'Material', render: (_, row) => row.item_name ?? '—' },
+                            { title: 'Bag', render: (_, row) => row.bag_barcode ?? '—' },
+                            { title: 'Supplier lot', render: (_, row) => row.supplier_lot_no ?? '—' },
+                            {
+                                title: 'Kg drawn',
+                                align: 'right',
+                                render: (_, row) => fmtKg(row.quantity_kg),
+                            },
+                            {
+                                title: 'Rate / kg',
+                                align: 'right',
+                                render: (_, row) => fmtMoney(row.rate_per_kg, 4),
+                            },
+                            { title: 'Amount', align: 'right', render: (_, row) => fmtMoney(row.amount) },
+                            // Rendered verbatim: a source this build has never
+                            // heard of still belongs on screen. It is exactly
+                            // the row worth looking at — the fallback priced at
+                            // stock average means a machine burnt more than was
+                            // ever scanned into it.
+                            { title: 'Rate from', render: (_, row) => row.rate_source ?? '—' },
+                        ]}
+                    />
+                </>
+            )}
+
+            {detail && otherLines.length > 0 && (
+                <>
+                    <Typography.Text strong style={{ display: 'block', marginTop: 16 }}>
+                        Everything else, at its issued cost
+                    </Typography.Text>
+                    <Table
+                        size="small"
+                        rowKey={(row, index) => `${row.item_id}-${row.warehouse_id}-${index}`}
+                        pagination={false}
+                        style={{ marginTop: 8 }}
+                        dataSource={otherLines}
+                        columns={[
+                            { title: 'Material', render: (_, row) => row.item_name ?? '—' },
+                            {
+                                title: 'Qty issued',
+                                align: 'right',
+                                render: (_, row) => fmtKg(row.quantity_issued_kg),
+                            },
+                            { title: 'Unit cost', align: 'right', render: (_, row) => fmtMoney(row.unit_cost, 4) },
+                            { title: 'Amount', align: 'right', render: (_, row) => fmtMoney(row.cost) },
+                        ]}
+                    />
+                </>
+            )}
+        </>
+    );
+}
 
 /**
  * Material use against the NORM for a completed batch — the block the Plant
@@ -1128,6 +1328,15 @@ export default function ApproveProductionPage() {
     const settings = useProductionSettings();
     const user = useAuthStore((s) => s.user);
     const myRoles = user?.roles?.map((r) => r.name) ?? [];
+    /**
+     * MAY THIS LOGIN SEE SUPPLIER RATES — finance.view or finance.manage,
+     * read through the same helper the sidebar uses rather than a new one.
+     *
+     * The server has already made this call (it omits the breakdown keys
+     * entirely for anyone else); this is that same rule honoured locally, and
+     * it can only ever hide more, never reveal. See BatchCostSection.
+     */
+    const showsFinanceDetail = hasModuleAccess(user, 'finance');
 
     const stageFor = (s: ShiftProductionEntryStatus) => STAGES.find((st) => st.status === s);
     const canActOn = (row: ShiftProductionEntry) => {
@@ -1584,6 +1793,17 @@ export default function ApproveProductionPage() {
                                     </Typography.Text>
                                 )}
                             </>
+                        )}
+
+                        {/* WHAT IT COST, directly under WHAT IT CONSUMED — the
+                            same lines, priced. Rendered whenever the backend
+                            serves the block at all (it always does on a build
+                            that has the costing layer, carrying a sentence
+                            instead of figures before completion); absent
+                            entirely on one that predates it, rather than
+                            showing an empty shell nobody can fill. */}
+                        {detailRow.batch_cost && (
+                            <BatchCostSection cost={detailRow.batch_cost} showsDetail={showsFinanceDetail} />
                         )}
 
                         {(detailRow.scraps ?? []).length > 0 && (

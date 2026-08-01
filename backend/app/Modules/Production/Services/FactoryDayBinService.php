@@ -14,8 +14,10 @@ use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Inventory\Services\WarehouseService;
 use App\Modules\Production\Models\DayBinMovement;
+use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\DayBinMovementType;
 use App\Modules\Production\Models\ShiftMaterialConsumption;
+use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\WorkCenter;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -151,8 +153,15 @@ class FactoryDayBinService
      *
      * @return array{bag: MaterialBag, balance: StockBalance, movement: DayBinMovement}
      */
-    public function loadBag(string $barcode, ?string $quantityKg, int $workCenterId, int $recordedBy, ?int $supervisorId = null): array
-    {
+    public function loadBag(
+        string $barcode,
+        ?string $quantityKg,
+        int $workCenterId,
+        int $recordedBy,
+        ?int $supervisorId = null,
+        ?string $ackReason = null,
+        ?string $ackNote = null,
+    ): array {
         $warehouse = $this->warehouse();
         if ($warehouse === null) {
             throw ValidationException::withMessages([
@@ -167,7 +176,7 @@ class FactoryDayBinService
             ]);
         }
 
-        return DB::transaction(function () use ($barcode, $quantityKg, $workCenterId, $recordedBy, $supervisorId, $warehouse) {
+        return DB::transaction(function () use ($barcode, $quantityKg, $workCenterId, $recordedBy, $supervisorId, $warehouse, $ackReason, $ackNote) {
             $bag = MaterialBag::query()->where('barcode', $barcode)->lockForUpdate()->first();
             if ($bag === null) {
                 throw ValidationException::withMessages([
@@ -200,6 +209,18 @@ class FactoryDayBinService
                 throw BagOverloadException::make($bag->barcode, $quantity, $remaining);
             }
 
+            // THE LOT (and therefore the material) IS RESOLVED BEFORE ANY
+            // MUTATION, because the acknowledgement gate below needs to know
+            // which material this machine is being topped up with, and a 422
+            // must never leave a half-applied scan behind it.
+            $lot = $bag->lot()->first();
+
+            $this->guardMachineBalance(
+                workCenterId: $workCenterId,
+                itemId: (int) $lot->item_id,
+                ackReason: $ackReason,
+            );
+
             // Same rule as TraceabilityService::loadBagToDayBin: a load that
             // drives remaining_kg to 0 leaves the bag Consumed (it holds
             // nothing any more) and the bag itself is now at that machine; a
@@ -212,8 +233,6 @@ class FactoryDayBinService
                 $bag->day_bin_work_center_id = $workCenterId;
             }
             $bag->save();
-
-            $lot = $bag->lot()->first();
 
             $notes = null;
             if ($supervisorId !== null) {
@@ -247,6 +266,11 @@ class FactoryDayBinService
                 'type' => DayBinMovementType::Load->value,
                 'material_bag_id' => $bag->id,
                 'quantity_kg' => $quantity,
+                // Present only when the gate above asked for it. A scan
+                // below the threshold carries nulls, which is what "nobody
+                // was asked" must look like in the data.
+                'balance_ack_reason' => $ackReason,
+                'balance_ack_note' => $ackNote,
                 'recorded_by' => $recordedBy,
             ]);
 
@@ -262,6 +286,113 @@ class FactoryDayBinService
                 'movement' => $movement,
             ];
         });
+    }
+
+    /**
+     * The acknowledgement reasons a scan may carry. Four words, because the
+     * question is "what happened to the material the estimate still expects"
+     * and there are only four honest answers to it:
+     *
+     *   confirm_extra    it really is still in there; we are loading on top
+     *   spill            it went on the floor
+     *   return_to_store  it went back to the store
+     *   correction       the estimate is wrong
+     */
+    public const ACK_REASONS = ['confirm_extra', 'spill', 'return_to_store', 'correction'];
+
+    /**
+     * THE SCAN ACKNOWLEDGEMENT GATE.
+     *
+     * When the running estimate still says this machine holds a meaningful
+     * quantity of this material and somebody scans another bag into it, the
+     * scan is refused until one word explains why. Above the threshold that
+     * discrepancy is worth a question; below it, nothing is asked and the
+     * ordinary scan stays one tap.
+     *
+     * IT DOES NOT ASK FOR A WEIGHT, AND MUST NOT. The factory does no
+     * routine day-bin weighing, and this gate deliberately introduces none —
+     * it names the estimated figure and offers four words, because a scale
+     * nobody walks to produces a number nobody trusts. The old
+     * reconciliation asked a question the factory does not answer; that
+     * mistake is not repeated here.
+     *
+     * THE ESTIMATE IS READ BEFORE THIS LOAD IS RECORDED, which is the whole
+     * correctness of the thing: computed afterwards, every 25 kg bag would
+     * trip a 5 kg threshold and the gate would fire on every scan, which is
+     * the same as not existing.
+     *
+     * A FIRST-EVER SCAN IS NEVER GATED, and that falls out for free rather
+     * than being special-cased: machineResinEstimate reports no pair at all
+     * until a material has been scanned into a machine at least once (no
+     * scan, no baseline), so there is no figure to exceed the threshold and
+     * nobody is asked to explain a machine the system has never seen loaded.
+     *
+     * @throws ValidationException 422 naming the estimated figure and the choices
+     */
+    private function guardMachineBalance(int $workCenterId, int $itemId, ?string $ackReason): void
+    {
+        if ($ackReason !== null) {
+            return;
+        }
+
+        // THE GATE ONLY SPEAKS WHEN THE ESTIMATE CAN BE TRUSTED — between
+        // batches. Consumption is booked at completeBatch, so while a batch
+        // is running the estimate has not yet been charged for anything that
+        // run has melted: a machine an hour into its shift reads as still
+        // holding its whole first bag, and gating on that figure turned the
+        // routine second-bag-of-the-run scan into a demanded explanation
+        // (the live diff audit called it: operators would reflexively answer
+        // confirm_extra within a week and the signal would die). Between
+        // batches every completed run HAS been charged, the figure is real,
+        // and a bag's worth still showing is a genuine question.
+        $running = ShiftProductionEntry::query()
+            ->where('work_center_id', $workCenterId)
+            ->where('batch_status', BatchStatus::InProgress->value)
+            ->exists();
+
+        if ($running) {
+            return;
+        }
+
+        $estimated = $this->estimatedRemainingFor($workCenterId, $itemId);
+
+        if ($estimated === null) {
+            return;
+        }
+
+        $threshold = (string) (float) config('production.tolerances.machine_balance_ack_kg', 5.0);
+
+        if (bccomp($estimated, $threshold, 4) < 0) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'balance_ack_reason' => sprintf(
+                'This machine is still estimated to hold %s kg of this material. Say what happened to it before loading more — %s.',
+                rtrim(rtrim($estimated, '0'), '.'),
+                implode(', ', self::ACK_REASONS),
+            ),
+        ]);
+    }
+
+    /**
+     * One machine's estimated remaining kg of one material, or null when
+     * there is no baseline to estimate against. Reuses machineResinEstimate
+     * rather than re-deriving the arithmetic, so the figure the gate quotes
+     * is exactly the figure every screen shows.
+     */
+    private function estimatedRemainingFor(int $workCenterId, int $itemId): ?string
+    {
+        $machine = $this->machineResinEstimate($workCenterId)->first();
+
+        if ($machine === null) {
+            return null;
+        }
+
+        $material = $machine['materials']
+            ->first(fn (array $row) => (int) $row['item']->id === $itemId);
+
+        return $material['estimated_remaining_kg'] ?? null;
     }
 
     /**

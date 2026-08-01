@@ -44,11 +44,13 @@ import {
     openMoldChangeLog,
     getBatchPreview,
     factoryStoreLabel,
+    readBalanceAckRefusal,
     resolveFactoryStore,
     saveDowntimeReason,
     startBatch,
 } from '@/features/production/api';
 import type {
+    BalanceAckReason,
     BinBayAvailability,
     BinBayRequirementComponent,
     DowntimeReason,
@@ -65,6 +67,7 @@ import type {
     WorkCenter,
 } from '@/features/production/types';
 import {
+    BALANCE_ACK_REASON_OPTIONS,
     canAmendCompletion,
     isAwaitingCorrection,
     readReturnReason,
@@ -1313,6 +1316,25 @@ export default function ShiftProductionEntryPage() {
     const [loadBagSupervisorId, setLoadBagSupervisorId] = useState<number | null>(null);
     const [loadBagSuccess, setLoadBagSuccess] = useState<string | null>(null);
     const [loadBagError, setLoadBagError] = useState<{ text: string; needsWarehouse: boolean } | null>(null);
+    /**
+     * THE REFUSED SCAN, awaiting one word — the same gate the Day Bin page's
+     * scan door answers, on the second of the two doors that reach it.
+     *
+     * Set only by the server's 422 and carrying the server's own sentence,
+     * which names the kg that machine is still estimated to hold. This
+     * screen never decides on its own that a scan needs explaining.
+     *
+     * ONE OBJECT, cleared on success, on a new barcode, on a change of
+     * machine, and on every open of the modal — because the server's gate
+     * waves through any request that already carries a reason, so a reason
+     * outliving its refusal would silently switch the check off for the
+     * next bag.
+     */
+    const [loadBagAck, setLoadBagAck] = useState<{
+        message: string;
+        reason: BalanceAckReason | null;
+        note: string;
+    } | null>(null);
     const loadBagInputRef = useRef<InputRef>(null);
     const currentUser = useAuthStore((s) => s.user);
     // There is no per-machine materials view here any more. One bin feeds the
@@ -4239,6 +4261,9 @@ export default function ShiftProductionEntryPage() {
         setLoadBagSupervisorId(currentUser?.id ?? null);
         setLoadBagSuccess(null);
         setLoadBagError(null);
+        // A fresh session asks its own questions. Nothing an earlier one was
+        // part-way through explaining may ride along into it.
+        setLoadBagAck(null);
         setLoadMaterialOpen(true);
     };
 
@@ -4268,6 +4293,10 @@ export default function ShiftProductionEntryPage() {
         if (!code) return;
         setLoadBagBarcode('');
         setLoadBagSuccess(null);
+        // A NEW BAG IS A NEW QUESTION — cleared here rather than only in the
+        // lookup's success path, so a failed lookup cannot leave the last
+        // bag's answer standing.
+        setLoadBagAck(null);
         bagLookupMutation.mutate(code);
     };
 
@@ -4288,6 +4317,10 @@ export default function ShiftProductionEntryPage() {
             setScannedLoadBag(null);
             setLoadBagKg(null);
             setLoadBagError(null);
+            // THE ACKNOWLEDGEMENT DIES WITH THE SCAN IT EXPLAINED. Left
+            // standing, it would be posted with the next bag and wave it
+            // through the gate unasked.
+            setLoadBagAck(null);
             // The machine stays selected: the next bag off the same pallet
             // goes into the same machine, and re-picking it every time is how
             // bag four gets credited to the wrong one.
@@ -4301,7 +4334,21 @@ export default function ShiftProductionEntryPage() {
             loadBagInputRef.current?.focus();
         },
         onError: (error: any) => {
+            // THE BALANCE GATE, before any other reading of this failure: the
+            // machine is still estimated to hold material and the server
+            // wants one word before it takes more. A third case alongside the
+            // two this handler already tells apart, not a parallel path — the
+            // error shape stays the one thing that decides.
+            const refusal = readBalanceAckRefusal(error);
+            if (refusal !== null) {
+                setLoadBagError(null);
+                setLoadBagAck({ message: refusal, reason: null, note: '' });
+                return;
+            }
             const text = error?.response?.data?.message ?? 'Could not load the bag.';
+            // Any other failure SUPERSEDES a half-answered question rather
+            // than stacking a second alert on top of it.
+            setLoadBagAck(null);
             setLoadBagError({
                 text,
                 // The one setup failure a supervisor can actually fix: nobody
@@ -4313,7 +4360,17 @@ export default function ShiftProductionEntryPage() {
         },
     });
 
-    const submitLoadBag = () => {
+    /**
+     * Post the scan. `ack` rides along ONLY on the resubmit of a scan the
+     * server already refused — never on a first attempt, because the gate
+     * short-circuits on any request that already carries a reason.
+     *
+     * Rebuilt from live state on both passes rather than replayed from a
+     * stashed payload, so a supervisor who lowers the kg while answering
+     * loads the kg they can see. Nothing clears the bag on failure, which is
+     * what makes reading live state safe here.
+     */
+    const submitLoadBag = (ack?: { reason: BalanceAckReason; note: string }) => {
         const supervisorId = loadBagSupervisorId ?? currentUser?.id;
         if (!scannedLoadBag || !loadBagKg || loadBagKg <= 0 || !supervisorId) return;
         if (loadBagMachineId === null) {
@@ -4328,6 +4385,14 @@ export default function ShiftProductionEntryPage() {
             work_center_id: loadBagMachineId,
             quantity_kg: loadBagKg,
             supervisor_id: supervisorId,
+            ...(ack
+                ? {
+                      balance_ack_reason: ack.reason,
+                      // Blank stays ABSENT rather than going up as "": the
+                      // note is optional and an empty one is not a note.
+                      ...(ack.note.trim() !== '' ? { balance_ack_note: ack.note.trim() } : {}),
+                  }
+                : {}),
         });
     };
 
@@ -7695,7 +7760,13 @@ export default function ShiftProductionEntryPage() {
                         maskClosable={false}
                         title="Load Material"
                         open={loadMaterialOpen}
-                        onCancel={() => setLoadMaterialOpen(false)}
+                        onCancel={() => {
+                            setLoadMaterialOpen(false);
+                            // Belt and braces with openLoadMaterial's own reset:
+                            // an unanswered question must not survive the modal
+                            // that asked it, whatever route reopens it later.
+                            setLoadBagAck(null);
+                        }}
                         afterOpenChange={(open) => {
                             if (open) loadBagInputRef.current?.focus();
                         }}
@@ -7741,6 +7812,12 @@ export default function ShiftProductionEntryPage() {
                                     onChange={(value) => {
                                         setLoadBagMachineId(value);
                                         setLoadBagError(null);
+                                        // The refusal was about ONE machine's
+                                        // estimated remaining. Point at another
+                                        // and the question no longer applies —
+                                        // carrying the answer across would
+                                        // explain the wrong machine.
+                                        setLoadBagAck(null);
                                     }}
                                     options={machineOptions}
                                     placeholder="Choose the machine…"
@@ -7795,14 +7872,74 @@ export default function ShiftProductionEntryPage() {
                                     optionFilterProp="label"
                                 />
                             </Form.Item>
+                            {/* THE REFUSED SCAN. The server's sentence first,
+                                word for word — it names the estimated kg still
+                                on that machine, and that figure is the whole
+                                reason anyone is being asked. Then the four
+                                words and an optional note, and nothing else:
+                                NO WEIGHT IS ASKED FOR HERE OR ANYWHERE. */}
+                            {loadBagAck !== null && (
+                                <Alert
+                                    type="warning"
+                                    showIcon
+                                    style={{ marginBottom: 12 }}
+                                    message="Say what happened to the material already on this machine"
+                                    description={
+                                        <Space direction="vertical" style={{ width: '100%' }}>
+                                            <Typography.Text>{loadBagAck.message}</Typography.Text>
+                                            <Select
+                                                style={{ width: '100%' }}
+                                                placeholder="What happened to it?"
+                                                options={BALANCE_ACK_REASON_OPTIONS}
+                                                value={loadBagAck.reason ?? undefined}
+                                                onChange={(value) =>
+                                                    setLoadBagAck((prev) =>
+                                                        prev === null ? prev : { ...prev, reason: value },
+                                                    )
+                                                }
+                                            />
+                                            <Input.TextArea
+                                                rows={2}
+                                                maxLength={200}
+                                                placeholder="Anything worth adding (optional)"
+                                                value={loadBagAck.note}
+                                                onChange={(e) =>
+                                                    setLoadBagAck((prev) =>
+                                                        prev === null ? prev : { ...prev, note: e.target.value },
+                                                    )
+                                                }
+                                            />
+                                        </Space>
+                                    }
+                                />
+                            )}
                             <Button
                                 type="primary"
                                 block
-                                onClick={submitLoadBag}
+                                onClick={() =>
+                                    loadBagAck !== null && loadBagAck.reason !== null
+                                        ? submitLoadBag({ reason: loadBagAck.reason, note: loadBagAck.note })
+                                        : submitLoadBag()
+                                }
                                 loading={loadBagMutation.isPending}
-                                disabled={!scannedLoadBag || !loadBagKg || loadBagKg <= 0 || loadBagMachineId === null}
+                                disabled={
+                                    !scannedLoadBag ||
+                                    !loadBagKg ||
+                                    loadBagKg <= 0 ||
+                                    loadBagMachineId === null ||
+                                    // A pending refusal with no word picked yet:
+                                    // the button says what it wants rather than
+                                    // firing a post that can only be refused.
+                                    (loadBagAck !== null && loadBagAck.reason === null)
+                                }
                             >
-                                {loadBagMachineId === null ? 'Pick a machine first' : 'Load into machine'}
+                                {loadBagMachineId === null
+                                    ? 'Pick a machine first'
+                                    : loadBagAck !== null
+                                      ? loadBagAck.reason === null
+                                          ? 'Pick a reason first'
+                                          : 'Confirm and load into machine'
+                                      : 'Load into machine'}
                             </Button>
                         </Form>
                     </Modal>

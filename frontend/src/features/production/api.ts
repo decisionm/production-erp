@@ -3,6 +3,7 @@ import type { Paginated } from '@/lib/types';
 import type {
     ProductionStandardRow,
     StandardItemCandidate,
+    BalanceAckReason,
     BatchPreview,
     BinBayAvailabilityResponse,
     BinBayHistoryRow,
@@ -1024,11 +1025,54 @@ export interface FactoryDayBinLoadPayload {
      * authenticated user.
      */
     supervisor_id: number;
+    /**
+     * THE ACKNOWLEDGEMENT — sent ONLY on the resubmit of a scan the server
+     * already refused, never on a first attempt.
+     *
+     * Sending it speculatively is not a harmless extra field: the server's
+     * gate short-circuits the moment a reason is present
+     * (`if ($ackReason !== null) return;`), so a pre-filled reason silently
+     * disables the check for that scan. Any surface holding this value must
+     * clear it on success, on a new barcode, and on close — see the
+     * `pendingAck` state on both scan doors.
+     */
+    balance_ack_reason?: BalanceAckReason;
+    /** Optional free text alongside the reason; max 200 chars server-side. */
+    balance_ack_note?: string;
 }
 
 export async function loadBagToFactoryDayBin(payload: FactoryDayBinLoadPayload): Promise<FactoryDayBinLoadResult> {
     const { data } = await api.post<{ data: FactoryDayBinLoadResult }>('/production/day-bin/load-bag', payload);
     return data.data;
+}
+
+/**
+ * THE SCAN ACKNOWLEDGEMENT REFUSAL, read off a failed load.
+ *
+ * The server refuses a scan into a machine its running estimate says still
+ * holds a meaningful quantity of the same material, with a 422 whose
+ * `errors.balance_ack_reason` carries ONE SENTENCE naming that estimated
+ * figure. Returns that sentence, or null when the failure was anything else
+ * (an unknown barcode, no day-bin warehouse, a 500).
+ *
+ * The sentence is returned VERBATIM and every caller must print it
+ * verbatim. It ends with the raw reason tokens because it is the server
+ * stating the vocabulary it accepts; the human-worded Select underneath
+ * carries that vocabulary for the operator. Do not trim, reword, or
+ * regex-strip the tail — the wording is the server's to change, and a
+ * client that parses it breaks silently the day it does.
+ *
+ * Reads `errors.balance_ack_reason`, NOT the top-level `message`: Laravel's
+ * top-level message on a multi-error 422 is only the first one, so keying
+ * off it would make this gate indistinguishable from any other validation
+ * failure on the same request.
+ */
+export function readBalanceAckRefusal(error: unknown): string | null {
+    const errors = (error as { response?: { data?: { errors?: Record<string, unknown> } } })?.response?.data?.errors;
+    const messages = errors?.balance_ack_reason;
+    if (!Array.isArray(messages) || messages.length === 0) return null;
+    const first = messages[0];
+    return typeof first === 'string' && first.trim() !== '' ? first : null;
 }
 
 export interface ReturnDayBinPayload {

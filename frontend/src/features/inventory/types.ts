@@ -89,7 +89,8 @@ export interface StockMovement {
     batch?: Batch | null;
     serial_number?: SerialNumber | null;
     quantity: string;
-    unit_cost: string | null;
+    /** GRN purchase rate — served only to finance.view/manage eyes; absent otherwise. */
+    unit_cost?: string | null;
     reference: string | null;
     transfer_group: string | null;
     movement_date: string;

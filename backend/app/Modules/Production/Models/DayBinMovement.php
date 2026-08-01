@@ -20,6 +20,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[Fillable([
     'work_center_id', 'item_id', 'shift_production_entry_id', 'type',
     'material_bag_id', 'quantity_kg', 'recorded_by', 'recorded_at',
+    // Why this machine was topped up while the estimate still expected
+    // material in it — see the balance-ack migration.
+    'balance_ack_reason', 'balance_ack_note',
 ])]
 class DayBinMovement extends Model
 {

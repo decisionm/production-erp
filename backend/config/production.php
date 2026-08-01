@@ -58,6 +58,38 @@ return [
          */
         'amend_material_drift_kg' => (float) env('PROD_TOL_AMEND_DRIFT_KG', 0.5),
 
+        /*
+         * THE SCAN-ACKNOWLEDGEMENT THRESHOLD, in kg.
+         *
+         * When a machine's ESTIMATED remaining for a material is at least
+         * this much and somebody scans another bag into it, the scan is
+         * refused until one word says why (see
+         * FactoryDayBinService::guardMachineBalance). Below it, nothing is
+         * asked — the ordinary scan stays one tap, which is what keeps the
+         * scan discipline alive on a busy floor.
+         *
+         * 25 kg — about one full bag — because a running machine NORMALLY
+         * carries material: the estimate is derived from output, pallets are
+         * scanned bag after bag, and a threshold of a few kilograms would
+         * fire on nearly every second scan (the first regression proved it:
+         * 500 kg loaded, 100 consumed, 400 "remaining" is the ordinary state
+         * of a machine mid-shift). A prompt that fires on the ordinary state
+         * trains the floor to click through it, and the signal dies. At a
+         * bag's worth the question means what it says: a whole bag the
+         * arithmetic cannot account for.
+         *
+         * Raising it asks fewer questions and misses more unscanned
+         * material; lowering it asks more and risks the operators learning
+         * to dismiss the prompt. It is an env override precisely so that
+         * call can be made against real shifts without a deploy — the owner
+         * should tune it once real scan patterns exist.
+         *
+         * NOTE WHAT IT DOES NOT DO: it never asks anyone to weigh anything.
+         * No routine day-bin weighing exists in this factory and none is
+         * introduced here.
+         */
+        'machine_balance_ack_kg' => (float) env('PROD_TOL_MACHINE_BALANCE_ACK_KG', 25.0),
+
         // Hard gates (null = disabled). When set, accountant approval is
         // refused while the figure exceeds the threshold.
         'variance_blocking_pct' => env('PROD_TOL_VARIANCE_BLOCKING') !== null

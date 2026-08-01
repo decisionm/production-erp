@@ -2,7 +2,9 @@
 
 namespace App\Modules\Production\Http\Requests;
 
+use App\Modules\Production\Services\FactoryDayBinService;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 /**
  * The Shift Floor's bag scan — barcode in, kg out of the store, INTO A
@@ -37,6 +39,15 @@ class LoadFactoryDayBinBagRequest extends FormRequest
             // partial load, same convention as the per-machine day-bin load.
             'quantity_kg' => ['nullable', 'numeric', 'gt:0'],
             'supervisor_id' => ['nullable', 'integer', 'exists:users,id'],
+            // THE ACKNOWLEDGEMENT, sent only when the previous attempt was
+            // refused because the machine still shows material. Optional
+            // here rather than conditionally required, because whether it is
+            // needed depends on the machine's live estimate — a fact this
+            // request cannot see and the service must decide (see
+            // FactoryDayBinService::guardMachineBalance). Validating the
+            // VOCABULARY is still this layer's job.
+            'balance_ack_reason' => ['nullable', 'string', Rule::in(FactoryDayBinService::ACK_REASONS)],
+            'balance_ack_note' => ['nullable', 'string', 'max:200'],
         ];
     }
 

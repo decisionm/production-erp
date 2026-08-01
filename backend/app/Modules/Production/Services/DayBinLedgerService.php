@@ -90,6 +90,13 @@ class DayBinLedgerService
                 'type' => $type,
                 'material_bag_id' => $data['material_bag_id'] ?? null,
                 'quantity_kg' => $quantity,
+                // Passed through rather than interpreted: the decision about
+                // WHEN an acknowledgement is required lives at the scan
+                // (FactoryDayBinService::loadBag), because only that path
+                // knows the machine's estimate. This ledger simply records
+                // what it is handed.
+                'balance_ack_reason' => $data['balance_ack_reason'] ?? null,
+                'balance_ack_note' => $data['balance_ack_note'] ?? null,
                 'recorded_by' => $data['recorded_by'] ?? null,
                 'recorded_at' => $data['recorded_at'] ?? now(),
             ]);

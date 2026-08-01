@@ -7,6 +7,7 @@ use App\Modules\HRMS\Http\Resources\EmployeeResource;
 use App\Modules\Inventory\Http\Resources\ItemResource;
 use App\Modules\Inventory\Http\Resources\WarehouseResource;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
+use App\Modules\Production\Services\BagCostAllocationService;
 use App\Modules\Production\Services\ShiftProductionEntryService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -15,6 +16,13 @@ class ShiftProductionEntryResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        // Priced ONCE and shared by the two keys that need it below.
+        // materialCost() runs a stock_movements query per entry, so letting
+        // `material_cost` and `batch_cost` each compute their own would
+        // double the query count of the busiest read in the module — a
+        // 20-row approval page is the normal case, not the worst one.
+        $materialCost = app(ShiftProductionEntryService::class)->materialCost($this->resource);
+
         return [
             'id' => $this->id,
             'shift' => ShiftResource::make($this->whenLoaded('shift')),
@@ -119,7 +127,31 @@ class ShiftProductionEntryResource extends JsonResource
             // unit cost its own issue movement recorded, plus a total that
             // is null (never a partial figure) when any line is unpriced.
             // Null until the batch completes, like variance/metrics above.
-            'material_cost' => app(ShiftProductionEntryService::class)->materialCost($this->resource),
+            'material_cost' => $materialCost,
+            // WHAT THIS BATCH COST, from the bags its resin actually came
+            // out of — resin priced off the machine's scanned load layers at
+            // each bag's own purchase rate, everything else priced exactly
+            // as material_cost prices it, plus the per-accepted-piece figure.
+            //
+            // Always present (nulls plus a `reason` in words before the
+            // batch completes), the same rule `quality` and `correction`
+            // follow above — a client must be able to say "not costed yet"
+            // without telling a missing key apart from a null one.
+            //
+            // THE DETAIL IS FINANCE'S. Totals and cost-per-piece are for
+            // everyone on the floor; the per-layer breakdown behind them —
+            // rates, bag barcodes, supplier lot numbers — is passed only for
+            // finance.view/manage, and the keys are ABSENT rather than null
+            // for anyone else, so no supplier rate is ever one devtools
+            // panel away from a production login. The permission gate is the
+            // module-coarse one this codebase already uses (there is no
+            // per-field precedent, and inventing one here would be inventing
+            // a permission the seeder would strip).
+            'batch_cost' => app(BagCostAllocationService::class)->summary(
+                $this->resource,
+                withDetail: (bool) $request->user()?->canAny(['finance.view', 'finance.manage']),
+                materialCost: $materialCost,
+            ),
             'sync_error' => $this->when(
                 $this->status === ShiftProductionEntryStatus::Failed && $this->relationLoaded('tallySyncEntries'),
                 fn () => $this->tallySyncEntries->first()?->error_message,

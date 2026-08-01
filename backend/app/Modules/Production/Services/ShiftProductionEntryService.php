@@ -59,6 +59,12 @@ class ShiftProductionEntryService
         // the rule (CLAUDE.md) — TallySync owns the voucher shape and
         // nothing about it is duplicated here.
         private readonly VoucherPreviewService $voucherPreview,
+        // The bag-cost ANALYTIC layer. It reads this entry's consumption
+        // lines and the machine's scanned load layers; it never writes a
+        // stock movement and never touches average cost — see that class's
+        // boundary note. Nothing in this service's stock handling changes
+        // because of it.
+        private readonly BagCostAllocationService $bagCosts,
     ) {}
 
     public function paginate(int $perPage = 20, ?ShiftProductionEntryStatus $status = null): LengthAwarePaginator
@@ -577,6 +583,18 @@ class ShiftProductionEntryService
                 $entry->save();
             }
 
+            // WHICH BAGS THIS BATCH'S RESIN CAME OUT OF, booked now that the
+            // consumption lines exist and inside this same transaction — a
+            // completion either books its costs or books nothing.
+            //
+            // Deliberately AFTER the stock issues above and deliberately
+            // without touching them: this is a parallel analytic record, and
+            // the ledger's own valuation is not affected by it in any way.
+            // An amendment reverses it (reverseCompletionEffects) before
+            // re-running this method, so the re-run allocates as the next
+            // run rather than doubling the batch's cost.
+            $this->bagCosts->allocate($entry, $completedBy);
+
             foreach ($data['scraps'] ?? [] as $line) {
                 $entry->scraps()->create([
                     'type' => $line['type'],
@@ -1019,6 +1037,17 @@ class ShiftProductionEntryService
                 createdBy: $userId,
             );
         }
+
+        // THE BAG-COST ALLOCATIONS ARE REVERSED, NEVER DELETED — the one
+        // place in this reversal that keeps its rows. The consumption lines
+        // below are deleted because the corrected completion rewrites them
+        // and the stock ledger already records both bookings; the cost
+        // allocations instead stamp reversed_at, so the run that was wrong
+        // stays readable beside the run that replaced it. Reversed rows are
+        // excluded from every layer-remaining sum, so the machine's bags get
+        // their kilograms back and the next allocation sees a world in which
+        // the wrong completion never happened.
+        $this->bagCosts->reverse($entry);
 
         $entry->materialConsumptions()->delete();
 
