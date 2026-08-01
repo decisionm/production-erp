@@ -979,8 +979,10 @@ class PackingMaterialMappingTest extends TestCase
         $this->assertSame(5, $entry->fresh()->materialConsumptions->count());
 
         $service = app(ShiftProductionEntryService::class);
+        // Four-eyes: the accountant gate refuses the PM's own account.
+        $accountant = User::factory()->create();
         $service->pmApprove($entry->fresh(), $approver->id);
-        $service->accountantApprove($entry->fresh(), $approver->id);
+        $service->accountantApprove($entry->fresh(), $accountant->id);
 
         $voucher = TallySyncEntry::query()->sole();
 

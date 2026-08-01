@@ -229,8 +229,12 @@ class NegativeStockOnCompletionTest extends TestCase
 
         $this->assertFalse($service->productionMetrics($entry)['blocks_approval']);
 
+        // Two people, because four-eyes: the accountant gate refuses the PM's
+        // own account. This test is about the shortfall surviving the chain,
+        // not about who signs — see ApprovalChainTest for the rule itself.
+        $accountant = User::factory()->create();
         $service->pmApprove($entry, $this->user->id);
-        $approved = $service->accountantApprove(ShiftProductionEntry::findOrFail($entryId), $this->user->id);
+        $approved = $service->accountantApprove(ShiftProductionEntry::findOrFail($entryId), $accountant->id);
 
         $this->assertSame(ShiftProductionEntryStatus::Approved, $approved->status);
 
@@ -401,8 +405,10 @@ class NegativeStockOnCompletionTest extends TestCase
         $this->complete($entryId)->assertOk();
 
         $service = app(ShiftProductionEntryService::class);
+        // Four-eyes: the accountant gate refuses the PM's own account.
+        $accountant = User::factory()->create();
         $service->pmApprove(ShiftProductionEntry::findOrFail($entryId), $this->user->id);
-        $service->accountantApprove(ShiftProductionEntry::findOrFail($entryId), $this->user->id);
+        $service->accountantApprove(ShiftProductionEntry::findOrFail($entryId), $accountant->id);
 
         $voucher = TallySyncEntry::where('tally_voucher_type', 'Manufacturing Journal')->firstOrFail();
 

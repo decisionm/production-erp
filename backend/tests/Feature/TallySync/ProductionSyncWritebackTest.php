@@ -58,10 +58,14 @@ class ProductionSyncWritebackTest extends TestCase
 
         // Walk the chain — the accountant's approval is the posting gate.
         $service = app(ShiftProductionEntryService::class);
+        // Two accounts, because four-eyes: the accountant gate refuses the
+        // PM's own account. The voucher payload carries neither approver, so
+        // nothing this test asserts depends on who signed.
         $approver = User::factory()->create()->id;
+        $accountant = User::factory()->create()->id;
         $service->pmApprove($entry, $approver);
 
-        return $service->accountantApprove($entry->fresh(), $approver);
+        return $service->accountantApprove($entry->fresh(), $accountant);
     }
 
     public function test_scraps_ride_the_voucher_payload_and_narration(): void

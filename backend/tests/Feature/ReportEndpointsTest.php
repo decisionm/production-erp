@@ -18,14 +18,23 @@ use Tests\TestCase;
 /**
  * The reports wave: read-only production / reconciliation / traceability
  * report endpoints. Central rule under test (SHIFT-REDESIGN-FORMULAS.md
- * row 24, WB2 totals row): period efficiency is Σ actual boxes / Σ
- * expected boxes × 100 — a ratio of sums, NEVER the average of row
- * percentages — and rows with null expected boxes (standards not
- * captured) contribute to NEITHER sum.
+ * row 24): period efficiency is Σ actual PIECES / Σ expected PIECES × 100 —
+ * a ratio of sums, NEVER the average of row percentages — and rows with a
+ * null piece expectation (standards not captured) contribute to NEITHER sum.
+ *
+ * GRAIN CHANGE (30-Jul review sweep): these totals were pinned at
+ * 20/31 = 64.5, the ratio of BOX sums (the old WB2 totals-row formula),
+ * while the per-row efficiency had already moved to pieces. One screen
+ * carried two efficiencies that could not be compared — rows in pieces, the
+ * "Day total" beneath them in boxes. The totals row now uses the same
+ * numerator, denominator and arithmetic path as the rows, so the pins below
+ * moved with it: 64.5 → 62.9 and 43.8 → 43.3. No row figure changed; only
+ * the aggregate's grain did.
  *
  * Fixture: 2 machines × 2 completed entries each, one of them missing
- * standards. Eligible rows: machine A 7/16, machine B 7/8 and 6/7 (13/15)
- * → total 20/31 = 64.5 (the average of the row percentages would be 72.3).
+ * standards. Eligible rows: 5880/13584.91, 10500/12000 and 6300/10500
+ * → total 22680/36084.91 = 62.9 (the average of the row percentages would
+ * be 63.6 — see the assertion comment).
  */
 class ReportEndpointsTest extends TestCase
 {
@@ -75,8 +84,8 @@ class ReportEndpointsTest extends TestCase
 
         // Machine A row 1 — WB2 row 6 standards: CT 10.6 × 5 cav × 8 h /
         // pack 840 → 16 expected boxes. Row efficiency is piece-grain:
-        // 5880/13584.9057 = 43.283… → 43.3 (the 7/16 boxes feed only the
-        // totals-row ratio, which stays the WB2 box formula).
+        // 5880/13584.9057 = 43.283… → 43.3. The 7/16 boxes are reported as
+        // plain column sums only — no ratio is taken over them any more.
         $a1 = $entry([
             'work_center_id' => $machineA->id, 'item_id' => $bottleA->id,
             'batch_number' => '20260727-M01-001',
@@ -193,12 +202,20 @@ class ReportEndpointsTest extends TestCase
             ->assertJsonPath('data.totals.rejection_kg_qc', '9.7500')
             ->assertJsonPath('data.totals.lumps_kg', '1.7500');
 
-        // THE rule: 20/31 = 64.516… → 64.5 (ratio of BOX sums — the WB2
-        // totals-row formula, deliberately untouched by the piece-grain
-        // row change). The average of the piece-grain row percentages
-        // would be (43.3 + 87.5 + 60.0) / 3 = 63.6 — asserting 64.5
-        // proves the aggregation is the totals-row ratio, not a mean.
-        $response->assertJsonPath('data.totals.efficiency_pct', 64.5);
+        // THE rule, now at the ROW grain: Σ actual pieces / Σ expected
+        // pieces = 22680 / 36084.91 = 62.851… → 62.9. This pin was 64.5,
+        // the ratio of BOX sums (20/31) — the last place on the daily sheet
+        // still answering the box question after the rows moved to pieces.
+        // Both figures are on one screen and a supervisor compares them, so
+        // they must be the same question; 62.9 is that question asked of
+        // the whole day.
+        //
+        // Still the discriminating assertion: the average of the row
+        // percentages would be (43.3 + 87.5 + 60.0) / 3 = 63.6, so 62.9
+        // proves the aggregation is a ratio of sums, not a mean. (Machine
+        // A's single-row test below can no longer prove that — with one
+        // eligible row the ratio and the mean coincide.)
+        $response->assertJsonPath('data.totals.efficiency_pct', 62.9);
     }
 
     public function test_rows_with_null_expected_contribute_to_neither_sum(): void
@@ -206,16 +223,72 @@ class ReportEndpointsTest extends TestCase
         $this->actingAsViewer();
         $machineA = $this->fixture()['machineA'];
 
-        // Machine A alone: eligible 7/16 = 43.75 → 43.8. The missing-
-        // standards entry's 5 actual boxes are in the column total (12)
-        // but NOT in the ratio — 12/16 would be 75.0, and averaging would
-        // be meaningless with one null row.
+        // Machine A alone: eligible 5880/13584.91 = 43.283… → 43.3. The
+        // missing-standards entry's 4200 actual pieces are in the column
+        // total (10080) but NOT in the ratio — (5880 + 4200) / 13584.91
+        // would be 74.2, an entry with no expectation flattering the day.
+        //
+        // Pin moved 43.8 → 43.3 with the totals grain (see class docblock):
+        // 43.8 was 7/16 boxes. It equals the single eligible row's own
+        // efficiency now, which is the correct answer and no longer a
+        // ratio-vs-mean discriminator — that job is test 1's alone.
         $this->getJson('/api/v1/production/reports/production?date=2026-07-27&work_center_id='.$machineA->id)
             ->assertOk()
             ->assertJsonCount(2, 'data.rows')
             ->assertJsonPath('data.totals.expected_boxes', 16)
             ->assertJsonPath('data.totals.actual_boxes', 12)
-            ->assertJsonPath('data.totals.efficiency_pct', 43.8);
+            ->assertJsonPath('data.totals.actual_pieces', '10080')
+            ->assertJsonPath('data.totals.efficiency_pct', 43.3);
+    }
+
+    /**
+     * The eligibility gate is expected_PIECES, not expected_boxes — the two
+     * are different sets. An entry with a cycle time, cavities and hours but
+     * no pack size has a real piece-grain expectation and must weigh both
+     * sums; its expected_boxes is null purely because nobody recorded how
+     * many go in a carton, which is not a reason to drop the machine's whole
+     * shift out of the day's efficiency.
+     *
+     * Every entry in fixture() carries nos_per_box, so that fixture cannot
+     * tell the two gates apart — a totals row still gated on expected_boxes
+     * would pass every assertion above. This is the test that separates them.
+     */
+    public function test_totals_ratio_includes_an_entry_with_standards_but_no_pack_size(): void
+    {
+        $this->actingAsViewer();
+
+        $shift = Shift::create(['name' => 'Morning', 'start_time' => '06:00', 'end_time' => '14:00']);
+        $machine = WorkCenter::create(['code' => 'MC-09', 'name' => 'Machine 9']);
+        $fgStore = Warehouse::create(['code' => 'FG', 'name' => 'FG Store']);
+        // No nos_per_box anywhere — not on the master, not on the entry.
+        $unpacked = Item::create(['sku' => 'BTL-NOPACK', 'name' => 'Bottle, pack size unrecorded', 'uom' => 'NOS']);
+        $packed = Item::create(['sku' => 'BTL-1000', 'name' => 'Bottle 1000-pack', 'uom' => 'NOS', 'nos_per_box' => 1000]);
+
+        $entry = fn (array $attributes) => ShiftProductionEntry::create($attributes + [
+            'shift_id' => $shift->id, 'work_center_id' => $machine->id,
+            'warehouse_id' => $fgStore->id, 'production_date' => '2026-08-04',
+            'batch_status' => BatchStatus::Completed, 'quantity_scrap' => '0',
+            'standard_cycle_time' => '12', 'active_cavities' => 5, 'running_hours' => '8',
+        ]);
+
+        // Expected 3600 × 5 × 8 / 12 = 12000 pieces; boxes null (no pack).
+        $entry(['item_id' => $unpacked->id, 'batch_number' => '20260804-M09-001', 'quantity_produced' => '6000']);
+        // Same expectation, pack 1000 → 12 expected boxes, 100% row.
+        $entry(['item_id' => $packed->id, 'batch_number' => '20260804-M09-002', 'nos_per_box' => 1000, 'quantity_produced' => '12000']);
+
+        // 18000 / 24000 = 75.0. Gated on expected_boxes the unpacked entry
+        // would drop out of both sums and the day would read 100.0 — a
+        // machine at half its standard erased by a missing carton count.
+        $this->getJson('/api/v1/production/reports/production?date=2026-08-04')
+            ->assertOk()
+            ->assertJsonCount(2, 'data.rows')
+            ->assertJsonPath('data.rows.0.expected_boxes', null)
+            ->assertJsonPath('data.rows.0.efficiency_pct', 50)
+            ->assertJsonPath('data.rows.1.efficiency_pct', 100)
+            // Boxes stay a plain column sum: only the packed entry has any.
+            ->assertJsonPath('data.totals.expected_boxes', 12)
+            ->assertJsonPath('data.totals.actual_pieces', '18000')
+            ->assertJsonPath('data.totals.efficiency_pct', 75);
     }
 
     public function test_production_report_with_no_expectations_has_null_total_efficiency(): void

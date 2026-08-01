@@ -659,8 +659,10 @@ class RunMaterialSuggestionTest extends TestCase
         $this->assertSame('71.6100', $this->kg($stored->firstWhere('item_id', $this->chips->id)->quantity_issued_kg));
 
         $service = app(ShiftProductionEntryService::class);
+        // Four-eyes: the accountant gate refuses the PM's own account.
+        $accountant = User::factory()->create();
         $service->pmApprove($entry->fresh(), $approver->id);
-        $service->accountantApprove($entry->fresh(), $approver->id);
+        $service->accountantApprove($entry->fresh(), $accountant->id);
 
         $voucher = TallySyncEntry::query()->sole();
 

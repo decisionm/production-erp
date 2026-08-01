@@ -91,7 +91,13 @@ class ShiftVoucherGranularityTest extends TestCase
         $service = app(ShiftProductionEntryService::class);
         $service->pmApprove($entry, $this->approver->id);
 
-        return $service->accountantApprove($entry->fresh(), $this->approver->id);
+        // A second account for the accountant gate (four-eyes). The voucher
+        // payload carries neither approver, so the granularity assertions
+        // below are unaffected by who signed.
+        return $service->accountantApprove(
+            $entry->fresh(),
+            User::factory()->create()->id,
+        );
     }
 
     public function test_two_approvals_in_the_same_shift_merge_into_one_summed_stock_journal(): void

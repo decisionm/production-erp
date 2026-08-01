@@ -18,6 +18,16 @@ export interface TallySyncEntry {
     attempts: number;
     error_message: string | null;
     synced_at: string | null;
+    /**
+     * When the cloud first handed this entry to an agent, as of THIS poll —
+     * null the first time, set on every re-poll (TallySyncService::pending()
+     * reads the rows before it stamps them). A non-null value therefore
+     * means "you have been given this voucher before", which is the line
+     * sync.ts will not cross: it may have been posted to Tally already, so
+     * the voucher is never rebuilt for it. A dashboard Retry clears the
+     * stamp, and that is what re-authorises a post.
+     */
+    delivered_at: string | null;
     created_at: string;
 }
 

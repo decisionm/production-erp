@@ -17,14 +17,30 @@ use Illuminate\Database\Eloquent\Collection;
  * consumptionVariance); this service only queries, iterates, and sums —
  * the formulas live in exactly one place (SHIFT-REDESIGN-FORMULAS.md).
  *
- * Aggregation rule (dictionary row 24, WB2 totals row): day/period
- * efficiency is Σ actual boxes / Σ expected boxes × 100 — a RATIO OF SUMS,
- * never the average of the row percentages. Rows whose expected_boxes is
- * null (standards not captured) contribute to NEITHER sum: they can't join
- * the denominator (no expectation exists) and letting their actual boxes
- * into the numerator would inflate the ratio against everyone else's
+ * Aggregation rule (dictionary row 24): day/period efficiency is
+ * Σ actual PIECES / Σ expected PIECES × 100 — a RATIO OF SUMS, never the
+ * average of the row percentages. Rows whose expected_pieces is null
+ * (standards not captured) contribute to NEITHER sum: they can't join the
+ * denominator (no expectation exists) and letting their actual pieces into
+ * the numerator would inflate the ratio against everyone else's
  * expectations. Their actuals still appear in the plain column totals —
  * only the efficiency ratio excludes them.
+ *
+ * ONE GRAIN ON ONE SCREEN (30-Jul review): the per-row efficiency moved to
+ * pieces when the box ratio was proved wrong (see productionMetrics() —
+ * 14,322 pieces against 13,333 expected read "75%" because 3 full boxes were
+ * divided by 4), but this totals row was left on the WB2 box formula. The
+ * daily sheet then showed two incomparable efficiencies side by side: rows
+ * measured in pieces, the "Day total" beneath them measured in boxes, with
+ * nothing on screen saying they were different questions. The totals row is
+ * the same figure at a coarser grain, not a different concept, so it now
+ * uses the same numerator/denominator and the same arithmetic path as the
+ * rows. Boxes remain plain column sums — reported, never ratioed.
+ *
+ * Note the eligibility gate is expected_PIECES, not expected_boxes: an entry
+ * with a cycle time, cavities and hours but no pack size has a real
+ * piece-grain expectation and must weigh both sums, even though its
+ * expected_boxes is null.
  */
 class ProductionReportService
 {
@@ -42,7 +58,8 @@ class ProductionReportService
 
     /**
      * The daily production sheet: one row per completed entry with the
-     * expected/actual/efficiency block, plus ratio-of-sums totals.
+     * expected/actual/efficiency block, plus ratio-of-sums totals at the
+     * SAME piece grain as the rows (see class docblock).
      *
      * @return array{date: string, rows: array<int, array<string, mixed>>, totals: array<string, mixed>}
      */
@@ -66,9 +83,12 @@ class ProductionReportService
         ];
 
         // The ratio-of-sums accumulators (see class docblock): only rows
-        // with a non-null expectation feed either side.
-        $eligibleActualBoxes = 0;
-        $eligibleExpectedBoxes = 0;
+        // with a non-null PIECE expectation feed either side. Kept as bc
+        // strings at the 2dp expected_pieces carries — expected pieces is a
+        // fraction (3600 × cavities × hours ÷ cycle time rarely lands whole)
+        // and float addition over a day of rows would drift the ratio.
+        $eligibleActualPieces = '0';
+        $eligibleExpectedPieces = '0';
 
         foreach ($entries as $entry) {
             $metrics = $this->entries->productionMetrics($entry);
@@ -90,13 +110,17 @@ class ProductionReportService
                 'efficiency_band' => $metrics['efficiency_band'],
             ];
 
+            // Plain column sum — boxes are reported, never ratioed.
             if ($metrics['expected_boxes'] !== null) {
                 $totals['expected_boxes'] = ($totals['expected_boxes'] ?? 0) + $metrics['expected_boxes'];
-                $eligibleExpectedBoxes += $metrics['expected_boxes'];
+            }
+
+            if ($metrics['expected_pieces'] !== null) {
+                $eligibleExpectedPieces = bcadd($eligibleExpectedPieces, $metrics['expected_pieces'], 2);
                 // Expected without actual still weighs the denominator —
                 // "expected to produce, nothing recorded" drags the ratio,
                 // it doesn't vanish from it.
-                $eligibleActualBoxes += $metrics['actual_boxes'] ?? 0;
+                $eligibleActualPieces = bcadd($eligibleActualPieces, $metrics['actual_pieces'] ?? '0', 2);
             }
 
             if ($metrics['actual_boxes'] !== null) {
@@ -117,12 +141,13 @@ class ProductionReportService
             }
         }
 
-        // Σ actual / Σ expected × 100, 1dp — null (not 0, not 100) when no
-        // row carried an expectation: no denominator means no ratio. Same
-        // key name as the per-row metric — the totals row is the same
-        // figure at a coarser grain, not a different concept.
-        $totals['efficiency_pct'] = $eligibleExpectedBoxes > 0
-            ? round($eligibleActualBoxes / $eligibleExpectedBoxes * 100, 1)
+        // Σ actual pieces / Σ expected pieces × 100, 1dp — null (not 0, not
+        // 100) when no row carried an expectation: no denominator means no
+        // ratio. Same key name AND the same arithmetic path as the per-row
+        // metric (bcdiv at 8dp, ×100, round to 1dp) — the totals row is the
+        // same figure at a coarser grain, not a different concept.
+        $totals['efficiency_pct'] = bccomp($eligibleExpectedPieces, '0', 2) === 1
+            ? round((float) bcmul(bcdiv($eligibleActualPieces, $eligibleExpectedPieces, 8), '100', 8), 1)
             : null;
 
         return ['date' => $date, 'rows' => $rows, 'totals' => $totals];

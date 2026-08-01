@@ -69,16 +69,21 @@ class TallySyncAgentController extends Controller
 
         $error = $request->validated()['error_message'];
 
-        $this->agentLog($request, 'voucher.failed', [
+        // Logged from the RESULT, not the request: a failure reported for a
+        // voucher already in Tally is refused by the service (it would put a
+        // Retry button on a voucher that is in the books), and the agent
+        // trace has to say that plainly rather than record a failure that
+        // never happened.
+        $result = $this->sync->markFailed($tallySyncEntry, $error);
+
+        $this->agentLog($request, $result->isInTally() ? 'voucher.failure_refused' : 'voucher.failed', [
             'entry_id' => $tallySyncEntry->id,
             'voucher_type' => $tallySyncEntry->tally_voucher_type,
             'voucher_number' => $tallySyncEntry->payload['voucher_number'] ?? null,
             'error' => $error,
         ]);
 
-        return TallySyncEntryResource::make(
-            $this->sync->markFailed($tallySyncEntry, $error),
-        );
+        return TallySyncEntryResource::make($result);
     }
 
     /**

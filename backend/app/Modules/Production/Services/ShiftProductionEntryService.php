@@ -419,10 +419,17 @@ class ShiftProductionEntryService
             // normally-completed batch left automatic consumed kg null.
             $this->recordClosingDayBin($entry, $data['closing_day_bin'] ?? [], $completedBy);
 
+            // Kg conversion runs on the weight THIS RUN resolved at Start
+            // Batch (configuration → standard → item, frozen in
+            // config_snapshot), NOT on the item master's own column — see
+            // resolvedUnitWeightGrams(). Reading the column directly left
+            // quantity_produced_kg null for every Tally-synced product and
+            // silently switched the whole reconciliation chain off.
             $item = Item::query()->find($entry->item_id);
-            $quantityProducedKg = $this->toKg($data['quantity_produced'], $item);
+            $unitWeightGrams = $this->resolvedUnitWeightGrams($entry, $item);
+            $quantityProducedKg = $this->toKg($data['quantity_produced'], $unitWeightGrams);
             $quantityRejectionKg = isset($data['quantity_scrap'])
-                ? $this->toKg($data['quantity_scrap'], $item)
+                ? $this->toKg($data['quantity_scrap'], $unitWeightGrams)
                 : null;
 
             // Concurrency guard: this affects zero rows (and throws) if
@@ -634,6 +641,12 @@ class ShiftProductionEntryService
             // whole handover before any stock movement happens.
             $this->recordClosingDayBin($entry, $data['closing_day_bin'] ?? [], $userId);
 
+            // Then, for anything nobody weighed, fall back to the ledger
+            // rather than to zero — see deriveUncountedClosing(). Must run
+            // while the outgoing segment is still in progress: the ledger
+            // refuses to back-record into a closed one.
+            $openingBasis = $this->deriveUncountedClosing($entry, $data['completion'] ?? []);
+
             $completed = $this->completeBatch($entry, $data['completion'], $userId);
 
             $child = ShiftProductionEntry::create([
@@ -657,10 +670,177 @@ class ShiftProductionEntryService
                 'active_cavities' => $completed->active_cavities,
                 'operator_id' => $data['operator_id'] ?? null,
                 'created_by' => $userId,
+                // WHERE THE INCOMING SHIFT'S OPENING CAME FROM, per material:
+                // 'counted' (somebody weighed the bin) or 'ledger' (derived).
+                // Recorded on the child because the child is the segment the
+                // figure belongs to, and on config_snapshot because that is
+                // already this run's frozen per-segment record — the same
+                // least-schema route stock_shortfalls took.
+                'config_snapshot' => ['opening_day_bin_basis' => $openingBasis],
             ]);
 
             return $child->fresh(['shift', 'workCenter', 'item', 'warehouse', 'operator', 'parentEntry']);
         });
+    }
+
+    /**
+     * HANDOVER WITHOUT A CLOSING COUNT — where the incoming shift's opening
+     * comes from when nobody weighed the bin.
+     *
+     * DayBinLedgerService::openingFor() gives a handover child its parent's
+     * closing count, and `?? '0.0000'` when the parent has none. Zero is the
+     * wrong answer at a handover and wrong in the expensive direction: the
+     * bin does not empty itself because the shift changed. The night shift
+     * inherited resin the ledger then said it did not have, its own closing
+     * count could be refused as impossible (a count above opening + loaded −
+     * returned "means material appeared from nowhere"), and its consumption
+     * came out understated by exactly the carry-over — silently, with no
+     * flag, because zero looks like a real figure.
+     *
+     * So: for each material this segment moved that has no count, record the
+     * balance the ledger itself implies —
+     *
+     *     opening + loaded − returned − consumed
+     *
+     * — as the outgoing segment's closing. Every term is the ledger's own
+     * (via consumptionFor/entrySummaryFor); `consumed` is what this very
+     * completion says it issued of that material. That figure then becomes
+     * the child's opening through the ordinary openingFor() path, so the
+     * ledger keeps one rule for openings rather than gaining a second.
+     *
+     * INVARIANTS KEPT. The derived value can never exceed the count guard's
+     * ceiling (opening + loaded − returned): consumption is never negative,
+     * so subtracting it can only lower the figure. It is clamped at zero, so
+     * a shift that issued more than the bin is recorded as holding cannot
+     * hand a negative balance forward. And it re-anchors balanceFor() the
+     * same way any count does, because it IS a count row — that is the only
+     * movement type the ledger has for an absolute observation.
+     *
+     * A WEIGHED COUNT ALWAYS WINS. The test is closingFor() === null, not
+     * "was this item in the payload", so a count recorded mid-shift from the
+     * floor screen counts as weighed too — nothing derived ever overwrites a
+     * figure a human put on a scale.
+     *
+     * recorded_by is deliberately null: a derived figure has no witness, and
+     * stamping the handover's user on it would dress an inference up as an
+     * observation. The returned basis is what makes it auditable.
+     *
+     * WHICH MATERIALS, and why the parent's are included. The obvious set is
+     * "everything that moved in this segment", and it is wrong by one link:
+     * in an ordinary three-shift day the afternoon loads nothing, it just
+     * runs down the resin the morning left it. That segment owns no day-bin
+     * movements at all, so a set built only from its own would be empty, no
+     * closing would be derived, and the NIGHT shift would open at zero —
+     * this very defect, one handover further along. The candidates are
+     * therefore the union of this segment's materials and its parent's. The
+     * chain then sustains itself: each handover leaves a count row owned by
+     * the segment that handed over, so the next one always has a parent with
+     * something to carry.
+     *
+     * KNOWN LIMIT: bin activity attached to NO segment
+     * (shift_production_entry_id null — e.g. the store refilling a bin
+     * before Start Batch) is not a candidate here, so a first segment that
+     * only ever ran on such material still hands over at zero. That is a
+     * narrower fix than the general problem, chosen deliberately: widening
+     * it means deciding which unattributed bin activity belongs to which
+     * run, which is DayBinLedgerService's question, not this method's.
+     *
+     * NOTE for direct service callers: a closing count smuggled in as
+     * completion.closing_day_bin is recorded by completeBatch AFTER this
+     * runs, so it would win on id order but this basis would still read
+     * 'ledger'. HandoverRequest has no such rule, so the HTTP path cannot
+     * reach it — closing counts belong at the top level.
+     *
+     * @param  array<string, mixed>  $completion  the outgoing segment's completion payload
+     * @return list<array{item_id: int, basis: string, opening_kg: string}>
+     */
+    private function deriveUncountedClosing(ShiftProductionEntry $entry, array $completion): array
+    {
+        // What this completion says it issued, per material. The day bin
+        // holds kg materials, so a line matched by item id is in kg.
+        $consumedByItem = [];
+        foreach ($completion['material_consumptions'] ?? [] as $line) {
+            $itemId = (int) ($line['item_id'] ?? 0);
+            $consumedByItem[$itemId] = bcadd(
+                $consumedByItem[$itemId] ?? '0.0000',
+                (string) ($line['quantity_issued_kg'] ?? '0'),
+                4,
+            );
+        }
+
+        // The candidate materials — this segment's, plus the one it
+        // continues. See the docblock: without the parent's, the carry-over
+        // survives exactly one handover.
+        $candidates = [];
+        foreach ($this->dayBin->entrySummaryFor($entry)['materials'] as $material) {
+            $candidates[(int) $material['item']['id']] = true;
+        }
+
+        if ($entry->parent_entry_id !== null) {
+            $parent = ShiftProductionEntry::query()->find($entry->parent_entry_id);
+            foreach ($parent !== null ? $this->dayBin->entrySummaryFor($parent)['materials'] : [] as $material) {
+                $candidates[(int) $material['item']['id']] = true;
+            }
+        }
+
+        // Deterministic order regardless of which side of the union a
+        // material came from.
+        ksort($candidates);
+
+        $basis = [];
+
+        foreach (array_keys($candidates) as $itemId) {
+            // Read every term from the ledger itself rather than off a
+            // summary row: a segment that loaded nothing has no summary row,
+            // but consumptionFor() still answers with the opening it
+            // inherited.
+            $terms = $this->dayBin->consumptionFor($entry, $itemId);
+
+            if ($terms['closing_kg'] !== null) {
+                $basis[] = [
+                    'item_id' => $itemId,
+                    'basis' => 'counted',
+                    'opening_kg' => $terms['closing_kg'],
+                ];
+
+                continue;
+            }
+
+            $remaining = bcsub(
+                bcsub(
+                    bcadd($terms['opening_kg'], $terms['loaded_kg'], 4),
+                    $terms['returned_kg'],
+                    4,
+                ),
+                $consumedByItem[$itemId] ?? '0.0000',
+                4,
+            );
+
+            // Issued more than the bin is recorded as holding: the stock
+            // record is what is wrong (a missed receipt, an opening balance
+            // never entered — see config/production.php 'stock'), and the
+            // next shift still starts from an empty bin, not a negative one.
+            if (bccomp($remaining, '0', 4) === -1) {
+                $remaining = '0.0000';
+            }
+
+            $this->dayBin->record([
+                'work_center_id' => $entry->work_center_id,
+                'item_id' => $itemId,
+                'shift_production_entry_id' => $entry->id,
+                'type' => 'count',
+                'quantity_kg' => $remaining,
+                'recorded_by' => null,
+            ]);
+
+            $basis[] = [
+                'item_id' => $itemId,
+                'basis' => 'ledger',
+                'opening_kg' => $remaining,
+            ];
+        }
+
+        return $basis;
     }
 
     /**
@@ -687,9 +867,42 @@ class ShiftProductionEntryService
      * matching the master plan's §4a design): Vincent/accounts verifies and
      * reconciles, and the entry becomes eligible for Tally immediately —
      * production quantities reach the books the same shift, with no MD wait.
+     *
+     * FOUR EYES, checked here first. Because this gate is the one that posts,
+     * it is also the one that must not be reachable by the person who cleared
+     * the gate before it — otherwise a single account signs a shift into the
+     * books alone and the PM stage is decoration. Relaxable only by
+     * production.approvals.allow_same_user (see config/production.php for why
+     * there is deliberately no Administrator exemption: everyone who approves
+     * here holds that role, so exempting it would leave the rule binding
+     * nobody who could break it).
      */
     public function accountantApprove(ShiftProductionEntry $entry, int $signedBy): ShiftProductionEntry
     {
+        // Read the PM's signature off the ROW, not the passed model: the
+        // caller's copy was loaded before this request and a stale null here
+        // would wave through exactly the case this refuses. Scoping the read
+        // to status = pm_approved also means a wrong-status call finds null
+        // and falls through to advance(), which reports the real problem
+        // (the transition) instead of an identity complaint about an entry
+        // that was never eligible anyway.
+        $pmSignedBy = ShiftProductionEntry::query()
+            ->whereKey($entry->id)
+            ->where('status', ShiftProductionEntryStatus::PmApproved->value)
+            ->value('plant_manager_signed_by');
+
+        if (
+            $pmSignedBy !== null
+            && (int) $pmSignedBy === $signedBy
+            && ! (bool) config('production.approvals.allow_same_user', false)
+        ) {
+            // Deliberately a plain sentence rather than ::make()'s
+            // "Cannot transition X from Y to Z" — the person reading it is an
+            // accountant being told why the button did nothing, and the
+            // reason is not a status problem.
+            throw new InvalidStatusTransitionException('the same person cannot give both approvals');
+        }
+
         // Optional hard gate (config, default off): an unaccounted-material
         // figure at/over the blocking threshold cannot be posted — reject it
         // back to the floor or correct the entry first.
@@ -1376,9 +1589,16 @@ class ShiftProductionEntryService
             }
         }
 
-        $weightGrams = $entry->item?->nominal_weight_grams;
-        if ($weightGrams !== null && bccomp((string) $weightGrams, '0', 4) === 1) {
-            return ['item_weight', $hasProduced ? bcdiv(bcmul($produced, (string) $weightGrams, 4), '1000', 4) : null];
+        // Same weight the run's own kg figures were computed at — the frozen
+        // snapshot first, the item column only for legacy rows (see
+        // resolvedUnitWeightGrams). A norm sourced from a master the run
+        // never used would put a phantom variance on every Tally-synced
+        // product. The norm_source label stays 'item_weight': it names the
+        // TIER (a per-piece weight rather than a BOM), and every client and
+        // test already reads that string.
+        $weightGrams = $this->resolvedUnitWeightGrams($entry, $entry->item);
+        if ($weightGrams !== null) {
+            return ['item_weight', $hasProduced ? bcdiv(bcmul($produced, $weightGrams, 4), '1000', 4) : null];
         }
 
         return [null, null];
@@ -1493,12 +1713,65 @@ class ShiftProductionEntryService
         return $candidate;
     }
 
-    private function toKg(string $quantityNos, ?Item $item): ?string
+    /**
+     * Pieces → kg at a unit weight already resolved by
+     * resolvedUnitWeightGrams(). No weight means no kg: null, never 0 — a
+     * zero would report a batch that produced nothing and reconcile every
+     * issued kilo as unaccounted.
+     *
+     * The arithmetic (4dp multiply, then ÷1000 at 4dp) is deliberately left
+     * exactly as it was — ProductionCalculationEngine::piecesToKg() carries
+     * the workbook's own 8dp variant and the two must not be merged
+     * casually; every figure pinned in the suite hangs off this one.
+     */
+    private function toKg(string $quantityNos, ?string $unitWeightGrams): ?string
     {
-        if ($item === null || $item->nominal_weight_grams === null) {
+        if ($unitWeightGrams === null) {
             return null;
         }
 
-        return bcdiv(bcmul($quantityNos, (string) $item->nominal_weight_grams, 4), '1000', 4);
+        return bcdiv(bcmul($quantityNos, $unitWeightGrams, 4), '1000', 4);
+    }
+
+    /**
+     * The unit weight THIS RUN resolved, in grams.
+     *
+     * The entry's frozen config_snapshot first — Start Batch already decided
+     * the effective weight there (configuration → standard → item master) and
+     * froze it, so this is by definition the weight the run was quoted and
+     * measured against. The item master's own nominal_weight_grams is only a
+     * fallback, for legacy rows whose snapshot predates the key.
+     *
+     * Why the order matters on the live floor: nothing WRITES
+     * items.nominal_weight_grams for a Tally-synced master (only item CRUD
+     * and the seeders do), so real products carry a weight on their approved
+     * standard/configuration and nothing on the item. Reading the column
+     * first left quantity_produced_kg null for every one of them, and with it
+     * rejection kg, unaccounted kg and the accountant's variance banner.
+     *
+     * The snapshot stores the weight as a string and writes '' when nothing
+     * resolved at all, so blanks are rejected before any bcmath call — and a
+     * zero or negative weight is "no weight", not a weight of zero.
+     */
+    private function resolvedUnitWeightGrams(ShiftProductionEntry $entry, ?Item $item): ?string
+    {
+        $candidates = [
+            $entry->config_snapshot['unit_weight_grams'] ?? null,
+            $item?->nominal_weight_grams,
+        ];
+
+        foreach ($candidates as $candidate) {
+            $weight = trim((string) ($candidate ?? ''));
+
+            if ($weight === '' || ! is_numeric($weight)) {
+                continue;
+            }
+
+            if (bccomp($weight, '0', 4) === 1) {
+                return $weight;
+            }
+        }
+
+        return null;
     }
 }

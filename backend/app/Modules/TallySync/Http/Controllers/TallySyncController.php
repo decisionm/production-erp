@@ -22,6 +22,13 @@ class TallySyncController extends Controller
         return TallySyncEntryResource::collection($this->sync->paginate());
     }
 
+    /**
+     * Re-queue a voucher for the agent. 422s (from the service) when the
+     * voucher is already synced — the dashboard only offers Retry on failed
+     * rows, but a stale page or any other API client can still ask, and
+     * re-queueing a voucher Tally has accepted posts it into the live books
+     * twice.
+     */
     public function retry(TallySyncEntry $tallySyncEntry): TallySyncEntryResource
     {
         return TallySyncEntryResource::make($this->sync->retry($tallySyncEntry));

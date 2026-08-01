@@ -68,6 +68,32 @@ const fmtSignedKg = (v: string | null | undefined): string => {
 };
 
 /**
+ * The unit to print beside a consumption quantity: the ITEM'S OWN, never a
+ * blanket "Kg". The column is stored as `quantity_issued_kg` for historical
+ * reasons, but the completion drawer's "Other materials" repeater accepts any
+ * item and files the figure in that item's unit — so 500 cartons sat under a
+ * heading that read "Kg", and an approver signing off a shift was told half a
+ * tonne of cardboard went into a bottle.
+ *
+ * Input normalization mirrors the backend's isMassUom(): lowercase, trailing
+ * dot stripped, because Tally's masters spell it "Kgs." on 90+ live items.
+ * Output vocabulary is the completion drawer's ("Kg" / "Nos" / the master's
+ * own spelling for anything else, so a metre item still reads "m") — the two
+ * screens describe the same lines and must not name their units differently.
+ *
+ * Blank or absent UOM reads "Kg", matching the server, which counts an
+ * unlabelled line toward the kg sums rather than dropping a real resin line.
+ */
+const unitLabel = (uom: string | null | undefined): string => {
+    const raw = (uom ?? '').trim();
+    if (raw === '') return 'Kg';
+    const norm = raw.toLowerCase().replace(/\.$/, '');
+    if (['kg', 'kgs', 'kilogram', 'kilograms'].includes(norm)) return 'Kg';
+    if (['no', 'nos', 'pcs', 'pieces', 'numbers'].includes(norm)) return 'Nos';
+    return raw;
+};
+
+/**
  * "standard: 50 trays · 120 pouches · 9 boxes" — expected packing from the
  * item's packing master (produced / nos-per-tray|pouch|box, rounded per the
  * shared packing-rounding mode) for eyeballing the entered counts. Null when
@@ -962,7 +988,15 @@ export default function ApproveProductionPage() {
                                         // loaded, so the first batch completed with a
                                         // day-bin material line blanked the whole drawer.
                                         { title: 'From', render: (_, row) => row.warehouse?.code ?? '—' },
-                                        { title: 'Kg', dataIndex: 'quantity_issued_kg' },
+                                        // Header names no unit — every line
+                                        // carries its own beside the figure,
+                                        // because the lines genuinely differ
+                                        // (resin in kg, cartons in nos).
+                                        {
+                                            title: 'Qty',
+                                            align: 'right',
+                                            render: (_, row) => `${row.quantity_issued_kg} ${unitLabel(row.item?.uom)}`,
+                                        },
                                     ]}
                                 />
                             </>

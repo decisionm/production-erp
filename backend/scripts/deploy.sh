@@ -28,6 +28,142 @@ echo "==> Deploying from $(pwd) using $($PHP -v | head -1)"
 # the server). Bump memory in case the shared host caps composer.
 $PHP -d memory_limit=-1 "$(command -v composer)" install --no-dev --optimize-autoloader
 
+# --- Take a database backup BEFORE migrating -------------------------------
+#
+# A migration is not undoable on a live factory database. down() methods rot
+# unnoticed because nothing exercises them, and MySQL cannot roll back DDL at
+# all, so a migration that dies halfway leaves a schema that is neither the old
+# one nor the new one. The only honest recovery is a dump taken minutes before.
+#
+# Therefore this is a HARD gate, not a courtesy: if a backup cannot be produced,
+# the deploy STOPS here, with the previous release still serving and the schema
+# untouched. Refusing to deploy costs an hour; discovering after the migration
+# that no backup exists costs the factory its books.
+
+# Read one value out of .env the way artisan does. Deliberately not `cut -d= -f2`
+# (a password containing '=' would be silently truncated, and a truncated
+# password produces a failed dump at best), and never `eval`/`export $(...)`
+# (a value containing $(...) or backticks would EXECUTE during deploy).
+# Everything after the first '=' is the value; one layer of matching outer
+# quotes is stripped, as phpdotenv does. An unquoted '#' is kept rather than
+# treated as a trailing comment — phpdotenv keeps it too, and a password is far
+# more likely to contain '#' than a .env line is to carry an inline comment.
+env_value() {
+  local line
+  line="$(grep -m1 -E "^[[:space:]]*$1=" .env || true)"
+  if [ -z "$line" ]; then return 0; fi
+  line="${line#*=}"
+  # A .env edited through hPanel's file manager or uploaded from Windows ends
+  # its lines with CRLF. A trailing \r inside a password turns this into a
+  # credentials failure that reports itself as "wrong password", which is the
+  # one wrong tree to bark up. Strip it before the quotes, so "secret"\r works.
+  line="${line%$'\r'}"
+  case "$line" in
+    \"*\") line="${line#\"}"; line="${line%\"}" ;;
+    \'*\') line="${line#\'}"; line="${line%\'}" ;;
+  esac
+  printf '%s' "$line"
+}
+
+DB_CONNECTION="$(env_value DB_CONNECTION)"
+DB_DATABASE="$(env_value DB_DATABASE)"
+DB_USERNAME="$(env_value DB_USERNAME)"
+DB_PASSWORD="$(env_value DB_PASSWORD)"
+# Defaults match config/database.php's mysql block, so an .env that omits these
+# (Hostinger's does not, but a fresh one might) is backed up from the same place
+# artisan is about to migrate.
+DB_HOST="$(env_value DB_HOST)";  DB_HOST="${DB_HOST:-127.0.0.1}"
+DB_PORT="$(env_value DB_PORT)";  DB_PORT="${DB_PORT:-3306}"
+
+# Stop rather than skip. A "no MySQL here, carry on" branch would quietly hand
+# back exactly the unbacked-up migration this block exists to prevent — and the
+# one deploy where that branch fires wrongly is the one that needed the dump.
+if [ "$DB_CONNECTION" != "mysql" ] && [ "$DB_CONNECTION" != "mariadb" ]; then
+  echo "ERROR: DB_CONNECTION in .env is '${DB_CONNECTION:-(unset, artisan would use sqlite)}', not mysql/mariadb." >&2
+  echo "       This deploy script only knows how to back up MySQL/MariaDB, and it will not run" >&2
+  echo "       migrations against a database it could not back up. Fix DB_CONNECTION in" >&2
+  echo "       $(pwd)/.env if it is wrong; if this instance genuinely is not MySQL, take your" >&2
+  echo "       own dump and extend this block — do not delete it." >&2
+  exit 1
+fi
+
+if [ -z "$DB_DATABASE" ] || [ -z "$DB_USERNAME" ]; then
+  echo "ERROR: DB_DATABASE and/or DB_USERNAME are missing from $(pwd)/.env, so the database" >&2
+  echo "       cannot be backed up and migrations have not been run. Nothing was changed." >&2
+  exit 1
+fi
+
+# Hostinger ships MariaDB's client on some plans, where the tool is named
+# mariadb-dump; both take the flags used below.
+DUMP_BIN=""
+for c in mysqldump mariadb-dump; do
+  if command -v "$c" >/dev/null 2>&1; then DUMP_BIN="$c"; break; fi
+done
+if [ -z "$DUMP_BIN" ]; then
+  echo "ERROR: neither mysqldump nor mariadb-dump is on PATH, so no pre-migration backup could" >&2
+  echo "       be taken. The deploy has STOPPED before 'artisan migrate' — the code on the" >&2
+  echo "       server is now newer than its schema, but nothing has been migrated and the" >&2
+  echo "       previous release is still what runs. Install the MySQL client tools (hPanel →" >&2
+  echo "       Advanced → SSH) or take a dump by hand from phpMyAdmin and re-run this script." >&2
+  exit 1
+fi
+
+mkdir -p ../backups
+BACKUP_FILE="../backups/erp-db-$(date +%Y%m%d-%H%M%S).sql"
+
+echo "==> Backing up '$DB_DATABASE' to $BACKUP_FILE before migrating"
+# --single-transaction: dump from one consistent snapshot without locking the
+#   floor out of the app mid-shift.  --quick: stream rows instead of buffering a
+#   whole table into RAM, which a shared host will not give us.
+# The password goes through MYSQL_PWD, scoped to this one command, and never
+# into argv: `-pSECRET` is visible in `ps` to every other user on a shared host.
+# `if !` rather than a bare redirect because `set -e` (top of file) would
+# otherwise kill the script before the message below could explain anything.
+if ! MYSQL_PWD="$DB_PASSWORD" "$DUMP_BIN" \
+      --single-transaction --quick \
+      --host="$DB_HOST" --port="$DB_PORT" --user="$DB_USERNAME" \
+      "$DB_DATABASE" > "$BACKUP_FILE"; then
+  rm -f "$BACKUP_FILE"   # a partial dump must not sit there looking like a backup
+  echo "ERROR: $DUMP_BIN failed (its own error is just above), so there is no pre-migration" >&2
+  echo "       backup. The deploy has STOPPED before 'artisan migrate': the schema is" >&2
+  echo "       untouched and the previous release is still serving. Usual causes, in order:" >&2
+  echo "         * wrong DB credentials in $(pwd)/.env, or a full disk quota;" >&2
+  echo "         * 'Access denied; you need the PROCESS privilege ... when trying to dump" >&2
+  echo "           tablespaces' — MySQL 8.0.21+ wants a privilege shared-hosting DB users are" >&2
+  echo "           rarely granted. The fix is to add --no-tablespaces to the $DUMP_BIN call in" >&2
+  echo "           this script; it is not added pre-emptively because older clients reject the" >&2
+  echo "           flag outright, which would break every deploy in the other direction." >&2
+  exit 1
+fi
+
+# Exit status alone is not sufficient — a dump tool can exit 0 having written
+# nothing, and a zero-byte file is not a backup, it is a false sense of one.
+if [ ! -s "$BACKUP_FILE" ]; then
+  rm -f "$BACKUP_FILE"
+  echo "ERROR: $DUMP_BIN exited successfully but produced an empty file, so there is no" >&2
+  echo "       usable backup. The deploy has STOPPED before 'artisan migrate' — nothing was" >&2
+  echo "       migrated. Check that user '$DB_USERNAME' can actually read '$DB_DATABASE'." >&2
+  exit 1
+fi
+
+# Apparent size via ls, not `du -h`: du reports allocated blocks, so it prints a
+# reassuring "4.0K" for a dump that is actually 200 bytes of header — and a dump
+# far smaller than last week's is the one thing worth noticing in this log line.
+echo "==> Backup OK: $(basename "$BACKUP_FILE") ($(ls -lh "$BACKUP_FILE" | awk '{print $5}'), $(wc -c < "$BACKUP_FILE" | tr -d ' ') bytes)"
+echo "    restore with: mysql -h $DB_HOST -P $DB_PORT -u $DB_USERNAME -p $DB_DATABASE < $BACKUP_FILE"
+
+# Keep the last 7, delete older. The glob is this script's own filename pattern
+# and nothing else, so a hand-made dump someone parked in ../backups before a
+# risky upgrade is never reaped by an unrelated deploy. Pruning happens only
+# AFTER a dump succeeded — a failed backup must not also destroy the history.
+OLD_BACKUPS="$(ls -1t ../backups/erp-db-*.sql 2>/dev/null | tail -n +8 || true)"
+if [ -n "$OLD_BACKUPS" ]; then
+  printf '%s\n' "$OLD_BACKUPS" | while IFS= read -r old; do
+    rm -f "$old"
+    echo "    pruned old backup: $(basename "$old")"
+  done
+fi
+
 # Apply any new migrations. --force is required in production (no prompt).
 $PHP artisan migrate --force
 
