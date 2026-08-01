@@ -27,6 +27,17 @@ class ProductionSyncWritebackTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // Sync write-backs are downstream of every approval gate and care
+        // only that an entry reached 'approved'. Off so this suite keeps
+        // testing the Tally ack/fail path rather than the quality queue —
+        // that gate is covered in BatchQualityStageTest.
+        config(['production.approvals.quality_stage_enabled' => false]);
+    }
+
     private function approvedEntry(): ShiftProductionEntry
     {
         $shift = Shift::create(['name' => 'Morning', 'start_time' => '06:00', 'end_time' => '14:00']);

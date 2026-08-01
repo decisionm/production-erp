@@ -77,13 +77,84 @@ return [
      * flag above — in the open, for everyone — not silently for whoever
      * happens to carry a role.
      *
-     * Scope is the accountant gate only. pmApprove needs no such check:
-     * it is the FIRST gate, so there is no earlier signature to collide
-     * with, and the supervisor who ran the batch is already kept out of
-     * both gates by the endpoint's role permissions.
+     * SCOPE is the accountant gate and the quality gate.
+     *
+     * The quality gate compares the checker against the person who COUNTED
+     * the output at Complete Batch (shift_production_entries.completed_by) —
+     * a check that certifies its own count certifies nothing. The accountant
+     * gate compares against the plant manager's signature. The same flag
+     * relaxes both, because a one-person office is one-person for all of them
+     * or none.
+     *
+     * IT IS STILL NOT THE PM GATE, and the reason is now narrower than it was.
+     * It used to be "the PM is first in the chain, so there is no earlier
+     * signature to collide with"; with quality sitting ahead of the PM that is
+     * no longer true — a QC checker who also holds the Plant Manager role
+     * could check a batch and then approve their own check. Whether that
+     * should be barred is a policy question the owner's brief does not answer
+     * ("all the machines will go to quality queue... then go to next level"
+     * says nothing about who stands at the next level), so the behaviour is
+     * deliberately left as it was rather than tightened on a guess. Raise it
+     * with the factory before adding a third comparison here.
      */
     'approvals' => [
         'allow_same_user' => (bool) env('PROD_APPROVALS_ALLOW_SAME_USER', false),
+
+        /*
+         * THE QUALITY GATE, between the supervisor's completion and the plant
+         * manager's approval (owner, 30-Jul): "all the machines will go to
+         * quality queue, and quality will do the check... so the total
+         * production will reduce if rejection, otherwise same, then go to
+         * next level."
+         *
+         * ON (the default): a completed batch sits in the quality queue and
+         * pmApprove() refuses it until a quality check is recorded. OFF: the
+         * chain is exactly what it was before this stage existed —
+         * completion → PM → accountant → Tally — and nothing about a batch's
+         * figures changes. The off path is pinned by a test, because "we can
+         * turn it off" is worth nothing if nobody has checked that turning it
+         * off restores the previous behaviour rather than a third one.
+         *
+         * It exists as a switch rather than a hard-wired stage for one
+         * reason: the gate is fail-CLOSED. If the quality desk is unstaffed
+         * for a shift, every batch that shift stops before the PM and
+         * production cannot reach the books. That is the correct default —
+         * an unchecked batch should not post — but the factory must be able
+         * to stand the gate down deliberately and visibly (in .env, where
+         * anyone can see it) rather than by someone quietly approving around
+         * it.
+         */
+        'quality_stage_enabled' => (bool) env('PROD_QUALITY_STAGE_ENABLED', true),
+    ],
+
+    /*
+     * WHERE QUALITY-REJECTED BOTTLES GO. The owner, asked whether rejected
+     * bottles are ever reworked: "no — go to the rejected scrap only."
+     *
+     * So a quality rejection moves stock twice, in one transaction: the
+     * rejected pieces are ISSUED out of finished goods (they are not sellable
+     * product and must stop counting as it), and their mass — piece count ×
+     * the run's frozen unit weight — is RECEIVED as scrap. Mass in equals
+     * mass out; the ERP never invents stock at this gate.
+     *
+     * THE SECOND HALF NEEDS A SCRAP ITEM, AND THIS ERP HAS NONE YET. There is
+     * no scrap-item master, no colour → scrap-item mapping, and nothing that
+     * resolves "amber scrap" or "clear scrap" (the item resolver handles
+     * masterbatch only). The factory's Tally books DO already carry "Pet
+     * Scrap" as a produced line on their daily Stock Journals, so the item
+     * exists in THEIR world — it has simply never been mirrored here.
+     *
+     * Name it here (by SKU, else by exact item name) and the scrap receipt
+     * happens. Leave it null — the default, because guessing which item is
+     * "the scrap one" would silently book real weight against the wrong
+     * master and the mistake would surface as a Tally rejection days later —
+     * and the rejection is still recorded in full, the finished-goods issue
+     * still happens, and the skipped receipt is written onto the entry where
+     * the approval screen shows it. Under-recording a movement is
+     * recoverable; mis-recording one against a guessed item is not.
+     */
+    'scrap' => [
+        'rejected_item_sku' => env('PROD_SCRAP_ITEM_SKU'),
     ],
 
     /*

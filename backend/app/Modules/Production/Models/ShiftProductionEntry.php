@@ -18,6 +18,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
 #[Fillable([
     'shift_id', 'work_center_id', 'item_id', 'warehouse_id', 'production_date',
     'batch_status', 'batch_number', 'quantity_produced', 'quantity_produced_kg',
+    'gross_quantity_produced',
     'quantity_scrap', 'quantity_rejection_kg', 'scrap_reason_id',
     'nos_per_tray', 'no_of_trays', 'nos_per_box', 'no_of_box',
     'no_of_pouches', 'nos_per_pouch', 'loose_pieces', 'helper_name',
@@ -26,7 +27,10 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
     'supervisor_signed_by', 'supervisor_signed_at', 'plant_manager_signed_by', 'plant_manager_signed_at',
     'accountant_signed_by', 'accountant_signed_at',
     'status', 'rejection_reason', 'approved_by', 'approved_at',
-    'operator_id', 'notes', 'created_by', 'parent_entry_id',
+    'operator_id', 'notes', 'created_by', 'completed_by', 'parent_entry_id',
+    // The quality gate between completion and the PM's approval.
+    'quality_reviewed_nos', 'quality_ok_nos', 'quality_rejected_nos',
+    'quality_checked_by', 'quality_checked_at', 'quality_note', 'quality_scrap_note',
     // Configurable production: the resolved configuration, the formula set
     // that produced this entry's figures, and the frozen inputs.
     'production_configuration_id', 'calculation_version', 'config_snapshot',
@@ -61,6 +65,12 @@ class ShiftProductionEntry extends Model
             'active_cavities' => 'integer',
             'running_hours' => 'decimal:2',
             'qc_rejection_kg' => 'decimal:4',
+            // Bottles are COUNTED at the quality gate, never weighed — the kg
+            // the books need is derived from the run's frozen unit weight.
+            'quality_reviewed_nos' => 'integer',
+            'quality_ok_nos' => 'integer',
+            'quality_rejected_nos' => 'integer',
+            'quality_checked_at' => 'datetime',
             'supervisor_signed_at' => 'datetime',
             'plant_manager_signed_at' => 'datetime',
             'accountant_signed_at' => 'datetime',
@@ -123,6 +133,21 @@ class ShiftProductionEntry extends Model
     public function accountantSignedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'accountant_signed_by');
+    }
+
+    /**
+     * Who counted the batch's output at Complete Batch. The four-eyes rule
+     * reads it: the person who counted must not also be the person who
+     * passes the quality check on that count.
+     */
+    public function completedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'completed_by');
+    }
+
+    public function qualityCheckedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'quality_checked_by');
     }
 
     public function materialConsumptions(): HasMany

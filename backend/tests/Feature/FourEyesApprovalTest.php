@@ -35,6 +35,18 @@ class FourEyesApprovalTest extends TestCase
 
     private static int $seq = 0;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // The four-eyes rule at the ACCOUNTANT gate is what this suite pins.
+        // The quality gate's own four-eyes check (the checker may not be the
+        // supervisor who counted the batch) is the same rule at a different
+        // desk and is pinned in BatchQualityStageTest; switching the stage
+        // off here keeps each test about one gate.
+        config(['production.approvals.quality_stage_enabled' => false]);
+    }
+
     private function submittedEntry(): ShiftProductionEntry
     {
         $n = ++self::$seq;

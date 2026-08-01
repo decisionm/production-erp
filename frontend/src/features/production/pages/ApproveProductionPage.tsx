@@ -1,6 +1,6 @@
 import type { ReactElement, ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Descriptions, Drawer, Input, Modal, Segmented, Space, Steps, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Descriptions, Drawer, Input, Modal, Segmented, Space, Steps, Table, Tag, Tooltip, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -24,7 +24,14 @@ import type {
     TraceabilityReportRow,
     VoucherPreview,
 } from '@/features/production/types';
-import { readStockShortfalls } from '@/features/production/types';
+import {
+    grossProducedPieces,
+    isQualityChecked,
+    netProducedPieces,
+    readQuality,
+    readQualityStageEnabled,
+    readStockShortfalls,
+} from '@/features/production/types';
 import { type PackingRounding, roundPer, useProductionSettings } from '@/features/production/packing';
 import { itemLabel } from '@/lib/itemLabel';
 
@@ -691,6 +698,67 @@ function VoucherPreviewSection({ preview, loading }: { preview: VoucherPreview |
  * Each row's available action depends on its stage AND the viewer's role — the
  * stage config drives both the button and the visibility.
  */
+/** One sentence, used by both the table button and the drawer button. */
+const AWAITING_QUALITY_REASON = 'Quality has not checked this batch yet. It appears in Quality → Production QC.';
+
+/**
+ * What quality found, compact enough for a table cell: the three counts and
+ * the net production figure this approval actually signs off.
+ *
+ * Counts are PIECES. The batch's other rejection figures on this page are
+ * kilograms; nothing here mixes the two.
+ */
+function QualityCell({ row, awaiting }: { row: ShiftProductionEntry; awaiting: boolean }): ReactElement {
+    const quality = readQuality(row);
+    const num = (n: number | null) => (n === null ? '—' : n.toLocaleString('en-IN'));
+
+    if (!isQualityChecked(row)) {
+        return awaiting ? (
+            <Tag>Awaiting quality</Tag>
+        ) : (
+            // Not awaiting and not checked: the batch is already past the PM
+            // gate, so it went through before the gate was switched on. Say
+            // nothing rather than imply a check was skipped.
+            <Typography.Text type="secondary">—</Typography.Text>
+        );
+    }
+
+    const rejected = quality?.rejected_nos ?? null;
+    const net = netProducedPieces(row);
+    const gross = grossProducedPieces(row);
+    const reduced = rejected !== null && rejected > 0;
+
+    return (
+        <Space direction="vertical" size={0}>
+            <Typography.Text style={{ fontSize: 12 }}>
+                {num(quality?.reviewed_nos ?? null)} reviewed · {num(quality?.ok_nos ?? null)} OK ·{' '}
+                <Typography.Text style={{ fontSize: 12 }} type={reduced ? 'danger' : undefined}>
+                    {num(rejected)} rejected
+                </Typography.Text>
+            </Typography.Text>
+            {/* The figure the PM is actually approving. When quality reduced
+                it, the supervisor's original is shown struck through beside
+                it — the subtraction the owner asked for, shown not implied. */}
+            <Typography.Text strong style={{ fontSize: 12 }}>
+                Net {num(net)} pcs
+                {reduced && gross !== null && (
+                    <Typography.Text type="secondary" delete style={{ fontSize: 12, fontWeight: 400, marginLeft: 6 }}>
+                        {num(gross)}
+                    </Typography.Text>
+                )}
+            </Typography.Text>
+            {/* The rejected pieces left finished goods, but their mass could
+                not be received as scrap — this ERP has no scrap item yet. The
+                approver is told, rather than it vanishing into a log. */}
+            {quality?.scrap_note && (
+                <Typography.Text type="warning" style={{ fontSize: 11 }}>
+                    {quality.scrap_note}
+                </Typography.Text>
+            )}
+        </Space>
+    );
+}
+
 const STAGES: {
     status: ShiftProductionEntryStatus;
     action: string;
@@ -719,10 +787,31 @@ export default function ApproveProductionPage() {
         return stage !== undefined && stage.roles.some((r) => myRoles.includes(r));
     };
 
+    // ------------------------------------------------------------------
+    // The quality gate (owner, 2026-07-30): every completed batch is checked
+    // by quality before the Plant Manager approves it.
+    //
+    // The flag rides on each ENTRY (`quality.stage_enabled`), not on
+    // /production/settings, so the switch and the check it governs always
+    // arrive together. Read per row for that reason — a row that predates the
+    // gate carries no block and is treated as ungated, which is what it is.
+    //
+    // Only the PM's gate. Once a batch is pm_approved the check has already
+    // happened (or the gate was off when it passed), and re-blocking the
+    // accountant would strand it halfway with no way forward.
+    // ------------------------------------------------------------------
+    const awaitingQuality = (row: ShiftProductionEntry) =>
+        readQualityStageEnabled(row) && row.status === 'pending' && !isQualityChecked(row);
+
     const { data, isLoading } = useQuery({
         queryKey: ['production', 'shift-production-entries', status],
         queryFn: () => listShiftProductionEntries(status),
     });
+
+    // Does any row in this queue carry the gate? Drives whether the Quality
+    // column is drawn at all — with the gate off the table is column-for-column
+    // what it has always been.
+    const qualityStageEnabled = (data?.data ?? []).some((row) => readQualityStageEnabled(row));
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['production', 'shift-production-entries'] });
 
@@ -827,6 +916,16 @@ export default function ApproveProductionPage() {
                     { title: 'Produced', dataIndex: 'quantity_produced' },
                     { title: 'Produced (Kg)', dataIndex: 'quantity_produced_kg', render: (v: string | null) => v ?? '—' },
                     { title: 'Rejected', dataIndex: 'quantity_scrap' },
+                    // Only rendered when the gate is switched on — with it off
+                    // the table is column-for-column what it has always been.
+                    ...(qualityStageEnabled
+                        ? [
+                              {
+                                  title: 'Quality',
+                                  render: (_: unknown, row: ShiftProductionEntry) => <QualityCell row={row} awaiting={awaitingQuality(row)} />,
+                              },
+                          ]
+                        : []),
                     {
                         title: 'Status',
                         dataIndex: 'status',
@@ -849,14 +948,27 @@ export default function ApproveProductionPage() {
                                 <Button size="small" onClick={() => setDetailRow(row)}>View</Button>
                                 {canActOn(row) && (
                                     <>
-                                        <Button
-                                            size="small"
-                                            type="primary"
-                                            loading={approveMutation.isPending}
-                                            onClick={() => approveMutation.mutate(row)}
-                                        >
-                                            {stageFor(row.status)!.action}
-                                        </Button>
+                                        <Tooltip title={awaitingQuality(row) ? AWAITING_QUALITY_REASON : ''}>
+                                            {/* span: antd tooltips need a live
+                                                element to hang off, and a
+                                                disabled button fires no events. */}
+                                            <span>
+                                                <Button
+                                                    size="small"
+                                                    type="primary"
+                                                    disabled={awaitingQuality(row)}
+                                                    loading={approveMutation.isPending}
+                                                    onClick={() => approveMutation.mutate(row)}
+                                                >
+                                                    {stageFor(row.status)!.action}
+                                                </Button>
+                                            </span>
+                                        </Tooltip>
+                                        {/* Reject stays live. Sending an
+                                            unchecked batch back to the
+                                            supervisor is a valid thing to do,
+                                            and blocking it would leave a bad
+                                            batch with nowhere to go. */}
                                         <Button size="small" danger onClick={() => setRejectingRow(row)}>
                                             Reject
                                         </Button>
@@ -1030,11 +1142,36 @@ export default function ApproveProductionPage() {
 
                         <VoucherPreviewSection preview={voucherPreview} loading={voucherLoading} />
 
+                        {/* The same gate as the table row. Without it the
+                            drawer would be a way round the block for anyone
+                            who opened the batch instead of approving from
+                            the list. */}
+                        {/* awaitingQuality already carries the per-row stage
+                            check, so this needs no second flag. */}
+                        {awaitingQuality(detailRow) && (
+                            <Alert
+                                style={{ marginTop: 24 }}
+                                type="warning"
+                                showIcon
+                                message="Awaiting quality"
+                                description={AWAITING_QUALITY_REASON}
+                            />
+                        )}
+
                         {canActOn(detailRow) && (
                             <Space style={{ marginTop: 24 }}>
-                                <Button type="primary" loading={approveMutation.isPending} onClick={() => approveMutation.mutate(detailRow)}>
-                                    {stageFor(detailRow.status)!.action}
-                                </Button>
+                                <Tooltip title={awaitingQuality(detailRow) ? AWAITING_QUALITY_REASON : ''}>
+                                    <span>
+                                        <Button
+                                            type="primary"
+                                            disabled={awaitingQuality(detailRow)}
+                                            loading={approveMutation.isPending}
+                                            onClick={() => approveMutation.mutate(detailRow)}
+                                        >
+                                            {stageFor(detailRow.status)!.action}
+                                        </Button>
+                                    </span>
+                                </Tooltip>
                                 <Button danger onClick={() => setRejectingRow(detailRow)}>Reject</Button>
                             </Space>
                         )}

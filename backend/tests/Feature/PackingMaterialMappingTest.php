@@ -74,6 +74,11 @@ class PackingMaterialMappingTest extends TestCase
     {
         parent::setUp();
 
+        // Packing-material mapping is what this suite pins; approvals here are
+        // scaffolding to reach the voucher. The quality gate is covered in
+        // BatchQualityStageTest.
+        config(['production.approvals.quality_stage_enabled' => false]);
+
         $this->rmStore = Warehouse::create(['code' => 'WH-RM', 'name' => 'Raw Material Store']);
         $this->fg = Warehouse::create(['code' => 'WH-FG', 'name' => 'Finished Goods']);
 

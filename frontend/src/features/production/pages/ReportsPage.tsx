@@ -54,6 +54,21 @@ const fmtKg = (v: string | null | undefined): string => {
 
 const fmtPct = (v: number | null | undefined): string => (v === null || v === undefined ? '—' : `${v}%`);
 
+/**
+ * Same formatting as fmtKg (plain number, no unit appended), named for the
+ * unit it prints — the reviewed column is PIECES, everything either side of it
+ * is kilograms, and a reader of this table should not have to guess which.
+ *
+ * WHAT "—" MEANS IN THE REVIEWED COLUMN TODAY: not served. Not "this batch was
+ * never checked". ProductionReportService emits no reviewed count at all (it
+ * carries the quality rejection in kilograms only), so every row and the day
+ * total print a dash regardless of what quality actually recorded — the counts
+ * are on the entry and on the approval screen, just not yet in this report.
+ * Once the service serves `qc_reviewed_pieces` the dash starts meaning the
+ * honest thing. Until then do not read this column as evidence about a shift.
+ */
+const fmtPcs = fmtKg;
+
 const BAG_STATUS_LABEL: Record<MaterialBagStatus, string> = {
     in_store: 'In Store',
     in_day_bin: 'At Machine',
@@ -103,7 +118,7 @@ function ProductionTab() {
 
     const exportCsv = () => {
         const csv = toCsv(
-            ['Date', 'Shift', 'Machine', 'Item', 'Batch', 'Running Hrs', 'Expected Boxes', 'Actual Boxes', 'Expected Pcs', 'Actual Pcs', 'Good Kg', 'Rejection Kg', 'Lumps Kg', 'Efficiency % (pcs)'],
+            ['Date', 'Shift', 'Machine', 'Item', 'Batch', 'Running Hrs', 'Expected Boxes', 'Actual Boxes', 'Expected Pcs', 'Actual Pcs', 'Good Kg', 'Rejection Kg', 'Reviewed Pcs', 'Rejected by QC Kg', 'Lumps Kg', 'Efficiency % (pcs)'],
             [
                 ...rows.map((r) => [
                     r.production_date,
@@ -118,6 +133,8 @@ function ProductionTab() {
                     r.actual_pieces,
                     r.good_production_kg,
                     r.rejection_kg_production,
+                    r.qc_reviewed_pieces ?? '',
+                    r.rejection_kg_qc,
                     r.lumps_kg,
                     r.efficiency_pct,
                 ]),
@@ -141,6 +158,8 @@ function ProductionTab() {
                           totals.actual_pieces,
                           totals.good_production_kg,
                           totals.rejection_kg_production,
+                          totals.qc_reviewed_pieces ?? '',
+                          totals.rejection_kg_qc,
                           totals.lumps_kg,
                           totals.efficiency_pct,
                       ] as (string | number | null)[]]
@@ -207,6 +226,20 @@ function ProductionTab() {
                     { title: 'Act. Pcs', dataIndex: 'actual_pieces', align: 'right', render: fmtKg },
                     { title: 'Good Kg', dataIndex: 'good_production_kg', align: 'right', render: fmtKg },
                     { title: 'Rej. Kg', dataIndex: 'rejection_kg_production', align: 'right', render: fmtKg },
+                    // The two quality columns — deliberately two, not a
+                    // dashboard. NOTE THE UNITS DIFFER, which is why both say
+                    // so in the heading: the reviewed count is pieces, while
+                    // the rejection the books actually move is the kilogram
+                    // figure the gate derives from it.
+                    //
+                    // "(not served)" in the heading is not decoration. The
+                    // backend report emits no reviewed count yet, so this
+                    // column is blank for every row — and a blank column
+                    // headed plainly "Reviewed" would read as "quality
+                    // reviewed nothing", which is the opposite of the truth.
+                    // Drop the suffix the day the service serves the field.
+                    { title: 'Reviewed (pcs, not served)', dataIndex: 'qc_reviewed_pieces', align: 'right', render: fmtPcs },
+                    { title: 'Rej. by QC (kg)', dataIndex: 'rejection_kg_qc', align: 'right', render: fmtKg },
                     { title: 'Lumps Kg', dataIndex: 'lumps_kg', align: 'right', render: fmtKg },
                     {
                         // The one place the grain is named — rows and the
@@ -231,8 +264,14 @@ function ProductionTab() {
                                 <Table.Summary.Cell index={3} align="right">{fmtKg(totals.actual_pieces)}</Table.Summary.Cell>
                                 <Table.Summary.Cell index={4} align="right">{fmtKg(totals.good_production_kg)}</Table.Summary.Cell>
                                 <Table.Summary.Cell index={5} align="right">{fmtKg(totals.rejection_kg_production)}</Table.Summary.Cell>
-                                <Table.Summary.Cell index={6} align="right">{fmtKg(totals.lumps_kg)}</Table.Summary.Cell>
-                                <Table.Summary.Cell index={7} align="right">{fmtPct(totals.efficiency_pct)}</Table.Summary.Cell>
+                                {/* Two cells matching the two quality columns —
+                                    the summary row is positional, so omitting
+                                    them would shift every total right of here
+                                    under the wrong heading. */}
+                                <Table.Summary.Cell index={6} align="right">{fmtPcs(totals.qc_reviewed_pieces)}</Table.Summary.Cell>
+                                <Table.Summary.Cell index={7} align="right">{fmtKg(totals.rejection_kg_qc)}</Table.Summary.Cell>
+                                <Table.Summary.Cell index={8} align="right">{fmtKg(totals.lumps_kg)}</Table.Summary.Cell>
+                                <Table.Summary.Cell index={9} align="right">{fmtPct(totals.efficiency_pct)}</Table.Summary.Cell>
                             </Table.Summary.Row>
                         </Table.Summary>
                     ) : null

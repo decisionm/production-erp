@@ -103,10 +103,13 @@ class ControlledProductEndToEndTest extends TestCase
     private function actAs(string ...$roles): User
     {
         $user = User::factory()->create(['is_active' => true]);
-        foreach (['production.manage', 'production.view', 'tally.view', 'tally.manage'] as $permission) {
+        foreach (['production.manage', 'production.view', 'tally.view', 'tally.manage', 'quality.manage', 'quality.view'] as $permission) {
             Permission::findOrCreate($permission, 'web');
         }
-        $user->givePermissionTo(['production.manage', 'production.view']);
+        // quality.* because the run now passes a quality check on its way to
+        // the plant manager — the same person can hold both here; the four-eyes
+        // rule only bars the checker from being the batch's own completer.
+        $user->givePermissionTo(['production.manage', 'production.view', 'quality.manage', 'quality.view']);
         foreach ($roles as $role) {
             $user->assignRole(Role::findOrCreate($role, 'web'));
         }
@@ -189,6 +192,21 @@ class ControlledProductEndToEndTest extends TestCase
         $this->assertSame(86.7, $metrics['efficiency_pct']);
         // Issued counts only the kg-family lines: 335 + 6.4.
         $this->assertSame('341.4000', $metrics['issued_kg']);
+
+        // ---- 3b. Quality passes the whole batch --------------------------
+        // Every completed batch goes through the quality queue now. This one
+        // is passed clean, which is the case the owner described as
+        // "otherwise same": the counts are recorded, the gate opens, and not
+        // one figure below moves — the voucher this test follows to Tally
+        // carries exactly what it carried before the stage existed.
+        $this->actAs();
+        $passed = $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/quality-check", [
+            'reviewed_nos' => 10400,
+            'ok_nos' => 10400,
+            'rejected_nos' => 0,
+        ])->assertOk();
+        $this->assertSame(10400.0, (float) $passed->json('data.quantity_produced'));
+        $this->assertNull($passed->json('data.gross_quantity_produced'));
 
         // ---- 4. Plant Manager approves — no voucher yet ------------------
         $this->actAs('Plant Manager');

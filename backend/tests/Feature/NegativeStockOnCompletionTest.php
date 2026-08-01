@@ -69,6 +69,11 @@ class NegativeStockOnCompletionTest extends TestCase
     {
         parent::setUp();
 
+        // This suite pins the negative-stock-on-completion decision and its
+        // shortfall reporting. The quality gate sits after completion and is
+        // covered in BatchQualityStageTest.
+        config(['production.approvals.quality_stage_enabled' => false]);
+
         $this->seed(CanonicalMachineSeeder::class);
         $this->machine = WorkCenter::where('code', 'MC-01')->firstOrFail();
         $this->shift = Shift::create(['name' => 'Morning', 'start_time' => '06:00', 'end_time' => '14:00']);

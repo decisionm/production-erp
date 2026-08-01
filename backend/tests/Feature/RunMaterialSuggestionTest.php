@@ -70,6 +70,11 @@ class RunMaterialSuggestionTest extends TestCase
     {
         parent::setUp();
 
+        // Run material suggestions are what this suite pins; approvals here are
+        // scaffolding to reach the posted figures. The quality gate is covered
+        // in BatchQualityStageTest.
+        config(['production.approvals.quality_stage_enabled' => false]);
+
         $this->rmStore = Warehouse::create(['code' => 'WH-RM', 'name' => 'Raw Material Store']);
         $this->fg = Warehouse::create(['code' => 'WH-FG', 'name' => 'Finished Goods']);
 

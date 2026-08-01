@@ -95,10 +95,10 @@ class CanonicalProductionFlowTest extends TestCase
     private function actAs(string ...$roles): User
     {
         $user = User::factory()->create(['is_active' => true]);
-        foreach (['production.view', 'production.manage', 'inventory.view', 'inventory.manage'] as $p) {
+        foreach (['production.view', 'production.manage', 'inventory.view', 'inventory.manage', 'quality.view', 'quality.manage'] as $p) {
             Permission::findOrCreate($p, 'web');
         }
-        $user->givePermissionTo(['production.view', 'production.manage', 'inventory.view', 'inventory.manage']);
+        $user->givePermissionTo(['production.view', 'production.manage', 'inventory.view', 'inventory.manage', 'quality.view', 'quality.manage']);
         foreach ($roles as $role) {
             $user->assignRole(Role::findOrCreate($role, 'web'));
         }
@@ -215,6 +215,34 @@ class CanonicalProductionFlowTest extends TestCase
         // QC weighed the rejection, so QC wins over the piece-derived figure.
         $this->assertSame('1.9300', $metrics['confirmed_rejection_kg']);
         $this->assertSame('1.6500', $metrics['lumps_kg']);
+
+        // ---- 6b. THE QUALITY QUEUE -----------------------------------
+        // Every completed batch stops here before the plant manager sees it.
+        // The checker is a different user from the supervisor who counted the
+        // batch — actAs() mints a new one — which is what the gate's
+        // four-eyes rule requires.
+        $this->actAs();
+        $checked = $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/quality-check", [
+            'reviewed_nos' => 8100,
+            'ok_nos' => 8000,
+            'rejected_nos' => 100,
+            'note' => 'Neck finish out of tolerance on one tray.',
+        ])->assertOk();
+
+        // "The total production will reduce if rejection": 8100 − 100 = 8000,
+        // and the supervisor's original count is kept beside it. Compared as
+        // numbers because an unCAST decimal column comes back formatted by
+        // the driver ('8000.0000' on MySQL, 8000 on the suite's SQLite) and
+        // the figure is what matters, not the formatting.
+        $this->assertSame(8000.0, (float) $checked->json('data.quantity_produced'));
+        $this->assertSame(8100.0, (float) $checked->json('data.gross_quantity_produced'));
+        // 100 x 12.9 g = 1.29 kg, and it lands on the EXISTING qc field, so
+        // the rejection precedence that was already there consumes it —
+        // replacing the 1.930 kg the supervisor had estimated at completion.
+        $checked->assertJsonPath('data.qc_rejection_kg', '1.2900');
+        $checked->assertJsonPath('data.metrics.confirmed_rejection_kg', '1.2900');
+        // 8000 x 12.9 g = 103.20 kg good, down from 104.49.
+        $checked->assertJsonPath('data.metrics.good_production_kg', '103.2000');
 
         // ---- 7. Plant Manager, then Accounts -------------------------
         $this->actAs('Plant Manager');
