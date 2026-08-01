@@ -471,6 +471,14 @@ class ShiftProductionEntryService
                 );
             }
 
+            // Material the ledger does not have is a FACT about this shift,
+            // not a reason to refuse it — the whole rationale, and the
+            // incident that forced it, is in config/production.php 'stock'.
+            // Read once here rather than inside StockMovementService so the
+            // permission stays this path's, not every issue's.
+            $allowNegative = (bool) config('production.stock.allow_negative_on_completion', true);
+            $shortfalls = [];
+
             foreach ($data['material_consumptions'] ?? [] as $index => $line) {
                 // WHICH STORE THIS MATERIAL CAME OUT OF, answered per line by
                 // the server. Absent or explicit null both mean "you decide";
@@ -496,13 +504,49 @@ class ShiftProductionEntryService
                     'created_by' => $completedBy,
                 ]);
 
+                $shortfallKg = null;
+
                 $this->stock->recordIssue(
                     itemId: $line['item_id'],
                     warehouseId: $warehouseId,
                     quantity: (string) $line['quantity_issued_kg'],
                     reference: "SPE #{$entry->id}",
                     createdBy: $completedBy,
+                    allowNegative: $allowNegative,
+                    shortfallKg: $shortfallKg,
                 );
+
+                if ($shortfallKg !== null) {
+                    // Names frozen alongside the ids, for the same reason
+                    // every other snapshot value is: the screen that flags
+                    // this may be read weeks later, after a master rename or
+                    // a soft delete, and "short 118.9980 kg of item #592"
+                    // is the message this whole change exists to stop
+                    // showing anyone.
+                    $shortfalls[] = [
+                        'item_id' => (int) $line['item_id'],
+                        'item_name' => Item::withTrashed()->find($line['item_id'])?->name,
+                        'warehouse_id' => (int) $warehouseId,
+                        'warehouse_name' => Warehouse::withTrashed()->find($warehouseId)?->name,
+                        'short_kg' => $shortfallKg,
+                    ];
+                }
+            }
+
+            if ($shortfalls !== []) {
+                // Onto the entry's EXISTING frozen snapshot rather than a
+                // new column — the same least-schema route
+                // material_shortage_override_reason took at Start, and for
+                // the same reason: config_snapshot is already this run's
+                // immutable per-batch record and already reaches the
+                // resource. save() writes the one dirty attribute, so the
+                // conditional UPDATE above remains the only writer of the
+                // lifecycle columns.
+                $entry->config_snapshot = [
+                    ...($entry->config_snapshot ?? []),
+                    'stock_shortfalls' => $shortfalls,
+                ];
+                $entry->save();
             }
 
             foreach ($data['scraps'] ?? [] as $line) {
@@ -847,11 +891,12 @@ class ShiftProductionEntryService
      * issue movements in creation order, one each, so nothing is counted
      * twice.
      *
-     * Null-safety rule: a line whose movement is missing, or whose movement
-     * carries no cost, prices at null — and total_cost is null whenever ANY
-     * line is unpriced. A total that silently omitted a line would read as
-     * "the batch cost this much" while understating it; no price is ever
-     * guessed.
+     * Null-safety rule: a line whose movement is missing, whose movement
+     * carries no cost, or which was issued out of a bin that had no recorded
+     * stock (and so no recorded cost) prices at null — and total_cost is
+     * null whenever ANY line is unpriced. A total that silently omitted a
+     * line would read as "the batch cost this much" while understating it;
+     * no price is ever guessed.
      *
      * @return array{
      *     lines: list<array{item_id: int, item_name: ?string, warehouse_id: int,
@@ -875,13 +920,35 @@ class ShiftProductionEntryService
         $pool = $this->stock->issuesForReference("SPE #{$entry->id}")
             ->groupBy(fn ($movement) => "{$movement->item_id}@{$movement->warehouse_id}");
 
+        // ZERO IS NOT A PRICE. A bin holding no recorded stock holds no
+        // recorded average cost either, so an issue that ran it negative
+        // (see config/production.php 'stock') stamps unit_cost 0.0000 — the
+        // ABSENCE of a price, which the rule above says is never guessed.
+        // Left alone, this batch would tell the accountant that 118.998 kg
+        // of resin cost nothing, on the same screen as the banner asking
+        // them to go fix that material's stock.
+        //
+        // Keyed off the recorded shortfall, so only those lines are
+        // affected: a genuinely free item has no shortfall record and still
+        // prices at zero, as it should.
+        $unpriced = [];
+        foreach ($this->stockShortfalls($entry) as $short) {
+            $unpriced["{$short['item_id']}@{$short['warehouse_id']}"] = true;
+        }
+
         $lines = [];
         $total = '0.0000';
         $everyLinePriced = true;
 
         foreach ($entry->materialConsumptions as $consumption) {
-            $movement = $pool->get("{$consumption->item_id}@{$consumption->warehouse_id}")?->shift();
+            $key = "{$consumption->item_id}@{$consumption->warehouse_id}";
+            $movement = $pool->get($key)?->shift();
             $unitCost = $movement?->unit_cost;
+
+            if ($unitCost !== null && isset($unpriced[$key]) && bccomp((string) $unitCost, '0', 4) === 0) {
+                $unitCost = null;
+            }
+
             $cost = $unitCost !== null
                 ? bcmul((string) $consumption->quantity_issued_kg, (string) $unitCost, 4)
                 : null;
@@ -939,6 +1006,8 @@ class ShiftProductionEntryService
      *     good_production_kg: ?string, confirmed_rejection_kg: ?string,
      *     reconciliation_unaccounted_kg: ?string, unaccounted_band: ?string,
      *     blocks_approval: bool,
+     *     stock_shortfalls: list<array{item_id: ?int, item_name: ?string,
+     *         warehouse_id: ?int, warehouse_name: ?string, short_kg: string}>,
      * }|null
      */
     public function productionMetrics(ShiftProductionEntry $entry): ?array
@@ -1127,7 +1196,42 @@ class ShiftProductionEntryService
             'reconciliation_unaccounted_kg' => $unaccounted,
             'unaccounted_band' => $unaccountedBand,
             'blocks_approval' => $blocksApproval,
+            // Material this batch issued that the ledger did not have.
+            // Deliberately reported NEXT TO blocks_approval and deliberately
+            // absent FROM it: the shift is the truth, the stock record is
+            // the thing that needs fixing, and the accountant is the person
+            // who can fix it. See config/production.php 'stock'.
+            'stock_shortfalls' => $this->stockShortfalls($entry),
         ];
+    }
+
+    /**
+     * The shortfalls completeBatch froze onto this entry, read straight back
+     * off its snapshot — never recomputed from today's balances, which have
+     * moved on since (and, if the accountant has done their job, no longer
+     * show a gap at all).
+     *
+     * Empty list, never null: a screen must be able to say "no shortfall"
+     * without distinguishing that from "this field is missing".
+     *
+     * @return list<array{item_id: ?int, item_name: ?string, warehouse_id: ?int,
+     *     warehouse_name: ?string, short_kg: string}>
+     */
+    private function stockShortfalls(ShiftProductionEntry $entry): array
+    {
+        $recorded = $entry->config_snapshot['stock_shortfalls'] ?? [];
+
+        if (! is_array($recorded)) {
+            return [];
+        }
+
+        return array_values(array_map(fn (array $line) => [
+            'item_id' => isset($line['item_id']) ? (int) $line['item_id'] : null,
+            'item_name' => $line['item_name'] ?? null,
+            'warehouse_id' => isset($line['warehouse_id']) ? (int) $line['warehouse_id'] : null,
+            'warehouse_name' => $line['warehouse_name'] ?? null,
+            'short_kg' => (string) ($line['short_kg'] ?? '0'),
+        ], array_filter($recorded, 'is_array')));
     }
 
     /**

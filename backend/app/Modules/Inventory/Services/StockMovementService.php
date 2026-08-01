@@ -73,6 +73,23 @@ class StockMovementService
         });
     }
 
+    /**
+     * $allowNegative is OPT-IN PER CALL, deliberately not a global setting on
+     * this service: exactly one caller passes it (a shift's completion
+     * consumption, and therefore handover), and every other issue — work
+     * orders, rework, subcontract, deliveries, maintenance — keeps the hard
+     * refusal it has always had. A service-wide switch would have flipped
+     * all of them at once, which is a different and much larger decision
+     * than the one the completion incident actually calls for.
+     *
+     * When it is on and the recorded balance cannot cover the issue, the
+     * issue happens anyway, the balance goes negative, and $shortfallKg
+     * comes back as the amount issued beyond what was recorded (null when
+     * there was enough) so the caller can write that fact down. It is
+     * by-reference rather than part of the return value because the return
+     * type is load-bearing for five other callers that read
+     * $movement->unit_cost off it.
+     */
     public function recordIssue(
         int $itemId,
         int $warehouseId,
@@ -83,9 +100,13 @@ class StockMovementService
         ?int $createdBy = null,
         ?int $batchId = null,
         ?int $serialNumberId = null,
+        bool $allowNegative = false,
+        ?string &$shortfallKg = null,
     ): StockMovement {
-        return DB::transaction(function () use ($itemId, $warehouseId, $quantity, $reference, $movementDate, $notes, $createdBy, $batchId, $serialNumberId) {
-            $costAtIssue = $this->decrementBalance($itemId, $warehouseId, $quantity);
+        $shortfallKg = null;
+
+        return DB::transaction(function () use ($itemId, $warehouseId, $quantity, $reference, $movementDate, $notes, $createdBy, $batchId, $serialNumberId, $allowNegative, &$shortfallKg) {
+            [$costAtIssue, $shortfallKg] = $this->decrementBalance($itemId, $warehouseId, $quantity, $allowNegative);
 
             if ($serialNumberId !== null) {
                 SerialNumber::whereKey($serialNumberId)->update([
@@ -126,7 +147,9 @@ class StockMovementService
         ?int $serialNumberId = null,
     ): array {
         return DB::transaction(function () use ($itemId, $fromWarehouseId, $toWarehouseId, $quantity, $reference, $movementDate, $notes, $createdBy, $batchId, $serialNumberId) {
-            $costAtTransfer = $this->decrementBalance($itemId, $fromWarehouseId, $quantity);
+            // A transfer never runs negative: moving material you do not
+            // have is not a truth about the floor, it is a typo.
+            [$costAtTransfer] = $this->decrementBalance($itemId, $fromWarehouseId, $quantity);
             $this->incrementBalance($itemId, $toWarehouseId, $quantity, $costAtTransfer);
 
             if ($serialNumberId !== null) {
@@ -311,20 +334,37 @@ class StockMovementService
     }
 
     /**
-     * @return string the average cost at the moment of decrement, for the caller to stamp onto the movement
+     * The shortfall is measured HERE, under the same row lock that does the
+     * decrement — a caller reading the balance first would be reading it
+     * without a lock, and could report a gap that a concurrent movement had
+     * already changed.
+     *
+     * bcsub(requested, balance) rather than "how far below zero we ended"
+     * so a bin that was ALREADY negative reports the whole new gap, which
+     * is the figure the accountant has to make good.
+     *
+     * @return array{0: string, 1: ?string} [average cost at the moment of
+     *                                      decrement, for the caller to stamp
+     *                                      onto the movement; kg issued beyond
+     *                                      the recorded balance, or null]
      */
-    private function decrementBalance(int $itemId, int $warehouseId, string $quantity): string
+    private function decrementBalance(int $itemId, int $warehouseId, string $quantity, bool $allowNegative = false): array
     {
         $balance = $this->lockBalance($itemId, $warehouseId);
 
+        $shortfall = null;
         if (bccomp($balance->quantity, $quantity, 4) < 0) {
-            throw InsufficientStockException::forItem($itemId, $warehouseId, $balance->quantity, $quantity);
+            if (! $allowNegative) {
+                throw InsufficientStockException::forItem($itemId, $warehouseId, $balance->quantity, $quantity);
+            }
+
+            $shortfall = bcsub($quantity, $balance->quantity, 4);
         }
 
         $costAtDecrement = $balance->average_cost;
         $balance->update(['quantity' => bcsub($balance->quantity, $quantity, 4)]);
 
-        return $costAtDecrement;
+        return [$costAtDecrement, $shortfall];
     }
 
     private function lockBalance(int $itemId, int $warehouseId): StockBalance

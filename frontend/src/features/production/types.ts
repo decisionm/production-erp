@@ -193,6 +193,120 @@ export interface ProductionMetrics {
     unaccounted_band?: 'ok' | 'investigate' | null;
     /** True when the configured hard gate refuses accountant approval. */
     blocks_approval?: boolean;
+    /**
+     * Materials this batch issued more of than the ledger held — the balance
+     * went NEGATIVE rather than the completion being refused.
+     *
+     * Optional and possibly absent: a backend older than negative-stock, or one
+     * with the flag off, simply omits the key, and an empty array is the normal
+     * answer for a batch that consumed nothing it did not have. Never treat
+     * absence as "unknown" — treat it as "none".
+     */
+    stock_shortfalls?: StockShortfall[] | null;
+}
+
+/**
+ * One material whose recorded stock could not cover what a batch consumed.
+ *
+ * THE SHIFT REALLY USED IT. A day bin holding zero RECORDED kg because nobody
+ * entered the opening stock still had resin in it, and the truthful record is
+ * the issue that happened — so the balance goes negative (Tally permits this
+ * too) and the shortfall is raised at approval for the ACCOUNTANT to fix by
+ * receiving the material or entering opening stock. It is never the
+ * supervisor's problem and it never blocks the floor.
+ *
+ * THESE FIVE KEYS ARE THE WHOLE WIRE SHAPE, and they are exactly what
+ * ShiftProductionEntryService::stockShortfalls() emits — item_id, item_name,
+ * warehouse_id, warehouse_name, short_kg — frozen onto the entry's
+ * config_snapshot at completion and read straight back off it. An earlier draft
+ * of this file also declared requested_kg/available_kg/resulting_balance_kg and
+ * `item`/`warehouse` relation objects "in case the resource lands under a
+ * different name". The server never sent any of them, so the drawer printed
+ * "— kg" for the one figure the whole screen exists to show. Speculative
+ * aliases do not make a reader tolerant; they make it silently wrong. Only
+ * `short_kg` is optional-shaped, and only because a backend predating this
+ * change omits the block entirely.
+ *
+ * Note there is ONE quantity here, not two: the server records the gap
+ * (bcsub(requested, balance), measured under the decrement's own row lock) and
+ * not the pair it came from. The gap is the figure the accountant has to make
+ * good, so it is the figure this screen prints.
+ */
+export interface StockShortfall {
+    item_id?: number | null;
+    item_name?: string | null;
+    warehouse_id?: number | null;
+    warehouse_name?: string | null;
+    /** kg issued beyond the recorded balance. Numeric string — print, never round. */
+    short_kg?: string | null;
+}
+
+/** A shortfall reduced to display strings. `shortKg` stays exact. */
+export interface ReadableStockShortfall {
+    key: string;
+    /** Named, never "#592" — unless a name is genuinely all the server withheld. */
+    item: string;
+    warehouse: string;
+    /** Numeric string as sent, trailing zeros trimmed; null when not stated. */
+    shortKg: string | null;
+}
+
+/**
+ * "118.9980" → "118.998", "0.0000" → "0". Trailing zeros only — the figure is
+ * NEVER rounded. The screen this feeds exists because a supervisor was told
+ * "requested 118.998", and 119 is a different number from the one on the
+ * refusal they were shown.
+ *
+ * The backend stores short_kg at 4dp, so this is what turns the stored
+ * "118.9980" back into the incident's own figure.
+ */
+function trimNumeric(value: string | number | null | undefined): string | null {
+    if (value === null || value === undefined) return null;
+    const raw = String(value).trim();
+    if (raw === '') return null;
+    // Anything that is not a plain decimal is printed exactly as it arrived.
+    if (!/^-?\d+(\.\d+)?$/.test(raw)) return raw;
+    return raw.includes('.') ? raw.replace(/0+$/, '').replace(/\.$/, '') : raw;
+}
+
+/**
+ * The shortfalls on a completed entry, in the shape a screen can print.
+ *
+ * `metrics.stock_shortfalls` is the ONLY source, because it is the only place
+ * the server puts them: ShiftProductionEntryResource computes `metrics`
+ * unconditionally (not `whenLoaded`), so the block survives the approval LIST
+ * payload where `material_consumptions` and friends are deliberately not
+ * eager-loaded — which is what lets a table row carry its own warning tag
+ * before anyone opens the drawer. An earlier draft also read a top-level
+ * `entry.stock_shortfalls`; no resource has ever exposed that key, so it was a
+ * dead branch pretending to be a fallback.
+ *
+ * Absent or empty both mean "nothing went negative", never "unknown" — this
+ * returns [] for a null entry, an older backend, and a clean batch alike.
+ */
+export function readStockShortfalls(
+    entry: Pick<ShiftProductionEntry, 'metrics'> | null | undefined,
+): ReadableStockShortfall[] {
+    const lines = entry?.metrics?.stock_shortfalls;
+    if (!Array.isArray(lines)) return [];
+
+    // AN ID IS NEVER PRINTED AS THE NAME. "item #592 at warehouse #10" is the
+    // exact sentence that started all this, and reprinting it one screen later
+    // — on the screen where it is signed — would move the defect rather than
+    // fix it. The server freezes both names at completion precisely so a later
+    // rename or soft delete cannot degrade this back to numbers; if it withheld
+    // one anyway, the line says so in words and parks the id in brackets where
+    // it can only be read as a debugging aid.
+    return lines.map((line, index) => ({
+        key: `${line.item_id ?? 'item'}-${line.warehouse_id ?? 'wh'}-${index}`,
+        item:
+            (line.item_name ?? '').trim() ||
+            (line.item_id != null ? `unnamed material (id ${line.item_id})` : 'unnamed material'),
+        warehouse:
+            (line.warehouse_name ?? '').trim() ||
+            (line.warehouse_id != null ? `unnamed store (id ${line.warehouse_id})` : 'unnamed store'),
+        shortKg: trimNumeric(line.short_kg),
+    }));
 }
 
 export interface ShiftProductionEntry {

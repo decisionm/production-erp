@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Descriptions, Drawer, Input, Modal, Segmented, Space, Steps, Table, Tag, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuthStore } from '@/features/auth/store';
 import {
     accountantApproveShiftProductionEntry,
@@ -17,11 +18,13 @@ import type {
     ConsumptionVariance,
     MachineDowntimeLog,
     ProductionMetrics,
+    ReadableStockShortfall,
     ShiftProductionEntry,
     ShiftProductionEntryStatus,
     TraceabilityReportRow,
     VoucherPreview,
 } from '@/features/production/types';
+import { readStockShortfalls } from '@/features/production/types';
 import { type PackingRounding, roundPer, useProductionSettings } from '@/features/production/packing';
 import { itemLabel } from '@/lib/itemLabel';
 
@@ -417,6 +420,62 @@ function MaterialVarianceSection({ metrics }: { metrics: ProductionMetrics | nul
 }
 
 /**
+ * The batch issued more of a material than the ledger recorded, so the balance
+ * went negative — and the completion was ALLOWED, because the shift genuinely
+ * consumed the resin whether or not the computer knew any had arrived.
+ *
+ * This is where that fact is repaid. The floor is not asked to reconcile stock
+ * mid-shift; the accountant, signing the money, is told exactly which material,
+ * from which bin, by how much — and what to do about it.
+ *
+ * Deliberately NOT a gate. `blocks_approval` is the only thing that refuses an
+ * approval and it stays that way: refusing here would push the argument back to
+ * the supervisor, which is the failure this whole change exists to undo.
+ */
+function StockShortfallSection({ shortfalls }: { shortfalls: ReadableStockShortfall[] }) {
+    if (shortfalls.length === 0) return null;
+
+    // Red, matching the row tag that brought the approver here. The one thing
+    // red usually means on this screen — "you cannot sign this" — is denied in
+    // as many words at the bottom of the block, because the loudness is the
+    // point: this is the moment, and the desk, where the stock gets corrected.
+    return (
+        <Alert
+            type="error"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="This batch consumed more than the recorded stock:"
+            description={
+                <>
+                    {/* ONE number, the one the server actually computes: the gap.
+                        The backend records short_kg (issued minus the balance it
+                        found under the decrement's own row lock) and nothing
+                        else, so printing a "requested / available" pair here
+                        would put two dashes on the screen the incident exists to
+                        make readable. The gap is also the figure the accountant
+                        has to make good, which is what this block is asking for. */}
+                    <ul style={{ margin: '4px 0 8px', paddingLeft: 18 }}>
+                        {shortfalls.map((line) => (
+                            <li key={line.key}>
+                                <Typography.Text strong>{line.shortKg ?? '—'} kg</Typography.Text> of {line.item} came
+                                out of {line.warehouse} that the stock record did not have
+                            </li>
+                        ))}
+                    </ul>
+                    <Typography.Text>
+                        The material was really used — receive it against a purchase, or enter its opening stock, on the{' '}
+                        <Link to="/production/day-bin">Factory Day Bin</Link> page.
+                    </Typography.Text>
+                    <Typography.Text type="secondary" style={{ display: 'block', marginTop: 4, fontSize: 12 }}>
+                        This does not stop approval — the batch can be signed as it stands.
+                    </Typography.Text>
+                </>
+            }
+        />
+    );
+}
+
+/**
  * Breakdowns logged on this machine on this production date. The log list is
  * paginated with no server-side filter, so when the page does not reach back
  * as far as the entry, this says so rather than claiming there were none.
@@ -745,7 +804,17 @@ export default function ApproveProductionPage() {
                     {
                         title: 'Status',
                         dataIndex: 'status',
-                        render: (s: ShiftProductionEntryStatus) => <Tag color={statusColor[s]}>{statusLabel[s]}</Tag>,
+                        // The shortfall rides in the status cell rather than in a
+                        // column of its own: a column would be blank on almost
+                        // every row and would shift the layout for everyone, while
+                        // the thing an approver needs is to spot the one row that
+                        // needs a second look before opening anything.
+                        render: (s: ShiftProductionEntryStatus, row: ShiftProductionEntry) => (
+                            <Space size={4} wrap>
+                                <Tag color={statusColor[s]}>{statusLabel[s]}</Tag>
+                                {readStockShortfalls(row).length > 0 && <Tag color="red">Stock went negative</Tag>}
+                            </Space>
+                        ),
                     },
                     {
                         title: 'Actions',
@@ -800,6 +869,11 @@ export default function ApproveProductionPage() {
                                 }
                             />
                         )}
+                        {/* Above the chain, not buried in a metrics section: it
+                            is a before-you-sign fact, and it must be readable on
+                            a row whose metrics block is null for any other
+                            reason. */}
+                        <StockShortfallSection shortfalls={readStockShortfalls(detailRow)} />
                         <Steps
                             size="small"
                             current={chainStep(detailRow)}
