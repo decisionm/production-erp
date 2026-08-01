@@ -6,7 +6,6 @@ use App\Models\User;
 use App\Modules\Core\Services\AppSettingService;
 use App\Modules\Inventory\Exceptions\BagOverloadException;
 use App\Modules\Inventory\Models\Enums\MaterialBagStatus;
-use App\Modules\Inventory\Models\Enums\StockMovementType;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\MaterialBag;
 use App\Modules\Inventory\Models\StockBalance;
@@ -14,31 +13,50 @@ use App\Modules\Inventory\Models\StockMovement;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Inventory\Services\WarehouseService;
+use App\Modules\Production\Models\DayBinMovement;
+use App\Modules\Production\Models\Enums\DayBinMovementType;
+use App\Modules\Production\Models\ShiftMaterialConsumption;
+use App\Modules\Production\Models\WorkCenter;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
- * The FACTORY DAY BIN — the one central place raw material is moved to when
- * it comes out of the store, before any machine runs.
+ * THE FACTORY'S INTERNAL WIP LOCATION, and the per-machine resin estimate
+ * built on top of it.
  *
- * Deliberately NOT a new ledger. The day bin is simply a WAREHOUSE:
+ * WHAT THE OWNER ACTUALLY RULED (31-Jul, decisive — it replaces the earlier
+ * "central bin plus an evening physical bin weight" design this class was
+ * first written for): "Our factory does not use a Day Bin warehouse or an
+ * evening physical bin weight. Replace that idea with estimated resin
+ * remaining for each machine: previous carryover plus barcode-scanned loads
+ * minus calculated consumption." And: "Scanning a bag means material was
+ * loaded into the selected machine; it does not mean the whole quantity was
+ * consumed."
  *
- *  - loading it is the existing store → warehouse stock transfer
- *    (POST /inventory/stock-movements/transfers). Material changes location,
- *    nothing is consumed, no Tally voucher is posted.
- *  - its balance is the ordinary stock_balances row for (item, day-bin
- *    warehouse) — no second set of balance maths to reconcile, and it still
- *    maps to a Tally godown like any other warehouse.
- *  - consumption reduces it automatically, because every material line at
- *    batch completion already carries its OWN warehouse_id: a line issued
- *    from the day-bin warehouse decrements that warehouse's balance through
- *    the same StockMovementService::recordIssue every other issue uses.
+ * So there are now two separate questions, and this class keeps them apart:
  *
- * This class only answers "which warehouse is the day bin" and "what is in
- * it", so the per-machine day_bin_movements ledger and the barcode bin-bay
- * (the optional bag-level detail) stay exactly as they are.
+ *  1. WHERE THE STOCK IS, IN THE BOOKS — still one warehouse. Loading is the
+ *     existing store → warehouse stock transfer: material changes location,
+ *     nothing is consumed, no Tally voucher is posted, and the balance is the
+ *     ordinary stock_balances row for (item, warehouse). Consumption reduces
+ *     it automatically, because every material line at batch completion
+ *     carries its own warehouse_id and issues through the same
+ *     StockMovementService::recordIssue every other issue uses. Tally sees ONE
+ *     godown; there is deliberately no warehouse per machine.
+ *
+ *  2. WHICH MACHINE THE MATERIAL WENT INTO — operational metadata, never a
+ *     location. A load names its machine and appends a day_bin_movements Load
+ *     row (the per-machine ledger that has existed since Phase 6), which is
+ *     what makes machineResinEstimate() possible. The class/route names stay
+ *     'day bin' because renaming a live API surface mid-freeze costs more than
+ *     it explains; the BEHAVIOUR is the machine estimate.
+ *
+ * THE PHYSICAL COUNT IS GONE. The old reconciliation read compared a derived
+ * "expected closing" against a weight somebody walked out and took. The
+ * factory does not take that weight, so the endpoint asked a question nobody
+ * answers — it is removed rather than left on the screen looking answerable.
  *
  * NOT CONFIGURED IS A NORMAL STATE. Until someone names the warehouse,
  * warehouseId() is null and every caller must behave exactly as it did
@@ -63,6 +81,11 @@ class FactoryDayBinService
         private readonly AppSettingService $settings,
         private readonly WarehouseService $warehouses,
         private readonly StockMovementService $stock,
+        // The per-machine ledger a load is recorded in. Same service the
+        // per-machine bin-bay path already writes through, so both routes
+        // into a machine's material land in one place and the estimate
+        // cannot see half the loads.
+        private readonly DayBinLedgerService $ledger,
     ) {}
 
     /**
@@ -94,27 +117,41 @@ class FactoryDayBinService
     }
 
     /**
-     * The CENTRALIZED bag-scan load: one barcode scan on the Shift Floor
-     * moves a bag's kg out of the store warehouse into the factory day-bin
-     * warehouse — for all machines at once, so no work center is picked and
-     * no per-machine day_bin_movements ledger row is written. The stock
-     * transfer IS the record (no new ledger, exactly like the manual
-     * transfer form this replaces for the scan case).
+     * THE BAG SCAN, WHICH NOW NAMES ITS MACHINE. One barcode scan on the
+     * Shift Floor moves a bag's kg out of the store warehouse into the
+     * internal WIP warehouse AND records which machine it was emptied into.
      *
-     * Bag state is Inventory's; the status/remaining handling here mirrors
-     * TraceabilityService::loadBagToDayBin line for line (full load empties
-     * the bag → Consumed, partial load leaves it InStore), and the bag
-     * decrement + warehouse transfer share ONE transaction so they can
-     * never drift. day_bin_work_center_id stays untouched — the central
-     * bin is not a machine.
+     * The owner's words: "Scanning a bag means material was loaded into the
+     * selected machine; it does not mean the whole quantity was consumed."
+     * So the scan produces two records, both inside one transaction:
+     *
+     *   - the stock transfer store → WIP warehouse. Unchanged. In the books
+     *     the material is simply somewhere else, and Tally still sees one
+     *     godown — there is no warehouse per machine and there must never be.
+     *   - a day_bin_movements Load row for (machine, item, bag, kg). This is
+     *     the operational attribution, and it is what
+     *     machineResinEstimate() sums. Written through DayBinLedgerService,
+     *     the same service the per-machine bin-bay path uses, so a machine's
+     *     material has exactly one ledger.
+     *
+     * PARTIAL LOADS AND BAG REMAINING ARE UNCHANGED, deliberately — the
+     * owner asked for both to keep working exactly as they do. The
+     * status/remaining handling mirrors TraceabilityService::loadBagToDayBin
+     * line for line: a full load empties the bag (→ Consumed) and stamps the
+     * machine on it, a partial load pours off the weighed kg and leaves the
+     * bag InStore in the store, unstamped, because that is where it still
+     * physically is. The ledger row carries the machine either way — the
+     * bag pointer says "this bag is at that machine now", the ledger row
+     * says "these kg went into that machine", and only the second is a
+     * quantity.
      *
      * $recordedBy is the AUTHENTICATED user (the audit identity on the
      * stock movements); $supervisorId is only a note of who was acting
      * supervisor at the scan, never the identity.
      *
-     * @return array{bag: MaterialBag, balance: StockBalance}
+     * @return array{bag: MaterialBag, balance: StockBalance, movement: DayBinMovement}
      */
-    public function loadBag(string $barcode, ?string $quantityKg, int $recordedBy, ?int $supervisorId = null): array
+    public function loadBag(string $barcode, ?string $quantityKg, int $workCenterId, int $recordedBy, ?int $supervisorId = null): array
     {
         $warehouse = $this->warehouse();
         if ($warehouse === null) {
@@ -130,7 +167,7 @@ class FactoryDayBinService
             ]);
         }
 
-        return DB::transaction(function () use ($barcode, $quantityKg, $recordedBy, $supervisorId, $warehouse) {
+        return DB::transaction(function () use ($barcode, $quantityKg, $workCenterId, $recordedBy, $supervisorId, $warehouse) {
             $bag = MaterialBag::query()->where('barcode', $barcode)->lockForUpdate()->first();
             if ($bag === null) {
                 throw ValidationException::withMessages([
@@ -165,12 +202,14 @@ class FactoryDayBinService
 
             // Same rule as TraceabilityService::loadBagToDayBin: a load that
             // drives remaining_kg to 0 leaves the bag Consumed (it holds
-            // nothing any more); a partial load pours off the weighed kg and
-            // the bag stays InStore.
+            // nothing any more) and the bag itself is now at that machine; a
+            // partial load pours off the weighed kg and the bag stays InStore,
+            // unstamped, because it is still physically in the store.
             $fullLoad = bccomp($quantity, $remaining, 4) === 0;
             $bag->remaining_kg = bcsub($remaining, $quantity, 4);
             if ($fullLoad) {
                 $bag->status = MaterialBagStatus::Consumed;
+                $bag->day_bin_work_center_id = $workCenterId;
             }
             $bag->save();
 
@@ -192,6 +231,25 @@ class FactoryDayBinService
                 createdBy: $recordedBy,
             );
 
+            // WHICH MACHINE GOT IT. Inside the same transaction as the bag
+            // decrement and the transfer, so a scan can never leave stock
+            // moved with no machine against it — an unattributed kg would
+            // silently overstate every machine's estimated remaining except
+            // the one that actually burnt it.
+            //
+            // No shift_production_entry_id: a scan is a load into a MACHINE,
+            // not into a batch. The floor loads before Start Batch as often
+            // as during a run, and the estimate is a running per-machine
+            // total that needs no segment window (see machineResinEstimate).
+            $movement = $this->ledger->record([
+                'work_center_id' => $workCenterId,
+                'item_id' => $lot->item_id,
+                'type' => DayBinMovementType::Load->value,
+                'material_bag_id' => $bag->id,
+                'quantity_kg' => $quantity,
+                'recorded_by' => $recordedBy,
+            ]);
+
             $balance = StockBalance::query()
                 ->with('item')
                 ->where('item_id', $lot->item_id)
@@ -201,22 +259,26 @@ class FactoryDayBinService
             return [
                 'bag' => $bag->load('lot.item'),
                 'balance' => $balance,
+                'movement' => $movement,
             ];
         });
     }
 
     /**
-     * What the factory day bin holds right now — always visible without
-     * picking a machine, which is the whole point of the central bin.
+     * WHAT THE FACTORY HOLDS IN WIP RIGHT NOW, as stock — the LOCATION
+     * question, deliberately not the machine one. It is the ordinary balance
+     * of the internal WIP warehouse and is readable without picking a
+     * machine, because in the books there is nothing per machine to pick:
+     * that is what machineResinEstimate() answers instead.
      *
-     * `materials` is empty (not an error) when nothing is in the bin, and the
-     * whole read answers `warehouse: null` when no bin is configured yet, so
-     * the screen can prompt instead of failing.
+     * `materials` is empty (not an error) when nothing is there, and the
+     * whole read answers `warehouse: null` when no warehouse is configured
+     * yet, so the screen can prompt instead of failing.
      *
      * `summary` and `todays_loads` are the owner's one-look answer: per raw
-     * material, what is in the bin vs still in the store (plus bags), and
-     * every load that went into the bin today with who did it. Both empty
-     * (not an error) until a bin is configured — there is no bin to summarize.
+     * material, what is out on the floor vs still in the store (plus bags),
+     * and every load that went out today with who did it. Both empty (not an
+     * error) until a warehouse is configured — there is nothing to summarize.
      *
      * @return array{
      *     warehouse: ?Warehouse,
@@ -319,287 +381,208 @@ class FactoryDayBinService
     }
 
     /**
-     * THE DAY-BIN RECONCILIATION — the central check that replaces the
-     * per-batch "unaccounted kg" figure.
+     * ESTIMATED RESIN REMAINING PER MACHINE — the figure that replaced the
+     * central-bin bookkeeping, in the owner's own arithmetic:
      *
-     * WHY IT MOVED HERE. Nothing weighs out a fixed quantity of resin to
-     * each machine. A batch's resin consumption is DERIVED from its output
-     * (good kg + rejection kg + lumps kg), so a per-batch "issued minus
-     * consumed" was ~0 by construction — an arithmetic identity wearing the
-     * clothes of a check, and it only ever confused the people reading it.
-     * Missing material is a CENTRAL question, so it is asked once a day
-     * against the one bin every machine draws from:
+     *     estimated remaining = Σ scanned loads into that machine
+     *                         − Σ calculated consumption of that machine's
+     *                           batches
      *
-     *     opening + loaded − consumed   vs   what is PHYSICALLY in the bin
+     * per machine, per material.
      *
-     * Per raw material, for one calendar date:
+     * WHY THERE IS NO DAILY CUTOFF, AND NO SEPARATE CARRYOVER TERM. The
+     * owner asked for "previous carryover plus barcode-scanned loads minus
+     * calculated consumption". A running total IS that: yesterday's carryover
+     * is nothing more than yesterday's loads minus yesterday's consumption,
+     * already inside the same two sums. Cutting the window at a date would
+     * force a separate opening figure that this schema does not store, and
+     * the old reconciliation read had to derive one by rolling the ledger
+     * backwards — which is exactly the machinery the pivot removed.
      *
-     *   opening_kg  — the bin balance at 00:00 on that date. This schema
-     *                 stores no historical balances (stock_balances holds
-     *                 only the CURRENT quantity), so it is derived by
-     *                 rolling the ledger back:
+     * WHERE THE RUNNING TOTAL STARTS, AND WHY IT IS NOT "ALL TIME". It starts
+     * at the FIRST SCAN of that material into that machine, and a pair with
+     * no scan at all is not reported.
      *
-     *                     opening = current_balance
-     *                             − Σ signed(every bin movement at or after
-     *                                        00:00 on the date, up to now)
+     * Not a refinement — without it the read is wrong on the day it ships.
+     * Consumption rows go back to before any of this existed, and scanning is
+     * behind a config flag (production.traceability_enabled) that a
+     * deployment may not have turned on at all. An all-time subtraction would
+     * therefore open with every machine reporting a deficit equal to its
+     * ENTIRE consumption history — a page of large negative numbers on
+     * rollout morning, indistinguishable from the one signal this endpoint
+     * exists to raise (material genuinely burnt without a scan).
      *
-     *                 signed receipt +, transfer_in +, issue −,
-     *                 transfer_out − : the same signs that built the current
-     *                 balance in the first place, applied in reverse. The
-     *                 window is "at or AFTER the date", NOT "on the date" —
-     *                 for a past date every movement since must come off
-     *                 too, and that is exactly what makes yesterday's
-     *                 reconciliation (the accountant's morning question)
-     *                 come out right.
+     * Starting at the first scan states the honest assumption instead: the
+     * factory does not know what was in a hopper before it began scanning, so
+     * that carryover is taken as zero and the count begins where the evidence
+     * does. Everything after the first scan is measured, including a machine
+     * that was scanned once and then ran unscanned for a week — which is
+     * exactly the case that must still read negative.
      *
-     *   loaded_kg   — transfers INTO the bin on that date: store → bin,
-     *                 bag scan and manual transfer form alike.
+     * WHY CONSUMPTION IS READ FROM material_consumptions, AND WHY THAT MAKES
+     * CORRECTIONS REPLACE RATHER THAN ACCUMULATE. The owner: "A correction
+     * must replace the previous calculation. The current resin quantity,
+     * totals and voucher preview must never count every correction as fresh
+     * consumption." An amendment reverses the completion and re-books it
+     * (amendCompletion → reverseCompletionEffects → completeBatch), and that
+     * reversal DELETES the entry's consumption rows before the corrected
+     * completion writes new ones. So the rows standing right now are always
+     * the latest calculation and only the latest — nothing needs to know an
+     * amendment happened. The reversal pairs live in stock_movements, which
+     * is append-only by design and is deliberately NOT what this sums.
      *
-     *   consumed_kg — issues OUT of the bin on that date: batch consumption
-     *                 lines ("SPE #id") and any manual issue equally. There
-     *                 is deliberately no reference filter — material that
-     *                 left the bin left the bin, whoever booked it.
+     * WHY IT MAY GO NEGATIVE, AND WHY IT IS SERVED THAT WAY. Consumption is
+     * DERIVED from output (pieces × standard weight + lumps), not weighed
+     * out, so a machine that ran on material nobody scanned reads negative.
+     * That is the honest signal and the one worth acting on — it means loads
+     * are being missed at the scanner. Clamping it at zero would erase
+     * exactly the case the estimate exists to expose. (DayBinLedgerService's
+     * balanceBeforeSegment does floor at zero; that is a headroom guard for a
+     * count, a different question, and its clamp is not copied here.)
      *
-     *   expected_closing_kg = opening + loaded − consumed.
+     * KG MATERIALS ONLY. The "Other materials (exceptions)" repeater files
+     * ANY item's quantity into a column named quantity_issued_kg, so a batch
+     * that issued 13,333 caps has a 13,333 "kg" consumption row. Restricting
+     * to the kg family — this database's only raw-material signal, the same
+     * gate the pickers use — is what stops the page reporting "estimated
+     * remaining −13,333 kg" for cartons.
      *
-     * THE TAUTOLOGY, STATED PLAINLY SO NOBODY MISTAKES IT FOR A CHECK.
-     * expected_closing_kg is NOT a verification of anything. For today, and
-     * whenever the date's only bin movements are transfers-in and
-     * issues-out, it equals the bin's live stock balance BY CONSTRUCTION:
-     * opening was derived by subtracting the very movements that are added
-     * back here, so the two cannot disagree. Comparing them proves the
-     * arithmetic, not the material. The genuine check is the PHYSICAL COUNT
-     * a person walks out and takes — the frontend collects that number and
-     * compares it against expected_closing_kg client-side. This endpoint
-     * supplies the expected side only; it never stores or judges a count.
+     * A pair appears once that material has been scanned into that machine at
+     * least once — before then there is no baseline to subtract from and no
+     * figure worth printing. Soft-deleted items are still listed: a retired
+     * master a machine still holds is precisely what must not be hidden.
      *
-     *   other_movements_kg — the one leak in the identity above, surfaced
-     *                 rather than hidden. A receipt booked straight into the
-     *                 bin, or a transfer back OUT of the bin to the store
-     *                 (both reachable through the ordinary
-     *                 /inventory/stock-movements/transfers form the Day Bin
-     *                 page already posts to), is neither a load nor
-     *                 consumption, so it sits in neither figure. Normally
-     *                 '0.0000'. When it is not, the full identity is
-     *
-     *                     live_balance = expected_closing + other_movements
-     *
-     *                 and the frontend can say so instead of reporting a
-     *                 physical-count discrepancy the screen cannot explain.
-     *
-     * TIMING BASIS, AND A DELIBERATE DIVERGENCE FROM THE REST OF THE MODULE.
-     * Batch consumption issues are stamped with the wall-clock moment they
-     * were recorded (ShiftProductionEntryService passes no movement date, so
-     * recordIssue defaults to now()). This read therefore bounds a day on
-     * stock_movements.movement_date — NOT on production_date, which is how
-     * every other day-scoped read in this module (ShiftSummaryService,
-     * ProductionReportService, ProductionDowntimeService) bounds one.
-     *
-     * That divergence is intended, for two reasons. A stock movement carries
-     * no production_date at all, so the column is not available here. More
-     * importantly, production_date is a SHIFT-ATTRIBUTION date: by factory
-     * convention an overnight shift files under the date it STARTED, so a
-     * batch keyed at 02:00 belongs to the previous day (see
-     * NightShiftProductionDateTest). What is physically in a bin at a given
-     * moment is a wall-clock fact, and this figure exists to be compared
-     * against a physical count taken at a wall-clock moment. Attributing the
-     * night's consumption backwards would make expected_closing describe a
-     * bin nobody could have looked into.
-     *
-     * WHERE THE DAY IS ACTUALLY CUT — do not read "midnight" as local
-     * midnight. The window is midnight to midnight in the APPLICATION
-     * timezone, and config/app.php hardcodes that to UTC (there is no
-     * APP_TIMEZONE override) while the factory runs IST. The cut therefore
-     * falls at 05:30 IST, not 00:00 IST, and a night shift's consumption
-     * splits across two reconciliation dates at that instant rather than
-     * landing whole on either.
-     *
-     * This does NOT affect the comparison the page exists for on TODAY's
-     * date. Wherever the boundary sits, the arithmetic collapses to
-     * expected_closing = live_balance − other_movements: opening is derived
-     * by subtracting the very movements added back afterwards, so every
-     * movement inside the window cancels and only the boundary-independent
-     * remainder survives. A count taken now therefore reconciles against now
-     * regardless of the cut — exactly when other_movements is '0.0000', and
-     * offset by it otherwise (the identity stated in the two paragraphs
-     * ABOVE). What the cut affects is only which past date a movement made
-     * between 00:00 and 05:30 IST is filed under. Straightening that out means
-     * setting app.timezone for the whole application — a global change that
-     * would move production_date too, well outside this endpoint — so it is
-     * recorded here rather than worked around locally.
-     *
-     * Materials with no movements on the date AND no opening balance are
-     * omitted — an all-zero row is noise on a page whose job is to make one
-     * real gap visible. Soft-deleted items are still listed: a retired
-     * master that somehow still holds bin stock is precisely the kind of
-     * material this page must not hide.
-     *
-     * `warehouse: null` (with an empty material list) when no bin is
-     * configured — the same normal state every other read here answers.
-     *
-     * @return array{
-     *     date: string,
-     *     warehouse: ?Warehouse,
+     * @return Collection<int, array{
+     *     work_center: WorkCenter,
      *     materials: Collection<int, array{
-     *         item: Item,
-     *         opening_kg: string,
-     *         loaded_kg: string,
-     *         consumed_kg: string,
-     *         expected_closing_kg: string,
-     *         other_movements_kg: string,
+     *         item: Item, loaded_kg: string, consumed_kg: string,
+     *         estimated_remaining_kg: string, last_load_at: ?CarbonImmutable,
      *     }>,
-     * }
+     * }>
      */
-    public function reconciliation(?string $date = null): array
+    public function machineResinEstimate(?int $workCenterId = null): Collection
     {
-        $date = $this->resolveReconciliationDate($date);
-        $warehouse = $this->warehouse();
+        // bcmath accumulation in PHP rather than SQL SUM(): the test database
+        // is SQLite, whose SUM() over a DECIMAL column comes back as a float,
+        // and a stock figure that has been through a float is not one this
+        // codebase will print. Same rule as everywhere else in the module.
+        $loaded = [];
+        $firstLoadAt = [];
+        $lastLoadAt = [];
 
-        if ($warehouse === null) {
-            return ['date' => $date, 'warehouse' => null, 'materials' => collect()];
+        DayBinMovement::query()
+            ->where('type', DayBinMovementType::Load->value)
+            ->when($workCenterId !== null, fn ($query) => $query->where('work_center_id', $workCenterId))
+            ->orderBy('id')
+            ->get(['work_center_id', 'item_id', 'quantity_kg', 'recorded_at'])
+            ->each(function (DayBinMovement $movement) use (&$loaded, &$firstLoadAt, &$lastLoadAt) {
+                $key = "{$movement->work_center_id}@{$movement->item_id}";
+                $loaded[$key] = bcadd($loaded[$key] ?? '0.0000', (string) $movement->quantity_kg, 4);
+
+                $at = CarbonImmutable::parse($movement->recorded_at);
+                if (! isset($firstLoadAt[$key]) || $at->lessThan($firstLoadAt[$key])) {
+                    $firstLoadAt[$key] = $at;
+                }
+                if (! isset($lastLoadAt[$key]) || $at->greaterThan($lastLoadAt[$key])) {
+                    $lastLoadAt[$key] = $at;
+                }
+            });
+
+        // No scan anywhere in scope means no baseline anywhere — there is
+        // nothing to estimate against, and reporting each machine's whole
+        // consumption history as a deficit would be inventing a shortage.
+        if ($loaded === []) {
+            return collect();
         }
 
-        $dayStart = CarbonImmutable::parse($date)->startOfDay();
-        $dayEnd = $dayStart->addDay();
+        $keys = collect(array_keys($loaded));
+        $machineIds = $keys->map(fn (string $key) => (int) explode('@', $key)[0])->unique();
+        $itemIds = $keys->map(fn (string $key) => (int) explode('@', $key)[1])->unique();
 
-        // ONE pass over every bin movement at or after 00:00 on the date.
-        // Aggregated in PHP with bcmath rather than SQL SUM() on purpose:
-        // the test database is SQLite, whose SUM() over a DECIMAL column
-        // comes back as a float, and a stock figure that has been through a
-        // float is not a stock figure this codebase is willing to print.
-        $movementsByItem = StockMovement::query()
-            ->where('warehouse_id', $warehouse->id)
-            ->where('movement_date', '>=', $dayStart)
-            ->orderBy('id')
-            ->get(['id', 'item_id', 'type', 'quantity', 'movement_date'])
-            ->groupBy('item_id');
+        $consumed = [];
 
-        $balanceByItem = StockBalance::query()
-            ->where('warehouse_id', $warehouse->id)
-            ->get()
-            ->keyBy('item_id');
+        // The machine a consumption belongs to is its BATCH's machine — the
+        // consumption row itself carries only the warehouse it was issued
+        // from, which is one shared location for the whole factory.
+        //
+        // Narrowed to the machines that have scans, and to rows written at or
+        // after the EARLIEST of their first scans, so a database with years of
+        // pre-scanner history is not dragged through PHP to be discarded.
+        // The exact per-pair cutoff is applied below.
+        ShiftMaterialConsumption::query()
+            ->join(
+                'shift_production_entries',
+                'shift_production_entries.id',
+                '=',
+                'shift_material_consumptions.shift_production_entry_id',
+            )
+            ->whereIn('shift_production_entries.work_center_id', $machineIds)
+            ->whereIn('shift_material_consumptions.item_id', $itemIds)
+            ->where('shift_material_consumptions.created_at', '>=', min($firstLoadAt))
+            ->get([
+                'shift_production_entries.work_center_id as wc_id',
+                'shift_material_consumptions.item_id',
+                'shift_material_consumptions.quantity_issued_kg',
+                'shift_material_consumptions.created_at',
+            ])
+            ->each(function ($row) use (&$consumed, $firstLoadAt) {
+                $key = "{$row->wc_id}@{$row->item_id}";
 
-        $itemIds = $movementsByItem->keys()->merge($balanceByItem->keys())->unique();
+                // Consumption from before this material was ever scanned into
+                // this machine came out of a hopper nobody logged. It is not
+                // this estimate's to subtract — see the docblock.
+                if (! isset($firstLoadAt[$key])
+                    || CarbonImmutable::parse($row->created_at)->lessThan($firstLoadAt[$key])) {
+                    return;
+                }
 
-        $materials = Item::withTrashed()
+                $consumed[$key] = bcadd($consumed[$key] ?? '0.0000', (string) $row->quantity_issued_kg, 4);
+            });
+
+        $machines = WorkCenter::query()->whereIn('id', $machineIds)->orderBy('code')->get();
+        $items = Item::withTrashed()
             ->whereIn('id', $itemIds)
             ->orderBy('name')
             ->get()
-            ->map(fn (Item $item) => $this->reconcileMaterial(
-                $item,
-                $movementsByItem->get($item->id) ?? collect(),
-                (string) ($balanceByItem->get($item->id)?->quantity ?? '0'),
-                $dayEnd,
-            ))
-            ->filter()
+            // The PHP twin of scopeKgUom — rows are already in memory, and a
+            // trashed master must be judged on the UOM it still carries.
+            ->filter(fn (Item $item) => $item->hasKgUom())
+            ->keyBy('id');
+
+        return $machines
+            ->map(function (WorkCenter $machine) use ($items, $loaded, $consumed, $lastLoadAt) {
+                $materials = $items
+                    ->map(function (Item $item) use ($machine, $loaded, $consumed, $lastLoadAt) {
+                        $key = "{$machine->id}@{$item->id}";
+
+                        // No scan of this material into this machine = no
+                        // baseline, so no row. Its consumption is not zero, it
+                        // is unmeasurable here, and a 0 kg line would say the
+                        // opposite.
+                        if (! isset($loaded[$key])) {
+                            return null;
+                        }
+
+                        $loadedKg = $loaded[$key];
+                        $consumedKg = $consumed[$key] ?? '0.0000';
+
+                        return [
+                            'item' => $item,
+                            'loaded_kg' => $loadedKg,
+                            'consumed_kg' => $consumedKg,
+                            'estimated_remaining_kg' => bcsub($loadedKg, $consumedKg, 4),
+                            'last_load_at' => $lastLoadAt[$key] ?? null,
+                        ];
+                    })
+                    ->filter()
+                    ->values();
+
+                return ['work_center' => $machine, 'materials' => $materials];
+            })
+            // A machine whose only scanned material turned out to be non-kg
+            // drops out entirely rather than listing as an empty card.
+            ->filter(fn (array $row) => $row['materials']->isNotEmpty())
             ->values();
-
-        return ['date' => $date, 'warehouse' => $warehouse, 'materials' => $materials];
-    }
-
-    /**
-     * One material's row, or null when the date has nothing to say about it
-     * (no movement on the date and nothing in the bin at 00:00).
-     *
-     * $movements is every bin movement for this item at or after 00:00 on
-     * the date — the ones before $dayEnd are the date's own, the rest are
-     * later history that exists only to be rolled back off the current
-     * balance.
-     *
-     * @param  Collection<int, StockMovement>  $movements
-     * @return array{
-     *     item: Item,
-     *     opening_kg: string,
-     *     loaded_kg: string,
-     *     consumed_kg: string,
-     *     expected_closing_kg: string,
-     *     other_movements_kg: string,
-     * }|null
-     */
-    private function reconcileMaterial(Item $item, Collection $movements, string $currentBalance, CarbonImmutable $dayEnd): ?array
-    {
-        $signedSinceDayStart = '0.0000';
-        $loaded = '0.0000';
-        $consumed = '0.0000';
-        $other = '0.0000';
-        $movedOnDate = false;
-
-        foreach ($movements as $movement) {
-            $quantity = bcadd((string) $movement->quantity, '0', 4);
-
-            // Every movement carries a POSITIVE quantity; the type is what
-            // says which way it went.
-            $signed = match ($movement->type) {
-                StockMovementType::Receipt, StockMovementType::TransferIn => $quantity,
-                StockMovementType::Issue, StockMovementType::TransferOut => bcsub('0', $quantity, 4),
-            };
-
-            $signedSinceDayStart = bcadd($signedSinceDayStart, $signed, 4);
-
-            if ($movement->movement_date->greaterThanOrEqualTo($dayEnd)) {
-                continue; // Later history: rolled back above, but not the date's own.
-            }
-
-            // A movement ON the date keeps the material on the page even
-            // when the figures net to zero (a 5 kg receipt and a 5 kg
-            // transfer back out is a day worth looking at, not an absence).
-            $movedOnDate = true;
-
-            match ($movement->type) {
-                StockMovementType::TransferIn => $loaded = bcadd($loaded, $quantity, 4),
-                StockMovementType::Issue => $consumed = bcadd($consumed, $quantity, 4),
-                default => $other = bcadd($other, $signed, 4),
-            };
-        }
-
-        $opening = bcsub(bcadd($currentBalance, '0', 4), $signedSinceDayStart, 4);
-
-        if (! $movedOnDate && bccomp($opening, '0', 4) === 0) {
-            return null;
-        }
-
-        return [
-            'item' => $item,
-            'opening_kg' => $opening,
-            'loaded_kg' => $loaded,
-            'consumed_kg' => $consumed,
-            'expected_closing_kg' => bcsub(bcadd($opening, $loaded, 4), $consumed, 4),
-            'other_movements_kg' => $other,
-        ];
-    }
-
-    /**
-     * The date being reconciled: the ?date=YYYY-MM-DD query value, or today
-     * when absent.
-     *
-     * Round-tripped through the format rather than merely parsed, so
-     * "2026-13-45" is refused instead of silently rolling over into
-     * February 2027 and answering with confident figures for a date nobody
-     * asked about. Validation lives here rather than in a FormRequest for
-     * the same reason loadBag's does: this is the layer that knows what a
-     * usable date means to the day bin.
-     */
-    private function resolveReconciliationDate(?string $date): string
-    {
-        $date = trim((string) $date);
-
-        if ($date === '') {
-            return CarbonImmutable::now()->toDateString();
-        }
-
-        try {
-            $parsed = CarbonImmutable::createFromFormat('Y-m-d', $date);
-        } catch (\Throwable) {
-            $parsed = null;
-        }
-
-        if ($parsed === null || $parsed->format('Y-m-d') !== $date) {
-            throw ValidationException::withMessages([
-                'date' => 'Give the date to reconcile as YYYY-MM-DD.',
-            ]);
-        }
-
-        return $date;
     }
 
     /**

@@ -51,8 +51,18 @@ class ProductionSettingsController extends Controller
                 // it mid-shift.
                 'finished_goods_warehouse_id' => $this->factoryWarehouses->configuredFinishedGoodsWarehouseId(),
                 'raw_material_warehouse_id' => $this->factoryWarehouses->configuredRawMaterialWarehouseId(),
+                // The Packing Material Store (cartons, trays, film, tape).
+                // Its configured and resolved values are always the same
+                // figure — this is the one role with no fallback, because
+                // guessing it would issue cartons out of the resin godown
+                // (see FactoryWarehouseResolver::packingMaterial). Published
+                // as the pair anyway so a screen can read all three roles the
+                // same way, and can say "not set" about the one that blocks
+                // a Tally post.
+                'packing_material_warehouse_id' => $this->factoryWarehouses->configuredPackingMaterialWarehouseId(),
                 'finished_goods_resolved_warehouse_id' => $this->factoryWarehouses->finishedGoods()?->id,
                 'raw_material_resolved_warehouse_id' => $this->factoryWarehouses->rawMaterial()?->id,
+                'packing_material_resolved_warehouse_id' => $this->factoryWarehouses->packingMaterial()?->id,
                 // The factory's machine rule, published so a screen can STATE
                 // which machines a product runs on. It was enforced on every
                 // start and displayed nowhere, which is why the owner could not
@@ -108,12 +118,19 @@ class ProductionSettingsController extends Controller
             $this->factoryWarehouses->setRawMaterialWarehouseId($value !== null ? (int) $value : null);
         }
 
+        if (array_key_exists('packing_material_warehouse_id', $data)) {
+            $value = $data['packing_material_warehouse_id'];
+            $this->factoryWarehouses->setPackingMaterialWarehouseId($value !== null ? (int) $value : null);
+        }
+
         return response()->json([
             'data' => [
                 'finished_goods_warehouse_id' => $this->factoryWarehouses->configuredFinishedGoodsWarehouseId(),
                 'raw_material_warehouse_id' => $this->factoryWarehouses->configuredRawMaterialWarehouseId(),
+                'packing_material_warehouse_id' => $this->factoryWarehouses->configuredPackingMaterialWarehouseId(),
                 'finished_goods_resolved_warehouse_id' => $this->factoryWarehouses->finishedGoods()?->id,
                 'raw_material_resolved_warehouse_id' => $this->factoryWarehouses->rawMaterial()?->id,
+                'packing_material_resolved_warehouse_id' => $this->factoryWarehouses->packingMaterial()?->id,
             ],
         ]);
     }

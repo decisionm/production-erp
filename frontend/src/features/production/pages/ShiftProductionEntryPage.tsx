@@ -38,6 +38,8 @@ import {
     listShifts,
     listWorkCenters,
     loadBagToFactoryDayBin,
+    machineLabel,
+    getFactoryWarehouseSettings,
     openDowntimeLog,
     openMoldChangeLog,
     getBatchPreview,
@@ -1259,6 +1261,31 @@ export default function ShiftProductionEntryPage() {
     // behind by a closed drawer must never turn the next ordinary completion
     // into an amendment of a different batch.
     const amending = completingEntry !== null && amendEntryId === completingEntry.id;
+    /**
+     * THE ANSWER TO THE STALE-MATERIAL REFUSAL, and it only exists once that
+     * refusal has actually happened.
+     *
+     * The server refuses a correction whose piece counts moved while its
+     * material kilograms did not (refuseStaleMaterialLines), because the drawer
+     * latches the previously issued kg and the screen would otherwise show one
+     * arithmetic while the batch got another. Its 422 ends by telling the
+     * supervisor to "send it again confirming the kilograms are right as typed
+     * if that is genuinely what the store issued" — a weighed 130 kg beside a
+     * piece miscount is a real and legitimate case.
+     *
+     * Until this existed there was no way to send it again: the flag the server
+     * reads (`material_kg_confirmed`) was accepted by AmendBatchRequest and
+     * emitted by nothing, so that supervisor was permanently blocked by a
+     * message telling them to do something the screen could not do.
+     *
+     * OFFERED ONLY AFTER THE REFUSAL, never up front. A checkbox sitting there
+     * before anything went wrong is a checkbox that gets ticked out of habit,
+     * which would put back exactly the silent wrong figure the guard exists to
+     * stop. `staleMaterialRefused` is set by the mutation's own error handler
+     * and both are cleared whenever a drawer opens or closes.
+     */
+    const [staleMaterialRefused, setStaleMaterialRefused] = useState(false);
+    const [materialKgConfirmed, setMaterialKgConfirmed] = useState(false);
     const [reportingDownMachine, setReportingDownMachine] = useState<WorkCenter | null>(null);
     const [closingDowntimeLog, setClosingDowntimeLog] = useState<MachineDowntimeLog | null>(null);
     const [startingMoldChangeMachine, setStartingMoldChangeMachine] = useState<WorkCenter | null>(null);
@@ -1273,6 +1300,16 @@ export default function ShiftProductionEntryPage() {
     const [loadBagBarcode, setLoadBagBarcode] = useState('');
     const [scannedLoadBag, setScannedLoadBag] = useState<MaterialBag | null>(null);
     const [loadBagKg, setLoadBagKg] = useState<number | null>(null);
+    /**
+     * WHICH MACHINE THE BAG WENT INTO — required, by the owner's ruling
+     * (31-Jul): "Scanning a bag means material was loaded into the selected
+     * machine." Defaulted when the floor is unambiguous (exactly one machine
+     * running, or the card that opened the modal), otherwise left empty: a
+     * guess here credits the wrong machine's estimate, and nothing on any
+     * screen would say so. Deliberately NOT cleared between bags — a pallet
+     * goes into one machine — only when the modal is opened.
+     */
+    const [loadBagMachineId, setLoadBagMachineId] = useState<number | null>(null);
     const [loadBagSupervisorId, setLoadBagSupervisorId] = useState<number | null>(null);
     const [loadBagSuccess, setLoadBagSuccess] = useState<string | null>(null);
     const [loadBagError, setLoadBagError] = useState<{ text: string; needsWarehouse: boolean } | null>(null);
@@ -1325,6 +1362,25 @@ export default function ShiftProductionEntryPage() {
         staleTime: 60 * 1000,
     });
     const { data: scrapReasons } = useQuery({ queryKey: ['production', 'scrap-reasons', 'all'], queryFn: listAllScrapReasons });
+    /**
+     * A REASON ADDED MOMENTS AGO MUST BE IN THE LIST WHEN THE DRAWER OPENS.
+     *
+     * This screen is opened once and left open for a whole shift, so the
+     * reason list it fetched at 06:00 is the one a supervisor is still picking
+     * from at 13:00 — while somebody in the office has just added the reason
+     * they were told to use, on another screen, and phoned to say so. Refetched
+     * on OPEN rather than polled: the list changes when a person decides
+     * something, not on a clock, and the moment it matters is the moment the
+     * drawer appears.
+     *
+     * Keyed on the entry's ID, not the object: the entry is re-read every 20
+     * seconds and a new object identity each time would refetch on a loop.
+     */
+    const completingEntryId = completingEntry?.id ?? null;
+    useEffect(() => {
+        if (completingEntryId === null) return;
+        queryClient.invalidateQueries({ queryKey: ['production', 'scrap-reasons', 'all'] });
+    }, [completingEntryId, queryClient]);
     // The GLOBAL downtime reason list — shared with Production Configuration
     // (same query key), so a reason saved from either screen appears in both.
     const { data: downtimeReasons } = useQuery({
@@ -1498,6 +1554,63 @@ export default function ShiftProductionEntryPage() {
     // missing answer is actually fixed, so every "we could not resolve it"
     // line below points at the same page.
     const warehouseSettingsLink = <Link to="/inventory/warehouses">Warehouses</Link>;
+
+    /**
+     * WHERE FINISHED GOODS ACTUALLY LAND, as the office set it.
+     *
+     * The same settings read the Production Configuration card writes — and
+     * read BEFORE the sole-Tally-linked heuristic, which is the fallback the
+     * SERVER only reaches when nothing is stored. Quoting the heuristic first
+     * is what made the Start drawer announce "No single Tally-linked store is
+     * set up yet" on a factory where somebody had already chosen the store:
+     * a confident wrong answer about a question that was already settled.
+     *
+     * A 403 (a login without the production module) is a normal answer here
+     * and leaves the heuristic in charge, exactly as before.
+     */
+    const { data: factoryWarehouseSettings } = useQuery({
+        queryKey: ['production', 'factory-warehouse-settings'],
+        queryFn: getFactoryWarehouseSettings,
+        retry: false,
+        staleTime: 60 * 1000,
+    });
+    /**
+     * The stored setting first, then what the server says it RESOLVES to
+     * today (setting, else the single Tally-linked warehouse). Both come off
+     * the same read, so the line can never disagree with the resolver the
+     * completion actually uses.
+     */
+    const finishedGoodsWarehouseId =
+        factoryWarehouseSettings?.finished_goods_warehouse_id ??
+        factoryWarehouseSettings?.finished_goods_resolved_warehouse_id ??
+        null;
+    const finishedGoodsWarehouseName = useMemo(() => {
+        if (finishedGoodsWarehouseId === null) return null;
+        const named = (warehouses?.data ?? []).find((w) => w.id === finishedGoodsWarehouseId);
+        return named ? `${named.code} — ${named.name}` : null;
+    }, [warehouses, finishedGoodsWarehouseId]);
+    /**
+     * The Start drawer's one line about where the bottles go.
+     *
+     * THREE STATES, NOT TWO. "A store is set but this login cannot read the
+     * warehouse list" (a floor login 403s on Inventory) is NOT the same as
+     * "no store is set" — printing the setup warning for a naming failure is
+     * the exact false alarm this line was fixed to stop. So a configured store
+     * we cannot name still says a store is configured.
+     */
+    const finishedGoodsLine: ReactNode =
+        finishedGoodsWarehouseName !== null ? (
+            `Finished goods go to ${finishedGoodsWarehouseName}.`
+        ) : finishedGoodsWarehouseId !== null ? (
+            'Finished goods go to the store chosen in Production settings.'
+        ) : factoryStoreName ? (
+            `Finished goods go to ${factoryStoreName}.`
+        ) : (
+            <>
+                Finished goods go to the factory store. No store is chosen in Production settings and no single
+                Tally-linked store could be worked out — check {warehouseSettingsLink}.
+            </>
+        );
     const scrapReasonOptions = scrapReasons?.data.map((r) => ({ value: r.id, label: `${r.code} — ${r.name}` })) ?? [];
     const downtimeReasonOptions =
         downtimeReasons?.data.filter((r) => r.is_active).map((r) => ({ value: r.id, label: r.description })) ?? [];
@@ -1549,6 +1662,22 @@ export default function ShiftProductionEntryPage() {
         }
         return map;
     }, [activeBatches]);
+
+    /**
+     * The machine to default a bag load to: the one that is running, when
+     * EXACTLY one is. Null with none or several — a load credited to the wrong
+     * machine silently moves two estimates the wrong way, and no screen would
+     * ever say so, which is worth one tap to avoid.
+     */
+    const soleRunningMachineId = useMemo(
+        () => (runningByMachine.size === 1 ? [...runningByMachine.keys()][0] : null),
+        [runningByMachine],
+    );
+    /** Active machines, for the Load Material picker. */
+    const machineOptions = useMemo(
+        () => (workCenters?.data ?? []).map((machine) => ({ value: machine.id, label: machineLabel(machine) })),
+        [workCenters],
+    );
 
     const openDowntimeByMachine = useMemo(() => {
         const map = new Map<number, MachineDowntimeLog>();
@@ -2851,9 +2980,10 @@ export default function ShiftProductionEntryPage() {
         // panel shows none. Nothing weighs a fixed quantity of resin out to a
         // machine: consumption is DERIVED from output (production + rejection +
         // lumps), so "issued − consumed" was an arithmetic identity sitting at
-        // ~0 and dressed up as a check. Missing material is a CENTRAL question
-        // now — the Factory Day Bin page compares one day's opening, loads and
-        // total batch consumption against a physical count of the bin.
+        // ~0 and dressed up as a check. Missing material is asked PER MACHINE
+        // instead — the Day Bin page holds bags scanned into a machine against
+        // what its batches calculated out, and a negative estimated remaining
+        // is the answer. Nothing is weighed anywhere in that comparison.
         const actualBoxes = goodBoxesWatch ?? null;
         const actualPouches = pouchesWatch ?? null;
         // Efficiency at the PIECES grain. Boxes-vs-boxes compounded two
@@ -3320,6 +3450,11 @@ export default function ShiftProductionEntryPage() {
 
             setCompletingEntry(entry);
             setAmendEntryId(entry.id);
+            // A fresh correction has not been refused yet, and last
+            // correction's confirmation is not an answer about this one's
+            // kilograms.
+            setStaleMaterialRefused(false);
+            setMaterialKgConfirmed(false);
             // No packing edit survives into a correction — the packing rows are
             // switched off for it entirely (see the packingRows memo).
             setPackingEdits({});
@@ -3641,6 +3776,11 @@ export default function ShiftProductionEntryPage() {
                 return amendBatch(completingEntry.id, {
                     ...payload,
                     amendment_reason: (amendment_reason ?? '').trim() || undefined,
+                    // Sent ONLY when the supervisor ticked it after the
+                    // server's refusal — omitted, never `false`, so an
+                    // ordinary correction's payload is byte-for-byte what it
+                    // always was.
+                    material_kg_confirmed: materialKgConfirmed ? true : undefined,
                 });
             }
 
@@ -3651,6 +3791,8 @@ export default function ShiftProductionEntryPage() {
             invalidate();
             setCompletingEntry(null);
             setAmendEntryId(null);
+            setStaleMaterialRefused(false);
+            setMaterialKgConfirmed(false);
             completeForm.reset({ material_consumptions: [], scraps: [], packing_lines: [], downtime_events: [] });
             // The packing edits belong to the batch that just went in — the
             // next one recalculates from its own cartons and trays.
@@ -3696,6 +3838,19 @@ export default function ShiftProductionEntryPage() {
             // which figures, and a sentence reworded here is a sentence that
             // stops matching what the backend can actually explain.
             const fieldMessages: string[] = body?.errors ? (Object.values(body.errors).flat() as string[]) : [];
+
+            // THE ONE REFUSAL THAT HAS AN ANSWER ON THIS SCREEN. The server
+            // keys it on `material_consumptions` and only ever raises it from
+            // refuseStaleMaterialLines (the amend path's stale-kg guard), so
+            // seeing that key on a correction is what unlocks the confirmation
+            // checkbox in the drawer. Ticking it and saving again is the "send
+            // it again confirming the kilograms are right as typed" the
+            // server's own message asks for — before this, the sentence
+            // described a control that did not exist.
+            if (amending && body?.errors?.material_consumptions) {
+                setStaleMaterialRefused(true);
+            }
+
             Modal.error({
                 title: 'Could not complete batch',
                 content:
@@ -3911,12 +4066,21 @@ export default function ShiftProductionEntryPage() {
         },
     });
 
-    // ----- Central Load Material: scan a bag into the factory day bin -----
+    // ----- Load Material: scan a bag into a machine -----
 
-    const openLoadMaterial = () => {
+    /**
+     * `machineId` is the CONTEXT the door was opened with — the machine whose
+     * card started the flow. Absent (the page-level button), the modal
+     * defaults to the machine that is running when exactly one is: on a floor
+     * with a single machine turning, that is not a guess. With none or several
+     * running it stays empty and the load is blocked until somebody says
+     * which.
+     */
+    const openLoadMaterial = (machineId?: number | null) => {
         setLoadBagBarcode('');
         setScannedLoadBag(null);
         setLoadBagKg(null);
+        setLoadBagMachineId(machineId ?? soleRunningMachineId);
         setLoadBagSupervisorId(currentUser?.id ?? null);
         setLoadBagSuccess(null);
         setLoadBagError(null);
@@ -3956,26 +4120,33 @@ export default function ShiftProductionEntryPage() {
         mutationFn: loadBagToFactoryDayBin,
         onSuccess: (result, payload) => {
             // Compose the confirmation from the response where it answers,
-            // falling back to what was scanned — never a blank.
+            // falling back to what was scanned — never a blank. The MACHINE is
+            // named back, because which machine was credited is the whole
+            // point of the scan and a confirmation without it cannot be
+            // checked against what the supervisor meant.
             const material = result?.day_bin?.item ?? result?.bag?.lot?.item ?? scannedLoadBag?.lot?.item ?? null;
-            const balance = result?.day_bin?.quantity_kg;
+            const machine = (workCenters?.data ?? []).find((wc) => wc.id === payload.work_center_id);
             setLoadBagSuccess(
                 `Loaded ${payload.quantity_kg} kg of ${material ? itemLabel(material) : 'material'}` +
-                    `${balance ? ` — day bin now holds ${balance} kg` : ''}.`,
+                    `${machine ? ` into ${machineLabel(machine)}` : ''}.`,
             );
             setScannedLoadBag(null);
             setLoadBagKg(null);
             setLoadBagError(null);
-            // The bag lost kg and the central day bin gained it — every
-            // surface quoting either must move.
+            // The machine stays selected: the next bag off the same pallet
+            // goes into the same machine, and re-picking it every time is how
+            // bag four gets credited to the wrong one.
+            // The bag lost kg, the floor gained it, and one machine's estimate
+            // moved — every surface quoting any of those must refetch.
             queryClient.invalidateQueries({ queryKey: ['production', 'factory-day-bin'] });
+            queryClient.invalidateQueries({ queryKey: ['production', 'machine-resin'] });
             queryClient.invalidateQueries({ queryKey: ['inventory', 'stock-balances'] });
             queryClient.invalidateQueries({ queryKey: ['production', 'material-bags', 'pick-list'] });
             // Back to the gun: the next bag scans without a tap.
             loadBagInputRef.current?.focus();
         },
         onError: (error: any) => {
-            const text = error?.response?.data?.message ?? 'Could not load the bag into the day bin.';
+            const text = error?.response?.data?.message ?? 'Could not load the bag.';
             setLoadBagError({
                 text,
                 // The one setup failure a supervisor can actually fix: nobody
@@ -3990,8 +4161,16 @@ export default function ShiftProductionEntryPage() {
     const submitLoadBag = () => {
         const supervisorId = loadBagSupervisorId ?? currentUser?.id;
         if (!scannedLoadBag || !loadBagKg || loadBagKg <= 0 || !supervisorId) return;
+        if (loadBagMachineId === null) {
+            // The button is disabled for this, but the bag panel is reachable
+            // by keyboard — say which field is missing rather than doing
+            // nothing at all.
+            setLoadBagError({ text: 'Pick the machine this bag was loaded into.', needsWarehouse: false });
+            return;
+        }
         loadBagMutation.mutate({
             barcode: scannedLoadBag.barcode,
+            work_center_id: loadBagMachineId,
             quantity_kg: loadBagKg,
             supervisor_id: supervisorId,
         });
@@ -4188,6 +4367,11 @@ export default function ShiftProductionEntryPage() {
                             message.info(completeElsewhere);
                         } else if (running) {
                             setCompletingEntry(running);
+                            // An ordinary completion is never gated by the
+                            // stale-material guard (it is amend-only), so this
+                            // clears any answer a previous correction left.
+                            setStaleMaterialRefused(false);
+                            setMaterialKgConfirmed(false);
                             // A fresh batch gets fresh resin and masterbatch
                             // fields: the auto-calculations run again until this
                             // batch's own manual edit or weighed figure latches
@@ -4397,9 +4581,11 @@ export default function ShiftProductionEntryPage() {
 
             <Space style={{ marginBottom: 32 }}>
                 {traceabilityEnabled && (
-                    // Deliberately page-level, not on any machine card: bags
-                    // feed the CENTRAL factory day bin, for all machines.
-                    <Button type="primary" onClick={openLoadMaterial}>
+                    // Page-level: one door for the whole floor, with the
+                    // machine chosen inside it (defaulted when exactly one is
+                    // running). Ten identical buttons on ten cards would be
+                    // ten doors to one room.
+                    <Button type="primary" onClick={() => openLoadMaterial()}>
                         Load Material
                     </Button>
                 )}
@@ -5280,23 +5466,17 @@ export default function ShiftProductionEntryPage() {
                         </>
                     )}
                     {/* WHERE THE FINISHED BOTTLES LAND — stated in one line, not
-                        asked. There is one factory and one place inside it, so
-                        this was never a decision the supervisor could get right
-                        or wrong; the server resolves it and this line only
-                        reports what it will almost certainly pick. When the
-                        books do not name a single store the line says so and
+                        asked. This was never a decision the supervisor could
+                        get right or wrong; the server resolves it and this line
+                        only reports what it will pick. It reads the STORED
+                        setting first and the Tally-linked heuristic only after,
+                        so a store the office has chosen is named rather than
+                        denied. When nothing answers, the line says so and
                         points at the page where it is fixed — the start is not
                         blocked here, because the server arbitrates and refuses
                         with a message of its own if it truly cannot answer. */}
                     <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
-                        {factoryStoreName ? (
-                            `Finished goods go to ${factoryStoreName}.`
-                        ) : (
-                            <>
-                                Finished goods go to the factory store. No single Tally-linked store is set up yet —
-                                check {warehouseSettingsLink}.
-                            </>
-                        )}
+                        {finishedGoodsLine}
                     </Typography.Text>
                     <Form.Item label="Operator (optional)">
                         <Controller
@@ -5314,6 +5494,8 @@ export default function ShiftProductionEntryPage() {
                 onClose={() => {
                     setCompletingEntry(null);
                     setAmendEntryId(null);
+                    setStaleMaterialRefused(false);
+                    setMaterialKgConfirmed(false);
                 }}
                 width="min(100vw, 560px)"
                 destroyOnHidden
@@ -5375,6 +5557,36 @@ export default function ShiftProductionEntryPage() {
                                     )}
                                 />
                             </Form.Item>
+                            {/* Only after the server has actually refused this
+                                correction for keeping the old kilograms. Shown
+                                up front it would be ticked out of habit, which
+                                is the silent wrong figure the guard exists to
+                                stop; shown here it is a direct answer to a
+                                sentence the supervisor has just read. */}
+                            {staleMaterialRefused && (
+                                <Alert
+                                    type="error"
+                                    showIcon
+                                    style={{ marginBottom: 16 }}
+                                    message="The counts moved but the material kilograms did not"
+                                    description={
+                                        <>
+                                            <Typography.Paragraph style={{ marginBottom: 8 }}>
+                                                Check the resin and masterbatch rows against the corrected counts. If
+                                                the kilograms below are genuinely what the store issued — a weighed
+                                                figure that did not change while a piece miscount did — say so and save
+                                                again.
+                                            </Typography.Paragraph>
+                                            <Checkbox
+                                                checked={materialKgConfirmed}
+                                                onChange={(event) => setMaterialKgConfirmed(event.target.checked)}
+                                            >
+                                                The kilograms are right as typed — this is what the store issued.
+                                            </Checkbox>
+                                        </>
+                                    }
+                                />
+                            )}
                         </>
                     )}
                     {/* Frozen at Start Batch, so it is the same standard the
@@ -7324,8 +7536,9 @@ export default function ShiftProductionEntryPage() {
                         destroyOnHidden
                     >
                         <Typography.Paragraph type="secondary">
-                            Central load for every machine: scan a bag and its kg move from the store into the
-                            factory day bin. The scanner types the code and presses Enter by itself.
+                            Scan a bag into the machine it was loaded into: its kg move out of the store, and that
+                            machine's estimated resin remaining goes up by them. The scanner types the code and
+                            presses Enter by itself; the machine stays selected between bags.
                         </Typography.Paragraph>
                         {loadBagSuccess && (
                             <Alert type="success" showIcon message={loadBagSuccess} style={{ marginBottom: 12 }} />
@@ -7344,6 +7557,30 @@ export default function ShiftProductionEntryPage() {
                             />
                         )}
                         <Form layout="vertical">
+                            {/* THE MACHINE, ABOVE THE BARCODE — the one field
+                                the scanner gun cannot fill in, and the one this
+                                load is meaningless without. */}
+                            <Form.Item
+                                label="Machine"
+                                required
+                                extra={
+                                    loadBagMachineId !== null && loadBagMachineId === soleRunningMachineId
+                                        ? 'Defaulted to the only machine running — change it if the bag went elsewhere.'
+                                        : 'Which machine this bag was emptied into.'
+                                }
+                            >
+                                <Select
+                                    value={loadBagMachineId ?? undefined}
+                                    onChange={(value) => {
+                                        setLoadBagMachineId(value);
+                                        setLoadBagError(null);
+                                    }}
+                                    options={machineOptions}
+                                    placeholder="Choose the machine…"
+                                    showSearch
+                                    optionFilterProp="label"
+                                />
+                            </Form.Item>
                             <Form.Item label="Bag barcode">
                                 <Input
                                     ref={loadBagInputRef}
@@ -7396,9 +7633,9 @@ export default function ShiftProductionEntryPage() {
                                 block
                                 onClick={submitLoadBag}
                                 loading={loadBagMutation.isPending}
-                                disabled={!scannedLoadBag || !loadBagKg || loadBagKg <= 0}
+                                disabled={!scannedLoadBag || !loadBagKg || loadBagKg <= 0 || loadBagMachineId === null}
                             >
-                                Load into Day Bin
+                                {loadBagMachineId === null ? 'Pick a machine first' : 'Load into machine'}
                             </Button>
                         </Form>
                     </Modal>

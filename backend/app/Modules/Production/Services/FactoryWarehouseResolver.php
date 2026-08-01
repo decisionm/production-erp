@@ -28,11 +28,15 @@ use Illuminate\Validation\ValidationException;
  * different questions and need different filters (see below), and because
  * Inventory's resolver is not this module's to change.
  *
- * PRECEDENCE, identical for every role:
+ * PRECEDENCE, for the finished-goods, raw-material and day-bin roles:
  *   1. the app setting for that role, when it names a live, ACTIVE warehouse;
  *   2. else the single ACTIVE Tally-linked warehouse, when there is exactly
  *      one (this factory's reality);
  *   3. else null.
+ *
+ * The PACKING MATERIAL role deliberately stops at step 1 — see
+ * packingMaterial() for why a fallback that is safe for the other roles is a
+ * confidently wrong answer for that one.
  *
  * `is_active` is filtered at every step, and that is the deliberate
  * difference from TallyGodownResolver: that class answers "what godown name
@@ -60,6 +64,8 @@ class FactoryWarehouseResolver
 
     public const SETTING_RAW_MATERIAL = 'production_raw_material_warehouse_id';
 
+    public const SETTING_PACKING_MATERIAL = 'production_packing_material_warehouse_id';
+
     public function __construct(
         private readonly AppSettingService $settings,
         private readonly WarehouseService $warehouses,
@@ -80,6 +86,38 @@ class FactoryWarehouseResolver
     public function rawMaterial(): ?Warehouse
     {
         return $this->fromSetting(self::SETTING_RAW_MATERIAL) ?? $this->soleTallyLinkedWarehouse();
+    }
+
+    /**
+     * THE PACKING MATERIAL STORE — cartons, trays, film pouches, tape.
+     *
+     * The owner's voucher rule (31-Jul): "Raw materials from the agreed RM or
+     * machine-WIP location, packing materials from the Packing Material
+     * Store, finished goods into the FG Store."
+     *
+     * AND IT IS THE ONE ROLE WITH NO FALLBACK — deliberately, breaking the
+     * "identical precedence for every role" pattern the class docblock
+     * states, so read this before adding one back.
+     *
+     * The sole-Tally-linked fallback is safe for the other two roles because
+     * a factory with one godown genuinely has nothing to choose between: the
+     * resin and the bottles are both in the one place Tally knows. Packing
+     * material is the case where that stops being true — a Packing Material
+     * Store is a SECOND named location, and the whole reason the owner named
+     * it separately is that cartons do not come out of the resin store.
+     * Falling back would therefore not be "the only possible answer", it
+     * would be a confident wrong one: tape and trays issued out of the raw
+     * material godown, reconciling in nobody's books.
+     *
+     * So an unresolved packing store answers null, and the voucher preview
+     * NAMES it rather than posting somewhere plausible. That is also why
+     * there is no packingMaterialOrFail() twin: nothing in the production
+     * path may refuse a shift over this. The shift is real and gets recorded;
+     * it is the POSTING that waits for the setting.
+     */
+    public function packingMaterial(): ?Warehouse
+    {
+        return $this->fromSetting(self::SETTING_PACKING_MATERIAL);
     }
 
     /**
@@ -181,6 +219,11 @@ class FactoryWarehouseResolver
         $this->settings->set(self::SETTING_RAW_MATERIAL, $warehouseId);
     }
 
+    public function setPackingMaterialWarehouseId(?int $warehouseId): void
+    {
+        $this->settings->set(self::SETTING_PACKING_MATERIAL, $warehouseId);
+    }
+
     /** What is stored for a role, before any fallback — what Settings shows. */
     public function configuredFinishedGoodsWarehouseId(): ?int
     {
@@ -190,6 +233,17 @@ class FactoryWarehouseResolver
     public function configuredRawMaterialWarehouseId(): ?int
     {
         return $this->fromSetting(self::SETTING_RAW_MATERIAL)?->id;
+    }
+
+    /**
+     * Identical to packingMaterial()?->id, and kept as its own method only so
+     * the settings read speaks the same "configured vs resolved" pair for all
+     * three roles. For this role the two are the same figure by design —
+     * there is no fallback for a resolved value to differ from.
+     */
+    public function configuredPackingMaterialWarehouseId(): ?int
+    {
+        return $this->fromSetting(self::SETTING_PACKING_MATERIAL)?->id;
     }
 
     /**

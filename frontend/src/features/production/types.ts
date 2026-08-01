@@ -406,11 +406,29 @@ export interface EntryCorrectionReturn {
     cleared_quality_check?: boolean;
 }
 
-/** One time the floor re-entered its own completion figures. */
+/**
+ * One time the floor re-entered its own completion figures.
+ *
+ * The named fields are exactly what `amendCompletion` writes onto the entry's
+ * frozen snapshot. They are declared rather than left to the index signature
+ * because `[key: string]: unknown` types every read as `unknown` — a screen
+ * printing `previous_quantity_produced` would then need a cast at each site,
+ * and a cast is where a wire-shape change stops being a type error.
+ *
+ * `amended_by`/`previous_completed_by` are users.id, NOT names: the snapshot
+ * stores ids and the resource does not resolve them. A screen that wants a
+ * name must look it up and must stay readable when it cannot.
+ */
 export interface EntryCorrectionAmendment {
     amended_by?: number | null;
     amended_at?: string | null;
     reason?: string | null;
+    /** How many of quality's returns this amendment answered. */
+    answered_returns?: number;
+    /** The produced figure this correction replaced — a decimal string. */
+    previous_quantity_produced?: string | null;
+    /** Who had completed the batch before this correction (users.id). */
+    previous_completed_by?: number | null;
     [key: string]: unknown;
 }
 
@@ -1422,9 +1440,51 @@ export interface VoucherPreviewLine {
     problems: string[];
 }
 
+/**
+ * A figure this voucher deliberately does NOT carry, with the factory's own
+ * reason for holding it back — mirrors the `withheld` entries
+ * TallySyncService::buildBatchVoucherPayload puts on the payload.
+ *
+ * Two kinds today, both the owner's own rulings:
+ *  - `'tape'` — calculated from the exact metres-per-carton standard, not
+ *    posted while Tally counts the tape in Nos ("Do not post tape until its
+ *    Tally unit is metres or there is an exact approved conversion").
+ *  - `'scrap'` — the rejected pieces and lumps this batch made, stated and not
+ *    posted ("Do not create a Tally scrap-output line until the owner confirms
+ *    whether rejected pieces and lumps are physically kept as stock or
+ *    discarded").
+ *
+ * HELD BACK ON PURPOSE IS NOT BROKEN: none of these ever makes `postable`
+ * false. They are shown so the accountant learns the figure is known, counted
+ * and waiting on an answer — an absence would explain nothing.
+ */
+export interface VoucherWithheldLine {
+    /**
+     * The two kinds that exist — PackingVoucherLines::WITHHELD_TAPE and
+     * ::WITHHELD_SCRAP, and nothing else. Left as a closed union on purpose: a
+     * third kind added on the server should fail this typecheck rather than
+     * arrive on the approval screen labelled with its own raw slug.
+     */
+    kind: 'tape' | 'scrap';
+    item: string | null;
+    quantity: string;
+    unit: string;
+    reason: string;
+}
+
 export interface VoucherPreview {
     voucher: Record<string, unknown>;
     lines: VoucherPreviewLine[];
+    /**
+     * What is calculated but deliberately not posted. Optional: a backend that
+     * predates the withheld lines sends no key at all.
+     */
+    withheld?: VoucherWithheldLine[];
+    /**
+     * The quiet sentences — true, worth reading once before signing, nothing to
+     * do about them. Never blockers.
+     */
+    notes?: string[];
     problems: string[];
     postable: boolean;
 }
@@ -1868,28 +1928,30 @@ export interface FactoryDayBin {
 }
 
 /**
- * One raw material's day-bin reconciliation row for a chosen date, from
- * GET /production/factory-day-bin/reconciliation. Mirrors
- * FactoryDayBinReconciliationResource field for field.
+ * One material's ESTIMATED RESIN REMAINING on ONE machine, from
+ * GET /production/machine-resin. Mirrors MachineResinMaterialResource field
+ * for field.
  *
- * THIS IS WHERE "IS ANY MATERIAL MISSING?" IS ASKED. It replaced the
- * per-batch unaccounted figure, which was ~0 by construction: nothing weighs
- * a fixed quantity of resin out to each machine, so a batch's consumption is
- * DERIVED from its output (good kg + rejection kg + lumps kg) and "issued
- * minus consumed" could only ever be an arithmetic identity. The real
- * question is central and daily, against the one bin every machine draws
- * from.
+ * THIS REPLACED the day-bin reconciliation row, which compared a derived
+ * expected closing against a physical bin weight. The owner (31-Jul): "Our
+ * factory does not use a Day Bin warehouse or an evening physical bin weight.
+ * Replace that idea with estimated resin remaining for each machine: previous
+ * carryover plus barcode-scanned loads minus calculated consumption." A read
+ * waiting on a count nobody takes is worse than no read, so it is gone rather
+ * than left on a screen looking answerable.
  *
  * Every figure is a 4dp decimal STRING, never a number — the same way the
  * rest of the shift engine speaks about kg, so a JSON parse cannot quietly
  * restate a stock quantity.
  *
- * There is deliberately NO actual/physical field. The expected side is all
- * the server offers; the genuine check is a count a person walks out and
- * takes, which the page holds in local state and subtracts client-side.
- * Nothing about a count is stored or sent anywhere.
+ * WHAT THE WINDOW IS. `loaded_kg` is every scan of this material into this
+ * machine; `consumed_kg` counts only the calculated consumption recorded AT
+ * OR AFTER the first such scan — material burnt before anyone scanned came
+ * out of a hopper nobody logged and is deliberately not subtracted. So the
+ * honest sentence for a screen is "counted from the first bag scanned into
+ * this machine", never "all time".
  */
-export interface FactoryDayBinReconciliationRow {
+export interface MachineResinMaterial {
     /**
      * Always present — the resource builds it with `ItemResource::make()`
      * directly, NOT through `whenLoaded`, so unlike FactoryDayBinMaterial's
@@ -1897,44 +1959,45 @@ export interface FactoryDayBinReconciliationRow {
      */
     item: Item;
     item_id: number;
-    /** The bin balance at 00:00 on the date, derived by rolling the ledger back. */
-    opening_kg: string;
-    /** Transfers INTO the bin on the date — bag scans and manual loads alike. */
+    /** Every barcode scan of this material into this machine. */
     loaded_kg: string;
-    /** Issues OUT of the bin on the date — batch consumption lines and manual issues. */
+    /**
+     * The CURRENT calculated consumption of this machine's batches. A
+     * correction replaces its predecessor rather than adding to it (the
+     * amendment deletes the entry's consumption rows before re-booking), so
+     * this figure never double-counts a corrected batch.
+     */
     consumed_kg: string;
     /**
-     * opening + loaded − consumed. NOT a check on its own: for an ordinary
-     * day it equals the bin's live balance by construction, because opening
-     * was derived by subtracting the very movements added back here. Only a
-     * physical count can disagree with it.
+     * loaded − consumed. CAN BE NEGATIVE and is served that way: consumption
+     * is derived from output rather than weighed out, so a negative figure
+     * means the machine ran on material nobody scanned — the one thing on
+     * this read worth acting on, and the exact thing a clamp at zero would
+     * erase. Show it, never hide it.
      */
-    expected_closing_kg: string;
+    estimated_remaining_kg: string;
     /**
-     * Normally '0.0000'. Non-zero means material moved through the bin by
-     * neither route — a receipt booked straight into the bin, or a transfer
-     * back out to the store. Signed. When it is non-zero the full identity
-     * is `live = expected_closing + other_movements`, so a physical count
-     * must be compared against THAT sum or the page invents a discrepancy
-     * it cannot explain.
+     * null = never loaded on this machine. The backend omits any pair with no
+     * scan at all, so in practice this is always set; it stays nullable
+     * because the resource declares it so.
      */
-    other_movements_kg: string;
+    last_load_at: string | null;
 }
 
 /**
- * GET /production/factory-day-bin/reconciliation?date=YYYY-MM-DD (today when
- * the date is absent). `warehouse: null` means no bin is configured — the
- * same normal state the plain day-bin read answers with.
+ * One machine's estimated resin remaining, per material, from
+ * GET /production/machine-resin (optionally narrowed with ?work_center_id=).
  *
- * `materials` omits any material the date has nothing to say about (no
- * movement on the date and nothing in the bin at 00:00), so an empty array
- * is a real answer, not a failure.
+ * AN EMPTY ARRAY MEANS "NOTHING HAS BEEN SCANNED INTO ANY MACHINE YET", not
+ * "the machines are empty": the backend answers with no rows at all when
+ * there are no Load movements anywhere, and omits any (machine, material)
+ * pair that was never scanned. A screen must say so in those words — an
+ * empty estimate is a missing baseline, never a zero balance.
  */
-export interface FactoryDayBinReconciliation {
-    /** The date actually reconciled, 'YYYY-MM-DD' — echoed back by the server. */
-    date: string;
-    warehouse: Warehouse | null;
-    materials: FactoryDayBinReconciliationRow[];
+export interface MachineResinEstimate {
+    work_center: WorkCenter;
+    work_center_id: number;
+    materials: MachineResinMaterial[];
 }
 
 /**
@@ -1956,10 +2019,15 @@ export interface RawMaterialOption {
 }
 
 /**
- * POST /production/day-bin/load-bag — the Shift Floor's central "Load
- * Material" scan: one bag's kg moves store → the factory day-bin warehouse.
- * Central by design (this replaced the per-machine Bin Bay scan page), so
- * there is deliberately no work_center_id here. Mirrors
+ * POST /production/day-bin/load-bag — the Shift Floor's "Load Material"
+ * scan: one bag's kg moves store → the internal WIP warehouse AND is
+ * attributed to the machine it was emptied into.
+ *
+ * The scan NAMES ITS MACHINE now (owner, 31-Jul: "Scanning a bag means
+ * material was loaded into the selected machine"). In the books the stock
+ * simply changed location — Tally still sees one godown, there is no
+ * warehouse per machine — and the machine is operational metadata that the
+ * per-machine estimate is summed from. Mirrors
  * FactoryDayBinController::loadBag's response verbatim.
  */
 export interface FactoryDayBinLoadResult {
@@ -1967,4 +2035,10 @@ export interface FactoryDayBinLoadResult {
     bag: MaterialBag;
     /** The day bin's row for this material — quantity_kg is the NEW balance. */
     day_bin: FactoryDayBinMaterial;
+    /**
+     * The machine attribution the scan just wrote, echoed back so the floor
+     * can confirm WHICH machine was credited without a second read. Optional
+     * only for a backend that predates the machine-named scan.
+     */
+    movement?: DayBinMovement;
 }

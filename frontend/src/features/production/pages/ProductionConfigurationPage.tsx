@@ -39,6 +39,7 @@ import {
     setFactoryWarehouse,
     updateWorkCenterCapability,
 } from '@/features/production/api';
+import type { FactoryWarehouseRole } from '@/features/production/api';
 import type { DowntimeReason, ImportResult, ProductionConfiguration, WorkCenter } from '@/features/production/types';
 import { itemLabel } from '@/lib/itemLabel';
 
@@ -579,11 +580,20 @@ function DowntimeReasonsTab() {
 }
 
 /**
- * The two warehouse ROLES the floor resolves silently. This card exists
- * because its absence blocked the factory's first real batch: Start Batch
- * refused (correctly) to guess where finished goods land, and its error
- * said "name one in Production settings" — a place that, until this card,
- * had no control to do so. The backend endpoint predates the screen.
+ * The warehouse ROLES the floor resolves silently. This card exists because
+ * its absence blocked the factory's first real batch: Start Batch refused
+ * (correctly) to guess where finished goods land, and its error said "name one
+ * in Production settings" — a place that, until this card, had no control to
+ * do so. The backend endpoint predates the screen.
+ *
+ * THE PACKING MATERIAL STORE IS THE ODD ONE OUT, and the card says so rather
+ * than reusing the other rows' warning. The other two roles fall back to the
+ * single Tally-linked warehouse, which is safe on a one-godown factory: the
+ * resin and the bottles are both in the one place Tally knows. Packing
+ * material is exactly the case where that stops being true — a Packing
+ * Material Store is a SECOND named location, named separately because cartons
+ * do not come out of the resin store. So it has no fallback, an unset value
+ * blocks nothing on the floor, and what waits for it is the Tally POST.
  */
 function FactoryWarehousesCard() {
     const queryClient = useQueryClient();
@@ -594,7 +604,7 @@ function FactoryWarehousesCard() {
     const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses', 'all'], queryFn: listAllWarehouses });
 
     const mutation = useMutation({
-        mutationFn: ({ role, warehouseId }: { role: 'finished_goods_warehouse_id' | 'raw_material_warehouse_id'; warehouseId: number | null }) =>
+        mutationFn: ({ role, warehouseId }: { role: FactoryWarehouseRole; warehouseId: number | null }) =>
             setFactoryWarehouse(role, warehouseId),
         onSuccess: () => {
             // The preview/readiness reads resolve through these settings, so
@@ -611,21 +621,33 @@ function FactoryWarehousesCard() {
         .filter((w) => w.is_active)
         .map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` }));
 
-    const describe = (stored: number | null | undefined, resolved: number | null | undefined): string => {
+    /**
+     * `unsetText` is per role, not shared. The default sentence names the
+     * consequence of leaving a role blank — and for packing material that
+     * consequence is a different one: nothing on the floor is refused, the
+     * VOUCHER is. Saying "Start Batch is REFUSED" there would be a threat the
+     * software does not carry out, which is how a warning stops being read.
+     */
+    const describe = (
+        stored: number | null | undefined,
+        resolved: number | null | undefined,
+        unsetText = 'Nothing set and nothing resolvable — Start Batch is REFUSED until this is chosen.',
+    ): string => {
         if (stored != null) return '';
         if (resolved != null) {
             const w = (warehouses?.data ?? []).find((x) => x.id === resolved);
             return `Nothing set — currently resolving to ${w ? w.name : `warehouse #${resolved}`}.`;
         }
-        return 'Nothing set and nothing resolvable — Start Batch is REFUSED until this is chosen.';
+        return unsetText;
     };
 
     const row = (
         label: string,
         help: string,
-        role: 'finished_goods_warehouse_id' | 'raw_material_warehouse_id',
+        role: FactoryWarehouseRole,
         stored: number | null | undefined,
         resolved: number | null | undefined,
+        unsetText?: string,
     ) => (
         <div style={{ marginBottom: 12 }}>
             <Typography.Text strong style={{ display: 'block' }}>{label}</Typography.Text>
@@ -640,12 +662,12 @@ function FactoryWarehousesCard() {
                 options={options}
                 onChange={(v) => mutation.mutate({ role, warehouseId: v ?? null })}
             />
-            {describe(stored, resolved) && (
+            {describe(stored, resolved, unsetText) && (
                 <Typography.Text
                     type={resolved == null && stored == null ? 'danger' : 'secondary'}
                     style={{ fontSize: 12, display: 'block', marginTop: 4 }}
                 >
-                    {describe(stored, resolved)}
+                    {describe(stored, resolved, unsetText)}
                 </Typography.Text>
             )}
         </div>
@@ -666,6 +688,17 @@ function FactoryWarehousesCard() {
                 'raw_material_warehouse_id',
                 settings?.raw_material_warehouse_id,
                 settings?.raw_material_resolved_warehouse_id,
+            )}
+            {row(
+                'Packing Material Store',
+                'Where cartons, trays, film pouches and tape are issued from on the Tally voucher. No fallback: cartons must not come out of the resin store, so this one is never guessed.',
+                'packing_material_warehouse_id',
+                settings?.packing_material_warehouse_id,
+                settings?.packing_material_resolved_warehouse_id,
+                // The truthful consequence. Nothing on the floor is blocked —
+                // the shift is real and gets recorded either way; it is the
+                // Tally post that waits for this.
+                'Nothing set — packing lines have no store to issue from, so the Tally voucher will not post until this is chosen. Production itself is unaffected.',
             )}
         </Card>
     );

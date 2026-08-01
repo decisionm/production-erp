@@ -43,6 +43,21 @@ return [
         'efficiency_ok' => (float) env('PROD_TOL_EFFICIENCY_OK', 95),
         'efficiency_watch' => (float) env('PROD_TOL_EFFICIENCY_WATCH', 85),
 
+        /*
+         * THE STALE-AMENDMENT TOLERANCE, in kg.
+         *
+         * A correction that moves the piece counts or the lumps by at least
+         * this much in KILOGRAM terms, while the material lines it submits
+         * are byte-for-byte the ones already stored, is refused (see
+         * ShiftProductionEntryService::amendCompletion). Below it, a
+         * one-piece typo fix is not worth interrupting a supervisor over.
+         *
+         * 0.5 kg, matching unaccounted_kg above — at this factory's ~5 g
+         * bottle that is a hundred pieces, which is a real recount rather
+         * than a slip of the finger.
+         */
+        'amend_material_drift_kg' => (float) env('PROD_TOL_AMEND_DRIFT_KG', 0.5),
+
         // Hard gates (null = disabled). When set, accountant approval is
         // refused while the figure exceeds the threshold.
         'variance_blocking_pct' => env('PROD_TOL_VARIANCE_BLOCKING') !== null
@@ -125,6 +140,41 @@ return [
          * it.
          */
         'quality_stage_enabled' => (bool) env('PROD_QUALITY_STAGE_ENABLED', true),
+
+        /*
+         * THE POSTING GATE'S OWN PRECONDITION: accountant approval is refused
+         * while the Tally voucher this batch would post is not postable.
+         *
+         * The owner (31-Jul): "If the Tally preview is invalid, posting must
+         * remain unavailable." Accountant approval IS the posting gate in this
+         * codebase — it is the transition that enqueues the voucher — so the
+         * preview's own verdict (VoucherPreviewService::forShiftProductionEntry,
+         * the SAME payload builder the real post uses) is what this consults.
+         * Nothing is duplicated and nothing here can drift from what is sent.
+         *
+         * DEFAULTS TO FALSE — watch-only — and that default is a safety
+         * property of the deployment, not a preference. It is the same
+         * reasoning as readiness.enforced below, for the same reason: what
+         * makes a voucher unpostable is MASTER-DATA coverage (an item with no
+         * Tally identity, a godown Tally does not know, and — once the packing
+         * lines land — a Packing Material Store nobody has named yet). A `true`
+         * default would reach a server whose .env had not been edited and
+         * refuse every approval in the factory on the next shift, for a
+         * condition no accountant could clear from the approval screen.
+         *
+         * Flip it (PROD_REQUIRE_POSTABLE_VOUCHER=true) once the masters are
+         * loaded and the packing store is named — checked against real
+         * batches, the way readiness.enforced is meant to be flipped. Until
+         * then the gate evaluates nothing and approval behaves exactly as it
+         * did before this existed.
+         *
+         * A LOCAL- fixture batch is exempt whichever way this is set: its
+         * product exists here and nowhere in Tally, so no voucher is ever
+         * built for it (TallySyncService::isLocalFixtureEntry) and there is
+         * nothing for a posting gate to protect. Refusing its approval would
+         * strand a real batch over a post that was never going to happen.
+         */
+        'require_postable_voucher' => (bool) env('PROD_REQUIRE_POSTABLE_VOUCHER', false),
     ],
 
     /*

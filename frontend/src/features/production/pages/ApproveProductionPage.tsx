@@ -1,9 +1,10 @@
 import type { ReactElement, ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Descriptions, Drawer, Input, Modal, Segmented, Space, Steps, Table, Tag, Tooltip, Typography } from 'antd';
+import { Alert, Button, Descriptions, Drawer, Input, Modal, Segmented, Space, Steps, Table, Tag, Timeline, Tooltip, Typography } from 'antd';
 import dayjs from 'dayjs';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { listUsers } from '@/features/access/api';
 import { useAuthStore } from '@/features/auth/store';
 import {
     accountantApproveShiftProductionEntry,
@@ -28,6 +29,7 @@ import {
     grossProducedPieces,
     isQualityChecked,
     netProducedPieces,
+    readCorrection,
     readQuality,
     readQualityStageEnabled,
     readStockShortfalls,
@@ -464,11 +466,14 @@ function ExpectedVsActualSection({ row, metrics }: { row: ShiftProductionEntry; 
  * below — so the section itself went with it rather than leaving a heading
  * over a duplicate.
  *
- * The real question ("is any material missing?") is asked centrally and once a
- * day on the Factory Day Bin page: opening + loaded − consumed against a
- * PHYSICAL count of the bin. `metrics.reconciliation_unaccounted_kg` and
- * `unaccounted_band` are still served and still read elsewhere (Reports); this
- * is a display decision on the approval desk, not a change to the engine.
+ * The real question ("is any material missing?") is asked on the Day Bin page,
+ * per machine: bags scanned into a machine minus what its batches calculated
+ * out, and a NEGATIVE estimated remaining is the signal. It is deliberately
+ * not a physical count — the owner ruled (31-Jul) that this factory takes no
+ * bin weight, so the daily reconciliation that once lived there is gone.
+ * `metrics.reconciliation_unaccounted_kg` and `unaccounted_band` are still
+ * served and still read elsewhere (Reports); this is a display decision on the
+ * approval desk, not a change to the engine.
  */
 
 /**
@@ -705,10 +710,282 @@ function VoucherPreviewSection({ preview, loading }: { preview: VoucherPreview |
                             },
                         ]}
                     />
+                    {/* WHAT THIS VOUCHER DELIBERATELY DOES NOT CARRY. The
+                        backend has been building these since the tape and
+                        scrap rulings and nothing rendered them, so the two
+                        figures the owner explicitly asked to be "withheld with
+                        its note" reached the accountant as silence — which
+                        reads exactly like the ERP never counted them.
+
+                        Deliberately NOT an error: held back on purpose is not
+                        broken, and colouring it red would train the accountant
+                        to click past the red that means Tally will refuse. */}
+                    {(preview.withheld ?? []).length > 0 && (
+                        <Alert
+                            type="info"
+                            showIcon
+                            style={{ marginTop: 8 }}
+                            message="Counted on this batch, deliberately not posted to Tally"
+                            description={
+                                <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                                    {(preview.withheld ?? []).map((line) => (
+                                        <li key={`${line.kind}-${line.item ?? ''}`}>
+                                            <Typography.Text strong>
+                                                {line.item ?? line.kind}: {line.quantity} {line.unit}
+                                            </Typography.Text>{' '}
+                                            — {line.reason}
+                                        </li>
+                                    ))}
+                                </ul>
+                            }
+                        />
+                    )}
+                    {/* The quiet sentences. MINUS anything the withheld list
+                        above already said in full: VoucherPreviewService::notes()
+                        copies the scrap entry's whole `reason` into `notes` —
+                        it predates anything rendering `withheld`, and
+                        BatchVoucherShapeTest pins it there — so printing both
+                        lists verbatim shows the accountant that entire
+                        paragraph twice, back to back. Filtered here rather
+                        than dropped on the server because the note is the
+                        older, tested contract; the tape note is unaffected, it
+                        is a short pointer AT the withheld line rather than a
+                        copy of it. */}
+                    {(() => {
+                        const reasons = new Set((preview.withheld ?? []).map((line) => line.reason));
+                        const notes = (preview.notes ?? []).filter((note) => !reasons.has(note));
+
+                        return notes.length === 0 ? null : (
+                            <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+                                {notes.map((note) => (
+                                    <li key={note}>
+                                        <Typography.Text type="secondary">{note}</Typography.Text>
+                                    </li>
+                                ))}
+                            </ul>
+                        );
+                    })()}
                 </>
             )}
         </>
     );
+}
+
+/**
+ * WHAT HAS BEEN DONE TO THIS BATCH SINCE IT WAS COMPLETED — quality's returns
+ * and the floor's own corrections, in the order they happened.
+ *
+ * The approver signs figures that may be the SECOND or third set this batch
+ * has carried, and until now nothing on this page said so: a batch quality
+ * sent back at 22:10 and the supervisor re-entered at 22:40 arrived at the PM
+ * looking exactly like one that was right the first time. The reason quality
+ * gave is the single most useful sentence on the drawer for deciding whether
+ * to sign, and it was being shown to nobody.
+ *
+ * A QUIET TIMELINE, deliberately. This is context for a decision, not an
+ * incident report — most batches render nothing here at all (the section
+ * returns null), and the ones that do get one line per event.
+ *
+ * NAMES ARE BEST-EFFORT. The snapshot stores users.id and the resource does
+ * not resolve them; `userNames` is filled from /users, which a Plant Manager
+ * login may not be allowed to read. When the name is missing the line simply
+ * omits it — "user #7" is noise, and the WHEN and WHY are what is being read.
+ */
+function CorrectionHistorySection({
+    row,
+    userNames,
+}: {
+    row: ShiftProductionEntry;
+    userNames: Map<number, string>;
+}) {
+    const correction = readCorrection(row);
+    const returns = correction?.returns ?? [];
+    const amendments = correction?.amendments ?? [];
+
+    if (returns.length === 0 && amendments.length === 0) return null;
+
+    const who = (id: number | null | undefined): string | null => {
+        if (id === null || id === undefined) return null;
+        return userNames.get(id) ?? null;
+    };
+    const when = (at: string | null | undefined): string | null =>
+        at ? dayjs(at).format('DD MMM YYYY HH:mm') : null;
+
+    type Event = {
+        key: string;
+        kind: 'return' | 'amendment';
+        at: string | null;
+        by: string | null;
+        reason: string | null;
+        note: string | null;
+    };
+
+    const events: Event[] = [
+        ...returns.map((entry, index): Event => ({
+            key: `return-${index}`,
+            kind: 'return',
+            at: entry.returned_at ?? null,
+            by: who(entry.returned_by),
+            reason: (entry.reason ?? '').trim() === '' ? null : entry.reason,
+            note: entry.cleared_quality_check ? 'The quality check recorded before this was unwound with it.' : null,
+        })),
+        ...amendments.map((entry, index): Event => {
+            // A decimal string off the snapshot ("2400.0000"). Shown as a
+            // piece count, because that is what it is — the raw four decimal
+            // places read as a weight and this figure is bottles.
+            const previous = (entry.previous_quantity_produced ?? '').trim();
+            const previousNumber = previous === '' ? NaN : Number(previous);
+            const previousShown = Number.isFinite(previousNumber)
+                ? previousNumber.toLocaleString('en-IN')
+                : previous;
+            return {
+                key: `amendment-${index}`,
+                kind: 'amendment',
+                at: entry.amended_at ?? null,
+                by: who(entry.amended_by),
+                reason: (entry.reason ?? '').trim() === '' ? null : (entry.reason ?? null),
+                // The movement, not just the final figure — "produced read
+                // 2,400 before this" is what makes a correction checkable.
+                note: previous === '' ? null : `Produced read ${previousShown} before this correction.`,
+            };
+        }),
+    ]
+        // Time order, with anything undated last: a snapshot written by an
+        // older backend has no timestamp, and guessing one would put it in a
+        // position it cannot be defended in.
+        .sort((a, b) => {
+            if (a.at === null && b.at === null) return 0;
+            if (a.at === null) return 1;
+            if (b.at === null) return -1;
+            return dayjs(a.at).valueOf() - dayjs(b.at).valueOf();
+        });
+
+    return (
+        <>
+            <Typography.Title level={5} style={{ marginTop: 16 }}>
+                What happened to this batch
+            </Typography.Title>
+            <Timeline
+                style={{ marginTop: 8 }}
+                items={events.map((event) => ({
+                    key: event.key,
+                    color: event.kind === 'return' ? 'red' : 'blue',
+                    children: (
+                        <Space direction="vertical" size={0}>
+                            <Typography.Text strong style={{ fontSize: 13 }}>
+                                {event.kind === 'return' ? 'Quality sent it back' : 'The floor corrected its figures'}
+                            </Typography.Text>
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                {[when(event.at), event.by].filter((part) => part !== null).join(' · ') || 'time not recorded'}
+                            </Typography.Text>
+                            {event.reason !== null && (
+                                <Typography.Text style={{ fontSize: 12 }}>“{event.reason}”</Typography.Text>
+                            )}
+                            {event.note !== null && (
+                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                    {event.note}
+                                </Typography.Text>
+                            )}
+                            {event.reason === null && event.kind === 'return' && (
+                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                    No reason was recorded.
+                                </Typography.Text>
+                            )}
+                        </Space>
+                    ),
+                }))}
+            />
+        </>
+    );
+}
+
+/**
+ * THE REAL FINAL PACKING OF THE APPROVED QUANTITY — full cartons, full trays,
+ * and the one part-filled tray a quality rejection leaves behind.
+ *
+ * WHY IT IS NOT THE ENTERED PACKING. The counts the supervisor typed record
+ * what physically left the floor, gross. Quality then rejects pieces out of
+ * that, and the approved quantity no longer divides into whole trays: 2,154
+ * approved at 120 per tray is 17 full trays and one tray of 114. Printing only
+ * the entered "18 trays" beside an approved 2,154 asks the approver to do that
+ * division in their head, and printing only the cartons reads short of the
+ * approved count by a tray's worth.
+ *
+ * PRECONDITIONS COPIED FROM looseTraysOver, and for the same reason: cartons
+ * must be a whole number of trays (`perBox % perTray`), or the figures belong
+ * to a multi-mode run where the carton count spans modes the tray count does
+ * not — and this decomposition would then be arithmetic on two different
+ * things.
+ *
+ * TWO MODES, NEVER BOTH AT ONCE. A pouch-packed run decomposes into pouches
+ * the same way; a run that recorded BOTH pouches and cartons is refused
+ * outright, because nothing recorded says how many of the approved pieces went
+ * down each route and every division would be against the wrong denominator.
+ *
+ * Returns null whenever it cannot be certain, and the drawer then shows
+ * exactly what it always showed.
+ */
+type FinalPacking =
+    | {
+          mode: 'tray';
+          approved: number;
+          cartons: number;
+          trays: number;
+          partialTray: number;
+          perTray: number;
+          perBox: number;
+      }
+    | { mode: 'pouch'; approved: number; pouches: number; loose: number; perPouch: number };
+
+function finalPackingAfterQuality(row: ShiftProductionEntry): FinalPacking | null {
+    // The APPROVED figure, read off the server's own net — never
+    // quantity_produced minus the rejected count, which subtracts twice.
+    const approved = netProducedPieces(row);
+    if (approved === null || approved <= 0) return null;
+
+    const packedInCartons = (row.no_of_box ?? 0) > 0 || (row.no_of_trays ?? 0) > 0;
+    const packedInPouches = (row.no_of_pouches ?? 0) > 0;
+
+    // A MULTI-MODE RUN: some of the approved pieces went into pouches and
+    // some into trays, and nothing recorded says how many of each. Every
+    // decomposition below would be arithmetic on the wrong denominator, so
+    // the drawer says nothing and shows exactly what it always showed.
+    if (packedInCartons && packedInPouches) return null;
+
+    // PIECES RECORDED OUTSIDE THE PACK HIERARCHY. `loose_pieces` exists
+    // because a run genuinely can ship pieces in no tray and no pouch, and a
+    // remainder printed as "1 pouch of 14" would then assert a pouch that was
+    // never filled. Checked for BOTH modes, ahead of the split: the remainder
+    // this function computes is only a part-pack when nothing was loose.
+    if ((row.loose_pieces ?? 0) > 0) return null;
+
+    if (packedInPouches) {
+        const perPouch = row.item?.nos_per_pouch;
+        if (!perPouch || perPouch < 1) return null;
+        const pouches = Math.floor(approved / perPouch);
+        return { mode: 'pouch', approved, pouches, loose: approved - pouches * perPouch, perPouch };
+    }
+
+    if (!packedInCartons) return null;
+
+    const perTray = row.nos_per_tray;
+    const perBox = row.nos_per_box;
+    if (!perTray || perTray < 1 || !perBox || perBox < 1) return null;
+    if (perBox % perTray !== 0) return null;
+
+    const cartons = Math.floor(approved / perBox);
+    const afterCartons = approved - cartons * perBox;
+    const trays = Math.floor(afterCartons / perTray);
+
+    return {
+        mode: 'tray',
+        approved,
+        cartons,
+        trays,
+        partialTray: afterCartons - trays * perTray,
+        perTray,
+        perBox,
+    };
 }
 
 /**
@@ -853,6 +1130,10 @@ export default function ApproveProductionPage() {
     const detailLooseTrays = detailRow === null ? null : looseTraysOver(detailRow);
     // Quality reduced the produced figure but not the packing counts.
     const detailQualityRejected = (readQuality(detailRow)?.rejected_nos ?? 0) > 0;
+    // What the approved quantity actually packs into once quality has taken
+    // its rejects out. Null unless every figure needed is present and
+    // unambiguous — see finalPackingAfterQuality.
+    const detailFinalPacking = detailRow === null ? null : finalPackingAfterQuality(detailRow);
 
     // ------------------------------------------------------------------
     // Detail-drawer context. All three are READ-ONLY endpoints — opening the
@@ -869,6 +1150,22 @@ export default function ApproveProductionPage() {
         queryFn: listMachineDowntimeLogs,
         enabled: detailRow !== null,
     });
+
+    // Names for the correction trail. The snapshot stores users.id only, and
+    // this list is what turns those into people. `retry: false` and a graceful
+    // empty map because an approver login may have no user-admin rights: a
+    // 403 here must cost the timeline its names, never the drawer.
+    const { data: users } = useQuery({
+        queryKey: ['access', 'users', 'approval-trail'],
+        queryFn: listUsers,
+        retry: false,
+        enabled: detailRow !== null,
+        staleTime: 5 * 60 * 1000,
+    });
+    const userNames = useMemo(
+        () => new Map((users?.data ?? []).map((u) => [u.id, u.name] as const)),
+        [users],
+    );
 
     // The traceability report keys off the LOT's received date, not the
     // batch's, so the window reaches back the report's full 92-day cap —
@@ -1119,6 +1416,53 @@ export default function ApproveProductionPage() {
                                         Packing counts show what was packed (gross); produced is net of quality rejection.
                                     </Typography.Text>
                                 )}
+                                {/* WHAT THE APPROVED QUANTITY ACTUALLY PACKS INTO.
+                                    Only once quality has taken pieces out — before
+                                    that it is the entered packing, said twice. The
+                                    part-filled tray is the whole point: it is where
+                                    the rejected pieces came from, and it is the
+                                    figure nobody can work out from the line above
+                                    without dividing in their head. */}
+                                {detailQualityRejected && detailFinalPacking && (
+                                    <div style={{ marginTop: 6 }}>
+                                        <Typography.Text strong style={{ display: 'block', fontSize: 12 }}>
+                                            Final packing of the {detailFinalPacking.approved.toLocaleString('en-IN')}{' '}
+                                            approved:{' '}
+                                            {detailFinalPacking.mode === 'tray' ? (
+                                                <>
+                                                    {detailFinalPacking.cartons} full{' '}
+                                                    {detailFinalPacking.cartons === 1 ? 'carton' : 'cartons'} ·{' '}
+                                                    {detailFinalPacking.trays} full{' '}
+                                                    {detailFinalPacking.trays === 1 ? 'tray' : 'trays'}
+                                                    {detailFinalPacking.partialTray > 0
+                                                        ? ` · 1 tray of ${detailFinalPacking.partialTray}`
+                                                        : ''}
+                                                </>
+                                            ) : (
+                                                <>
+                                                    {detailFinalPacking.pouches} full{' '}
+                                                    {detailFinalPacking.pouches === 1 ? 'pouch' : 'pouches'}
+                                                    {detailFinalPacking.loose > 0
+                                                        ? ` · 1 pouch of ${detailFinalPacking.loose}`
+                                                        : ''}
+                                                </>
+                                            )}
+                                        </Typography.Text>
+                                        {/* The one caption that keeps the two sets of
+                                            figures from looking like a contradiction:
+                                            a rejection does not put a carton back in
+                                            the store, so the consumption lines below
+                                            are unchanged and correct. */}
+                                        <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                                            Worked out at{' '}
+                                            {detailFinalPacking.mode === 'tray'
+                                                ? `${detailFinalPacking.perBox}/carton and ${detailFinalPacking.perTray}/tray`
+                                                : `${detailFinalPacking.perPouch}/pouch`}
+                                            . The material consumption lines below still show the packaging actually used
+                                            on the floor — a quality rejection does not put a carton back in the store.
+                                        </Typography.Text>
+                                    </div>
+                                )}
                             </Descriptions.Item>
                             <Descriptions.Item label="Operator">{detailRow.operator?.name ?? '—'}</Descriptions.Item>
                             <Descriptions.Item label="Notes">{detailRow.notes ?? '—'}</Descriptions.Item>
@@ -1139,6 +1483,13 @@ export default function ApproveProductionPage() {
                                 <Descriptions.Item label="Rejected Because">{detailRow.rejection_reason}</Descriptions.Item>
                             )}
                         </Descriptions>
+
+                        {/* WHY THESE FIGURES MAY NOT BE THE FIRST SET. Directly
+                            under the figures themselves, so quality's reason and
+                            the correction that answered it are read with the
+                            numbers still on screen. Renders nothing at all on the
+                            ordinary batch that was right first time. */}
+                        <CorrectionHistorySection row={detailRow} userNames={userNames} />
 
                         {/* Expected vs actual first: it is the question both
                             approvers are actually answering. The sections
@@ -1187,9 +1538,9 @@ export default function ApproveProductionPage() {
                                     <Typography.Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
                                         Consumed on these lines: {fmtKg(detailRow.metrics.issued_kg)} kg of material counted in
                                         kg — resin consumption is calculated as production + rejection + lumps, not weighed out
-                                        per machine. Whether any material is actually missing is checked once a day on the{' '}
-                                        <Link to="/production/day-bin">Factory Day Bin</Link>, against a physical count of the
-                                        bin.
+                                        per machine. Whether a machine has burnt material nobody scanned in shows up on the{' '}
+                                        <Link to="/production/day-bin">Day Bin</Link> page, as an estimated remaining that has
+                                        gone negative.
                                     </Typography.Text>
                                 )}
                             </>

@@ -360,15 +360,18 @@ Route::prefix('v1')->group(function () {
             // with their current store kg. Plain masters+balances read —
             // like the bin read above, never traceability-gated.
             Route::get('factory-day-bin/raw-materials', [FactoryDayBinController::class, 'rawMaterials']);
-            // The day-bin reconciliation for one date (?date=YYYY-MM-DD,
-            // today when absent): per material opening + loaded − consumed
-            // = expected closing. This is where "is any material missing?"
-            // is now asked — centrally, once a day — instead of per batch,
-            // where the figure was ~0 by construction. Past dates included:
-            // yesterday's numbers are the accountant's morning question.
-            // Plain movements+balances read, so outside the traceability
-            // gate like its two neighbours above.
-            Route::get('factory-day-bin/reconciliation', [FactoryDayBinController::class, 'reconciliation']);
+            // ESTIMATED RESIN REMAINING PER MACHINE (optional
+            // ?work_center_id=): scanned loads into that machine minus the
+            // calculated consumption of its batches, per material, all time.
+            // This is where "how much is left on that machine?" is answered.
+            //
+            // It REPLACED factory-day-bin/reconciliation, which compared a
+            // derived expected closing against a physical bin weight — the
+            // owner has since ruled that this factory takes no such weight
+            // (31-Jul), so the read asked a question nobody answers. Plain
+            // ledger+consumption read, so outside the traceability gate like
+            // its two neighbours above.
+            Route::get('machine-resin', [FactoryDayBinController::class, 'machineResin']);
             Route::apiResource('work-centers', WorkCenterController::class)->only(['index', 'store', 'update']);
 
             Route::apiResource('boms', BomController::class)->only(['index', 'store']);

@@ -15,12 +15,15 @@ use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
 use App\Modules\Production\Models\Enums\ShiftScrapType;
 use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
+use App\Modules\Production\Models\ShiftScrap;
 use App\Modules\Production\Models\WorkCenter;
+use App\Modules\TallySync\Services\VoucherPreviewService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Fast shop-floor capture, modeled as a batch lifecycle rather than a
@@ -51,6 +54,11 @@ class ShiftProductionEntryService
         // Answers "which warehouse" so the floor is never asked — see the
         // class docblock on FactoryWarehouseResolver.
         private readonly FactoryWarehouseResolver $factoryWarehouses,
+        // What Tally would refuse, asked before the approval that posts.
+        // A cross-module READ through the other module's service, which is
+        // the rule (CLAUDE.md) — TallySync owns the voucher shape and
+        // nothing about it is duplicated here.
+        private readonly VoucherPreviewService $voucherPreview,
     ) {}
 
     public function paginate(int $perPage = 20, ?ShiftProductionEntryStatus $status = null): LengthAwarePaginator
@@ -675,6 +683,10 @@ class ShiftProductionEntryService
                 );
             }
 
+            // BEFORE ANY MUTATION: refuse a correction that moved the counts
+            // and left the material kg exactly as they were.
+            $this->refuseStaleMaterialLines($entry, $row, $data);
+
             $this->reverseCompletionEffects($entry, $row, $amendedBy);
 
             // The amendment trail, and the shortfall record the wrong
@@ -731,6 +743,227 @@ class ShiftProductionEntryService
 
             return $this->completeBatch($entry->refresh(), $data, $amendedBy);
         });
+    }
+
+    /**
+     * THE STALE-AMENDMENT REFUSAL — the browser smoke test's bug, made
+     * impossible to submit.
+     *
+     * WHAT WENT WRONG. The correction drawer opens with the stored material
+     * kg already in the boxes and LATCHES them, so the resin estimator does
+     * not overwrite a figure the store actually weighed out. Correct on its
+     * own. But a supervisor then fixes the piece count, watches every derived
+     * number on the panel move — good kg, rejection kg, the calculated resin
+     * total — and submits. The resin line that posts is the OLD one. The
+     * screen showed one arithmetic and the batch got another, and nothing
+     * anywhere said so.
+     *
+     * THE CHOICE MADE HERE: REFUSE, DO NOT RECOMPUTE. This module is
+     * advisory-by-construction — completeBatch stores exactly the
+     * material_consumptions rows it was handed, and every suggestion service
+     * in it carries a docblock swearing it never reaches a stored figure
+     * (RunMaterialSuggestionService, MasterbatchDosingService). A server that
+     * quietly replaced the submitted kg with its own would break that
+     * invariant to fix a client bug, and would then be inventing consumption
+     * figures on a shift nobody could audit. So the submitted figure stays
+     * the figure — but a correction whose material lines did not move while
+     * its output did is sent back with both numbers named, and the supervisor
+     * decides which one is true. That is the choice they were never given.
+     *
+     * IT FIRES ONLY ON THE EXACT SHAPE OF THE BUG, which is why it is a delta
+     * and not an absolute check:
+     *
+     *   - the output moved: (produced + rejected) pieces × the run's frozen
+     *     unit weight, plus lumps kg, differs from the stored figures by at
+     *     least production.tolerances.amend_material_drift_kg; AND
+     *   - the material lines did not: the submitted kg-family total equals
+     *     the stored kg-family total to the same tolerance.
+     *
+     * Comparing TOTALS rather than hunting for "the resin line" is deliberate
+     * and is what makes this safe. Masterbatch, and every other material,
+     * sits on both sides of the comparison and cancels — so nothing has to
+     * identify which line is which, and no name pattern or suggestion service
+     * (which answers null on ambiguity, and would silently stop guarding) is
+     * involved.
+     *
+     * DELIBERATELY AMEND-ONLY. A first completion has no previous state to
+     * have gone stale against, and gating one would be a floor-wide change to
+     * the path every shift runs through.
+     *
+     * THE ESCAPE HATCH is material_kg_confirmed: a weighed figure that
+     * genuinely did not change (the store issued 130 kg; the supervisor is
+     * fixing a piece miscount, not the material) is submitted again with that
+     * flag and goes through untouched. Until the drawer sends it, this case
+     * is a hard 422 — deliberate, on a frozen deploy, because the alternative
+     * is the silent wrong figure this exists to stop.
+     *
+     * @param  array<string, mixed>  $data  the amend payload
+     *
+     * @throws ValidationException 422 naming both figures
+     */
+    private function refuseStaleMaterialLines(ShiftProductionEntry $entry, ShiftProductionEntry $row, array $data): void
+    {
+        // filter_var, not === true: the 'boolean' rule VALIDATES the shape it
+        // accepts (true, 1, "1", "true", and their false twins) without
+        // casting it, so a strict comparison here would quietly re-refuse an
+        // amendment a supervisor had already confirmed — with a message
+        // telling them to confirm it.
+        if (filter_var($data['material_kg_confirmed'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
+            return;
+        }
+
+        $row->loadMissing([
+            'scraps',
+            // withTrashed for the same reason every other kg roll-up does it:
+            // a soft-deleted master must not lose its UOM and silently drop
+            // out of (or into) a kilogram sum.
+            'materialConsumptions.item' => fn ($query) => $query->withTrashed(),
+        ]);
+
+        // Nothing stored to have gone stale — a completion that issued no
+        // material has no figure to keep by mistake.
+        $storedMass = $this->consumedMassKg($row);
+        if (bccomp($storedMass, '0', 4) !== 1) {
+            return;
+        }
+
+        $tolerance = (string) config('production.tolerances.amend_material_drift_kg', 0.5);
+
+        // The pieces side of the formula, in kg. Rejected pieces are part of
+        // it because they were moulded from the same resin — the owner's
+        // arithmetic, unchanged: (packed pieces sent to QC + production
+        // rejected pieces) × standard weight + lumps.
+        $piecesBefore = bcadd(
+            (string) ($row->quantity_produced ?? '0'),
+            (string) ($row->quantity_scrap ?? '0'),
+            4,
+        );
+        $piecesAfter = bcadd(
+            (string) ($data['quantity_produced'] ?? '0'),
+            (string) ($data['quantity_scrap'] ?? '0'),
+            4,
+        );
+        $pieceDelta = bcsub($piecesAfter, $piecesBefore, 4);
+
+        $grams = $this->resolvedUnitWeightGrams($entry, Item::query()->find($entry->item_id));
+
+        // No resolved weight means the pieces cannot be turned into kg at
+        // all, so a changed count cannot be judged — say nothing rather than
+        // guess. (The lumps half below is still in kg and still judged.)
+        if ($grams === null && bccomp($pieceDelta, '0', 4) !== 0) {
+            return;
+        }
+
+        $pieceMassDelta = $grams !== null
+            ? bcdiv(bcmul($pieceDelta, $grams, 4), '1000', 4)
+            : '0.0000';
+
+        $lumpsDelta = bcsub(
+            $this->lumpsKgOfLines($data['scraps'] ?? []),
+            $this->lumpsKgOfScraps($row->scraps),
+            4,
+        );
+
+        $outputDelta = bcadd($pieceMassDelta, $lumpsDelta, 4);
+
+        // The output barely moved — this is a typo fix, not a recount.
+        if (bccomp($this->bcAbs($outputDelta), $tolerance, 4) !== 1) {
+            return;
+        }
+
+        $submittedMass = $this->massOfSubmittedLines($data['material_consumptions'] ?? []);
+
+        // The material lines DID move — the supervisor made a choice about
+        // them, whatever it was, and this method has no opinion on it.
+        if (bccomp($this->bcAbs(bcsub($submittedMass, $storedMass, 4)), $tolerance, 4) === 1) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'material_consumptions' => sprintf(
+                'The counts changed but the material kilograms did not. The corrected counts work out to %s kg '
+                .'of material, and the form still carries %s kg — the figure the first completion had. '
+                .'Check the resin and masterbatch rows against the new counts, or send it again confirming '
+                .'the kilograms are right as typed if that is genuinely what the store issued.',
+                bcadd($storedMass, $outputDelta, 4),
+                $submittedMass,
+            ),
+        ]);
+    }
+
+    /**
+     * The kg-family total of a SUBMITTED consumption payload, by exactly the
+     * rule consumedMassKg() applies to stored rows — including its fail-safe
+     * direction, where an item with a blank or unknown UOM is COUNTED. The
+     * two sides of the comparison must be measured the same way or the
+     * guard's own arithmetic would manufacture a difference.
+     *
+     * @param  array<int, array{item_id?: mixed, quantity_issued_kg?: mixed}>  $lines
+     */
+    private function massOfSubmittedLines(array $lines): string
+    {
+        $total = '0.0000';
+
+        foreach ($lines as $line) {
+            if (! is_array($line) || ! isset($line['item_id'])) {
+                continue;
+            }
+
+            $uom = Item::withTrashed()->find($line['item_id'])?->uom;
+            if ($uom !== null && trim($uom) !== '' && ! $this->isMassUom($uom)) {
+                continue;
+            }
+
+            $total = bcadd($total, (string) ($line['quantity_issued_kg'] ?? '0'), 4);
+        }
+
+        return $total;
+    }
+
+    /**
+     * Lumps kg out of a submitted scraps payload. Lumps are weighed, never
+     * counted, so only quantity_kg is read.
+     *
+     * @param  array<int, array{type?: mixed, quantity_kg?: mixed}>  $lines
+     */
+    private function lumpsKgOfLines(array $lines): string
+    {
+        $total = '0.0000';
+
+        foreach ($lines as $line) {
+            if (! is_array($line) || ($line['type'] ?? null) !== ShiftScrapType::Lumps->value) {
+                continue;
+            }
+
+            $total = bcadd($total, (string) ($line['quantity_kg'] ?? '0'), 4);
+        }
+
+        return $total;
+    }
+
+    /**
+     * Lumps kg off stored scrap rows — the same sum productionMetrics()
+     * takes, kept here so the guard reads the stored side identically.
+     *
+     * @param  iterable<int, ShiftScrap>  $scraps
+     */
+    private function lumpsKgOfScraps(iterable $scraps): string
+    {
+        $total = '0.0000';
+
+        foreach ($scraps as $scrap) {
+            if ($scrap->type === ShiftScrapType::Lumps && $scrap->quantity_kg !== null) {
+                $total = bcadd($total, (string) $scrap->quantity_kg, 4);
+            }
+        }
+
+        return $total;
+    }
+
+    /** |value| at 4dp, without going through a float. */
+    private function bcAbs(string $value): string
+    {
+        return bccomp($value, '0', 4) === -1 ? bcsub('0', $value, 4) : bcadd($value, '0', 4);
     }
 
     /**
@@ -1897,6 +2130,51 @@ class ShiftProductionEntryService
             // accountant being told why the button did nothing, and the
             // reason is not a status problem.
             throw new InvalidStatusTransitionException('the same person cannot give both approvals');
+        }
+
+        // THE POSTING GATE'S OWN PRECONDITION (config, default off — see
+        // config/production.php 'require_postable_voucher' for why the
+        // default is a safety property rather than a preference).
+        //
+        // The owner: "If the Tally preview is invalid, posting must remain
+        // unavailable." This gate IS the posting moment, so the question is
+        // asked here, of the EXISTING preview service — which builds its
+        // payload with the same method the real post uses, so the gate can
+        // never judge a voucher different from the one that would be sent.
+        //
+        // Scoped to a row genuinely awaiting this gate, exactly like the
+        // four-eyes read above: a wrong-status call finds null here and falls
+        // through to advance(), which reports the real problem (the
+        // transition) rather than a voucher complaint about an entry that was
+        // never eligible. A LOCAL- fixture is exempt because no voucher is
+        // ever built for it (TallySyncService::isLocalFixtureEntry) — there
+        // is no posting for a posting gate to protect, and refusing would
+        // strand a real batch.
+        if ((bool) config('production.approvals.require_postable_voucher', false)) {
+            $awaiting = ShiftProductionEntry::query()
+                ->whereKey($entry->id)
+                ->where('status', ShiftProductionEntryStatus::PmApproved->value)
+                ->first();
+
+            if ($awaiting !== null && ! ($awaiting->item?->isLocalFixture() ?? false)) {
+                $preview = $this->voucherPreview->forShiftProductionEntry($awaiting);
+
+                if (! ($preview['postable'] ?? false)) {
+                    $problems = array_merge(
+                        $preview['problems'] ?? [],
+                        ...array_map(fn ($line) => $line['problems'] ?? [], $preview['lines'] ?? []),
+                    );
+
+                    // Factory words, and the actual reasons — an accountant
+                    // being told the button did nothing needs to know which
+                    // master to fix, not that a boolean was false.
+                    throw new InvalidStatusTransitionException(
+                        'this batch cannot be posted to Tally yet, so it cannot be approved: '
+                        .implode(' ', array_unique($problems))
+                        .' Fix the masters (or the Production settings they name) and approve it again.',
+                    );
+                }
+            }
         }
 
         // Optional hard gate (config, default off): an unaccounted-material

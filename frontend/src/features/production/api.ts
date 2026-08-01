@@ -17,8 +17,8 @@ import type {
     EntryDayBinSummary,
     FactoryDayBin,
     FactoryDayBinLoadResult,
-    FactoryDayBinReconciliation,
     MachineDowntimeLog,
+    MachineResinEstimate,
     MaterialBag,
     MaterialBagStatus,
     MasterbatchDosing,
@@ -657,10 +657,26 @@ export async function completeBatch(id: number, payload: CompleteBatchPayload): 
  * `amendment_reason` is optional by the backend's own rule: a supervisor
  * fixing their own typo, on their own batch, before anyone else has seen it,
  * is not asked to justify it. Who amended and when are recorded regardless.
+ *
+ * `material_kg_confirmed` IS THE ESCAPE HATCH FOR ONE SPECIFIC REFUSAL, and it
+ * exists on this endpoint alone. The drawer opens with the previously issued
+ * material kg already in its boxes and latches them, so a supervisor can move
+ * the piece counts and submit the OLD kilograms beside them — the screen shows
+ * one arithmetic and the batch gets another. The server refuses exactly that
+ * shape (ShiftProductionEntryService::refuseStaleMaterialLines) with a 422 on
+ * `errors.material_consumptions` naming both figures, and its message ends
+ * "send it again confirming the kilograms are right as typed if that is
+ * genuinely what the store issued". THIS FLAG IS HOW IT IS SENT AGAIN. Without
+ * it the refusal has no answer and a genuinely weighed figure — the store
+ * issued 130 kg, the supervisor is fixing a piece miscount, not the material —
+ * is permanently blocked.
+ *
+ * Never send it unprompted: it is an answer to a refusal that already
+ * happened, not a default. The drawer only offers the checkbox after the 422.
  */
 export async function amendBatch(
     id: number,
-    payload: CompleteBatchPayload & { amendment_reason?: string },
+    payload: CompleteBatchPayload & { amendment_reason?: string; material_kg_confirmed?: boolean },
 ): Promise<ShiftProductionEntry> {
     const { data } = await api.post<{ data: ShiftProductionEntry }>(
         `/production/shift-production-entries/${id}/amend`,
@@ -977,16 +993,25 @@ export async function loadDayBin(payload: LoadDayBinPayload): Promise<DayBinMove
 }
 
 /**
- * The Shift Floor's CENTRAL load — POST /production/day-bin/load-bag. One
- * scan point for every machine: the bag's kg moves store → the factory
- * day-bin WAREHOUSE (FactoryDayBin), never a per-machine ledger — that is
- * what loadDayBin above is for. When no day-bin warehouse is configured yet
- * the backend answers 422 with `errors.day_bin` and a message saying so
- * (the Day Bin page names the warehouse).
+ * The Shift Floor's bag load — POST /production/day-bin/load-bag. The bag's
+ * kg move store → the internal WIP WAREHOUSE (FactoryDayBin) and are
+ * attributed to the machine they were emptied into. When no day-bin
+ * warehouse is configured yet the backend answers 422 with `errors.day_bin`
+ * and a message saying so (the Day Bin page names the warehouse).
  */
 export interface FactoryDayBinLoadPayload {
     /** The scanned bag barcode. */
     barcode: string;
+    /**
+     * THE MACHINE THE BAG WAS LOADED INTO — required, by the owner's ruling
+     * (31-Jul): "Scanning a bag means material was loaded into the selected
+     * machine." Required in this type and not merely on the server, so a
+     * surface that forgets to ask fails to compile rather than posting an
+     * unattributed load — one of those silently overstates the estimated
+     * remaining of every machine except the one that actually burnt the kg,
+     * and no screen would say so.
+     */
+    work_center_id: number;
     /**
      * Kg to move — prefilled with the bag's whole remaining_kg, lowered for
      * a part bag. (The backend also treats an ABSENT value as "whole bag",
@@ -1346,23 +1371,26 @@ export async function getFactoryDayBin(): Promise<FactoryDayBin> {
 }
 
 /**
- * The day bin's reconciliation for ONE date: per material, opening + loaded
- * − consumed = expected closing. This is the central "is any material
- * missing?" check that replaced the per-batch unaccounted figure.
+ * ESTIMATED RESIN REMAINING PER MACHINE — per machine, per material: what was
+ * scanned in, what the batches calculated out, and what should therefore
+ * still be on it.
  *
- * `date` MUST be 'YYYY-MM-DD'. The server round-trips it through that exact
- * format and 422s on anything else, so a raw ISO timestamp is rejected —
- * always hand it a `dayjs(...).format('YYYY-MM-DD')`. Omitted means today.
+ * This REPLACED getFactoryDayBinReconciliation(), which asked the server for
+ * an expected closing so a person could weigh the bin and disagree with it.
+ * The owner (31-Jul) ruled that this factory takes no such weight, so both
+ * the endpoint and the read are gone — not left on screen looking answerable.
  *
- * Past dates are first-class: yesterday's figures are the accountant's
- * morning question, and the server derives opening by rolling the ledger
- * back rather than reading a historical balance it does not store.
+ * `workCenterId` narrows it to one machine; the server VALIDATES it (422 on
+ * an unknown id) rather than quietly widening to every machine, so a bad id
+ * is never answered with a confident wrong page.
+ *
+ * AN EMPTY ARRAY IS A REAL ANSWER and means "nothing has been scanned into
+ * any machine yet" — never "the machines are empty". See MachineResinEstimate.
  */
-export async function getFactoryDayBinReconciliation(date?: string): Promise<FactoryDayBinReconciliation> {
-    const { data } = await api.get<{ data: FactoryDayBinReconciliation }>(
-        '/production/factory-day-bin/reconciliation',
-        { params: date ? { date } : undefined },
-    );
+export async function getMachineResinEstimates(workCenterId?: number | null): Promise<MachineResinEstimate[]> {
+    const { data } = await api.get<{ data: MachineResinEstimate[] }>('/production/machine-resin', {
+        params: workCenterId != null ? { work_center_id: workCenterId } : undefined,
+    });
     return data.data;
 }
 
@@ -1389,9 +1417,32 @@ export async function setDayBinWarehouse(warehouseId: number | null): Promise<nu
 export interface FactoryWarehouseSettings {
     finished_goods_warehouse_id: number | null;
     raw_material_warehouse_id: number | null;
+    /**
+     * The PACKING MATERIAL STORE — cartons, trays, film pouches, tape.
+     *
+     * The one role with NO FALLBACK, deliberately: a factory with a single
+     * Tally godown genuinely has nothing to choose between for resin or
+     * bottles, but a Packing Material Store is a SECOND named place, and the
+     * whole reason the owner named it separately is that cartons do not come
+     * out of the resin store. So `packing_material_resolved_warehouse_id` is
+     * always the same figure as the configured one, and when it is null the
+     * Tally preview names the gap instead of posting somewhere plausible.
+     * Nothing in the production path refuses a shift over it — the shift is
+     * real and gets recorded; it is the POSTING that waits.
+     *
+     * Optional: a backend that predates the role sends neither key.
+     */
+    packing_material_warehouse_id?: number | null;
     finished_goods_resolved_warehouse_id: number | null;
     raw_material_resolved_warehouse_id: number | null;
+    packing_material_resolved_warehouse_id?: number | null;
 }
+
+/** The three warehouse roles the settings endpoint stores by name. */
+export type FactoryWarehouseRole =
+    | 'finished_goods_warehouse_id'
+    | 'raw_material_warehouse_id'
+    | 'packing_material_warehouse_id';
 
 export async function getFactoryWarehouseSettings(): Promise<FactoryWarehouseSettings> {
     const { data } = await api.get<{ data: FactoryWarehouseSettings }>('/production/settings');
@@ -1399,7 +1450,7 @@ export async function getFactoryWarehouseSettings(): Promise<FactoryWarehouseSet
 }
 
 export async function setFactoryWarehouse(
-    role: 'finished_goods_warehouse_id' | 'raw_material_warehouse_id',
+    role: FactoryWarehouseRole,
     warehouseId: number | null,
 ): Promise<FactoryWarehouseSettings> {
     const { data } = await api.put<{ data: FactoryWarehouseSettings }>(

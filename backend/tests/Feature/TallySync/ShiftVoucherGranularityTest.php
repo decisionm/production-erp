@@ -7,9 +7,11 @@ use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
+use App\Modules\Production\Models\PackingMaterialMapping;
 use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\WorkCenter;
+use App\Modules\Production\Services\FactoryWarehouseResolver;
 use App\Modules\Production\Services\ShiftProductionEntryService;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Services\TallySyncService;
@@ -268,5 +270,68 @@ class ShiftVoucherGranularityTest extends TestCase
         $this->assertSame('Manufacturing Journal', $voucher->tally_voucher_type);
         $this->assertSame("SPE-{$entry->id}", $voucher->payload['voucher_number']);
         $this->assertNull($entry->fresh()->tally_sync_entry_id);
+    }
+
+    /**
+     * THE PACKING SPLIT HOLDS ON THIS PATH TOO.
+     *
+     * The owner (30-Jul): "Raw materials from the agreed RM or machine-WIP
+     * location, packing materials from the Packing Material Store." Shift
+     * granularity is a SECOND payload builder feeding the same Tally, and the
+     * accountant's postable preview only ever evaluates the per-batch one — so
+     * a split that held only there would be silently absent from every voucher
+     * a factory running in shift mode actually posts.
+     */
+    public function test_packing_material_posts_out_of_the_packing_store_in_shift_mode_too(): void
+    {
+        config(['tally-sync.voucher_granularity' => 'shift']);
+
+        $packingStore = Warehouse::create(['code' => 'WH-PACK', 'name' => 'Packing Material Store']);
+        app(FactoryWarehouseResolver::class)->setPackingMaterialWarehouseId($packingStore->id);
+
+        $carton = Item::create(['sku' => 'BOX-170', 'name' => '170 Ml Master Box', 'uom' => 'NOS']);
+        PackingMaterialMapping::create([
+            'spec_kind' => PackingMaterialMapping::KIND_CARTON,
+            'spec_value' => '170ML',
+            'item_id' => $carton->id,
+        ]);
+
+        // Both lines are issued from the RM store as far as the ERP's own
+        // stock is concerned — the split is a VOUCHER-side routing decision,
+        // and that is exactly why it has to be asserted on the payload.
+        $this->approve($this->pendingEntry('5000', [
+            [$this->resin, '250.0000'],
+            [$carton, '13.0000'],
+        ], 'B-1'));
+
+        $godowns = collect(TallySyncEntry::query()->sole()->payload['consumed'])
+            ->mapWithKeys(fn ($line) => [$line['item'] => $line['godown']]);
+
+        $this->assertSame('RM Store', $godowns['PET Resin'], 'Resin keeps the store it was issued from.');
+        $this->assertSame('Packing Material Store', $godowns['170 Ml Master Box']);
+    }
+
+    /**
+     * And with no store named, a packing line is NOT silently redirected — it
+     * keeps the godown it was issued from, the same fail-visible behaviour the
+     * per-batch payload has (where the preview then refuses the post).
+     */
+    public function test_an_unnamed_packing_store_never_redirects_a_shift_line(): void
+    {
+        config(['tally-sync.voucher_granularity' => 'shift']);
+
+        $carton = Item::create(['sku' => 'BOX-170', 'name' => '170 Ml Master Box', 'uom' => 'NOS']);
+        PackingMaterialMapping::create([
+            'spec_kind' => PackingMaterialMapping::KIND_CARTON,
+            'spec_value' => '170ML',
+            'item_id' => $carton->id,
+        ]);
+
+        $this->approve($this->pendingEntry('5000', [[$carton, '13.0000']], 'B-1'));
+
+        $godowns = collect(TallySyncEntry::query()->sole()->payload['consumed'])
+            ->mapWithKeys(fn ($line) => [$line['item'] => $line['godown']]);
+
+        $this->assertSame('RM Store', $godowns['170 Ml Master Box']);
     }
 }
