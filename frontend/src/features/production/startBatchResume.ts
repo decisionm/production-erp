@@ -23,7 +23,11 @@ const draftSchema = z
         shift_id: positiveInteger,
         production_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
         item_id: positiveInteger,
-        warehouse_id: positiveInteger,
+        // The finished-goods store is resolved by the screen, never chosen by
+        // the supervisor — so it rides along only when the resolution had an
+        // answer. A missing store must not lock the Configure door: the drawer
+        // re-resolves it on return exactly as it does on a fresh open.
+        warehouse_id: optionalPositiveInteger,
         operator_id: optionalPositiveInteger,
         active_cavities: optionalPositiveInteger,
         standard_id: optionalPositiveInteger,
@@ -109,10 +113,10 @@ export function encodeStartBatchResume(
         shift_id: String(valid.shift_id),
         production_date: valid.production_date,
         item_id: String(valid.item_id),
-        warehouse_id: String(valid.warehouse_id),
     });
 
     if (outcome !== undefined) params.set('outcome', outcome);
+    if (valid.warehouse_id !== undefined) params.set('warehouse_id', String(valid.warehouse_id));
     if (valid.operator_id !== undefined) params.set('operator_id', String(valid.operator_id));
     if (valid.active_cavities !== undefined) params.set('active_cavities', String(valid.active_cavities));
     if (valid.standard_id !== undefined) params.set('standard_id', String(valid.standard_id));

@@ -1741,13 +1741,13 @@ export default function ShiftProductionEntryPage() {
         selectedStandardId
         ?? (batchPreview?.variants?.length === 1 ? batchPreview.variants[0].id : undefined);
     const startBatchRecipeDraft = useMemo<StartBatchResumeDraft | null>(() => {
-        if (!startingMachine || !effectiveShiftId || !startItemId || !startWarehouseId) return null;
+        if (!startingMachine || !effectiveShiftId || !startItemId) return null;
         return {
             machine_id: startingMachine.id,
             shift_id: effectiveShiftId,
             production_date: startProductionDate,
             item_id: startItemId,
-            warehouse_id: startWarehouseId,
+            warehouse_id: startWarehouseId ?? undefined,
             operator_id: startOperatorId,
             active_cavities: startActiveCavities ?? undefined,
             standard_id: resolvedStartStandardId,
@@ -1819,9 +1819,11 @@ export default function ShiftProductionEntryPage() {
         const machine = workCenters.data.find((candidate) => candidate.id === draft.machine_id && candidate.is_active);
         const shift = shifts.data.find((candidate) => candidate.id === draft.shift_id && candidate.is_active);
         const item = items.data.find((candidate) => candidate.id === draft.item_id && candidate.is_active);
-        const warehouse = warehouses.data.find(
-            (candidate) => candidate.id === draft.warehouse_id && candidate.is_active,
-        );
+        // The store travels only when the screen had resolved one; absent, the
+        // reopened drawer resolves it afresh like any other open.
+        const warehouseOk =
+            draft.warehouse_id === undefined
+            || warehouses.data.some((candidate) => candidate.id === draft.warehouse_id && candidate.is_active);
         const operatorExists =
             draft.operator_id === undefined
             || employees.data.some(
@@ -1840,7 +1842,7 @@ export default function ShiftProductionEntryPage() {
                         ? 'The selected shift is no longer active.'
                         : !item
                             ? 'The selected product is no longer active.'
-                            : !warehouse
+                            : !warehouseOk
                                 ? 'The selected finished-goods warehouse no longer exists.'
                                 : !operatorExists
                                     ? 'The selected operator is no longer available.'
@@ -3454,7 +3456,7 @@ export default function ShiftProductionEntryPage() {
             title={
                 startBatchRecipeDraft
                     ? undefined
-                    : 'Choose the product and the finished-goods store first — they travel with you.'
+                    : 'Choose the product first — it travels with you.'
             }
             onClick={() => {
                 if (startBatchRecipeDraft) navigate(buildStartBatchStandardUrl(startBatchRecipeDraft));
