@@ -10,6 +10,13 @@ export interface TallySyncEntry {
     attempts: number;
     error_message: string | null;
     synced_at: string | null;
+    /**
+     * When the agent last collected this voucher (TallySyncEntryResource has
+     * always sent it). Set but not synced means the agent has it and has not
+     * reported back — the signal that separates "the factory machine is off"
+     * from "Tally rejected it".
+     */
+    delivered_at: string | null;
     created_at: string;
 }
 

@@ -772,7 +772,11 @@ const STAGES: {
 ];
 
 export default function ApproveProductionPage() {
-    const [status, setStatus] = useState<ShiftProductionEntryStatus>('pending');
+    // The tab set is the backend statuses plus one client-side view: batches
+    // still with quality are status=pending on the server but not yet the
+    // PM's to act on.
+    type QueueTab = ShiftProductionEntryStatus | 'awaiting_quality';
+    const [status, setStatus] = useState<QueueTab>('pending');
     const [detailRow, setDetailRow] = useState<ShiftProductionEntry | null>(null);
     const [rejectingRow, setRejectingRow] = useState<ShiftProductionEntry | null>(null);
     const [rejectReason, setRejectReason] = useState('');
@@ -803,9 +807,19 @@ export default function ApproveProductionPage() {
     const awaitingQuality = (row: ShiftProductionEntry) =>
         readQualityStageEnabled(row) && row.status === 'pending' && !isQualityChecked(row);
 
+    // "Awaiting Quality" is a VIEW of the pending queue, not a backend status
+    // — the quality gate is a precondition on the PM's approval, so both tabs
+    // read status=pending and split client-side on whether the check exists.
+    // One fetch serves both, and the two tabs can never disagree with the
+    // server about what pending means. The owner saw this page still claiming
+    // the chain was Supervisor → PM → Accountant and asked, reasonably,
+    // "there is no quality here?" — the queue quality feeds was invisible
+    // from the very page that waits on it.
+    const fetchStatus: ShiftProductionEntryStatus = status === 'awaiting_quality' ? 'pending' : status;
+
     const { data, isLoading } = useQuery({
-        queryKey: ['production', 'shift-production-entries', status],
-        queryFn: () => listShiftProductionEntries(status),
+        queryKey: ['production', 'shift-production-entries', fetchStatus],
+        queryFn: () => listShiftProductionEntries(fetchStatus),
     });
 
     // Does any row in this queue carry the gate? Drives whether the Quality
@@ -882,14 +896,20 @@ export default function ApproveProductionPage() {
         <>
             <Typography.Title level={3} style={{ marginBottom: 4 }}>Approve Production</Typography.Title>
             <Typography.Paragraph type="secondary">
-                Every completed batch passes the chain — Supervisor → Plant Manager → Accountant — and posts
-                to Tally the moment the Accountant approves. Rejection at any stage sends it back to the supervisor.
+                Every completed batch passes the chain — Supervisor → Quality → Plant Manager → Accountant —
+                and posts to Tally the moment the Accountant approves. Quality works its own queue
+                (Quality → Production QC); rejection at any stage sends the batch back to the supervisor.
             </Typography.Paragraph>
 
             <Segmented
                 value={status}
-                onChange={(v) => setStatus(v as ShiftProductionEntryStatus)}
+                onChange={(v) => setStatus(v as QueueTab)}
                 options={[
+                    // First because it is first in the chain. Read-only here —
+                    // the check itself happens on the Production QC page; this
+                    // tab exists so an approver can see what has not reached
+                    // them yet without asking quality.
+                    { label: 'Awaiting Quality', value: 'awaiting_quality' },
                     { label: 'Plant Manager', value: 'pending' },
                     { label: 'Accountant', value: 'pm_approved' },
                     { label: 'Approved', value: 'approved' },
@@ -904,7 +924,16 @@ export default function ApproveProductionPage() {
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
-                dataSource={data?.data}
+                dataSource={
+                    // Both tabs read the same pending fetch and split on the
+                    // check's existence, so they can never disagree with the
+                    // server about what pending means. Other tabs pass through.
+                    status === 'awaiting_quality'
+                        ? (data?.data ?? []).filter(awaitingQuality)
+                        : status === 'pending'
+                          ? (data?.data ?? []).filter((row) => !awaitingQuality(row))
+                          : data?.data
+                }
                 pagination={false}
                 locale={{ emptyText: `Nothing waiting here.` }}
                 columns={[
@@ -1124,7 +1153,16 @@ export default function ApproveProductionPage() {
                                     dataSource={detailRow.scraps ?? []}
                                     columns={[
                                         { title: 'Type', dataIndex: 'type' },
-                                        { title: 'Nos', dataIndex: 'quantity_nos', render: (v: string | null) => v ?? '—' },
+                                        // Lumps are weighed, never counted — the entry
+                                        // screen does not even offer a Nos box for them.
+                                        // A dash here would read as "a count exists and
+                                        // is missing"; blank says the column does not
+                                        // apply to this line. Rejected FG still shows
+                                        // its count, dash included.
+                                        {
+                                            title: 'Nos',
+                                            render: (_, row) => (row.type === 'lumps' ? '' : (row.quantity_nos ?? '—')),
+                                        },
                                         { title: 'Kg', dataIndex: 'quantity_kg', render: (v: string | null) => v ?? '—' },
                                         { title: 'Reason', render: (_, row) => row.scrap_reason?.name ?? '—' },
                                     ]}
