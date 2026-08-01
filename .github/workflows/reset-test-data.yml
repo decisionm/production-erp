@@ -12,6 +12,10 @@ name: Reset test data
 # downtime reasons, factory settings, warehouses, shifts, users, moulds, or the
 # imported workbook.
 #
+# `since` is REFUSED unless it is a real YYYY-MM-DD date. A cutoff that cannot be
+# read is not quietly dropped: dropping it turns "clear yesterday" into "clear
+# everything", which is the one mistake this workflow must not be able to make.
+#
 # WHAT IT CANNOT DO: unsend a Tally voucher. A batch that reached Accountant
 # approval has already posted into the factory's live books, and only a person
 # in Tally can remove it. The command names those voucher numbers precisely so
@@ -42,14 +46,37 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Both checks read their input from `env`, never from an inline ${{ }}
+      # expansion. An expansion is substituted into the script TEXT before bash
+      # parses it, so a value containing shell would already have run by the time
+      # any test or `tr` looked at it — no amount of sanitising downstream can
+      # undo that. Through env the value is only ever data.
       - name: Refuse a write without the typed confirmation
         if: ${{ inputs.write }}
+        env:
+          CONFIRM: ${{ inputs.confirm }}
         run: |
-          if [ "${{ inputs.confirm }}" != "DELETE TEST DATA" ]; then
+          if [ "$CONFIRM" != "DELETE TEST DATA" ]; then
             echo "::error::Write refused. To delete, set write=true AND type DELETE TEST DATA in the confirm box. A dry run (write=false) needs no confirmation."
             exit 1
           fi
           echo "::warning::DELETING rehearsal data from the LIVE database. Ensure a database backup exists."
+
+      # Refused, never stripped. This box once ran through `tr -cd '0-9-'`, which
+      # turned "yesterday" into the EMPTY string — and an empty since means no
+      # --since flag at all, i.e. delete every batch the factory ever made, from a
+      # run the operator had asked to limit to one day. A since that is not a date
+      # stops the workflow here, before a single row is read.
+      - name: Refuse a since that is not a date
+        env:
+          SINCE: ${{ inputs.since }}
+        run: |
+          TRIMMED="$(printf '%s' "$SINCE" | tr -d '[:space:]')"
+          if [ -n "$TRIMMED" ] && ! printf '%s' "$TRIMMED" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
+            echo "::error::since must be a date in YYYY-MM-DD form (got '$SINCE'). Leave the box blank to clear every batch — this run has been refused rather than silently widened to everything."
+            exit 1
+          fi
+          echo "SINCE=$TRIMMED" >> "$GITHUB_ENV"
 
       - name: Set up SSH
         run: |
@@ -66,13 +93,21 @@ jobs:
           printf '%s\n' "$keys" >> ~/.ssh/known_hosts
 
       - name: Run it
+        env:
+          WRITE: ${{ inputs.write }}
         run: |
           set -o pipefail
           FLAGS=""
-          [ "${{ inputs.write }}" = "true" ] && FLAGS="$FLAGS --write --force"
-          # Sanitised to digits and dashes: a date cannot smuggle shell.
-          SINCE=$(printf '%s' "${{ inputs.since }}" | tr -cd '0-9-')
-          [ -n "$SINCE" ] && FLAGS="$FLAGS --since=$SINCE"
+          # if-blocks, not `[ ... ] && FLAGS=...`: under bash -e a failing test at
+          # the head of an AND-list is IGNORED, so the "no flag" branch used to
+          # sail past unnoticed instead of stopping anything. $SINCE comes from
+          # the refusal step above, already proven to be a date or empty.
+          if [ "$WRITE" = "true" ]; then
+            FLAGS="$FLAGS --write --force"
+          fi
+          if [ -n "$SINCE" ]; then
+            FLAGS="$FLAGS --since=$SINCE"
+          fi
 
           ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
@@ -81,11 +116,16 @@ jobs:
 
       - name: Summarise
         if: always()
+        env:
+          WRITE: ${{ inputs.write }}
+          SINCE_INPUT: ${{ inputs.since }}
         run: |
+          # Through env, like every other read of these boxes — this step runs on
+          # always(), so it sees the raw value even on the run that was refused.
           {
             echo "### Reset test data"
             echo
-            echo "write: \`${{ inputs.write }}\` · since: \`${{ inputs.since }}\`"
+            echo "write: \`$WRITE\` · since: \`$SINCE_INPUT\`"
             echo
             echo '```'
             cat reset-output.txt 2>/dev/null || echo "(no output captured)"

@@ -35,6 +35,15 @@ export default defineConfig(({ command }) => ({
         react(),
         VitePWA({
             registerType: 'autoUpdate',
+            // `null`, not `false`. The plugin only turns on skipWaiting +
+            // clientsClaim for an autoUpdate worker when injectRegister is
+            // `auto` or nullish (`injectRegister === 'auto' || injectRegister == null`);
+            // `false` fails that check and would silently produce a worker that
+            // sits in "waiting" forever. Nullish also means the plugin injects
+            // no <script> of its own — registration is done explicitly in
+            // src/main.tsx via `virtual:pwa-register`, which is the only path
+            // that reloads the page when the new worker activates.
+            injectRegister: null,
             includeAssets: [
                 'swaashpet-favicon.png',
                 'swaashpet-apple-touch-icon.png',
