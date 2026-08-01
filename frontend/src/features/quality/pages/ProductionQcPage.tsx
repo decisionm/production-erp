@@ -8,6 +8,8 @@ import {
     type BatchQualityQueueRow,
     createBatchQualityCheck,
     listBatchQualityQueue,
+    returnBatchToProduction,
+    RETURN_REASON_MIN_LENGTH,
 } from '@/features/quality/api';
 import { grossProducedPieces, readQuantity } from '@/features/production/types';
 import { itemLabel } from '@/lib/itemLabel';
@@ -73,6 +75,16 @@ export default function ProductionQcPage() {
 
     const queryClient = useQueryClient();
     const [openRow, setOpenRow] = useState<BatchQualityQueueRow | null>(null);
+    // The desk's other answer: not "these are the numbers", but "I cannot
+    // certify this — production has to look at it again".
+    const [returningRow, setReturningRow] = useState<BatchQualityQueueRow | null>(null);
+
+    // Both writes move a batch between two desks' screens, so both stale the
+    // same two lists: this queue and the production/approval entry list.
+    const refreshQueues = () => {
+        queryClient.invalidateQueries({ queryKey: ['quality', 'batch-quality-queue'] });
+        queryClient.invalidateQueries({ queryKey: ['production', 'shift-production-entries'] });
+    };
 
     const { data, isLoading, error } = useQuery({
         queryKey: ['quality', 'batch-quality-queue'],
@@ -187,9 +199,21 @@ export default function ProductionQcPage() {
                     {
                         title: 'Actions',
                         render: (_, row) => (
-                            <Button size="small" type="primary" onClick={() => setOpenRow(row)}>
-                                Check
-                            </Button>
+                            // Two doors out of this queue, side by side, because
+                            // they are the two honest answers to the same batch:
+                            // record the count, or send it back with the reason.
+                            // Returning is not the primary one — most batches are
+                            // checked, not returned — but it must never be hidden
+                            // behind the check drawer, or a checker with a bad
+                            // batch has only one button and it is the wrong one.
+                            <Space size={8} wrap>
+                                <Button size="small" type="primary" onClick={() => setOpenRow(row)}>
+                                    Check
+                                </Button>
+                                <Button size="small" onClick={() => setReturningRow(row)}>
+                                    Return to production
+                                </Button>
+                            </Space>
                         ),
                     },
                 ]}
@@ -202,13 +226,156 @@ export default function ProductionQcPage() {
                 onClose={() => setOpenRow(null)}
                 onDone={() => {
                     setOpenRow(null);
-                    queryClient.invalidateQueries({ queryKey: ['quality', 'batch-quality-queue'] });
                     // The approval queues carry the check and the net figure,
                     // so they are stale the moment one is recorded.
-                    queryClient.invalidateQueries({ queryKey: ['production', 'shift-production-entries'] });
+                    refreshQueues();
+                }}
+            />
+
+            <ReturnToProductionDrawer
+                row={returningRow}
+                canSubmit={canSubmit}
+                onClose={() => setReturningRow(null)}
+                onDone={() => {
+                    setReturningRow(null);
+                    // The batch has to LEAVE this queue on the next read — it is
+                    // production's now. `listBatchQualityQueue` drops it on the
+                    // server's `correction.awaiting_correction` flag.
+                    refreshQueues();
                 }}
             />
         </>
+    );
+}
+
+/**
+ * Sending a batch back to the floor. One required field, because there is only
+ * one thing the floor needs from this desk: what to correct.
+ *
+ * Deliberately a separate drawer from the check rather than a tab inside it.
+ * The two actions have opposite consequences and share no input, and a return
+ * reached through a half-filled check form is a return typed while looking at
+ * counts that are about to be thrown away.
+ */
+function ReturnToProductionDrawer({
+    row,
+    canSubmit,
+    onClose,
+    onDone,
+}: {
+    row: BatchQualityQueueRow | null;
+    canSubmit: boolean;
+    onClose: () => void;
+    onDone: () => void;
+}) {
+    const [reason, setReason] = useState('');
+    const [submitError, setSubmitError] = useState<string | null>(null);
+
+    // Fresh batch, fresh reason — the previous batch's complaint must never
+    // travel to this one's supervisor.
+    useEffect(() => {
+        setReason('');
+        setSubmitError(null);
+    }, [row?.id]);
+
+    const trimmed = reason.trim();
+    const reasonOk = trimmed.length >= RETURN_REASON_MIN_LENGTH;
+
+    const mutation = useMutation({
+        mutationFn: () => returnBatchToProduction(row!.id, trimmed),
+        onSuccess: () => onDone(),
+        onError: (err: unknown) => {
+            const response = (err as { response?: { data?: { message?: string; errors?: Record<string, string[]> } } })
+                ?.response?.data;
+            const firstFieldError = response?.errors ? Object.values(response.errors)[0]?.[0] : undefined;
+            setSubmitError(
+                firstFieldError
+                    ?? response?.message
+                    ?? 'Could not send the batch back. Nothing was changed — try again.',
+            );
+        },
+    });
+
+    return (
+        <Drawer
+            open={row !== null}
+            onClose={onClose}
+            width={520}
+            destroyOnHidden
+            title={row ? `Return to production — ${row.batch_number ?? `batch #${row.id}`}` : 'Return to production'}
+            footer={
+                <Space style={{ float: 'right' }}>
+                    <Button onClick={onClose}>Cancel</Button>
+                    <Button
+                        danger
+                        type="primary"
+                        disabled={!reasonOk || !canSubmit}
+                        loading={mutation.isPending}
+                        onClick={() => {
+                            setSubmitError(null);
+                            mutation.mutate();
+                        }}
+                    >
+                        Send back to production
+                    </Button>
+                </Space>
+            }
+        >
+            {row && (
+                <Space direction="vertical" size={16} style={{ width: '100%' }}>
+                    <Descriptions size="small" column={1} bordered>
+                        <Descriptions.Item label="Machine">
+                            {row.work_center?.code ?? row.work_center?.name ?? '—'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="Product">{itemLabel(row.item)}</Descriptions.Item>
+                        <Descriptions.Item label="Produced">
+                            <strong>{fmtPcs(grossProducedPieces(row))}</strong> pcs
+                        </Descriptions.Item>
+                    </Descriptions>
+
+                    <div>
+                        <Typography.Text strong>
+                            What does production have to correct? <span style={{ color: '#cf1322' }}>*</span>
+                        </Typography.Text>
+                        <Input.TextArea
+                            style={{ marginTop: 4 }}
+                            rows={4}
+                            maxLength={1000}
+                            autoFocus
+                            value={reason}
+                            onChange={(e) => setReason(e.target.value)}
+                            placeholder="e.g. Carton count is 40 but only 38 cartons are on the pallet — recount and re-enter."
+                        />
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            The supervisor sees this sentence and nothing else, so name the figure that is wrong.
+                            {!reasonOk && trimmed.length > 0
+                                ? ` At least ${RETURN_REASON_MIN_LENGTH} characters.`
+                                : ''}
+                        </Typography.Text>
+                    </div>
+
+                    <Alert
+                        type="warning"
+                        showIcon
+                        message="This batch leaves the quality queue"
+                        description="It goes back to the floor for correction and comes back here for a fresh check once production has re-entered its figures. The Plant Manager cannot approve it in the meantime."
+                    />
+
+                    {!canSubmit && (
+                        <Alert
+                            type="warning"
+                            showIcon
+                            message="You can view this queue but not return batches"
+                            description="Sending a batch back needs the Quality manage permission."
+                        />
+                    )}
+
+                    {submitError && (
+                        <Alert type="error" showIcon message="Could not send it back" description={submitError} />
+                    )}
+                </Space>
+            )}
+        </Drawer>
     );
 }
 

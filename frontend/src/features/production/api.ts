@@ -313,6 +313,44 @@ export async function listShiftProductionEntries(status?: ShiftProductionEntrySt
 }
 
 /**
+ * Every completed batch still waiting for its approval chain — the whole
+ * pending list, not one page of it.
+ *
+ * WHY IT PAGES INSTEAD OF READING THE FIRST RESPONSE, the same reason the
+ * quality queue does: the list is fixed at 20 per page and ordered by
+ * production date descending, and the batches that need attention are exactly
+ * the ones that have been waiting longest. A night shift running 22:00→06:00
+ * files under YESTERDAY's production date, so at 06:45 its batches are neither
+ * "today" nor near the top of a newest-first page — and they are precisely the
+ * ones a supervisor is still doing paperwork on.
+ *
+ * `status=pending` is the server's own filter and already implies a completed
+ * batch (ShiftProductionEntryService::paginate refuses to mix in a running
+ * one), so the walk is bounded by the approval backlog rather than by all of
+ * production history. `meta.last_page` bounds the loop; the hard cap is a
+ * second bound so a malformed meta cannot spin, and it is the honest limit of
+ * this read — a backlog deeper than 25 pages (500 batches awaiting approval)
+ * would leave the oldest unlisted, which is itself a sign the chain has
+ * stopped moving.
+ */
+export async function listPendingEntries(): Promise<ShiftProductionEntry[]> {
+    const all: ShiftProductionEntry[] = [];
+    let page = 1;
+    let lastPage = 1;
+
+    do {
+        const { data } = await api.get<Paginated<ShiftProductionEntry>>('/production/shift-production-entries', {
+            params: { status: 'pending', page },
+        });
+        all.push(...(data?.data ?? []));
+        lastPage = data?.meta?.last_page ?? 1;
+        page += 1;
+    } while (page <= lastPage && page <= 25);
+
+    return all;
+}
+
+/**
  * Every machine's currently-running batch across ALL shifts/dates, never
  * paginated — the authoritative source for the Shift Floor's machine state
  * (matches the backend's global one-in-progress-per-machine guard).
@@ -600,6 +638,32 @@ export interface CompleteBatchPayload {
 export async function completeBatch(id: number, payload: CompleteBatchPayload): Promise<ShiftProductionEntry> {
     const { data } = await api.post<{ data: ShiftProductionEntry }>(
         `/production/shift-production-entries/${id}/complete`,
+        payload,
+    );
+    return data.data;
+}
+
+/**
+ * Correcting a completed batch quality has not touched yet — the floor's own
+ * fix to its own count.
+ *
+ * THE PAYLOAD IS A WHOLE COMPLETION, not a patch. The server reverses what the
+ * first completion booked (each consumption line received back at the unit
+ * cost its own issue recorded, the finished-goods receipt issued back out) and
+ * then re-runs the ordinary completion against what is sent here. So anything
+ * omitted is not "left alone" — it is not re-booked. The drawer that calls
+ * this loads every recorded figure back into the form for exactly that reason.
+ *
+ * `amendment_reason` is optional by the backend's own rule: a supervisor
+ * fixing their own typo, on their own batch, before anyone else has seen it,
+ * is not asked to justify it. Who amended and when are recorded regardless.
+ */
+export async function amendBatch(
+    id: number,
+    payload: CompleteBatchPayload & { amendment_reason?: string },
+): Promise<ShiftProductionEntry> {
+    const { data } = await api.post<{ data: ShiftProductionEntry }>(
+        `/production/shift-production-entries/${id}/amend`,
         payload,
     );
     return data.data;

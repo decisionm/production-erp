@@ -318,20 +318,36 @@ export default function AppLayout({ children }: PropsWithChildren) {
                     zIndex: isMobile ? 100 : 10,
                 }}
             >
+                {/* Bottom margin is deliberately tighter than the sides: with the
+                    attribution line gone there is nothing under the plaque, so the
+                    menu starts directly beneath it instead of below a gap that no
+                    longer holds anything. */}
                 <div
                     style={{
-                        margin: 12,
+                        margin: '12px 12px 8px',
                         display: 'flex',
                         flexDirection: 'column',
-                        alignItems: collapsed ? 'center' : 'flex-start',
-                        gap: 4,
+                        // Expanded, the plaque stretches to the sider width so the
+                        // logo has the whole width to fill. Collapsed, it stays
+                        // centred and shrinks to the mark — stretching there would
+                        // just wrap the small mark in new empty white.
+                        alignItems: collapsed ? 'center' : 'stretch',
                         overflow: 'hidden',
                     }}
                 >
                     {/* The logo is navy-on-white artwork, so it sits on a white
                         plaque rather than directly on the dark sider — keeping the
                         factory's own colours instead of inventing a reversed
-                        variant. Collapsed, only the chevron mark fits. */}
+                        variant. Collapsed, only the chevron mark fits.
+
+                        Expanded, the artwork is width-driven: it takes the full
+                        plaque minus its padding so it fills the sider rather than
+                        floating in the middle of it. width:100% + height:auto +
+                        object-fit:contain cannot stretch it — the 335x144 source
+                        proportions are preserved by construction, and max-height
+                        is only a ceiling, never a second dimension to fight the
+                        width. Collapsed keeps the mark at its intrinsic ratio and
+                        centred. */}
                     <div
                         style={{
                             background: '#fff',
@@ -339,6 +355,7 @@ export default function AppLayout({ children }: PropsWithChildren) {
                             padding: collapsed ? '6px 8px' : '8px 12px',
                             display: 'flex',
                             alignItems: 'center',
+                            justifyContent: 'center',
                             flexShrink: 0,
                             lineHeight: 0,
                         }}
@@ -346,35 +363,13 @@ export default function AppLayout({ children }: PropsWithChildren) {
                         <img
                             src={`${import.meta.env.BASE_URL}${collapsed ? 'swaashpet-mark.png' : 'swaashpet-logo.png'}`}
                             alt="SWAASHPET POLYMERS"
-                            style={{ height: collapsed ? 30 : 38, width: 'auto', display: 'block' }}
+                            style={
+                                collapsed
+                                    ? { height: 32, width: 'auto', objectFit: 'contain', display: 'block' }
+                                    : { width: '100%', height: 'auto', maxHeight: 72, objectFit: 'contain', display: 'block' }
+                            }
                         />
                     </div>
-                    {/* Under the logo, on the owner's instruction, and hidden when
-                        the sider is collapsed — at that width it would either wrap
-                        or crowd the mark it is meant to sit quietly beneath. It
-                        stays on the login page either way, so a collapsed sider
-                        never loses the attribution entirely. */}
-                    {!collapsed && (
-                        <Typography.Text
-                            style={{
-                                color: 'rgba(255,255,255,0.45)',
-                                fontSize: 11,
-                                letterSpacing: '0.04em',
-                                paddingLeft: 2,
-                                whiteSpace: 'nowrap',
-                            }}
-                        >
-                            Powered by Balin
-                            {/* The build stamp answers "which version am I on?"
-                                out loud. The app is an installed PWA that keeps
-                                serving its saved copy until the background
-                                update lands, so after every deploy the owner
-                                and the tooling were reduced to guessing about
-                                caches. Deliberately beside the attribution:
-                                small, always visible, never a dialog. */}
-                            <span style={{ opacity: 0.7 }}> · {__BUILD_STAMP__}</span>
-                        </Typography.Text>
-                    )}
                 </div>
                 <Menu
                     theme="dark"

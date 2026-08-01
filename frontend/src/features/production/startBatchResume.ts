@@ -126,6 +126,26 @@ export function buildStartBatchRecipeUrl(draft: StartBatchResumeDraft): string {
     return `/production/boms?${encodeStartBatchResume(draft, 'configure').toString()}`;
 }
 
+/**
+ * The other configuration door, and the one the readiness gate actually sends
+ * people through.
+ *
+ * WHY THE PRODUCT STANDARD AND NOT THE RECIPE. Every finding that refuses a
+ * start names one of four figures — weight, cycle time, cavities, pieces per
+ * box — or the product's Tally identity, and the Product Standards page is
+ * where all five are written (New product standard writes the four; Attach
+ * item resolves the fifth). A missing consumption recipe is deliberately not a
+ * finding at all — see ProductReadinessService, which says so and why — so the
+ * recipe page is not where a blocked start gets unblocked.
+ *
+ * Same allowlisted `phase=configure` query as the recipe leg, so the return
+ * trip and its validation are shared and there is exactly one encoding of
+ * "which Start Batch was this".
+ */
+export function buildStartBatchStandardUrl(draft: StartBatchResumeDraft): string {
+    return `/production/standards?${encodeStartBatchResume(draft, 'configure').toString()}`;
+}
+
 export function buildStartBatchReturnUrl(
     draft: StartBatchResumeDraft,
     outcome: StartBatchResumeOutcome,

@@ -397,6 +397,108 @@ export function isQualityChecked(
     return entry?.quality?.checked === true;
 }
 
+/** One time quality sent this batch back to the floor. */
+export interface EntryCorrectionReturn {
+    returned_by: number | null;
+    returned_at: string | null;
+    reason: string | null;
+    /** Was a recorded check unwound by this return, or had none been made yet? */
+    cleared_quality_check?: boolean;
+}
+
+/** One time the floor re-entered its own completion figures. */
+export interface EntryCorrectionAmendment {
+    amended_by?: number | null;
+    amended_at?: string | null;
+    reason?: string | null;
+    [key: string]: unknown;
+}
+
+/**
+ * What has been done to this batch since it was completed, exactly as
+ * ShiftProductionEntryResource serves it under the `correction` key
+ * (ShiftProductionEntryService::correctionHistory).
+ *
+ * ALWAYS PRESENT with empty lists, same rule as `quality` — a client can say
+ * "nothing has happened to this batch" without having to tell a missing key
+ * apart from a null one. Optional here only for payloads that predate the
+ * two correction doors.
+ */
+export interface EntryCorrection {
+    /**
+     * Quality returned this batch and nobody has re-checked it since. THE
+     * SERVER'S OWN FLAG, never recomputed here: it already folds in the
+     * status, the batch status and the absence of a check, and it is the one
+     * thing that separates "waiting for its first check" from "sent back to
+     * the floor" — two states that otherwise look identical, both being
+     * status `pending` with `quality.checked === false`.
+     */
+    awaiting_correction: boolean;
+    /** The reason on the most recent return — the only instruction the floor gets. */
+    latest_return_reason: string | null;
+    returns: EntryCorrectionReturn[];
+    amendments: EntryCorrectionAmendment[];
+}
+
+/** The entry's correction block, or null on a backend that predates it. */
+export function readCorrection(
+    entry: Pick<ShiftProductionEntry, 'correction'> | null | undefined,
+): EntryCorrection | null {
+    return entry?.correction ?? null;
+}
+
+/**
+ * Has quality sent this batch back for correction?
+ *
+ * FALSE UNLESS THE SERVER SAYS OTHERWISE, and the direction matters for the
+ * same reason `readQualityStageEnabled` reads off: a backend without the
+ * correction doors sends no `correction` block, and reading that as "returned"
+ * would paint every pending batch in the factory amber and drop it into the
+ * production queue as work to redo.
+ */
+export function isAwaitingCorrection(
+    entry: Pick<ShiftProductionEntry, 'correction'> | null | undefined,
+): boolean {
+    return entry?.correction?.awaiting_correction === true;
+}
+
+/** Why quality sent it back, or null when it never did. */
+export function readReturnReason(
+    entry: Pick<ShiftProductionEntry, 'correction'> | null | undefined,
+): string | null {
+    const reason = (entry?.correction?.latest_return_reason ?? '').trim();
+    return reason === '' ? null : reason;
+}
+
+/**
+ * May the floor still correct its own completion figures?
+ *
+ * READ OFF THE ENTRY'S OWN FIELDS, never off the caller's role or a guess:
+ * the batch is completed, it is still `pending` (so no approval has been
+ * signed and no voucher is on its way), and quality has not checked it. Those
+ * are precisely the conditions `ShiftProductionEntryService::amendCompletion`
+ * tests before it will do anything.
+ *
+ * IT IS NOT THE GATE. The server refuses several cases this cannot see from a
+ * list payload — a batch already sitting on a Tally voucher, a segment whose
+ * child shift opened from its closing weights — and it refuses them with a
+ * sentence in factory words that the screen shows. This only decides whether
+ * offering the door is honest; the server decides whether it opens.
+ */
+export function canAmendCompletion(
+    entry:
+        | Pick<ShiftProductionEntry, 'status' | 'batch_status' | 'quality'>
+        | null
+        | undefined,
+): boolean {
+    if (!entry) return false;
+    return (
+        entry.status === 'pending'
+        && entry.batch_status === 'completed'
+        && entry.quality?.checked !== true
+    );
+}
+
 /**
  * Parse a decimal-string quantity into a number, or null when it is absent or
  * not a plain number. Never returns NaN — a NaN would propagate silently into
@@ -508,6 +610,14 @@ export interface ShiftProductionEntry {
      * `readQuality` / `isQualityChecked` / `readQualityStageEnabled`.
      */
     quality?: EntryQuality | null;
+    /**
+     * The two correction doors: quality's returns and the floor's own
+     * amendments. Always served (empty lists before anything happens) by a
+     * backend that has them; optional only for payloads that predate them.
+     * Read through `readCorrection` / `isAwaitingCorrection` /
+     * `readReturnReason`.
+     */
+    correction?: EntryCorrection | null;
     /**
      * Both collections are `whenLoaded` on the backend resource, and the
      * approval/reject/start endpoints deliberately don't load them — so they

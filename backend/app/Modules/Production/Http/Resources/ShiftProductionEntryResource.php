@@ -107,6 +107,14 @@ class ShiftProductionEntryResource extends JsonResource
                 ...app(ShiftProductionEntryService::class)->qualityCheck($this->resource),
                 'checked_by' => UserResource::make($this->whenLoaded('qualityCheckedBy')),
             ],
+            // WHY THIS BATCH CAME BACK, and what has been changed on it since
+            // it was completed. Quality's return reason is the only
+            // instruction the supervisor gets, so it has to reach the screen
+            // that shows them the batch — and the PM and accountant sign off
+            // on figures that were amended, which they are entitled to see.
+            // Always present (empty lists before anything happens), same rule
+            // as `quality` above.
+            'correction' => app(ShiftProductionEntryService::class)->correctionHistory($this->resource),
             // What the consumed material actually cost — each line at the
             // unit cost its own issue movement recorded, plus a total that
             // is null (never a partial figure) when any line is unpriced.
