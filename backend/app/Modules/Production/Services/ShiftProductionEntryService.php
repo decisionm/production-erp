@@ -1865,6 +1865,12 @@ class ShiftProductionEntryService
             ->lockForUpdate()
             ->first([
                 'id', 'status', 'batch_status', 'quantity_produced', 'quantity_produced_kg',
+                // quantity_scrap is load-bearing for refuseStaleMaterialLines():
+                // its pieces-before side is produced + rejected, and a column
+                // missing from this list silently reads null — which made the
+                // guard blame the supervisor for 0.612 kg that was never
+                // theirs (found by typing the figure into a real browser).
+                'quantity_scrap',
                 'gross_quantity_produced', 'qc_rejection_kg', 'quality_checked_at',
                 'quality_rejected_nos', 'completed_by', 'tally_sync_entry_id', 'config_snapshot',
             ]);

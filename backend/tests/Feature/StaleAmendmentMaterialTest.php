@@ -187,6 +187,39 @@ class StaleAmendmentMaterialTest extends TestCase
         )->json('data.0.quantity_produced'));
     }
 
+    public function test_the_named_figure_counts_stored_rejected_pieces_on_the_before_side(): void
+    {
+        // The bug this pins: rowOpenForCorrection() reads an explicit column
+        // list, and quantity_scrap was not on it — so a batch that carried
+        // production rejects had its before-side read as produced + null,
+        // and the refusal blamed the supervisor for rejected-pieces kg that
+        // never moved. Found by a person reading the figure on screen, which
+        // is exactly who this message exists for.
+        $this->actAsSupervisor();
+        $entryId = $this->startBatch();
+
+        // 12,000 packed + 200 rejected = 122 kg of pieces + 2 kg lumps.
+        $this->postJson(
+            "/api/v1/production/shift-production-entries/{$entryId}/complete",
+            [...$this->figures(12000, '124'), 'quantity_scrap' => '200'],
+        )->assertOk();
+
+        // Correction: 10,000 packed, the SAME 200 rejected, kilograms untouched.
+        // Only the packed count moved: −2,000 pieces = −20 kg exactly.
+        $refused = $this->amend($entryId, [
+            ...$this->figures(10000, '124'),
+            'quantity_scrap' => '200',
+            'amendment_reason' => 'Counted the last pallet twice',
+        ])->assertStatus(422);
+
+        // Stored total is 124 resin + 2.5 masterbatch = 126.5; the counts now
+        // imply 106.5. A before-side that dropped the 200 stored rejects
+        // would print 104.5 here — 2 kg that were never the supervisor's.
+        $message = $refused->json('errors.material_consumptions.0');
+        $this->assertStringContainsString('106.5000 kg', $message, 'The before side must include stored rejected pieces.');
+        $this->assertStringContainsString('126.5000 kg', $message, 'What the form still carries.');
+    }
+
     // (b) every way it must NOT fire ----------------------------------------------
 
     public function test_a_correction_that_moves_the_kilograms_too_goes_straight_through(): void
