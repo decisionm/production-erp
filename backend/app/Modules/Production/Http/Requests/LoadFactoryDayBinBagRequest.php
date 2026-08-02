@@ -7,15 +7,21 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 /**
- * The Shift Floor's bag scan — barcode in, kg out of the store, INTO A
- * NAMED MACHINE.
+ * The Shift Floor's bag scan — barcode in, kg out of the store, into the
+ * COMMON RESIN INPUT.
  *
- * work_center_id is REQUIRED, and that is the owner's ruling (31-Jul):
- * "Scanning a bag means material was loaded into the selected machine."
- * Optional would have been worse than absent — an unattributed load
- * silently overstates the estimated remaining of every machine except the
- * one that actually burnt the material, and nothing on any screen would
- * say so.
+ * THERE IS NO MACHINE FIELD, and its absence is the owner's correction
+ * (2-Aug): the factory has one common resin input point for all machines and
+ * a bag is never assigned or scanned to a machine. work_center_id used to be
+ * required here; it is not merely optional now, it is not a field.
+ *
+ * IT IS STILL ACCEPTED AND IGNORED, for the length of the deploy window
+ * only. A floor tablet running the previous build will keep posting
+ * work_center_id for as long as it has not reloaded, and refusing those
+ * scans would stop material entering the factory over a field the server no
+ * longer wants. It is deliberately absent from rules() rather than validated
+ * as `sometimes`, so nothing downstream can read it back out of validated()
+ * and quietly start attributing loads to machines again.
  *
  * There is deliberately NO recorded_by/loaded_by field: the audit identity
  * on the stock movements is always the authenticated user. supervisor_id
@@ -33,18 +39,17 @@ class LoadFactoryDayBinBagRequest extends FormRequest
     {
         return [
             'barcode' => ['required', 'string', 'exists:material_bags,barcode'],
-            // The machine the bag was emptied into.
-            'work_center_id' => ['required', 'integer', 'exists:work_centers,id'],
             // Absent = the whole bag (its remaining_kg); present = a weighed
-            // partial load, same convention as the per-machine day-bin load.
+            // partial load. Partial loads and the bag's remaining balance are
+            // preserved exactly as they were.
             'quantity_kg' => ['nullable', 'numeric', 'gt:0'],
             'supervisor_id' => ['nullable', 'integer', 'exists:users,id'],
             // THE ACKNOWLEDGEMENT, sent only when the previous attempt was
-            // refused because the machine still shows material. Optional
-            // here rather than conditionally required, because whether it is
-            // needed depends on the machine's live estimate — a fact this
+            // refused because the common input still shows material.
+            // Optional here rather than conditionally required, because
+            // whether it is needed depends on the live estimate — a fact this
             // request cannot see and the service must decide (see
-            // FactoryDayBinService::guardMachineBalance). Validating the
+            // FactoryDayBinService::guardCommonInputBalance). Validating the
             // VOCABULARY is still this layer's job.
             'balance_ack_reason' => ['nullable', 'string', Rule::in(FactoryDayBinService::ACK_REASONS)],
             'balance_ack_note' => ['nullable', 'string', 'max:200'],
@@ -58,7 +63,6 @@ class LoadFactoryDayBinBagRequest extends FormRequest
             // must read as exactly what it is, not a generic "invalid".
             'barcode.required' => 'Scan or type a bag barcode.',
             'barcode.exists' => 'Unknown bag barcode — no registered bag carries this code.',
-            'work_center_id.required' => 'Pick the machine this bag was loaded into.',
         ];
     }
 }

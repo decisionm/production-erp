@@ -4,7 +4,6 @@ namespace App\Modules\Sales\Services;
 
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Services\StockMovementService;
-use App\Modules\Inventory\Services\TraceabilityService;
 use App\Modules\Production\Models\BatchResinAllocation;
 use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
@@ -13,10 +12,10 @@ use App\Modules\Production\Models\ProductionStandard;
 use App\Modules\Production\Models\ProductionStandardPackaging;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Services\BagCostAllocationService;
-use App\Modules\Production\Services\BagLotRateResolver;
 use App\Modules\Production\Services\FactoryWarehouseResolver;
 use App\Modules\Production\Services\PackingMaterialSuggestionService;
 use App\Modules\Production\Services\ProductionStandardResolver;
+use App\Modules\Production\Services\ResinPoolService;
 use App\Modules\Production\Services\RunMaterialSuggestionService;
 use App\Modules\Sales\Models\SalesOrder;
 use Illuminate\Database\Eloquent\Builder;
@@ -39,7 +38,7 @@ use Illuminate\Database\Eloquent\Builder;
  *     materials its standard states) priced at what that material costs now.
  *
  *   ACTUAL — what a piece of this product DID cost, taken from the latest
- *     approved batch that carries a live bag-cost allocation run. Absent
+ *     approved batch that carries a live cost-allocation run. Absent
  *     until such a batch exists, and it says so in words rather than
  *     borrowing the estimate and calling it an actual.
  *
@@ -49,25 +48,30 @@ use Illuminate\Database\Eloquent\Builder;
  * at, instead of being handed a confident figure with no production behind
  * it.
  *
- * ==================== THE RESIN RATE IS THE NEXT BAG ====================
+ * ============== THE RESIN RATE IS THE COMMON POOL'S AVERAGE ==============
  *
- * The estimate prices resin off the bag that would ACTUALLY be picked next —
- * TraceabilityService::pickList's own head, which is the FIFO order the store
- * is required to issue in and the order enforceFifo() polices. Quoting the
- * moving average instead would be quoting a blend of bags bought months
- * apart; quoting the next bag quotes the price the next bottle will really
- * carry.
+ * The estimate prices resin at the weighted average of the COMMON RESIN POOL
+ * for that exact material — the same figure a real batch is allocated at
+ * (ResinPoolService, via BagCostAllocationService), so the estimate and the
+ * actual are two readings of one basis.
  *
- * The rate comes through BagLotRateResolver, so it is the same rate a batch
- * would be allocated at, from the same audited cost versions — a revised
- * purchase invoice moves the estimate and the next batch together, and moves
- * neither closed batch behind them.
+ * IT USED TO QUOTE THE NEXT BAG BY FIFO, and that basis died with the rest of
+ * the bag-to-batch claim. The owner's correction (2-Aug): the factory has ONE
+ * common resin input point serving every machine and a bag is never assigned
+ * to a machine or a batch. There is therefore no "next bag this batch will
+ * draw from" — every bag goes into the same input, and a single bag's rate
+ * would be a price the next bottle does not carry.
  *
- * When no bag is in store (or its lot has no recorded rate — opening stock,
- * the commonest case on day one) the estimate falls back to the stock moving
- * average AND SAYS SO in the source words. The fallback is labelled because
- * the two figures mean different things, and a reader deciding whether to
- * quote a price is entitled to know which one they have.
+ * The pool's rates come through Production's own rate resolver as each bag is
+ * loaded, so they are still the audited cost versions — a revised purchase invoice
+ * reaches the pool with the next load, and moves no closed batch behind it.
+ *
+ * When the pool holds nothing priced (nothing loaded yet, or only lots with
+ * no recorded rate — opening stock, the commonest case on day one) the
+ * estimate falls back to the stock moving average AND SAYS SO in the source
+ * words. The fallback is labelled because the two figures mean different
+ * things, and a reader deciding whether to quote a price is entitled to know
+ * which one they have.
  *
  * ======================= NULL IS A REAL ANSWER =======================
  *
@@ -183,8 +187,12 @@ class SalesCostInsightService
         private readonly ProductionStandardResolver $standards,
         private readonly RunMaterialSuggestionService $suggestions,
         private readonly PackingMaterialSuggestionService $packing,
-        private readonly TraceabilityService $traceability,
-        private readonly BagLotRateResolver $rates,
+        // The common resin pool, read-only: its weighted average IS the
+        // resin estimate. TraceabilityService::pickList and BagLotRateResolver
+        // used to be injected here for the retired next-bag-by-FIFO basis and
+        // are deliberately gone — leaving them would leave the seam the dead
+        // claim could grow back through.
+        private readonly ResinPoolService $pool,
         private readonly StockMovementService $stock,
         private readonly FactoryWarehouseResolver $warehouses,
         private readonly BagCostAllocationService $allocations,
@@ -210,7 +218,7 @@ class SalesCostInsightService
 
         // Each distinct product is resolved ONCE. An order commonly repeats a
         // product across lines (different delivery dates, different prices),
-        // and every estimate costs a pick-list read plus several average-cost
+        // and every estimate costs a pool read plus several average-cost
         // lookups — paying for them per LINE would multiply the busiest part
         // of this read by nothing gained.
         $estimates = [];
@@ -340,8 +348,8 @@ class SalesCostInsightService
     /**
      * Resin: the product's own unit weight IS its resin per bottle (a bottle
      * weighing 5 g is 5 g of polymer — RunMaterialSuggestionService's rule,
-     * borrowed rather than restated), priced at the bag the store would pick
-     * next.
+     * borrowed rather than restated), priced at the common resin pool's
+     * weighted average.
      *
      * @return array<string, mixed>
      */
@@ -402,43 +410,47 @@ class SalesCostInsightService
     }
 
     /**
-     * The rate the NEXT bag out of the store carries, or the moving average
-     * when no bag can answer — labelled either way.
+     * THE COMMON RESIN POOL'S WEIGHTED AVERAGE, or the stock moving average
+     * when the pool holds nothing priced — labelled either way.
+     *
+     * This replaced "the rate the next bag out of the store carries". The
+     * owner's correction (2-Aug) ended the pick-list-head basis along with
+     * the rest of the bag-to-batch claim: with ONE common resin input point
+     * serving every machine, there is no "next bag this batch will draw
+     * from" — every bag goes into the same input and every batch draws from
+     * the same pool. Quoting one bag's rate would be quoting a price the next
+     * bottle will not carry.
+     *
+     * The pool is the same figure a real batch is allocated at
+     * (ResinPoolService, via BagCostAllocationService), so the estimate and
+     * the actual are two readings of one basis rather than two different
+     * theories. NO BAG OR LOT IDENTITY comes back from here any more — the
+     * identity array is empty, because the pool has no single bag behind it
+     * and naming one would be the dead claim wearing a different hat.
      *
      * @return array{0: ?string, 1: ?string, 2: string, 3: array<string, mixed>}
      */
     private function resinRate(int $resinItemId): array
     {
-        // pickList IS the store's issue order (oldest lot, then oldest bag) —
-        // the same order enforceFifo() polices, so its head is the bag the
-        // next batch will really draw from.
-        $bag = $this->traceability->pickList($resinItemId, 1)->first();
+        $poolRate = $this->pool->currentAverage($resinItemId);
 
-        if ($bag !== null) {
-            [$rate, $source] = $this->rates->rateFor($bag->lot);
-
-            if ($rate !== null) {
-                return [
-                    $rate,
-                    $source,
-                    'the next resin bag in store by FIFO, at its own purchase rate',
-                    [
-                        'material_bag_id' => (int) $bag->id,
-                        'bag_barcode' => $bag->barcode,
-                        'material_lot_id' => $bag->lot === null ? null : (int) $bag->lot->id,
-                        'supplier_lot_no' => $bag->lot?->supplier_lot_no,
-                    ],
-                ];
-            }
+        if ($poolRate !== null) {
+            return [
+                $poolRate,
+                'resin_pool_weighted_average',
+                'the common resin pool\'s weighted average — an accounting allocation across every bag loaded, not one bag\'s own price',
+                [],
+            ];
         }
 
         $average = $this->averageCost($resinItemId);
 
-        $words = $bag === null
-            ? 'the store moving average — no resin bag is in store to price from'
-            : 'the store moving average — the next resin bag by FIFO has no recorded purchase rate';
-
-        return [$average, $average === null ? null : 'store_average', $words, []];
+        return [
+            $average,
+            $average === null ? null : 'store_average',
+            'the store moving average — no priced resin stands in the common pool to price from',
+            [],
+        ];
     }
 
     /**
@@ -764,7 +776,7 @@ class SalesCostInsightService
                 // the schema does not have.
                 'production_date' => $entry->production_date?->toDateString(),
                 'approved_at' => $entry->approved_at?->toIso8601String(),
-                'basis' => 'the latest approved batch of this product, at its own bag-cost allocation',
+                'basis' => 'the latest approved batch of this product, at the common resin pool\'s weighted average — an accounting allocation, not physical bag traceability',
             ],
         ];
     }
@@ -945,7 +957,7 @@ class SalesCostInsightService
 
     /**
      * The identity-free explanation of every part, for readers who may see
-     * the money but not the bags behind it.
+     * the money but not the rates behind it.
      *
      * @param  list<array<string, mixed>>  $components
      * @return array<string, string>

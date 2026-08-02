@@ -8,6 +8,7 @@ use App\Modules\Inventory\Models\StockBalance;
 use App\Modules\Inventory\Models\StockMovement;
 use App\Modules\Production\Models\DayBinMovement;
 use App\Modules\Production\Models\ProductionDowntimeEvent;
+use App\Modules\Production\Models\ResinPoolBalance;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use Illuminate\Console\Command;
@@ -224,6 +225,31 @@ class ResetTestData extends Command
             // Children first, so nothing is orphaned even where the schema
             // would have allowed it.
             ProductionDowntimeEvent::query()->whereIn('shift_production_entry_id', $entryIds)->delete();
+
+            // THE COMMON RESIN POOL IS ZEROED FOR EVERY MATERIAL WHOSE LOADS
+            // ARE GOING, and zeroed rather than adjusted deliberately.
+            //
+            // The pool is a running weighted average, not a derivable total:
+            // its rate depends on the ORDER loads and draws happened in, and
+            // stock_movements carries no record of that (recomputeBalances()
+            // below can rebuild a stock balance precisely for exactly that
+            // reason — this one it cannot). Subtracting the deleted kg would
+            // need a rate that no longer exists anywhere, so it would be
+            // inventing one.
+            //
+            // Empty is the honest post-reset state: with no priced material
+            // in the pool, the next batch's resin falls to the labelled
+            // stock-average fallback, which SAYS it is a fallback. A
+            // fabricated average would not.
+            $pooledItemIds = DayBinMovement::query()
+                ->whereIn('id', $dayBinMovementIds)
+                ->distinct()
+                ->pluck('item_id');
+
+            ResinPoolBalance::query()
+                ->whereIn('item_id', $pooledItemIds)
+                ->update(['quantity_kg' => '0.0000', 'avg_rate_per_kg' => '0.0000', 'unpriced_kg' => '0.0000']);
+
             DayBinMovement::query()->whereIn('id', $dayBinMovementIds)->delete();
 
             DB::table('shift_material_consumptions')->whereIn('shift_production_entry_id', $entryIds)->delete();

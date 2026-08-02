@@ -1038,15 +1038,21 @@ class ShiftProductionEntryService
             );
         }
 
-        // THE BAG-COST ALLOCATIONS ARE REVERSED, NEVER DELETED — the one
+        // THE RESIN COST ALLOCATIONS ARE REVERSED, NEVER DELETED — the one
         // place in this reversal that keeps its rows. The consumption lines
         // below are deleted because the corrected completion rewrites them
         // and the stock ledger already records both bookings; the cost
         // allocations instead stamp reversed_at, so the run that was wrong
-        // stays readable beside the run that replaced it. Reversed rows are
-        // excluded from every layer-remaining sum, so the machine's bags get
-        // their kilograms back and the next allocation sees a world in which
-        // the wrong completion never happened.
+        // stays readable beside the run that replaced it.
+        //
+        // Reversing also GIVES THE KILOGRAMS BACK TO THE COMMON RESIN POOL,
+        // each at its own frozen rate (BagCostAllocationService::reverse), so
+        // the pool afterwards holds what a world in which the wrong
+        // completion never happened would have left in it. It runs HERE, and
+        // therefore strictly before completeBatch() re-allocates as run N+1
+        // inside this same transaction — a re-draw against an unrestored pool
+        // would charge the corrected batch at an average the correction
+        // itself distorted.
         $this->bagCosts->reverse($entry);
 
         $entry->materialConsumptions()->delete();
