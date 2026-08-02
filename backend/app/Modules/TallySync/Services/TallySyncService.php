@@ -745,7 +745,7 @@ class TallySyncService
      *
      * @throws ValidationException 422 naming the voucher to check in Tally
      */
-    public function retry(TallySyncEntry $entry): TallySyncEntry
+    public function retry(TallySyncEntry $entry, ?int $userId = null): TallySyncEntry
     {
         if ($entry->isInTally()) {
             $synced = $entry->synced_at?->format('d M Y H:i');
@@ -757,13 +757,71 @@ class TallySyncService
             ]);
         }
 
+        // REGENERATE, DON'T REPLAY. A failed voucher usually failed because
+        // a mapping was wrong — the product had no Tally identity, a store
+        // was unmapped — and Accounts has since FIXED the mapping. Replaying
+        // the frozen payload would fail identically forever. Rebuilding it
+        // from the source records picks the fix up; the old payload's error
+        // and the regeneration are recorded on the entry so the story of
+        // "it failed, someone fixed the mapping, it went through" is
+        // readable afterwards. Idempotency is untouched: an entry that ever
+        // reached Tally is refused above, and the agent-side delivered_at
+        // guard stays exactly as it was.
+        $failedError = $entry->error_message;
+        $payload = $this->regeneratePayload($entry) ?? $entry->payload;
+
+        $log = $payload['resolution_log'] ?? [];
+        if ($failedError !== null) {
+            $log[] = [
+                'at' => now()->toIso8601String(),
+                'by' => $userId,
+                'previous_error' => $failedError,
+                'note' => 'Payload regenerated from current mappings and re-queued.',
+            ];
+        }
+        $payload['resolution_log'] = $log;
+
         $entry->update([
             'status' => TallySyncStatus::Pending,
             'error_message' => null,
             'delivered_at' => null,
+            'payload' => $payload,
         ]);
 
         return $entry;
+    }
+
+    /**
+     * Rebuild a queued voucher's payload from its source records — the
+     * mapping fixes made since it failed are exactly what a retry needs to
+     * pick up. Types without a rebuilder keep their frozen payload (null).
+     */
+    private function regeneratePayload(TallySyncEntry $entry): ?array
+    {
+        // A morph type that no longer resolves (renamed model, historical
+        // junk) must degrade to the frozen payload, not a 500.
+        if (! class_exists($entry->syncable_type)) {
+            return null;
+        }
+
+        $source = $entry->syncable;
+        if ($source === null) {
+            return null;
+        }
+
+        $fresh = match (true) {
+            $source instanceof ShiftProductionEntry => $this->buildBatchVoucherPayload($source),
+            default => null,
+        };
+
+        if ($fresh === null) {
+            return null;
+        }
+
+        // Keep the history the old payload accumulated.
+        $fresh['resolution_log'] = $entry->payload['resolution_log'] ?? [];
+
+        return $fresh;
     }
 
     private function enqueue(Model $syncable, string $voucherType, array $payload): TallySyncEntry

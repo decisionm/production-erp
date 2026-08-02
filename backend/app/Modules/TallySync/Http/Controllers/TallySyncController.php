@@ -40,6 +40,6 @@ class TallySyncController extends Controller
      */
     public function retry(TallySyncEntry $tallySyncEntry): TallySyncEntryResource
     {
-        return TallySyncEntryResource::make($this->sync->retry($tallySyncEntry));
+        return TallySyncEntryResource::make($this->sync->retry($tallySyncEntry, request()->user()?->id));
     }
 }

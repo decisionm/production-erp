@@ -18,6 +18,10 @@ export interface TallySyncEntry {
      */
     delivered_at: string | null;
     created_at: string;
+    /** Repair history: each retry after a failure records the previous error. */
+    resolution_log?: { at: string; by: number | null; previous_error: string; note: string }[];
+    /** The exact place a recognised Tally refusal is fixed; null for unknown errors. */
+    fix?: { sentence: string; path: string } | null;
 }
 
 export interface AgentToken {
