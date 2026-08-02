@@ -272,7 +272,7 @@ export default function QuotationsPage() {
                 title={`Quotation #${detailQuotation?.id}`}
                 open={detailQuotation !== null}
                 onClose={() => setDetailQuotation(null)}
-                width={640}
+                width="min(100vw, 640px)"
                 destroyOnHidden
                 extra={
                     detailQuotation && (

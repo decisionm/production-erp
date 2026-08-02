@@ -255,7 +255,7 @@ export default function ReworkOrdersPage() {
                 title={`Rework Order #${detailRow?.id}`}
                 open={detailRow !== null}
                 onClose={() => setDetailRow(null)}
-                width={600}
+                width="min(100vw, 600px)"
                 destroyOnHidden
             >
                 {detailRow && (

@@ -236,7 +236,7 @@ export default function NonConformanceReportsPage() {
                 title={`NCR #${detailReport?.id}`}
                 open={detailReport !== null}
                 onClose={() => setDetailReport(null)}
-                width={520}
+                width="min(100vw, 520px)"
                 destroyOnHidden
             >
                 {detailReport && (

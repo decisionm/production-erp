@@ -313,7 +313,7 @@ export default function DeliveriesPage() {
                 title={`Delivery #${detailDelivery?.id}`}
                 open={detailDelivery !== null}
                 onClose={() => setDetailDelivery(null)}
-                width={560}
+                width="min(100vw, 560px)"
                 destroyOnHidden
             >
                 {detailDelivery && (

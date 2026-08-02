@@ -198,7 +198,7 @@ export default function BatchesPage() {
                 title={`Barcode — ${barcodeBatch?.batch_number}`}
                 open={barcodeBatch !== null}
                 onClose={() => setBarcodeBatch(null)}
-                width={420}
+                width="min(100vw, 420px)"
                 destroyOnHidden
             >
                 {barcodeBatch && (

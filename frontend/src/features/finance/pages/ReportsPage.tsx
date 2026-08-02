@@ -37,11 +37,11 @@ function ProfitAndLossTab() {
     return (
         <div>
             <Typography.Title level={5}>Revenue</Typography.Title>
-            <Table<ProfitAndLossLine> rowKey="account_id" loading={isLoading} dataSource={data?.revenue} pagination={false} columns={lineColumns} />
+            <Table<ProfitAndLossLine> scroll={{ x: 'max-content' }} rowKey="account_id" loading={isLoading} dataSource={data?.revenue} pagination={false} columns={lineColumns} />
             <Typography.Paragraph strong style={{ marginTop: 8 }}>Total Revenue: {data?.total_revenue}</Typography.Paragraph>
 
             <Typography.Title level={5} style={{ marginTop: 24 }}>Expense</Typography.Title>
-            <Table<ProfitAndLossLine> rowKey="account_id" loading={isLoading} dataSource={data?.expense} pagination={false} columns={lineColumns} />
+            <Table<ProfitAndLossLine> scroll={{ x: 'max-content' }} rowKey="account_id" loading={isLoading} dataSource={data?.expense} pagination={false} columns={lineColumns} />
             <Typography.Paragraph strong style={{ marginTop: 8 }}>Total Expense: {data?.total_expense}</Typography.Paragraph>
 
             <Typography.Title level={4} style={{ marginTop: 24 }}>Net Income: {data?.net_income}</Typography.Title>
@@ -61,15 +61,15 @@ function BalanceSheetTab() {
     return (
         <div>
             <Typography.Title level={5}>Assets</Typography.Title>
-            <Table<ProfitAndLossLine> rowKey="account_id" loading={isLoading} dataSource={data?.assets} pagination={false} columns={lineColumns} />
+            <Table<ProfitAndLossLine> scroll={{ x: 'max-content' }} rowKey="account_id" loading={isLoading} dataSource={data?.assets} pagination={false} columns={lineColumns} />
             <Typography.Paragraph strong style={{ marginTop: 8 }}>Total Assets: {data?.total_assets}</Typography.Paragraph>
 
             <Typography.Title level={5} style={{ marginTop: 24 }}>Liabilities</Typography.Title>
-            <Table<ProfitAndLossLine> rowKey="account_id" loading={isLoading} dataSource={data?.liabilities} pagination={false} columns={lineColumns} />
+            <Table<ProfitAndLossLine> scroll={{ x: 'max-content' }} rowKey="account_id" loading={isLoading} dataSource={data?.liabilities} pagination={false} columns={lineColumns} />
             <Typography.Paragraph strong style={{ marginTop: 8 }}>Total Liabilities: {data?.total_liabilities}</Typography.Paragraph>
 
             <Typography.Title level={5} style={{ marginTop: 24 }}>Equity</Typography.Title>
-            <Table<ProfitAndLossLine> rowKey="account_id" loading={isLoading} dataSource={data?.equity} pagination={false} columns={lineColumns} />
+            <Table<ProfitAndLossLine> scroll={{ x: 'max-content' }} rowKey="account_id" loading={isLoading} dataSource={data?.equity} pagination={false} columns={lineColumns} />
             <Typography.Paragraph strong style={{ marginTop: 8 }}>Total Equity: {data?.total_equity}</Typography.Paragraph>
 
             <Typography.Paragraph type="secondary" style={{ marginTop: 16 }}>

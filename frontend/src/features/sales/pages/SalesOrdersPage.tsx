@@ -632,7 +632,7 @@ export default function SalesOrdersPage() {
                 // Widened to the same 760 this page's own order modal uses: the
                 // cost breakdown carries a rate, its unit and its provenance on
                 // one row, and 620 wrapped every one of them.
-                width={760}
+                width="min(100vw, 760px)"
                 destroyOnHidden
             >
                 {detailOrder && (

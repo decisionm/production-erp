@@ -169,6 +169,7 @@ export default function ItemDetailPage() {
             <Typography.Title level={5}>Stock by Warehouse</Typography.Title>
             {itemBalances.length > 0 ? (
                 <Table
+                    scroll={{ x: 'max-content' }}
                     rowKey="id"
                     size="small"
                     pagination={false}

@@ -207,7 +207,7 @@ export default function LeaveRequestsPage() {
                 title={`Leave Request #${detailRow?.id}`}
                 open={detailRow !== null}
                 onClose={() => setDetailRow(null)}
-                width={480}
+                width="min(100vw, 480px)"
                 destroyOnHidden
             >
                 {detailRow && (

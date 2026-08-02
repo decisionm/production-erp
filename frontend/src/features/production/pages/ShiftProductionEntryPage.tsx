@@ -4865,6 +4865,7 @@ export default function ShiftProductionEntryPage() {
                 </Space>
             ) : (
                 <Table<ShiftProductionEntry>
+                    scroll={{ x: 'max-content' }}
                     rowKey="id"
                     size="small"
                     loading={entriesLoading}
@@ -5493,6 +5494,7 @@ export default function ShiftProductionEntryPage() {
                                         </Typography.Text>
                                     ) : (
                                         <Table
+                                            scroll={{ x: 'max-content' }}
                                             size="small"
                                             rowKey="item_id"
                                             pagination={false}
@@ -5551,6 +5553,7 @@ export default function ShiftProductionEntryPage() {
                                                                 first.
                                                             </Typography.Text>
                                                             <Table
+                                                                scroll={{ x: 'max-content' }}
                                                                 size="small"
                                                                 rowKey="movement_id"
                                                                 pagination={false}
@@ -7653,6 +7656,7 @@ export default function ShiftProductionEntryPage() {
                     <>
                         <Typography.Text strong>Logged today</Typography.Text>
                         <Table
+                            scroll={{ x: 'max-content' }}
                             size="small"
                             rowKey="id"
                             pagination={false}

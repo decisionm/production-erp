@@ -322,7 +322,7 @@ export default function LeadsPage() {
                     setDetailLead(null);
                     setEditingRequirement(false);
                 }}
-                width={480}
+                width="min(100vw, 480px)"
                 destroyOnHidden
             >
                 {detailLead && (

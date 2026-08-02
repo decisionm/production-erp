@@ -166,7 +166,7 @@ export default function SerialNumbersPage() {
                 title={`Barcode — ${barcodeSerial?.serial_number}`}
                 open={barcodeSerial !== null}
                 onClose={() => setBarcodeSerial(null)}
-                width={420}
+                width="min(100vw, 420px)"
                 destroyOnHidden
             >
                 {barcodeSerial && (

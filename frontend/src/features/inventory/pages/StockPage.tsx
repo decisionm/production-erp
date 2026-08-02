@@ -450,7 +450,7 @@ export default function StockPage() {
                 }
                 open={historyRow !== null}
                 onClose={() => setHistoryRow(null)}
-                width={640}
+                width="min(100vw, 640px)"
                 destroyOnHidden
             >
                 {historyRow && (

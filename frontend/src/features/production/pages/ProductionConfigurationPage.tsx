@@ -508,6 +508,7 @@ function DowntimeReasonsTab() {
                 closable
             />
             <Table
+                scroll={{ x: 'max-content' }}
                 rowKey="id"
                 size="small"
                 loading={isFetching}
@@ -704,6 +705,7 @@ function SettingsTab() {
         <>
         <FactoryWarehousesCard />
         <Table
+            scroll={{ x: 'max-content' }}
             rowKey="id"
             size="small"
             loading={isFetching}
@@ -850,6 +852,7 @@ function ImportTab() {
                         }
                     >
                         <Table
+                            scroll={{ x: 'max-content' }}
                             rowKey="row"
                             size="small"
                             dataSource={result.rows}
