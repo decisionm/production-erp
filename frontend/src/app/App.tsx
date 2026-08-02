@@ -35,7 +35,6 @@ import ShiftProductionEntryPage from '@/features/production/pages/ShiftProductio
 import ShiftsPage from '@/features/production/pages/ShiftsPage';
 import ShiftSummaryPage from '@/features/production/pages/ShiftSummaryPage';
 import SubcontractOrdersPage from '@/features/production/pages/SubcontractOrdersPage';
-import WorkCentersPage from '@/features/production/pages/WorkCentersPage';
 import WorkOrdersPage from '@/features/production/pages/WorkOrdersPage';
 import PayrollRunsPage from '@/features/payroll/pages/PayrollRunsPage';
 import PayslipsPage from '@/features/payroll/pages/PayslipsPage';
@@ -98,7 +97,16 @@ export default function App() {
                                     <Route path="/inventory/material-lots" element={<MaterialLotsPage />} />
                                     <Route path="/inventory/batches" element={<BatchesPage />} />
                                     <Route path="/inventory/serial-numbers" element={<SerialNumbersPage />} />
-                                    <Route path="/production/work-centers" element={<WorkCentersPage />} />
+                                    {/* Work Centers is retired as a screen, not as a
+                                        record: the WorkCenter rows it edited are the
+                                        machine master, now shown in full on Machine
+                                        Setup. The URL is kept so old bookmarks and
+                                        anything printed on a wall still land
+                                        somewhere true. */}
+                                    <Route
+                                        path="/production/work-centers"
+                                        element={<Navigate to="/production/configuration?tab=machines" replace />}
+                                    />
                                     <Route path="/production/configuration" element={<ProductionConfigurationPage />} />
                                     <Route path="/production/boms" element={<BomsPage />} />
                                     <Route path="/production/routings" element={<RoutingsPage />} />

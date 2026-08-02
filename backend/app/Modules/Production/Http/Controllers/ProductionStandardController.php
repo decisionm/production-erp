@@ -5,32 +5,73 @@ namespace App\Modules\Production\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Production\Http\Requests\AttachProductionStandardItemRequest;
 use App\Modules\Production\Http\Requests\ImportProductionStandardsRequest;
+use App\Modules\Production\Http\Requests\IndexProductionStandardsRequest;
 use App\Modules\Production\Http\Requests\StoreProductionStandardRequest;
+use App\Modules\Production\Http\Resources\ProductionConfigurationResource;
 use App\Modules\Production\Models\ProductionStandard;
+use App\Modules\Production\Services\ProductionConfigurationService;
 use App\Modules\Production\Services\ProductionStandardImportService;
 use App\Modules\Production\Services\ProductionStandardService;
+use App\Modules\Production\Services\ProductStandardsWorkspaceService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class ProductionStandardController extends Controller
 {
     public function __construct(
         private readonly ProductionStandardImportService $import,
         private readonly ProductionStandardService $standards,
+        private readonly ProductStandardsWorkspaceService $workspace,
+        private readonly ProductionConfigurationService $configurations,
     ) {}
 
-    public function index(Request $request): JsonResponse
+    /**
+     * The product-configuration workspace, one page at a time.
+     *
+     * Still a RAW Laravel paginator on the wire (`data` beside `total` and
+     * `current_page`, no `meta` envelope) because that is what this endpoint
+     * has always returned and the reader normalises it; `summary` is added
+     * alongside for the header's chips. Every key a row carried before is
+     * still on it — the workspace fields are additions, not a replacement.
+     *
+     * The default view is production-READY. That is a deliberate change of
+     * behaviour: this endpoint used to hand back everything, and the page
+     * sorted it out client-side after fetching 200 rows. A caller that wants
+     * the old answer asks for `view=all`.
+     */
+    public function index(IndexProductionStandardsRequest $request): JsonResponse
     {
-        $standards = ProductionStandard::query()
-            ->with(['item', 'packagings'])
-            ->when($request->query('status'), fn ($q, $v) => $q->where('status', $v))
-            ->when($request->query('item_id'), fn ($q, $v) => $q->where('item_id', $v))
-            ->when($request->boolean('matched_only'), fn ($q) => $q->whereNotNull('item_id'))
-            ->orderBy('source_product_name')
-            ->orderBy('cavities')
-            ->paginate((int) $request->query('per_page', 50));
+        $filters = $request->validated();
 
-        return response()->json($standards);
+        $result = $this->workspace->workspace(
+            $filters,
+            $this->workspace->resolvePerPage($request->query('per_page', 25)),
+            max(1, (int) $request->query('page', 1)),
+        );
+
+        return response()->json($result['page']->toArray() + ['summary' => $result['summary']]);
+    }
+
+    /**
+     * The machine exceptions on one product — the workspace's expanded row.
+     *
+     * A convenience over the configurations the exceptions page already
+     * serves, not a second source: it calls the same service, returns the
+     * same resource, and every write (create, approve, deactivate, copy)
+     * still happens through the configuration endpoints. Nothing about the
+     * approval flow changes because the list can now be reached by product.
+     *
+     * A standard with no item attached has no exceptions by construction —
+     * configurations are keyed on the item — so it answers with an empty
+     * list rather than an error the page would have to special-case.
+     */
+    public function machineExceptions(ProductionStandard $standard): AnonymousResourceCollection
+    {
+        return ProductionConfigurationResource::collection(
+            $standard->item_id === null
+                ? collect()
+                : $this->configurations->forItem($standard->item_id),
+        );
     }
 
     /**

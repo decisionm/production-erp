@@ -10,7 +10,15 @@ class ProductionConfigurationResource extends JsonResource
     {
         return [
             'id' => $this->id,
-            'work_center' => ['id' => $this->work_center_id, 'name' => $this->whenLoaded('workCenter', fn () => $this->workCenter?->name)],
+            // The code rides beside the name because the floor calls machines
+            // by code (MC-04) and the office calls them by name (Machine 4);
+            // an exceptions list that carries only one of the two is unreadable
+            // to whichever half of the factory is looking at it.
+            'work_center' => [
+                'id' => $this->work_center_id,
+                'code' => $this->whenLoaded('workCenter', fn () => $this->workCenter?->code),
+                'name' => $this->whenLoaded('workCenter', fn () => $this->workCenter?->name),
+            ],
             'item' => ['id' => $this->item_id, 'name' => $this->whenLoaded('item', fn () => $this->item?->name), 'sku' => $this->whenLoaded('item', fn () => $this->item?->sku)],
             'mold' => $this->mold_id ? ['id' => $this->mold_id, 'name' => $this->whenLoaded('mold', fn () => $this->mold?->name)] : null,
             'colour' => $this->colour,

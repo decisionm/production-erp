@@ -2,7 +2,11 @@ import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
 import type {
     ProductionStandardRow,
+    ProductStandardsSummary,
+    ProductStandardsView,
+    ProductStandardsWorkspaceRow,
     StandardItemCandidate,
+    StandardPackagingMode,
     BalanceAckReason,
     BatchPreview,
     BinBayAvailabilityResponse,
@@ -123,20 +127,48 @@ export function machineLabel(machine: Pick<WorkCenter, 'name' | 'code'>): string
     return machine.code && machine.code !== machine.name ? `${machine.name} (${machine.code})` : machine.name;
 }
 
-export interface CreateWorkCenterPayload {
+/**
+ * Everything the machine master can write — the same vocabulary as
+ * StoreWorkCenterRequest and UpdateWorkCenterRequest, field for field.
+ *
+ * There used to be two write functions against this one endpoint: an identity
+ * one (code/name/hours/active, from the retired Work Centers page) and a
+ * "capability" one (cavities/cycle time, from Machine Setup). They wrote the
+ * same PUT and neither could express a whole machine, so adding a machine with
+ * its cavity range known meant saving it twice. One machine master, one
+ * payload.
+ *
+ * `default_shift_hours` and `confirmation_status` are deliberately ABSENT.
+ * Both columns exist and both ride the wire back, but nothing edits them — an
+ * omitted key is untouched by the backend, which is how they stay exactly as
+ * the workbook left them.
+ *
+ * Null means "no limit known" and never blocks anything; only a stated limit
+ * constrains a configuration.
+ */
+export interface WorkCenterWritePayload {
     code: string;
     name: string;
-    capacity_hours_per_day?: number;
+    capacity_hours_per_day?: number | null;
+    is_active?: boolean;
+    capacity_class?: string | null;
+    min_cavities?: number | null;
+    max_cavities?: number | null;
+    /** Explicit set for machines whose options are not a continuous range. */
+    permitted_cavities?: number[] | null;
+    cycle_time_min?: number | null;
+    cycle_time_max?: number | null;
 }
 
-export async function createWorkCenter(payload: CreateWorkCenterPayload): Promise<WorkCenter> {
+export async function createWorkCenter(payload: WorkCenterWritePayload): Promise<WorkCenter> {
     const { data } = await api.post<{ data: WorkCenter }>('/production/work-centers', payload);
     return data.data;
 }
 
-export type UpdateWorkCenterPayload = Partial<CreateWorkCenterPayload> & { is_active?: boolean };
-
-export async function updateWorkCenter(id: number, payload: UpdateWorkCenterPayload): Promise<WorkCenter> {
+export async function updateWorkCenter(
+    id: number,
+    payload: Partial<WorkCenterWritePayload>,
+): Promise<WorkCenter> {
     const { data } = await api.put<{ data: WorkCenter }>(`/production/work-centers/${id}`, payload);
     return data.data;
 }
@@ -423,13 +455,63 @@ export interface StandardCoverageRow {
  */
 type WirePage<T> = { data: T[]; meta?: Paginated<T>['meta'] } & Partial<Paginated<T>['meta']>;
 
-export async function listProductionStandards(params: {
+/** The page sizes the workspace offers. The server clamps anything else rather than refusing it. */
+export const PRODUCT_STANDARDS_PAGE_SIZES = [25, 50, 100] as const;
+
+/**
+ * The workspace query string.
+ *
+ * The two flags are typed as the literal `1`, not `boolean`, on purpose:
+ * Laravel's `boolean` rule accepts `1`, `0`, `"1"` and `"0"` but NOT the
+ * string `"true"`, which is exactly what axios puts on the wire for `true`.
+ * The old index validated nothing so a boolean worked by accident; the
+ * workspace has a FormRequest, and sending `matched_only=true` would answer a
+ * live factory's product master with a 422. Typing the literal makes that
+ * mistake a compile error instead of a blank page.
+ */
+export interface ProductStandardsWorkspaceParams {
+    view?: ProductStandardsView;
+    /** Matches the factory's product name OR the Tally item's name/sku. */
+    search?: string;
+    /** No item at all, or an item Tally has never heard of — one job. */
+    missing_tally?: 1;
+    packing_mode?: StandardPackagingMode;
+    /** Standards whose cavity count this machine can run. */
+    work_center_id?: number;
+    status?: string;
+    item_id?: number;
+    matched_only?: 1;
     page?: number;
     per_page?: number;
-    status?: string;
-    matched_only?: boolean;
-} = {}): Promise<Paginated<ProductionStandardRow>> {
-    const { data } = await api.get<WirePage<ProductionStandardRow>>('/production/standards', { params });
+}
+
+export interface ProductStandardsWorkspacePage {
+    data: ProductStandardsWorkspaceRow[];
+    meta: Paginated<ProductStandardsWorkspaceRow>['meta'];
+    summary: ProductStandardsSummary;
+}
+
+/**
+ * The product-configuration workspace, one REAL page at a time.
+ *
+ * The endpoint still answers with a raw Laravel paginator (`total` and
+ * `current_page` at the top level, no `meta` envelope) with `summary`
+ * alongside, so both shapes are still normalised here rather than at the call
+ * site.
+ *
+ * THE DEFAULT VIEW IS PRODUCTION-READY — the server's default, not this
+ * function's. A caller that wants everything asks for `view: 'all'`; the
+ * Start Batch return does exactly that, because a supervisor sent here by a
+ * blocked start is by construction looking at a product that is not ready,
+ * and the default view would show them an empty table.
+ */
+export async function listProductionStandards(
+    params: ProductStandardsWorkspaceParams = {},
+): Promise<ProductStandardsWorkspacePage> {
+    const { data } = await api.get<WirePage<ProductStandardsWorkspaceRow> & { summary?: ProductStandardsSummary }>(
+        '/production/standards',
+        { params },
+    );
     const rows = data.data ?? [];
 
     return {
@@ -440,7 +522,67 @@ export async function listProductionStandards(params: {
             per_page: data.per_page ?? rows.length,
             total: data.total ?? rows.length,
         },
+        // An older backend sends no summary. Reporting the page's own row
+        // count as "all" is the only honest fallback — inventing ready and
+        // incomplete numbers would put a verdict on screen nothing computed.
+        summary: data.summary ?? { ready: 0, incomplete: 0, all: data.total ?? rows.length },
     };
+}
+
+/**
+ * One product's machine exceptions, by standard.
+ *
+ * The workspace row already carries a slim copy for the collapsed table; this
+ * is the full ProductionConfiguration resource the expanded row's write
+ * actions need (status, effective dates, mould, the approval trail). Same
+ * service, same machine order — it is a second VIEW of the list, never a
+ * second source.
+ *
+ * A standard with no item attached answers with an empty list rather than an
+ * error, because configurations are keyed on the item.
+ */
+export async function listStandardMachineExceptions(standardId: number): Promise<ProductionConfiguration[]> {
+    const { data } = await api.get<{ data: ProductionConfiguration[] }>(
+        `/production/standards/${standardId}/machine-exceptions`,
+    );
+    return data.data ?? [];
+}
+
+/**
+ * The five product-configuration figures the app is allowed to write, saved
+ * on the ITEM MASTER in one round trip.
+ *
+ * WHY THIS EXISTS AND WHY IT IS NOT `updateItem`. Every gap the readiness gate
+ * reports is a `standard ?? item` question — weight, cycle time and cavities
+ * fall back from the workbook standard to the item master, pieces-per-box
+ * falls back from the resolved packaging to the item, and colour is only ever
+ * the item's. So a gap exists precisely when BOTH sides are blank, and filling
+ * the item master closes the gap the gate itself will re-evaluate. There is no
+ * write endpoint for a standard's own figures (the workbook is their record)
+ * and none for a packaging row, so this is the whole of what can honestly be
+ * offered — and it is enough for all five.
+ *
+ * Inventory's shared `UpdateItemPayload` does not carry `nos_per_box`, which
+ * the packing gap needs, and the workspace saves all five together. Casting
+ * around that would be a lie about a live factory's packing figure; a narrow,
+ * truthful payload is not.
+ *
+ * Every field is `sometimes` on the backend, so an omitted key is left alone
+ * and an explicit null clears the figure.
+ */
+export interface ProductConfigurationFiguresPayload {
+    nominal_weight_grams?: number | null;
+    standard_cycle_time?: number | null;
+    standard_cavities?: number | null;
+    colour?: string | null;
+    nos_per_box?: number | null;
+}
+
+export async function saveProductConfigurationFigures(
+    itemId: number,
+    payload: ProductConfigurationFiguresPayload,
+): Promise<void> {
+    await api.put(`/inventory/items/${itemId}`, payload);
 }
 
 /**
@@ -1313,23 +1455,6 @@ export async function saveFactorySetting(payload: {
     change_reason?: string;
 }): Promise<FactorySetting> {
     const { data } = await api.post<{ data: FactorySetting }>('/production/factory-settings', payload);
-    return data.data;
-}
-
-export async function updateWorkCenterCapability(
-    id: number,
-    payload: {
-        name?: string;
-        capacity_class?: string | null;
-        min_cavities?: number | null;
-        max_cavities?: number | null;
-        permitted_cavities?: number[] | null;
-        cycle_time_min?: number | null;
-        cycle_time_max?: number | null;
-        default_shift_hours?: number | null;
-    },
-): Promise<WorkCenter> {
-    const { data } = await api.put<{ data: WorkCenter }>(`/production/work-centers/${id}`, payload);
     return data.data;
 }
 

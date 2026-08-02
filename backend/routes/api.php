@@ -389,7 +389,13 @@ Route::prefix('v1')->group(function () {
             // ledger+consumption read, so outside the traceability gate like
             // its two neighbours above.
             Route::get('machine-resin', [FactoryDayBinController::class, 'machineResin']);
-            Route::apiResource('work-centers', WorkCenterController::class)->only(['index', 'store', 'update']);
+            // READING the machine list stays here, under module:production.
+            // It is not an admin screen's private data — the Start Batch
+            // picker, the configuration forms, the downtime log and the day
+            // bin all resolve a machine through it, so a supervisor who
+            // cannot read it cannot start a shift. WRITING a machine lives in
+            // its own module:machine-master group below.
+            Route::apiResource('work-centers', WorkCenterController::class)->only(['index']);
 
             Route::apiResource('boms', BomController::class)->only(['index', 'store']);
 
@@ -442,6 +448,10 @@ Route::prefix('v1')->group(function () {
             // Declared after standards/coverage and standards/import so the
             // literal segments are never shadowed by the {standard} binding.
             Route::get('standards/{standard}/item-candidates', [ProductionStandardController::class, 'itemCandidates']);
+            // The workspace's expanded row: this product's machine exceptions.
+            // A read over the same configurations the exceptions endpoints
+            // above serve — every write still goes through them.
+            Route::get('standards/{standard}/machine-exceptions', [ProductionStandardController::class, 'machineExceptions']);
             Route::post('standards/{standard}/attach-item', [ProductionStandardController::class, 'attachItem']);
             Route::post('standards', [ProductionStandardController::class, 'store']);
 
@@ -571,6 +581,29 @@ Route::prefix('v1')->group(function () {
                 // only visible) with traceability on.
                 Route::get('reports/traceability', [ProductionReportController::class, 'traceability']);
             });
+        });
+
+        /*
+         * THE MACHINE MASTER — adding a machine and changing what one IS
+         * (its code, its name, its cavity and cycle-time capabilities,
+         * whether it is still in service).
+         *
+         * Same URL prefix as the production group above and the same
+         * controller; a DIFFERENT permission. `module:machine-master` makes
+         * the POST/PUT require machine-master.manage, while the GET beside it
+         * still needs only production.view — which is precisely the split the
+         * factory asked for: every supervisor reads the machine list, the
+         * office changes it. Separated as a route group rather than an
+         * authorize() check inside the FormRequest so the rule is visible
+         * where the URL is declared and cannot be forgotten by the next
+         * write endpoint added here.
+         *
+         * The resource parameter is still {work_center}, so
+         * UpdateWorkCenterRequest's route('work_center') lookup and its
+         * unique-code-ignoring rule are untouched by the move.
+         */
+        Route::prefix('production')->middleware('module:machine-master')->group(function () {
+            Route::apiResource('work-centers', WorkCenterController::class)->only(['store', 'update']);
         });
 
         Route::prefix('maintenance')->middleware('module:maintenance')->group(function () {

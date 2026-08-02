@@ -1,7 +1,13 @@
 html,
 body,
 #root {
-    overflow-x: hidden;
+    /* clip, not hidden: `hidden` computes overflow-y to `auto`, which makes
+       every one of these a scroll container and silently disables
+       position:sticky for the whole app — the app bar and every sticky
+       table header were pinned to nothing from day one. `clip` cuts the
+       same horizontal overflow without creating a scroll container, so
+       sticky works and vertical page scroll is untouched. */
+    overflow-x: clip;
 }
 
 @media (max-width: 768px) {

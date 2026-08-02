@@ -61,6 +61,118 @@ class ProductReadinessService
     ];
 
     /**
+     * The sentence each check speaks when it fails. Extracted from failures()
+     * into a constant for one reason: the Product Standards workspace lists
+     * the SAME gaps against a product row, and a workspace that paraphrases
+     * the gate produces two vocabularies for one fact — the supervisor is
+     * told one thing on the configuration page and another when the batch is
+     * refused. Both now read the same strings from here.
+     *
+     * @var array<string, string>
+     */
+    private const SENTENCES = [
+        'weight' => 'No product weight — pieces cannot be converted to kg, so rejection and reconciliation cannot be calculated.',
+        'cycle_time' => 'No standard cycle time — expected output and efficiency cannot be calculated.',
+        'cavities' => 'No standard cavities — expected output cannot be calculated.',
+        'packing' => 'No packing configuration — pieces per box is needed to convert boxes to pieces.',
+        'colour' => 'No colour — the masterbatch suggestion and the amber/clear scrap item cannot be resolved.',
+        'tally_item' => 'The product does not exist in Tally — any voucher naming it will be rejected.',
+    ];
+
+    /**
+     * Where a person goes to close each gap. A gap without a destination is
+     * the "vague note" the workspace exists to abolish: naming the missing
+     * field is only half an instruction if the reader still has to guess
+     * which screen owns it.
+     *
+     * Four destinations for six gaps, because three of the gaps (the run
+     * figures) are the same edit.
+     *
+     * @var array<string, string>
+     */
+    private const FIX_TARGETS = [
+        'weight' => 'standard_edit',
+        'cycle_time' => 'standard_edit',
+        'cavities' => 'standard_edit',
+        'packing' => 'packing_edit',
+        'colour' => 'item_colour',
+        'tally_item' => 'attach_item',
+    ];
+
+    /**
+     * The product-configuration gaps on ONE standard row, numbered in the
+     * order a supervisor reads them: what the product runs to, how it is
+     * packed, what colour it is, and whether Tally has heard of it.
+     *
+     * Six checks, not ten: the other four in this class need a context a
+     * configuration screen does not have. `tally_godown` and `machine_active`
+     * are judged against a warehouse and a machine that only an intended RUN
+     * names, and `item_active`/`uom` belong to the item master rather than to
+     * this product's production configuration.
+     *
+     * SEVERITY-BLIND on purpose. assess() reads config/production.readiness
+     * and, with the master switch off, reports every failure as a warning
+     * instead — correct for a gate that is being watched before it is allowed
+     * to bite, and wrong here, because it would empty the Incomplete view and
+     * declare a factory of half-configured products ready. A gap is a missing
+     * master whether or not the gate currently refuses it.
+     *
+     * @return list<array{number: int, key: string, label: string, sentence: string, fix_target: string}>
+     */
+    public function configurationGaps(
+        ?Item $item,
+        ?ProductionStandard $standard = null,
+        ?ProductionStandardPackaging $packaging = null,
+    ): array {
+        $missing = [];
+
+        // The same precedence every consumer uses: the factory standard
+        // outranks the item master. A figure present on either side is not a
+        // gap, because the run will find it.
+        if (! $this->positive($standard?->unit_weight_grams ?? $item?->nominal_weight_grams)) {
+            $missing[] = 'weight';
+        }
+        if (! $this->positive($standard?->cycle_time ?? $item?->standard_cycle_time)) {
+            $missing[] = 'cycle_time';
+        }
+        if (! $this->positive($standard?->cavities ?? $item?->standard_cavities)) {
+            $missing[] = 'cavities';
+        }
+        if (! $this->positive($packaging?->nos_per_box ?? $item?->nos_per_box)) {
+            $missing[] = 'packing';
+        }
+        if (trim((string) $item?->colour) === '') {
+            $missing[] = 'colour';
+        }
+
+        // A standard with no item at all has no Tally identity by
+        // definition, so it fails the same check for the same reason and
+        // fix_target sends the reader to the attach screen either way.
+        //
+        // A LOCAL- fixture is skipped here exactly as it is in failures():
+        // it was fabricated BECAUSE Tally does not carry the product, and
+        // reporting a deliberate state as a gap on most of the catalogue is
+        // how a gap list stops being read. The consequence is not hidden —
+        // the workspace's `tally` block still reports guid_present false and
+        // says the voucher cannot sync. A gap is something to fix here; that
+        // is something to know.
+        if ($item === null || ($item->tally_stock_item_guid === null && ! $item->isLocalFixture())) {
+            $missing[] = 'tally_item';
+        }
+
+        return array_map(fn (int $index, string $key) => [
+            // Numbered, not bulleted. "Two things are missing: 1… 2…" is a
+            // job a person can work through and report back on; a bullet list
+            // is a mood.
+            'number' => $index + 1,
+            'key' => $key,
+            'label' => self::LABELS[$key],
+            'sentence' => self::SENTENCES[$key],
+            'fix_target' => self::FIX_TARGETS[$key],
+        ], array_keys($missing), $missing);
+    }
+
+    /**
      * Assess one intended production run. Warehouse and machine are optional
      * so the same method serves both the product picker (product-only, "is
      * this product ever runnable?") and Start Batch (the full context).
@@ -180,23 +292,23 @@ class ProductReadinessService
         // which is honest, because until the supervisor says which variant
         // this run is, nothing knows what it weighs either.
         if (! $this->positive($configuration?->unit_weight_grams ?? $standard?->unit_weight_grams ?? $item->nominal_weight_grams)) {
-            $failures['weight'] = 'No product weight — pieces cannot be converted to kg, so rejection and reconciliation cannot be calculated.';
+            $failures['weight'] = self::SENTENCES['weight'];
         }
 
         if (! $this->positive($configuration?->default_cycle_time ?? $standard?->cycle_time ?? $item->standard_cycle_time)) {
-            $failures['cycle_time'] = 'No standard cycle time — expected output and efficiency cannot be calculated.';
+            $failures['cycle_time'] = self::SENTENCES['cycle_time'];
         }
 
         if (! $this->positive($configuration?->default_cavities ?? $standard?->cavities ?? $item->standard_cavities)) {
-            $failures['cavities'] = 'No standard cavities — expected output cannot be calculated.';
+            $failures['cavities'] = self::SENTENCES['cavities'];
         }
 
         if (! $this->positive($packaging?->nos_per_box ?? $item->nos_per_box)) {
-            $failures['packing'] = 'No packing configuration — pieces per box is needed to convert boxes to pieces.';
+            $failures['packing'] = self::SENTENCES['packing'];
         }
 
         if (trim((string) $item->colour) === '') {
-            $failures['colour'] = 'No colour — the masterbatch suggestion and the amber/clear scrap item cannot be resolved.';
+            $failures['colour'] = self::SENTENCES['colour'];
         }
 
         // A missing consumption recipe is deliberately NOT a finding. The
@@ -218,7 +330,7 @@ class ProductReadinessService
         // ("voucher posting disabled") in its own words. A REAL item missing
         // its GUID is a genuine gap and still fails here.
         if ($item->tally_stock_item_guid === null && ! $item->isLocalFixture()) {
-            $failures['tally_item'] = 'The product does not exist in Tally — any voucher naming it will be rejected.';
+            $failures['tally_item'] = self::SENTENCES['tally_item'];
         }
 
         // Judged by the SAME TallyGodownResolver the voucher payload and its

@@ -1694,7 +1694,14 @@ export type ConfigurationStatus = 'draft' | 'approved' | 'inactive';
 
 export interface ProductionConfiguration {
     id: number;
-    work_center: { id: number; name?: string };
+    /**
+     * `code` and `name` are both `whenLoaded` on the resource, so a caller
+     * that did not eager-load the machine gets an id and nothing else. The
+     * floor calls machines by code (MC-04) and the office by name (Machine
+     * 4); a list carrying only one of the two is unreadable to half the
+     * factory, so readers show both when both arrive.
+     */
+    work_center: { id: number; code?: string | null; name?: string };
     item: { id: number; name?: string; sku?: string };
     mold: { id: number; name?: string } | null;
     colour: string | null;
@@ -1781,10 +1788,13 @@ export interface ImportResult {
     rows: ImportRowResult[];
 }
 
+/** The three ways a product reaches a box. The workspace filters on these. */
+export type StandardPackagingMode = 'pouch' | 'tray' | 'direct_box';
+
 /** A packaging option on a product standard: how pieces reach a box. */
 export interface StandardPackaging {
     id: number;
-    mode: 'pouch' | 'tray' | 'direct_box';
+    mode: StandardPackagingMode;
     label: string;
     nos_per_pouch: number | null;
     pouches_per_box: number | null;
@@ -2006,6 +2016,135 @@ export interface StandardItemCandidate {
      * from "I am about to pick the wrong bottle".
      */
     attached_to_same_product?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// The PRODUCT STANDARDS WORKSPACE — the same standards rows, plus everything
+// the single product-configuration screen answers about them.
+//
+// Every field below is computed by the backend, and the gap sentences are the
+// Start Batch gate's OWN strings (ProductReadinessService::SENTENCES, which
+// both the gate and this workspace now read). The page must never paraphrase
+// them: a supervisor told one thing here and another when the batch is
+// refused stops believing both screens.
+// ---------------------------------------------------------------------------
+
+/** Which products a view shows. Production-ready is the default the server applies. */
+export type ProductStandardsView = 'ready' | 'incomplete' | 'all';
+
+/**
+ * The six things that can stand between a product and a shift, in the gate's
+ * own vocabulary. Same keys as ProductReadinessService's findings.
+ */
+export type ProductStandardGapKey =
+    | 'weight'
+    | 'cycle_time'
+    | 'cavities'
+    | 'packing'
+    | 'colour'
+    | 'tally_item';
+
+/**
+ * Where a person goes to close a gap. Four destinations for six gaps — the
+ * three run figures are one edit.
+ *
+ * The workspace resolves each of these to a real control; a gap whose target
+ * it cannot honour would be the vague note this screen exists to abolish.
+ */
+export type ProductStandardFixTarget =
+    | 'standard_edit'
+    | 'packing_edit'
+    | 'item_colour'
+    | 'attach_item';
+
+/** One numbered gap: what is missing, what it costs, and where to fix it. */
+export interface ProductStandardGap {
+    /** 1..n within the row — numbered so it can be worked through and reported back on. */
+    number: number;
+    key: ProductStandardGapKey;
+    label: string;
+    sentence: string;
+    fix_target: ProductStandardFixTarget;
+}
+
+/**
+ * The product's Tally identity and the exact consequence of not having one.
+ *
+ * `sentence` is null when the item is attached AND Tally carries it. When it
+ * is present it is stated verbatim — production is not blocked by this, and a
+ * screen that implied otherwise would refuse work the floor is allowed to do.
+ */
+export interface ProductStandardTallyIdentity {
+    attached: boolean;
+    guid_present: boolean;
+    sentence: string | null;
+}
+
+/**
+ * The recipe a run of this product will consume, named read-only.
+ *
+ * Recipes are ITEM-level and Bills of Material owns them. This workspace
+ * shows which one is in force and links to it; it never copies or edits one,
+ * because a second editing surface for one master is how two versions of a
+ * recipe start disagreeing.
+ */
+export interface ProductStandardActiveRecipe {
+    id: number;
+    name: string;
+    version: string | null;
+}
+
+/**
+ * A machine exception as it rides ON the workspace row — the slim projection
+ * the collapsed table needs.
+ *
+ * The expanded row re-reads the same exceptions from
+ * `standards/{standard}/machine-exceptions`, which returns the full
+ * ProductionConfiguration resource the write actions need. Both come from the
+ * same service in the same machine order.
+ */
+export interface StandardMachineException {
+    id: number;
+    work_center: { id: number; code: string | null; name: string | null };
+    status: ConfigurationStatus;
+    colour: string | null;
+    mold: { id: number; name: string | null } | null;
+    effective_from: string | null;
+    effective_to: string | null;
+    default_cycle_time: string | null;
+    default_cavities: number | null;
+    unit_weight_grams: string | null;
+}
+
+/**
+ * One workspace row: every key the standards index already returned, plus the
+ * workspace's own answers.
+ *
+ * It extends ProductionStandardRow rather than restating it because the
+ * backend builds the row with `$standard->toArray() + [...]` — the additions
+ * are additions, and anything reading the old shape keeps working.
+ */
+export interface ProductStandardsWorkspaceRow extends ProductionStandardRow {
+    /** Empty exactly when `ready` is true. */
+    gaps: ProductStandardGap[];
+    ready: boolean;
+    /** The packaging option a run would actually resolve to, if any. */
+    resolved_packaging_id: number | null;
+    machine_exceptions: StandardMachineException[];
+    active_recipe: ProductStandardActiveRecipe | null;
+    tally: ProductStandardTallyIdentity;
+}
+
+/**
+ * The chip numbers.
+ *
+ * Counted over the FILTERED set minus the view, so clicking Incomplete never
+ * rewrites the number that told you to click it.
+ */
+export interface ProductStandardsSummary {
+    ready: number;
+    incomplete: number;
+    all: number;
 }
 
 // ---------------------------------------------------------------------------

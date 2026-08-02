@@ -1,10 +1,12 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     Alert,
     Button,
-    Card,
+    Checkbox,
     Col,
+    DatePicker,
     Divider,
+    Drawer,
     Form,
     Input,
     InputNumber,
@@ -20,6 +22,7 @@ import {
     Tooltip,
     Typography,
 } from 'antd';
+import dayjs from 'dayjs';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { listAllItems } from '@/features/inventory/api';
@@ -28,83 +31,105 @@ import {
     hasStartBatchResume,
     parseStartBatchResume,
 } from '@/features/production/startBatchResume';
+import type { ProductConfigurationFiguresPayload } from '@/features/production/api';
 import {
+    approveProductionConfiguration,
     attachStandardItem,
+    copyProductionConfiguration,
+    createProductionConfiguration,
     createProductionStandard,
-    listProductionConfigurations,
+    deactivateProductionConfiguration,
+    listAllMolds,
     listProductionStandards,
     listStandardItemCandidates,
+    listStandardMachineExceptions,
+    listWorkCenters,
+    machineLabel,
+    PRODUCT_STANDARDS_PAGE_SIZES,
+    saveProductConfigurationFigures,
+    updateProductionConfiguration,
 } from '@/features/production/api';
 import { useProductionSettings } from '@/features/production/packing';
 import type {
     ProductionConfiguration,
-    ProductionStandardRow,
+    ProductStandardGap,
+    ProductStandardGapKey,
+    ProductStandardsView,
+    ProductStandardsWorkspaceRow,
+    StandardPackagingMode,
     StandardSpecColumn,
     StandardSpecProvenance,
 } from '@/features/production/types';
 import { itemLabel } from '@/lib/itemLabel';
 
 /**
- * The factory's imported product master, on screen — and the place it is
- * maintained from.
+ * THE PRODUCT CONFIGURATION WORKSPACE — one screen that answers, for every
+ * product the factory makes, "can this run, and if not, what exactly is
+ * missing and where do I go?"
  *
- * This existed as an API endpoint and a database table with no page, which made
- * the configured products invisible: the only place their figures surfaced was
- * inside the Start Batch dialog, one product at a time, after picking a
- * machine. There was no way to answer "what is actually configured?".
+ * It replaces three places that used to hold one product's configuration
+ * between them: this page (the workbook's figures), Machine Setup → Machine
+ * Exceptions (the per-machine approvals), and nowhere at all (the item
+ * master's colour and packing, which had no editor). A supervisor no longer
+ * has to know which of those a missing figure lives in.
  *
- * It was read-only for as long as the import command was the only writer. It no
- * longer is, and the three things that changed are all things the workbook
- * cannot do for itself:
+ * ## The three things this screen refuses to do
  *
- *  - **Attaching a Tally item.** ~60 standards import under a product name that
- *    matches no item, so they land recorded-but-unattached. Only a person can
- *    say which item a workbook name means; the app can only shortlist. That
- *    shortlist is name similarity and nothing else — see the attach dialog,
- *    which says so where the decision is made rather than in a comment here.
- *  - **Adding a product by hand.** A product the workbook does not carry used
- *    to need a workbook edit and a re-import to exist at all.
- *  - **Reading a machine's exceptions.** The per-machine overrides used to live
- *    on a separate tab, which asked people to hold "standard" and
- *    "configuration" apart in their heads. They are now the expandable row of
- *    the standard they override, which is the only place the difference is
- *    self-explanatory.
- *
- * Editing an imported FIGURE is still not offered: the workbook is the
- * factory's own record, and a figure edited here would silently disagree with
- * it.
+ *  - **Paraphrase the gate.** Every gap sentence on this page is the string
+ *    the Start Batch readiness gate itself speaks (ProductReadinessService's
+ *    SENTENCES, which both now read). Rewording them here would mean a
+ *    supervisor is told one thing while configuring and another when the
+ *    batch is refused.
+ *  - **Guess at a Tally identity.** The attach dialog ranks by NAME
+ *    similarity and says so where the decision is made; nothing is written
+ *    until a person picks. A product with no Tally item still RUNS — only its
+ *    voucher waits, and the exact sentence saying so is the backend's.
+ *  - **Edit the workbook's own figures.** The standard's cavities, weight and
+ *    cycle time are the factory's record and are corrected there. What this
+ *    page writes is the ITEM MASTER, which is the other half of the
+ *    precedence the gate reads (`standard ?? item`) and the half the app
+ *    owns — see ProductConfigurationFiguresModal.
  *
  * ## The three tables this page is NOT
  *
- * Worth stating, because they are easy to confuse and each explains a different
- * notice on Start Batch:
- *
  *  - **Product standards** (this page) — what a product runs to WHEREVER it
  *    runs: cavities, weight, cycle time, packing. From the workbook.
- *  - **Production configuration** (/production/configuration) — a machine +
- *    product + mould approval, needed only for an exception. Now shown inline
- *    here, on the standard it is an exception to.
- *  - **Bills of Material** (/production/boms) — the consumption recipe: how much
- *    resin and masterbatch go into one bottle.
+ *  - **Production configuration** — a machine + product + mould approval,
+ *    needed only for an exception. Now maintained HERE, in the drawer of the
+ *    standard it is an exception to, rather than on a tab of its own.
+ *  - **Bills of Material** (/production/boms) — the consumption recipe: how
+ *    much resin and masterbatch go into one bottle. Item-level, shown here
+ *    read-only, edited only there.
  */
 
-/** One page holds the whole master (103 rows today), so the header freezing is what makes it readable. */
-const PER_PAGE = 200;
-
 /**
- * The app bar is `position: sticky; top: 0` at antd's default header height, so
- * the table header has to freeze below it rather than under it.
+ * The app bar is `position: sticky; top: 0` and carries no height override, so
+ * it stands at antd's default Layout.Header height. Browser-proven against the
+ * running app rather than assumed: the header measures 64px and the table's
+ * sticky header must freeze BELOW it, not under it.
  */
 const APP_HEADER_HEIGHT = 64;
 
+const DEFAULT_PAGE_SIZE = PRODUCT_STANDARDS_PAGE_SIZES[0];
+
+/** Figures line up column-wise only if the digits are the same width. */
+const numeric = { fontVariantNumeric: 'tabular-nums' } as const;
+
 /** The standard's packaging row for one mode, if the workbook gave one. */
-const pkg = (r: ProductionStandardRow, mode: 'pouch' | 'tray' | 'direct_box') =>
+const pkg = (r: ProductStandardsWorkspaceRow, mode: StandardPackagingMode) =>
     r.packagings.find((p) => p.mode === mode);
 
 const fmt = (v: string | number | null | undefined, suffix = ''): string => {
     if (v === null || v === undefined || v === '') return '—';
     const n = typeof v === 'number' ? v : parseFloat(v);
     return Number.isNaN(n) ? '—' : `${parseFloat(n.toFixed(4))}${suffix}`;
+};
+
+/** A decimal string from the wire, as a number a form control can hold. */
+const num = (v: string | number | null | undefined): number | undefined => {
+    if (v === null || v === undefined || v === '') return undefined;
+    const n = typeof v === 'number' ? v : parseFloat(v);
+    return Number.isNaN(n) ? undefined : n;
 };
 
 const STATUS: Record<string, { colour: string; label: string; help: string }> = {
@@ -127,11 +152,15 @@ const CONFIG_STATUS_COLOUR: Record<string, string> = {
     inactive: 'default',
 };
 
+const PACKING_MODE_LABEL: Record<StandardPackagingMode, string> = {
+    pouch: 'Pouch',
+    tray: 'Tray',
+    direct_box: 'Straight into the box',
+};
+
 // ---------------------------------------------------------------------------
 // Packing-material specs, and whether the value in the cell was inferred
 // ---------------------------------------------------------------------------
-
-const SPEC_COLUMNS = ['carton_spec', 'tray_spec', 'pouch_spec'] as const;
 
 /**
  * A packing-material spec, plus its provenance entry when one exists.
@@ -145,7 +174,7 @@ const SPEC_COLUMNS = ['carton_spec', 'tray_spec', 'pouch_spec'] as const;
  * A column with no entry in the map came from the workbook verbatim.
  */
 function standardSpec(
-    r: ProductionStandardRow,
+    r: ProductStandardsWorkspaceRow,
     column: StandardSpecColumn,
 ): { value: string | null; inferred: StandardSpecProvenance | null } {
     const value =
@@ -161,7 +190,7 @@ function standardSpec(
     };
 }
 
-const specCell = (r: ProductionStandardRow, column: StandardSpecColumn) => {
+const specCell = (r: ProductStandardsWorkspaceRow, column: StandardSpecColumn) => {
     const { value, inferred } = standardSpec(r, column);
     if (value === null) return '—';
     if (inferred === null) return value;
@@ -195,12 +224,9 @@ const specCell = (r: ProductionStandardRow, column: StandardSpecColumn) => {
     );
 };
 
-const hasInferredSpec = (r: ProductionStandardRow) =>
-    SPEC_COLUMNS.some((c) => standardSpec(r, c).inferred !== null);
-
 /**
  * How this standard came to point at its Tally item, in one line — or nothing,
- * which is itself the answer for the ~40 rows the importer matched by name.
+ * which is itself the answer for the rows the importer matched by name.
  *
  * `item_attached_by` is a users foreign key, so an endpoint that has not
  * eager-loaded the relation sends a bare id. An id is not a name: "attached by
@@ -208,7 +234,7 @@ const hasInferredSpec = (r: ProductionStandardRow) =>
  * that matters most — that a PERSON decided this in the app, rather than the
  * importer matching two strings — so it is shown either way, named or not.
  */
-const attachmentNote = (r: ProductionStandardRow): string | null => {
+const attachmentNote = (r: ProductStandardsWorkspaceRow): string | null => {
     const by = r.item_attached_by;
     const name = by !== null && by !== undefined && typeof by !== 'number' ? (by.name ?? '').trim() : '';
     const on = r.item_attached_at ? r.item_attached_at.slice(0, 10) : '';
@@ -219,33 +245,553 @@ const attachmentNote = (r: ProductionStandardRow): string | null => {
     return on === '' ? `attached by ${name}` : `attached by ${name} · ${on}`;
 };
 
+const showSaveError = (error: any, title: string) => {
+    const errors = error?.response?.data?.errors;
+    Modal.error({
+        title,
+        // Field-level messages say exactly what the backend refused and why —
+        // a cavity count outside the machine's capability, an overlapping
+        // approval, an attach that collides with an existing variant. All are
+        // real answers, not "unexpected error".
+        content: errors
+            ? Object.values(errors).flat().join(' ')
+            : (error?.response?.data?.message ?? 'Unexpected error.'),
+    });
+};
+
 // ---------------------------------------------------------------------------
-// The expandable row: this product's per-machine exceptions
+// The gaps, and where each one is closed
 // ---------------------------------------------------------------------------
 
+/** The item-master field each gap is closed by. `tally_item` is closed by attaching, not typing. */
+type FigureField = keyof ProductConfigurationFiguresPayload;
+
+const GAP_FIELD: Record<ProductStandardGapKey, FigureField | null> = {
+    weight: 'nominal_weight_grams',
+    cycle_time: 'standard_cycle_time',
+    cavities: 'standard_cavities',
+    packing: 'nos_per_box',
+    colour: 'colour',
+    tally_item: null,
+};
+
+/** What the button on a gap says. Never "fix this" — always the actual destination. */
+const GAP_ACTION_LABEL: Record<ProductStandardGapKey, string> = {
+    weight: 'Set the weight',
+    cycle_time: 'Set the cycle time',
+    cavities: 'Set the cavities',
+    packing: 'Set pieces per box',
+    colour: 'Set the colour',
+    tally_item: 'Attach a Tally item',
+};
+
 /**
- * The approved configurations for one product — the exceptions to the standard
- * the row above states.
+ * The server's numbered gap list, each line ending in a control that goes
+ * somewhere real.
  *
- * Mounted only once its row is expanded, which is why the query lives in here
- * rather than in the page: a hundred rows each firing a configurations request
- * on render would be a hundred requests to show nothing most of the time.
- *
- * Read-only on purpose. Editing an approval is an approval decision and stays
- * on Machine Setup, which has the approve/deactivate/copy actions and
- * the audit trail around them.
+ * The sentences are printed verbatim — they are the gate's own. The only
+ * thing this component decides is which control closes each one, and when a
+ * standard has no Tally item yet it says so instead of offering an editor
+ * that would have nothing to write to: every figure this page writes lives on
+ * the ITEM, so the item has to exist first.
  */
-function MachineOverrides({ itemId, productName }: { itemId: number; productName: string }) {
-    const { data, isLoading, isError } = useQuery({
-        queryKey: ['production', 'configurations', 'for-item', itemId],
-        queryFn: () => listProductionConfigurations({ item_id: itemId, per_page: 200 }),
+function GapList({
+    gaps,
+    hasItem,
+    onFix,
+    onAttach,
+}: {
+    gaps: ProductStandardGap[];
+    hasItem: boolean;
+    onFix: (field: FigureField) => void;
+    onAttach: () => void;
+}) {
+    return (
+        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+            {gaps.map((gap) => {
+                const field = GAP_FIELD[gap.key];
+                // Every editable figure is an item-master field, so without an
+                // item there is exactly one honest next step for any of them.
+                const attachFirst = field !== null && !hasItem;
+
+                return (
+                    <div key={gap.key} style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
+                        <Typography.Text strong style={{ ...numeric, minWidth: 18 }}>
+                            {gap.number}.
+                        </Typography.Text>
+                        <div style={{ flex: 1 }}>
+                            <Typography.Text>{gap.sentence}</Typography.Text>
+                            <div style={{ marginTop: 2 }}>
+                                <Button
+                                    type="link"
+                                    size="small"
+                                    style={{ padding: 0, height: 'auto' }}
+                                    onClick={() => (field === null || attachFirst ? onAttach() : onFix(field))}
+                                >
+                                    {attachFirst ? 'Attach a Tally item first' : GAP_ACTION_LABEL[gap.key]}
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })}
+        </Space>
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The item-master figures — the half of the product configuration the app owns
+// ---------------------------------------------------------------------------
+
+interface FiguresForm {
+    nominal_weight_grams?: number;
+    standard_cycle_time?: number;
+    standard_cavities?: number;
+    nos_per_box?: number;
+    colour?: string;
+}
+
+/**
+ * The five figures that close a gap, on the ITEM MASTER.
+ *
+ * WHY THE ITEM AND NOT THE STANDARD. Every gap the readiness gate reports is a
+ * `standard ?? item` question: the workbook standard is consulted first and
+ * the item master answers when it is blank. So a gap exists precisely when
+ * BOTH are blank, and writing the item closes the gap the gate itself
+ * re-evaluates — no second source of truth appears, because the precedence
+ * that decides between them already existed and is unchanged. A standard's own
+ * figures remain the workbook's record and are still not editable here.
+ *
+ * Each field therefore shows what the WORKBOOK says beside it. A supervisor
+ * typing 26 into "weight" while the standard already states 24 must be able to
+ * see that the run will use 24 — that is not a rejection, the item master is
+ * used by other screens, but it would be a nasty surprise on the floor.
+ */
+function ProductConfigurationFiguresModal({
+    row,
+    focus,
+    onClose,
+}: {
+    row: ProductStandardsWorkspaceRow;
+    focus: FigureField;
+    onClose: () => void;
+}) {
+    const queryClient = useQueryClient();
+    const [form] = Form.useForm<FiguresForm>();
+    const item = row.item;
+
+    const save = useMutation({
+        mutationFn: (values: FiguresForm) =>
+            saveProductConfigurationFigures(item!.id, {
+                // Sent whole, not as a diff: every field is `sometimes` on the
+                // backend, an explicit null clears a figure, and a partial
+                // save that silently kept an old value would be the harder
+                // thing to explain on the floor.
+                nominal_weight_grams: values.nominal_weight_grams ?? null,
+                standard_cycle_time: values.standard_cycle_time ?? null,
+                standard_cavities: values.standard_cavities ?? null,
+                nos_per_box: values.nos_per_box ?? null,
+                colour: (values.colour ?? '').trim() === '' ? null : values.colour!.trim(),
+            }),
+        onSuccess: () => {
+            // Both masters: the workspace re-reads its gaps from the gate, and
+            // every picker in the app holds this item in the all-items cache.
+            queryClient.invalidateQueries({ queryKey: ['production', 'standards'] });
+            queryClient.invalidateQueries({ queryKey: ['inventory', 'items'] });
+            onClose();
+        },
+        onError: (error: any) => showSaveError(error, 'Could not save these figures'),
     });
+
+    if (item === null) return null;
+
+    const standardSays = (label: string, value: string | number | null | undefined) =>
+        value === null || value === undefined || value === '' ? (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                The workbook leaves {label} blank for this product.
+            </Typography.Text>
+        ) : (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                The workbook standard says <b style={numeric}>{value}</b> — that is what a run uses.
+            </Typography.Text>
+        );
+
+    return (
+        <Modal
+            open
+            width={640}
+            title={`Item master — ${itemLabel(item)}`}
+            okText="Save figures"
+            confirmLoading={save.isPending}
+            onCancel={onClose}
+            onOk={() => form.validateFields().then((values) => save.mutate(values))}
+            destroyOnHidden
+        >
+            <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 14 }}
+                message="These are the item master's figures, not the workbook's"
+                description={
+                    <>
+                        A run reads the factory workbook standard first and falls back to these when it is blank —
+                        which is why filling one in here closes the gap. The workbook's own figures are corrected in
+                        the workbook, and this screen never overwrites them.
+                    </>
+                }
+            />
+
+            <Form<FiguresForm>
+                form={form}
+                layout="vertical"
+                requiredMark={false}
+                initialValues={{
+                    nominal_weight_grams: num(item.nominal_weight_grams),
+                    standard_cycle_time: num(item.standard_cycle_time),
+                    standard_cavities: item.standard_cavities ?? undefined,
+                    nos_per_box: item.nos_per_box ?? undefined,
+                    colour: item.colour ?? undefined,
+                }}
+            >
+                <Row gutter={12}>
+                    <Col xs={24} sm={8}>
+                        <Form.Item
+                            name="nominal_weight_grams"
+                            label="Weight of one piece (g)"
+                            extra={standardSays('the weight', row.unit_weight_grams)}
+                        >
+                            <InputNumber
+                                min={0.0001}
+                                step={0.1}
+                                style={{ width: '100%' }}
+                                autoFocus={focus === 'nominal_weight_grams'}
+                            />
+                        </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={8}>
+                        <Form.Item
+                            name="standard_cycle_time"
+                            label="Cycle time (s)"
+                            extra={standardSays('the cycle time', row.cycle_time)}
+                        >
+                            <InputNumber
+                                min={0.1}
+                                step={0.1}
+                                style={{ width: '100%' }}
+                                autoFocus={focus === 'standard_cycle_time'}
+                            />
+                        </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={8}>
+                        <Form.Item
+                            name="standard_cavities"
+                            label="Cavities"
+                            extra={standardSays('the cavity count', row.cavities)}
+                        >
+                            <InputNumber
+                                min={1}
+                                precision={0}
+                                style={{ width: '100%' }}
+                                autoFocus={focus === 'standard_cavities'}
+                            />
+                        </Form.Item>
+                    </Col>
+                </Row>
+
+                <Row gutter={12}>
+                    <Col xs={24} sm={12}>
+                        <Form.Item
+                            name="nos_per_box"
+                            label="Pieces per box"
+                            // The one figure whose fix is worth spelling out:
+                            // it closes the packing gap without the standard
+                            // gaining a packing MODE, because a packaging row
+                            // can only be written by the workbook import.
+                            extra={
+                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                    {row.packagings.length > 0
+                                        ? `The workbook packs this ${row.packagings
+                                              .map((p) => PACKING_MODE_LABEL[p.mode].toLowerCase())
+                                              .join(' / ')}.`
+                                        : 'The workbook records no packing mode for this product. Setting the count here lets boxes be converted to pieces; the packing MODE still comes from the workbook.'}
+                                </Typography.Text>
+                            }
+                        >
+                            <InputNumber
+                                min={1}
+                                precision={0}
+                                style={{ width: '100%' }}
+                                autoFocus={focus === 'nos_per_box'}
+                            />
+                        </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={12}>
+                        <Form.Item
+                            name="colour"
+                            label="Colour"
+                            extra={
+                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                    Drives the masterbatch suggestion and the amber/clear scrap item. Write{' '}
+                                    <b>Clear</b> for a bottle that takes no masterbatch — blank is "nobody has said",
+                                    which is not the same thing.
+                                </Typography.Text>
+                            }
+                        >
+                            <Input maxLength={32} placeholder="Clear, Amber, Blue…" autoFocus={focus === 'colour'} />
+                        </Form.Item>
+                    </Col>
+                </Row>
+            </Form>
+        </Modal>
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Machine exceptions — the per-machine approvals, on the product they override
+// ---------------------------------------------------------------------------
+
+interface ExceptionForm {
+    work_center_id?: number;
+    mold_id?: number | null;
+    colour?: string;
+    unit_weight_grams?: number;
+    default_cycle_time?: number;
+    cycle_time_min?: number;
+    cycle_time_max?: number;
+    default_cavities?: number;
+    effective_from?: dayjs.Dayjs;
+    notes?: string;
+}
+
+/**
+ * Create or edit ONE machine exception, against this product's item.
+ *
+ * An APPROVED configuration is never edited — the backend refuses it, because
+ * an approval is a decision about a specific set of figures. The list offers
+ * "Copy to draft" instead, which is the same refusal expressed as a next step.
+ */
+function MachineExceptionModal({
+    itemId,
+    productName,
+    configuration,
+    onClose,
+}: {
+    itemId: number;
+    productName: string;
+    configuration: ProductionConfiguration | null;
+    onClose: () => void;
+}) {
+    const queryClient = useQueryClient();
+    const [form] = Form.useForm<ExceptionForm>();
+
+    // Active only: a retired machine must not be selectable for a new
+    // exception, or the exception is unusable the moment it is approved.
+    const machines = useQuery({
+        queryKey: ['production', 'work-centers', 'active'],
+        queryFn: () => listWorkCenters(true),
+    });
+    const molds = useQuery({ queryKey: ['production', 'molds', 'all'], queryFn: listAllMolds });
+
+    const save = useMutation({
+        mutationFn: (values: ExceptionForm) => {
+            const payload = {
+                work_center_id: values.work_center_id!,
+                item_id: itemId,
+                mold_id: values.mold_id ?? null,
+                colour: (values.colour ?? '').trim() === '' ? null : values.colour!.trim(),
+                unit_weight_grams: values.unit_weight_grams ?? null,
+                default_cycle_time: values.default_cycle_time ?? null,
+                cycle_time_min: values.cycle_time_min ?? null,
+                cycle_time_max: values.cycle_time_max ?? null,
+                default_cavities: values.default_cavities ?? null,
+                effective_from: values.effective_from ? values.effective_from.format('YYYY-MM-DD') : null,
+                notes: (values.notes ?? '').trim() === '' ? null : values.notes!.trim(),
+            };
+
+            return configuration === null
+                ? createProductionConfiguration(payload)
+                : updateProductionConfiguration(configuration.id, payload);
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['production', 'standards'] });
+            queryClient.invalidateQueries({ queryKey: ['production', 'configurations'] });
+            onClose();
+        },
+        onError: (error: any) => showSaveError(error, 'Could not save this machine exception'),
+    });
+
+    return (
+        <Modal
+            open
+            width={620}
+            title={configuration === null ? `New machine exception — ${productName}` : `Edit draft — ${productName}`}
+            okText={configuration === null ? 'Create draft' : 'Save draft'}
+            confirmLoading={save.isPending}
+            onCancel={onClose}
+            onOk={() => form.validateFields().then((values) => save.mutate(values))}
+            destroyOnHidden
+        >
+            <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 14 }}
+                message="Saved as a draft. It reaches the shop floor only once approved."
+                description="An exception is only needed when this product runs differently on one machine than the standard says. Everywhere else the standard applies on its own."
+            />
+
+            <Form<ExceptionForm>
+                form={form}
+                layout="vertical"
+                initialValues={
+                    configuration === null
+                        ? undefined
+                        : {
+                              work_center_id: configuration.work_center.id,
+                              mold_id: configuration.mold?.id ?? null,
+                              colour: configuration.colour ?? undefined,
+                              unit_weight_grams: num(configuration.unit_weight_grams),
+                              default_cycle_time: num(configuration.default_cycle_time),
+                              cycle_time_min: num(configuration.cycle_time_min),
+                              cycle_time_max: num(configuration.cycle_time_max),
+                              default_cavities: configuration.default_cavities ?? undefined,
+                              effective_from: configuration.effective_from
+                                  ? dayjs(configuration.effective_from)
+                                  : undefined,
+                              notes: configuration.notes ?? undefined,
+                          }
+                }
+            >
+                <Form.Item
+                    name="work_center_id"
+                    label="Machine"
+                    rules={[{ required: true, message: 'An exception is always about one machine.' }]}
+                >
+                    <Select
+                        showSearch
+                        optionFilterProp="label"
+                        loading={machines.isLoading}
+                        options={(machines.data?.data ?? []).map((m) => ({ value: m.id, label: machineLabel(m) }))}
+                    />
+                </Form.Item>
+
+                <Row gutter={12}>
+                    <Col xs={24} sm={12}>
+                        <Form.Item name="mold_id" label="Mould (optional)">
+                            <Select
+                                allowClear
+                                showSearch
+                                optionFilterProp="label"
+                                loading={molds.isLoading}
+                                options={(molds.data?.data ?? []).map((m) => ({ value: m.id, label: m.name }))}
+                            />
+                        </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={12}>
+                        <Form.Item
+                            name="colour"
+                            label="Colour (optional)"
+                            extra="Leave blank for an exception that applies to every colour of this product."
+                        >
+                            <Input maxLength={32} placeholder="Amber, Clear…" />
+                        </Form.Item>
+                    </Col>
+                </Row>
+
+                <Row gutter={12}>
+                    <Col xs={24} sm={8}>
+                        <Form.Item name="default_cycle_time" label="Cycle time (s)">
+                            <InputNumber min={0.1} step={0.1} style={{ width: '100%' }} />
+                        </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={8}>
+                        <Form.Item name="default_cavities" label="Cavities">
+                            <InputNumber min={1} precision={0} style={{ width: '100%' }} />
+                        </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={8}>
+                        <Form.Item name="unit_weight_grams" label="Weight (g)">
+                            <InputNumber min={0.0001} step={0.1} style={{ width: '100%' }} />
+                        </Form.Item>
+                    </Col>
+                </Row>
+
+                <Row gutter={12}>
+                    <Col xs={12} sm={8}>
+                        <Form.Item name="cycle_time_min" label="Cycle min (s)">
+                            <InputNumber min={0.1} step={0.1} style={{ width: '100%' }} />
+                        </Form.Item>
+                    </Col>
+                    <Col xs={12} sm={8}>
+                        <Form.Item name="cycle_time_max" label="Cycle max (s)">
+                            <InputNumber min={0.1} step={0.1} style={{ width: '100%' }} />
+                        </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={8}>
+                        <Form.Item name="effective_from" label="Effective from">
+                            <DatePicker style={{ width: '100%' }} />
+                        </Form.Item>
+                    </Col>
+                </Row>
+
+                <Form.Item name="notes" label="Note (optional)">
+                    <Input.TextArea rows={2} placeholder="Why this machine runs this product differently." />
+                </Form.Item>
+
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    Cycle time, cavities and weight are all required before this can be approved, and the cavity count
+                    must be one the machine is capable of — save what you know now and fill the rest in as the factory
+                    confirms it.
+                </Typography.Text>
+            </Form>
+        </Modal>
+    );
+}
+
+/**
+ * This product's machine exceptions, with their whole approval flow.
+ *
+ * The list comes from the per-standard endpoint, which is a second VIEW of the
+ * configurations the exceptions page already served — same service, same
+ * machine order — and every write still goes through the configuration
+ * endpoints. Nothing about how an approval happens changed; only where it can
+ * be reached from.
+ */
+function MachineExceptions({ standardId, itemId, productName }: { standardId: number; itemId: number | null; productName: string }) {
+    const queryClient = useQueryClient();
+    const [editing, setEditing] = useState<ProductionConfiguration | null>(null);
+    const [creating, setCreating] = useState(false);
+
+    const { data, isLoading, isError } = useQuery({
+        queryKey: ['production', 'standards', 'machine-exceptions', standardId],
+        queryFn: () => listStandardMachineExceptions(standardId),
+    });
+
+    const invalidate = () => {
+        queryClient.invalidateQueries({ queryKey: ['production', 'standards'] });
+        queryClient.invalidateQueries({ queryKey: ['production', 'configurations'] });
+    };
+    const onError = (error: any) => showSaveError(error, 'Could not save this machine exception');
+
+    const approve = useMutation({ mutationFn: approveProductionConfiguration, onSuccess: invalidate, onError });
+    const deactivate = useMutation({ mutationFn: deactivateProductionConfiguration, onSuccess: invalidate, onError });
+    const copy = useMutation({ mutationFn: copyProductionConfiguration, onSuccess: invalidate, onError });
+
+    if (itemId === null) {
+        // Configurations are keyed on the item, so there is nothing to list and
+        // nothing that could be created. Said as the next step, not as an error.
+        return (
+            <Typography.Text type="secondary">
+                A machine exception is recorded against the Tally item, so this product needs its item attached before
+                one can be created.
+            </Typography.Text>
+        );
+    }
 
     if (isLoading) {
         return (
             <Space>
                 <Spin size="small" />
-                <Typography.Text type="secondary">Looking for machine overrides…</Typography.Text>
+                <Typography.Text type="secondary">Looking for machine exceptions…</Typography.Text>
             </Space>
         );
     }
@@ -253,85 +799,137 @@ function MachineOverrides({ itemId, productName }: { itemId: number; productName
     if (isError) {
         return (
             <Typography.Text type="secondary">
-                Could not read this product's machine overrides just now. Open{' '}
-                <Link to="/production/configuration">Machine Setup</Link> to check them.
+                Could not read this product's machine exceptions just now. Reopen this drawer to try again.
             </Typography.Text>
         );
     }
 
-    const rows = data?.data ?? [];
-
-    if (rows.length === 0) {
-        // The common and correct case, said quietly. An empty table here would
-        // read as "something is missing"; nothing is missing — a product with
-        // no exception simply runs to its standard.
-        return (
-            <Space size={6} wrap>
-                <Typography.Text type="secondary">
-                    Runs to this standard on every machine it may run on.
-                </Typography.Text>
-                <Link to="/production/configuration">Add a machine exception</Link>
-            </Space>
-        );
-    }
+    const rows = data ?? [];
 
     return (
         <>
-            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
-                Machines that run <b>{productName}</b> to figures of their own. Everywhere else, the standard above
-                applies.
-            </Typography.Text>
-            <Table<ProductionConfiguration>
-                rowKey="id"
-                size="small"
-                pagination={false}
-                dataSource={rows}
-                columns={[
-                    {
-                        title: 'Machine',
-                        render: (_, c) => c.work_center.name ?? `#${c.work_center.id}`,
-                    },
-                    {
-                        title: 'Cycle time (s)',
-                        align: 'right' as const,
-                        render: (_, c) =>
-                            c.cycle_time_min !== null && c.cycle_time_max !== null
-                                ? `${fmt(c.default_cycle_time)} (${fmt(c.cycle_time_min)}–${fmt(c.cycle_time_max)})`
-                                : fmt(c.default_cycle_time),
-                    },
-                    {
-                        title: 'Cavities',
-                        align: 'right' as const,
-                        render: (_, c) => c.default_cavities ?? '—',
-                    },
-                    {
-                        title: 'Weight (g)',
-                        align: 'right' as const,
-                        render: (_, c) => fmt(c.unit_weight_grams),
-                    },
-                    {
-                        title: 'Mould / colour',
-                        render: (_, c) => [c.mold?.name, c.colour].filter(Boolean).join(' · ') || '—',
-                    },
-                    {
-                        title: 'Status',
-                        render: (_, c) => (
-                            <Space direction="vertical" size={2}>
-                                <Tag color={CONFIG_STATUS_COLOUR[c.status] ?? 'default'}>{c.status}</Tag>
-                                {c.confirmation_status && (
-                                    <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                                        {c.confirmation_status}
-                                    </Typography.Text>
-                                )}
-                            </Space>
-                        ),
-                    },
-                ]}
-            />
-            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
-                Only an <b>approved</b> override drives a batch. Edit or approve on{' '}
-                <Link to="/production/configuration">Machine Setup → Machine Exceptions</Link>.
-            </Typography.Text>
+            <Space style={{ marginBottom: 8 }} wrap>
+                <Button size="small" type="primary" onClick={() => setCreating(true)}>
+                    New machine exception
+                </Button>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    {rows.length === 0
+                        ? 'Runs to the standard above on every machine it may run on.'
+                        : 'Only an approved exception, effective today, drives a batch.'}
+                </Typography.Text>
+            </Space>
+
+            {rows.length > 0 && (
+                <Table<ProductionConfiguration>
+                    rowKey="id"
+                    size="small"
+                    pagination={false}
+                    dataSource={rows}
+                    columns={[
+                        {
+                            title: 'Machine',
+                            render: (_, c) =>
+                                [c.work_center.code, c.work_center.name].filter(Boolean).join(' — ') ||
+                                `#${c.work_center.id}`,
+                        },
+                        {
+                            title: 'Cycle time (s)',
+                            align: 'right' as const,
+                            render: (_, c) => (
+                                <span style={numeric}>
+                                    {c.cycle_time_min !== null && c.cycle_time_max !== null
+                                        ? `${fmt(c.default_cycle_time)} (${fmt(c.cycle_time_min)}–${fmt(c.cycle_time_max)})`
+                                        : fmt(c.default_cycle_time)}
+                                </span>
+                            ),
+                        },
+                        {
+                            title: 'Cavities',
+                            align: 'right' as const,
+                            render: (_, c) => <span style={numeric}>{c.default_cavities ?? '—'}</span>,
+                        },
+                        {
+                            title: 'Weight (g)',
+                            align: 'right' as const,
+                            render: (_, c) => <span style={numeric}>{fmt(c.unit_weight_grams)}</span>,
+                        },
+                        {
+                            title: 'Mould / colour',
+                            render: (_, c) => [c.mold?.name, c.colour].filter(Boolean).join(' · ') || 'Any',
+                        },
+                        {
+                            title: 'Status',
+                            render: (_, c) => (
+                                <Space direction="vertical" size={2}>
+                                    <Tag color={CONFIG_STATUS_COLOUR[c.status] ?? 'default'}>{c.status}</Tag>
+                                    {/* The factory's own wording, shown verbatim
+                                        so nobody mistakes an unreviewed
+                                        candidate for a decision. */}
+                                    {c.confirmation_status && (
+                                        <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                                            {c.confirmation_status}
+                                        </Typography.Text>
+                                    )}
+                                </Space>
+                            ),
+                        },
+                        {
+                            title: 'Actions',
+                            render: (_, c) => (
+                                <Space size={4} wrap>
+                                    {c.status === 'draft' && (
+                                        <>
+                                            <Button size="small" onClick={() => setEditing(c)}>
+                                                Edit
+                                            </Button>
+                                            <Button
+                                                size="small"
+                                                type="primary"
+                                                loading={approve.isPending}
+                                                onClick={() => approve.mutate(c.id)}
+                                            >
+                                                Approve
+                                            </Button>
+                                        </>
+                                    )}
+                                    {c.status === 'approved' && (
+                                        <Button size="small" danger onClick={() => deactivate.mutate(c.id)}>
+                                            Deactivate
+                                        </Button>
+                                    )}
+                                    {/* An approved row is never edited in
+                                        place — copy-to-draft is the same
+                                        refusal expressed as a next step. */}
+                                    <Tooltip
+                                        title={
+                                            c.status === 'approved'
+                                                ? 'An approved exception cannot be edited. This makes an editable draft with the same figures.'
+                                                : 'Make another draft with these figures.'
+                                        }
+                                    >
+                                        <Button size="small" loading={copy.isPending} onClick={() => copy.mutate(c.id)}>
+                                            Copy to draft
+                                        </Button>
+                                    </Tooltip>
+                                </Space>
+                            ),
+                        },
+                    ]}
+                />
+            )}
+
+            {(creating || editing !== null) && (
+                <MachineExceptionModal
+                    key={editing?.id ?? 'new'}
+                    itemId={itemId}
+                    productName={productName}
+                    configuration={editing}
+                    onClose={() => {
+                        setCreating(false);
+                        setEditing(null);
+                    }}
+                />
+            )}
         </>
     );
 }
@@ -339,19 +937,6 @@ function MachineOverrides({ itemId, productName }: { itemId: number; productName
 // ---------------------------------------------------------------------------
 // Attaching a Tally item to a standard that has none
 // ---------------------------------------------------------------------------
-
-const showSaveError = (error: any, title: string) => {
-    const errors = error?.response?.data?.errors;
-    Modal.error({
-        title,
-        // Field-level messages say exactly what the backend refused and why —
-        // an attach that collides with an existing variant is a real answer,
-        // not an "unexpected error".
-        content: errors
-            ? Object.values(errors).flat().join(' ')
-            : (error?.response?.data?.message ?? 'Unexpected error.'),
-    });
-};
 
 /**
  * Pick the Tally item an unattached standard means.
@@ -362,7 +947,7 @@ const showSaveError = (error: any, title: string) => {
  * match can be the right one. The dialog says this where the choice happens;
  * a person confirms, and nothing is written until they do.
  */
-function AttachItemModal({ standard, onClose }: { standard: ProductionStandardRow; onClose: () => void }) {
+function AttachItemModal({ standard, onClose }: { standard: ProductStandardsWorkspaceRow; onClose: () => void }) {
     const queryClient = useQueryClient();
     const [selected, setSelected] = useState<number | null>(null);
 
@@ -389,9 +974,9 @@ function AttachItemModal({ standard, onClose }: { standard: ProductionStandardRo
     const attach = useMutation({
         mutationFn: (itemId: number) => attachStandardItem(standard.id, itemId),
         onSuccess: () => {
-            // The whole standards prefix, not this page+scope: the other scope's
-            // cache and the counts on the stat cards are wrong the moment a row
-            // gains its item.
+            // The whole standards prefix, not this page+view: the other views'
+            // caches and the summary chips are wrong the moment a row gains
+            // its item.
             queryClient.invalidateQueries({ queryKey: ['production', 'standards'] });
             onClose();
         },
@@ -536,7 +1121,7 @@ function DerivedPerBox({ per, count, unit }: { per?: number; count?: number; uni
         );
     }
     return (
-        <Typography.Text style={{ fontSize: 12 }}>
+        <Typography.Text style={{ fontSize: 12, ...numeric }}>
             {per}/{unit} × {count} {unit}s = <b>{per * count}</b>/box
         </Typography.Text>
     );
@@ -733,15 +1318,286 @@ function NewStandardModal({ onClose, initialName }: { onClose: () => void; initi
 }
 
 // ---------------------------------------------------------------------------
+// The drawer: one product's WHOLE configuration
+// ---------------------------------------------------------------------------
+
+/** A labelled block in the drawer. Quiet caption, then the answer. */
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+    return (
+        <div style={{ marginBottom: 10 }}>
+            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
+                {label}
+            </Typography.Text>
+            <div>{children}</div>
+        </div>
+    );
+}
+
+function ProductConfigurationDrawer({
+    row: opened,
+    stillListed,
+    onClose,
+    onFix,
+    onAttach,
+}: {
+    row: ProductStandardsWorkspaceRow;
+    stillListed: boolean;
+    onClose: () => void;
+    onFix: (row: ProductStandardsWorkspaceRow, field: FigureField) => void;
+    onAttach: (row: ProductStandardsWorkspaceRow) => void;
+}) {
+    /**
+     * The drawer reads its OWN copy of the product, because a save can move
+     * the row out of the view behind it — and a drawer that then went on
+     * listing a gap the person had just closed would be the worst screen in
+     * the app: it would teach them that fixing things does not work.
+     *
+     * Keyed under the standards prefix, so the same invalidation every save
+     * already fires refreshes it. `search` is the product's own name, which
+     * always matches itself; the id decides which row of that name it is.
+     *
+     * The page size is a BOUND, not a magic number: it has to exceed the
+     * number of standards that can share one product name, and the whole
+     * master is about a hundred rows. If this master ever grows past that,
+     * the fallback below degrades to the row as it was opened — stale, but
+     * never wrong about a different product.
+     */
+    const { data: fresh } = useQuery({
+        queryKey: ['production', 'standards', 'one', opened.id],
+        queryFn: () =>
+            listProductionStandards({ view: 'all', search: opened.source_product_name, per_page: 100 }).then(
+                (page) => page.data.find((r) => r.id === opened.id) ?? null,
+            ),
+    });
+
+    const row = fresh ?? opened;
+    const item = row.item;
+
+    return (
+        <Drawer
+            open
+            width={760}
+            onClose={onClose}
+            title={row.source_product_name}
+            extra={
+                row.ready ? (
+                    <Tag color="green">Production ready</Tag>
+                ) : (
+                    <Tag color="gold">{row.gaps.length} to fix</Tag>
+                )
+            }
+        >
+            {/* A save can move a product out of the view it was opened from.
+                Saying so beats a drawer that silently describes a row the
+                table behind it no longer shows. */}
+            {!stillListed && (
+                <Alert
+                    type="success"
+                    showIcon
+                    style={{ marginBottom: 14 }}
+                    message="Saved — this product no longer matches the view behind this drawer"
+                    description="Switch to All (or Production ready) to find it again."
+                />
+            )}
+
+            {row.gaps.length > 0 && (
+                <>
+                    <Typography.Title level={5} style={{ marginTop: 0 }}>
+                        What is missing
+                    </Typography.Title>
+                    <GapList
+                        gaps={row.gaps}
+                        hasItem={item !== null}
+                        onFix={(field) => onFix(row, field)}
+                        onAttach={() => onAttach(row)}
+                    />
+                    <Divider style={{ margin: '16px 0' }} />
+                </>
+            )}
+
+            <Typography.Title level={5} style={{ marginTop: 0 }}>
+                Standard figures
+            </Typography.Title>
+            <Row gutter={12}>
+                <Col xs={8}>
+                    <Field label="Cavities">
+                        <span style={numeric}>{row.cavities ?? '—'}</span>
+                    </Field>
+                </Col>
+                <Col xs={8}>
+                    <Field label="Weight (g)">
+                        <span style={numeric}>{fmt(row.unit_weight_grams)}</span>
+                    </Field>
+                </Col>
+                <Col xs={8}>
+                    <Field label="Cycle time (s)">
+                        <span style={numeric}>{fmt(row.cycle_time)}</span>
+                    </Field>
+                </Col>
+            </Row>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                From the factory workbook{row.source_reference ? ` (SL ${row.source_reference})` : ''} — corrected
+                there, never here. A run reads these first and falls back to the item master when one is blank.
+                {item !== null && (
+                    <>
+                        {' '}
+                        <Button
+                            type="link"
+                            size="small"
+                            style={{ padding: 0, height: 'auto' }}
+                            onClick={() => onFix(row, 'nominal_weight_grams')}
+                        >
+                            Edit the item master's figures
+                        </Button>
+                    </>
+                )}
+            </Typography.Text>
+
+            <Divider style={{ margin: '16px 0' }} />
+
+            <Typography.Title level={5} style={{ marginTop: 0 }}>
+                Packing
+            </Typography.Title>
+            {row.packagings.length === 0 ? (
+                <Typography.Text type="secondary">
+                    The workbook records no packing mode for this product.
+                </Typography.Text>
+            ) : (
+                <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                    {row.packagings.map((p) => (
+                        <Typography.Text key={p.id} style={numeric}>
+                            {PACKING_MODE_LABEL[p.mode]} — <b>{p.nos_per_box ?? '—'}</b> pieces per box
+                            {p.mode === 'pouch' && p.nos_per_pouch ? ` (${p.nos_per_pouch}/pouch × ${p.pouches_per_box ?? '—'})` : ''}
+                            {p.mode === 'tray' && p.nos_per_tray ? ` (${p.nos_per_tray}/tray × ${p.trays_per_box ?? '—'})` : ''}
+                            {p.id === row.resolved_packaging_id ? ' · used by a run' : ''}
+                        </Typography.Text>
+                    ))}
+                </Space>
+            )}
+            <div style={{ marginTop: 4 }}>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    Item master pieces per box: <b style={numeric}>{item?.nos_per_box ?? 'not set'}</b> — used when the
+                    workbook states no packing.
+                    {item !== null && (
+                        <>
+                            {' '}
+                            <Button
+                                type="link"
+                                size="small"
+                                style={{ padding: 0, height: 'auto' }}
+                                onClick={() => onFix(row, 'nos_per_box')}
+                            >
+                                Set pieces per box
+                            </Button>
+                        </>
+                    )}
+                </Typography.Text>
+            </div>
+
+            <Divider style={{ margin: '16px 0' }} />
+
+            <Row gutter={16}>
+                <Col xs={24} sm={12}>
+                    <Typography.Title level={5} style={{ marginTop: 0 }}>
+                        Required colour
+                    </Typography.Title>
+                    <Field label="Item master colour">
+                        {item?.colour ? (
+                            <Tag>{item.colour}</Tag>
+                        ) : (
+                            <Typography.Text type="secondary">Not set</Typography.Text>
+                        )}
+                        {item !== null && (
+                            <Button
+                                type="link"
+                                size="small"
+                                style={{ padding: 0, height: 'auto', marginLeft: 8 }}
+                                onClick={() => onFix(row, 'colour')}
+                            >
+                                {item.colour ? 'Change' : 'Set the colour'}
+                            </Button>
+                        )}
+                    </Field>
+                </Col>
+                <Col xs={24} sm={12}>
+                    <Typography.Title level={5} style={{ marginTop: 0 }}>
+                        Active recipe
+                    </Typography.Title>
+                    <Field label="What one piece consumes">
+                        {row.active_recipe ? (
+                            <>
+                                {row.active_recipe.name}
+                                {row.active_recipe.version ? ` · v${row.active_recipe.version}` : ''}
+                            </>
+                        ) : (
+                            <Typography.Text type="secondary">No active recipe</Typography.Text>
+                        )}
+                    </Field>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        Recipes belong to the item and are maintained on{' '}
+                        <Link to="/production/boms">Bills of Material</Link>. A missing recipe does not stop a batch —
+                        it stops the material consumption being calculated for you.
+                    </Typography.Text>
+                </Col>
+            </Row>
+
+            <Divider style={{ margin: '16px 0' }} />
+
+            <Typography.Title level={5} style={{ marginTop: 0 }}>
+                Tally identity
+            </Typography.Title>
+            {item ? (
+                <Field label="Attached Tally item">
+                    <Space size={6} wrap>
+                        <span>{itemLabel(item)}</span>
+                        {row.tally.guid_present ? (
+                            <Tag color="green">in Tally</Tag>
+                        ) : (
+                            <Tag color="orange">not in Tally</Tag>
+                        )}
+                    </Space>
+                    {attachmentNote(row) !== null && (
+                        <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
+                            {attachmentNote(row)}
+                        </Typography.Text>
+                    )}
+                </Field>
+            ) : (
+                <Space size={8} wrap style={{ marginBottom: 6 }}>
+                    <Tag>not attached</Tag>
+                    <Button size="small" onClick={() => onAttach(row)}>
+                        Attach a Tally item
+                    </Button>
+                </Space>
+            )}
+            {/* The backend's own sentence, verbatim. Production is not blocked
+                by this and the wording says so — a screen that said "not
+                ready" here would refuse work the floor is allowed to do. */}
+            {row.tally.sentence !== null && (
+                <Alert type="warning" showIcon message={row.tally.sentence} style={{ marginTop: 4 }} />
+            )}
+
+            <Divider style={{ margin: '16px 0' }} />
+
+            <Typography.Title level={5} style={{ marginTop: 0 }}>
+                Machine exceptions
+            </Typography.Title>
+            <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
+                A machine that runs <b>{row.source_product_name}</b> to figures of its own. Everywhere else, the
+                standard above applies — most products need none of these.
+            </Typography.Paragraph>
+            <MachineExceptions
+                standardId={row.id}
+                itemId={item?.id ?? null}
+                productName={row.source_product_name}
+            />
+        </Drawer>
+    );
+}
+
+// ---------------------------------------------------------------------------
 
 export default function ProductStandardsPage() {
-    const [page, setPage] = useState(1);
-    const [scope, setScope] = useState<'mapped' | 'all'>('all');
-    const [search, setSearch] = useState('');
-    const [cavityBand, setCavityBand] = useState<'any' | 'below' | 'atOrAbove'>('any');
-    const [attaching, setAttaching] = useState<ProductionStandardRow | null>(null);
-    const [adding, setAdding] = useState(false);
-
     /**
      * Arrived here from a blocked Start Batch.
      *
@@ -759,6 +1615,40 @@ export default function ProductStandardsPage() {
         if (!hasStartBatchResume(params, 'configure')) return null;
         return parseStartBatchResume(params)?.draft ?? null;
     }, [resumeQuery]);
+
+    /**
+     * Production-ready is the default view — it answers the question the floor
+     * asks. EXCEPT on arrival from a blocked Start Batch, which is by
+     * construction about a product that is NOT ready: landing that supervisor
+     * on the ready view would show them an empty table and a page that looks
+     * broken. Initialised from the URL rather than corrected in an effect, so
+     * the wrong view is never even fetched.
+     */
+    const [view, setView] = useState<ProductStandardsView>(() =>
+        hasStartBatchResume(new URLSearchParams(window.location.search), 'configure') ? 'all' : 'ready',
+    );
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+    const [searchInput, setSearchInput] = useState('');
+    const [search, setSearch] = useState('');
+    const [missingTally, setMissingTally] = useState(false);
+    const [packingMode, setPackingMode] = useState<StandardPackagingMode | undefined>();
+    const [machineId, setMachineId] = useState<number | undefined>();
+
+    const [attaching, setAttaching] = useState<ProductStandardsWorkspaceRow | null>(null);
+    const [adding, setAdding] = useState(false);
+    const [openRow, setOpenRow] = useState<ProductStandardsWorkspaceRow | null>(null);
+    const [figures, setFigures] = useState<{ row: ProductStandardsWorkspaceRow; focus: FigureField } | null>(null);
+
+    // Typing goes to the server, so it waits for a pause rather than firing a
+    // request per keystroke.
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setSearch(searchInput.trim());
+            setPage(1);
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [searchInput]);
 
     // Only fetched when somebody actually came from Start Batch. The key is
     // the app-wide "every item" one, so on a warm cache this costs nothing.
@@ -778,14 +1668,50 @@ export default function ProductStandardsPage() {
         if (!resumeDraft || !resumeItem) return;
         if (prefilledSearchForRef.current === resumeQuery) return;
         prefilledSearchForRef.current = resumeQuery;
+        setSearchInput(resumeItem.name);
+        // Set directly as well as through the debounce, so the first fetch
+        // after arrival is already the filtered one.
         setSearch(resumeItem.name);
         setPage(1);
     }, [resumeDraft, resumeItem, resumeQuery]);
 
-    const { data, isLoading } = useQuery({
-        queryKey: ['production', 'standards', page, scope],
-        queryFn: () => listProductionStandards({ page, per_page: PER_PAGE, matched_only: scope === 'mapped' }),
+    const { data, isFetching } = useQuery({
+        queryKey: [
+            'production',
+            'standards',
+            'workspace',
+            { view, page, pageSize, search, missingTally, packingMode, machineId },
+        ],
+        queryFn: () =>
+            listProductionStandards({
+                view,
+                page,
+                per_page: pageSize,
+                search: search === '' ? undefined : search,
+                // Literal 1, never a boolean: Laravel's `boolean` rule refuses
+                // the string "true" axios would send.
+                missing_tally: missingTally ? 1 : undefined,
+                packing_mode: packingMode,
+                work_center_id: machineId,
+            }),
+        // The table keeps the page it is showing while the next one loads, so
+        // paging does not blink the master away.
+        placeholderData: keepPreviousData,
     });
+
+    const rows = useMemo(() => data?.data ?? [], [data]);
+    const summary = data?.summary ?? { ready: 0, incomplete: 0, all: 0 };
+    const total = data?.meta.total ?? 0;
+
+    // The drawer must show the CURRENT row, not the one that was clicked: a
+    // save invalidates the list, and a gap list still naming a figure that has
+    // just been filled is worse than no gap list at all.
+    useEffect(() => {
+        if (openRow === null) return;
+        const fresh = rows.find((r) => r.id === openRow.id);
+        if (fresh !== undefined && fresh !== openRow) setOpenRow(fresh);
+    }, [rows, openRow]);
+    const openRowStillListed = openRow === null || rows.some((r) => r.id === openRow.id);
 
     // The factory's machine rule, from the backend that also enforces it — so
     // the machines this page names cannot disagree with the machines Start
@@ -796,33 +1722,31 @@ export default function ProductStandardsPage() {
     const threshold = rule?.cavity_threshold ?? null;
     const restrictedNames = (rule?.restricted_machines ?? []).map((m) => m.name);
 
-    const rows = data?.data ?? [];
+    const machines = useQuery({
+        queryKey: ['production', 'work-centers', 'active'],
+        queryFn: () => listWorkCenters(true),
+    });
 
-    // Filtered in the browser rather than by the API: the whole list is one
-    // page, and typing is instant this way.
-    const visible = useMemo(() => {
-        const q = search.trim().toLowerCase();
-        return rows.filter((r) => {
-            if (q !== '') {
-                const hit =
-                    r.source_product_name.toLowerCase().includes(q) ||
-                    (r.item?.name ?? '').toLowerCase().includes(q) ||
-                    (r.item?.sku ?? '').toLowerCase().includes(q);
-                if (!hit) return false;
-            }
-            if (cavityBand === 'any' || threshold === null) return true;
-            // A blank cavity count belongs to neither band. It is the figure
-            // the rule is decided on, so a row without one cannot be claimed
-            // for either side.
-            if (r.cavities === null || r.cavities === undefined) return false;
-            return cavityBand === 'below' ? r.cavities < threshold : r.cavities >= threshold;
-        });
-    }, [rows, search, cavityBand, threshold]);
+    /** Open the control that closes a gap. Attaching is a different act, so it is a different door. */
+    const openFix = (row: ProductStandardsWorkspaceRow, field: FigureField) => {
+        if (row.item === null) {
+            setAttaching(row);
+            return;
+        }
+        setFigures({ row, focus: field });
+    };
 
-    const mappedCount = rows.filter((r) => r.item !== null).length;
-    const needsAnswer = rows.filter((r) => r.status === 'unresolved').length;
-    const withPouch = rows.filter((r) => r.packagings.some((p) => p.mode === 'pouch')).length;
-    const inferredCount = rows.filter(hasInferredSpec).length;
+    const viewOption = (label: string, value: ProductStandardsView, count: number, colour?: string) => ({
+        value,
+        label: (
+            <Space size={6}>
+                <span>{label}</span>
+                <Typography.Text strong style={{ ...numeric, color: view === value ? undefined : colour }}>
+                    {count}
+                </Typography.Text>
+            </Space>
+        ),
+    });
 
     return (
         <>
@@ -839,10 +1763,9 @@ export default function ProductStandardsPage() {
                 </Col>
             </Row>
             <Typography.Paragraph type="secondary">
-                The factory's product master — cavities, weight, cycle time and packing for each product, attached to
-                the Tally item it applies to. Expand a row to see the machines that run it differently. The figures come
-                from the workbook and are corrected there; what is maintained here is which item a product is, and
-                products the workbook does not carry.
+                Every product's whole configuration in one place — the workbook's cavities, weight, cycle time and
+                packing, the Tally item it applies to, the colour it needs, the recipe it consumes and the machines
+                that run it differently. Open a product to see what stands between it and a shift, and to fix it.
             </Typography.Paragraph>
 
             {/* THE WAY BACK. A supervisor sent here by a blocked Start Batch has
@@ -874,8 +1797,10 @@ export default function ProductStandardsPage() {
                                 when the product has no standard at all, so the
                                 filtered table below is empty. An empty grid
                                 reads as "nothing to do here"; it is in fact the
-                                whole reason they were sent. */}
-                            {resumeItem && visible.length === 0 && !isLoading ? (
+                                whole reason they were sent. Read from the
+                                server's total for the filtered set, since the
+                                page is no longer the whole master. */}
+                            {resumeItem && total === 0 && !isFetching ? (
                                 <div style={{ marginTop: 8 }}>
                                     <Typography.Text strong>
                                         There is no standard for this product yet — that is what Start Batch is
@@ -912,291 +1837,388 @@ export default function ProductStandardsPage() {
                                 The <b>MACHINES</b> column is the factory's own rule, not a list anyone maintains: under{' '}
                                 {threshold} cavities a mould runs on <b>any</b> machine, and at {threshold} or more it is
                                 set up on <b>{restrictedNames.join(' or ')}</b>. Change the rule on{' '}
-                                <Link to="/production/configuration">Machine Setup → Machines &amp; Capabilities</Link> and
+                                <Link to="/production/configuration?tab=machines">Machines &amp; Capabilities</Link> and
                                 this column follows.{' '}
                             </>
                         ) : null}
-                        A <b>standard</b> (this page) is what a product runs to wherever it runs. A{' '}
-                        <b>configuration</b> is only needed for an exception — a product that runs differently on one
-                        machine than the workbook says. Those exceptions are on the <b>expanded row</b> of the product
-                        they belong to; <Link to="/production/configuration">Machine Setup</Link> is where they are
-                        edited and approved.
+                        A <b>standard</b> is what a product runs to wherever it runs. A <b>machine exception</b> is only
+                        needed when a product runs differently on one machine than the workbook says — those live in
+                        each product's own drawer here, together with their approval, rather than on a list of their
+                        own.
                     </>
                 }
             />
 
-            <Row gutter={[10, 10]} style={{ marginBottom: 16 }}>
-                <Col xs={12} sm={6}>
-                    <Card size="small" styles={{ body: { padding: '10px 14px' } }}>
-                        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
-                            Standards shown
-                        </Typography.Text>
-                        <Typography.Text strong style={{ fontSize: 24 }}>{rows.length}</Typography.Text>
-                    </Card>
-                </Col>
-                <Col xs={12} sm={6}>
-                    <Card size="small" styles={{ body: { padding: '10px 14px' } }}>
-                        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
-                            Attached to a Tally item
-                        </Typography.Text>
-                        <Typography.Text strong style={{ fontSize: 24, color: '#237804' }}>{mappedCount}</Typography.Text>
-                    </Card>
-                </Col>
-                <Col xs={12} sm={6}>
-                    <Card size="small" styles={{ body: { padding: '10px 14px' } }}>
-                        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
-                            Offer a pouch option
-                        </Typography.Text>
-                        <Typography.Text strong style={{ fontSize: 24 }}>{withPouch}</Typography.Text>
-                    </Card>
-                </Col>
-                <Col xs={12} sm={6}>
-                    <Card size="small" styles={{ body: { padding: '10px 14px' } }}>
-                        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
-                            Need a factory answer
-                        </Typography.Text>
-                        <Typography.Text strong style={{ fontSize: 24, color: needsAnswer > 0 ? '#ad6800' : undefined }}>
-                            {needsAnswer}
-                        </Typography.Text>
-                    </Card>
-                </Col>
-            </Row>
-
-            <Space style={{ marginBottom: 12 }} wrap>
-                <Segmented
-                    value={scope}
-                    onChange={(v) => { setScope(v as 'mapped' | 'all'); setPage(1); }}
+            <Space style={{ marginBottom: 8 }} wrap size={12}>
+                <Segmented<ProductStandardsView>
+                    value={view}
+                    onChange={(v) => {
+                        setView(v);
+                        setPage(1);
+                    }}
                     options={[
-                        { value: 'mapped', label: 'Attached to an item' },
-                        { value: 'all', label: 'Everything imported' },
+                        viewOption('Production ready', 'ready', summary.ready, '#237804'),
+                        viewOption('Incomplete', 'incomplete', summary.incomplete, '#ad6800'),
+                        viewOption('All', 'all', summary.all),
                     ]}
                 />
+            </Space>
+            <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 12 }}>
+                The three counts describe every product matching the filters below — not the page, and not the view.
+                Switching view never changes the number that told you to switch.
+            </Typography.Paragraph>
+
+            <Space style={{ marginBottom: 12 }} wrap>
                 <Input.Search
                     allowClear
                     placeholder="Search product or Tally item…"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    style={{ width: 320 }}
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    style={{ width: 300 }}
                 />
-                {/* The cavity bands the machine rule actually splits on, so the
-                    high-cavity group can be read as a group — that is the list
-                    someone checks when they want to know what Machine 10 runs. */}
-                {threshold !== null && restrictedNames.length > 0 && (
-                    <Segmented
-                        value={cavityBand}
-                        onChange={(v) => setCavityBand(v as 'any' | 'below' | 'atOrAbove')}
-                        options={[
-                            { value: 'any', label: 'Any cavities' },
-                            { value: 'below', label: `Under ${threshold} — all machines` },
-                            { value: 'atOrAbove', label: `${threshold}+ — ${restrictedNames.join('/')} only` },
-                        ]}
-                    />
-                )}
+                <Select
+                    allowClear
+                    placeholder="Any packing"
+                    style={{ width: 200 }}
+                    value={packingMode}
+                    onChange={(v) => {
+                        setPackingMode(v);
+                        setPage(1);
+                    }}
+                    options={(['pouch', 'tray', 'direct_box'] as StandardPackagingMode[]).map((m) => ({
+                        value: m,
+                        label: PACKING_MODE_LABEL[m],
+                    }))}
+                />
+                <Select
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    placeholder="Runs on machine…"
+                    style={{ width: 220 }}
+                    value={machineId}
+                    loading={machines.isLoading}
+                    onChange={(v) => {
+                        setMachineId(v);
+                        setPage(1);
+                    }}
+                    options={(machines.data?.data ?? []).map((m) => ({ value: m.id, label: machineLabel(m) }))}
+                />
+                <Tooltip title="Standards with no Tally item at all, and standards attached to an item Tally has never heard of. Both are the same job.">
+                    <Checkbox
+                        checked={missingTally}
+                        onChange={(e) => {
+                            setMissingTally(e.target.checked);
+                            setPage(1);
+                        }}
+                    >
+                        Missing Tally identity
+                    </Checkbox>
+                </Tooltip>
             </Space>
 
-            <Table<ProductionStandardRow>
-                rowKey="id"
-                size="small"
-                loading={isLoading}
-                dataSource={visible}
-                scroll={{ x: 'max-content' }}
-                // Frozen below the app bar, not under it. The alternative — a
-                // fixed body height via scroll.y — misaligns against the grouped
-                // POUCH/TRAY/Packaging headers this table has.
-                sticky={{ offsetHeader: APP_HEADER_HEIGHT }}
-                expandable={{
-                    // An unattached standard has no item to look configurations
-                    // up by, so there is nothing behind its expander.
-                    rowExpandable: (r) => r.item !== null,
-                    expandedRowRender: (r) =>
-                        r.item ? <MachineOverrides itemId={r.item.id} productName={r.source_product_name} /> : null,
-                    // Pinned rather than measured: with `x: max-content` and
-                    // three grouped header blocks, an auto-width expand column
-                    // is where header and body drift apart.
-                    columnWidth: 44,
-                }}
-                pagination={{
-                    current: page,
-                    pageSize: PER_PAGE,
-                    total: data?.meta?.total ?? rows.length,
-                    onChange: setPage,
-                    showSizeChanger: false,
-                    // Search and the cavity band filter in the browser, so the
-                    // server's total is not what is on screen. Saying "103
-                    // standards" above six KIDNEY rows would be the page
-                    // contradicting itself.
-                    showTotal: (total) =>
-                        visible.length === rows.length
-                            ? `${total} standards`
-                            : `${visible.length} of ${total} standards match`,
-                }}
-                columns={[
-                    {
-                        title: 'SL.NO.',
-                        align: 'right' as const,
-                        render: (_, r) => (
-                            <Tooltip title={r.source ? `From ${r.source}` : undefined}>
-                                <Typography.Text type="secondary">{r.source_reference ?? '—'}</Typography.Text>
-                            </Tooltip>
-                        ),
-                    },
-                    {
-                        title: 'PRODUCT',
-                        sorter: (a, b) => a.source_product_name.localeCompare(b.source_product_name),
-                        render: (_, r) => <Typography.Text strong>{r.source_product_name}</Typography.Text>,
-                    },
-                    {
-                        title: 'Tally item it applies to',
-                        sorter: (a, b) => (a.item?.name ?? '').localeCompare(b.item?.name ?? ''),
-                        render: (_, r) =>
-                            r.item ? (
+            {/* Figures line up column-wise across every cell of the grid. */}
+            <div style={numeric}>
+                <Table<ProductStandardsWorkspaceRow>
+                    rowKey="id"
+                    size="small"
+                    loading={isFetching}
+                    dataSource={rows}
+                    scroll={{ x: 'max-content' }}
+                    // Frozen below the app bar, not under it: the bar is
+                    // sticky at top:0 and 64px tall (measured in the browser,
+                    // not assumed), so the table header freezes at 64.
+                    sticky={{ offsetHeader: APP_HEADER_HEIGHT }}
+                    pagination={{
+                        current: page,
+                        pageSize,
+                        total,
+                        showSizeChanger: true,
+                        pageSizeOptions: [...PRODUCT_STANDARDS_PAGE_SIZES],
+                        onChange: (nextPage, nextSize) => {
+                            // A size change re-slices the master, so the old
+                            // page number is meaningless.
+                            if (nextSize !== pageSize) {
+                                setPageSize(nextSize);
+                                setPage(1);
+                                return;
+                            }
+                            setPage(nextPage);
+                        },
+                        // The server filters and pages, so this total IS what
+                        // matches — no client-side subset to caveat.
+                        showTotal: (t, range) => `${range[0]}–${range[1]} of ${t} products`,
+                    }}
+                    columns={[
+                        {
+                            // Stable across pages: row 26 on page two is the
+                            // 26th product, which is how a person reads a
+                            // number back over the phone.
+                            title: '#',
+                            width: 56,
+                            fixed: 'left' as const,
+                            align: 'right' as const,
+                            render: (_: unknown, __: ProductStandardsWorkspaceRow, index: number) => (
+                                <Typography.Text type="secondary">{(page - 1) * pageSize + index + 1}</Typography.Text>
+                            ),
+                        },
+                        {
+                            title: 'PRODUCT',
+                            width: 240,
+                            fixed: 'left' as const,
+                            render: (_, r) => (
                                 <Space direction="vertical" size={0}>
-                                    <span>{itemLabel(r.item)}</span>
-                                    {/* Silent for a row the IMPORTER matched by
-                                        name — which is the truth about it, and
-                                        the distinction someone checking this
-                                        column is looking for. */}
-                                    {attachmentNote(r) !== null && (
-                                        <Tooltip title="A person chose this item on this page. Rows without this line were matched by the importer from the workbook's product name.">
-                                            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                                                {attachmentNote(r)}
-                                            </Typography.Text>
-                                        </Tooltip>
-                                    )}
-                                </Space>
-                            ) : (
-                                <Space size={6}>
-                                    <Tooltip title="Imported, but the workbook name matches no Tally item — the standard is recorded as work to do rather than dropped.">
-                                        <Tag>not attached</Tag>
+                                    <Typography.Text strong>{r.source_product_name}</Typography.Text>
+                                    <Tooltip title={r.source ? `From ${r.source}` : undefined}>
+                                        <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                                            {r.source_reference ? `SL ${r.source_reference}` : '—'}
+                                        </Typography.Text>
                                     </Tooltip>
-                                    <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setAttaching(r)}>
-                                        Attach
-                                    </Button>
                                 </Space>
                             ),
-                    },
-                    {
-                        title: 'NO. OF CAVITY',
-                        align: 'right',
-                        sorter: (a, b) => (a.cavities ?? -1) - (b.cavities ?? -1),
-                        render: (_, r) => r.cavities ?? '—',
-                    },
-                    {
-                        // Which machines this product may run on — the factory's
-                        // own rule (below the threshold, anywhere; at or above
-                        // it, the named machines), applied to this row's cavity
-                        // count. Computed, never stored: the rule is one
-                        // sentence, and storing it per product-machine pair
-                        // would mean ~790 rows to approve that then outrank the
-                        // workbook the moment a figure is corrected there.
-                        title: 'MACHINES',
-                        sorter: (a, b) => (a.cavities ?? -1) - (b.cavities ?? -1),
-                        render: (_, r) => {
-                            if (threshold === null || restrictedNames.length === 0) return '—';
-                            if (r.cavities === null || r.cavities === undefined) {
-                                return (
-                                    <Tooltip title="No cavity count on this standard, and the rule is decided on cavities — so which machines this runs on is not something the app can answer yet.">
-                                        <Typography.Text type="secondary">needs a cavity count</Typography.Text>
+                        },
+                        {
+                            title: 'GAPS',
+                            width: 116,
+                            fixed: 'left' as const,
+                            render: (_, r) =>
+                                r.ready ? (
+                                    <Tag color="green">Ready</Tag>
+                                ) : (
+                                    <Tooltip
+                                        title={r.gaps.map((g) => `${g.number}. ${g.label}`).join(' · ')}
+                                    >
+                                        <Button
+                                            type="link"
+                                            size="small"
+                                            style={{ padding: 0 }}
+                                            onClick={() => setOpenRow(r)}
+                                        >
+                                            <Tag color="gold" style={{ marginInlineEnd: 0, cursor: 'pointer' }}>
+                                                {r.gaps.length} to fix
+                                            </Tag>
+                                        </Button>
+                                    </Tooltip>
+                                ),
+                        },
+                        {
+                            title: 'Tally item it applies to',
+                            width: 280,
+                            render: (_, r) =>
+                                r.item ? (
+                                    <Space direction="vertical" size={0}>
+                                        <Space size={6}>
+                                            <span>{itemLabel(r.item)}</span>
+                                            {!r.tally.guid_present && (
+                                                <Tooltip title={r.tally.sentence ?? undefined}>
+                                                    <Tag color="orange">not in Tally</Tag>
+                                                </Tooltip>
+                                            )}
+                                        </Space>
+                                        {/* Silent for a row the IMPORTER matched
+                                            by name — which is the truth about
+                                            it, and the distinction someone
+                                            checking this column is looking for. */}
+                                        {attachmentNote(r) !== null && (
+                                            <Tooltip title="A person chose this item on this page. Rows without this line were matched by the importer from the workbook's product name.">
+                                                <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                                                    {attachmentNote(r)}
+                                                </Typography.Text>
+                                            </Tooltip>
+                                        )}
+                                    </Space>
+                                ) : (
+                                    <Space size={6}>
+                                        <Tooltip title={r.tally.sentence ?? undefined}>
+                                            <Tag>not attached</Tag>
+                                        </Tooltip>
+                                        <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setAttaching(r)}>
+                                            Attach
+                                        </Button>
+                                    </Space>
+                                ),
+                        },
+                        {
+                            title: 'NO. OF CAVITY',
+                            width: 110,
+                            align: 'right' as const,
+                            render: (_, r) => r.cavities ?? '—',
+                        },
+                        {
+                            // Which machines this product may run on — the
+                            // factory's own rule (below the threshold,
+                            // anywhere; at or above it, the named machines),
+                            // applied to this row's cavity count. Computed,
+                            // never stored: the rule is one sentence, and
+                            // storing it per product-machine pair would mean
+                            // ~790 rows to approve that then outrank the
+                            // workbook the moment a figure is corrected there.
+                            title: 'MACHINES',
+                            width: 170,
+                            render: (_, r) => {
+                                if (threshold === null || restrictedNames.length === 0) return '—';
+                                if (r.cavities === null || r.cavities === undefined) {
+                                    return (
+                                        <Tooltip title="No cavity count on this standard, and the rule is decided on cavities — so which machines this runs on is not something the app can answer yet.">
+                                            <Typography.Text type="secondary">needs a cavity count</Typography.Text>
+                                        </Tooltip>
+                                    );
+                                }
+                                return r.cavities >= threshold ? (
+                                    <Tooltip title={`${r.cavities} cavities — at or above ${threshold}, so this mould is set up on ${restrictedNames.join(' or ')}.`}>
+                                        <Tag color="gold">{restrictedNames.join(' or ')} only</Tag>
+                                    </Tooltip>
+                                ) : (
+                                    <Tooltip title={`${r.cavities} cavities — below ${threshold}, so any machine can run it.`}>
+                                        <Tag color="green">All machines</Tag>
                                     </Tooltip>
                                 );
-                            }
-                            return r.cavities >= threshold ? (
-                                <Tooltip title={`${r.cavities} cavities — at or above ${threshold}, so this mould is set up on ${restrictedNames.join(' or ')}.`}>
-                                    <Tag color="gold">{restrictedNames.join(' or ')} only</Tag>
-                                </Tooltip>
-                            ) : (
-                                <Tooltip title={`${r.cavities} cavities — below ${threshold}, so any machine can run it.`}>
-                                    <Tag color="green">All machines</Tag>
-                                </Tooltip>
-                            );
+                            },
                         },
-                    },
-                    {
-                        title: 'WT. (g)',
-                        align: 'right',
-                        sorter: (a, b) => parseFloat(a.unit_weight_grams ?? '-1') - parseFloat(b.unit_weight_grams ?? '-1'),
-                        render: (_, r) => fmt(r.unit_weight_grams),
-                    },
-                    {
-                        title: 'CYCLE TIME (s)',
-                        align: 'right',
-                        sorter: (a, b) => parseFloat(a.cycle_time ?? '-1') - parseFloat(b.cycle_time ?? '-1'),
-                        render: (_, r) =>
-                            r.cycle_time_raw && r.cycle_time_raw !== r.cycle_time ? (
-                                <Tooltip title={`The workbook cell held "${r.cycle_time_raw}" — split into separate variants rather than averaged.`}>
-                                    <span>{fmt(r.cycle_time)} *</span>
-                                </Tooltip>
-                            ) : (
-                                fmt(r.cycle_time)
+                        {
+                            title: 'WT. (g)',
+                            width: 96,
+                            align: 'right' as const,
+                            render: (_, r) => fmt(r.unit_weight_grams),
+                        },
+                        {
+                            title: 'CYCLE TIME (s)',
+                            width: 120,
+                            align: 'right' as const,
+                            render: (_, r) =>
+                                r.cycle_time_raw && r.cycle_time_raw !== r.cycle_time ? (
+                                    <Tooltip title={`The workbook cell held "${r.cycle_time_raw}" — split into separate variants rather than averaged.`}>
+                                        <span>{fmt(r.cycle_time)} *</span>
+                                    </Tooltip>
+                                ) : (
+                                    fmt(r.cycle_time)
+                                ),
+                        },
+                        {
+                            // The workbook's own three pouch columns, as
+                            // columns — not folded into a tooltip. This page is
+                            // read against the printed sheet, so it must line
+                            // up with it.
+                            title: 'POUCH',
+                            children: [
+                                { title: 'BOTL/POUCH', width: 100, align: 'right' as const, render: (_: unknown, r: ProductStandardsWorkspaceRow) => pkg(r, 'pouch')?.nos_per_pouch ?? '—' },
+                                { title: 'BOT/BOX', width: 92, align: 'right' as const, render: (_: unknown, r: ProductStandardsWorkspaceRow) => pkg(r, 'pouch')?.nos_per_box ?? '—' },
+                                { title: 'POUCH/BOX', width: 100, align: 'right' as const, render: (_: unknown, r: ProductStandardsWorkspaceRow) => pkg(r, 'pouch')?.pouches_per_box ?? '—' },
+                            ],
+                        },
+                        {
+                            title: 'TRAY',
+                            children: [
+                                { title: 'BOTL/TRAY', width: 96, align: 'right' as const, render: (_: unknown, r: ProductStandardsWorkspaceRow) => pkg(r, 'tray')?.nos_per_tray ?? '—' },
+                                { title: 'BOT/BOX', width: 92, align: 'right' as const, render: (_: unknown, r: ProductStandardsWorkspaceRow) => pkg(r, 'tray')?.nos_per_box ?? '—' },
+                                { title: 'TRAY/BOX', width: 96, align: 'right' as const, render: (_: unknown, r: ProductStandardsWorkspaceRow) => pkg(r, 'tray')?.trays_per_box ?? '—' },
+                            ],
+                        },
+                        {
+                            title: 'Box only',
+                            width: 96,
+                            align: 'right' as const,
+                            render: (_, r) => pkg(r, 'direct_box')?.nos_per_box ?? '—',
+                        },
+                        {
+                            // The three right-hand spec columns of the sheet:
+                            // which carton, which tray, which pouch film.
+                            title: 'Packaging materials',
+                            children: [
+                                { title: 'CARTON', width: 130, render: (_: unknown, r: ProductStandardsWorkspaceRow) => specCell(r, 'carton_spec') },
+                                { title: 'TRAY', width: 130, render: (_: unknown, r: ProductStandardsWorkspaceRow) => specCell(r, 'tray_spec') },
+                                { title: 'POUCH', width: 130, render: (_: unknown, r: ProductStandardsWorkspaceRow) => specCell(r, 'pouch_spec') },
+                            ],
+                        },
+                        {
+                            title: 'Exceptions',
+                            width: 110,
+                            align: 'right' as const,
+                            render: (_, r) =>
+                                r.machine_exceptions.length === 0 ? (
+                                    <Typography.Text type="secondary">—</Typography.Text>
+                                ) : (
+                                    <Tooltip
+                                        title={r.machine_exceptions
+                                            .map((e) => `${e.work_center.code ?? e.work_center.name ?? `#${e.work_center.id}`} · ${e.status}`)
+                                            .join(' · ')}
+                                    >
+                                        <Tag>{r.machine_exceptions.length}</Tag>
+                                    </Tooltip>
+                                ),
+                        },
+                        {
+                            title: 'Recipe',
+                            width: 170,
+                            render: (_, r) =>
+                                r.active_recipe ? (
+                                    <Tooltip title="The active Bill of Material — maintained on Bills of Material, shown here read-only.">
+                                        <Typography.Text>{r.active_recipe.name}</Typography.Text>
+                                    </Tooltip>
+                                ) : (
+                                    <Typography.Text type="secondary">—</Typography.Text>
+                                ),
+                        },
+                        {
+                            title: 'Status',
+                            width: 150,
+                            render: (_, r) => {
+                                const s = STATUS[r.status] ?? { colour: 'default', label: r.status, help: '' };
+                                return (
+                                    <Tooltip title={r.status === 'unresolved' ? (r.unresolved_reason ?? s.help) : s.help}>
+                                        <Tag color={s.colour}>{s.label}</Tag>
+                                    </Tooltip>
+                                );
+                            },
+                        },
+                        {
+                            title: '',
+                            width: 104,
+                            fixed: 'right' as const,
+                            render: (_, r) => (
+                                <Button size="small" onClick={() => setOpenRow(r)}>
+                                    Configure
+                                </Button>
                             ),
-                    },
-                    {
-                        // The workbook's own three pouch columns, as columns —
-                        // not folded into a tooltip. This page is read against
-                        // the printed sheet, so it must line up with it.
-                        title: 'POUCH',
-                        children: [
-                            { title: 'BOTL/POUCH', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'pouch')?.nos_per_pouch ?? '—' },
-                            { title: 'BOT/BOX', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'pouch')?.nos_per_box ?? '—' },
-                            { title: 'POUCH/BOX', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'pouch')?.pouches_per_box ?? '—' },
-                        ],
-                    },
-                    {
-                        title: 'TRAY',
-                        children: [
-                            { title: 'BOTL/TRAY', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'tray')?.nos_per_tray ?? '—' },
-                            { title: 'BOT/BOX', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'tray')?.nos_per_box ?? '—' },
-                            { title: 'TRAY/BOX', align: 'right' as const, render: (_: unknown, r: ProductionStandardRow) => pkg(r, 'tray')?.trays_per_box ?? '—' },
-                        ],
-                    },
-                    {
-                        title: 'Box only',
-                        align: 'right' as const,
-                        render: (_, r) => pkg(r, 'direct_box')?.nos_per_box ?? '—',
-                    },
-                    {
-                        // The three right-hand spec columns of the sheet:
-                        // which carton, which tray, which pouch film.
-                        title: 'Packaging materials',
-                        children: [
-                            { title: 'CARTON', render: (_: unknown, r: ProductionStandardRow) => specCell(r, 'carton_spec') },
-                            { title: 'TRAY', render: (_: unknown, r: ProductionStandardRow) => specCell(r, 'tray_spec') },
-                            { title: 'POUCH', render: (_: unknown, r: ProductionStandardRow) => specCell(r, 'pouch_spec') },
-                        ],
-                    },
-                    {
-                        title: 'Status',
-                        render: (_, r) => {
-                            const s = STATUS[r.status] ?? { colour: 'default', label: r.status, help: '' };
-                            return (
-                                <Tooltip title={r.status === 'unresolved' ? (r.unresolved_reason ?? s.help) : s.help}>
-                                    <Tag color={s.colour}>{s.label}</Tag>
-                                </Tooltip>
-                            );
                         },
-                    },
-                ]}
-            />
+                    ]}
+                />
+            </div>
 
             <Typography.Text type="secondary" style={{ display: 'block', marginTop: 12, fontSize: 12 }}>
                 A cycle time marked <b>*</b> came from a workbook cell holding more than one value; each became its own
                 variant rather than being averaged, because the mean of two real cycle times is a rate no machine runs
-                at. Hover any tag for the figures behind it.
-                {inferredCount > 0 && (
-                    <>
-                        {' '}A packing spec shown with a{' '}
-                        <span style={{ borderBottom: '1px dotted #ad6800' }}>dotted underline</span> was blank in the
-                        workbook and filled from a same-family row — {inferredCount}{' '}
-                        {inferredCount === 1 ? 'product has' : 'products have'} at least one. Hover it to see which row
-                        it came from; it is a reasonable guess, not the factory's word.
-                    </>
-                )}
+                at. A packing spec shown with a{' '}
+                <span style={{ borderBottom: '1px dotted #ad6800' }}>dotted underline</span> was blank in the workbook
+                and filled from a same-family row — hover it to see which row it came from; it is a reasonable guess,
+                not the factory's word. Hover any tag for the figures behind it.
             </Typography.Text>
+
+            {openRow !== null && (
+                <ProductConfigurationDrawer
+                    row={openRow}
+                    stillListed={openRowStillListed}
+                    onClose={() => setOpenRow(null)}
+                    // The drawer hands back the row IT is showing, which is the
+                    // freshly re-read one — so an editor never opens on figures
+                    // the screen behind it has already replaced.
+                    onFix={openFix}
+                    onAttach={setAttaching}
+                />
+            )}
 
             {/* Mounted only while open, and keyed by row, so each dialog starts
                 with nothing selected rather than inheriting the last row's pick. */}
             {attaching !== null && (
                 <AttachItemModal key={attaching.id} standard={attaching} onClose={() => setAttaching(null)} />
+            )}
+            {figures !== null && (
+                <ProductConfigurationFiguresModal
+                    key={`${figures.row.id}-${figures.focus}`}
+                    row={figures.row}
+                    focus={figures.focus}
+                    onClose={() => setFigures(null)}
+                />
             )}
             {adding && (
                 <NewStandardModal

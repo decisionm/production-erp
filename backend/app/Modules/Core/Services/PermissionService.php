@@ -25,6 +25,18 @@ class PermissionService
         'inventory' => 'Inventory',
         'procurement' => 'Procurement',
         'production' => 'Production',
+        // The machine master (Machines & Capabilities) — a CATALOG module of
+        // its own, not a corner of Production, because the two audiences
+        // differ: every supervisor must READ the machine list (every product
+        // picker, every Start Batch screen and every configuration form
+        // depends on it), but only the office changes what a machine IS.
+        // Splitting the write side into its own module is what makes
+        // "supervisors view, office edits" expressible as a role instead of
+        // a convention. It has to be a catalog entry rather than a
+        // hand-created permission: RoleService intersects every grant with
+        // this list, so a permission missing from here is stripped from every
+        // role on the next save and the guard then 403s everyone.
+        'machine-master' => 'Machine Master',
         'sales' => 'Sales',
         'finance' => 'Finance',
         'quality' => 'Quality',
