@@ -358,9 +358,24 @@ export default function TallySyncPage() {
                             return (
                                 <div style={{ maxWidth: 380, whiteSpace: 'normal' }}>
                                     {row.error_message ? (
-                                        <Typography.Text type="danger">{row.error_message}</Typography.Text>
+                                        <>
+                                            <Typography.Text type="danger">{row.error_message}</Typography.Text>
+                                            {row.fix && (
+                                                <div style={{ marginTop: 4 }}>
+                                                    <Typography.Text style={{ fontSize: 12 }}>
+                                                        {row.fix.sentence}{' '}
+                                                        <Link to={row.fix.path}>Open the fix</Link>
+                                                    </Typography.Text>
+                                                </div>
+                                            )}
+                                        </>
                                     ) : (
                                         <Typography.Text type="secondary">—</Typography.Text>
+                                    )}
+                                    {(row.resolution_log?.length ?? 0) > 0 && !row.error_message && (
+                                        <Typography.Text type="success" style={{ display: 'block', fontSize: 12 }}>
+                                            Fixed after {row.resolution_log!.length} failed attempt{row.resolution_log!.length > 1 ? 's' : ''} — payload regenerated from current mappings.
+                                        </Typography.Text>
                                     )}
                                     {outcome && (
                                         <div style={{ marginTop: 4 }}>
