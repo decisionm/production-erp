@@ -134,13 +134,6 @@ export default function LoginPage() {
                             Sign in
                         </Button>
                     </Form>
-
-                    {/* Inside the card, not the brand panel: the panel is hidden
-                        below the `lg` breakpoint (see index.css), so this is the
-                        only spot a phone actually shows. */}
-                    <Typography.Text type="secondary" style={{ display: 'block', marginTop: 24, textAlign: 'center', fontSize: 12 }}>
-                        Powered by Balin
-                    </Typography.Text>
                 </Card>
             </Flex>
         </Flex>
