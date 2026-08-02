@@ -5,14 +5,23 @@ namespace App\Modules\Production\Http\Requests;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
- * The per-machine resin estimate's one optional filter.
+ * The common-resin read's one leftover filter, kept ONLY for the deploy
+ * window.
  *
- * VALIDATED RATHER THAN COERCED, deliberately. A silent `is_numeric() ? ... :
- * null` would turn `?work_center_id=abc` into "every machine" and
- * `?work_center_id=99999` into an empty page — both of them confident answers
- * to a question nobody asked. This is the same rule the retired
- * reconciliation read applied to its date, and it is the one worth keeping
- * from it: a read that cannot honour its filter says so.
+ * The owner's correction (2-Aug) removed the machine dimension from this read
+ * entirely — the factory has one common resin input point and a per-machine
+ * balance was a number with no physical referent. So `work_center_id` narrows
+ * nothing any more, and the controller ignores it.
+ *
+ * IT IS STILL VALIDATED RATHER THAN DROPPED, for the same reason the load
+ * request still tolerates the field: a floor tablet running the previous
+ * build keeps sending it until it reloads, and this read is what that tablet
+ * polls. Accepting-and-ignoring shows it a stale-shaped answer it can fail to
+ * parse loudly; a 422 would show it nothing at all. Validating the value
+ * keeps `?work_center_id=abc` an obvious error rather than silent noise.
+ *
+ * DELETE THIS REQUEST once the floor has reloaded — the field is dead weight,
+ * not a feature.
  */
 class MachineResinQueryRequest extends FormRequest
 {

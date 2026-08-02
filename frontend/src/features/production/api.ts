@@ -23,7 +23,7 @@ import type {
     FactoryDayBin,
     FactoryDayBinLoadResult,
     MachineDowntimeLog,
-    MachineResinEstimate,
+    CommonResinMaterial,
     MaterialBag,
     MaterialBagStatus,
     MasterbatchDosing,
@@ -1137,24 +1137,21 @@ export async function loadDayBin(payload: LoadDayBinPayload): Promise<DayBinMove
 
 /**
  * The Shift Floor's bag load — POST /production/day-bin/load-bag. The bag's
- * kg move store → the internal WIP WAREHOUSE (FactoryDayBin) and are
- * attributed to the machine they were emptied into. When no day-bin
- * warehouse is configured yet the backend answers 422 with `errors.day_bin`
- * and a message saying so (the Day Bin page names the warehouse).
+ * kg move store → the internal WIP WAREHOUSE (FactoryDayBin) and enter the
+ * COMMON RESIN INPUT. When no day-bin warehouse is configured yet the backend
+ * answers 422 with `errors.day_bin` and a message saying so (the Day Bin page
+ * names the warehouse).
+ *
+ * NO MACHINE IS POSTED, and the absence is deliberate rather than optional.
+ * The owner's correction (2-Aug): the factory has one common resin input
+ * point and a bag is never assigned or scanned to a machine. The server
+ * dropped `work_center_id` from its validation rules entirely — an old client
+ * that still posts one is accepted and the value ignored — so no key here
+ * may reintroduce a dimension the model no longer has.
  */
 export interface FactoryDayBinLoadPayload {
     /** The scanned bag barcode. */
     barcode: string;
-    /**
-     * THE MACHINE THE BAG WAS LOADED INTO — required, by the owner's ruling
-     * (31-Jul): "Scanning a bag means material was loaded into the selected
-     * machine." Required in this type and not merely on the server, so a
-     * surface that forgets to ask fails to compile rather than posting an
-     * unattributed load — one of those silently overstates the estimated
-     * remaining of every machine except the one that actually burnt the kg,
-     * and no screen would say so.
-     */
-    work_center_id: number;
     /**
      * Kg to move — prefilled with the bag's whole remaining_kg, lowered for
      * a part bag. (The backend also treats an ABSENT value as "whole bag",
@@ -1191,11 +1188,13 @@ export async function loadBagToFactoryDayBin(payload: FactoryDayBinLoadPayload):
 /**
  * THE SCAN ACKNOWLEDGEMENT REFUSAL, read off a failed load.
  *
- * The server refuses a scan into a machine its running estimate says still
- * holds a meaningful quantity of the same material, with a 422 whose
- * `errors.balance_ack_reason` carries ONE SENTENCE naming that estimated
- * figure. Returns that sentence, or null when the failure was anything else
- * (an unknown barcode, no day-bin warehouse, a 500).
+ * The server refuses a load when its running estimate says the COMMON RESIN
+ * INPUT still holds a meaningful quantity of the same material, with a 422
+ * whose `errors.balance_ack_reason` carries ONE SENTENCE naming that
+ * estimated figure — and saying, in the server's own words, that the figure
+ * is an estimate which does not count batches still running. Returns that
+ * sentence, or null when the failure was anything else (an unknown barcode,
+ * no day-bin warehouse, a 500).
  *
  * The sentence is returned VERBATIM and every caller must print it
  * verbatim. It ends with the raw reason tokens because it is the server
@@ -1540,26 +1539,23 @@ export async function getFactoryDayBin(): Promise<FactoryDayBin> {
 }
 
 /**
- * ESTIMATED RESIN REMAINING PER MACHINE — per machine, per material: what was
- * scanned in, what the batches calculated out, and what should therefore
- * still be on it.
+ * ESTIMATED RESIN REMAINING IN THE COMMON INPUT — one row per material:
+ * every kg loaded into the factory's one input point, less the calculated
+ * consumption of that material ACROSS ALL MACHINES.
  *
- * This REPLACED getFactoryDayBinReconciliation(), which asked the server for
- * an expected closing so a person could weigh the bin and disagree with it.
- * The owner (31-Jul) ruled that this factory takes no such weight, so both
- * the endpoint and the read are gone — not left on screen looking answerable.
+ * NO MACHINE DIMENSION, and no way to ask for one. The owner's correction
+ * (2-Aug): the factory has one common resin input point, a bag is never
+ * assigned or scanned to a machine, and a per-machine balance was a number
+ * with no physical referent. The route PATH is unchanged so the deploy is
+ * one-sided; the PAYLOAD is a flat list. The `?work_center_id=` parameter is
+ * still accepted by the server and DELIBERATELY IGNORED, so this client
+ * stops sending it rather than asking for a narrowing that cannot happen.
  *
- * `workCenterId` narrows it to one machine; the server VALIDATES it (422 on
- * an unknown id) rather than quietly widening to every machine, so a bad id
- * is never answered with a confident wrong page.
- *
- * AN EMPTY ARRAY IS A REAL ANSWER and means "nothing has been scanned into
- * any machine yet" — never "the machines are empty". See MachineResinEstimate.
+ * AN EMPTY ARRAY IS A REAL ANSWER and means "nothing has been loaded yet" —
+ * never "the input is empty". See CommonResinMaterial.
  */
-export async function getMachineResinEstimates(workCenterId?: number | null): Promise<MachineResinEstimate[]> {
-    const { data } = await api.get<{ data: MachineResinEstimate[] }>('/production/machine-resin', {
-        params: workCenterId != null ? { work_center_id: workCenterId } : undefined,
-    });
+export async function getCommonResinEstimate(): Promise<CommonResinMaterial[]> {
+    const { data } = await api.get<{ data: CommonResinMaterial[] }>('/production/machine-resin');
     return data.data;
 }
 

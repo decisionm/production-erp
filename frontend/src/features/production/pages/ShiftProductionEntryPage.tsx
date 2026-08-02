@@ -38,7 +38,6 @@ import {
     listShifts,
     listWorkCenters,
     loadBagToFactoryDayBin,
-    machineLabel,
     getFactoryWarehouseSettings,
     openDowntimeLog,
     openMoldChangeLog,
@@ -1295,24 +1294,18 @@ export default function ShiftProductionEntryPage() {
     const [finishingMoldChangeLog, setFinishingMoldChangeLog] = useState<MoldChangeLog | null>(null);
     const [powerInterruptionOpen, setPowerInterruptionOpen] = useState(false);
     const [stockCountOpen, setStockCountOpen] = useState(false);
-    // Central "Load Material" — one scan point feeding the factory day bin
-    // for every machine (the owner retired the per-machine Bin Bay page in
-    // favour of this). Plain state, not a form: the driver is a barcode
+    // Central "Load Material" — the factory's ONE common resin input point,
+    // serving every machine (the owner retired the per-machine Bin Bay page
+    // in favour of this, and the 2-Aug correction removed the machine from
+    // the scan itself). Plain state, not a form: the driver is a barcode
     // scanner typing a code and sending Enter, not a keyboard user tabbing.
+    //
+    // There is no `loadBagMachineId` and there must never be one again: a bag
+    // is never assigned or scanned to a machine.
     const [loadMaterialOpen, setLoadMaterialOpen] = useState(false);
     const [loadBagBarcode, setLoadBagBarcode] = useState('');
     const [scannedLoadBag, setScannedLoadBag] = useState<MaterialBag | null>(null);
     const [loadBagKg, setLoadBagKg] = useState<number | null>(null);
-    /**
-     * WHICH MACHINE THE BAG WENT INTO — required, by the owner's ruling
-     * (31-Jul): "Scanning a bag means material was loaded into the selected
-     * machine." Defaulted when the floor is unambiguous (exactly one machine
-     * running, or the card that opened the modal), otherwise left empty: a
-     * guess here credits the wrong machine's estimate, and nothing on any
-     * screen would say so. Deliberately NOT cleared between bags — a pallet
-     * goes into one machine — only when the modal is opened.
-     */
-    const [loadBagMachineId, setLoadBagMachineId] = useState<number | null>(null);
     const [loadBagSupervisorId, setLoadBagSupervisorId] = useState<number | null>(null);
     const [loadBagSuccess, setLoadBagSuccess] = useState<string | null>(null);
     const [loadBagError, setLoadBagError] = useState<{ text: string; needsWarehouse: boolean } | null>(null);
@@ -1321,14 +1314,15 @@ export default function ShiftProductionEntryPage() {
      * scan door answers, on the second of the two doors that reach it.
      *
      * Set only by the server's 422 and carrying the server's own sentence,
-     * which names the kg that machine is still estimated to hold. This
-     * screen never decides on its own that a scan needs explaining.
+     * which names the kg the COMMON INPUT is still estimated to hold and says
+     * that figure does not count batches still running. This screen never
+     * decides on its own that a scan needs explaining, and never paraphrases
+     * the sentence — least of all the caveat.
      *
-     * ONE OBJECT, cleared on success, on a new barcode, on a change of
-     * machine, and on every open of the modal — because the server's gate
-     * waves through any request that already carries a reason, so a reason
-     * outliving its refusal would silently switch the check off for the
-     * next bag.
+     * ONE OBJECT, cleared on success, on a new barcode, and on every open of
+     * the modal — because the server's gate waves through any request that
+     * already carries a reason, so a reason outliving its refusal would
+     * silently switch the check off for the next bag.
      */
     const [loadBagAck, setLoadBagAck] = useState<{
         message: string;
@@ -1685,21 +1679,10 @@ export default function ShiftProductionEntryPage() {
         return map;
     }, [activeBatches]);
 
-    /**
-     * The machine to default a bag load to: the one that is running, when
-     * EXACTLY one is. Null with none or several — a load credited to the wrong
-     * machine silently moves two estimates the wrong way, and no screen would
-     * ever say so, which is worth one tap to avoid.
-     */
-    const soleRunningMachineId = useMemo(
-        () => (runningByMachine.size === 1 ? [...runningByMachine.keys()][0] : null),
-        [runningByMachine],
-    );
-    /** Active machines, for the Load Material picker. */
-    const machineOptions = useMemo(
-        () => (workCenters?.data ?? []).map((machine) => ({ value: machine.id, label: machineLabel(machine) })),
-        [workCenters],
-    );
+    // `soleRunningMachineId` and `machineOptions` lived here to default and
+    // fill the Load Material modal's machine picker. Both are gone with it:
+    // the factory has ONE common resin input point and a bag is never
+    // assigned to a machine, so there is no machine to default or offer.
 
     const openDowntimeByMachine = useMemo(() => {
         const map = new Map<number, MachineDowntimeLog>();
@@ -4243,21 +4226,18 @@ export default function ShiftProductionEntryPage() {
         },
     });
 
-    // ----- Load Material: scan a bag into a machine -----
+    // ----- Load Material: scan a bag into the common resin input -----
 
     /**
-     * `machineId` is the CONTEXT the door was opened with — the machine whose
-     * card started the flow. Absent (the page-level button), the modal
-     * defaults to the machine that is running when exactly one is: on a floor
-     * with a single machine turning, that is not a guess. With none or several
-     * running it stays empty and the load is blocked until somebody says
-     * which.
+     * NO ARGUMENT, deliberately. This used to take the machine whose card
+     * started the flow and default the rest from whichever machine was
+     * running — a whole apparatus for answering a question the factory does
+     * not ask. There is one input point; the door just opens.
      */
-    const openLoadMaterial = (machineId?: number | null) => {
+    const openLoadMaterial = () => {
         setLoadBagBarcode('');
         setScannedLoadBag(null);
         setLoadBagKg(null);
-        setLoadBagMachineId(machineId ?? soleRunningMachineId);
         setLoadBagSupervisorId(currentUser?.id ?? null);
         setLoadBagSuccess(null);
         setLoadBagError(null);
@@ -4304,15 +4284,12 @@ export default function ShiftProductionEntryPage() {
         mutationFn: loadBagToFactoryDayBin,
         onSuccess: (result, payload) => {
             // Compose the confirmation from the response where it answers,
-            // falling back to what was scanned — never a blank. The MACHINE is
-            // named back, because which machine was credited is the whole
-            // point of the scan and a confirmation without it cannot be
-            // checked against what the supervisor meant.
+            // falling back to what was scanned — never a blank. NO MACHINE IS
+            // NAMED BACK, because none was sent: the material entered the
+            // factory's one common input.
             const material = result?.day_bin?.item ?? result?.bag?.lot?.item ?? scannedLoadBag?.lot?.item ?? null;
-            const machine = (workCenters?.data ?? []).find((wc) => wc.id === payload.work_center_id);
             setLoadBagSuccess(
-                `Loaded ${payload.quantity_kg} kg of ${material ? itemLabel(material) : 'material'}` +
-                    `${machine ? ` into ${machineLabel(machine)}` : ''}.`,
+                `Loaded ${payload.quantity_kg} kg of ${material ? itemLabel(material) : 'material'} into the common resin input.`,
             );
             setScannedLoadBag(null);
             setLoadBagKg(null);
@@ -4321,11 +4298,11 @@ export default function ShiftProductionEntryPage() {
             // standing, it would be posted with the next bag and wave it
             // through the gate unasked.
             setLoadBagAck(null);
-            // The machine stays selected: the next bag off the same pallet
-            // goes into the same machine, and re-picking it every time is how
-            // bag four gets credited to the wrong one.
-            // The bag lost kg, the floor gained it, and one machine's estimate
-            // moved — every surface quoting any of those must refetch.
+            // The bag lost kg, the floor gained it, and the common input's
+            // estimate moved — every surface quoting any of those must
+            // refetch. The 'machine-resin' key keeps its literal name: the
+            // Day Bin page owns that query, and renaming it on one side only
+            // would stop this scan refreshing it.
             queryClient.invalidateQueries({ queryKey: ['production', 'factory-day-bin'] });
             queryClient.invalidateQueries({ queryKey: ['production', 'machine-resin'] });
             queryClient.invalidateQueries({ queryKey: ['inventory', 'stock-balances'] });
@@ -4335,7 +4312,7 @@ export default function ShiftProductionEntryPage() {
         },
         onError: (error: any) => {
             // THE BALANCE GATE, before any other reading of this failure: the
-            // machine is still estimated to hold material and the server
+            // common input is still estimated to hold material and the server
             // wants one word before it takes more. A third case alongside the
             // two this handler already tells apart, not a parallel path — the
             // error shape stays the one thing that decides.
@@ -4373,16 +4350,8 @@ export default function ShiftProductionEntryPage() {
     const submitLoadBag = (ack?: { reason: BalanceAckReason; note: string }) => {
         const supervisorId = loadBagSupervisorId ?? currentUser?.id;
         if (!scannedLoadBag || !loadBagKg || loadBagKg <= 0 || !supervisorId) return;
-        if (loadBagMachineId === null) {
-            // The button is disabled for this, but the bag panel is reachable
-            // by keyboard — say which field is missing rather than doing
-            // nothing at all.
-            setLoadBagError({ text: 'Pick the machine this bag was loaded into.', needsWarehouse: false });
-            return;
-        }
         loadBagMutation.mutate({
             barcode: scannedLoadBag.barcode,
-            work_center_id: loadBagMachineId,
             quantity_kg: loadBagKg,
             supervisor_id: supervisorId,
             ...(ack
@@ -4771,10 +4740,11 @@ export default function ShiftProductionEntryPage() {
                                             {/* Phase 6 traceability actions — invisible unless the
                                                 backend flag is on, so with it off this card is
                                                 exactly the pre-traceability UI. */}
-                                            {/* No "Materials" button: the bin is factory-wide, so
-                                                it lives on its own page (/production/day-bin) and
-                                                is loaded from the one Load Material button below
-                                                the machine grid. */}
+                                            {/* No "Materials" button on a machine card: resin
+                                                enters ONE common input serving the whole factory,
+                                                never a machine, so it lives on its own page
+                                                (/production/day-bin) and is loaded from the one
+                                                Load Material button below the grid. */}
                                             {running && traceabilityEnabled && (
                                                 <Button
                                                     block
@@ -4801,10 +4771,11 @@ export default function ShiftProductionEntryPage() {
 
             <Space style={{ marginBottom: 32 }}>
                 {traceabilityEnabled && (
-                    // Page-level: one door for the whole floor, with the
-                    // machine chosen inside it (defaulted when exactly one is
-                    // running). Ten identical buttons on ten cards would be
-                    // ten doors to one room.
+                    // Page-level, and the only level there is: one door for
+                    // the whole floor, because the factory has one resin
+                    // input point. Ten identical buttons on ten cards would
+                    // be ten doors to one room, and would suggest the room
+                    // was ten rooms.
                     <Button type="primary" onClick={() => openLoadMaterial()}>
                         Load Material
                     </Button>
@@ -7780,9 +7751,10 @@ export default function ShiftProductionEntryPage() {
                         destroyOnHidden
                     >
                         <Typography.Paragraph type="secondary">
-                            Scan a bag into the machine it was loaded into: its kg move out of the store, and that
-                            machine's estimated resin remaining goes up by them. The scanner types the code and
-                            presses Enter by itself; the machine stays selected between bags.
+                            Scan a bag into the factory's one common resin input: its kg move out of the store and the
+                            common input's estimated remaining goes up by them. No machine is chosen, because a bag is
+                            never tied to one. The scanner types the code and presses Enter by itself, so a whole
+                            pallet goes in one bag after another.
                         </Typography.Paragraph>
                         {loadBagSuccess && (
                             <Alert type="success" showIcon message={loadBagSuccess} style={{ marginBottom: 12 }} />
@@ -7801,36 +7773,11 @@ export default function ShiftProductionEntryPage() {
                             />
                         )}
                         <Form layout="vertical">
-                            {/* THE MACHINE, ABOVE THE BARCODE — the one field
-                                the scanner gun cannot fill in, and the one this
-                                load is meaningless without. */}
-                            <Form.Item
-                                label="Machine"
-                                required
-                                extra={
-                                    loadBagMachineId !== null && loadBagMachineId === soleRunningMachineId
-                                        ? 'Defaulted to the only machine running — change it if the bag went elsewhere.'
-                                        : 'Which machine this bag was emptied into.'
-                                }
-                            >
-                                <Select
-                                    value={loadBagMachineId ?? undefined}
-                                    onChange={(value) => {
-                                        setLoadBagMachineId(value);
-                                        setLoadBagError(null);
-                                        // The refusal was about ONE machine's
-                                        // estimated remaining. Point at another
-                                        // and the question no longer applies —
-                                        // carrying the answer across would
-                                        // explain the wrong machine.
-                                        setLoadBagAck(null);
-                                    }}
-                                    options={machineOptions}
-                                    placeholder="Choose the machine…"
-                                    showSearch
-                                    optionFilterProp="label"
-                                />
-                            </Form.Item>
+                            {/* THE BARCODE FIRST, AND NOTHING ABOVE IT. The
+                                machine picker that used to sit here is deleted,
+                                not hidden: a bag is never assigned to a
+                                machine, so there is no field for the scanner
+                                gun to be waiting on. */}
                             <Form.Item label="Bag barcode">
                                 <Input
                                     ref={loadBagInputRef}
@@ -7879,17 +7826,19 @@ export default function ShiftProductionEntryPage() {
                                 />
                             </Form.Item>
                             {/* THE REFUSED SCAN. The server's sentence first,
-                                word for word — it names the estimated kg still
-                                on that machine, and that figure is the whole
-                                reason anyone is being asked. Then the four
-                                words and an optional note, and nothing else:
-                                NO WEIGHT IS ASKED FOR HERE OR ANYWHERE. */}
+                                WORD FOR WORD — it names the estimated kg still
+                                in the common input AND says that figure does
+                                not count batches still running, and both
+                                halves are the whole reason anyone is being
+                                asked. Then the four words and an optional
+                                note, and nothing else: NO WEIGHT IS ASKED FOR
+                                HERE OR ANYWHERE. */}
                             {loadBagAck !== null && (
                                 <Alert
                                     type="warning"
                                     showIcon
                                     style={{ marginBottom: 12 }}
-                                    message="Say what happened to the material already on this machine"
+                                    message="Say what happened to the material already in the common input"
                                     description={
                                         <Space direction="vertical" style={{ width: '100%' }}>
                                             <Typography.Text>{loadBagAck.message}</Typography.Text>
@@ -7932,20 +7881,17 @@ export default function ShiftProductionEntryPage() {
                                     !scannedLoadBag ||
                                     !loadBagKg ||
                                     loadBagKg <= 0 ||
-                                    loadBagMachineId === null ||
                                     // A pending refusal with no word picked yet:
                                     // the button says what it wants rather than
                                     // firing a post that can only be refused.
                                     (loadBagAck !== null && loadBagAck.reason === null)
                                 }
                             >
-                                {loadBagMachineId === null
-                                    ? 'Pick a machine first'
-                                    : loadBagAck !== null
-                                      ? loadBagAck.reason === null
-                                          ? 'Pick a reason first'
-                                          : 'Confirm and load into machine'
-                                      : 'Load into machine'}
+                                {loadBagAck !== null
+                                    ? loadBagAck.reason === null
+                                        ? 'Pick a reason first'
+                                        : 'Confirm and load into the common input'
+                                    : 'Load into the common input'}
                             </Button>
                         </Form>
                     </Modal>

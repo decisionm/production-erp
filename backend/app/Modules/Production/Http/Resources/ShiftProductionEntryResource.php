@@ -138,15 +138,19 @@ class ShiftProductionEntryResource extends JsonResource
             // follow above — a client must be able to say "not costed yet"
             // without telling a missing key apart from a null one.
             //
-            // THE DETAIL IS FINANCE'S. Totals and cost-per-piece are for
-            // everyone on the floor; the per-layer breakdown behind them —
-            // rates, bag barcodes, supplier lot numbers — is passed only for
-            // finance.view/manage, and the keys are ABSENT rather than null
-            // for anyone else, so no supplier rate is ever one devtools
-            // panel away from a production login. The permission gate is the
+            // THE DETAIL IS FINANCE'S. Totals, cost-per-piece and the
+            // accounting-allocation sentence (`basis`) are for everyone on
+            // the floor; the per-material rates behind them are passed only
+            // for finance.view/manage, and the keys are ABSENT rather than
+            // null for anyone else, so no rate is ever one devtools panel
+            // away from a production login. The permission gate is the
             // module-coarse one this codebase already uses (there is no
             // per-field precedent, and inventing one here would be inventing
             // a permission the seeder would strip).
+            //
+            // THERE ARE NO BAG BARCODES OR SUPPLIER LOTS IN IT AT ANY LEVEL
+            // any more. The owner's correction (2-Aug) ended the bag-to-batch
+            // claim — see BagCostAllocationService.
             'batch_cost' => app(BagCostAllocationService::class)->summary(
                 $this->resource,
                 withDetail: (bool) $request->user()?->canAny(['finance.view', 'finance.manage']),

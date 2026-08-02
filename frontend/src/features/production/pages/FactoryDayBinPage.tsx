@@ -28,11 +28,9 @@ import { listAllWarehouses } from '@/features/inventory/api';
 import {
     findMaterialBagByBarcode,
     getFactoryDayBin,
-    getMachineResinEstimates,
+    getCommonResinEstimate,
     listRawMaterials,
-    listWorkCenters,
     loadBagToFactoryDayBin,
-    machineLabel,
     factoryStoreLabel,
     loadFactoryDayBin,
     readBalanceAckRefusal,
@@ -43,9 +41,9 @@ import { useProductionSettings } from '@/features/production/packing';
 import { BALANCE_ACK_REASON_OPTIONS } from '@/features/production/types';
 import type {
     BalanceAckReason,
+    CommonResinMaterial,
     FactoryDayBinLoadRow,
     FactoryDayBinUnopenedBags,
-    MachineResinMaterial,
     MaterialBag,
 } from '@/features/production/types';
 import type { Item } from '@/features/inventory/types';
@@ -82,37 +80,35 @@ interface BalanceRow {
 }
 
 /**
- * MATERIAL ON THE FLOOR, BY MACHINE — the owner's material control room, and
- * the floor's one scan point for material coming out of the store.
+ * THE COMMON RESIN INPUT — the owner's material control room, and the
+ * factory's one loading point for material coming out of the store.
  *
- * WHAT THE OWNER RULED (31-Jul, decisive, and it replaced the design this
- * page was first built for): "Our factory does not use a Day Bin warehouse or
- * an evening physical bin weight. Replace that idea with estimated resin
- * remaining for each machine: previous carryover plus barcode-scanned loads
- * minus calculated consumption." And: "Scanning a bag means material was
- * loaded into the selected machine; it does not mean the whole quantity was
- * consumed."
+ * WHAT THE OWNER CORRECTED (2-Aug, decisive, and it replaced the design this
+ * page carried for four days): the factory has ONE COMMON resin input point
+ * serving every machine. A bag is NEVER assigned or scanned to a machine.
+ * The machine selector, the per-machine cards and the per-machine estimated
+ * balance were all false, and they are gone — not nulled, not hidden behind
+ * a flag. A per-machine number had no physical referent, so every reading of
+ * it was a reading of nothing.
  *
- * So the day's reconciliation is GONE — card, physical-count boxes, tolerance
- * and all. It asked for a weight nobody in this factory takes, which made it
- * a question the screen could never get an answer to. In its place, the
- * per-machine estimate. The route and the setting keep the "day bin" name
- * because renaming a live surface mid-freeze costs more than it explains; the
- * BEHAVIOUR is per machine.
+ * What survives from the 31-Jul ruling is the shape of the estimate itself:
+ * loads in, calculated consumption out, no physical weighing. This factory
+ * takes no bin weight, so the daily reconciliation that once lived here is
+ * still gone. The route and the setting keep the "day bin" name because
+ * renaming a live surface mid-freeze costs more than it explains.
  *
  * Top to bottom, in the order the floor uses it:
  *
- *  1. SCAN — a barcode input built for a USB scanner gun, and a MACHINE the
- *     bag is being loaded into. The gun types the code and presses Enter
- *     (lookup), the bag shows itself (material, SKU, kg remaining), and Enter
- *     again loads the whole bag — kg editable first for a part bag. The
- *     machine stays put between bags (a stack goes into one machine) and is
- *     required: an unattributed load overstates every machine except the one
- *     that burnt the material. Same POST the Shift Floor's Load Material
- *     modal uses — one flow, two doors.
- *  2. ESTIMATED REMAINING, PER MACHINE — scanned in, calculated out, and what
- *     should still be on it. Negative is shown, not hidden: it is the one
- *     figure here worth acting on.
+ *  1. SCAN — a barcode input built for a USB scanner gun, and nothing else to
+ *     pick. The gun types the code and presses Enter (lookup), the bag shows
+ *     itself (material, SKU, kg remaining), and Enter again loads the whole
+ *     bag — kg editable first for a part bag. Same POST the Shift Floor's
+ *     Load Material modal uses — one flow, two doors.
+ *  2. ESTIMATED REMAINING IN THE COMMON INPUT — one row per material: loaded
+ *     in, calculated out across ALL machines, and what should therefore still
+ *     be in the input. Negative is shown, not hidden: it is the one figure
+ *     here worth acting on. It LAGS the floor, because consumption is booked
+ *     at batch completion, and the caption says so.
  *  3. WHAT IS OUT OF THE STORE — one row per raw material: on the floor now,
  *     still in the store, bags still holding material. The floor figures are
  *     the WIP warehouse's ordinary stock balances (it IS a warehouse — no
@@ -124,8 +120,8 @@ interface BalanceRow {
  *  4. MANUAL LOAD (collapsed) — for unlabelled bags and opening stock: raw
  *     materials only (the backend's kg-uom picker — never the bottle list),
  *     posting the EXISTING store → WIP stock transfer. A location move, never
- *     a consumption, never a Tally post. It writes no machine attribution, so
- *     it does not feed the estimate above — said on screen in one line.
+ *     a consumption, never a Tally post. It writes no day-bin movement, so it
+ *     does not feed the estimate above — said on screen in one line.
  *  5. LOADED TODAY — every load today with time, material, kg, bag and who.
  *     Always shown once the warehouse is named: an empty list is the normal
  *     morning state and says so in one plain line.
@@ -149,13 +145,6 @@ export default function FactoryDayBinPage() {
     const [scanCode, setScanCode] = useState('');
     const [scannedBag, setScannedBag] = useState<MaterialBag | null>(null);
     const [scanKg, setScanKg] = useState<number | null>(null);
-    /**
-     * THE MACHINE THE BAG IS GOING INTO — required, and deliberately NOT
-     * cleared after a load: a stack of bags is emptied into one machine, and
-     * re-picking it between every scan is how the wrong machine gets credited
-     * on bag four. Cleared only by the person changing it.
-     */
-    const [scanMachineId, setScanMachineId] = useState<number | null>(null);
     const [scanError, setScanError] = useState<string | null>(null);
     const [scanSuccess, setScanSuccess] = useState<string | null>(null);
     /**
@@ -170,8 +159,8 @@ export default function FactoryDayBinPage() {
      * the reason must never outlive the refusal that asked for it. The
      * server's gate short-circuits whenever a reason is present, so a reason
      * left lying in state would sail the NEXT scan straight past the check
-     * with nobody told. Cleared on success, on a new barcode, and on a
-     * change of machine — every path that makes the refusal stale.
+     * with nobody told. Cleared on success and on a new barcode — every path
+     * that makes the refusal stale.
      */
     const [scanAck, setScanAck] = useState<{
         message: string;
@@ -205,34 +194,23 @@ export default function FactoryDayBinPage() {
     const dayBinWarehouse = dayBin?.warehouse ?? null;
     const configured = dayBinWarehouse !== null;
 
-    // ----- ESTIMATED RESIN REMAINING, PER MACHINE. Not date-scoped and not
-    // countable: it is a running figure per (machine, material), counted from
-    // the first bag scanned into that machine. No date picker, because there
-    // is no daily closing to pick — and no count box, because this factory
-    // takes no physical bin weight.
+    // ----- ESTIMATED REMAINING IN THE COMMON INPUT. Not date-scoped and not
+    // countable: it is a running figure per material, counted from the first
+    // load of that material. No date picker, because there is no daily
+    // closing to pick — and no count box, because this factory takes no
+    // physical bin weight. The query key is UNCHANGED ('machine-resin'): the
+    // Shift Floor's Load Material modal invalidates the same key, and
+    // renaming it on one side only would silently stop this card refreshing
+    // after a floor scan.
     const {
-        data: machineResin,
-        isLoading: machineResinLoading,
-        isError: machineResinUnavailable,
+        data: commonResin,
+        isLoading: commonResinLoading,
+        isError: commonResinUnavailable,
     } = useQuery({
         queryKey: ['production', 'machine-resin'],
-        queryFn: () => getMachineResinEstimates(),
+        queryFn: getCommonResinEstimate,
         retry: false,
     });
-
-    // The machine picker for the scan. ACTIVE machines only — a retired one
-    // cannot be loaded, and offering it would book an attribution nobody can
-    // act on. A 403 here leaves the list empty, and the scan panel says so
-    // rather than letting a bag be loaded with no machine.
-    const { data: workCenters, isError: workCentersUnavailable } = useQuery({
-        queryKey: ['production', 'work-centers', 'active'],
-        queryFn: () => listWorkCenters(true),
-        retry: false,
-    });
-    const machineOptions = useMemo(
-        () => (workCenters?.data ?? []).map((machine) => ({ value: machine.id, label: machineLabel(machine) })),
-        [workCenters],
-    );
 
     const warehouseOptions = useMemo(
         () =>
@@ -367,14 +345,12 @@ export default function FactoryDayBinPage() {
         mutationFn: loadBagToFactoryDayBin,
         onSuccess: (result, payload) => {
             // Compose the confirmation from the response where it answers,
-            // falling back to what was scanned — never a blank. The MACHINE is
-            // named back: the whole point of the scan is which machine got it,
-            // and a confirmation that omits it cannot be checked.
+            // falling back to what was scanned — never a blank. NO MACHINE IS
+            // NAMED BACK, because none was sent: the material entered the
+            // factory's one common input.
             const material = result?.day_bin?.item ?? result?.bag?.lot?.item ?? scannedBag?.lot?.item ?? null;
-            const machine = (workCenters?.data ?? []).find((wc) => wc.id === payload.work_center_id);
             setScanSuccess(
-                `Loaded ${payload.quantity_kg} kg of ${material ? itemLabel(material) : 'material'}` +
-                    `${machine ? ` into ${machineLabel(machine)}` : ''}.`,
+                `Loaded ${payload.quantity_kg} kg of ${material ? itemLabel(material) : 'material'} into the common resin input.`,
             );
             setScannedBag(null);
             setScanKg(null);
@@ -383,10 +359,8 @@ export default function FactoryDayBinPage() {
             // standing, it would be posted with the next bag and wave it
             // through the gate unasked.
             setScanAck(null);
-            // The machine is NOT cleared — the next bag off the same pallet
-            // goes into the same machine.
-            // The bag lost kg, the floor gained it, and one machine's estimate
-            // moved — every surface quoting any of those must refetch.
+            // The bag lost kg, the floor gained it, and the common input's
+            // estimate moved — every surface quoting any of those must refetch.
             queryClient.invalidateQueries({ queryKey: ['production', 'factory-day-bin'] });
             queryClient.invalidateQueries({ queryKey: ['production', 'machine-resin'] });
             queryClient.invalidateQueries({ queryKey: ['inventory', 'stock-balances'] });
@@ -395,11 +369,13 @@ export default function FactoryDayBinPage() {
             scanInputRef.current?.focus();
         },
         onError: (error: any) => {
-            // THE BALANCE GATE, first: the server says this machine is still
-            // estimated to hold material and wants one word before it takes
-            // more. Its sentence names the figure, so it is shown as written
-            // rather than restated here — the estimate is the server's to
-            // quote and this screen has no business paraphrasing it.
+            // THE BALANCE GATE, first: the server says the common input is
+            // still estimated to hold material and wants one word before it
+            // takes more. Its sentence names the figure AND states that the
+            // figure does not count batches still running, so it is shown as
+            // written rather than restated here — the estimate is the
+            // server's to quote and this screen has no business paraphrasing
+            // it, least of all the caveat.
             const refusal = readBalanceAckRefusal(error);
             if (refusal !== null) {
                 setScanError(null);
@@ -424,17 +400,11 @@ export default function FactoryDayBinPage() {
      * failure, which is what makes that safe.
      */
     const submitBagLoad = (ack?: { reason: BalanceAckReason; note: string }) => {
-        if (!scannedBag || !scanKg || scanKg <= 0 || scanMachineId === null || !currentUser || bagLoad.isPending) {
-            // A missing machine is the one blocked case worth naming: the
-            // button is disabled for it, but Enter reaches here too.
-            if (scannedBag && scanMachineId === null) {
-                setScanError('Pick the machine this bag was loaded into.');
-            }
+        if (!scannedBag || !scanKg || scanKg <= 0 || !currentUser || bagLoad.isPending) {
             return;
         }
         bagLoad.mutate({
             barcode: scannedBag.barcode,
-            work_center_id: scanMachineId,
             quantity_kg: scanKg,
             // Recorded as a note; the audit identity is the login either way.
             supervisor_id: currentUser.id,
@@ -569,20 +539,21 @@ export default function FactoryDayBinPage() {
     ];
 
     /**
-     * One machine's estimate table. Same columns for every machine, so the
-     * eye reads down a column across cards.
+     * The common input's estimate table — ONE table, one row per material.
+     * There is no machine dimension to group by any more, and there is no
+     * second table: the factory has one loading point.
      *
      * NEGATIVE IS PRINTED, in red, with the reason beside it. The estimate is
-     * scanned-in minus calculated-out, and consumption is derived from output
-     * rather than weighed — so a negative figure means the machine ran on
-     * material nobody scanned. That is the one line on this page worth acting
-     * on, and clamping it at zero would erase exactly it.
+     * loaded-in minus calculated-out, and consumption is derived from output
+     * rather than weighed — so a negative figure means the factory ran on
+     * material nobody recorded loading. That is the one line on this page
+     * worth acting on, and clamping it at zero would erase exactly it.
      */
-    const machineResinColumns = [
+    const commonResinColumns = [
         {
             title: 'Material',
             key: 'material',
-            render: (_: unknown, row: MachineResinMaterial) => (
+            render: (_: unknown, row: CommonResinMaterial) => (
                 <Space direction="vertical" size={0}>
                     <Typography.Text strong>{row.item.name}</Typography.Text>
                     {skuLine(row.item) !== null && (
@@ -594,22 +565,22 @@ export default function FactoryDayBinPage() {
             ),
         },
         {
-            title: 'Scanned in',
+            title: 'Loaded',
             key: 'loaded',
             align: 'right' as const,
-            render: (_: unknown, row: MachineResinMaterial) => fmtQty(row.loaded_kg),
+            render: (_: unknown, row: CommonResinMaterial) => fmtQty(row.loaded_kg),
         },
         {
-            title: 'Calculated out',
+            title: 'Consumed (all batches)',
             key: 'consumed',
             align: 'right' as const,
-            render: (_: unknown, row: MachineResinMaterial) => fmtQty(row.consumed_kg),
+            render: (_: unknown, row: CommonResinMaterial) => fmtQty(row.consumed_kg),
         },
         {
             title: 'Estimated remaining',
             key: 'remaining',
             align: 'right' as const,
-            render: (_: unknown, row: MachineResinMaterial) => {
+            render: (_: unknown, row: CommonResinMaterial) => {
                 const remaining = parseFloat(row.estimated_remaining_kg);
                 const short = !Number.isNaN(remaining) && remaining < 0;
                 return (
@@ -622,7 +593,7 @@ export default function FactoryDayBinPage() {
                             a verdict, and the fix is a scan somebody missed. */}
                         {short && (
                             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                more consumed than scanned in — a bag was probably not scanned
+                                more consumed than loaded — a bag was probably not scanned
                             </Typography.Text>
                         )}
                     </Space>
@@ -632,7 +603,7 @@ export default function FactoryDayBinPage() {
         {
             title: 'Last load',
             key: 'last_load',
-            render: (_: unknown, row: MachineResinMaterial) =>
+            render: (_: unknown, row: CommonResinMaterial) =>
                 row.last_load_at === null ? (
                     <Typography.Text type="secondary">—</Typography.Text>
                 ) : (
@@ -680,11 +651,12 @@ export default function FactoryDayBinPage() {
         <Space direction="vertical" size="large" style={{ width: '100%' }}>
             <Space direction="vertical" size={0}>
                 <Typography.Title level={3} style={{ marginBottom: 0 }}>
-                    Day Bin — material on the floor, by machine
+                    Common resin input
                 </Typography.Title>
                 <Typography.Text type="secondary">
-                    Scan each bag into the machine it was loaded into, and see what should still be on that machine:
-                    what was scanned in, less what its batches calculated out. Nothing is consumed here and loading
+                    This factory has ONE resin input point. Every bag is loaded into it and no bag is ever tied to a
+                    machine — so what you see below is the whole input: what was loaded, what every machine's batches
+                    calculated out, and what should therefore still be in it. Nothing is consumed here and loading
                     posts nothing to Tally — Complete Batch on the Shift Floor takes the material out by itself.
                 </Typography.Text>
             </Space>
@@ -736,12 +708,12 @@ export default function FactoryDayBinPage() {
             {configured && (
                 <>
                     {traceabilityEnabled && (
-                        <Card size="small" title="Scan a bag into a machine">
+                        <Card size="small" title="Scan a bag into the common input">
                             <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-                                Pick the machine first, then scan — the machine stays put so a whole pallet goes in one
-                                bag after another. The scanner types the code and presses Enter by itself; Enter again
-                                (or the button) loads the whole bag, and lowering the kg loads a part bag with the rest
-                                left in it.
+                                Just scan — there is nothing else to choose, because there is one input point and a bag
+                                is never tied to a machine. The scanner types the code and presses Enter by itself;
+                                Enter again (or the button) loads the whole bag, and lowering the kg loads a part bag
+                                with the rest left in it. A whole pallet goes in one bag after another without a tap.
                             </Typography.Paragraph>
                             {scanSuccess && (
                                 <Alert type="success" showIcon message={scanSuccess} style={{ marginBottom: 12 }} />
@@ -749,43 +721,10 @@ export default function FactoryDayBinPage() {
                             {scanError && (
                                 <Alert type="error" showIcon message={scanError} style={{ marginBottom: 12 }} />
                             )}
-                            {/* THE MACHINE, ABOVE THE BARCODE — it is the one
-                                field the gun cannot fill in, and a scan with no
-                                machine is a load nothing can be attributed to. */}
-                            <Form layout="vertical" component="div" style={{ maxWidth: 480 }}>
-                                <Form.Item
-                                    label="Machine"
-                                    required
-                                    extra={
-                                        workCentersUnavailable
-                                            ? 'The machine list could not be loaded — reload the page, or ask for Production access if this keeps happening.'
-                                            : 'Which machine this bag was emptied into. Stays selected between bags.'
-                                    }
-                                >
-                                    <Select
-                                        size="large"
-                                        style={{ width: '100%' }}
-                                        placeholder="Choose the machine…"
-                                        options={machineOptions}
-                                        showSearch
-                                        optionFilterProp="label"
-                                        value={scanMachineId ?? undefined}
-                                        onChange={(value) => {
-                                            setScanMachineId(value);
-                                            setScanError(null);
-                                            // The refusal was about ONE machine's
-                                            // estimated remaining. Point at another
-                                            // machine and that question no longer
-                                            // applies — carrying the answer across
-                                            // would explain the wrong machine.
-                                            setScanAck(null);
-                                        }}
-                                        notFoundContent={
-                                            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No active machines" />
-                                        }
-                                    />
-                                </Form.Item>
-                            </Form>
+                            {/* THE BARCODE, AND NOTHING ABOVE IT. The machine
+                                selector that used to sit here is deleted, not
+                                hidden: a bag is never assigned to a machine, so
+                                there is no field for the gun to be waiting on. */}
                             <Input
                                 ref={scanInputRef}
                                 autoFocus
@@ -827,18 +766,20 @@ export default function FactoryDayBinPage() {
                                         </Form.Item>
                                     </Form>
                                     {/* THE REFUSED SCAN. The server's sentence
-                                        first, word for word — it names the
-                                        estimated kg still on the machine, and
-                                        that figure is the whole reason anyone
-                                        is being asked. Then the four words,
-                                        and nothing else: NO WEIGHT IS ASKED
-                                        FOR HERE OR ANYWHERE. */}
+                                        first, WORD FOR WORD — it names the
+                                        estimated kg still in the common input
+                                        AND says that figure does not count
+                                        batches still running, and both halves
+                                        are the whole reason anyone is being
+                                        asked. Then the four words, and nothing
+                                        else: NO WEIGHT IS ASKED FOR HERE OR
+                                        ANYWHERE. */}
                                     {scanAck !== null && (
                                         <Alert
                                             type="warning"
                                             showIcon
                                             style={{ marginBottom: 12 }}
-                                            message="Say what happened to the material already on this machine"
+                                            message="Say what happened to the material already in the common input"
                                             description={
                                                 <Space direction="vertical" style={{ width: '100%' }}>
                                                     <Typography.Text>{scanAck.message}</Typography.Text>
@@ -882,7 +823,6 @@ export default function FactoryDayBinPage() {
                                         disabled={
                                             !scanKg ||
                                             scanKg <= 0 ||
-                                            scanMachineId === null ||
                                             // A pending refusal with no word picked
                                             // yet: the button stays put and says
                                             // what it wants, rather than firing a
@@ -890,45 +830,47 @@ export default function FactoryDayBinPage() {
                                             (scanAck !== null && scanAck.reason === null)
                                         }
                                     >
-                                        {scanMachineId === null
-                                            ? 'Pick a machine first'
-                                            : scanAck !== null
-                                              ? scanAck.reason === null
-                                                  ? 'Pick a reason first'
-                                                  : 'Confirm and load into machine'
-                                              : 'Load into machine'}
+                                        {scanAck !== null
+                                            ? scanAck.reason === null
+                                                ? 'Pick a reason first'
+                                                : 'Confirm and load into the common input'
+                                            : 'Load into the common input'}
                                     </Button>
                                 </div>
                             )}
                         </Card>
                     )}
 
-                    {/* ESTIMATED RESIN REMAINING, PER MACHINE — the owner's
-                        replacement for the day's reconciliation. First, because
-                        it is the question the floor actually asks ("how much is
-                        left on MC-03?"), and because the balances below answer a
-                        different one (where the stock is, in the books). */}
-                    <Card size="small" title="Estimated resin remaining, per machine">
+                    {/* ESTIMATED REMAINING IN THE COMMON INPUT — the owner's
+                        replacement for the day's reconciliation, and since the
+                        2-Aug correction a single table rather than a card per
+                        machine. First, because it is the question the floor
+                        actually asks ("how much resin is left?"), and because
+                        the balances below answer a different one (where the
+                        stock is, in the books). */}
+                    <Card size="small" title="Estimated remaining in the common input">
                         <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-                            Carryover plus every bag scanned into the machine, less what its batches calculated out —
-                            resin consumed is (pieces packed and sent to QC + pieces rejected during production) × the
-                            standard weight per piece, plus lumps. Counted from the first bag scanned into that
-                            machine, so material burnt before anyone scanned is deliberately not subtracted. It is an
-                            estimate, not a weight: nothing here is weighed.
+                            Everything loaded into the one factory input, less what every machine's batches calculated
+                            out — resin consumed is (pieces packed and sent to QC + pieces rejected during production)
+                            × the standard weight per piece, plus lumps. Counted from the first load of each material,
+                            so material burnt before anyone recorded a load is deliberately not subtracted. It is an
+                            estimate, not a weight — nothing here is weighed, and it does not count batches still
+                            running, whose material has left the input but has not been calculated out yet.
                         </Typography.Paragraph>
 
-                        {machineResinUnavailable ? (
+                        {commonResinUnavailable ? (
                             <Typography.Text type="secondary">
-                                The per-machine estimate could not be loaded. Everything else on this page is
+                                The common-input estimate could not be loaded. Everything else on this page is
                                 unaffected.
                             </Typography.Text>
-                        ) : machineResinLoading ? (
-                            <Typography.Text type="secondary">Working out what is left on each machine…</Typography.Text>
-                        ) : (machineResin ?? []).length === 0 ? (
-                            // NOT "the machines are empty". The server answers
-                            // with no rows at all until something has been
-                            // scanned, and printing zeros would be a reading
-                            // nobody took.
+                        ) : commonResinLoading ? (
+                            <Typography.Text type="secondary">
+                                Working out what is left in the common input…
+                            </Typography.Text>
+                        ) : (commonResin ?? []).length === 0 ? (
+                            // NOT "the input is empty". The server answers with
+                            // no rows at all until something has been loaded,
+                            // and printing zeros would be a reading nobody took.
                             //
                             // The second sentence depends on whether there IS a
                             // scan panel: with barcode traceability off the card
@@ -936,30 +878,21 @@ export default function FactoryDayBinPage() {
                             // send somebody looking for a control this
                             // deployment does not have.
                             <Typography.Text type="secondary">
-                                No bag has been scanned into a machine yet, so there is no baseline to estimate
-                                against — this is not a reading of empty machines.{' '}
+                                Nothing has been loaded into the common input yet, so there is no baseline to estimate
+                                against — this is not a reading of an empty input.{' '}
                                 {traceabilityEnabled
                                     ? 'It fills in from the first scan above.'
-                                    : 'Barcode scanning is switched off for this factory, so nothing feeds it: material still moves out of the store below, but with no machine recorded against it.'}
+                                    : 'Barcode scanning is switched off for this factory, so nothing feeds it: material still moves out of the store below, but no load movement is recorded for it.'}
                             </Typography.Text>
                         ) : (
-                            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                                {(machineResin ?? []).map((machine) => (
-                                    <div key={machine.work_center_id}>
-                                        <Typography.Text strong style={{ display: 'block', marginBottom: 4 }}>
-                                            {machineLabel(machine.work_center)}
-                                        </Typography.Text>
-                                        <Table<MachineResinMaterial>
-                                            rowKey={(row) => row.item_id}
-                                            size="small"
-                                            columns={machineResinColumns}
-                                            dataSource={machine.materials}
-                                            pagination={false}
-                                            scroll={{ x: 'max-content' }}
-                                        />
-                                    </div>
-                                ))}
-                            </Space>
+                            <Table<CommonResinMaterial>
+                                rowKey={(row) => row.item_id}
+                                size="small"
+                                columns={commonResinColumns}
+                                dataSource={commonResin ?? []}
+                                pagination={false}
+                                scroll={{ x: 'max-content' }}
+                            />
                         )}
                     </Card>
 
@@ -1012,7 +945,7 @@ export default function FactoryDayBinPage() {
                                 emptyText: (
                                     <Typography.Text type="secondary">
                                         {traceabilityEnabled
-                                            ? 'Nothing has left the store yet — scan a bag into a machine above.'
+                                            ? 'Nothing has left the store yet — scan a bag into the common input above.'
                                             : 'Nothing has left the store yet — load material below.'}
                                     </Typography.Text>
                                 ),
@@ -1035,19 +968,20 @@ export default function FactoryDayBinPage() {
                                         initialValues={{ loaded_at: dayjs() }}
                                     >
                                         {/* WHAT THIS DOOR CANNOT DO. A manual
-                                            load is a plain stock transfer with
-                                            no machine on it, so it moves the
-                                            balance below but not any machine's
-                                            estimate above. Said here rather
-                                            than discovered later, when a
-                                            machine's estimate reads short by
-                                            exactly a load somebody made. */}
+                                            load is a plain stock transfer and
+                                            writes no day-bin load movement, so
+                                            it moves the balance below but not
+                                            the common input's estimate above.
+                                            Said here rather than discovered
+                                            later, when the estimate reads short
+                                            by exactly a load somebody made. */}
                                         <Typography.Text
                                             type="secondary"
                                             style={{ display: 'block', fontSize: 12, marginBottom: 8 }}
                                         >
-                                            No machine is recorded on a manual load, so it does not raise any machine's
-                                            estimated remaining — scan the bag above whenever it carries a barcode.
+                                            A manual load records no load movement, so it does not raise the common
+                                            input's estimated remaining — scan the bag above whenever it carries a
+                                            barcode.
                                         </Typography.Text>
                                         <Row gutter={[12, 0]}>
                                             <Col xs={24} md={8}>

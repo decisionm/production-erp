@@ -561,39 +561,44 @@ export function grossProducedPieces(
 }
 
 /**
- * WHAT THIS BATCH'S RESIN COST, per bag layer — the finance-only detail
+ * WHAT THIS BATCH'S RESIN COST, per material — the finance-only detail
  * behind `BatchCost.resin_cost`.
  *
- * One row per SLICE drawn out of one scanned load layer, oldest load first.
- * A batch that drew from three part-empty bags has three rows here, each at
- * that bag's own purchase rate — which is the whole point of the bag layer:
- * two bags of the same resin bought a month apart do not cost the same, and
- * a single blended average would say they did.
+ * ONE ROW PER EXACT MATERIAL, drawn from that material's COMMON POOL at the
+ * pool's weighted average. THERE ARE NO BAG OR LOT IDENTITIES IN IT, at any
+ * permission level. The owner's correction (2-Aug) removed the ground the
+ * old per-bag layer stood on: with one common resin input serving every
+ * machine there is no physical path from a bag to a batch, and naming a bag
+ * barcode or a supplier lot against a batch was the most confidently wrong
+ * thing this screen could do.
  *
- * `rate_per_kg`/`amount` are null when the bag's lot has no recorded
- * purchase rate at all (opening stock, which was never bought through a
- * GRN). That is a real state and it is why the whole batch total goes null
- * rather than quietly costing that resin at zero.
+ * `pool_rate`/`amount` are null when nothing priced stands in the pool and
+ * there is no stock average to fall back on either. That is a real state and
+ * it is why the whole batch total goes null rather than quietly costing that
+ * resin at zero.
  */
-export interface BatchCostLayer {
-    day_bin_movement_id: number | null;
+export interface BatchCostAllocation {
     item_id: number;
     item_name: string | null;
-    material_bag_id: number | null;
-    bag_barcode: string | null;
-    material_lot_id: number | null;
-    supplier_lot_no: string | null;
-    quantity_kg: string;
-    rate_per_kg: string | null;
+    /** The pool's weighted average at allocation time — frozen, never re-read. */
+    pool_rate: string | null;
+    /** Kg of this material drawn for this batch — 4dp decimal string. */
+    quantity: string;
     amount: string | null;
     /**
-     * How the rate above was arrived at — e.g. the bag's own purchase rate,
-     * or the stock average used as a fallback when a machine burnt more than
-     * was ever scanned into it. Rendered verbatim; this client does not
+     * How the rate above was arrived at — the common pool's weighted average,
+     * the stock average used as a fallback when consumption ran past what the
+     * pool held, or an unpriced slice. Rendered verbatim; this client does not
      * enumerate the vocabulary, because a value it has never heard of must
      * still reach the screen rather than being silently dropped.
      */
     rate_source: string | null;
+    /**
+     * The accounting-allocation sentence, repeated per row by the server.
+     * DO NOT RENDER IT PER ROW — `BatchCost.basis` carries the same sentence
+     * once, ungated, and one claim said once is the claim this module makes.
+     */
+    sentence: string;
 }
 
 /**
@@ -611,8 +616,13 @@ export interface BatchCostOtherLine {
 }
 
 /**
- * WHAT THIS BATCH COST — resin priced off the bags its machine actually had
- * scanned into it, everything else at its recorded issue cost.
+ * WHAT THIS BATCH COST — resin allocated out of the COMMON RESIN POOL at its
+ * weighted average, everything else at its recorded issue cost.
+ *
+ * IT IS AN ACCOUNTING ALLOCATION, NOT TRACEABILITY, and `basis` says so in
+ * the server's own words. Print `basis` wherever any of these figures is
+ * printed: the factory records no bag-to-batch link, and a cost figure shown
+ * without that sentence is a claim this module does not make.
  *
  * ALWAYS PRESENT on a completed-or-not entry: before completion every figure
  * is null and `reason` says so in words. Never tell a null total apart from
@@ -623,11 +633,12 @@ export interface BatchCostOtherLine {
  * is how a paisa goes missing. null NEVER means zero — it means "this cannot
  * be costed in full", and `reason` names which of the two ways it failed.
  *
- * `layers` and `other_lines` are ABSENT (not null, not empty) for anyone
- * without finance.view/finance.manage — supplier rates are Owner and
- * Accounts territory. Gate the breakdown on the KEY BEING PRESENT rather
- * than on a permission check of your own: the server has already decided,
- * and a second opinion here can only disagree with it.
+ * `allocations` and `other_lines` are ABSENT (not null, not empty) for anyone
+ * without finance.view/finance.manage — the rates are Owner and Accounts
+ * territory. Gate the breakdown on the KEY BEING PRESENT rather than on a
+ * permission check of your own: the server has already decided, and a second
+ * opinion here can only disagree with it. `basis` is NOT part of that gate —
+ * it is what the number means, not anatomy, and everyone sees it.
  */
 export interface BatchCost {
     /**
@@ -650,6 +661,16 @@ export interface BatchCost {
     cost_per_accepted_unit: string | null;
     accepted_quantity: string | null;
     /**
+     * THE ONE SENTENCE THESE FIGURES MUST NEVER BE SHOWN WITHOUT: what the
+     * costing basis is, and what it is not. The server sends it on EVERY
+     * return path and at every permission level (BagCostAllocationService::
+     * ALLOCATION_SENTENCE), which is why it is required here rather than
+     * optional with a local fallback — a second copy of the sentence living
+     * in this client is exactly the drift the backend constant exists to
+     * prevent.
+     */
+    basis: string;
+    /**
      * Machine-readable provenance per figure; see `batchCostSourceLabel`.
      *
      * OPTIONAL because it is READ optionally, and the two must agree. The
@@ -663,8 +684,8 @@ export interface BatchCost {
         other_cost: string;
         cost_per_accepted_unit: string;
     };
-    /** Finance only — ABSENT otherwise. */
-    layers?: BatchCostLayer[];
+    /** Finance only — ABSENT otherwise. Carries no bag or lot identity. */
+    allocations?: BatchCostAllocation[];
     /** Finance only — ABSENT otherwise. */
     other_lines?: BatchCostOtherLine[];
 }
@@ -677,8 +698,8 @@ export interface BatchCost {
 export function batchCostSourceLabel(source: string | null | undefined): string {
     if (!source) return '—';
     switch (source) {
-        case 'bag_load_fifo_layers':
-            return 'the bags scanned into this machine, oldest load first';
+        case 'common_resin_pool_weighted_average':
+            return "the common resin pool's weighted average for each material";
         case 'issue_unit_cost':
             return 'the cost recorded when each material was issued';
         case 'quantity_produced_qc_net':
@@ -2259,30 +2280,32 @@ export interface FactoryDayBin {
 }
 
 /**
- * One material's ESTIMATED RESIN REMAINING on ONE machine, from
- * GET /production/machine-resin. Mirrors MachineResinMaterialResource field
+ * One material's ESTIMATED REMAINING IN THE COMMON RESIN INPUT, from
+ * GET /production/machine-resin. Mirrors CommonResinMaterialResource field
  * for field.
  *
- * THIS REPLACED the day-bin reconciliation row, which compared a derived
- * expected closing against a physical bin weight. The owner (31-Jul): "Our
- * factory does not use a Day Bin warehouse or an evening physical bin weight.
- * Replace that idea with estimated resin remaining for each machine: previous
- * carryover plus barcode-scanned loads minus calculated consumption." A read
- * waiting on a count nobody takes is worse than no read, so it is gone rather
- * than left on a screen looking answerable.
+ * THERE IS NO MACHINE FIELD, and its absence is the point. The owner's
+ * correction (2-Aug): the factory has ONE COMMON resin input point serving
+ * every machine, a bag is never assigned or scanned to a machine, and a
+ * per-machine balance was a number with no physical referent. This type
+ * REPLACED the machine-keyed pair (MachineResinEstimate +
+ * MachineResinMaterial) rather than nulling their machine field, so nothing
+ * can keep rendering a dimension that no longer exists.
  *
  * Every figure is a 4dp decimal STRING, never a number — the same way the
  * rest of the shift engine speaks about kg, so a JSON parse cannot quietly
  * restate a stock quantity.
  *
- * WHAT THE WINDOW IS. `loaded_kg` is every scan of this material into this
- * machine; `consumed_kg` counts only the calculated consumption recorded AT
- * OR AFTER the first such scan — material burnt before anyone scanned came
- * out of a hopper nobody logged and is deliberately not subtracted. So the
- * honest sentence for a screen is "counted from the first bag scanned into
- * this machine", never "all time".
+ * WHAT THE WINDOW IS. `loaded_kg` is every load of this material into the
+ * common input, whatever machine the row does or does not name (historical
+ * rows carry one; rows written since the correction do not — the material
+ * entered the factory's one input either way). `consumed_kg` counts only the
+ * calculated consumption recorded AT OR AFTER the first such load — material
+ * burnt before anyone recorded a load came out of an input nobody was
+ * logging and is deliberately not subtracted. So the honest sentence for a
+ * screen is "counted from the first load of this material", never "all time".
  */
-export interface MachineResinMaterial {
+export interface CommonResinMaterial {
     /**
      * Always present — the resource builds it with `ItemResource::make()`
      * directly, NOT through `whenLoaded`, so unlike FactoryDayBinMaterial's
@@ -2290,45 +2313,38 @@ export interface MachineResinMaterial {
      */
     item: Item;
     item_id: number;
-    /** Every barcode scan of this material into this machine. */
+    /** Every load of this material into the common input. */
     loaded_kg: string;
     /**
-     * The CURRENT calculated consumption of this machine's batches. A
-     * correction replaces its predecessor rather than adding to it (the
-     * amendment deletes the entry's consumption rows before re-booking), so
-     * this figure never double-counts a corrected batch.
+     * The CURRENT calculated consumption of this material ACROSS ALL
+     * MACHINES. A correction replaces its predecessor rather than adding to
+     * it (the amendment deletes the entry's consumption rows before
+     * re-booking), so this figure never double-counts a corrected batch.
      */
     consumed_kg: string;
     /**
      * loaded − consumed. CAN BE NEGATIVE and is served that way: consumption
      * is derived from output rather than weighed out, so a negative figure
-     * means the machine ran on material nobody scanned — the one thing on
-     * this read worth acting on, and the exact thing a clamp at zero would
-     * erase. Show it, never hide it.
+     * means the factory ran on material nobody recorded loading — the one
+     * thing on this read worth acting on, and the exact thing a clamp at zero
+     * would erase. Show it, never hide it.
+     *
+     * IT LAGS THE FLOOR. Consumption is booked at batch completion, so
+     * material an in-flight batch has already melted is not yet subtracted.
+     * Every screen printing it must say so.
      */
     estimated_remaining_kg: string;
     /**
-     * null = never loaded on this machine. The backend omits any pair with no
-     * scan at all, so in practice this is always set; it stays nullable
-     * because the resource declares it so.
+     * null = never loaded. The backend omits any material with no load at
+     * all, so in practice this is always set; it stays nullable because the
+     * resource declares it so.
+     *
+     * AN EMPTY ARRAY of these means "NOTHING HAS BEEN LOADED YET", not "the
+     * input is empty": the backend answers with no rows at all when there are
+     * no Load movements anywhere. A screen must say so in those words — an
+     * empty estimate is a missing baseline, never a zero balance.
      */
     last_load_at: string | null;
-}
-
-/**
- * One machine's estimated resin remaining, per material, from
- * GET /production/machine-resin (optionally narrowed with ?work_center_id=).
- *
- * AN EMPTY ARRAY MEANS "NOTHING HAS BEEN SCANNED INTO ANY MACHINE YET", not
- * "the machines are empty": the backend answers with no rows at all when
- * there are no Load movements anywhere, and omits any (machine, material)
- * pair that was never scanned. A screen must say so in those words — an
- * empty estimate is a missing baseline, never a zero balance.
- */
-export interface MachineResinEstimate {
-    work_center: WorkCenter;
-    work_center_id: number;
-    materials: MachineResinMaterial[];
 }
 
 /**
@@ -2351,15 +2367,14 @@ export interface RawMaterialOption {
 
 /**
  * POST /production/day-bin/load-bag — the Shift Floor's "Load Material"
- * scan: one bag's kg moves store → the internal WIP warehouse AND is
- * attributed to the machine it was emptied into.
+ * scan: one bag's kg move store → the internal WIP warehouse and enter the
+ * COMMON RESIN INPUT.
  *
- * The scan NAMES ITS MACHINE now (owner, 31-Jul: "Scanning a bag means
- * material was loaded into the selected machine"). In the books the stock
- * simply changed location — Tally still sees one godown, there is no
- * warehouse per machine — and the machine is operational metadata that the
- * per-machine estimate is summed from. Mirrors
- * FactoryDayBinController::loadBag's response verbatim.
+ * NO MACHINE IS NAMED (owner's correction, 2-Aug: the factory has one common
+ * resin input point and a bag is never assigned or scanned to a machine). In
+ * the books the stock simply changed location — Tally still sees one godown,
+ * there is no warehouse per machine. Mirrors FactoryDayBinController::loadBag's
+ * response verbatim.
  */
 export interface FactoryDayBinLoadResult {
     /** Post-load bag state (remaining_kg already reduced; lot.item loaded). */
@@ -2367,9 +2382,9 @@ export interface FactoryDayBinLoadResult {
     /** The day bin's row for this material — quantity_kg is the NEW balance. */
     day_bin: FactoryDayBinMaterial;
     /**
-     * The machine attribution the scan just wrote, echoed back so the floor
-     * can confirm WHICH machine was credited without a second read. Optional
-     * only for a backend that predates the machine-named scan.
+     * The movement row the load just wrote, echoed back so the floor can
+     * confirm what was recorded without a second read. It names NO machine —
+     * `work_center_id` is written null on this path.
      */
     movement?: DayBinMovement;
 }

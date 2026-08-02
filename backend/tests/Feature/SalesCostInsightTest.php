@@ -22,6 +22,7 @@ use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\WorkCenter;
 use App\Modules\Production\Services\FactoryDayBinService;
 use App\Modules\Production\Services\FactoryWarehouseResolver;
+use App\Modules\Production\Services\ResinPoolService;
 use App\Modules\Sales\Models\Customer;
 use App\Modules\Sales\Models\SalesOrder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -36,13 +37,17 @@ use Tests\TestCase;
  *
  * WHAT MUST HOLD, and each one is a scene below:
  *
- *  1. THE ESTIMATE IS PRICED OFF THE NEXT BAG, not off a blended average.
- *     The bag the store would really pick next is the one quoted, and when
- *     that bag is emptied the estimate moves to the one behind it — at ITS
- *     rate, with nobody re-entering anything.
- *  2. THE FALLBACK ADMITS ITSELF. With no bag to price from, the estimate
- *     falls back to the stock moving average AND SAYS SO in words, because
- *     the two figures mean different things to whoever is quoting a price.
+ *  1. THE ESTIMATE IS PRICED AT THE COMMON RESIN POOL'S WEIGHTED AVERAGE —
+ *     the same basis a real batch is allocated at, so the estimate and the
+ *     actual are two readings of one thing. It used to quote the next bag by
+ *     FIFO; the owner's correction (2-Aug) ended that basis along with the
+ *     rest of the bag-to-batch claim, because with ONE common resin input
+ *     point there is no "next bag this batch will draw from". Loading dearer
+ *     resin on top re-averages the pool, with nobody re-entering anything.
+ *  2. THE FALLBACK ADMITS ITSELF. With nothing priced in the pool, the
+ *     estimate falls back to the stock moving average AND SAYS SO in words,
+ *     because the two figures mean different things to whoever is quoting a
+ *     price.
  *  3. THE WHOLE PIECE IS COSTED — resin, the masterbatch its colour doses,
  *     and the packing materials its standard states, each divided down to
  *     one piece, and the parts add up exactly to the total shown.
@@ -55,9 +60,10 @@ use Tests\TestCase;
  *  6. NO ORDER-LEVEL ACTUAL UNLESS EVERY LINE HAS ONE, and the order block
  *     says out loud that it is batch actuals added up, not an order-level
  *     cost allocation — because no such allocation exists in this system.
- *  7. RATES AND IDENTITIES ARE FINANCE'S. A sales login sees costs and
- *     margins; the anatomy behind them is ABSENT from its payload, not
- *     nulled.
+ *  7. RATES ARE FINANCE'S, AND BAG IDENTITIES ARE NOBODY'S. A sales login
+ *     sees costs and margins; the rate anatomy behind them is ABSENT from its
+ *     payload, not nulled. Bag barcodes and supplier lots are absent from
+ *     BOTH payloads — the pool has no single bag behind it to name.
  *  8. THE ENDPOINT WRITES NOTHING, proved by watching every statement it
  *     fires — and a sales order still never touches stock.
  *
@@ -155,7 +161,7 @@ class SalesCostInsightTest extends TestCase
 
     public function test_the_estimate_prices_every_part_of_a_piece_and_the_parts_add_up(): void
     {
-        $this->bag('BAG-A', '25.0000', '2026-07-20', '90.0000');
+        $this->loadResin('BAG-A', '25.0000', '2026-07-20', '90.0000');
         $order = $this->order([['item' => $this->bottle, 'quantity' => '10000', 'unit_price' => '1.5000']]);
 
         $line = $this->actingAsFinance()->getJson($this->url($order))->assertOk()->json('data.lines.0');
@@ -191,31 +197,38 @@ class SalesCostInsightTest extends TestCase
         $this->assertSame('51.66', $line['estimate']['estimated_margin_pct']);
     }
 
-    public function test_the_estimate_moves_to_the_next_bag_when_the_first_is_emptied(): void
+    public function test_the_estimate_moves_with_the_pool_when_dearer_resin_is_loaded_on_top(): void
     {
-        $first = $this->bag('BAG-A', '25.0000', '2026-07-20', '90.0000');
-        $this->bag('BAG-B', '25.0000', '2026-07-25', '100.0000');
+        $this->loadResin('BAG-A', '25.0000', '2026-07-20', '90.0000');
 
         $order = $this->order([['item' => $this->bottle, 'quantity' => '10000', 'unit_price' => '1.5000']]);
 
-        // Oldest lot first — pickList's order, which is the order the store is
-        // required to issue in. Resin at 90.0000/kg, so 0.450000 of the total.
+        // 25 kg standing in the common input at 90.0000/kg, so 0.450000 of
+        // the total.
         $before = $this->actingAsFinance()->getJson($this->url($order))->assertOk()->json('data.lines.0.estimate');
         $this->assertSame('0.725000', $before['estimated_unit_cost']);
         $this->assertSame('0.450000', collect($before['components'])->firstWhere('kind', 'resin')['per_unit_cost']);
 
-        // The store empties the first bag into a machine. Nothing about the
-        // estimate is re-entered; the next layer simply becomes the head.
-        $first->update(['remaining_kg' => '0.0000', 'status' => MaterialBagStatus::Consumed]);
+        // A dearer bag is loaded on top. THE ESTIMATE DOES NOT JUMP TO THE
+        // NEW BAG'S PRICE — there is no "next bag this batch will draw from"
+        // any more, because every bag goes into the same input. The pool
+        // re-averages instead: (25×90 + 25×100) ÷ 50 = 95.
+        $this->loadResin('BAG-B', '25.0000', '2026-07-25', '100.0000');
 
         $payload = $this->actingAsFinance()->getJson($this->url($order))->assertOk()->json('data.lines.0');
 
-        // resin now 5 g @ 100.0000/kg = 0.500000, so 0.500000 + 0.075 + 0.2
-        $this->assertSame('0.775000', $payload['estimate']['estimated_unit_cost']);
+        // resin now 5 g @ 95.0000/kg = 0.475000, so 0.475 + 0.075 + 0.2
+        $this->assertSame('0.750000', $payload['estimate']['estimated_unit_cost']);
 
         $resin = collect($payload['estimate']['components'])->firstWhere('kind', 'resin');
-        $this->assertSame('100.0000', $resin['rate']);
-        $this->assertSame('BAG-B', $resin['bag_barcode']);
+        $this->assertSame('95.0000', $resin['rate']);
+        $this->assertSame('resin_pool_weighted_average', $resin['rate_source']);
+
+        // AND NO BAG IS NAMED, even for finance — the pool has no single bag
+        // behind it, and naming one would be the dead bag-to-batch claim
+        // wearing a different hat.
+        $this->assertArrayNotHasKey('bag_barcode', $resin);
+        $this->assertArrayNotHasKey('material_bag_id', $resin);
     }
 
     // ------------------------------------------------------------------
@@ -261,7 +274,7 @@ class SalesCostInsightTest extends TestCase
 
     public function test_a_clear_bottle_doses_no_masterbatch_and_that_is_not_a_missing_price(): void
     {
-        $this->bag('BAG-A', '25.0000', '2026-07-20', '90.0000');
+        $this->loadResin('BAG-A', '25.0000', '2026-07-20', '90.0000');
         $this->bottle->update(['colour' => 'Clear']);
 
         $order = $this->order([['item' => $this->bottle, 'quantity' => '10000', 'unit_price' => '1.5000']]);
@@ -281,7 +294,7 @@ class SalesCostInsightTest extends TestCase
 
     public function test_without_an_approved_batch_there_is_no_actual_only_a_reason(): void
     {
-        $this->bag('BAG-A', '25.0000', '2026-07-20', '90.0000');
+        $this->loadResin('BAG-A', '25.0000', '2026-07-20', '90.0000');
         $order = $this->order([['item' => $this->bottle, 'quantity' => '10000', 'unit_price' => '1.5000']]);
 
         $line = $this->actingAsFinance()->getJson($this->url($order))->assertOk()->json('data.lines.0');
@@ -297,7 +310,7 @@ class SalesCostInsightTest extends TestCase
 
     public function test_an_actual_appears_only_once_a_batch_is_approved_and_disappears_if_it_is_amended(): void
     {
-        $this->bag('BAG-A', '25.0000', '2026-07-20', '90.0000');
+        $this->loadResin('BAG-A', '25.0000', '2026-07-20', '90.0000');
         $order = $this->order([['item' => $this->bottle, 'quantity' => '10000', 'unit_price' => '1.5000']]);
 
         // A completed but NOT yet approved batch: real production, not yet a
@@ -341,7 +354,7 @@ class SalesCostInsightTest extends TestCase
 
     public function test_a_synced_batch_is_still_an_approved_batch(): void
     {
-        $this->bag('BAG-A', '25.0000', '2026-07-20', '90.0000');
+        $this->loadResin('BAG-A', '25.0000', '2026-07-20', '90.0000');
         $order = $this->order([['item' => $this->bottle, 'quantity' => '10000', 'unit_price' => '1.5000']]);
 
         // Synced is downstream of the accountant's approval, never a step back
@@ -360,7 +373,7 @@ class SalesCostInsightTest extends TestCase
 
     public function test_the_order_actual_is_withheld_until_every_line_has_one_and_never_claims_an_allocation(): void
     {
-        $this->bag('BAG-A', '25.0000', '2026-07-20', '90.0000');
+        $this->loadResin('BAG-A', '25.0000', '2026-07-20', '90.0000');
 
         $other = Item::create(['sku' => 'BTL-500', 'name' => 'Bottle 500ML', 'uom' => 'Nos.', 'colour' => 'Clear', 'is_active' => true]);
         ProductionStandard::create([
@@ -406,7 +419,7 @@ class SalesCostInsightTest extends TestCase
 
     public function test_the_order_actual_lands_once_every_line_is_backed_by_a_batch(): void
     {
-        $this->bag('BAG-A', '25.0000', '2026-07-20', '90.0000');
+        $this->loadResin('BAG-A', '25.0000', '2026-07-20', '90.0000');
         $order = $this->order([['item' => $this->bottle, 'quantity' => '10000', 'unit_price' => '1.5000']]);
 
         $entry = $this->batch(ShiftProductionEntryStatus::Approved);
@@ -426,7 +439,7 @@ class SalesCostInsightTest extends TestCase
 
     public function test_a_sales_login_sees_the_money_but_never_the_bags_behind_it(): void
     {
-        $this->bag('BAG-A', '25.0000', '2026-07-20', '90.0000');
+        $this->loadResin('BAG-A', '25.0000', '2026-07-20', '90.0000');
         $lot = MaterialLot::query()->firstOrFail();
         $lot->update(['supplier_lot_no' => 'SUP-LOT-77']);
 
@@ -454,15 +467,24 @@ class SalesCostInsightTest extends TestCase
         $finance = $this->actingAsFinance()->getJson($this->url($order))->assertOk();
         $resin = collect($finance->json('data.lines.0.estimate.components'))->firstWhere('kind', 'resin');
 
-        $this->assertSame('BAG-A', $resin['bag_barcode']);
-        $this->assertSame('SUP-LOT-77', $resin['supplier_lot_no']);
+        // The RATE, yes — that is the anatomy finance is entitled to.
         $this->assertSame('90.0000', $resin['rate']);
         $this->assertSame('per_kg', $resin['rate_unit']);
+        $this->assertSame('resin_pool_weighted_average', $resin['rate_source']);
+
+        // THE BAG AND THE SUPPLIER LOT, NO — not withheld from sales and
+        // handed to finance, but GONE. The estimate is the common pool's
+        // weighted average across every bag ever loaded; there is no single
+        // bag it could name without lying about where the number came from.
+        $this->assertArrayNotHasKey('bag_barcode', $resin);
+        $this->assertArrayNotHasKey('supplier_lot_no', $resin);
+        $this->assertStringNotContainsString('BAG-A', json_encode($finance->json()));
+        $this->assertStringNotContainsString('SUP-LOT-77', json_encode($finance->json()));
     }
 
     public function test_the_endpoint_is_closed_to_a_login_without_sales_access(): void
     {
-        $this->bag('BAG-A', '25.0000', '2026-07-20', '90.0000');
+        $this->loadResin('BAG-A', '25.0000', '2026-07-20', '90.0000');
         $order = $this->order([['item' => $this->bottle, 'quantity' => '10000', 'unit_price' => '1.5000']]);
 
         $user = User::factory()->create(['is_active' => true]);
@@ -479,7 +501,7 @@ class SalesCostInsightTest extends TestCase
 
     public function test_reading_the_cost_insight_changes_nothing_in_the_world(): void
     {
-        $this->bag('BAG-A', '25.0000', '2026-07-20', '90.0000');
+        $this->loadResin('BAG-A', '25.0000', '2026-07-20', '90.0000');
         $order = $this->order([['item' => $this->bottle, 'quantity' => '10000', 'unit_price' => '1.5000']]);
 
         $entry = $this->batch(ShiftProductionEntryStatus::Approved);
@@ -506,13 +528,14 @@ class SalesCostInsightTest extends TestCase
         $this->assertSame([], $writes, 'The cost-insight read fired a write statement.');
         $this->assertSame($before, $this->worldSnapshot());
 
-        // THE OTHER BRANCH, under the same listener. With the bag gone the
-        // resin rate falls through to the moving average, which resolves a
-        // warehouse through the day bin — a configured bin, so the
+        // THE OTHER BRANCH, under the same listener. With the POOL drawn dry
+        // the resin rate falls through to the moving average, which resolves
+        // a warehouse through the day bin — a configured bin, so the
         // holds-stock query really runs rather than short-circuiting on a
         // null setting. Proving the happy path read-only proves very little.
         $dayBin = Warehouse::create(['code' => 'WH-DAYBIN', 'name' => 'Factory Day Bin', 'is_active' => true]);
         app(FactoryDayBinService::class)->setWarehouseId($dayBin->id);
+        app(ResinPoolService::class)->draw($this->resin->id, '25.0000');
         MaterialBag::query()->update(['remaining_kg' => '0.0000', 'status' => MaterialBagStatus::Consumed]);
         $this->receive($this->resin->id, '100.0000', '80.0000');
 
@@ -531,7 +554,7 @@ class SalesCostInsightTest extends TestCase
 
     public function test_a_sales_order_still_never_touches_stock(): void
     {
-        $this->bag('BAG-A', '25.0000', '2026-07-20', '90.0000');
+        $this->loadResin('BAG-A', '25.0000', '2026-07-20', '90.0000');
 
         // Writing an order needs sales.manage — EnsureModulePermission's rule.
         $this->actingWith(['sales.manage']);
@@ -606,6 +629,25 @@ class SalesCostInsightTest extends TestCase
             'status' => MaterialBagStatus::InStore,
             'current_warehouse_id' => $this->store->id,
         ]);
+    }
+
+    /**
+     * A bag REGISTERED AND THEN LOADED at the common resin input — which is
+     * the only way a rate reaches the pool, and therefore the only way the
+     * estimate can quote one.
+     *
+     * The fold is called directly rather than through the scan endpoint
+     * because what these scenes are about is what SALES does with a priced
+     * pool, not how one comes to exist (BagCostTraceabilityTest covers the
+     * scan end to end, gate and all).
+     */
+    private function loadResin(string $barcode, string $kg, string $receivedDate, ?string $rate): MaterialBag
+    {
+        $bag = $this->bag($barcode, $kg, $receivedDate, $rate);
+
+        app(ResinPoolService::class)->fold($this->resin->id, $kg, $rate);
+
+        return $bag;
     }
 
     private function receive(int $itemId, string $quantity, string $unitCost): void

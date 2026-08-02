@@ -122,7 +122,6 @@ class FactoryDayBinBagLoadTest extends TestCase
 
         $response = $this->postJson('/api/v1/production/day-bin/load-bag', [
             'barcode' => 'LOT1-B1',
-            'work_center_id' => $this->machine->id,
         ])->assertOk();
 
         // The response answers the two questions the scanner has: what is
@@ -139,23 +138,22 @@ class FactoryDayBinBagLoadTest extends TestCase
         $this->assertSame('75.0000', $this->storeResin->fresh()->quantity);
         $this->assertSame('0.0000', $bag->fresh()->remaining_kg);
         $this->assertSame(MaterialBagStatus::Consumed, $bag->fresh()->status);
-        // A WHOLE bag physically goes to the machine, so the machine is
-        // stamped on it. This assertion USED to require null, back when the
-        // scan was central and picked no machine; the owner's 31-Jul ruling
-        // ("scanning a bag means material was loaded into the selected
-        // machine") inverted it, and the same rule already governed the
-        // per-machine path in TraceabilityService::loadBagToDayBin.
-        $this->assertSame($this->machine->id, $bag->fresh()->day_bin_work_center_id);
+        // NO MACHINE IS STAMPED ON THE BAG. The owner's correction (2-Aug)
+        // superseded the 31-Jul per-machine ruling this assertion once
+        // encoded: the factory has ONE common resin input point and a bag is
+        // never assigned or scanned to a machine.
+        $this->assertNull($bag->fresh()->day_bin_work_center_id);
 
-        // AND the ledger row that makes the per-machine estimate possible.
+        // AND the ledger row that makes the common-input estimate possible —
+        // machineless and batchless, because a load is material entering the
+        // common input, not into a machine and not into a batch (the floor
+        // loads before Start Batch as often as during a run).
         $movement = DayBinMovement::query()->sole();
-        $this->assertSame($this->machine->id, $movement->work_center_id);
+        $this->assertNull($movement->work_center_id);
         $this->assertSame($this->resin->id, $movement->item_id);
         $this->assertSame(DayBinMovementType::Load, $movement->type);
         $this->assertSame('25.0000', $movement->quantity_kg);
         $this->assertSame($bag->id, $movement->material_bag_id);
-        // A load is into a MACHINE, not into a batch — the floor scans
-        // before Start Batch as often as during a run.
         $this->assertNull($movement->shift_production_entry_id);
 
         // The record is the EXISTING transfer pair, referencing the bag —
@@ -178,7 +176,6 @@ class FactoryDayBinBagLoadTest extends TestCase
 
         $this->postJson('/api/v1/production/day-bin/load-bag', [
             'barcode' => 'LOT1-B1',
-            'work_center_id' => $this->machine->id,
             'supervisor_id' => $supervisor->id,
         ])->assertOk();
 
@@ -197,7 +194,6 @@ class FactoryDayBinBagLoadTest extends TestCase
 
         $this->postJson('/api/v1/production/day-bin/load-bag', [
             'barcode' => 'LOT1-B1',
-            'work_center_id' => $this->machine->id,
             'quantity_kg' => '10.5',
         ])->assertOk()
             ->assertJsonPath('data.bag.remaining_kg', '14.5000')
@@ -208,34 +204,47 @@ class FactoryDayBinBagLoadTest extends TestCase
         $this->assertSame('89.5000', $this->storeResin->fresh()->quantity);
         $this->assertSame('14.5000', $bag->fresh()->remaining_kg);
         $this->assertSame(MaterialBagStatus::InStore, $bag->fresh()->status);
-        // The BAG is still in the store, so it carries no machine — but the
-        // 10.5 kg that came out of it did go into one, and the ledger says
-        // so. That split is the whole point: the pointer is a location, the
-        // ledger row is a quantity.
+        // The bag stays in the store holding its remainder, and carries no
+        // machine — nothing does any more.
         $this->assertNull($bag->fresh()->day_bin_work_center_id);
         $movement = DayBinMovement::query()->sole();
-        $this->assertSame($this->machine->id, $movement->work_center_id);
+        $this->assertNull($movement->work_center_id);
         $this->assertSame('10.5000', $movement->quantity_kg);
     }
 
-    public function test_a_scan_without_a_machine_is_refused_and_nothing_moves(): void
+    public function test_a_scan_needs_no_machine_and_a_machine_an_old_client_sends_reaches_nothing(): void
     {
         $this->actingAsProduction();
         $this->configureBin();
         $bag = $this->bag();
 
+        // THE INVERSE OF WHAT THIS SCENE ONCE ASSERTED. A machineless scan
+        // used to be refused ("Pick the machine this bag was loaded into");
+        // under the owner's correction (2-Aug) it is the ONLY kind of scan
+        // there is, because the factory has one common resin input point.
         $this->postJson('/api/v1/production/day-bin/load-bag', ['barcode' => 'LOT1-B1'])
-            ->assertUnprocessable()
-            ->assertJsonValidationErrors([
-                'work_center_id' => 'Pick the machine this bag was loaded into.',
-            ]);
+            ->assertOk();
 
-        // An unattributed load would overstate the estimated remaining of
-        // every machine except the one that actually burnt the material, so
-        // it is refused rather than recorded against nobody.
-        $this->assertSame('25.0000', $bag->fresh()->remaining_kg);
-        $this->assertSame(0, StockMovement::count());
-        $this->assertSame(0, DayBinMovement::count());
+        $this->assertSame('0.0000', $bag->fresh()->remaining_kg);
+        $this->assertNull(DayBinMovement::query()->sole()->work_center_id);
+
+        // And a floor tablet still running the previous build keeps posting
+        // work_center_id until it reloads. That scan must SUCCEED — refusing
+        // it would stop material entering the factory over a field the server
+        // no longer wants — and the value must reach nothing.
+        $second = $this->bag('LOT1-B2');
+
+        $this->postJson('/api/v1/production/day-bin/load-bag', [
+            'barcode' => 'LOT1-B2',
+            'work_center_id' => $this->machine->id,
+            // The common input already shows 25 kg of this material, so the
+            // gate asks its one question — answered here, since this scene is
+            // about the machine field rather than about the gate.
+            'balance_ack_reason' => 'confirm_extra',
+        ])->assertOk();
+
+        $this->assertNull($second->fresh()->day_bin_work_center_id);
+        $this->assertSame([null, null], DayBinMovement::query()->orderBy('id')->pluck('work_center_id')->all());
     }
 
     // (c) more than the bag holds ---------------------------------------------

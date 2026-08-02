@@ -20,36 +20,45 @@ use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
 
 /**
- * ESTIMATED RESIN REMAINING PER MACHINE — the read that replaced the central
- * day-bin bookkeeping, in the owner's own words (31-Jul):
+ * ESTIMATED RESIN REMAINING IN THE COMMON INPUT — one figure per material for
+ * the whole factory.
  *
- *   "Our factory does not use a Day Bin warehouse or an evening physical bin
- *    weight. Replace that idea with estimated resin remaining for each
- *    machine: previous carryover plus barcode-scanned loads minus calculated
- *    consumption."
+ * WHAT THE OWNER CORRECTED (2-Aug), superseding the per-machine model this
+ * file was written for: the factory has ONE COMMON resin input/loading point
+ * for all machines. A bag is NEVER assigned or scanned to a machine. Machine
+ * selector, per-machine bag history and per-machine estimated balance were
+ * all false and are gone. Loading records material entering the common input
+ * — it is not consumption and posts no Tally entry. What is reconciled is
+ * TOTAL loads against TOTAL calculated consumption across ALL machines.
  *
- *   "Scanning a bag means material was loaded into the selected machine; it
- *    does not mean the whole quantity was consumed."
+ * What survives from the previous ruling, unchanged and still load-bearing:
  *
  *   "A correction must replace the previous calculation. The current resin
  *    quantity, totals and voucher preview must never count every correction
  *    as fresh consumption."
  *
+ *   "QC-rejected pieces are already part of the packed quantity. They reduce
+ *    approved finished goods, but must not be added to resin consumption a
+ *    second time."
+ *
  * What must hold:
- *  - a scan names its machine, and the kg land against THAT machine only;
- *  - the estimate is loads − consumption, per machine per material, running
- *    from the first scan of that material into that machine (a pair nobody
- *    has ever scanned has no baseline and is not reported);
+ *  - a load names no machine, and every load of a material adds into ONE
+ *    common total;
+ *  - the estimate is loads − consumption across every machine, per material,
+ *    running from the first load of that material (a material nobody has ever
+ *    loaded has no baseline and is not reported);
  *  - amending twice MOVES the figure, it never grows it;
  *  - a negative estimate is served honestly, never clamped;
  *  - piece-counted materials (cartons) never appear in a kilogram estimate;
  *  - a quality rejection never touches a kilogram of it;
+ *  - the machine filter narrows nothing and is not an error, for the length
+ *    of the deploy window;
  *  - the physical-count reconciliation endpoint is gone.
  *
  * THE FIXTURE'S ARITHMETIC, once:
  *   bottle = 10.0 g, so 1,000 pieces = 10 kg exactly.
  */
-class MachineResinEstimateTest extends TestCase
+class CommonResinEstimateTest extends TestCase
 {
     use RefreshDatabase;
 
@@ -64,9 +73,9 @@ class MachineResinEstimateTest extends TestCase
     private Warehouse $rm;
 
     /**
-     * The internal machine-WIP location a scan moves stock INTO. In the books
-     * that is all a load is — a location change; Tally still sees one godown.
-     * Which machine got it is the ledger's job, not a warehouse's.
+     * The internal WIP location a load moves stock INTO. In the books that is
+     * all a load is — a location change; Tally still sees one godown. There is
+     * no warehouse per machine and there must never be.
      */
     private Warehouse $wip;
 
@@ -88,7 +97,7 @@ class MachineResinEstimateTest extends TestCase
 
         $this->fg = Warehouse::create(['code' => 'FG', 'name' => 'FG Store', 'is_active' => true, 'tally_guid' => 'gd-fg']);
         $this->rm = Warehouse::create(['code' => 'RM', 'name' => 'RM Store', 'is_active' => true, 'tally_guid' => 'gd-rm']);
-        $this->wip = Warehouse::create(['code' => 'WIP', 'name' => 'Machine WIP', 'is_active' => true]);
+        $this->wip = Warehouse::create(['code' => 'WIP', 'name' => 'Factory WIP', 'is_active' => true]);
 
         $this->resin = Item::create([
             'sku' => 'PET-IV08', 'name' => 'Billion Pet Resin IV-0.8', 'uom' => 'Kgs.',
@@ -132,7 +141,7 @@ class MachineResinEstimateTest extends TestCase
         return $user;
     }
 
-    /** A registered bag of resin sitting in the store, ready to scan. */
+    /** A registered bag of resin sitting in the store, ready to load. */
     private function bag(string $barcode, string $kg): MaterialBag
     {
         $lot = MaterialLot::create([
@@ -152,22 +161,25 @@ class MachineResinEstimateTest extends TestCase
     }
 
     /**
-     * $ackReason is the scan acknowledgement (see
-     * FactoryDayBinService::guardMachineBalance): once a machine's estimate
-     * still shows material, topping it up asks for one word explaining why.
-     * These scenes are about the ESTIMATE ARITHMETIC rather than that gate,
-     * so where a scan here is a genuine top-up of a machine that really does
-     * still hold resin, it passes 'confirm_extra' — which is exactly what
-     * the supervisor standing at that machine would answer.
+     * Load a bag at the COMMON INPUT. No machine is passed, because there is
+     * no machine to pass.
+     *
+     * $ackReason is the load acknowledgement (see
+     * FactoryDayBinService::guardCommonInputBalance): once the common input's
+     * estimate still shows material, topping it up asks for one word
+     * explaining why — and, unlike the old per-machine gate, it asks even
+     * while batches are running, because with one shared input some batch
+     * almost always is. These scenes are about the ESTIMATE ARITHMETIC rather
+     * than that gate, so a genuine top-up here answers 'confirm_extra', which
+     * is exactly what the supervisor standing at the input would say.
      */
-    private function scan(string $barcode, WorkCenter $machine, ?string $quantityKg = null, ?string $ackReason = null): void
+    private function load(string $barcode, ?string $quantityKg = null, ?string $ackReason = null): void
     {
         $this->postJson('/api/v1/production/day-bin/load-bag', array_filter([
             'barcode' => $barcode,
-            'work_center_id' => $machine->id,
             'quantity_kg' => $quantityKg,
             'balance_ack_reason' => $ackReason,
-        ]))->assertOk();
+        ], fn ($value) => $value !== null))->assertOk();
     }
 
     private function startBatch(WorkCenter $machine): int
@@ -208,87 +220,90 @@ class MachineResinEstimateTest extends TestCase
         ];
     }
 
-    /** The estimate rows for one machine, keyed by item id. */
-    private function estimateFor(WorkCenter $machine): array
+    /** The common input's estimate rows, keyed by item id. */
+    private function estimate(): array
     {
-        $data = $this->getJson('/api/v1/production/machine-resin')->assertOk()->json('data');
-
-        $machineRow = collect($data)->firstWhere('work_center_id', $machine->id);
-
-        return collect($machineRow['materials'] ?? [])->keyBy('item_id')->all();
+        return collect($this->getJson('/api/v1/production/machine-resin')->assertOk()->json('data'))
+            ->keyBy('item_id')
+            ->all();
     }
 
-    // (a) a load belongs to the machine it was scanned into --------------------
+    // (a) every load lands in one common total ---------------------------------
 
-    public function test_a_scan_credits_the_machine_it_names_and_no_other(): void
+    public function test_loads_add_into_one_common_total_and_name_no_machine(): void
     {
         $this->actAsSupervisor();
         $this->bag('BAG-A', '500');
         $this->bag('BAG-B', '300');
 
-        $this->scan('BAG-A', $this->machineOne);
-        $this->scan('BAG-B', $this->machineTwo);
+        $this->load('BAG-A');
+        $this->load('BAG-B', ackReason: 'confirm_extra');
 
-        $one = $this->estimateFor($this->machineOne);
-        $two = $this->estimateFor($this->machineTwo);
+        $rows = $this->estimate();
 
-        $this->assertSame('500.0000', $one[$this->resin->id]['loaded_kg']);
-        $this->assertSame('0.0000', $one[$this->resin->id]['consumed_kg']);
-        $this->assertSame('500.0000', $one[$this->resin->id]['estimated_remaining_kg']);
-        $this->assertNotNull($one[$this->resin->id]['last_load_at']);
+        // ONE ROW for the material, not one card per machine. 500 + 300.
+        $this->assertCount(1, $rows);
+        $this->assertSame('800.0000', $rows[$this->resin->id]['loaded_kg']);
+        $this->assertSame('0.0000', $rows[$this->resin->id]['consumed_kg']);
+        $this->assertSame('800.0000', $rows[$this->resin->id]['estimated_remaining_kg']);
+        $this->assertNotNull($rows[$this->resin->id]['last_load_at']);
 
-        $this->assertSame('300.0000', $two[$this->resin->id]['loaded_kg']);
-        $this->assertSame('300.0000', $two[$this->resin->id]['estimated_remaining_kg']);
+        // AND NO MACHINE DIMENSION AT ALL — the keys are absent from the
+        // payload, not nulled, so nothing downstream can keep rendering a
+        // dimension that no longer exists.
+        $this->assertArrayNotHasKey('work_center', $rows[$this->resin->id]);
+        $this->assertArrayNotHasKey('work_center_id', $rows[$this->resin->id]);
+        $this->assertArrayNotHasKey('materials', $rows[$this->resin->id]);
     }
 
-    public function test_a_partial_scan_credits_only_the_weighed_kg_and_the_bag_keeps_the_rest(): void
+    public function test_a_partial_load_credits_only_the_weighed_kg_and_the_bag_keeps_the_rest(): void
     {
         $this->actAsSupervisor();
         $bag = $this->bag('BAG-A', '500');
 
-        // "Scanning a bag means material was loaded into the selected
-        // machine; it does not mean the whole quantity was consumed."
-        $this->scan('BAG-A', $this->machineOne, '120.5');
+        // Loading a bag means material entered the common input; it does not
+        // mean the whole quantity was consumed.
+        $this->load('BAG-A', '120.5');
 
         $this->assertSame('379.5000', $bag->fresh()->remaining_kg);
         $this->assertSame(MaterialBagStatus::InStore, $bag->fresh()->status);
 
-        $estimate = $this->estimateFor($this->machineOne);
-        $this->assertSame('120.5000', $estimate[$this->resin->id]['loaded_kg']);
-        $this->assertSame('120.5000', $estimate[$this->resin->id]['estimated_remaining_kg']);
+        $this->assertSame('120.5000', $this->estimate()[$this->resin->id]['loaded_kg']);
 
-        // The same bag can be poured into a second machine later — which is
-        // exactly why the load has to be a ledger row and not a pointer on
-        // the bag.
-        $this->scan('BAG-A', $this->machineTwo, '79.5');
+        // The same bag can be poured in again later — which is why a load has
+        // to be a ledger row and not a pointer on the bag.
+        $this->load('BAG-A', '79.5', ackReason: 'confirm_extra');
+
         $this->assertSame('300.0000', $bag->fresh()->remaining_kg);
-        $this->assertSame('79.5000', $this->estimateFor($this->machineTwo)[$this->resin->id]['loaded_kg']);
-        $this->assertSame('120.5000', $this->estimateFor($this->machineOne)[$this->resin->id]['loaded_kg']);
+        $this->assertSame('200.0000', $this->estimate()[$this->resin->id]['loaded_kg']);
     }
 
-    // (b) the owner's arithmetic ------------------------------------------------
+    // (b) the owner's arithmetic, across every machine ---------------------------
 
-    public function test_the_estimate_is_loads_minus_the_calculated_consumption_of_that_machines_batches(): void
+    public function test_the_estimate_is_loads_minus_the_consumption_of_every_machines_batches(): void
     {
         $this->actAsSupervisor();
         $this->bag('BAG-A', '500');
-        $this->scan('BAG-A', $this->machineOne);
+        $this->load('BAG-A');
 
         // 9,500 packed + 500 production-rejected = 10,000 pieces × 10 g =
-        // 100 kg, plus 2 kg of lumps = 102 kg consumed.
-        $entryId = $this->startBatch($this->machineOne);
-        $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/complete", $this->figures(9500, 500, '2'))
+        // 100 kg, plus 2 kg of lumps = 102 kg, on machine one.
+        $first = $this->startBatch($this->machineOne);
+        $this->postJson("/api/v1/production/shift-production-entries/{$first}/complete", $this->figures(9500, 500, '2'))
             ->assertOk();
 
-        $estimate = $this->estimateFor($this->machineOne)[$this->resin->id];
-        $this->assertSame('500.0000', $estimate['loaded_kg']);
-        $this->assertSame('102.0000', $estimate['consumed_kg']);
-        $this->assertSame('398.0000', $estimate['estimated_remaining_kg']);
+        // A SECOND MACHINE BURNS THE SAME COMMON MATERIAL, and its 50 kg
+        // subtract from the same total. Under the per-machine model that was
+        // a different card this load never reached; there is one input now,
+        // so there is one figure.
+        $second = $this->startBatch($this->machineTwo);
+        $this->postJson("/api/v1/production/shift-production-entries/{$second}/complete", $this->figures(5000))
+            ->assertOk();
 
-        // Another machine's batch is another machine's material.
-        $this->assertArrayNotHasKey($this->machineTwo->id, collect(
-            $this->getJson('/api/v1/production/machine-resin')->json('data')
-        )->keyBy('work_center_id')->all());
+        $row = $this->estimate()[$this->resin->id];
+        $this->assertSame('500.0000', $row['loaded_kg']);
+        $this->assertSame('152.0000', $row['consumed_kg']);
+        $this->assertSame('348.0000', $row['estimated_remaining_kg']);
     }
 
     public function test_carryover_needs_no_daily_cutoff_because_the_running_total_is_the_carryover(): void
@@ -297,24 +312,23 @@ class MachineResinEstimateTest extends TestCase
         $this->bag('BAG-A', '500');
         $this->bag('BAG-B', '200');
 
-        $this->scan('BAG-A', $this->machineOne);
+        $this->load('BAG-A');
         $first = $this->startBatch($this->machineOne);
         $this->postJson("/api/v1/production/shift-production-entries/{$first}/complete", $this->figures(10000))
             ->assertOk();
 
-        // A second shift on the same machine, days later — nothing is reset,
-        // nothing is opened, the figure simply carries. The machine still
-        // holds 400 kg of the first bag, so this top-up carries the
-        // acknowledgement the scan gate asks for.
-        $this->scan('BAG-B', $this->machineOne, ackReason: 'confirm_extra');
+        // A second shift days later — nothing is reset, nothing is opened,
+        // the figure simply carries. The input still shows 400 kg, so this
+        // top-up carries the acknowledgement the gate asks for.
+        $this->load('BAG-B', ackReason: 'confirm_extra');
         $second = $this->startBatch($this->machineOne);
         $this->postJson("/api/v1/production/shift-production-entries/{$second}/complete", $this->figures(5000))
             ->assertOk();
 
-        $estimate = $this->estimateFor($this->machineOne)[$this->resin->id];
-        $this->assertSame('700.0000', $estimate['loaded_kg']);
-        $this->assertSame('150.0000', $estimate['consumed_kg']);
-        $this->assertSame('550.0000', $estimate['estimated_remaining_kg']);
+        $row = $this->estimate()[$this->resin->id];
+        $this->assertSame('700.0000', $row['loaded_kg']);
+        $this->assertSame('150.0000', $row['consumed_kg']);
+        $this->assertSame('550.0000', $row['estimated_remaining_kg']);
     }
 
     // (c) a correction REPLACES, it never accumulates ---------------------------
@@ -323,14 +337,14 @@ class MachineResinEstimateTest extends TestCase
     {
         $this->actAsSupervisor();
         $this->bag('BAG-A', '500');
-        $this->scan('BAG-A', $this->machineOne);
+        $this->load('BAG-A');
 
         $entryId = $this->startBatch($this->machineOne);
 
         // Counted wrong: 12,000 pieces = 120 kg.
         $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/complete", $this->figures(12000))
             ->assertOk();
-        $this->assertSame('380.0000', $this->estimateFor($this->machineOne)[$this->resin->id]['estimated_remaining_kg']);
+        $this->assertSame('380.0000', $this->estimate()[$this->resin->id]['estimated_remaining_kg']);
 
         // First correction: 10,000 pieces = 100 kg.
         $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/amend", [
@@ -338,7 +352,7 @@ class MachineResinEstimateTest extends TestCase
             'amendment_reason' => 'Counted the last pallet twice',
         ])->assertOk();
 
-        $afterFirst = $this->estimateFor($this->machineOne)[$this->resin->id];
+        $afterFirst = $this->estimate()[$this->resin->id];
         $this->assertSame('100.0000', $afterFirst['consumed_kg'], 'A correction replaces the previous calculation.');
         $this->assertSame('400.0000', $afterFirst['estimated_remaining_kg']);
 
@@ -348,13 +362,13 @@ class MachineResinEstimateTest extends TestCase
             'amendment_reason' => 'One tray was short',
         ])->assertOk();
 
-        $afterSecond = $this->estimateFor($this->machineOne)[$this->resin->id];
+        $afterSecond = $this->estimate()[$this->resin->id];
         $this->assertSame('90.0000', $afterSecond['consumed_kg']);
         $this->assertSame('410.0000', $afterSecond['estimated_remaining_kg']);
 
         // The whole point, stated as the thing that would break: had the
         // corrections accumulated, consumption would read 120 + 100 + 90 =
-        // 310 kg and the machine would look nearly empty. Exactly ONE
+        // 310 kg and the input would look nearly empty. Exactly ONE
         // consumption row stands, and it is the latest calculation.
         $this->assertSame(1, ShiftMaterialConsumption::query()
             ->where('shift_production_entry_id', $entryId)->count());
@@ -362,39 +376,39 @@ class MachineResinEstimateTest extends TestCase
 
     // (d) honest negatives -------------------------------------------------------
 
-    public function test_a_machine_that_ran_past_what_was_scanned_into_it_reads_negative_and_is_not_clamped(): void
+    public function test_a_factory_that_ran_past_what_was_loaded_reads_negative_and_is_not_clamped(): void
     {
         $this->actAsSupervisor();
 
-        // 40 kg scanned, then a shift that burnt 100 kg — the machine ran on
-        // 60 kg nobody logged.
+        // 40 kg loaded, then a shift that burnt 100 kg — the factory ran on
+        // 60 kg nobody recorded loading.
         $this->bag('BAG-A', '40');
-        $this->scan('BAG-A', $this->machineOne);
+        $this->load('BAG-A');
 
         $entryId = $this->startBatch($this->machineOne);
         $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/complete", $this->figures(10000))
             ->assertOk();
 
-        $estimate = $this->estimateFor($this->machineOne)[$this->resin->id];
-        $this->assertSame('40.0000', $estimate['loaded_kg']);
-        $this->assertSame('100.0000', $estimate['consumed_kg']);
+        $row = $this->estimate()[$this->resin->id];
+        $this->assertSame('40.0000', $row['loaded_kg']);
+        $this->assertSame('100.0000', $row['consumed_kg']);
         // Clamping this at zero would erase the one thing on the page worth
-        // acting on: loads are being missed at the scanner.
-        $this->assertSame('-60.0000', $estimate['estimated_remaining_kg']);
+        // acting on: loads are being missed at the input.
+        $this->assertSame('-60.0000', $row['estimated_remaining_kg']);
     }
 
     // (e) where the running total starts -----------------------------------------
 
-    public function test_a_machine_nobody_has_scanned_into_is_not_reported_at_all(): void
+    public function test_a_material_nobody_has_loaded_is_not_reported_at_all(): void
     {
         $this->actAsSupervisor();
 
         // The rollout case, and the reason this rule exists. Consumption rows
-        // predate the scanner (and scanning is behind a config flag a
-        // deployment may never have turned on), so an all-time subtraction
-        // would open with every machine in the factory reporting a deficit
-        // equal to its whole history — indistinguishable from the genuine
-        // "material burnt without a scan" signal above.
+        // predate the scanner (and loading is behind a config flag a
+        // deployment may never have turned on), so an unbounded subtraction
+        // would open with every material reporting a deficit equal to its
+        // whole history — indistinguishable from the genuine "material burnt
+        // without a load" signal above.
         $entryId = $this->startBatch($this->machineOne);
         $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/complete", $this->figures(10000))
             ->assertOk();
@@ -402,31 +416,31 @@ class MachineResinEstimateTest extends TestCase
         $this->assertSame([], $this->getJson('/api/v1/production/machine-resin')->assertOk()->json('data'));
     }
 
-    public function test_consumption_from_before_the_first_scan_is_not_subtracted(): void
+    public function test_consumption_from_before_the_first_load_is_not_subtracted(): void
     {
         $this->actAsSupervisor();
 
-        // Yesterday's shift, out of a hopper nobody logged.
+        // Yesterday's shift, out of an input nobody was recording.
         $before = $this->startBatch($this->machineOne);
         $this->postJson("/api/v1/production/shift-production-entries/{$before}/complete", $this->figures(10000))
             ->assertOk();
 
-        // The scanner starts today.
+        // The recording starts today.
         $this->travel(1)->days();
         $this->bag('BAG-A', '500');
-        $this->scan('BAG-A', $this->machineOne);
+        $this->load('BAG-A');
 
         $after = $this->startBatch($this->machineOne);
         $this->postJson("/api/v1/production/shift-production-entries/{$after}/complete", $this->figures(8000))
             ->assertOk();
 
-        $estimate = $this->estimateFor($this->machineOne)[$this->resin->id];
-        $this->assertSame('500.0000', $estimate['loaded_kg']);
+        $row = $this->estimate()[$this->resin->id];
+        $this->assertSame('500.0000', $row['loaded_kg']);
         // 80 kg, not 180: the count begins where the evidence does. The
-        // unknown carryover in the hopper on day one is taken as zero and
-        // stated as such, rather than charged to the first scan.
-        $this->assertSame('80.0000', $estimate['consumed_kg']);
-        $this->assertSame('420.0000', $estimate['estimated_remaining_kg']);
+        // unknown carryover in the input on day one is taken as zero and
+        // stated as such, rather than charged to the first load.
+        $this->assertSame('80.0000', $row['consumed_kg']);
+        $this->assertSame('420.0000', $row['estimated_remaining_kg']);
     }
 
     // (f) kilograms only ---------------------------------------------------------
@@ -435,7 +449,7 @@ class MachineResinEstimateTest extends TestCase
     {
         $this->actAsSupervisor();
         $this->bag('BAG-A', '500');
-        $this->scan('BAG-A', $this->machineOne);
+        $this->load('BAG-A');
 
         $entryId = $this->startBatch($this->machineOne);
         $figures = $this->figures(10000);
@@ -449,35 +463,39 @@ class MachineResinEstimateTest extends TestCase
 
         $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/complete", $figures)->assertOk();
 
-        $estimate = $this->estimateFor($this->machineOne);
-        $this->assertArrayHasKey($this->resin->id, $estimate);
+        $rows = $this->estimate();
+        $this->assertArrayHasKey($this->resin->id, $rows);
         $this->assertArrayNotHasKey(
             $this->carton->id,
-            $estimate,
+            $rows,
             'Cartons are counted in Nos — a kilogram estimate must never claim to know how many are left.',
         );
     }
 
-    public function test_the_read_narrows_to_one_machine_on_request(): void
+    // (g) the machine filter is dead weight, kept only for the deploy window ------
+
+    public function test_the_machine_filter_narrows_nothing_and_is_not_an_error(): void
     {
         $this->actAsSupervisor();
         $this->bag('BAG-A', '500');
         $this->bag('BAG-B', '300');
-        $this->scan('BAG-A', $this->machineOne);
-        $this->scan('BAG-B', $this->machineTwo);
+        $this->load('BAG-A');
+        $this->load('BAG-B', ackReason: 'confirm_extra');
 
+        // A floor tablet running the previous build keeps polling with
+        // ?work_center_id= until it reloads. It gets the whole common answer
+        // — ACCEPTED AND IGNORED, because a 422 would replace a stale number
+        // with an error, and there is nothing left to narrow to anyway.
         $data = $this->getJson('/api/v1/production/machine-resin?work_center_id='.$this->machineTwo->id)
             ->assertOk()
             ->json('data');
 
         $this->assertCount(1, $data);
-        $this->assertSame($this->machineTwo->id, $data[0]['work_center_id']);
-        $this->assertSame('MC-02', $data[0]['work_center']['code']);
-        $this->assertSame('300.0000', $data[0]['materials'][0]['loaded_kg']);
+        $this->assertSame('800.0000', $data[0]['loaded_kg']);
+        $this->assertSame($data, $this->getJson('/api/v1/production/machine-resin')->assertOk()->json('data'));
 
-        // A filter it cannot honour is refused, not quietly widened to "every
-        // machine" (garbage) or narrowed to nothing (a machine that does not
-        // exist) — both are confident answers to a question nobody asked.
+        // A value it cannot even parse is still refused rather than treated
+        // as noise — the filter is dead weight, not a free-text field.
         $this->getJson('/api/v1/production/machine-resin?work_center_id=abc')
             ->assertUnprocessable()
             ->assertJsonValidationErrors(['work_center_id']);
@@ -486,7 +504,7 @@ class MachineResinEstimateTest extends TestCase
             ->assertJsonValidationErrors(['work_center_id' => 'No such machine.']);
     }
 
-    // (g) QC rejection is not consumption ----------------------------------------
+    // (h) QC rejection is not consumption ----------------------------------------
 
     public function test_a_quality_rejection_never_adds_to_resin_consumption_a_second_time(): void
     {
@@ -496,7 +514,7 @@ class MachineResinEstimateTest extends TestCase
         // consumption a second time."
         $this->actAsSupervisor();
         $this->bag('BAG-A', '500');
-        $this->scan('BAG-A', $this->machineOne);
+        $this->load('BAG-A');
 
         $entryId = $this->startBatch($this->machineOne);
 
@@ -505,7 +523,7 @@ class MachineResinEstimateTest extends TestCase
         $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/complete", $this->figures(10000, 500, '1'))
             ->assertOk();
 
-        $before = $this->estimateFor($this->machineOne)[$this->resin->id];
+        $before = $this->estimate()[$this->resin->id];
         $this->assertSame('106.0000', $before['consumed_kg']);
         $this->assertSame('394.0000', $before['estimated_remaining_kg']);
 
@@ -542,11 +560,14 @@ class MachineResinEstimateTest extends TestCase
         );
 
         $this->actAsSupervisor();
-        $after = $this->estimateFor($this->machineOne)[$this->resin->id];
-        $this->assertSame($before, $after, 'A quality check moves finished goods, never the resin estimate.');
+        $this->assertSame(
+            $before,
+            $this->estimate()[$this->resin->id],
+            'A quality check moves finished goods, never the resin estimate.',
+        );
     }
 
-    // (h) the physical count is gone ---------------------------------------------
+    // (i) the physical count is gone ---------------------------------------------
 
     public function test_the_reconciliation_endpoint_is_retired(): void
     {
@@ -554,6 +575,8 @@ class MachineResinEstimateTest extends TestCase
 
         // The factory takes no evening bin weight, so the read that waited
         // for one is gone rather than left on the screen looking answerable.
+        // Nor did a per-machine physical weighing replace it — the owner's
+        // correction rules that out too.
         $this->getJson('/api/v1/production/factory-day-bin/reconciliation')->assertNotFound();
     }
 }

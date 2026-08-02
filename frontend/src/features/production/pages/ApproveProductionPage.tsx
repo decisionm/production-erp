@@ -9,7 +9,6 @@ import { hasModuleAccess } from '@/features/auth/permissions';
 import { useAuthStore } from '@/features/auth/store';
 import {
     accountantApproveShiftProductionEntry,
-    getTraceabilityReport,
     getVoucherPreview,
     listMachineDowntimeLogs,
     listShiftProductionEntries,
@@ -24,7 +23,6 @@ import type {
     ReadableStockShortfall,
     ShiftProductionEntry,
     ShiftProductionEntryStatus,
-    TraceabilityReportRow,
     VoucherPreview,
 } from '@/features/production/types';
 import {
@@ -230,17 +228,27 @@ const fmtMoney = (v: string | null | undefined, dp: 2 | 4 = 2): string => {
 
 /**
  * WHAT THIS BATCH COST — the block both approvers read before the batch
- * posts, and the only place in the ERP that answers it from the bags the
- * resin actually came out of.
+ * posts.
+ *
+ * IT IS AN ACCOUNTING ALLOCATION, NOT TRACEABILITY, AND IT SAYS SO. The
+ * owner's correction (2-Aug) ended the bag-to-batch claim this block used to
+ * make: the factory has ONE COMMON resin input point, a bag is never
+ * assigned or scanned to a machine, and no physical path runs from a bag to a
+ * batch. So "Which bags the resin came out of" — barcodes and supplier lots
+ * named against a specific batch — is deleted, not softened. What replaced it
+ * is one weighted average per EXACT material, and the server's own
+ * `basis` sentence is printed under the figures FOR EVERYONE, not gated with
+ * the rates: it is not anatomy, it is what the number means.
  *
  * ============================ THE HONESTY RULES ============================
  *
  * A NULL FIGURE IS NEVER PRINTED AS A NUMBER. When the server cannot cost
  * the batch in full it sends nulls plus one sentence saying which of the two
- * ways it failed (resin from a bag with no purchase rate, or material issued
- * with no recorded cost). That sentence is shown in place of the figures. A
- * zero, or a bare em dash with nothing beside it, would tell the accountant
- * this batch was free — on the very screen asking them to approve it.
+ * ways it failed (resin the pool could not price and no stock average to fall
+ * back on, or material issued with no recorded cost). That sentence is shown
+ * in place of the figures. A zero, or a bare em dash with nothing beside it,
+ * would tell the accountant this batch was free — on the very screen asking
+ * them to approve it.
  *
  * EVERY FIGURE NAMES ITS SOURCE, from the server's own `sources` map rather
  * than a sentence written here, so a change in how a number is derived
@@ -252,10 +260,11 @@ const fmtMoney = (v: string | null | undefined, dp: 2 | 4 = 2): string => {
  *
  * ========================= THE FINANCE BOUNDARY =========================
  *
- * The totals and the per-piece figure are for everyone who can approve a
- * batch. The BREAKDOWN behind them — bag barcodes, supplier lot numbers and
- * the rates paid — is Owner and Accounts territory, and the server already
- * omits `layers`/`other_lines` entirely for anyone else.
+ * The totals, the per-piece figure and the basis sentence are for everyone
+ * who can approve a batch. The BREAKDOWN behind them — the per-material pool
+ * rates and the amounts drawn — is Owner and Accounts territory, and the
+ * server already omits `allocations`/`other_lines` entirely for anyone else.
+ * There are no bag or lot identities in it at ANY permission level.
  *
  * So the gate here is THE KEY BEING PRESENT, with the caller's finance
  * permission checked alongside it. Presence is the authority: it is the
@@ -269,11 +278,11 @@ const fmtMoney = (v: string | null | undefined, dp: 2 | 4 = 2): string => {
  * not show invites someone to go looking for it.
  */
 function BatchCostSection({ cost, showsDetail }: { cost: BatchCost; showsDetail: boolean }) {
-    const layers = cost.layers ?? [];
+    const allocations = cost.allocations ?? [];
     const otherLines = cost.other_lines ?? [];
     // Present AND permitted. See the class note: presence is the server's
     // ruling, the permission is this client honouring the same rule locally.
-    const detail = showsDetail && (cost.layers !== undefined || cost.other_lines !== undefined);
+    const detail = showsDetail && (cost.allocations !== undefined || cost.other_lines !== undefined);
 
     return (
         <>
@@ -296,7 +305,7 @@ function BatchCostSection({ cost, showsDetail }: { cost: BatchCost; showsDetail:
                     <Space direction="vertical" size={0}>
                         <Typography.Text strong>{fmtMoney(cost.material_cost_total)}</Typography.Text>
                         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                            resin drawn from the bags, plus every other material this batch consumed
+                            resin allocated out of the common pool, plus every other material this batch consumed
                         </Typography.Text>
                     </Space>
                 </Descriptions.Item>
@@ -330,7 +339,16 @@ function BatchCostSection({ cost, showsDetail }: { cost: BatchCost; showsDetail:
                 </Descriptions.Item>
             </Descriptions>
 
+            {/* WHAT THE NUMBER MEANS, IN THE SERVER'S OWN WORDS, and shown to
+                EVERYONE who can see the figures — deliberately outside the
+                `detail` gate below. Rendered from `cost.basis` rather than
+                written out here: a second copy of the sentence in this client
+                is the drift the backend constant exists to prevent. */}
             <Typography.Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
+                {cost.basis}.
+            </Typography.Text>
+
+            <Typography.Text type="secondary" style={{ display: 'block', marginTop: 4, fontSize: 12 }}>
                 Read {dayjs(cost.as_of).format('DD MMM YYYY HH:mm')}
                 {/* An amended batch is re-costed from scratch as a new run.
                     Saying so is the difference between "this changed" and
@@ -342,37 +360,40 @@ function BatchCostSection({ cost, showsDetail }: { cost: BatchCost; showsDetail:
                 here reaches Tally.
             </Typography.Text>
 
-            {detail && layers.length > 0 && (
+            {detail && allocations.length > 0 && (
                 <>
+                    {/* THE POOL ALLOCATION — one row per exact material, at
+                        that material's own pool average. NO BAG COLUMN AND NO
+                        SUPPLIER LOT COLUMN: the payload no longer carries
+                        either, at any permission level, because the factory
+                        records no bag-to-batch link to show. */}
                     <Typography.Text strong style={{ display: 'block', marginTop: 16 }}>
-                        Which bags the resin came out of
+                        How the resin was allocated
                     </Typography.Text>
                     <Table
                         size="small"
-                        rowKey={(row, index) => `${row.day_bin_movement_id ?? 'fallback'}-${index}`}
+                        rowKey={(row, index) => `${row.item_id}-${index}`}
                         pagination={false}
                         style={{ marginTop: 8 }}
-                        dataSource={layers}
+                        dataSource={allocations}
                         columns={[
                             { title: 'Material', render: (_, row) => row.item_name ?? '—' },
-                            { title: 'Bag', render: (_, row) => row.bag_barcode ?? '—' },
-                            { title: 'Supplier lot', render: (_, row) => row.supplier_lot_no ?? '—' },
+                            {
+                                title: 'Pool rate / kg',
+                                align: 'right',
+                                render: (_, row) => fmtMoney(row.pool_rate, 4),
+                            },
                             {
                                 title: 'Kg drawn',
                                 align: 'right',
-                                render: (_, row) => fmtKg(row.quantity_kg),
-                            },
-                            {
-                                title: 'Rate / kg',
-                                align: 'right',
-                                render: (_, row) => fmtMoney(row.rate_per_kg, 4),
+                                render: (_, row) => fmtKg(row.quantity),
                             },
                             { title: 'Amount', align: 'right', render: (_, row) => fmtMoney(row.amount) },
                             // Rendered verbatim: a source this build has never
                             // heard of still belongs on screen. It is exactly
                             // the row worth looking at — the fallback priced at
-                            // stock average means a machine burnt more than was
-                            // ever scanned into it.
+                            // stock average means the factory burnt more than
+                            // the pool was ever priced for.
                             { title: 'Rate from', render: (_, row) => row.rate_source ?? '—' },
                         ]}
                     />
@@ -667,10 +688,13 @@ function ExpectedVsActualSection({ row, metrics }: { row: ShiftProductionEntry; 
  * over a duplicate.
  *
  * The real question ("is any material missing?") is asked on the Day Bin page,
- * per machine: bags scanned into a machine minus what its batches calculated
- * out, and a NEGATIVE estimated remaining is the signal. It is deliberately
- * not a physical count — the owner ruled (31-Jul) that this factory takes no
- * bin weight, so the daily reconciliation that once lived there is gone.
+ * against the COMMON RESIN INPUT: everything loaded into the factory's one
+ * input point minus what every machine's batches calculated out, and a
+ * NEGATIVE estimated remaining is the signal. There is no per-machine version
+ * of that figure — the owner corrected (2-Aug) that a bag is never tied to a
+ * machine — and it is deliberately not a physical count either, because this
+ * factory takes no bin weight (31-Jul), so the daily reconciliation that once
+ * lived there is gone.
  * `metrics.reconciliation_unaccounted_kg` and `unaccounted_band` are still
  * served and still read elsewhere (Reports); this is a display decision on the
  * approval desk, not a change to the engine.
@@ -792,72 +816,41 @@ function DowntimeSection({ row, logs, loading }: { row: ShiftProductionEntry; lo
 }
 
 /**
- * Which supplier lot and which physical bags fed this batch — the answer a
- * customer complaint needs. Derived from the traceability report's
- * lot → bag → fed-segment chain, matched on this entry's id.
+ * SOURCE MATERIAL — the honest answer, which is that there is no per-batch
+ * answer to give.
+ *
+ * WHAT WAS DELETED HERE, AND WHY. This section used to name supplier lots and
+ * bag barcodes against a specific batch, from the traceability report's
+ * lot → bag → fed-segment chain. The owner's correction (2-Aug) removed the
+ * ground it stood on: the factory has ONE COMMON resin input point, a bag is
+ * never assigned or scanned to a machine or a batch, and there is therefore
+ * no physical path from a bag to a batch to report.
+ *
+ * REWORDING THE EMPTY STATE WOULD NOT HAVE BEEN ENOUGH. Historical
+ * day_bin_movements (and the legacy bin-bay path, which this wave did not
+ * touch) still carry a work_center_id and a shift_production_entry_id, so the
+ * old table still had real rows to draw for older batches — it would have
+ * gone on printing bag barcodes against those batches, which is the exact
+ * claim that died. The table and the query behind it are gone; the heading
+ * stays, with one sentence saying what the factory actually records, because
+ * an approver looking for source material deserves an answer rather than a
+ * missing section.
+ *
+ * NO POINTER ANYWHERE ELSE, deliberately. An earlier draft ended with "lot
+ * and bag history is on the Reports page" — but that tab is traceability-flag
+ * gated on both the route and the screen, so on a flag-off deployment the
+ * sentence would send an approver to a tab that does not render. What this
+ * section has to say is true unconditionally and needs no destination.
  */
-function SourceMaterialSection({
-    row,
-    lots,
-    loading,
-    windowFrom,
-    windowTo,
-}: {
-    row: ShiftProductionEntry;
-    lots: TraceabilityReportRow[] | null | undefined;
-    loading: boolean;
-    windowFrom: string;
-    windowTo: string;
-}) {
-    // `bags`/`fed` come back only when the report loaded them — a lot row
-    // without them is a lot that fed nothing here, never a reason to throw.
-    const fedRows = (lots ?? []).flatMap((lot) =>
-        (lot.bags ?? [])
-            .filter((bag) => (bag.fed ?? []).some((feed) => feed.segment?.id === row.id))
-            .map((bag) => ({
-                key: `${lot.id}-${bag.id}`,
-                lot: lot.supplier_lot_no ?? `Lot #${lot.id}`,
-                material: itemLabel(lot.item),
-                barcode: bag.barcode,
-                loaded_kg: (bag.fed ?? [])
-                    .filter((feed) => feed.segment?.id === row.id)
-                    .reduce((sum, feed) => sum + parseFloat(feed.loaded_kg), 0),
-            })),
-    );
-
+function SourceMaterialSection() {
     return (
         <>
             <Typography.Title level={5} style={{ marginTop: 16 }}>Source Material</Typography.Title>
-            {loading && <Typography.Text type="secondary">Loading scanned bags…</Typography.Text>}
-            {!loading && lots === null && (
-                <MissingInput
-                    what="The lot and bag barcodes behind this batch"
-                    inputs={['traceability is switched off on this server, so no bag scans are recorded']}
-                />
-            )}
-            {!loading && lots !== null && fedRows.length === 0 && (
-                <MissingInput
-                    what="The lot and bag barcodes behind this batch"
-                    inputs={[
-                        `no scanned bag fed this batch from any lot received between ${windowFrom} and ${windowTo}`,
-                        'either the bags were not scanned into the day bin, or they came from an older lot than that window',
-                    ]}
-                />
-            )}
-            {!loading && fedRows.length > 0 && (
-                <Table
-                    size="small"
-                    rowKey="key"
-                    pagination={false}
-                    dataSource={fedRows}
-                    columns={[
-                        { title: 'Material', dataIndex: 'material' },
-                        { title: 'Supplier Lot', dataIndex: 'lot' },
-                        { title: 'Bag Barcode', dataIndex: 'barcode' },
-                        { title: 'Loaded (kg)', render: (_, r) => r.loaded_kg.toFixed(4) },
-                    ]}
-                />
-            )}
+            <Typography.Text type="secondary" style={{ display: 'block' }}>
+                No bag can be named against this batch, and none is claimed. Resin enters one common input serving
+                every machine, so every batch draws from the same shared material and the factory records no
+                bag-to-batch link.
+            </Typography.Text>
         </>
     );
 }
@@ -1424,16 +1417,9 @@ export default function ApproveProductionPage() {
         [users],
     );
 
-    // The traceability report keys off the LOT's received date, not the
-    // batch's, so the window reaches back the report's full 92-day cap —
-    // and the section says so when nothing matches.
-    const traceFrom = detailRow ? dayjs(detailRow.production_date).subtract(92, 'day').format('YYYY-MM-DD') : '';
-    const traceTo = detailRow ? detailRow.production_date : '';
-    const { data: traceLots, isFetching: traceLoading } = useQuery({
-        queryKey: ['production', 'traceability-report', traceFrom, traceTo],
-        queryFn: () => getTraceabilityReport({ date_from: traceFrom, date_to: traceTo }),
-        enabled: detailRow !== null,
-    });
+    // The traceability report query that fed Source Material is GONE with the
+    // bag-to-batch claim it answered. Nothing on this drawer asks which bags
+    // fed a batch any more, so nothing fetches a lot → bag chain to answer it.
 
     const approveMutation = useMutation({
         mutationFn: (row: ShiftProductionEntry) => stageFor(row.status)!.mutate(row.id),
@@ -1786,10 +1772,10 @@ export default function ApproveProductionPage() {
                                 {detailRow.metrics && (
                                     <Typography.Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
                                         Consumed on these lines: {fmtKg(detailRow.metrics.issued_kg)} kg of material counted in
-                                        kg — resin consumption is calculated as production + rejection + lumps, not weighed out
-                                        per machine. Whether a machine has burnt material nobody scanned in shows up on the{' '}
-                                        <Link to="/production/day-bin">Day Bin</Link> page, as an estimated remaining that has
-                                        gone negative.
+                                        kg — resin consumption is calculated as production + rejection + lumps, never weighed
+                                        out. Whether the factory has burnt material nobody recorded loading shows up on the{' '}
+                                        <Link to="/production/day-bin">Common resin input</Link> page, as an estimated
+                                        remaining that has gone negative across the whole input.
                                     </Typography.Text>
                                 )}
                             </>
@@ -1833,13 +1819,7 @@ export default function ApproveProductionPage() {
                             </>
                         )}
 
-                        <SourceMaterialSection
-                            row={detailRow}
-                            lots={traceLots}
-                            loading={traceLoading}
-                            windowFrom={traceFrom}
-                            windowTo={traceTo}
-                        />
+                        <SourceMaterialSection />
 
                         <VoucherPreviewSection preview={voucherPreview} loading={voucherLoading} />
 

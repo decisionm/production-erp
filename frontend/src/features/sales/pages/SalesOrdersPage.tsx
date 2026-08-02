@@ -141,15 +141,15 @@ function actualBadgeLabel(source: SalesCostActualSource | null): string {
  * disagree with it. Nothing renders in its place otherwise: no locked panel,
  * no "ask for access" shell, no heading over an absent key.
  *
- * The bag and supplier columns are gated the same way one level down — those
- * keys are spread in only for resin priced off an actual bag, so they are
- * missing on most components even for finance.
+ * THERE ARE NO BAG OR SUPPLIER LOT COLUMNS, and their deletion is the point.
+ * The owner's correction (2-Aug) ended the "next bag out of the store" basis:
+ * with ONE common resin input point, no single bag stands behind a price.
+ * Resin is quoted at the common pool's weighted average, which the "Rate
+ * from" column names — and the payload no longer carries a bag identity to
+ * put in a column even if one were wanted.
  */
 function ComponentBreakdown({ components }: { components: SalesCostComponent[] }) {
     if (components.length === 0) return null;
-
-    const hasBag = components.some((c) => 'bag_barcode' in c);
-    const hasLot = components.some((c) => 'supplier_lot_no' in c);
 
     return (
         <Collapse
@@ -229,17 +229,6 @@ function ComponentBreakdown({ components }: { components: SalesCostComponent[] }
                                     title: 'Basis',
                                     render: (_, row) => row.basis ?? '—',
                                 },
-                                ...(hasBag
-                                    ? [{ title: 'Bag', render: (_: unknown, row: SalesCostComponent) => row.bag_barcode ?? '—' }]
-                                    : []),
-                                ...(hasLot
-                                    ? [
-                                          {
-                                              title: 'Supplier lot',
-                                              render: (_: unknown, row: SalesCostComponent) => row.supplier_lot_no ?? '—',
-                                          },
-                                      ]
-                                    : []),
                             ]}
                         />
                     ),
@@ -409,11 +398,11 @@ function OrderTotalBlock({ total }: { total: SalesCostOrderTotal }) {
 /**
  * WHAT THIS ORDER COSTS — fetched when the drawer opens, and only then.
  *
- * DELIBERATELY NOT A COLUMN ON THE ORDERS TABLE. Costing one line walks a FIFO
- * pick list plus several moving-average lookups per distinct product, so a
- * margin column would fire one of those reads per row on every page of the
- * list — twenty orders' worth of production and inventory queries to fill a
- * column, paid on every visit, whether or not anybody reads it. The drawer
+ * DELIBERATELY NOT A COLUMN ON THE ORDERS TABLE. Costing one line reads the
+ * common resin pool plus several moving-average lookups per distinct product,
+ * so a margin column would fire one of those reads per row on every page of
+ * the list — twenty orders' worth of production and inventory queries to fill
+ * a column, paid on every visit, whether or not anybody reads it. The drawer
  * asks for one order because somebody asked to see that order.
  *
  * Mounted by the drawer's own `detailOrder &&` guard, so the query starts when

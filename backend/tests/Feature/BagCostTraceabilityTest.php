@@ -15,6 +15,7 @@ use App\Modules\Production\Exceptions\DuplicateAllocationException;
 use App\Modules\Production\Models\BatchResinAllocation;
 use App\Modules\Production\Models\DayBinMovement;
 use App\Modules\Production\Models\Enums\DayBinMovementType;
+use App\Modules\Production\Models\ResinPoolBalance;
 use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\WorkCenter;
@@ -28,55 +29,59 @@ use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
 
 /**
- * RESIN-BAG COST TRACEABILITY — the story the factory owner asked for, told
- * end to end: which bag did this batch's resin come out of, what was that
- * bag bought for, and what did the batch therefore cost per accepted piece.
+ * RESIN COSTING AT THE COMMON INPUT — the story after the owner's correction
+ * (2-Aug), told end to end: what did this batch's resin cost, on what basis,
+ * and what is that basis honestly worth.
+ *
+ * WHAT THE CORRECTION CHANGED. The factory has ONE COMMON resin input point
+ * serving every machine. A bag is never assigned or scanned to a machine, so
+ * "which bag did this batch burn" has no physical answer and this module
+ * stopped answering it. Per-machine layers, per-machine bag history and
+ * per-machine estimated balance are gone. What replaced them is a WEIGHTED
+ * AVERAGE PER EXACT MATERIAL — an accounting allocation, labelled as one
+ * everywhere it appears.
  *
  * WHAT MUST HOLD, and each one is a scene below:
  *
- *  1. FIFO ACROSS A BAG BOUNDARY. Two bags at two different rates are
- *     scanned into a machine. A batch that burns more than the first bag
- *     held draws the oldest layer to exhaustion and the remainder from the
- *     next one, priced at ITS rate — and the part-used second bag carries
- *     into the NEXT batch at that same rate, with nobody carrying anything
- *     forward by hand.
- *  2. A CORRECTION REPLACES, IT DOES NOT ACCUMULATE. An amendment reverses
- *     the whole first run (stamped, never deleted) and writes run 2 beside
- *     it. Afterwards the layers hold exactly what they would have held if
- *     the wrong completion had never happened.
- *  3. NEVER TWICE. A batch may have at most one live allocation run.
- *  4. BEYOND THE LAYERS IS ADMITTED, NOT HIDDEN. Consumption the scans
- *     cannot account for falls back to the stock average and says so in
- *     rate_source, because that gap is the scan discipline's own error bar.
- *  5. NO PRICE IS EVER INVENTED. A bag whose lot has no recorded rate —
- *     opening stock, the commonest case on day one — is allocated with a
- *     null rate and rate_source 'unknown', and the batch total goes null
- *     rather than quietly understating itself.
- *  6. THE SCAN ASKS A QUESTION, NEVER FOR A WEIGHT. Topping up a machine
- *     the estimate says still holds material is refused until one word
- *     explains why; below the threshold nobody is asked anything.
- *  7. THE MONEY READS CORRECTLY, including cost per ACCEPTED piece after a
- *     quality check has netted the batch.
- *  8. RATES AND SUPPLIER IDENTITIES ARE FINANCE'S. A production login sees
- *     totals and cost-per-piece; the per-layer breakdown is ABSENT from its
- *     payload, not merely nulled.
+ *  1. THE POOL IS A WEIGHTED AVERAGE. Two bags at 92 and 118 make a pool at
+ *     105, and a batch draws at 105 — not at either bag's own price, because
+ *     no bag is that batch's bag.
+ *  2. A PARTIAL LOAD FOLDS THE KG IT ACTUALLY POURED, and the bag keeps its
+ *     remainder in the store.
+ *  3. NO PRICE IS EVER INVENTED. A rateless lot lands in unpriced_kg and does
+ *     NOT move the average — averaging in a rate nobody knows would price
+ *     that material at whatever the rest of the pool happened to cost.
+ *  4. A CORRECTION REPLACES, IT DOES NOT ACCUMULATE. An amendment reverses
+ *     the run (stamped, never deleted), gives the kilograms back AT THEIR OWN
+ *     FROZEN RATE, and re-draws — leaving the pool byte-for-byte where a
+ *     never-wrong world would have left it.
+ *  5. BEYOND THE POOL IS ADMITTED, NOT HIDDEN. Consumption the loads cannot
+ *     account for falls back to the stock average and says so in rate_source.
+ *  6. THE LOAD GATE ASKS ONE QUESTION, ABOUT THE COMMON INPUT, and its 422
+ *     says the figure is an estimate that does not count running batches.
+ *     There is NO running-batch exemption any more — with one shared input
+ *     some batch is always running, so the old exemption would have silenced
+ *     the gate permanently.
+ *  7. A LOAD CARRIES NO MACHINE. Not on the ledger row, not on the bag.
+ *  8. IDENTITY SURVIVES. Lot, permanent barcode, original rate, quantity and
+ *     partial-bag balance are all preserved — it is the CLAIM built on top of
+ *     them that was removed, not the data.
+ *  9. THE MONEY SAYS WHAT IT IS. batch_cost carries the accounting-allocation
+ *     sentence for everyone, and carries NO bag or supplier identity for
+ *     anyone.
+ * 10. NEVER TWICE, and the stock ledger is never touched.
  *
  * WHERE THE RATES COME FROM IN EACH SCENE. Inventory owns the rate contract
  * (MaterialLot::currentRatePerKg()/receiptRatePerKg()/hasRevisions()) and
- * BagLotRateResolver is the seam Production adapts it through.
+ * BagLotRateResolver is the seam Production adapts it through — now read at
+ * LOAD time, when a bag's kg enter the pool, rather than at allocation time.
  *
- *  - The MULTI-RATE scenes stub that seam, keyed by lot id. What they exist
- *    to assert is the ALLOCATION ARITHMETIC — which layer, how much, at
- *    which frozen rate — and two known rates state that far more plainly
- *    than two lots' worth of GRN fixtures would.
+ *  - The multi-rate scenes stub that seam, keyed by lot id, because what they
+ *    exist to assert is the POOL ARITHMETIC and two known rates state it far
+ *    more plainly than two lots' worth of GRN fixtures would.
  *  - THE CONTRACT ITSELF IS EXERCISED FOR REAL in
- *    test_real_lot_rates_flow_through_from_the_grn_and_a_later_cost_version_supersedes_them:
- *    a genuine receipt rate reaches a batch, a genuine cost version
- *    supersedes it for the NEXT batch, and the closed batch is proven not to
- *    have been rewritten. No stub anywhere in that scene.
- *  - The scenes that need no rate at all (FIFO order, carry-over, reversal,
- *    the ack gate, the unpriced opening-stock lot) run against the real
- *    resolver with no stub near them either.
+ *    test_real_lot_rates_reach_the_pool_and_a_later_cost_version_reaches_it_with_the_next_load.
+ *    No stub anywhere in that scene.
  */
 class BagCostTraceabilityTest extends TestCase
 {
@@ -111,9 +116,15 @@ class BagCostTraceabilityTest extends TestCase
         $this->store = Warehouse::create(['code' => 'WH-RM', 'name' => 'Raw Material Store']);
         $this->dayBin = Warehouse::create(['code' => 'WH-DAYBIN', 'name' => 'Factory Day Bin']);
 
+        // The common input needs a WIP warehouse named before a bag can be
+        // loaded into it — the load is still the ordinary store → WIP stock
+        // transfer it has always been.
+        app(FactoryDayBinService::class)->setWarehouseId($this->dayBin->id);
+
         // Real resin stock to issue against, at a stock average that is
-        // deliberately NOT any bag's rate — so a figure that accidentally
-        // came from the ledger instead of from a bag is visible on sight.
+        // deliberately NOT any bag's rate and NOT any pool average — so a
+        // figure that accidentally came from the ledger instead of from the
+        // pool is visible on sight.
         app(StockMovementService::class)->recordReceipt(
             itemId: $this->resin->id,
             warehouseId: $this->store->id,
@@ -144,9 +155,9 @@ class BagCostTraceabilityTest extends TestCase
     }
 
     /** A registered bag of resin physically sitting in the raw-material store. */
-    private function bag(string $barcode, string $kg): MaterialBag
+    private function bag(string $barcode, string $kg, ?MaterialLot $lot = null): MaterialBag
     {
-        $lot = MaterialLot::create([
+        $lot ??= MaterialLot::create([
             'item_id' => $this->resin->id,
             'received_date' => '2026-07-25',
             'bag_count' => 1,
@@ -173,7 +184,7 @@ class BagCostTraceabilityTest extends TestCase
     {
         $this->app->instance(BagLotRateResolver::class, new class($byLotId) extends BagLotRateResolver
         {
-            /** @param array<int, array{0: ?string, 1: string}> $byLotId */
+            /** @param  array<int, array{0: ?string, 1: string}>  $byLotId */
             public function __construct(private readonly array $byLotId) {}
 
             public function rateFor(?MaterialLot $lot): array
@@ -197,18 +208,24 @@ class BagCostTraceabilityTest extends TestCase
         ])->assertOk()->json('data.id');
     }
 
-    /** Scan a bag into the machine through the per-machine day-bin path. */
-    private function loadBag(MaterialBag $bag, int $entryId, string $kg): void
+    /**
+     * Load a bag at the COMMON INPUT. No machine is passed, because there is
+     * no machine to pass.
+     *
+     * $ack is the acknowledgement the gate demands once the common input is
+     * already estimated to hold this material — every scene that loads a
+     * second bag of one material has to answer it, which is the gate working.
+     */
+    private function loadBag(MaterialBag $bag, ?string $kg = null, ?string $ack = null): void
     {
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->postJson('/api/v1/production/day-bin/load-bag', array_filter([
             'barcode' => $bag->barcode,
-            'work_center_id' => $this->machine->id,
-            'shift_production_entry_id' => $entryId,
             'quantity_kg' => $kg,
-        ])->assertSuccessful();
+            'balance_ack_reason' => $ack,
+        ], fn ($value) => $value !== null))->assertSuccessful();
     }
 
-    /** @param array<int, array{item_id: int, quantity_issued_kg: string}> $consumptions */
+    /** @param  array<int, array{item_id: int, quantity_issued_kg: string}>  $consumptions */
     private function complete(int $entryId, string $produced, array $consumptions): void
     {
         $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/complete", [
@@ -230,144 +247,155 @@ class BagCostTraceabilityTest extends TestCase
             ->get();
     }
 
+    private function pool(): ResinPoolBalance
+    {
+        return ResinPoolBalance::query()->where('item_id', $this->resin->id)->firstOrFail();
+    }
+
     // ==================================================================
-    // 1. FIFO ACROSS A BAG BOUNDARY, AND THE CARRY-OVER
+    // 1. THE POOL IS A WEIGHTED AVERAGE, AND THE BATCH DRAWS AT IT
     // ==================================================================
 
-    public function test_a_batch_draws_the_oldest_bag_first_and_the_part_used_bag_carries_to_the_next_batch(): void
+    public function test_two_bags_at_different_rates_make_one_weighted_average_the_batch_draws_at(): void
     {
         $this->actingAsProduction();
 
-        $bagA = $this->bag('LOT-A-B1', '25.0000');
-        $bagB = $this->bag('LOT-B-B1', '25.0000');
+        $cheap = $this->bag('LOT-A-B1', '25.0000');
+        $dear = $this->bag('LOT-B-B1', '25.0000');
 
-        // Two bags bought at two different rates — the whole point of
-        // costing off bags rather than off a blended average.
         $this->stubRates([
-            $bagA->material_lot_id => ['100.0000', BagLotRateResolver::SOURCE_BAG_RECEIPT],
-            $bagB->material_lot_id => ['120.0000', BagLotRateResolver::SOURCE_BAG_RECEIPT],
+            $cheap->material_lot_id => ['92.0000', BagLotRateResolver::SOURCE_BAG_RECEIPT],
+            $dear->material_lot_id => ['118.0000', BagLotRateResolver::SOURCE_BAG_RECEIPT],
         ]);
 
-        // ---- Batch 1: burns 30 kg, which is more than bag A held. -------
-        $entryOne = $this->startBatch();
-        $this->loadBag($bagA, $entryOne, '25');
-        $this->loadBag($bagB, $entryOne, '25');
+        $this->loadBag($cheap);
+        // The second bag of the same material is gated — 25 kg are still
+        // estimated to be standing in the common input. That is scene 6's
+        // subject; here it is simply answered.
+        $this->loadBag($dear, ack: 'confirm_extra');
 
-        $this->complete($entryOne, '6000', [
-            ['item_id' => $this->resin->id, 'quantity_issued_kg' => '30.0000'],
+        // 50 kg at (25×92 + 25×118) ÷ 50 = 105. Neither bag's own price.
+        $pool = $this->pool();
+        $this->assertSame('50.0000', $pool->quantity_kg);
+        $this->assertSame('105.0000', $pool->avg_rate_per_kg);
+        $this->assertSame('0.0000', $pool->unpriced_kg);
+
+        $entry = $this->startBatch();
+        $this->complete($entry, '4000', [
+            ['item_id' => $this->resin->id, 'quantity_issued_kg' => '20.0000'],
         ]);
 
-        $rows = $this->liveAllocations($entryOne);
+        // ONE ROW FOR THE RUN, not one per bag — there are no bag layers to
+        // walk any more, and no bag identity on it to walk to.
+        $rows = $this->liveAllocations($entry);
+        $this->assertCount(1, $rows);
+        $this->assertSame('20.0000', $rows[0]->quantity_kg);
+        $this->assertSame('105.0000', $rows[0]->rate_per_kg);
+        $this->assertSame('2100.0000', $rows[0]->amount);
+        $this->assertSame(BagCostAllocationService::SOURCE_POOL_AVERAGE, $rows[0]->rate_source);
+        $this->assertNull($rows[0]->material_bag_id);
+        $this->assertNull($rows[0]->material_lot_id);
+        $this->assertNull($rows[0]->day_bin_movement_id);
 
-        // TWO layers, oldest first: bag A to exhaustion, then bag B for the
-        // remainder — each at its OWN rate, neither at the 90.00 stock
-        // average sitting in the ledger beside them.
-        $this->assertCount(2, $rows);
+        // The pool is 20 kg lighter and STILL AT 105 — drawing kg out of a
+        // pool does not change what the remaining kg cost.
+        $this->assertSame('30.0000', $this->pool()->quantity_kg);
+        $this->assertSame('105.0000', $this->pool()->avg_rate_per_kg);
 
-        $this->assertSame($bagA->id, $rows[0]->material_bag_id);
-        $this->assertSame('25.0000', $rows[0]->quantity_kg);
-        $this->assertSame('100.0000', $rows[0]->rate_per_kg);
-        $this->assertSame('2500.0000', $rows[0]->amount);
-        $this->assertSame(BagLotRateResolver::SOURCE_BAG_RECEIPT, $rows[0]->rate_source);
-
-        $this->assertSame($bagB->id, $rows[1]->material_bag_id);
-        $this->assertSame('5.0000', $rows[1]->quantity_kg);
-        $this->assertSame('120.0000', $rows[1]->rate_per_kg);
-        $this->assertSame('600.0000', $rows[1]->amount);
-
-        // Both rows are run 1 and both point at a real Load layer — no
-        // fallback row, because the scans covered the whole consumption.
-        $this->assertSame([1, 1], $rows->pluck('allocation_run')->all());
-        $this->assertNotContains(null, $rows->pluck('day_bin_movement_id')->all());
-
-        $summaryOne = app(BagCostAllocationService::class)->summary(ShiftProductionEntry::find($entryOne));
-        $this->assertSame('3100.0000', $summaryOne['resin_cost']);
-
-        // ---- Batch 2: the part-used bag B is still standing there. ------
-        // Nothing carried anything forward. Bag B's layer simply still has
-        // 20 kg un-allocated against it, and the next batch finds it.
+        // The next batch draws the same average, with nobody carrying
+        // anything forward by hand.
         $entryTwo = $this->startBatch();
-
         $this->complete($entryTwo, '2000', [
             ['item_id' => $this->resin->id, 'quantity_issued_kg' => '10.0000'],
         ]);
 
-        $rowsTwo = $this->liveAllocations($entryTwo);
-
-        $this->assertCount(1, $rowsTwo);
-        $this->assertSame($bagB->id, $rowsTwo[0]->material_bag_id);
-        $this->assertSame('10.0000', $rowsTwo[0]->quantity_kg);
-        // AT BAG B'S RATE, not bag A's and not the average — the carry-over
-        // kept its identity across a batch boundary.
-        $this->assertSame('120.0000', $rowsTwo[0]->rate_per_kg);
-        $this->assertSame('1200.0000', $rowsTwo[0]->amount);
-        $this->assertSame($rows[1]->day_bin_movement_id, $rowsTwo[0]->day_bin_movement_id);
+        $this->assertSame('105.0000', $this->liveAllocations($entryTwo)->first()->rate_per_kg);
+        $this->assertSame('20.0000', $this->pool()->quantity_kg);
     }
 
-    public function test_material_returned_out_of_the_machine_stops_being_drawable_from_its_layer(): void
+    // ==================================================================
+    // 2. A PARTIAL LOAD FOLDS ONLY THE KG IT POURED
+    // ==================================================================
+
+    public function test_a_partial_bag_load_folds_the_poured_kg_and_leaves_the_rest_in_the_bag(): void
     {
         $this->actingAsProduction();
 
-        $bagA = $this->bag('LOT-A-B1', '25.0000');
-        $this->stubRates([$bagA->material_lot_id => ['100.0000', BagLotRateResolver::SOURCE_BAG_RECEIPT]]);
+        $first = $this->bag('LOT-A-B1', '25.0000');
+        $second = $this->bag('LOT-B-B1', '25.0000');
 
-        $entry = $this->startBatch();
-        $this->loadBag($bagA, $entry, '25');
-
-        // 10 kg goes BACK to the store. Only 15 kg is standing at the
-        // machine, and the bag is in the store holding those 10 kg again.
-        $this->postJson('/api/v1/production/day-bin/return', [
-            'work_center_id' => $this->machine->id,
-            'item_id' => $this->resin->id,
-            'quantity_kg' => '10.0000',
-            'material_bag_id' => $bagA->id,
-            'shift_production_entry_id' => $entry,
-        ])->assertSuccessful();
-
-        $this->assertSame('10.0000', (string) $bagA->fresh()->remaining_kg);
-
-        // The batch nevertheless claims 25 kg — 10 more than was there.
-        $this->complete($entry, '5000', [
-            ['item_id' => $this->resin->id, 'quantity_issued_kg' => '25.0000'],
+        $this->stubRates([
+            $first->material_lot_id => ['100.0000', BagLotRateResolver::SOURCE_BAG_RECEIPT],
+            $second->material_lot_id => ['150.0000', BagLotRateResolver::SOURCE_BAG_RECEIPT],
         ]);
 
-        $rows = $this->liveAllocations($entry);
+        $this->loadBag($first);
+        // Only 10 of the second bag's 25 kg are poured in.
+        $this->loadBag($second, '10', ack: 'confirm_extra');
 
-        // TWO rows, not one. The layer gives up only the 15 kg that stayed.
-        $this->assertCount(2, $rows);
+        // 35 kg at (25×100 + 10×150) ÷ 35 = 4000 ÷ 35 = 114.2857…, truncated
+        // at 4 dp by plain bcdiv — the module's convention everywhere.
+        $pool = $this->pool();
+        $this->assertSame('35.0000', $pool->quantity_kg);
+        $this->assertSame('114.2857', $pool->avg_rate_per_kg);
 
-        $this->assertSame($bagA->id, $rows[0]->material_bag_id);
-        $this->assertSame('15.0000', $rows[0]->quantity_kg);
-        $this->assertSame('100.0000', $rows[0]->rate_per_kg);
-        $this->assertSame('1500.0000', $rows[0]->amount);
-        $this->assertSame(BagLotRateResolver::SOURCE_BAG_RECEIPT, $rows[0]->rate_source);
+        // THE BAG KEPT ITS REMAINDER, in the store, still loadable — the
+        // partial-bag balance the correction explicitly preserved.
+        $second->refresh();
+        $this->assertSame('15.0000', $second->remaining_kg);
+        $this->assertSame(MaterialBagStatus::InStore, $second->status);
+        $this->assertSame($this->store->id, $second->current_warehouse_id);
 
-        // AND THE ALARM STILL RINGS. The 10 kg the scans cannot account for
-        // falls to the beyond-layers fallback and SAYS SO — the whole point
-        // of the row. Priced at a bag rate it would have looked trustworthy.
-        $this->assertNull($rows[1]->day_bin_movement_id);
-        $this->assertNull($rows[1]->material_bag_id);
-        $this->assertSame('10.0000', $rows[1]->quantity_kg);
-        $this->assertSame(BagLotRateResolver::SOURCE_AVERAGE_FALLBACK, $rows[1]->rate_source);
-
-        // The returned kilograms are not chargeable here a second time
-        // either: the layer is spent, so a later batch finds nothing left.
-        $entryTwo = $this->startBatch();
-        $this->complete($entryTwo, '1000', [
-            ['item_id' => $this->resin->id, 'quantity_issued_kg' => '5.0000'],
-        ]);
-
-        $rowsTwo = $this->liveAllocations($entryTwo);
-        $this->assertCount(1, $rowsTwo);
-        $this->assertNull($rowsTwo[0]->day_bin_movement_id);
-        $this->assertSame(BagLotRateResolver::SOURCE_AVERAGE_FALLBACK, $rowsTwo[0]->rate_source);
+        // The fully poured bag is empty and consumed.
+        $first->refresh();
+        $this->assertSame('0.0000', $first->remaining_kg);
+        $this->assertSame(MaterialBagStatus::Consumed, $first->status);
     }
 
     // ==================================================================
-    // 2. A CORRECTION REPLACES THE ALLOCATION
+    // 3. A RATELESS LOT IS COUNTED, NEVER PRICED
     // ==================================================================
 
-    public function test_an_amendment_reverses_the_first_run_and_replaces_it_leaving_the_layers_untouched_by_the_mistake(): void
+    public function test_a_lot_with_no_recorded_rate_lands_in_unpriced_kg_and_does_not_move_the_average(): void
+    {
+        $this->actingAsProduction();
+
+        $priced = $this->bag('LOT-A-B1', '25.0000');
+        // Opening stock: a real lot, with no cost source anywhere behind it.
+        $openingStock = $this->bag('LOT-OPENING-B1', '25.0000');
+
+        $this->stubRates([
+            $priced->material_lot_id => ['120.0000', BagLotRateResolver::SOURCE_BAG_RECEIPT],
+            // The rateless lot is simply absent from the stub, which is
+            // exactly what the real resolver answers for it: [null, unknown].
+        ]);
+
+        $this->loadBag($priced);
+        $this->loadBag($openingStock, ack: 'confirm_extra');
+
+        $pool = $this->pool();
+
+        // THE AVERAGE DID NOT MOVE. Folding 25 unpriced kg in at 120 would
+        // have claimed a price for material nobody has a price for; folding
+        // them in at 0 would have claimed it was free. Neither is true, so
+        // they are counted apart.
+        $this->assertSame('25.0000', $pool->quantity_kg);
+        $this->assertSame('120.0000', $pool->avg_rate_per_kg);
+        $this->assertSame('25.0000', $pool->unpriced_kg);
+
+        // Both bags' KILOGRAMS still reached the common input — the estimate
+        // is a kg question and is not confused by the missing price.
+        $this->assertSame('50.0000', DayBinMovement::query()
+            ->where('type', DayBinMovementType::Load->value)
+            ->get()
+            ->reduce(fn (string $carry, DayBinMovement $row) => bcadd($carry, (string) $row->quantity_kg, 4), '0.0000'));
+    }
+
+    // ==================================================================
+    // 4. A CORRECTION REPLACES, AND THE POOL ENDS WHERE IT SHOULD
+    // ==================================================================
+
+    public function test_an_amendment_gives_the_kilograms_back_at_their_own_rate_and_redraws(): void
     {
         $this->actingAsProduction();
 
@@ -379,20 +407,20 @@ class BagCostTraceabilityTest extends TestCase
             $bagB->material_lot_id => ['120.0000', BagLotRateResolver::SOURCE_BAG_RECEIPT],
         ]);
 
+        $this->loadBag($bagA);
+        $this->loadBag($bagB, ack: 'confirm_extra');
+
+        // 50 kg at 110.
+        $this->assertSame('110.0000', $this->pool()->avg_rate_per_kg);
+
         $entry = $this->startBatch();
-        $this->loadBag($bagA, $entry, '25');
-        $this->loadBag($bagB, $entry, '25');
 
         // The wrong completion: 40 kg.
         $this->complete($entry, '6000', [
             ['item_id' => $this->resin->id, 'quantity_issued_kg' => '40.0000'],
         ]);
 
-        $firstRun = $this->liveAllocations($entry);
-        $this->assertSame('40.0000', $firstRun->reduce(
-            fn (string $carry, BatchResinAllocation $row) => bcadd($carry, (string) $row->quantity_kg, 4),
-            '0.0000',
-        ));
+        $this->assertSame('10.0000', $this->pool()->quantity_kg);
 
         // The correction: it was really 30 kg (and 5,000 pieces).
         $this->postJson("/api/v1/production/shift-production-entries/{$entry}/amend", [
@@ -405,284 +433,236 @@ class BagCostTraceabilityTest extends TestCase
             ]],
         ])->assertOk();
 
-        // NOTHING WAS DELETED. Run 1's rows are all still there, every one
-        // of them stamped reversed_at — that is the audit trail the owner
-        // asked for ("auditable reversal + reapplication").
+        // NOTHING WAS DELETED. Run 1's rows are all still there, stamped
+        // reversed_at — the audit trail the owner asked for.
         $reversed = BatchResinAllocation::query()
             ->where('shift_production_entry_id', $entry)
             ->whereNotNull('reversed_at')
             ->get();
 
-        $this->assertCount($firstRun->count(), $reversed);
+        $this->assertCount(1, $reversed);
         $this->assertSame([1], $reversed->pluck('allocation_run')->unique()->all());
+        $this->assertSame('40.0000', $reversed[0]->quantity_kg);
 
         // Run 2 replaced it, and it is the ONLY live run.
-        $liveNow = $this->liveAllocations($entry);
-        $this->assertSame([2], $liveNow->pluck('allocation_run')->unique()->all());
+        $live = $this->liveAllocations($entry);
+        $this->assertSame([2], $live->pluck('allocation_run')->unique()->all());
+        $this->assertCount(1, $live);
+        $this->assertSame('30.0000', $live[0]->quantity_kg);
+        $this->assertSame('110.0000', $live[0]->rate_per_kg);
+        $this->assertSame('3300.0000', $live[0]->amount);
 
-        // THE LAYERS ARE AS IF THE MISTAKE NEVER HAPPENED: bag A drawn to
-        // its full 25, bag B drawn 5 — byte for byte the never-wrong world
-        // asserted in scene 1.
-        $this->assertCount(2, $liveNow);
-        $this->assertSame($bagA->id, $liveNow[0]->material_bag_id);
-        $this->assertSame('25.0000', $liveNow[0]->quantity_kg);
-        $this->assertSame($bagB->id, $liveNow[1]->material_bag_id);
-        $this->assertSame('5.0000', $liveNow[1]->quantity_kg);
-        $this->assertSame('3100.0000', app(BagCostAllocationService::class)
+        // THE POOL IS EXACTLY THE NEVER-WRONG WORLD: 50 loaded, 30 drawn,
+        // 20 left at 110. The 40 kg went back at THEIR OWN rate (110), not
+        // at whatever the pool happened to average afterwards — which is why
+        // the average survives the round trip untouched.
+        $this->assertSame('20.0000', $this->pool()->quantity_kg);
+        $this->assertSame('110.0000', $this->pool()->avg_rate_per_kg);
+
+        $this->assertSame('3300.0000', app(BagCostAllocationService::class)
             ->summary(ShiftProductionEntry::find($entry))['resin_cost']);
-
-        // And the proof that reversal really did give the kilograms back:
-        // the next batch finds bag B holding 20 kg, not 10.
-        $entryTwo = $this->startBatch();
-        $this->complete($entryTwo, '2000', [
-            ['item_id' => $this->resin->id, 'quantity_issued_kg' => '20.0000'],
-        ]);
-
-        $rowsTwo = $this->liveAllocations($entryTwo);
-        $this->assertCount(1, $rowsTwo);
-        $this->assertSame($bagB->id, $rowsTwo[0]->material_bag_id);
-        $this->assertSame('20.0000', $rowsTwo[0]->quantity_kg);
     }
 
     // ==================================================================
-    // 3. NEVER TWO LIVE RUNS
+    // 5. BEYOND THE POOL IS ADMITTED, NOT HIDDEN
     // ==================================================================
 
-    public function test_a_second_live_allocation_run_is_refused_outright(): void
+    public function test_consumption_beyond_the_pool_falls_back_to_the_stock_average_and_says_so(): void
     {
         $this->actingAsProduction();
 
         $bag = $this->bag('LOT-A-B1', '25.0000');
         $this->stubRates([$bag->material_lot_id => ['100.0000', BagLotRateResolver::SOURCE_BAG_RECEIPT]]);
 
-        $entry = $this->startBatch();
-        $this->loadBag($bag, $entry, '25');
-        $this->complete($entry, '4000', [
-            ['item_id' => $this->resin->id, 'quantity_issued_kg' => '20.0000'],
-        ]);
-
-        $allocator = app(BagCostAllocationService::class);
-        $model = ShiftProductionEntry::find($entry);
-
-        // Allocating again without reversing first would charge this batch
-        // for its resin twice, and every total downstream would be wrong
-        // with nothing anywhere saying so. It is refused instead.
-        $this->expectException(DuplicateAllocationException::class);
-
-        try {
-            $allocator->allocate($model, null);
-        } finally {
-            // Exactly one live run survives the attempt.
-            $this->assertSame([1], $this->liveAllocations($entry)->pluck('allocation_run')->unique()->all());
-        }
-    }
-
-    // ==================================================================
-    // 4. BEYOND THE LAYERS
-    // ==================================================================
-
-    public function test_consumption_beyond_every_scanned_layer_falls_back_to_the_stock_average_and_says_so(): void
-    {
-        $this->actingAsProduction();
-
-        $bag = $this->bag('LOT-A-B1', '25.0000');
-        $this->stubRates([$bag->material_lot_id => ['100.0000', BagLotRateResolver::SOURCE_BAG_RECEIPT]]);
+        $this->loadBag($bag);
 
         $entry = $this->startBatch();
-        $this->loadBag($bag, $entry, '25');
 
-        // 40 kg burnt, 25 kg ever scanned. The machine ran on material
-        // nobody logged — which is exactly the case this must not hide.
-        $this->complete($entry, '8000', [
+        // 40 kg burnt against 25 kg ever loaded. The 15 kg gap is the load
+        // discipline's own error bar and must be visible, not absorbed.
+        $this->complete($entry, '6000', [
             ['item_id' => $this->resin->id, 'quantity_issued_kg' => '40.0000'],
         ]);
 
         $rows = $this->liveAllocations($entry);
         $this->assertCount(2, $rows);
 
-        $this->assertSame($bag->id, $rows[0]->material_bag_id);
         $this->assertSame('25.0000', $rows[0]->quantity_kg);
         $this->assertSame('100.0000', $rows[0]->rate_per_kg);
+        $this->assertSame(BagCostAllocationService::SOURCE_POOL_AVERAGE, $rows[0]->rate_source);
 
-        // ONE fallback row for the unaccounted 15 kg, with no bag, no lot
-        // and no layer behind it — and rate_source that admits as much
-        // rather than dressing the stock average up as a purchase rate.
-        $this->assertNull($rows[1]->day_bin_movement_id);
-        $this->assertNull($rows[1]->material_bag_id);
-        $this->assertNull($rows[1]->material_lot_id);
+        // The surplus, at the STOCK average (90) and labelled as such.
         $this->assertSame('15.0000', $rows[1]->quantity_kg);
-        $this->assertSame(BagLotRateResolver::SOURCE_AVERAGE_FALLBACK, $rows[1]->rate_source);
         $this->assertSame('90.0000', $rows[1]->rate_per_kg);
-        $this->assertSame('1350.0000', $rows[1]->amount);
+        $this->assertSame(BagLotRateResolver::SOURCE_AVERAGE_FALLBACK, $rows[1]->rate_source);
 
+        // 2500 + 1350.
         $this->assertSame('3850.0000', app(BagCostAllocationService::class)
             ->summary(ShiftProductionEntry::find($entry))['resin_cost']);
+
+        // The pool is empty, not negative — it cannot lend what it never had.
+        $this->assertSame('0.0000', $this->pool()->quantity_kg);
     }
 
     // ==================================================================
-    // 5. NO PRICE IS EVER INVENTED
+    // 6. THE LOAD GATE — ONE QUESTION, ABOUT THE COMMON INPUT
     // ==================================================================
 
-    public function test_a_bag_whose_lot_has_no_recorded_rate_is_left_unpriced_rather_than_guessed(): void
+    public function test_loading_more_while_the_common_input_still_shows_material_is_refused_until_one_word_explains_why(): void
     {
         $this->actingAsProduction();
-
-        // No stub at all: the real resolver, against a lot with no cost
-        // source — an opening-stock bag, which is the commonest bag in the
-        // building on the day this ships.
-        $bag = $this->bag('LOT-A-B1', '25.0000');
-
-        $entry = $this->startBatch();
-        $this->loadBag($bag, $entry, '25');
-        $this->complete($entry, '4000', [
-            ['item_id' => $this->resin->id, 'quantity_issued_kg' => '20.0000'],
-        ]);
-
-        $rows = $this->liveAllocations($entry);
-        $this->assertCount(1, $rows);
-
-        // The QUANTITY is known and recorded — it is only the price that is
-        // not, and the row says exactly that.
-        $this->assertSame('20.0000', $rows[0]->quantity_kg);
-        $this->assertSame($bag->id, $rows[0]->material_bag_id);
-        $this->assertNull($rows[0]->rate_per_kg);
-        $this->assertNull($rows[0]->amount);
-        $this->assertSame(BagLotRateResolver::SOURCE_UNKNOWN, $rows[0]->rate_source);
-
-        // And the batch total refuses to be a confident understatement: it
-        // is null, with words saying why, rather than 0 or a partial sum.
-        $summary = app(BagCostAllocationService::class)->summary(ShiftProductionEntry::find($entry));
-
-        $this->assertNull($summary['resin_cost']);
-        $this->assertNull($summary['material_cost_total']);
-        $this->assertNull($summary['cost_per_accepted_unit']);
-        $this->assertStringContainsString('no recorded purchase rate', (string) $summary['reason']);
-    }
-
-    // ==================================================================
-    // 6. THE SCAN ACKNOWLEDGEMENT — a question, never a weighing
-    // ==================================================================
-
-    public function test_topping_up_a_machine_that_still_shows_material_is_refused_until_one_word_explains_why(): void
-    {
-        $this->actingAsProduction();
-        app(FactoryDayBinService::class)->setWarehouseId($this->dayBin->id);
 
         $first = $this->bag('LOT-A-B1', '25.0000');
         $second = $this->bag('LOT-B-B1', '25.0000');
 
-        // The FIRST scan is never gated: before it there is no baseline, so
-        // there is no figure to exceed the threshold and nobody is asked to
-        // explain a machine the system has never seen loaded.
-        $this->postJson('/api/v1/production/day-bin/load-bag', [
-            'barcode' => $first->barcode,
-            'work_center_id' => $this->machine->id,
-        ])->assertOk();
+        // A FIRST-EVER LOAD IS NEVER GATED — there is no baseline to exceed.
+        $this->loadBag($first);
 
-        $this->assertNull(DayBinMovement::query()->latest('id')->first()->balance_ack_reason);
+        // A BATCH IS RUNNING, AND THE GATE FIRES ANYWAY. Under the
+        // per-machine model this was exempt; with one shared input some batch
+        // is running almost always, so the exemption would have silenced the
+        // gate permanently.
+        $this->startBatch();
 
-        // Now the machine is estimated to hold 25 kg and somebody scans
-        // another bag into it. Refused — with the figure named and the
-        // choices offered.
         $refused = $this->postJson('/api/v1/production/day-bin/load-bag', [
             'barcode' => $second->barcode,
-            'work_center_id' => $this->machine->id,
         ])->assertStatus(422);
 
         $message = $refused->json('errors.balance_ack_reason.0');
-        $this->assertStringContainsString('25', (string) $message);
-        $this->assertStringContainsString('confirm_extra', (string) $message);
-        $this->assertStringContainsString('return_to_store', (string) $message);
 
-        // IT ASKED FOR A REASON, NOT FOR A WEIGHT — no routine day-bin
-        // weighing exists in this factory and this gate introduces none.
-        $this->assertStringNotContainsStringIgnoringCase('weigh', (string) $message);
+        $this->assertStringContainsString('common resin input', $message);
+        $this->assertStringContainsString('25 kg', $message);
+        // THE HONEST CAVEAT, in the sentence itself — the figure has not been
+        // charged for anything the running batch has already melted.
+        $this->assertStringContainsString('estimated, not counting batches still running', $message);
 
-        // AND THE REFUSAL MOVED NOTHING: the bag is untouched and no second
-        // load row exists.
+        foreach (FactoryDayBinService::ACK_REASONS as $reason) {
+            $this->assertStringContainsString($reason, $message);
+        }
+
+        // NOTHING MOVED on the refusal.
         $this->assertSame('25.0000', $second->fresh()->remaining_kg);
-        $this->assertSame(MaterialBagStatus::InStore, $second->fresh()->status);
         $this->assertSame(1, DayBinMovement::query()->where('type', DayBinMovementType::Load->value)->count());
 
-        // With the word, it goes through — and the word is recorded on the
-        // load row itself, where every estimate and allocation can see it.
+        // One word, and the scan goes through — recorded ON the load row.
         $this->postJson('/api/v1/production/day-bin/load-bag', [
             'barcode' => $second->barcode,
-            'work_center_id' => $this->machine->id,
-            'balance_ack_reason' => 'confirm_extra',
-            'balance_ack_note' => 'Hopper genuinely still part full.',
-        ])->assertOk();
+            'balance_ack_reason' => 'spill',
+            'balance_ack_note' => 'Bag split on the way in.',
+        ])->assertSuccessful();
 
-        $recorded = DayBinMovement::query()->latest('id')->first();
-        $this->assertSame('confirm_extra', $recorded->balance_ack_reason);
-        $this->assertSame('Hopper genuinely still part full.', $recorded->balance_ack_note);
-        $this->assertSame('0.0000', $second->fresh()->remaining_kg);
+        $load = DayBinMovement::query()
+            ->where('type', DayBinMovementType::Load->value)
+            ->orderByDesc('id')
+            ->first();
+
+        $this->assertSame('spill', $load->balance_ack_reason);
+        $this->assertSame('Bag split on the way in.', $load->balance_ack_note);
     }
 
-    public function test_a_scan_during_a_running_batch_is_never_gated_because_the_estimate_is_stale_by_construction(): void
-    {
-        // Consumption books at completeBatch, so mid-run the machine's
-        // estimate has not been charged for anything this batch has melted —
-        // a machine an hour into its shift "still holds" its whole first
-        // bag. Gating on that figure turned the routine second bag of a run
-        // into a demanded explanation (the diff audit's top finding: the
-        // floor would answer confirm_extra by reflex within a week and the
-        // signal would die). Between batches the figure is real and the
-        // gate speaks; during a run it stays silent.
-        $this->actingAsProduction();
-        app(FactoryDayBinService::class)->setWarehouseId($this->dayBin->id);
-
-        $this->startBatch();
-
-        $first = $this->bag('RUN-A-B1', '25.0000');
-        $second = $this->bag('RUN-B-B1', '25.0000');
-
-        $this->postJson('/api/v1/production/day-bin/load-bag', [
-            'barcode' => $first->barcode,
-            'work_center_id' => $this->machine->id,
-        ])->assertOk();
-
-        // 25 kg estimated on the machine — over the threshold — but the
-        // batch is running, so the top-up loads without a question and
-        // records no acknowledgement.
-        $this->postJson('/api/v1/production/day-bin/load-bag', [
-            'barcode' => $second->barcode,
-            'work_center_id' => $this->machine->id,
-        ])->assertOk();
-
-        $this->assertNull(DayBinMovement::query()->latest('id')->first()->balance_ack_reason);
-    }
-
-    public function test_a_scan_below_the_threshold_is_never_asked_to_explain_itself(): void
+    public function test_a_load_below_the_threshold_is_never_asked_to_explain_itself(): void
     {
         $this->actingAsProduction();
-        app(FactoryDayBinService::class)->setWarehouseId($this->dayBin->id);
 
-        // A nearly-empty machine: 3 kg estimated remaining, under the 5 kg
-        // threshold. The ordinary scan must stay one tap — a gate that
-        // fires on every load is a gate operators learn to dismiss.
-        $first = $this->bag('LOT-A-B1', '3.0000');
+        $first = $this->bag('LOT-A-B1', '25.0000');
         $second = $this->bag('LOT-B-B1', '25.0000');
 
-        $this->postJson('/api/v1/production/day-bin/load-bag', [
-            'barcode' => $first->barcode,
-            'work_center_id' => $this->machine->id,
-        ])->assertOk();
+        $this->loadBag($first);
+
+        // The batch burnt nearly all of it: 23 of 25 kg, leaving 2 kg — below
+        // the 5 kg threshold, so the ordinary scan stays one tap.
+        $entry = $this->startBatch();
+        $this->complete($entry, '4000', [
+            ['item_id' => $this->resin->id, 'quantity_issued_kg' => '23.0000'],
+        ]);
 
         $this->postJson('/api/v1/production/day-bin/load-bag', [
             'barcode' => $second->barcode,
-            'work_center_id' => $this->machine->id,
-        ])->assertOk();
+        ])->assertSuccessful();
 
-        $this->assertSame(2, DayBinMovement::query()->where('type', DayBinMovementType::Load->value)->count());
-        $this->assertNull(DayBinMovement::query()->latest('id')->first()->balance_ack_reason);
+        $this->assertNull(DayBinMovement::query()
+            ->where('type', DayBinMovementType::Load->value)
+            ->orderByDesc('id')
+            ->first()
+            ->balance_ack_reason);
     }
 
     // ==================================================================
-    // 7 & 8. WHAT THE MONEY READS, AND WHO MAY SEE THE RATES
+    // 7. A LOAD CARRIES NO MACHINE
     // ==================================================================
 
-    public function test_batch_cost_splits_resin_from_other_material_and_costs_each_accepted_piece_after_quality_nets_it(): void
+    public function test_a_load_names_no_machine_anywhere_even_when_an_old_client_sends_one(): void
+    {
+        $this->actingAsProduction();
+
+        $bag = $this->bag('LOT-A-B1', '25.0000');
+
+        // A floor tablet still running the previous build keeps posting
+        // work_center_id for as long as it has not reloaded. The scan must
+        // succeed — refusing it would stop material entering the factory over
+        // a field the server no longer wants — and the value must reach
+        // nothing.
+        $this->postJson('/api/v1/production/day-bin/load-bag', [
+            'barcode' => $bag->barcode,
+            'work_center_id' => $this->machine->id,
+        ])->assertSuccessful();
+
+        $load = DayBinMovement::query()->where('type', DayBinMovementType::Load->value)->firstOrFail();
+
+        $this->assertNull($load->work_center_id);
+        // Nor is the machine stamped on the BAG — a bag at the common input
+        // is not at a machine.
+        $this->assertNull($bag->fresh()->day_bin_work_center_id);
+    }
+
+    // ==================================================================
+    // 8. IDENTITY SURVIVES — it was the CLAIM that was removed, not the data
+    // ==================================================================
+
+    public function test_lot_identity_the_permanent_barcode_and_the_original_rate_all_survive_a_load(): void
+    {
+        $this->actingAsProduction();
+
+        $lot = MaterialLot::create([
+            'item_id' => $this->resin->id,
+            'received_date' => '2026-07-25',
+            'bag_count' => 1,
+            'total_received_kg' => '25.0000',
+            'supplier_lot_no' => 'SUP-9931',
+            'receipt_rate_per_kg' => '104.5000',
+        ]);
+
+        $bag = $this->bag('LOT-REAL-B1', '25.0000', $lot);
+
+        $this->loadBag($bag, '10');
+
+        $bag->refresh();
+        $lot->refresh();
+
+        // The bag's permanent barcode, its original size, and the balance it
+        // still holds after a partial pour.
+        $this->assertSame('LOT-REAL-B1', $bag->barcode);
+        $this->assertSame('25.0000', $bag->original_kg);
+        $this->assertSame('15.0000', $bag->remaining_kg);
+
+        // The lot's supplier identity and the rate it was bought at.
+        $this->assertSame('SUP-9931', $lot->supplier_lot_no);
+        $this->assertSame('104.5000', $lot->receipt_rate_per_kg);
+        $this->assertSame($lot->id, $bag->material_lot_id);
+
+        // And the load row still names the BAG it came out of — the store's
+        // own record of which bag was opened, which is a fact. What is gone
+        // is the claim that this bag belongs to a machine or to a batch.
+        $load = DayBinMovement::query()->where('type', DayBinMovementType::Load->value)->firstOrFail();
+        $this->assertSame($bag->id, $load->material_bag_id);
+        $this->assertSame('10.0000', $load->quantity_kg);
+    }
+
+    // ==================================================================
+    // 9. THE MONEY SAYS WHAT IT IS
+    // ==================================================================
+
+    public function test_batch_cost_splits_pooled_resin_from_other_material_and_costs_each_accepted_piece_after_quality_nets_it(): void
     {
         $this->actingAsProduction();
 
@@ -699,12 +679,13 @@ class BagCostTraceabilityTest extends TestCase
         $bag = $this->bag('LOT-A-B1', '25.0000');
         $this->stubRates([$bag->material_lot_id => ['100.0000', BagLotRateResolver::SOURCE_BAG_RECEIPT]]);
 
-        $entry = $this->startBatch();
-        $this->loadBag($bag, $entry, '25');
+        $this->loadBag($bag);
 
-        // Resin was scanned; masterbatch was not. The scan trail alone
-        // decides which bucket each line lands in — no name is matched
-        // anywhere, which is the rule this module holds to.
+        $entry = $this->startBatch();
+
+        // Resin was loaded; masterbatch was not. The LOAD TRAIL alone decides
+        // which bucket each line lands in — no name is matched anywhere,
+        // which is the rule this module holds to.
         $this->complete($entry, '10000', [
             ['item_id' => $this->resin->id, 'quantity_issued_kg' => '20.0000'],
             ['item_id' => $masterbatch->id, 'quantity_issued_kg' => '2.0000'],
@@ -713,7 +694,7 @@ class BagCostTraceabilityTest extends TestCase
         $allocator = app(BagCostAllocationService::class);
         $summary = $allocator->summary(ShiftProductionEntry::find($entry));
 
-        // Resin off its bag (20 × 100), masterbatch at its issue cost
+        // Resin at the pool average (20 × 100), masterbatch at its issue cost
         // (2 × 250) — and the two buckets sum to the total with no line
         // counted twice and none dropped.
         $this->assertSame('2000.0000', $summary['resin_cost']);
@@ -742,10 +723,7 @@ class BagCostTraceabilityTest extends TestCase
 
         // THE COST PER PIECE ROSE, and it should have: the rejected pieces
         // did not stop costing what they cost, so the accepted ones carry
-        // the whole bill. 2500 ÷ 9,500 = 0.263157…, truncated at 4 dp by
-        // plain bcdiv — the module's convention everywhere (see
-        // BatchEstimationService, CapacityPlanService), and a tenth of a
-        // paisa per bottle is not a figure worth a second rounding regime.
+        // the whole bill. 2500 ÷ 9,500 = 0.263157…, truncated at 4 dp.
         $netted = $allocator->summary(ShiftProductionEntry::find($entry));
 
         $this->assertSame('9500', $netted['accepted_quantity']);
@@ -753,20 +731,21 @@ class BagCostTraceabilityTest extends TestCase
         $this->assertSame('2500.0000', $netted['material_cost_total']);
     }
 
-    public function test_rates_bags_and_supplier_lots_are_finance_only_while_the_totals_are_everyones(): void
+    public function test_batch_cost_states_the_accounting_allocation_and_carries_no_bag_identity_for_anyone(): void
     {
         $this->actingAsProduction();
 
         $bag = $this->bag('LOT-A-B1', '25.0000');
         $this->stubRates([$bag->material_lot_id => ['100.0000', BagLotRateResolver::SOURCE_BAG_RECEIPT]]);
 
+        $this->loadBag($bag);
+
         $entry = $this->startBatch();
-        $this->loadBag($bag, $entry, '25');
         $this->complete($entry, '10000', [
             ['item_id' => $this->resin->id, 'quantity_issued_kg' => '20.0000'],
         ]);
 
-        // ---- The production login: totals, yes. Rates, no. --------------
+        // ---- The production login: totals and the claim, yes. Rates, no. --
         $asProduction = $this->getJson('/api/v1/production/shift-production-entries?status=pending')
             ->assertOk()
             ->json('data.0.batch_cost');
@@ -774,12 +753,21 @@ class BagCostTraceabilityTest extends TestCase
         $this->assertSame('2000.0000', $asProduction['material_cost_total']);
         $this->assertSame('0.2000', $asProduction['cost_per_accepted_unit']);
 
-        // ABSENT, not null — a supplier rate must never be one devtools
-        // panel away from a production login.
-        $this->assertArrayNotHasKey('layers', $asProduction);
-        $this->assertArrayNotHasKey('other_lines', $asProduction);
+        // THE SENTENCE IS FOR EVERYONE. It is not anatomy, it is what the
+        // number means, and a reader shown the figure without it would be
+        // shown a claim this module does not make.
+        $this->assertSame(BagCostAllocationService::ALLOCATION_SENTENCE, $asProduction['basis']);
+        $this->assertStringContainsString('not physical bag traceability', $asProduction['basis']);
+        $this->assertSame('common_resin_pool_weighted_average', $asProduction['sources']['resin_cost']);
 
-        // ---- Finance: the same totals, plus what is behind them. --------
+        // ABSENT, not null — a rate must never be one devtools panel away
+        // from a production login.
+        $this->assertArrayNotHasKey('allocations', $asProduction);
+        $this->assertArrayNotHasKey('other_lines', $asProduction);
+        // The dead key from the layer model is gone entirely.
+        $this->assertArrayNotHasKey('layers', $asProduction);
+
+        // ---- Finance: the same totals, plus the rate behind them. --------
         $this->actingAsProduction(['finance.view']);
 
         $asFinance = $this->getJson('/api/v1/production/shift-production-entries?status=pending')
@@ -787,100 +775,63 @@ class BagCostTraceabilityTest extends TestCase
             ->json('data.0.batch_cost');
 
         $this->assertSame('2000.0000', $asFinance['material_cost_total']);
-        $this->assertArrayHasKey('layers', $asFinance);
+        $this->assertArrayHasKey('allocations', $asFinance);
+        $this->assertArrayNotHasKey('layers', $asFinance);
 
-        $this->assertCount(1, $asFinance['layers']);
-        $this->assertSame('LOT-A-B1', $asFinance['layers'][0]['bag_barcode']);
-        $this->assertSame('100.0000', $asFinance['layers'][0]['rate_per_kg']);
-        $this->assertSame('20.0000', $asFinance['layers'][0]['quantity_kg']);
-        $this->assertSame(BagLotRateResolver::SOURCE_BAG_RECEIPT, $asFinance['layers'][0]['rate_source']);
+        $this->assertCount(1, $asFinance['allocations']);
+        $detail = $asFinance['allocations'][0];
+
+        $this->assertSame('100.0000', $detail['pool_rate']);
+        $this->assertSame('20.0000', $detail['quantity']);
+        $this->assertSame('2000.0000', $detail['amount']);
+        $this->assertSame(BagCostAllocationService::SOURCE_POOL_AVERAGE, $detail['rate_source']);
+        $this->assertSame(BagCostAllocationService::ALLOCATION_SENTENCE, $detail['sentence']);
+
+        // NOT EVEN FINANCE GETS A BAG. The claim is dead at every permission
+        // level — this is the assertion that stops it being quietly restored
+        // "just for the accountant".
+        foreach (['bag_barcode', 'material_bag_id', 'material_lot_id', 'supplier_lot_no', 'day_bin_movement_id'] as $dead) {
+            $this->assertArrayNotHasKey($dead, $detail);
+        }
     }
 
     // ==================================================================
-    // THE REAL CONTRACT, END TO END — no stub anywhere in this scene
+    // 10. NEVER TWICE, AND THE LEDGER IS NEVER TOUCHED
     // ==================================================================
 
-    public function test_real_lot_rates_flow_through_from_the_grn_and_a_later_cost_version_supersedes_them(): void
-    {
-        $this->actingAsProduction();
-
-        // A lot that arrived with a real purchase rate on it — Inventory's
-        // own column, through Inventory's own contract methods. The stub
-        // used elsewhere in this file is deliberately absent here: this is
-        // the scene that proves the seam is wired to the real thing.
-        $lot = MaterialLot::create([
-            'item_id' => $this->resin->id,
-            'received_date' => '2026-07-25',
-            'bag_count' => 1,
-            'total_received_kg' => '25.0000',
-            'receipt_rate_per_kg' => '104.5000',
-        ]);
-
-        $bag = $lot->bags()->create([
-            'barcode' => 'LOT-REAL-B1',
-            'original_kg' => '25.0000',
-            'remaining_kg' => '25.0000',
-            'status' => MaterialBagStatus::InStore,
-            'current_warehouse_id' => $this->store->id,
-        ]);
-
-        $entry = $this->startBatch();
-        $this->loadBag($bag, $entry, '25');
-        $this->complete($entry, '4000', [
-            ['item_id' => $this->resin->id, 'quantity_issued_kg' => '20.0000'],
-        ]);
-
-        $row = $this->liveAllocations($entry)->first();
-
-        // The GRN rate reached the batch untouched, and is named as such.
-        $this->assertSame('104.5000', $row->rate_per_kg);
-        $this->assertSame('2090.0000', $row->amount);
-        $this->assertSame(BagLotRateResolver::SOURCE_BAG_RECEIPT, $row->rate_source);
-
-        // ---- The purchase invoice lands, revising the rate upward. ------
-        app(MaterialCostVersionService::class)->append(
-            $lot,
-            ['rate_per_kg' => '111.0000', 'kind' => 'invoice', 'note' => 'Supplier invoice 8841.'],
-            null,
-        );
-
-        // THE CLOSED BATCH IS NOT REWRITTEN. Its rate was frozen at
-        // allocation time, which is the whole rule about provisional GRN
-        // costs: a revision reaches FUTURE batches, it never silently edits
-        // a figure somebody has already signed off.
-        $this->assertSame('104.5000', $row->fresh()->rate_per_kg);
-        $this->assertSame('2090.0000', $row->fresh()->amount);
-
-        // The next batch draws the same bag's remaining 5 kg at the REVISED
-        // rate, and says it is a revision rather than a receipt.
-        $entryTwo = $this->startBatch();
-        $this->complete($entryTwo, '1000', [
-            ['item_id' => $this->resin->id, 'quantity_issued_kg' => '5.0000'],
-        ]);
-
-        $rowTwo = $this->liveAllocations($entryTwo)->first();
-
-        $this->assertSame('5.0000', $rowTwo->quantity_kg);
-        $this->assertSame('111.0000', $rowTwo->rate_per_kg);
-        $this->assertSame('555.0000', $rowTwo->amount);
-        $this->assertSame(BagLotRateResolver::SOURCE_BAG_VERSION, $rowTwo->rate_source);
-    }
-
-    // ==================================================================
-    // THE LEDGER IS NOT TOUCHED — the ruling this whole layer rests on
-    // ==================================================================
-
-    public function test_allocating_bag_costs_leaves_the_stock_ledgers_own_valuation_exactly_as_it_was(): void
+    public function test_a_second_live_allocation_run_is_refused_outright(): void
     {
         $this->actingAsProduction();
 
         $bag = $this->bag('LOT-A-B1', '25.0000');
-        // A bag rate deliberately far from the 90.00 stock average: if any
-        // of this leaked into the ledger, this assertion is where it shows.
-        $this->stubRates([$bag->material_lot_id => ['400.0000', BagLotRateResolver::SOURCE_BAG_RECEIPT]]);
+        $this->stubRates([$bag->material_lot_id => ['100.0000', BagLotRateResolver::SOURCE_BAG_RECEIPT]]);
+
+        $this->loadBag($bag);
 
         $entry = $this->startBatch();
-        $this->loadBag($bag, $entry, '25');
+        $this->complete($entry, '4000', [
+            ['item_id' => $this->resin->id, 'quantity_issued_kg' => '20.0000'],
+        ]);
+
+        $this->expectException(DuplicateAllocationException::class);
+
+        // A double allocation would charge this batch for its resin twice and
+        // would be invisible in every total.
+        app(BagCostAllocationService::class)->allocate(ShiftProductionEntry::find($entry));
+    }
+
+    public function test_allocating_pool_costs_leaves_the_stock_ledgers_own_valuation_exactly_as_it_was(): void
+    {
+        $this->actingAsProduction();
+
+        $bag = $this->bag('LOT-A-B1', '25.0000');
+        // A bag rate deliberately far from the 90.00 stock average: if any of
+        // this leaked into the ledger, this assertion is where it shows.
+        $this->stubRates([$bag->material_lot_id => ['400.0000', BagLotRateResolver::SOURCE_BAG_RECEIPT]]);
+
+        $this->loadBag($bag);
+
+        $entry = $this->startBatch();
 
         $averageBefore = StockBalance::query()
             ->where('item_id', $this->resin->id)
@@ -896,14 +847,92 @@ class BagCostTraceabilityTest extends TestCase
             ->where('warehouse_id', $this->store->id)
             ->value('average_cost');
 
-        // The Accounts-approved moving average is untouched — bag rates are
+        // The Accounts-approved moving average is untouched — pool rates are
         // an analytic layer BESIDE the ledger and never inside it, and they
         // never reach Tally at all.
         $this->assertSame($averageBefore, $averageAfter);
         $this->assertSame('90.0000', (string) $averageAfter);
 
-        // While the bag layer, beside it, priced the batch at the bag rate.
+        // While the pool, beside it, priced the batch at the pool rate.
         $this->assertSame('8000.0000', app(BagCostAllocationService::class)
             ->summary(ShiftProductionEntry::find($entry))['resin_cost']);
+    }
+
+    // ==================================================================
+    // THE REAL CONTRACT, END TO END — no stub anywhere in this scene
+    // ==================================================================
+
+    public function test_real_lot_rates_reach_the_pool_and_a_later_cost_version_reaches_it_with_the_next_load(): void
+    {
+        $this->actingAsProduction();
+
+        // A lot that arrived with a real purchase rate on it — Inventory's
+        // own column, through Inventory's own contract methods. The stub used
+        // elsewhere in this file is deliberately absent here: this is the
+        // scene that proves the seam is wired to the real thing.
+        $lot = MaterialLot::create([
+            'item_id' => $this->resin->id,
+            'received_date' => '2026-07-25',
+            'bag_count' => 2,
+            'total_received_kg' => '50.0000',
+            'receipt_rate_per_kg' => '104.5000',
+        ]);
+
+        $bagOne = $this->bag('LOT-REAL-B1', '25.0000', $lot);
+        $bagTwo = $this->bag('LOT-REAL-B2', '25.0000', $lot);
+
+        $this->loadBag($bagOne);
+
+        $this->assertSame('104.5000', $this->pool()->avg_rate_per_kg);
+
+        $entry = $this->startBatch();
+        $this->complete($entry, '4000', [
+            ['item_id' => $this->resin->id, 'quantity_issued_kg' => '20.0000'],
+        ]);
+
+        $row = $this->liveAllocations($entry)->first();
+
+        // The GRN rate reached the batch through the pool, untouched.
+        $this->assertSame('104.5000', $row->rate_per_kg);
+        $this->assertSame('2090.0000', $row->amount);
+        $this->assertSame(BagCostAllocationService::SOURCE_POOL_AVERAGE, $row->rate_source);
+
+        // ---- The purchase invoice lands, revising the rate upward. ------
+        app(MaterialCostVersionService::class)->append(
+            $lot,
+            ['rate_per_kg' => '111.0000', 'kind' => 'invoice', 'note' => 'Supplier invoice 8841.'],
+            null,
+        );
+
+        // THE CLOSED BATCH IS NOT REWRITTEN. Its rate was frozen at
+        // allocation time, which is the whole rule about provisional GRN
+        // costs: a revision reaches FUTURE material, it never silently edits
+        // a figure somebody has already signed off.
+        $this->assertSame('104.5000', $row->fresh()->rate_per_kg);
+        $this->assertSame('2090.0000', $row->fresh()->amount);
+
+        // NOR DOES IT REPRICE WHAT IS ALREADY IN THE POOL. The 5 kg still
+        // standing in the common input were bought at 104.50 and are still
+        // carried at 104.50 — a revision reaches the pool WITH THE NEXT LOAD,
+        // which is the only moment a rate is read.
+        $this->assertSame('5.0000', $this->pool()->quantity_kg);
+        $this->assertSame('104.5000', $this->pool()->avg_rate_per_kg);
+
+        $this->loadBag($bagTwo, ack: 'confirm_extra');
+
+        // (5 × 104.50 + 25 × 111) ÷ 30 = 3297.50 ÷ 30 = 109.9166…
+        $this->assertSame('30.0000', $this->pool()->quantity_kg);
+        $this->assertSame('109.9166', $this->pool()->avg_rate_per_kg);
+
+        $entryTwo = $this->startBatch();
+        $this->complete($entryTwo, '2000', [
+            ['item_id' => $this->resin->id, 'quantity_issued_kg' => '10.0000'],
+        ]);
+
+        $rowTwo = $this->liveAllocations($entryTwo)->first();
+
+        $this->assertSame('10.0000', $rowTwo->quantity_kg);
+        $this->assertSame('109.9166', $rowTwo->rate_per_kg);
+        $this->assertSame('1099.1660', $rowTwo->amount);
     }
 }

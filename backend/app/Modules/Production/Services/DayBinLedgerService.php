@@ -11,6 +11,7 @@ use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\WorkCenter;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /**
  * The machine-side half of Phase 6 traceability: owns day_bin_movements
@@ -35,8 +36,16 @@ class DayBinLedgerService
      *  - count: quantity ≤ opening + loaded − returned (segment window
      *    when a segment is given, running balance otherwise).
      *
+     * work_center_id IS NULLABLE, and null means the COMMON RESIN INPUT — the
+     * one loading point serving every machine (owner's correction, 2-Aug).
+     * The legacy per-machine bin-bay path still passes a machine and its
+     * guards are unchanged; the common-input scan passes null and its kg are
+     * summed factory-wide by FactoryDayBinService::commonResinEstimate.
+     * Return and Count still require a machine — they are per-machine
+     * questions and their balance guards are per-machine sums.
+     *
      * @param  array{
-     *     work_center_id: int, item_id: int, type: string,
+     *     work_center_id: ?int, item_id: int, type: string,
      *     quantity_kg: string|float|int, shift_production_entry_id?: ?int,
      *     material_bag_id?: ?int, recorded_by?: ?int, recorded_at?: mixed,
      * }  $data
@@ -46,7 +55,7 @@ class DayBinLedgerService
         return DB::transaction(function () use ($data) {
             $type = DayBinMovementType::from($data['type']);
             $quantity = bcadd((string) $data['quantity_kg'], '0', 4);
-            $workCenterId = (int) $data['work_center_id'];
+            $workCenterId = isset($data['work_center_id']) ? (int) $data['work_center_id'] : null;
             $itemId = (int) $data['item_id'];
             $entryId = $data['shift_production_entry_id'] ?? null;
 
@@ -55,7 +64,8 @@ class DayBinLedgerService
             // balance and both pass. The work-center row is the natural
             // mutex — every writer for one machine funnels through it, and
             // the lock lives exactly as long as this transaction.
-            if (in_array($type, [DayBinMovementType::Return, DayBinMovementType::Count], true)) {
+            if ($workCenterId !== null
+                && in_array($type, [DayBinMovementType::Return, DayBinMovementType::Count], true)) {
                 WorkCenter::query()->whereKey($workCenterId)->lockForUpdate()->first();
             }
 
@@ -64,6 +74,18 @@ class DayBinLedgerService
             $segment = $entryId !== null ? ShiftProductionEntry::query()->find($entryId) : null;
             if ($segment !== null && $segment->batch_status !== BatchStatus::InProgress) {
                 throw SegmentClosedException::make($segment->id);
+            }
+
+            // Both guards are PER-MACHINE sums, so both need a machine. A
+            // machineless Return or Count is not a case this ledger can
+            // judge and is refused rather than waved through with an
+            // unguarded write — the common input's own question is answered
+            // by FactoryDayBinService::commonResinEstimate, not here.
+            if (in_array($type, [DayBinMovementType::Return, DayBinMovementType::Count], true)
+                && $workCenterId === null) {
+                throw ValidationException::withMessages([
+                    'work_center_id' => 'Name the machine this day-bin '.$type->value.' belongs to.',
+                ]);
             }
 
             if ($type === DayBinMovementType::Return) {

@@ -102,10 +102,12 @@ export type SalesCostComponentStatus = 'priced' | 'unknown' | 'excluded';
  * question in the factory is carried, named, and left out of the money. An
  * excluded part contributes nothing and does NOT null the total.
  *
- * The bag and supplier identity keys are spread in by the server only for
- * resin that was priced off an actual bag — they are ABSENT on every other
- * component, including for finance users. Test each key's presence, never
- * "this is a finance payload so the identity must be here".
+ * THERE ARE NO BAG OR SUPPLIER IDENTITY KEYS, at any permission level. The
+ * owner's correction (2-Aug) ended the "next bag out of the store" basis this
+ * estimate once quoted: with ONE common resin input point serving every
+ * machine, no single bag stands behind a price and naming one would be the
+ * dead bag-to-batch claim wearing a different hat. Resin is priced at the
+ * common pool's weighted average, and `source`/`rate_source` say so.
  */
 export interface SalesCostComponent {
     /** Open vocabulary — 'resin', 'masterbatch', 'packaging', a packing kind. */
@@ -123,14 +125,6 @@ export interface SalesCostComponent {
     /** See `salesRateSourceLabel`. */
     rate_source: string | null;
     basis: string | null;
-    /** Resin-priced-from-a-bag only — ABSENT otherwise. */
-    material_bag_id?: number;
-    /** Resin-priced-from-a-bag only — ABSENT otherwise. */
-    bag_barcode?: string | null;
-    /** Resin-priced-from-a-bag only — ABSENT otherwise. */
-    material_lot_id?: number | null;
-    /** Resin-priced-from-a-bag only — ABSENT otherwise. */
-    supplier_lot_no?: string | null;
 }
 
 /**
@@ -155,10 +149,11 @@ export interface SalesCostEstimate {
      */
     sources: Record<string, string>;
     /**
-     * THE ANATOMY IS FINANCE'S — per-kg rates, bag barcodes, supplier lot
-     * numbers. ABSENT (not null, not empty) for anyone without
+     * THE ANATOMY IS FINANCE'S — the per-kg and per-unit rates behind each
+     * part. ABSENT (not null, not empty) for anyone without
      * finance.view/finance.manage, and absent for everyone when the line's
-     * product has left the item master.
+     * product has left the item master. It carries no bag or supplier
+     * identity for anyone: there is none to carry.
      *
      * Gate the breakdown on THE KEY BEING PRESENT rather than on a permission
      * check of your own: the server has already decided, it cannot go stale
@@ -260,12 +255,11 @@ export interface SalesCostInsight {
 export function salesRateSourceLabel(source: string | null | undefined): string {
     if (!source) return '—';
     switch (source) {
-        case 'bag_receipt':
-            return "the bag's own purchase receipt";
-        case 'bag_version':
-            // Worth its own sentence: this is the one that means the number
-            // moved after the material was bought.
-            return "the bag's revised purchase cost";
+        case 'resin_pool_weighted_average':
+            // The one that must never read as a bag's price: it is an
+            // accounting allocation across every bag loaded into the common
+            // input, not what any single bag cost.
+            return "the common resin pool's weighted average";
         case 'average_fallback':
             return 'the store moving average';
         case 'store_average':

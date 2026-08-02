@@ -14,30 +14,32 @@ use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Inventory\Services\WarehouseService;
 use App\Modules\Production\Models\DayBinMovement;
-use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\DayBinMovementType;
 use App\Modules\Production\Models\ShiftMaterialConsumption;
-use App\Modules\Production\Models\ShiftProductionEntry;
-use App\Modules\Production\Models\WorkCenter;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
- * THE FACTORY'S INTERNAL WIP LOCATION, and the per-machine resin estimate
+ * THE FACTORY'S INTERNAL WIP LOCATION, and the COMMON RESIN INPUT estimate
  * built on top of it.
  *
- * WHAT THE OWNER ACTUALLY RULED (31-Jul, decisive — it replaces the earlier
- * "central bin plus an evening physical bin weight" design this class was
- * first written for): "Our factory does not use a Day Bin warehouse or an
- * evening physical bin weight. Replace that idea with estimated resin
- * remaining for each machine: previous carryover plus barcode-scanned loads
- * minus calculated consumption." And: "Scanning a bag means material was
- * loaded into the selected machine; it does not mean the whole quantity was
- * consumed."
+ * WHAT THE OWNER ACTUALLY RULED (2-Aug, decisive — it supersedes the
+ * per-machine model this class carried until now): the factory has ONE COMMON
+ * resin input/loading point serving every machine. A bag is NEVER assigned to
+ * a machine and never scanned to one. So the machine selector, the
+ * per-machine bag history and the per-machine estimated balance were all
+ * describing a factory that does not exist, and they are gone rather than
+ * left on the screen looking answerable.
  *
- * So there are now two separate questions, and this class keeps them apart:
+ * Loading records MATERIAL ENTERING THE COMMON INPUT. It is not consumption
+ * and posts no Tally entry. Each batch still calculates its own consumption
+ * from output + rejection + lumps, exactly as before — that arithmetic is
+ * untouched. What is reconciled is TOTAL loads into the common input against
+ * TOTAL calculated consumption across ALL machines.
+ *
+ * So there are two separate questions, and this class keeps them apart:
  *
  *  1. WHERE THE STOCK IS, IN THE BOOKS — still one warehouse. Loading is the
  *     existing store → warehouse stock transfer: material changes location,
@@ -48,17 +50,19 @@ use Illuminate\Validation\ValidationException;
  *     StockMovementService::recordIssue every other issue uses. Tally sees ONE
  *     godown; there is deliberately no warehouse per machine.
  *
- *  2. WHICH MACHINE THE MATERIAL WENT INTO — operational metadata, never a
- *     location. A load names its machine and appends a day_bin_movements Load
- *     row (the per-machine ledger that has existed since Phase 6), which is
- *     what makes machineResinEstimate() possible. The class/route names stay
- *     'day bin' because renaming a live API surface mid-freeze costs more than
- *     it explains; the BEHAVIOUR is the machine estimate.
+ *  2. HOW MUCH IS STANDING IN THE COMMON INPUT — one running figure per
+ *     material, Σ loads − Σ consumption across every machine
+ *     (commonResinEstimate). A Load row is written with NO work_center_id;
+ *     the column is nullable and every historical machine-stamped row is left
+ *     exactly as it was, because that is the audit record of how the factory
+ *     ran under the previous understanding.
  *
- * THE PHYSICAL COUNT IS GONE. The old reconciliation read compared a derived
- * "expected closing" against a weight somebody walked out and took. The
- * factory does not take that weight, so the endpoint asked a question nobody
- * answers — it is removed rather than left on the screen looking answerable.
+ * The class/route names stay 'day bin' because renaming a live API surface
+ * mid-freeze costs more than it explains; the BEHAVIOUR is the common input.
+ *
+ * THE PHYSICAL COUNT IS GONE, and no per-machine bin weighing replaced it.
+ * The old reconciliation read compared a derived "expected closing" against a
+ * weight somebody walked out and took. The factory does not take that weight.
  *
  * NOT CONFIGURED IS A NORMAL STATE. Until someone names the warehouse,
  * warehouseId() is null and every caller must behave exactly as it did
@@ -83,11 +87,17 @@ class FactoryDayBinService
         private readonly AppSettingService $settings,
         private readonly WarehouseService $warehouses,
         private readonly StockMovementService $stock,
-        // The per-machine ledger a load is recorded in. Same service the
+        // The ledger a load is recorded in. Same service the legacy
         // per-machine bin-bay path already writes through, so both routes
-        // into a machine's material land in one place and the estimate
-        // cannot see half the loads.
+        // land in one place and the estimate cannot see half the loads.
         private readonly DayBinLedgerService $ledger,
+        // THE MONEY SIDE of a load: the bag's own purchase rate folded into
+        // the common pool for its material. Kept separate from the ledger
+        // row above, which is the KILOGRAM side — see
+        // BagCostAllocationService for why the two are deliberately not one
+        // mechanism.
+        private readonly ResinPoolService $pool,
+        private readonly BagLotRateResolver $rates,
     ) {}
 
     /**
@@ -119,33 +129,40 @@ class FactoryDayBinService
     }
 
     /**
-     * THE BAG SCAN, WHICH NOW NAMES ITS MACHINE. One barcode scan on the
-     * Shift Floor moves a bag's kg out of the store warehouse into the
-     * internal WIP warehouse AND records which machine it was emptied into.
+     * THE BAG SCAN AT THE COMMON RESIN INPUT. One barcode scan on the Shift
+     * Floor moves a bag's kg out of the store warehouse into the internal WIP
+     * warehouse and records that the material entered the common input.
      *
-     * The owner's words: "Scanning a bag means material was loaded into the
-     * selected machine; it does not mean the whole quantity was consumed."
-     * So the scan produces two records, both inside one transaction:
+     * THERE IS NO MACHINE HERE, AND THERE MUST NOT BE. The owner's correction
+     * (2-Aug): the factory has one common resin input point for all machines
+     * and a bag is never assigned or scanned to a machine. The parameter is
+     * gone from this signature rather than made optional, because an optional
+     * machine is an invitation to start writing one again.
+     *
+     * The scan produces three records, all inside one transaction:
      *
      *   - the stock transfer store → WIP warehouse. Unchanged. In the books
      *     the material is simply somewhere else, and Tally still sees one
-     *     godown — there is no warehouse per machine and there must never be.
-     *   - a day_bin_movements Load row for (machine, item, bag, kg). This is
-     *     the operational attribution, and it is what
-     *     machineResinEstimate() sums. Written through DayBinLedgerService,
-     *     the same service the per-machine bin-bay path uses, so a machine's
-     *     material has exactly one ledger.
+     *     godown.
+     *   - a day_bin_movements Load row for (item, bag, kg) with a NULL
+     *     work_center_id. This is the kilogram record, and it is what
+     *     commonResinEstimate() sums.
+     *   - the bag's own purchase rate folded into the common resin pool for
+     *     its material (ResinPoolService). This is the money record, and it
+     *     is what a batch's cost is later drawn against. A lot with no
+     *     recorded rate folds into the pool's unpriced kg and does NOT move
+     *     its average — see ResinPoolService for why that is the honest
+     *     answer rather than a gap to paper over.
      *
-     * PARTIAL LOADS AND BAG REMAINING ARE UNCHANGED, deliberately — the
-     * owner asked for both to keep working exactly as they do. The
-     * status/remaining handling mirrors TraceabilityService::loadBagToDayBin
-     * line for line: a full load empties the bag (→ Consumed) and stamps the
-     * machine on it, a partial load pours off the weighed kg and leaves the
-     * bag InStore in the store, unstamped, because that is where it still
-     * physically is. The ledger row carries the machine either way — the
-     * bag pointer says "this bag is at that machine now", the ledger row
-     * says "these kg went into that machine", and only the second is a
-     * quantity.
+     * PO/GRN/LOT IDENTITY, THE PERMANENT BAG BARCODE, THE ORIGINAL RATE, THE
+     * QUANTITY AND THE PARTIAL-BAG BALANCE ARE ALL PRESERVED EXACTLY. What
+     * was removed is the false claim built on top of them — that a bag stood
+     * at a named machine. A full load empties the bag (→ Consumed); a partial
+     * load pours off the weighed kg and leaves the bag InStore in the store,
+     * holding its remainder, because that is where it still physically is.
+     * Nothing stamps a machine onto the bag any more (material_bags
+     * .day_bin_work_center_id keeps its historical values and stops being
+     * written by this path).
      *
      * $recordedBy is the AUTHENTICATED user (the audit identity on the
      * stock movements); $supervisorId is only a note of who was acting
@@ -156,7 +173,6 @@ class FactoryDayBinService
     public function loadBag(
         string $barcode,
         ?string $quantityKg,
-        int $workCenterId,
         int $recordedBy,
         ?int $supervisorId = null,
         ?string $ackReason = null,
@@ -176,7 +192,7 @@ class FactoryDayBinService
             ]);
         }
 
-        return DB::transaction(function () use ($barcode, $quantityKg, $workCenterId, $recordedBy, $supervisorId, $warehouse, $ackReason, $ackNote) {
+        return DB::transaction(function () use ($barcode, $quantityKg, $recordedBy, $supervisorId, $warehouse, $ackReason, $ackNote) {
             $bag = MaterialBag::query()->where('barcode', $barcode)->lockForUpdate()->first();
             if ($bag === null) {
                 throw ValidationException::withMessages([
@@ -211,26 +227,28 @@ class FactoryDayBinService
 
             // THE LOT (and therefore the material) IS RESOLVED BEFORE ANY
             // MUTATION, because the acknowledgement gate below needs to know
-            // which material this machine is being topped up with, and a 422
-            // must never leave a half-applied scan behind it.
+            // which material the common input is being topped up with, and a
+            // 422 must never leave a half-applied scan behind it.
             $lot = $bag->lot()->first();
 
-            $this->guardMachineBalance(
-                workCenterId: $workCenterId,
+            $this->guardCommonInputBalance(
                 itemId: (int) $lot->item_id,
                 ackReason: $ackReason,
             );
 
-            // Same rule as TraceabilityService::loadBagToDayBin: a load that
-            // drives remaining_kg to 0 leaves the bag Consumed (it holds
-            // nothing any more) and the bag itself is now at that machine; a
-            // partial load pours off the weighed kg and the bag stays InStore,
-            // unstamped, because it is still physically in the store.
+            // A load that drives remaining_kg to 0 leaves the bag Consumed
+            // (it holds nothing any more); a partial load pours off the
+            // weighed kg and the bag stays InStore, because it is still
+            // physically in the store holding its remainder.
+            //
+            // NO MACHINE IS STAMPED ON THE BAG. day_bin_work_center_id keeps
+            // whatever history it already holds and is no longer written
+            // here: a bag at the common input is not at a machine, and
+            // recording one would re-assert the claim the owner removed.
             $fullLoad = bccomp($quantity, $remaining, 4) === 0;
             $bag->remaining_kg = bcsub($remaining, $quantity, 4);
             if ($fullLoad) {
                 $bag->status = MaterialBagStatus::Consumed;
-                $bag->day_bin_work_center_id = $workCenterId;
             }
             $bag->save();
 
@@ -250,18 +268,18 @@ class FactoryDayBinService
                 createdBy: $recordedBy,
             );
 
-            // WHICH MACHINE GOT IT. Inside the same transaction as the bag
+            // THE KILOGRAM RECORD. Inside the same transaction as the bag
             // decrement and the transfer, so a scan can never leave stock
-            // moved with no machine against it — an unattributed kg would
-            // silently overstate every machine's estimated remaining except
-            // the one that actually burnt it.
+            // moved with nothing recorded against it.
             //
-            // No shift_production_entry_id: a scan is a load into a MACHINE,
-            // not into a batch. The floor loads before Start Batch as often
-            // as during a run, and the estimate is a running per-machine
-            // total that needs no segment window (see machineResinEstimate).
+            // work_center_id is NULL and shift_production_entry_id is absent,
+            // and both absences say the same thing: a scan is material
+            // entering the COMMON INPUT, not into a machine and not into a
+            // batch. The floor loads before Start Batch as often as during a
+            // run, and the estimate is a running factory-wide total that
+            // needs no machine and no segment window (commonResinEstimate).
             $movement = $this->ledger->record([
-                'work_center_id' => $workCenterId,
+                'work_center_id' => null,
                 'item_id' => $lot->item_id,
                 'type' => DayBinMovementType::Load->value,
                 'material_bag_id' => $bag->id,
@@ -273,6 +291,15 @@ class FactoryDayBinService
                 'balance_ack_note' => $ackNote,
                 'recorded_by' => $recordedBy,
             ]);
+
+            // THE MONEY RECORD. The bag's own lot rate folds into the common
+            // pool for this exact material, at this exact quantity — the
+            // moving average every future batch of this material will be
+            // costed at. A rateless lot (opening stock, the commonest case on
+            // day one) folds into the pool's unpriced kg and leaves the
+            // average untouched: see ResinPoolService.
+            [$rate] = $this->rates->rateFor($lot);
+            $this->pool->fold((int) $lot->item_id, $quantity, $rate);
 
             $balance = StockBalance::query()
                 ->with('item')
@@ -301,60 +328,52 @@ class FactoryDayBinService
     public const ACK_REASONS = ['confirm_extra', 'spill', 'return_to_store', 'correction'];
 
     /**
-     * THE SCAN ACKNOWLEDGEMENT GATE.
+     * THE SCAN ACKNOWLEDGEMENT GATE, NOW KEYED ON THE COMMON INPUT.
      *
-     * When the running estimate still says this machine holds a meaningful
-     * quantity of this material and somebody scans another bag into it, the
-     * scan is refused until one word explains why. Above the threshold that
-     * discrepancy is worth a question; below it, nothing is asked and the
-     * ordinary scan stays one tap.
+     * When the running estimate still says the common input holds a
+     * meaningful quantity of this material and somebody loads another bag of
+     * it, the scan is refused until one word explains why. Above the
+     * threshold that discrepancy is worth a question; below it nothing is
+     * asked and the ordinary scan stays one tap. ONE question, the same four
+     * reasons, the same audited columns on the Load row.
      *
-     * IT DOES NOT ASK FOR A WEIGHT, AND MUST NOT. The factory does no
-     * routine day-bin weighing, and this gate deliberately introduces none —
-     * it names the estimated figure and offers four words, because a scale
-     * nobody walks to produces a number nobody trusts. The old
-     * reconciliation asked a question the factory does not answer; that
-     * mistake is not repeated here.
+     * IT DOES NOT ASK FOR A WEIGHT, AND MUST NOT. The factory does no routine
+     * bin weighing and this gate introduces none — it names the estimated
+     * figure and offers four words, because a scale nobody walks to produces
+     * a number nobody trusts.
+     *
+     * THE RUNNING-BATCH EXEMPTION IS GONE, and that is a re-judgement rather
+     * than an oversight. Under the per-machine model the gate stayed silent
+     * while that machine's batch ran, because consumption is booked at
+     * completeBatch and a machine an hour into its shift still read as
+     * holding its whole first bag. With ONE common input serving every
+     * machine, some batch is almost always running somewhere, so the same
+     * exemption would silence the gate permanently — which is the same as
+     * deleting it.
+     *
+     * So it fires whenever the common estimate is at or over the threshold,
+     * and the 422 SAYS WHAT THE FIGURE IS WORTH: it is an estimate that does
+     * not yet count batches still running. The operator is told the honest
+     * basis instead of being handed a number dressed up as a measurement.
      *
      * THE ESTIMATE IS READ BEFORE THIS LOAD IS RECORDED, which is the whole
      * correctness of the thing: computed afterwards, every 25 kg bag would
-     * trip a 5 kg threshold and the gate would fire on every scan, which is
-     * the same as not existing.
+     * trip a 5 kg threshold and the gate would fire on every scan.
      *
-     * A FIRST-EVER SCAN IS NEVER GATED, and that falls out for free rather
-     * than being special-cased: machineResinEstimate reports no pair at all
-     * until a material has been scanned into a machine at least once (no
-     * scan, no baseline), so there is no figure to exceed the threshold and
-     * nobody is asked to explain a machine the system has never seen loaded.
+     * A FIRST-EVER LOAD IS NEVER GATED, and that falls out for free rather
+     * than being special-cased: commonResinEstimate reports no row at all
+     * until a material has been loaded at least once (no load, no baseline),
+     * so there is no figure to exceed the threshold.
      *
      * @throws ValidationException 422 naming the estimated figure and the choices
      */
-    private function guardMachineBalance(int $workCenterId, int $itemId, ?string $ackReason): void
+    private function guardCommonInputBalance(int $itemId, ?string $ackReason): void
     {
         if ($ackReason !== null) {
             return;
         }
 
-        // THE GATE ONLY SPEAKS WHEN THE ESTIMATE CAN BE TRUSTED — between
-        // batches. Consumption is booked at completeBatch, so while a batch
-        // is running the estimate has not yet been charged for anything that
-        // run has melted: a machine an hour into its shift reads as still
-        // holding its whole first bag, and gating on that figure turned the
-        // routine second-bag-of-the-run scan into a demanded explanation
-        // (the live diff audit called it: operators would reflexively answer
-        // confirm_extra within a week and the signal would die). Between
-        // batches every completed run HAS been charged, the figure is real,
-        // and a bag's worth still showing is a genuine question.
-        $running = ShiftProductionEntry::query()
-            ->where('work_center_id', $workCenterId)
-            ->where('batch_status', BatchStatus::InProgress->value)
-            ->exists();
-
-        if ($running) {
-            return;
-        }
-
-        $estimated = $this->estimatedRemainingFor($workCenterId, $itemId);
+        $estimated = $this->estimatedRemainingFor($itemId);
 
         if ($estimated === null) {
             return;
@@ -368,7 +387,7 @@ class FactoryDayBinService
 
         throw ValidationException::withMessages([
             'balance_ack_reason' => sprintf(
-                'This machine is still estimated to hold %s kg of this material. Say what happened to it before loading more — %s.',
+                'The common resin input is still estimated to hold %s kg of this material (estimated, not counting batches still running). Say what happened to it before loading more — %s.',
                 rtrim(rtrim($estimated, '0'), '.'),
                 implode(', ', self::ACK_REASONS),
             ),
@@ -376,20 +395,14 @@ class FactoryDayBinService
     }
 
     /**
-     * One machine's estimated remaining kg of one material, or null when
-     * there is no baseline to estimate against. Reuses machineResinEstimate
-     * rather than re-deriving the arithmetic, so the figure the gate quotes
-     * is exactly the figure every screen shows.
+     * The common input's estimated remaining kg of one material, or null when
+     * there is no baseline to estimate against. Reuses commonResinEstimate
+     * rather than re-deriving the arithmetic, so the figure the gate quotes is
+     * exactly the figure every screen shows.
      */
-    private function estimatedRemainingFor(int $workCenterId, int $itemId): ?string
+    private function estimatedRemainingFor(int $itemId): ?string
     {
-        $machine = $this->machineResinEstimate($workCenterId)->first();
-
-        if ($machine === null) {
-            return null;
-        }
-
-        $material = $machine['materials']
+        $material = $this->commonResinEstimate()
             ->first(fn (array $row) => (int) $row['item']->id === $itemId);
 
         return $material['estimated_remaining_kg'] ?? null;
@@ -512,42 +525,44 @@ class FactoryDayBinService
     }
 
     /**
-     * ESTIMATED RESIN REMAINING PER MACHINE — the figure that replaced the
-     * central-bin bookkeeping, in the owner's own arithmetic:
+     * ESTIMATED RESIN REMAINING IN THE COMMON INPUT — one figure per
+     * material, for the whole factory:
      *
-     *     estimated remaining = Σ scanned loads into that machine
-     *                         − Σ calculated consumption of that machine's
-     *                           batches
+     *     estimated remaining = Σ every load of that material
+     *                         − Σ calculated consumption of that material
+     *                           across ALL machines
      *
-     * per machine, per material.
+     * THERE IS NO MACHINE DIMENSION, and its absence is the owner's
+     * correction (2-Aug) rather than a simplification: the factory has one
+     * common resin input point, a bag is never assigned or scanned to a
+     * machine, so a per-machine balance was a number with no physical
+     * referent. Reconciliation is TOTAL loads against TOTAL consumption.
      *
-     * WHY THERE IS NO DAILY CUTOFF, AND NO SEPARATE CARRYOVER TERM. The
-     * owner asked for "previous carryover plus barcode-scanned loads minus
-     * calculated consumption". A running total IS that: yesterday's carryover
-     * is nothing more than yesterday's loads minus yesterday's consumption,
-     * already inside the same two sums. Cutting the window at a date would
-     * force a separate opening figure that this schema does not store, and
-     * the old reconciliation read had to derive one by rolling the ledger
-     * backwards — which is exactly the machinery the pivot removed.
+     * WHY THERE IS NO DAILY CUTOFF, AND NO SEPARATE CARRYOVER TERM. A running
+     * total already IS "previous carryover plus loads minus consumption":
+     * yesterday's carryover is nothing more than yesterday's loads minus
+     * yesterday's consumption, inside the same two sums. Cutting the window
+     * at a date would force a separate opening figure this schema does not
+     * store.
      *
-     * WHERE THE RUNNING TOTAL STARTS, AND WHY IT IS NOT "ALL TIME". It starts
-     * at the FIRST SCAN of that material into that machine, and a pair with
-     * no scan at all is not reported.
+     * WHERE THE RUNNING TOTAL STARTS, AND WHY IT IS NOT LITERALLY ALL TIME.
+     * It starts at the FIRST LOAD of that material, and a material with no
+     * load at all is not reported.
      *
      * Not a refinement — without it the read is wrong on the day it ships.
-     * Consumption rows go back to before any of this existed, and scanning is
-     * behind a config flag (production.traceability_enabled) that a
-     * deployment may not have turned on at all. An all-time subtraction would
-     * therefore open with every machine reporting a deficit equal to its
-     * ENTIRE consumption history — a page of large negative numbers on
-     * rollout morning, indistinguishable from the one signal this endpoint
-     * exists to raise (material genuinely burnt without a scan).
+     * Consumption rows go back to before any of this existed, and loading is
+     * behind a config flag (production.traceability_enabled) a deployment may
+     * never have turned on. An unbounded subtraction would open with every
+     * material reporting a deficit equal to its ENTIRE consumption history —
+     * a page of large negative numbers on rollout morning, indistinguishable
+     * from the one signal this endpoint exists to raise (material genuinely
+     * burnt without a load).
      *
-     * Starting at the first scan states the honest assumption instead: the
-     * factory does not know what was in a hopper before it began scanning, so
-     * that carryover is taken as zero and the count begins where the evidence
-     * does. Everything after the first scan is measured, including a machine
-     * that was scanned once and then ran unscanned for a week — which is
+     * Starting at the first load states the honest assumption instead: the
+     * factory does not know what stood in the input before it began
+     * recording, so that carryover is taken as zero and the count begins
+     * where the evidence does. Everything after the first load is measured,
+     * including a material loaded once and then run unrecorded for a week —
      * exactly the case that must still read negative.
      *
      * WHY CONSUMPTION IS READ FROM material_consumptions, AND WHY THAT MAKES
@@ -564,12 +579,14 @@ class FactoryDayBinService
      *
      * WHY IT MAY GO NEGATIVE, AND WHY IT IS SERVED THAT WAY. Consumption is
      * DERIVED from output (pieces × standard weight + lumps), not weighed
-     * out, so a machine that ran on material nobody scanned reads negative.
-     * That is the honest signal and the one worth acting on — it means loads
-     * are being missed at the scanner. Clamping it at zero would erase
-     * exactly the case the estimate exists to expose. (DayBinLedgerService's
-     * balanceBeforeSegment does floor at zero; that is a headroom guard for a
-     * count, a different question, and its clamp is not copied here.)
+     * out, so material run without being loaded reads negative. That is the
+     * honest signal and the one worth acting on. Clamping at zero would erase
+     * exactly the case the estimate exists to expose.
+     *
+     * IT IS AN ESTIMATE, AND IT LAGS THE FLOOR BY THE BATCHES STILL RUNNING.
+     * Consumption is booked at completeBatch, so material an in-flight batch
+     * has already melted is not yet subtracted. Every surface that quotes
+     * this figure says so in words — see guardCommonInputBalance's 422.
      *
      * KG MATERIALS ONLY. The "Other materials (exceptions)" repeater files
      * ANY item's quantity into a column named quantity_issued_kg, so a batch
@@ -578,20 +595,15 @@ class FactoryDayBinService
      * gate the pickers use — is what stops the page reporting "estimated
      * remaining −13,333 kg" for cartons.
      *
-     * A pair appears once that material has been scanned into that machine at
-     * least once — before then there is no baseline to subtract from and no
-     * figure worth printing. Soft-deleted items are still listed: a retired
-     * master a machine still holds is precisely what must not be hidden.
+     * Soft-deleted items are still listed: a retired master the input still
+     * holds is precisely what must not be hidden.
      *
      * @return Collection<int, array{
-     *     work_center: WorkCenter,
-     *     materials: Collection<int, array{
-     *         item: Item, loaded_kg: string, consumed_kg: string,
-     *         estimated_remaining_kg: string, last_load_at: ?CarbonImmutable,
-     *     }>,
+     *     item: Item, loaded_kg: string, consumed_kg: string,
+     *     estimated_remaining_kg: string, last_load_at: ?CarbonImmutable,
      * }>
      */
-    public function machineResinEstimate(?int $workCenterId = null): Collection
+    public function commonResinEstimate(): Collection
     {
         // bcmath accumulation in PHP rather than SQL SUM(): the test database
         // is SQLite, whose SUM() over a DECIMAL column comes back as a float,
@@ -601,13 +613,17 @@ class FactoryDayBinService
         $firstLoadAt = [];
         $lastLoadAt = [];
 
+        // EVERY Load row, whatever machine it does or does not name. Rows
+        // written before the correction carry a work_center_id and are
+        // counted exactly like the ones written after it that do not: the
+        // material entered the factory's input either way, and re-reading
+        // history through the new model is the whole point of a common total.
         DayBinMovement::query()
             ->where('type', DayBinMovementType::Load->value)
-            ->when($workCenterId !== null, fn ($query) => $query->where('work_center_id', $workCenterId))
             ->orderBy('id')
-            ->get(['work_center_id', 'item_id', 'quantity_kg', 'recorded_at'])
+            ->get(['item_id', 'quantity_kg', 'recorded_at'])
             ->each(function (DayBinMovement $movement) use (&$loaded, &$firstLoadAt, &$lastLoadAt) {
-                $key = "{$movement->work_center_id}@{$movement->item_id}";
+                $key = (int) $movement->item_id;
                 $loaded[$key] = bcadd($loaded[$key] ?? '0.0000', (string) $movement->quantity_kg, 4);
 
                 $at = CarbonImmutable::parse($movement->recorded_at);
@@ -619,49 +635,33 @@ class FactoryDayBinService
                 }
             });
 
-        // No scan anywhere in scope means no baseline anywhere — there is
-        // nothing to estimate against, and reporting each machine's whole
+        // No load of anything means no baseline for anything — there is
+        // nothing to estimate against, and reporting the factory's whole
         // consumption history as a deficit would be inventing a shortage.
         if ($loaded === []) {
             return collect();
         }
 
-        $keys = collect(array_keys($loaded));
-        $machineIds = $keys->map(fn (string $key) => (int) explode('@', $key)[0])->unique();
-        $itemIds = $keys->map(fn (string $key) => (int) explode('@', $key)[1])->unique();
-
+        $itemIds = array_keys($loaded);
         $consumed = [];
 
-        // The machine a consumption belongs to is its BATCH's machine — the
-        // consumption row itself carries only the warehouse it was issued
-        // from, which is one shared location for the whole factory.
+        // ACROSS ALL MACHINES. No join to shift_production_entries any more:
+        // which machine burnt it is no longer part of the question, and the
+        // consumption row already carries the item and the quantity.
         //
-        // Narrowed to the machines that have scans, and to rows written at or
-        // after the EARLIEST of their first scans, so a database with years of
-        // pre-scanner history is not dragged through PHP to be discarded.
-        // The exact per-pair cutoff is applied below.
+        // Narrowed to rows written at or after the EARLIEST first load, so a
+        // database with years of pre-recording history is not dragged through
+        // PHP to be discarded. The exact per-material cutoff is applied below.
         ShiftMaterialConsumption::query()
-            ->join(
-                'shift_production_entries',
-                'shift_production_entries.id',
-                '=',
-                'shift_material_consumptions.shift_production_entry_id',
-            )
-            ->whereIn('shift_production_entries.work_center_id', $machineIds)
-            ->whereIn('shift_material_consumptions.item_id', $itemIds)
-            ->where('shift_material_consumptions.created_at', '>=', min($firstLoadAt))
-            ->get([
-                'shift_production_entries.work_center_id as wc_id',
-                'shift_material_consumptions.item_id',
-                'shift_material_consumptions.quantity_issued_kg',
-                'shift_material_consumptions.created_at',
-            ])
-            ->each(function ($row) use (&$consumed, $firstLoadAt) {
-                $key = "{$row->wc_id}@{$row->item_id}";
+            ->whereIn('item_id', $itemIds)
+            ->where('created_at', '>=', min($firstLoadAt))
+            ->get(['item_id', 'quantity_issued_kg', 'created_at'])
+            ->each(function (ShiftMaterialConsumption $row) use (&$consumed, $firstLoadAt) {
+                $key = (int) $row->item_id;
 
-                // Consumption from before this material was ever scanned into
-                // this machine came out of a hopper nobody logged. It is not
-                // this estimate's to subtract — see the docblock.
+                // Consumption from before this material was ever loaded came
+                // out of an input nobody was recording. It is not this
+                // estimate's to subtract — see the docblock.
                 if (! isset($firstLoadAt[$key])
                     || CarbonImmutable::parse($row->created_at)->lessThan($firstLoadAt[$key])) {
                     return;
@@ -670,49 +670,25 @@ class FactoryDayBinService
                 $consumed[$key] = bcadd($consumed[$key] ?? '0.0000', (string) $row->quantity_issued_kg, 4);
             });
 
-        $machines = WorkCenter::query()->whereIn('id', $machineIds)->orderBy('code')->get();
-        $items = Item::withTrashed()
+        return Item::withTrashed()
             ->whereIn('id', $itemIds)
             ->orderBy('name')
             ->get()
             // The PHP twin of scopeKgUom — rows are already in memory, and a
             // trashed master must be judged on the UOM it still carries.
             ->filter(fn (Item $item) => $item->hasKgUom())
-            ->keyBy('id');
+            ->map(function (Item $item) use ($loaded, $consumed, $lastLoadAt) {
+                $loadedKg = $loaded[$item->id];
+                $consumedKg = $consumed[$item->id] ?? '0.0000';
 
-        return $machines
-            ->map(function (WorkCenter $machine) use ($items, $loaded, $consumed, $lastLoadAt) {
-                $materials = $items
-                    ->map(function (Item $item) use ($machine, $loaded, $consumed, $lastLoadAt) {
-                        $key = "{$machine->id}@{$item->id}";
-
-                        // No scan of this material into this machine = no
-                        // baseline, so no row. Its consumption is not zero, it
-                        // is unmeasurable here, and a 0 kg line would say the
-                        // opposite.
-                        if (! isset($loaded[$key])) {
-                            return null;
-                        }
-
-                        $loadedKg = $loaded[$key];
-                        $consumedKg = $consumed[$key] ?? '0.0000';
-
-                        return [
-                            'item' => $item,
-                            'loaded_kg' => $loadedKg,
-                            'consumed_kg' => $consumedKg,
-                            'estimated_remaining_kg' => bcsub($loadedKg, $consumedKg, 4),
-                            'last_load_at' => $lastLoadAt[$key] ?? null,
-                        ];
-                    })
-                    ->filter()
-                    ->values();
-
-                return ['work_center' => $machine, 'materials' => $materials];
+                return [
+                    'item' => $item,
+                    'loaded_kg' => $loadedKg,
+                    'consumed_kg' => $consumedKg,
+                    'estimated_remaining_kg' => bcsub($loadedKg, $consumedKg, 4),
+                    'last_load_at' => $lastLoadAt[$item->id] ?? null,
+                ];
             })
-            // A machine whose only scanned material turned out to be non-kg
-            // drops out entirely rather than listing as an empty card.
-            ->filter(fn (array $row) => $row['materials']->isNotEmpty())
             ->values();
     }
 

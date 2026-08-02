@@ -7,19 +7,20 @@ use App\Modules\Inventory\Http\Resources\MaterialBagResource;
 use App\Modules\Inventory\Http\Resources\WarehouseResource;
 use App\Modules\Production\Http\Requests\LoadFactoryDayBinBagRequest;
 use App\Modules\Production\Http\Requests\MachineResinQueryRequest;
+use App\Modules\Production\Http\Resources\CommonResinMaterialResource;
 use App\Modules\Production\Http\Resources\DayBinMovementResource;
 use App\Modules\Production\Http\Resources\FactoryDayBinLoadResource;
 use App\Modules\Production\Http\Resources\FactoryDayBinMaterialResource;
 use App\Modules\Production\Http\Resources\FactoryDayBinSummaryResource;
-use App\Modules\Production\Http\Resources\MachineResinEstimateResource;
 use App\Modules\Production\Http\Resources\RawMaterialPickerResource;
 use App\Modules\Production\Services\FactoryDayBinService;
 use Illuminate\Http\JsonResponse;
 
 /**
  * The factory's internal WIP location as a place (which warehouse it is and
- * what is in it), and the per-machine estimated resin remaining built on top
- * of it.
+ * what is in it), and the COMMON RESIN INPUT's estimated remaining built on
+ * top of it — one figure per material for the whole factory, never per
+ * machine (owner's correction, 2-Aug).
  *
  * The reads (show, machineResin) are deliberately OUTSIDE the
  * traceability-gated route group: they are the plain path (warehouses,
@@ -54,28 +55,31 @@ class FactoryDayBinController extends Controller
     }
 
     /**
-     * ESTIMATED RESIN REMAINING PER MACHINE — loads into that machine minus
-     * the calculated consumption of its batches, per material, all time.
+     * ESTIMATED RESIN REMAINING IN THE COMMON INPUT — every load of a
+     * material minus the calculated consumption of that material across ALL
+     * machines, one row per material.
      *
-     * This REPLACED the day-bin reconciliation read, which compared a derived
-     * expected closing against a physical bin weight. The owner (31-Jul):
-     * "Our factory does not use a Day Bin warehouse or an evening physical
-     * bin weight. Replace that idea with estimated resin remaining for each
-     * machine." A read that waits for a count nobody takes is worse than no
-     * read, so it is gone rather than left on the screen looking answerable.
+     * THE MACHINE DIMENSION IS GONE, and that is the owner's correction
+     * (2-Aug): the factory has one common resin input point, a bag is never
+     * assigned or scanned to a machine, and a per-machine balance was a
+     * number with no physical referent. The route PATH is unchanged so the
+     * deploy is one-sided; the PAYLOAD is a flat list of materials.
      *
-     * Optional ?work_center_id= narrows it to one machine. A read, so
-     * production.view is enough.
+     * ?work_center_id= is still validated and DELIBERATELY IGNORED for the
+     * length of the deploy window — a tablet running the previous build will
+     * keep sending it, and a 422 on a read it can no longer parse anyway
+     * would replace a stale number with an error. It narrows nothing, because
+     * there is nothing left to narrow to.
+     *
+     * A read, so production.view is enough.
      */
     public function machineResin(MachineResinQueryRequest $request): JsonResponse
     {
-        $workCenterId = $request->validated()['work_center_id'] ?? null;
+        $request->validated();
 
         return response()->json([
-            'data' => MachineResinEstimateResource::collection(
-                $this->dayBin->machineResinEstimate(
-                    $workCenterId !== null ? (int) $workCenterId : null,
-                ),
+            'data' => CommonResinMaterialResource::collection(
+                $this->dayBin->commonResinEstimate(),
             ),
         ]);
     }
@@ -93,11 +97,14 @@ class FactoryDayBinController extends Controller
     }
 
     /**
-     * The Shift Floor's scan: one bag barcode → its kg moves store → the
-     * internal WIP warehouse, AND is attributed to the machine it was
-     * emptied into. In the books the stock simply changed location (Tally
-     * still sees one godown); the machine is operational metadata, and it is
-     * what the per-machine estimate above is built from.
+     * The Shift Floor's scan: one bag barcode → its kg move store → the
+     * internal WIP warehouse and enter the COMMON RESIN INPUT. In the books
+     * the stock simply changed location (Tally still sees one godown); no
+     * machine is named, because the factory has one loading point and a bag
+     * is never assigned to a machine.
+     *
+     * A work_center_id posted by a floor tablet still running the previous
+     * build is accepted and ignored — see LoadFactoryDayBinBagRequest.
      *
      * The audit identity is ALWAYS the authenticated user; supervisor_id is
      * only recorded as a note of who was acting supervisor.
@@ -109,7 +116,6 @@ class FactoryDayBinController extends Controller
         $result = $this->dayBin->loadBag(
             (string) $validated['barcode'],
             isset($validated['quantity_kg']) ? (string) $validated['quantity_kg'] : null,
-            (int) $validated['work_center_id'],
             (int) $request->user()->id,
             isset($validated['supervisor_id']) ? (int) $validated['supervisor_id'] : null,
             isset($validated['balance_ack_reason']) ? (string) $validated['balance_ack_reason'] : null,
@@ -119,9 +125,9 @@ class FactoryDayBinController extends Controller
         return response()->json(['data' => [
             'bag' => MaterialBagResource::make($result['bag']),
             'day_bin' => FactoryDayBinMaterialResource::make($result['balance']),
-            // The machine attribution the scan just wrote, echoed back so the
-            // floor screen can confirm WHICH machine it credited without a
-            // second read.
+            // The load row the scan just wrote, echoed back so the floor
+            // screen can confirm the kg it credited without a second read.
+            // Its work_center is null and stays null.
             'movement' => DayBinMovementResource::make($result['movement']),
         ]]);
     }
