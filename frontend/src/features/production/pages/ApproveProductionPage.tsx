@@ -9,15 +9,18 @@ import { hasModuleAccess } from '@/features/auth/permissions';
 import { useAuthStore } from '@/features/auth/store';
 import {
     accountantApproveShiftProductionEntry,
+    generateCartons,
     getVoucherPreview,
     listMachineDowntimeLogs,
     listShiftProductionEntries,
     pmApproveShiftProductionEntry,
     rejectShiftProductionEntry,
 } from '@/features/production/api';
+import FinishedCartonLabels from '@/features/production/components/FinishedCartonLabels';
 import type {
     BatchCost,
     ConsumptionVariance,
+    FinishedCarton,
     MachineDowntimeLog,
     ProductionMetrics,
     ReadableStockShortfall,
@@ -851,6 +854,47 @@ function SourceMaterialSection() {
                 every machine, so every batch draws from the same shared material and the factory records no
                 bag-to-batch link.
             </Typography.Text>
+        </>
+    );
+}
+
+/**
+ * CARTON BARCODE LABELS for a completed batch's packed boxes. One click mints
+ * them (the server is idempotent — a second click returns the same permanent
+ * codes, so generate and reprint are the same button) and shows the printable
+ * labels inline. Only offered once the batch is completed: before that the
+ * packed count is still moving.
+ */
+function CartonLabelsSection({ row }: { row: ShiftProductionEntry }) {
+    const [cartons, setCartons] = useState<FinishedCarton[] | null>(null);
+
+    const generateMutation = useMutation({
+        mutationFn: () => generateCartons(row.id),
+        onSuccess: setCartons,
+        onError: (error: unknown) => {
+            const detail = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+            Modal.error({ title: 'Could not produce carton labels', content: detail ?? 'Unknown error' });
+        },
+    });
+
+    if (row.batch_status !== 'completed') return null;
+
+    return (
+        <>
+            <Typography.Title level={5} style={{ marginTop: 16 }}>Carton Labels</Typography.Title>
+            {cartons === null ? (
+                <>
+                    <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+                        Every packed box gets a permanent barcode naming its batch — scanned later at dispatch.
+                        Codes never change, so this button also reprints existing labels.
+                    </Typography.Text>
+                    <Button loading={generateMutation.isPending} onClick={() => generateMutation.mutate()}>
+                        Carton labels
+                    </Button>
+                </>
+            ) : (
+                <FinishedCartonLabels cartons={cartons} />
+            )}
         </>
     );
 }
@@ -1820,6 +1864,8 @@ export default function ApproveProductionPage() {
                         )}
 
                         <SourceMaterialSection />
+
+                        <CartonLabelsSection row={detailRow} />
 
                         <VoucherPreviewSection preview={voucherPreview} loading={voucherLoading} />
 

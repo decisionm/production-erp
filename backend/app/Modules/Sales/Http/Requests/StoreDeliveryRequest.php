@@ -20,7 +20,11 @@ class StoreDeliveryRequest extends FormRequest
             'reference' => ['nullable', 'string', 'max:255'],
             'delivered_date' => ['nullable', 'date'],
             'notes' => ['nullable', 'string'],
-            'lines' => ['required', 'array', 'min:1'],
+            // Either typed lines OR scanned carton codes — the scan path
+            // derives its lines from the physical cartons server-side.
+            'carton_codes' => ['sometimes', 'array', 'min:1'],
+            'carton_codes.*' => ['string', 'max:64'],
+            'lines' => ['required_without:carton_codes', 'array', 'min:1'],
             'lines.*.sales_order_line_id' => [
                 'required',
                 'integer',

@@ -1,11 +1,13 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Descriptions, Drawer, Form, Input, InputNumber, message, Modal, Select, Space, Table, Typography } from 'antd';
+import { Alert, Button, Descriptions, Drawer, Form, Input, InputNumber, message, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import BarcodeScanInput from '@/components/barcode/BarcodeScanInput';
 import { listWarehouses } from '@/features/inventory/api';
+import { lookupCarton } from '@/features/production/api';
+import type { FinishedCarton } from '@/features/production/types';
 import { createDelivery, listDeliveries, listSalesOrders } from '@/features/sales/api';
 import type { Delivery } from '@/features/sales/types';
 
@@ -28,6 +30,10 @@ type DeliveryFormValues = z.infer<typeof deliverySchema>;
 export default function DeliveriesPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [detailDelivery, setDetailDelivery] = useState<Delivery | null>(null);
+    // DISPATCH BY SCAN: the cartons scanned for this delivery. When any are
+    // present the server derives the lines from these physical boxes and the
+    // typed quantities above are not sent at all.
+    const [scannedCartons, setScannedCartons] = useState<FinishedCarton[]>([]);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['sales', 'deliveries'], queryFn: listDeliveries });
@@ -48,6 +54,36 @@ export default function DeliveriesPage() {
     const { fields, replace } = useFieldArray({ control, name: 'lines' });
     const selectedOrderId = watch('sales_order_id');
     const selectedOrder = deliverableOrders.find((o) => o.id === selectedOrderId);
+
+    // Resolve one scanned carton code and queue it. The server re-checks
+    // everything at submit (locked, so two scanners cannot race a box out
+    // twice) — these checks exist so the person scanning hears about a wrong
+    // box now, holding it, not after twenty more scans.
+    const handleCartonScan = async (code: string) => {
+        const trimmed = code.trim();
+        if (trimmed === '') return;
+        if (scannedCartons.some((c) => c.carton_no === trimmed)) {
+            message.info(`Carton ${trimmed} is already on this delivery's list.`);
+            return;
+        }
+        try {
+            const carton = await lookupCarton(trimmed);
+            if (carton.status === 'dispatched') {
+                message.error(`Carton ${trimmed} was already dispatched — it cannot leave twice.`);
+                return;
+            }
+            if (selectedOrder && !selectedOrder.lines.some((l) => l.item.id === carton.item?.id)) {
+                message.error(`Carton ${trimmed} holds ${carton.item?.sku ?? 'an item'} — this order does not carry it.`);
+                return;
+            }
+            setScannedCartons((prev) => [...prev, carton]);
+            message.success(
+                `${trimmed}: ${Number(carton.pieces).toLocaleString('en-IN')} pcs · batch ${carton.batch?.batch_number ?? '—'}`,
+            );
+        } catch (error: any) {
+            message.error(error?.response?.data?.message ?? `No carton carries the code ${trimmed}.`);
+        }
+    };
 
     const handleLineScan = (code: string) => {
         const trimmed = code.trim().toLowerCase();
@@ -80,6 +116,8 @@ export default function DeliveriesPage() {
             }));
 
         replace(remainingLines);
+        // A carton queued against one order may be off the next one entirely.
+        setScannedCartons([]);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedOrderId]);
 
@@ -95,6 +133,7 @@ export default function DeliveriesPage() {
             invalidate();
             setModalOpen(false);
             reset({ lines: [] });
+            setScannedCartons([]);
         },
         onError: (error: any) => {
             Modal.error({ title: 'Could not post delivery', content: error?.response?.data?.message ?? 'Unknown error' });
@@ -136,16 +175,25 @@ export default function DeliveriesPage() {
                 maskClosable={false}
                 title="New Delivery"
                 open={modalOpen}
-                onCancel={() => setModalOpen(false)}
+                onCancel={() => {
+                    setModalOpen(false);
+                    setScannedCartons([]);
+                }}
                 onOk={handleSubmit((values) =>
                     mutation.mutate({
                         sales_order_id: values.sales_order_id,
                         warehouse_id: values.warehouse_id,
                         reference: values.reference,
-                        lines: values.lines.map((l) => ({
-                            sales_order_line_id: l.sales_order_line_id,
-                            quantity: l.quantity,
-                        })),
+                        // Scanned cartons win: the delivery is then built from
+                        // the physical boxes, not the typed quantities.
+                        ...(scannedCartons.length > 0
+                            ? { carton_codes: scannedCartons.map((c) => c.carton_no) }
+                            : {
+                                  lines: values.lines.map((l) => ({
+                                      sales_order_line_id: l.sales_order_line_id,
+                                      quantity: l.quantity,
+                                  })),
+                              }),
                     }),
                 )}
                 confirmLoading={mutation.isPending}
@@ -211,6 +259,53 @@ export default function DeliveriesPage() {
                             />
                         </Space>
                     ))}
+
+                    {fields.length > 0 && (
+                        <div style={{ marginTop: 16 }}>
+                            <Typography.Text strong>Or dispatch by scanning cartons</Typography.Text>
+                            <Form.Item style={{ marginTop: 8, marginBottom: 8 }}>
+                                <BarcodeScanInput
+                                    autoFocus={false}
+                                    placeholder="Scan a carton barcode to add its box…"
+                                    onScan={handleCartonScan}
+                                />
+                            </Form.Item>
+                            {scannedCartons.length > 0 && (
+                                <>
+                                    <Alert
+                                        type="info"
+                                        showIcon
+                                        style={{ marginBottom: 8 }}
+                                        message={`The delivery will be built from these ${scannedCartons.length} scanned carton${scannedCartons.length === 1 ? '' : 's'} — ${scannedCartons
+                                            .reduce((sum, c) => sum + Number(c.pieces), 0)
+                                            .toLocaleString('en-IN')} pcs. The typed quantities above are ignored.`}
+                                    />
+                                    {scannedCartons.map((carton) => (
+                                        <Space key={carton.carton_no} style={{ display: 'flex', marginTop: 4 }}>
+                                            <Typography.Text code>{carton.carton_no}</Typography.Text>
+                                            <span>
+                                                {carton.item?.sku ?? '—'} · {Number(carton.pieces).toLocaleString('en-IN')} pcs
+                                                {carton.is_partial ? ' ' : ''}
+                                            </span>
+                                            {carton.is_partial && <Tag color="warning">Partial</Tag>}
+                                            <Button
+                                                size="small"
+                                                type="link"
+                                                danger
+                                                onClick={() =>
+                                                    setScannedCartons((prev) =>
+                                                        prev.filter((c) => c.carton_no !== carton.carton_no),
+                                                    )
+                                                }
+                                            >
+                                                Remove
+                                            </Button>
+                                        </Space>
+                                    ))}
+                                </>
+                            )}
+                        </div>
+                    )}
                 </Form>
             </Modal>
 

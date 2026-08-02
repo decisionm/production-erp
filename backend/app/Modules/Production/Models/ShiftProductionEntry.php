@@ -155,6 +155,12 @@ class ShiftProductionEntry extends Model
         return $this->hasMany(ShiftMaterialConsumption::class);
     }
 
+    /** The batch's packed cartons, each with a permanent scannable identity. */
+    public function cartons(): HasMany
+    {
+        return $this->hasMany(FinishedCarton::class);
+    }
+
     /**
      * Sync attempts for this entry, newest first — read-only here; all
      * writes stay in the TallySync module. Exists so a failed entry can

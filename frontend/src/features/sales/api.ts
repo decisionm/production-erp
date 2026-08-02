@@ -81,7 +81,15 @@ export interface CreateDeliveryPayload {
     warehouse_id: number;
     reference?: string;
     notes?: string;
-    lines: { sales_order_line_id: number; quantity: number }[];
+    /** Typed quantities — the path without carton barcodes. */
+    lines?: { sales_order_line_id: number; quantity: number }[];
+    /**
+     * Dispatch by scan: the carton barcodes that physically left. The server
+     * derives the delivery lines from these boxes and refuses any carton that
+     * is unknown, already dispatched, or off this order — send INSTEAD of
+     * `lines`, never both.
+     */
+    carton_codes?: string[];
 }
 
 export async function createDelivery(payload: CreateDeliveryPayload): Promise<Delivery> {
