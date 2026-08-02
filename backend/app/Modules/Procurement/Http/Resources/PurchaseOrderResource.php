@@ -12,6 +12,9 @@ class PurchaseOrderResource extends JsonResource
         return [
             'id' => $this->id,
             'status' => $this->status->value,
+            // 'tally' = a read-only mirror of the order living in Tally.
+            'source' => $this->source ?? 'erp',
+            'tally_order_no' => $this->tally_order_no,
             'vendor' => VendorResource::make($this->whenLoaded('vendor')),
             'purchase_requisition_id' => $this->purchase_requisition_id,
             'order_date' => $this->order_date?->toDateString(),

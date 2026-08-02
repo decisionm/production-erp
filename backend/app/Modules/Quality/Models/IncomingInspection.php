@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[Fillable([
     'goods_receipt_note_line_id', 'item_id', 'inspected_quantity', 'accepted_quantity',
     'rejected_quantity', 'result', 'inspection_date', 'inspected_by', 'notes',
+    'rejections_out_reference', 'bag_disposition_note',
 ])]
 class IncomingInspection extends Model
 {

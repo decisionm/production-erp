@@ -6,6 +6,7 @@ use App\Modules\Inventory\Models\Item;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable(['purchase_order_id', 'item_id', 'quantity', 'unit_price', 'quantity_received'])]
 class PurchaseOrderLine extends Model
@@ -27,5 +28,11 @@ class PurchaseOrderLine extends Model
     public function item(): BelongsTo
     {
         return $this->belongsTo(Item::class);
+    }
+
+    /** Item/due-date delivery windows, oldest due first — the GRN allocation order. */
+    public function schedules(): HasMany
+    {
+        return $this->hasMany(PurchaseOrderSchedule::class)->orderBy('due_date')->orderBy('id');
     }
 }

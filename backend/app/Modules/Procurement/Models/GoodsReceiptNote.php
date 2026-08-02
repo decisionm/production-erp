@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[Fillable([
     'receipt_key', 'receipt_payload_hash', 'purchase_order_id', 'warehouse_id',
     'reference', 'received_date', 'notes', 'created_by',
+    'receipt_note_reference', 'tracking_number',
 ])]
 class GoodsReceiptNote extends Model
 {

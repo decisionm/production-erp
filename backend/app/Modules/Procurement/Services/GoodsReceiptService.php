@@ -111,7 +111,21 @@ class GoodsReceiptService
                     'received_date' => $data['received_date'] ?? now(),
                     'notes' => $data['notes'] ?? null,
                     'created_by' => $createdBy,
+                    // Recorded at PHYSICAL ARRIVAL (owner-confirmed): the
+                    // reference this arrival's Receipt Note — and any later
+                    // Rejections Out — will carry against the Tally PO. A
+                    // blank gets a deterministic internal one so every
+                    // arrival is referenceable.
+                    'receipt_note_reference' => $data['receipt_note_reference'] ?? null,
+                    'tracking_number' => $data['tracking_number'] ?? null,
                 ]);
+
+                if ($grn->receipt_note_reference === null) {
+                    $grn->update(['receipt_note_reference' => sprintf('RN-%05d', $grn->id)]);
+                }
+                if ($grn->tracking_number === null) {
+                    $grn->update(['tracking_number' => sprintf('GRN-%05d', $grn->id)]);
+                }
 
                 foreach ($data['lines'] as $lineData) {
                     // Form request validation ties purchase_order_line_id to this
@@ -132,6 +146,19 @@ class GoodsReceiptService
                         'quantity' => $lineData['quantity'],
                         'unit_cost' => $unitCost,
                     ]);
+
+                    // SCHEDULE ALLOCATION (owner-confirmed): each arrival is
+                    // booked against the PO line's item/due-date windows —
+                    // explicit rows when the receiver adjusted the preview,
+                    // else oldest-due-first by default. A line on a PO with
+                    // no schedules skips this entirely (ERP-native orders
+                    // keep working unchanged).
+                    $this->allocateSchedules(
+                        $poLine,
+                        $grnLine,
+                        (string) $lineData['quantity'],
+                        $lineData['schedule_allocations'] ?? null,
+                    );
 
                     // This is still the one and only inventory receipt. The
                     // material lots below add physical bag identity; they do
@@ -222,6 +249,76 @@ class GoodsReceiptService
      * @param  array<string, mixed>  $data
      * @return array<string, mixed>
      */
+    /**
+     * Book one GRN line's quantity against its PO line's delivery schedules.
+     *
+     * Explicit allocations (the receiver edited the preview) are validated:
+     * every schedule must belong to this line, no allocation may exceed the
+     * schedule's remaining quantity, and the sum must equal the line. The
+     * default is the owner-confirmed rule — oldest due date first — walking
+     * the windows in due-date order and filling each before the next. A
+     * remainder beyond every schedule is allowed (the delivery genuinely
+     * over-covers the plan) and simply carries no allocation row: the PO
+     * line's own quantity_received remains the authoritative total.
+     */
+    private function allocateSchedules($poLine, $grnLine, string $quantity, ?array $explicit): void
+    {
+        $schedules = $poLine->schedules()->get();
+
+        if ($schedules->isEmpty()) {
+            return;
+        }
+
+        if ($explicit !== null) {
+            $total = '0.0000';
+            foreach ($explicit as $row) {
+                $schedule = $schedules->firstWhere('id', (int) $row['purchase_order_schedule_id']);
+                if ($schedule === null) {
+                    throw new InvalidStatusTransitionException(
+                        'a schedule allocation names a delivery window that does not belong to this order line',
+                    );
+                }
+                $qty = bcadd((string) $row['quantity'], '0', 4);
+                if (bccomp($qty, $schedule->remaining(), 4) > 0) {
+                    throw new InvalidStatusTransitionException(
+                        "an allocation of {$qty} kg exceeds the {$schedule->remaining()} still open on the {$schedule->due_date->toDateString()} window",
+                    );
+                }
+                $total = bcadd($total, $qty, 4);
+                $grnLine->scheduleAllocations()->create([
+                    'purchase_order_schedule_id' => $schedule->id,
+                    'quantity' => $qty,
+                ]);
+                $schedule->update(['quantity_received' => bcadd((string) $schedule->quantity_received, $qty, 4)]);
+            }
+            if (bccomp($total, $quantity, 4) !== 0) {
+                throw new InvalidStatusTransitionException(
+                    "schedule allocations total {$total} but the arrival line is {$quantity} — they must match exactly",
+                );
+            }
+
+            return;
+        }
+
+        $left = $quantity;
+        foreach ($schedules as $schedule) {
+            if (bccomp($left, '0', 4) !== 1) {
+                break;
+            }
+            $open = $schedule->remaining();
+            if (bccomp($open, '0', 4) !== 1) {
+                continue;
+            }
+            $take = bccomp($left, $open, 4) === 1 ? $open : $left;
+            $grnLine->scheduleAllocations()->create([
+                'purchase_order_schedule_id' => $schedule->id,
+                'quantity' => $take,
+            ]);
+            $schedule->update(['quantity_received' => bcadd((string) $schedule->quantity_received, $take, 4)]);
+            $left = bcsub($left, $take, 4);
+        }
+    }
+
     private function prepareLotManifests(PurchaseOrder $order, array $data): array
     {
         /** @var array<string, string> $barcodePaths */

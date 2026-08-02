@@ -10,7 +10,7 @@ import BarcodeScanInput from '@/components/barcode/BarcodeScanInput';
 import MaterialBagLabels from '@/features/inventory/components/MaterialBagLabels';
 import { listWarehouses } from '@/features/inventory/api';
 import { createGoodsReceipt, listGoodsReceipts, listPurchaseOrders } from '@/features/procurement/api';
-import type { GoodsReceiptNote } from '@/features/procurement/types';
+import type { GoodsReceiptNote, PurchaseOrderSchedule } from '@/features/procurement/types';
 import { useProductionSettings } from '@/features/production/packing';
 import { formatDateTime } from '@/lib/datetime';
 import { itemLabel } from '@/lib/itemLabel';
@@ -22,6 +22,27 @@ function nowReceivedAt(): string {
     return dayjs().format(RECEIVED_AT_FORMAT);
 }
 
+/**
+ * The owner-confirmed default: an arrival fills the oldest-due open window
+ * first, then walks forward. Rendered as an editable preview — the server
+ * enforces the same arithmetic on whatever the receiver submits.
+ */
+function proposeAllocations(schedules: PurchaseOrderSchedule[], quantity: number) {
+    if (schedules.length === 0) return undefined;
+    let left = quantity;
+    return schedules.map((schedule) => {
+        const open = Number(schedule.remaining);
+        const take = Math.min(Math.max(left, 0), Math.max(open, 0));
+        left -= take;
+        return {
+            purchase_order_schedule_id: schedule.id,
+            due_date: schedule.due_date,
+            remaining: schedule.remaining,
+            quantity: Number(take.toFixed(4)),
+        };
+    });
+}
+
 const receiptSchema = z.object({
     purchase_order_id: z.number({ error: 'Purchase order is required' }),
     warehouse_id: z.number({ error: 'Warehouse is required' }),
@@ -30,6 +51,10 @@ const receiptSchema = z.object({
         .string({ error: 'Received date & time is required' })
         .min(1, 'Received date & time is required'),
     reference: z.string().optional(),
+    // Recorded at physical arrival (owner flow) — both default
+    // deterministically server-side when left blank.
+    receipt_note_reference: z.string().trim().max(64).optional(),
+    tracking_number: z.string().trim().max(64).optional(),
     lines: z
         .array(
             z.object({
@@ -38,6 +63,17 @@ const receiptSchema = z.object({
                 item_uom: z.string(),
                 quantity: z.number().gt(0, 'Quantity must be greater than 0'),
                 unit_cost: z.number().min(0),
+                // The editable allocation preview against the PO line's
+                // delivery windows. Prefilled oldest-due-first from the
+                // typed quantity; the server validates the sum exactly.
+                schedule_allocations: z
+                    .array(z.object({
+                        purchase_order_schedule_id: z.number(),
+                        due_date: z.string(),
+                        remaining: z.string(),
+                        quantity: z.number().min(0),
+                    }))
+                    .optional(),
                 // Phase 6 traceability intake — optional, and only ever
                 // populated when production.traceability_enabled is on (the
                 // sub-form doesn't render otherwise).
@@ -83,6 +119,41 @@ function isMassUom(uom: string): boolean {
  * backend mints a barcoded material_bags row per bag. Rendered only when the
  * traceability flag is on.
  */
+/**
+ * The editable allocation preview: which delivery window this arrival's
+ * quantity is booked against. Prefilled oldest-due-first when the line is
+ * seeded; the receiver may move quantity between windows; the server
+ * validates that the sum equals the line exactly.
+ */
+function LineAllocationsEditor({ control, lineIndex }: { control: Control<ReceiptFormValues>; lineIndex: number }) {
+    const { fields } = useFieldArray({ control, name: `lines.${lineIndex}.schedule_allocations` });
+
+    if (fields.length === 0) return null;
+
+    return (
+        <div style={{ marginLeft: 24, marginTop: 4 }}>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                Booked against delivery windows — oldest due first by default; adjust before submitting.
+            </Typography.Text>
+            {fields.map((row, allocationIndex) => (
+                <Space key={row.id} align="baseline" style={{ display: 'flex', marginTop: 2 }}>
+                    <span style={{ width: 150, display: 'inline-block', fontVariantNumeric: 'tabular-nums' }}>
+                        due {row.due_date}
+                    </span>
+                    <Typography.Text type="secondary" style={{ fontSize: 12, width: 110, display: 'inline-block' }}>
+                        open {row.remaining}
+                    </Typography.Text>
+                    <Controller
+                        name={`lines.${lineIndex}.schedule_allocations.${allocationIndex}.quantity`}
+                        control={control}
+                        render={({ field }) => <InputNumber {...field} min={0} placeholder="Qty" size="small" />}
+                    />
+                </Space>
+            ))}
+        </div>
+    );
+}
+
 function LineLotsSubForm({ control, lineIndex }: { control: Control<ReceiptFormValues>; lineIndex: number }) {
     const lots = useFieldArray({ control, name: `lines.${lineIndex}.lots` });
     const line = useWatch({ control, name: `lines.${lineIndex}` });
@@ -263,6 +334,13 @@ export default function GoodsReceiptsPage() {
                 item_uom: line.item.uom,
                 quantity: Number(line.quantity) - Number(line.quantity_received),
                 unit_cost: Number(line.unit_price),
+                // Oldest-due-first proposal over the line's open delivery
+                // windows — shown editable; the receiver may move quantity
+                // between windows before submitting.
+                schedule_allocations: proposeAllocations(
+                    line.schedules ?? [],
+                    Number(line.quantity) - Number(line.quantity_received),
+                ),
                 // In the new traceability UI, kg receipts cannot silently
                 // bypass their physical bags. Pre-opening one required row
                 // makes the normal path obvious; the backend remains
@@ -302,10 +380,21 @@ export default function GoodsReceiptsPage() {
                 warehouse_id: values.warehouse_id,
                 received_date: values.received_date,
                 reference: values.reference,
+                receipt_note_reference: values.receipt_note_reference || undefined,
+                tracking_number: values.tracking_number || undefined,
                 lines: values.lines.map((l) => ({
                     purchase_order_line_id: l.purchase_order_line_id,
                     quantity: l.quantity,
                     unit_cost: l.unit_cost,
+                    // Send the edited preview only when windows exist; rows
+                    // moved to zero are dropped (a zero allocation is not an
+                    // allocation). The server re-validates the exact sum.
+                    schedule_allocations: (l.schedule_allocations ?? [])
+                        .filter((row) => row.quantity > 0)
+                        .map((row) => ({
+                            purchase_order_schedule_id: row.purchase_order_schedule_id,
+                            quantity: row.quantity,
+                        })),
                     lots:
                         traceabilityEnabled && (l.lots?.length ?? 0) > 0
                             ? l.lots!.map((lot) => ({
@@ -493,6 +582,24 @@ export default function GoodsReceiptsPage() {
                     <Form.Item label="Reference">
                         <Controller name="reference" control={control} render={({ field }) => <Input {...field} />} />
                     </Form.Item>
+                    {/* Recorded at physical arrival (owner flow): the Receipt
+                        Note reference this arrival — and any later Rejections
+                        Out — will carry against the Tally order. Left blank,
+                        both default to deterministic internal ones. */}
+                    <Form.Item label="Receipt Note reference">
+                        <Space>
+                            <Controller
+                                name="receipt_note_reference"
+                                control={control}
+                                render={({ field }) => <Input {...field} placeholder="e.g. RN-00072 (blank = automatic)" style={{ width: 240 }} />}
+                            />
+                            <Controller
+                                name="tracking_number"
+                                control={control}
+                                render={({ field }) => <Input {...field} placeholder="Tracking no. (blank = automatic)" style={{ width: 220 }} />}
+                            />
+                        </Space>
+                    </Form.Item>
 
                     <Typography.Text strong>Lines to Receive</Typography.Text>
                     {fields.length > 0 && (
@@ -527,6 +634,7 @@ export default function GoodsReceiptsPage() {
                                     render={({ field }) => <InputNumber {...field} min={0} placeholder="Unit Cost" />}
                                 />
                             </Space>
+                            <LineAllocationsEditor control={control} lineIndex={index} />
                             {/* Phase 6: per-line supplier lots & bags — the GRN
                                 end of the lot → bag → day-bin chain. Optional:
                                 a GRN without lots posts exactly as before. */}

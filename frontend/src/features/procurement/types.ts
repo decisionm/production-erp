@@ -35,17 +35,31 @@ export interface PurchaseRequisition {
 
 export type PurchaseOrderStatus = 'draft' | 'sent' | 'partially_received' | 'closed' | 'cancelled';
 
+/** One item/due-date delivery window mirrored from the Tally order. */
+export interface PurchaseOrderSchedule {
+    id: number;
+    due_date: string;
+    quantity: string;
+    quantity_received: string;
+    remaining: string;
+    tally_reference: string | null;
+}
+
 export interface PurchaseOrderLine {
     id: number;
     item: Item;
     quantity: string;
     unit_price: string;
     quantity_received: string;
+    schedules?: PurchaseOrderSchedule[];
 }
 
 export interface PurchaseOrder {
     id: number;
     status: PurchaseOrderStatus;
+    /** 'tally' = read-only mirror of the order living in Tally. */
+    source: 'erp' | 'tally';
+    tally_order_no: string | null;
     vendor: Vendor;
     purchase_requisition_id: number | null;
     order_date: string;
@@ -70,6 +84,9 @@ export interface GoodsReceiptNote {
     purchase_order_id: number;
     warehouse: Warehouse;
     reference: string | null;
+    /** Recorded at physical arrival; defaults deterministically when blank. */
+    receipt_note_reference?: string | null;
+    tracking_number?: string | null;
     received_date: string;
     notes: string | null;
     lines: GoodsReceiptNoteLine[];

@@ -21,6 +21,11 @@ class IncomingInspectionResource extends JsonResource
             'inspection_date' => $this->inspection_date?->toDateString(),
             'inspected_by' => $this->whenLoaded('inspectedBy', fn () => $this->inspectedBy?->name),
             'notes' => $this->notes,
+            // What the disposition actually did to the arrival's bags, and
+            // the reference a Rejections Out voucher will carry once its
+            // Tally shape is proven and enabled. Reference, not voucher.
+            'rejections_out_reference' => $this->rejections_out_reference,
+            'bag_disposition_note' => $this->bag_disposition_note,
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }

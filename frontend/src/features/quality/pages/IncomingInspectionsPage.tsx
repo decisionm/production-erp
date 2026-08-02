@@ -98,6 +98,24 @@ export default function IncomingInspectionsPage() {
                     },
                     { title: 'Date', dataIndex: 'inspection_date' },
                     {
+                        title: 'Disposition',
+                        render: (_, row) => (
+                            <>
+                                {row.bag_disposition_note && (
+                                    <Typography.Text style={{ display: 'block', fontSize: 12 }}>
+                                        {row.bag_disposition_note}
+                                    </Typography.Text>
+                                )}
+                                {row.rejections_out_reference && (
+                                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                        Rejections Out ref {row.rejections_out_reference} — recorded; no Tally voucher until its shape is proven.
+                                    </Typography.Text>
+                                )}
+                                {!row.bag_disposition_note && !row.rejections_out_reference && '—'}
+                            </>
+                        ),
+                    },
+                    {
                         title: 'Actions',
                         render: (_, row) => (
                             <Button size="small" onClick={() => setDetailRow(row)}>View</Button>

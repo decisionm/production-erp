@@ -81,7 +81,15 @@ export interface CreatePurchaseOrderPayload {
     order_date: string;
     expected_date?: string;
     notes?: string;
-    lines: { item_id: number; quantity: number; unit_price: number }[];
+    /** 'tally' records a read-only mirror of the order living in Tally. */
+    source?: 'erp' | 'tally';
+    tally_order_no?: string;
+    lines: {
+        item_id: number;
+        quantity: number;
+        unit_price: number;
+        schedules?: { due_date: string; quantity: number; tally_reference?: string }[];
+    }[];
 }
 
 export async function createPurchaseOrder(payload: CreatePurchaseOrderPayload): Promise<PurchaseOrder> {
@@ -118,10 +126,15 @@ export interface CreateGoodsReceiptPayload {
      */
     received_date: string;
     notes?: string;
+    /** Recorded at physical arrival; server defaults both when blank. */
+    receipt_note_reference?: string;
+    tracking_number?: string;
     lines: {
         purchase_order_line_id: number;
         quantity: number;
         unit_cost?: number;
+        /** Edited oldest-due preview; omitted = server allocates oldest-due itself. */
+        schedule_allocations?: { purchase_order_schedule_id: number; quantity: number }[];
         lots?: {
             supplier_lot_no?: string;
             bag_count: number;
