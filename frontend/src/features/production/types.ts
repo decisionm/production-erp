@@ -2388,3 +2388,29 @@ export interface FactoryDayBinLoadResult {
      */
     movement?: DayBinMovement;
 }
+
+/**
+ * A FINISHED CARTON — one physical box of a completed batch's packed output,
+ * carrying a permanent printed barcode. Generated once per batch (idempotent),
+ * scanned at dispatch. Mirrors FinishedCartonResource.
+ */
+export interface FinishedCarton {
+    id: number;
+    /** The printed code: {batch_number}-C01, -C02, … Permanent. */
+    carton_no: string;
+    item?: Item;
+    /** Pieces in this box — the last box of a run is usually a partial. */
+    pieces: string;
+    is_partial: boolean;
+    status: 'in_stock' | 'dispatched';
+    delivery_id: number | null;
+    /** The traceability spine: which batch this physical box came from. */
+    batch?: {
+        shift_production_entry_id: number;
+        batch_number: string | null;
+        production_date: string | null;
+        machine: string | null;
+        shift: string | null;
+    };
+    created_at: string | null;
+}

@@ -10,6 +10,7 @@ import type {
     BalanceAckReason,
     BatchPreview,
     BinBayAvailabilityResponse,
+    FinishedCarton,
     BinBayHistoryRow,
     Bom,
     DowntimeReason,
@@ -1661,5 +1662,28 @@ export async function loadFactoryDayBin(payload: LoadFactoryDayBinPayload): Prom
  */
 export async function listRawMaterials(): Promise<RawMaterialOption[]> {
     const { data } = await api.get<{ data: RawMaterialOption[] }>('/production/factory-day-bin/raw-materials');
+    return data.data;
+}
+
+/**
+ * Mint (or re-fetch) the carton barcodes for a completed batch. Idempotent
+ * server-side: the first call creates them from the packed count, every later
+ * call returns the same rows — so "generate" and "reprint" are one action.
+ */
+export async function generateCartons(entryId: number): Promise<FinishedCarton[]> {
+    const { data } = await api.post<{ data: FinishedCarton[] }>(
+        `/production/shift-production-entries/${entryId}/cartons`,
+    );
+    return data.data;
+}
+
+/**
+ * Resolve one scanned carton code to its box — item, pieces, batch spine,
+ * and whether it already left. 422 when no carton carries the code.
+ */
+export async function lookupCarton(cartonNo: string): Promise<FinishedCarton> {
+    const { data } = await api.get<{ data: FinishedCarton }>(
+        `/production/cartons/${encodeURIComponent(cartonNo)}`,
+    );
     return data.data;
 }

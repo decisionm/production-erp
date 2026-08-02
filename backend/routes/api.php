@@ -50,6 +50,7 @@ use App\Modules\Production\Http\Controllers\DayBinController;
 use App\Modules\Production\Http\Controllers\DowntimeReasonController;
 use App\Modules\Production\Http\Controllers\FactoryDayBinController;
 use App\Modules\Production\Http\Controllers\FactorySettingController;
+use App\Modules\Production\Http\Controllers\FinishedCartonController;
 use App\Modules\Production\Http\Controllers\MachineDowntimeLogController;
 use App\Modules\Production\Http\Controllers\MasterbatchDosingController;
 use App\Modules\Production\Http\Controllers\MoldChangeLogController;
@@ -389,6 +390,14 @@ Route::prefix('v1')->group(function () {
             // ledger+consumption read, so outside the traceability gate like
             // its two neighbours above.
             Route::get('machine-resin', [FactoryDayBinController::class, 'machineResin']);
+
+            // FINISHED CARTON IDENTITIES: generated once per completed batch
+            // (idempotent), reprinted as a plain read, and looked up by scan
+            // for dispatch and traceability. carton_no carries dashes and
+            // digits only — no constraint needed beyond the route segment.
+            Route::post('shift-production-entries/{shift_production_entry}/cartons', [FinishedCartonController::class, 'generate']);
+            Route::get('shift-production-entries/{shift_production_entry}/cartons', [FinishedCartonController::class, 'index']);
+            Route::get('cartons/{cartonNo}', [FinishedCartonController::class, 'lookup']);
             // READING the machine list stays here, under module:production.
             // It is not an admin screen's private data — the Start Batch
             // picker, the configuration forms, the downtime log and the day

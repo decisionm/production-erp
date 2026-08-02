@@ -4,6 +4,7 @@ namespace App\Modules\Sales\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Inventory\Services\StockMovementService;
+use App\Modules\Production\Models\FinishedCarton;
 use App\Modules\Sales\Events\DeliveryDispatched;
 use App\Modules\Sales\Exceptions\OverDeliveryException;
 use App\Modules\Sales\Models\Delivery;
@@ -11,6 +12,7 @@ use App\Modules\Sales\Models\Enums\SalesOrderStatus;
 use App\Modules\Sales\Models\SalesOrder;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Posting a Delivery is the one place Sales actually moves stock. It never
@@ -63,6 +65,17 @@ class DeliveryService
                 'created_by' => $createdBy,
             ]);
 
+            // DISPATCH BY SCAN: when the payload names carton codes, the
+            // delivery's lines are DERIVED from the physical cartons that
+            // actually left — each scanned code resolved, validated against
+            // the order's items, and stamped dispatched onto this delivery.
+            // The quantities then flow through the exact same per-line path
+            // (over-delivery guard, stock issue, Tally event) as a typed
+            // delivery. Traceability rides free: carton → batch → delivery.
+            if (! empty($data['carton_codes'])) {
+                $data['lines'] = $this->linesFromCartons($order, $data['carton_codes'], $delivery->id);
+            }
+
             foreach ($data['lines'] as $lineData) {
                 // Form request validation ties sales_order_line_id to this
                 // sales_order_id, so a miss here means a genuine bug, not
@@ -102,6 +115,52 @@ class DeliveryService
 
             return $delivery->load(['lines.item', 'warehouse', 'salesOrder']);
         });
+    }
+
+    /**
+     * Resolve scanned carton codes into delivery lines. Every carton must
+     * exist, be in stock, and hold an item this order actually carries —
+     * refusals name the exact carton, because the person holding the scanner
+     * is looking at it. Cartons are locked, stamped dispatched, and tied to
+     * the delivery; quantities are grouped per order line.
+     *
+     * @param  array<int, string>  $codes
+     * @return array<int, array{sales_order_line_id: int, quantity: string}>
+     */
+    private function linesFromCartons(SalesOrder $order, array $codes, int $deliveryId): array
+    {
+        $byLine = [];
+
+        foreach (array_values(array_unique($codes)) as $code) {
+            $carton = FinishedCarton::query()->where('carton_no', $code)->lockForUpdate()->first();
+
+            if ($carton === null) {
+                throw ValidationException::withMessages([
+                    'carton_codes' => "No carton carries the code {$code} — check the label.",
+                ]);
+            }
+            if ($carton->status !== FinishedCarton::STATUS_IN_STOCK) {
+                throw ValidationException::withMessages([
+                    'carton_codes' => "Carton {$code} was already dispatched — it cannot leave twice.",
+                ]);
+            }
+
+            $soLine = $order->lines->firstWhere('item_id', $carton->item_id);
+            if ($soLine === null) {
+                throw ValidationException::withMessages([
+                    'carton_codes' => "Carton {$code} holds an item this order does not carry — wrong pallet?",
+                ]);
+            }
+
+            $carton->update(['status' => FinishedCarton::STATUS_DISPATCHED, 'delivery_id' => $deliveryId]);
+
+            $byLine[$soLine->id] = bcadd($byLine[$soLine->id] ?? '0.0000', (string) $carton->pieces, 4);
+        }
+
+        return collect($byLine)
+            ->map(fn ($quantity, $lineId) => ['sales_order_line_id' => (int) $lineId, 'quantity' => $quantity])
+            ->values()
+            ->all();
     }
 
     private function recomputeOrderStatus(SalesOrder $order): void
