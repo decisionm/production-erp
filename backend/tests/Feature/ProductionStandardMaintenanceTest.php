@@ -353,9 +353,25 @@ class ProductionStandardMaintenanceTest extends TestCase
         $this->assertSame(500, $packaging->nos_per_box);
         $this->assertTrue($packaging->is_default);
 
-        // It appears on the standards page...
-        $listed = collect($this->getJson('/api/v1/production/standards?per_page=100')->assertOk()->json('data'));
+        // It appears on the standards page. Under ALL, explicitly: that page
+        // is now a workspace whose default view is production-READY, and this
+        // product is not — the item this test attaches carries no colour, so
+        // the workspace states exactly that and sends the reader to the item.
+        // Being listed as incomplete WITH ITS REASON is the honest answer;
+        // being listed with no qualification is what used to happen and is
+        // how a product reached Start Batch before anyone noticed.
+        $listed = collect($this->getJson('/api/v1/production/standards?view=all&per_page=100')->assertOk()->json('data'));
         $this->assertContains($standard->id, $listed->pluck('id')->all());
+
+        $row = $listed->firstWhere('id', $standard->id);
+        $this->assertSame(
+            [['number' => 1, 'key' => 'colour', 'label' => 'Colour', 'sentence' => $row['gaps'][0]['sentence'], 'fix_target' => 'item_colour']],
+            $row['gaps'],
+            'One gap, numbered, with the screen that closes it.',
+        );
+        $this->assertContains($standard->id, collect(
+            $this->getJson('/api/v1/production/standards?view=incomplete&per_page=100')->assertOk()->json('data'),
+        )->pluck('id')->all());
 
         // ...in the Start Batch picker's coverage projection...
         $coverage = collect($this->getJson('/api/v1/production/standards/coverage')->assertOk()->json('data'));

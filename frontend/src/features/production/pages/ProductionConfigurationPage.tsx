@@ -19,67 +19,76 @@ import {
     Typography,
 } from 'antd';
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { listAllItems, listAllWarehouses } from '@/features/inventory/api';
+import { Link, useSearchParams } from 'react-router-dom';
+import { listAllWarehouses } from '@/features/inventory/api';
+import { hasManageAccess } from '@/features/auth/permissions';
+import { useAuthStore } from '@/features/auth/store';
 import {
-    approveProductionConfiguration,
-    machineLabel,
-    copyProductionConfiguration,
-    createProductionConfiguration,
-    deactivateProductionConfiguration,
+    createWorkCenter,
     importProductionConfigurations,
     listDowntimeReasons,
     listFactorySettings,
-    listMolds,
-    listProductionConfigurations,
     listWorkCenters,
     saveDowntimeReason,
     saveFactorySetting,
     getFactoryWarehouseSettings,
     setFactoryWarehouse,
-    updateWorkCenterCapability,
+    updateWorkCenter,
 } from '@/features/production/api';
-import type { FactoryWarehouseRole } from '@/features/production/api';
-import type { DowntimeReason, ImportResult, ProductionConfiguration, WorkCenter } from '@/features/production/types';
-import { itemLabel } from '@/lib/itemLabel';
+import type { FactoryWarehouseRole, WorkCenterWritePayload } from '@/features/production/api';
+import type { DowntimeReason, ImportResult, WorkCenter } from '@/features/production/types';
 
 /**
- * Machine Setup — where the factory's real machine-side values are entered and
- * approved without a code deploy.
+ * Machine Setup — the MACHINE side of the factory, editable without a deploy.
  *
- * This page is NOT the product list. Every product's agreed weight, cycle time,
- * cavities and packing live on Product Standards (/production/standards); the
- * first tab here holds only the machine-by-machine EXCEPTIONS to those figures
- * and is where they get approved.
+ * The split this page now holds up: everything here belongs to a MACHINE (the
+ * machine master and its capabilities, downtime reasons, factory settings, the
+ * workbook import). Everything belonging to a PRODUCT — agreed weight, cycle
+ * time, cavities, packing, active recipe, required colour, Tally identity and
+ * the machine-by-machine exceptions to those figures — lives on Product
+ * Standards (/production/standards) and is approved there.
  *
- * The organising rule of this screen: nothing here is a production standard
- * until someone approves it. Imported and hand-entered rows are drafts, the
- * factory's own "To Confirm" wording is shown beside them, and approval is a
- * deliberate button with an actor behind it.
+ * The Machine Exceptions tab used to live here and no longer does. It read as a
+ * second product list competing with Product Standards, which is exactly the
+ * confusion this split removes: an exception is a fact about a product, so it
+ * sits beside that product's other figures rather than in a separate workspace.
  */
+
+/** Tab keys, in tab order. `?tab=` accepts exactly these; anything else lands on machines. */
+const TAB_KEYS = ['machines', 'downtime', 'settings', 'import'] as const;
+type TabKey = (typeof TAB_KEYS)[number];
+const DEFAULT_TAB: TabKey = 'machines';
+
 export default function ProductionConfigurationPage() {
+    // Addressable tabs. Without this, "Machine Setup → Factory Settings" in
+    // someone else's prose lands the reader on whichever tab happened to be
+    // the default, and the retired /production/work-centers URL has no way to
+    // redirect to the machine master specifically.
+    const [searchParams, setSearchParams] = useSearchParams();
+    const requested = searchParams.get('tab');
+    const activeTab: TabKey = TAB_KEYS.includes(requested as TabKey) ? (requested as TabKey) : DEFAULT_TAB;
+
     return (
         <div style={{ padding: 24 }}>
             <Typography.Title level={3}>Machine Setup</Typography.Title>
             <Typography.Paragraph type="secondary" style={{ maxWidth: 820 }}>
-                What the office sets up behind the machines — machine exceptions, machine capabilities,
-                downtime reasons and factory settings. A product's agreed weight, cycle time, cavities and
-                packing live on <Link to="/production/standards">Product Standards</Link>. An exception here
-                overrides those figures on one machine, and it reaches the shop floor only once{' '}
-                <Typography.Text strong>approved</Typography.Text>.
+                The machine side of the factory — the machine master and what each machine can run, the
+                downtime reasons the floor picks from, the factory-wide settings, and the workbook import.
+                Products are not set up here: every product's agreed weight, cycle time, cavities, packing,
+                recipe, required colour and its machine exceptions live on{' '}
+                <Link to="/production/standards">Product Standards</Link>, and are approved there.
             </Typography.Paragraph>
 
             <Tabs
-                defaultActiveKey="configurations"
+                activeKey={activeTab}
+                onChange={(key) => {
+                    const next = new URLSearchParams(searchParams);
+                    next.set('tab', key);
+                    // Replace, not push: clicking through four tabs should not
+                    // cost four Back presses to leave the page.
+                    setSearchParams(next, { replace: true });
+                }}
                 items={[
-                    // The tab keeps its key (and stays the default) — only its
-                    // NAME changed. "Machine–Product Configurations" read like a
-                    // second product list and competed with Product Standards;
-                    // the owner said three times the two pages confused them.
-                    // Standards is where every product's figures live; this tab
-                    // is only the machine-by-machine exceptions and their
-                    // approval, so its name now says that.
-                    { key: 'configurations', label: 'Machine Exceptions', children: <ConfigurationsTab /> },
                     { key: 'machines', label: 'Machines & Capabilities', children: <MachinesTab /> },
                     { key: 'downtime', label: 'Downtime Reasons', children: <DowntimeReasonsTab /> },
                     { key: 'settings', label: 'Factory Settings', children: <SettingsTab /> },
@@ -90,300 +99,242 @@ export default function ProductionConfigurationPage() {
     );
 }
 
-const STATUS_COLOUR: Record<string, string> = { draft: 'default', approved: 'success', inactive: 'warning' };
+/**
+ * What a blank capability reads as.
+ *
+ * Not a dash. A dash looks like a value somebody forgot to type, and these
+ * blanks are a real and deliberate state: the factory's master workbook leaves
+ * every cavity field empty, so the software says so instead of inventing a
+ * limit that would then start refusing runs.
+ */
+const NOT_CONFIRMED = 'Not confirmed';
 
-function ConfigurationsTab() {
+/** A stated value, or the honest blank. */
+function stated(value: string | number | null | undefined) {
+    return value == null || value === '' ? (
+        <Typography.Text type="secondary">{NOT_CONFIRMED}</Typography.Text>
+    ) : (
+        String(value)
+    );
+}
+
+interface MachineFormValues {
+    code: string;
+    name: string;
+    capacity_class?: string | null;
+    capacity_hours_per_day?: number | null;
+    min_cavities?: number | null;
+    max_cavities?: number | null;
+    /** Comma-separated in the form; a list of numbers on the wire. */
+    permitted_cavities?: string | null;
+    cycle_time_min?: number | null;
+    cycle_time_max?: number | null;
+    is_active?: boolean;
+}
+
+/** The add flow starts blank and in service — a machine is added to be run. */
+const BLANK_MACHINE: MachineFormValues = {
+    code: '',
+    name: '',
+    capacity_class: null,
+    capacity_hours_per_day: null,
+    min_cavities: null,
+    max_cavities: null,
+    permitted_cavities: '',
+    cycle_time_min: null,
+    cycle_time_max: null,
+    is_active: true,
+};
+
+/**
+ * The resource returns decimal columns as strings (`"8.00"`). An InputNumber
+ * will display that but not increment it, so it is coerced on the way in.
+ */
+function numberOrNull(value: string | number | null | undefined): number | null {
+    if (value == null || value === '') return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function machineFormValues(row: WorkCenter): MachineFormValues {
+    return {
+        code: row.code,
+        name: row.name,
+        capacity_class: row.capacity_class ?? null,
+        capacity_hours_per_day: numberOrNull(row.capacity_hours_per_day),
+        min_cavities: row.min_cavities ?? null,
+        max_cavities: row.max_cavities ?? null,
+        permitted_cavities: row.permitted_cavities?.join(', ') ?? '',
+        cycle_time_min: numberOrNull(row.cycle_time_min),
+        cycle_time_max: numberOrNull(row.cycle_time_max),
+        is_active: row.is_active,
+    };
+}
+
+/**
+ * Named fields, never a spread of the form store: the payload IS the contract
+ * with the endpoint, and a spread quietly posts whatever else the form is
+ * holding and relies on the backend to drop it.
+ *
+ * `default_shift_hours` and `confirmation_status` are absent on purpose. Both
+ * columns exist and both come back on every read; nothing on this screen edits
+ * them, and a key the payload never mentions is a column the backend never
+ * touches.
+ */
+function machinePayload(values: MachineFormValues): WorkCenterWritePayload {
+    const permitted =
+        typeof values.permitted_cavities === 'string' && values.permitted_cavities.trim() !== ''
+            ? values.permitted_cavities
+                  .split(',')
+                  .map((entry) => Number(entry.trim()))
+                  .filter((entry) => Number.isFinite(entry) && entry > 0)
+            : [];
+
+    return {
+        code: values.code.trim(),
+        name: values.name.trim(),
+        capacity_class: values.capacity_class?.trim() || null,
+        capacity_hours_per_day: values.capacity_hours_per_day ?? null,
+        min_cavities: values.min_cavities ?? null,
+        max_cavities: values.max_cavities ?? null,
+        permitted_cavities: permitted.length > 0 ? permitted : null,
+        cycle_time_min: values.cycle_time_min ?? null,
+        cycle_time_max: values.cycle_time_max ?? null,
+        is_active: values.is_active ?? true,
+    };
+}
+
+/**
+ * The MACHINE MASTER. One record per machine, and the only place a machine is
+ * created or edited.
+ *
+ * It replaces two screens that both wrote the same `work_centers` row from
+ * different halves of it: a "Work Centers" admin page that knew about code,
+ * name, hours and active state, and this tab, which knew about cavities and
+ * cycle time. Neither could describe a whole machine. There is no second model
+ * behind this page — the WorkCenter ids the shop floor, the day bin, downtime
+ * and every batch already point at are exactly the rows listed here, which is
+ * why retiring the old page cost no history.
+ *
+ * Codes stay MC-01..MC-10 (the floor's own names). The code field is editable
+ * so a future rename is one edit, not a migration.
+ */
+function MachinesTab() {
     const queryClient = useQueryClient();
-    const [status, setStatus] = useState<string | undefined>();
-    const [machineId, setMachineId] = useState<number | undefined>();
-    const [page, setPage] = useState(1);
-    const [search, setSearch] = useState('');
-    const [creating, setCreating] = useState(false);
+    const user = useAuthStore((s) => s.user);
+    // Supervisors read this master constantly — it is how a machine's cavity
+    // range is checked before a run. Only the office writes it.
+    const canManage = hasManageAccess(user, 'machine-master');
+
+    // Defaults to the machines actually in service. Turning the filter on adds
+    // the retired ones to the same list rather than swapping to them, because
+    // the question it answers is "did we ever have a machine like this?" — a
+    // history read, not a different list.
+    const [showInactive, setShowInactive] = useState(false);
+    const { data, isFetching } = useQuery({
+        queryKey: ['production', 'work-centers', showInactive ? 'all' : 'active'],
+        queryFn: () => listWorkCenters(showInactive ? undefined : true),
+    });
+
+    /** `null` = closed, `'new'` = the add flow, a machine = editing that machine. */
+    const [editing, setEditing] = useState<WorkCenter | 'new' | null>(null);
     const [form] = Form.useForm();
 
-    const { data, isFetching } = useQuery({
-        queryKey: ['production', 'configurations', status, machineId, page, search],
-        queryFn: () => listProductionConfigurations({
-            status,
-            work_center_id: machineId,
-            page,
-            per_page: 50,
-            search: search || undefined,
-        }),
-    });
-    // Active only: a retired machine must not be selectable for a new
-    // configuration, or the configuration is unusable the moment it is
-    // approved.
-    const { data: machines } = useQuery({
-        queryKey: ['production', 'work-centers', 'active'],
-        queryFn: () => listWorkCenters(true),
-    });
-    const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
-    const { data: molds } = useQuery({ queryKey: ['production', 'molds'], queryFn: listMolds });
-
-    const invalidate = () => queryClient.invalidateQueries({ queryKey: ['production', 'configurations'] });
     const onError = (error: any) => {
         const errors = error?.response?.data?.errors;
         Modal.error({
             title: 'Could not save',
-            // Field-level messages from the backend say exactly what is
-            // missing or out of range — surface them rather than a generic
-            // failure the user cannot act on.
+            // Field-level messages say exactly which limit was refused and why
+            // ("max cavities must be at least min cavities"). A generic failure
+            // leaves the office guessing at a number.
             content: errors
                 ? Object.values(errors).flat().join(' ')
                 : (error?.response?.data?.message ?? 'Unexpected error.'),
         });
     };
 
-    const createMutation = useMutation({
-        mutationFn: createProductionConfiguration,
-        onSuccess: () => {
-            invalidate();
-            setCreating(false);
-            form.resetFields();
-        },
-        onError,
-    });
-    const approveMutation = useMutation({ mutationFn: approveProductionConfiguration, onSuccess: invalidate, onError });
-    const deactivateMutation = useMutation({ mutationFn: deactivateProductionConfiguration, onSuccess: invalidate, onError });
-    const copyMutation = useMutation({ mutationFn: copyProductionConfiguration, onSuccess: invalidate, onError });
-
-    const columns = [
-        {
-            title: 'Machine',
-            render: (_: unknown, row: ProductionConfiguration) => row.work_center.name ?? `#${row.work_center.id}`,
-        },
-        {
-            title: 'Product',
-            render: (_: unknown, row: ProductionConfiguration) => (
-                <>
-                    <div>{row.item.name ?? `#${row.item.id}`}</div>
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                        {[row.item.sku, row.mold?.name, row.colour].filter(Boolean).join(' · ')}
-                    </Typography.Text>
-                </>
-            ),
-        },
-        { title: 'CT (s)', dataIndex: 'default_cycle_time' },
-        { title: 'Cavities', dataIndex: 'default_cavities' },
-        { title: 'Weight (g)', dataIndex: 'unit_weight_grams' },
-        {
-            title: 'Status',
-            render: (_: unknown, row: ProductionConfiguration) => (
-                <Space direction="vertical" size={2}>
-                    <Tag color={STATUS_COLOUR[row.status]}>{row.status}</Tag>
-                    {/* The factory's own wording, shown verbatim so nobody
-                        mistakes an unreviewed candidate for a decision. */}
-                    {row.confirmation_status && (
-                        <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                            {row.confirmation_status}
-                        </Typography.Text>
-                    )}
-                </Space>
-            ),
-        },
-        {
-            title: 'Actions',
-            render: (_: unknown, row: ProductionConfiguration) => (
-                <Space>
-                    {row.status === 'draft' && (
-                        <Button
-                            type="primary"
-                            size="small"
-                            loading={approveMutation.isPending}
-                            onClick={() => approveMutation.mutate(row.id)}
-                        >
-                            Approve
-                        </Button>
-                    )}
-                    {row.status === 'approved' && (
-                        <Button size="small" danger onClick={() => deactivateMutation.mutate(row.id)}>
-                            Deactivate
-                        </Button>
-                    )}
-                    <Button size="small" onClick={() => copyMutation.mutate(row.id)}>
-                        Copy
-                    </Button>
-                </Space>
-            ),
-        },
-    ];
-
-    return (
-        <>
-            {/* A person landing here needs to know why this tab exists at all
-                when Product Standards carries the products: this is where a
-                machine-specific exception is created and approved. */}
-            <Alert
-                type="info"
-                showIcon
-                style={{ marginBottom: 16 }}
-                message="This tab is only for machine exceptions"
-                description={
-                    <>
-                        Every product's agreed weight, cycle time, cavities and packing live on{' '}
-                        <Link to="/production/standards">Product Standards</Link> — a row here is only needed
-                        when a product runs differently on one machine than the workbook says, and this is
-                        where that exception gets approved.
-                    </>
-                }
-            />
-
-            <Space style={{ marginBottom: 16 }} wrap>
-                <Input.Search
-                    placeholder="Search product…"
-                    allowClear
-                    onSearch={setSearch}
-                    style={{ width: 260 }}
-                />
-                <Select
-                    allowClear
-                    placeholder="All statuses"
-                    style={{ width: 160 }}
-                    value={status}
-                    onChange={setStatus}
-                    options={[
-                        { value: 'draft', label: 'Draft' },
-                        { value: 'approved', label: 'Approved' },
-                        { value: 'inactive', label: 'Inactive' },
-                    ]}
-                />
-                <Select
-                    allowClear
-                    showSearch
-                    optionFilterProp="label"
-                    placeholder="All machines"
-                    style={{ width: 180 }}
-                    value={machineId}
-                    onChange={(v) => { setMachineId(v); setPage(1); }}
-                    options={(machines?.data ?? []).map((m) => ({ value: m.id, label: m.name }))}
-                />
-                <Button type="primary" onClick={() => setCreating(true)}>
-                    New Configuration
-                </Button>
-            </Space>
-
-            <Table
-                rowKey="id"
-                size="small"
-                loading={isFetching}
-                dataSource={data?.data ?? []}
-                columns={columns as never}
-                pagination={{
-                    current: page,
-                    pageSize: 50,
-                    total: data?.meta?.total ?? 0,
-                    onChange: setPage,
-                    showSizeChanger: false,
-                    showTotal: (total) => `${total} configurations`,
-                }}
-            />
-
-            <Modal
-                title="New configuration"
-                open={creating}
-                onCancel={() => setCreating(false)}
-                okText="Create draft"
-                confirmLoading={createMutation.isPending}
-                onOk={() => form.validateFields().then((values) => createMutation.mutate(values))}
-                destroyOnHidden
-            >
-                <Alert
-                    type="info"
-                    showIcon
-                    style={{ marginBottom: 16 }}
-                    message="Created as a draft. It reaches the shop floor only once approved."
-                />
-                <Form form={form} layout="vertical">
-                    <Form.Item name="work_center_id" label="Machine" rules={[{ required: true }]}>
-                        <Select
-                            showSearch
-                            optionFilterProp="label"
-                            options={(machines?.data ?? []).map((m) => ({ value: m.id, label: machineLabel(m) }))}
-                        />
-                    </Form.Item>
-                    <Form.Item name="item_id" label="Product" rules={[{ required: true }]}>
-                        <Select
-                            showSearch
-                            optionFilterProp="label"
-                            options={(items?.data ?? []).map((i) => ({ value: i.id, label: itemLabel(i) }))}
-                        />
-                    </Form.Item>
-                    <Row gutter={12}>
-                        <Col span={12}>
-                            <Form.Item name="mold_id" label="Mould (optional)">
-                                <Select
-                                    allowClear
-                                    showSearch
-                                    optionFilterProp="label"
-                                    options={(molds?.data ?? []).map((m) => ({ value: m.id, label: m.name }))}
-                                />
-                            </Form.Item>
-                        </Col>
-                        <Col span={12}>
-                            <Form.Item name="colour" label="Colour (optional)">
-                                <Input placeholder="Amber, Clear…" />
-                            </Form.Item>
-                        </Col>
-                    </Row>
-                    <Row gutter={12}>
-                        <Col span={8}>
-                            <Form.Item name="default_cycle_time" label="Cycle time (s)">
-                                <InputNumber min={0.1} style={{ width: '100%' }} />
-                            </Form.Item>
-                        </Col>
-                        <Col span={8}>
-                            <Form.Item name="default_cavities" label="Cavities">
-                                <InputNumber min={1} style={{ width: '100%' }} />
-                            </Form.Item>
-                        </Col>
-                        <Col span={8}>
-                            <Form.Item name="unit_weight_grams" label="Unit weight (g)">
-                                <InputNumber min={0.0001} style={{ width: '100%' }} />
-                            </Form.Item>
-                        </Col>
-                    </Row>
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                        Cycle time, cavities and weight are all required before this can be approved — but you can
-                        save what you know now and fill the rest in as the factory confirms it.
-                    </Typography.Text>
-                </Form>
-            </Modal>
-        </>
-    );
-}
-
-function MachinesTab() {
-    const queryClient = useQueryClient();
-    // Defaults to the machines actually in service. Retired ones stay
-    // reachable behind the filter — production history references them and
-    // they must remain inspectable, just not selectable.
-    const [showInactive, setShowInactive] = useState(false);
-    const { data, isFetching } = useQuery({
-        queryKey: ['production', 'work-centers', showInactive ? 'inactive' : 'active'],
-        queryFn: () => listWorkCenters(!showInactive),
-    });
-    const [editing, setEditing] = useState<WorkCenter | null>(null);
-    const [form] = Form.useForm();
-
     const mutation = useMutation({
-        mutationFn: (values: any) => {
-            const permitted =
-                typeof values.permitted_cavities === 'string' && values.permitted_cavities.trim() !== ''
-                    ? values.permitted_cavities
-                          .split(',')
-                          .map((v: string) => Number(v.trim()))
-                          .filter((v: number) => Number.isFinite(v) && v > 0)
-                    : null;
-            return updateWorkCenterCapability(editing!.id, { ...values, permitted_cavities: permitted });
+        mutationFn: (values: MachineFormValues) => {
+            const payload = machinePayload(values);
+            // The modal is the only caller and only exists while `editing` is
+            // set. The null branch is unreachable — and refuses rather than
+            // falling through to create, because "unreachable" going wrong
+            // here would mean a duplicate machine in a live master.
+            if (editing === null) return Promise.reject(new Error('No machine is open.'));
+            return editing === 'new' ? createWorkCenter(payload) : updateWorkCenter(editing.id, payload);
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['production', 'work-centers'] });
             setEditing(null);
         },
-        onError: (error: any) =>
-            Modal.error({ title: 'Could not save', content: error?.response?.data?.message ?? 'Unexpected error.' }),
+        onError,
     });
+
+    const open = (row: WorkCenter | 'new') => {
+        setEditing(row);
+        // Cleared first, then filled. The form store outlives the modal (it is
+        // destroyed on hide, the store is not), so without the reset an Add
+        // straight after an Edit could open carrying the edited machine's code
+        // — which on a live master is a duplicate machine one Enter away.
+        // BLANK_MACHINE and machineFormValues both state all ten fields, so
+        // the fill alone is already complete; the reset makes that independent
+        // of how the form library treats preserved values.
+        form.resetFields();
+        form.setFieldsValue(row === 'new' ? BLANK_MACHINE : machineFormValues(row));
+    };
+
+    const columns = [
+        { title: 'Code', dataIndex: 'code', width: 110, fixed: 'left' as const },
+        { title: 'Machine', dataIndex: 'name', width: 200 },
+        {
+            title: 'Class',
+            width: 140,
+            render: (_: unknown, row: WorkCenter) => stated(row.capacity_class),
+        },
+        {
+            title: 'Cavities',
+            width: 150,
+            render: (_: unknown, row: WorkCenter) =>
+                row.permitted_cavities?.length
+                    ? row.permitted_cavities.join(' / ')
+                    : row.min_cavities != null || row.max_cavities != null
+                      ? `${row.min_cavities ?? '?'}–${row.max_cavities ?? '?'}`
+                      : NOT_CONFIRMED,
+        },
+        {
+            title: 'Cycle time (s)',
+            width: 150,
+            render: (_: unknown, row: WorkCenter) =>
+                row.cycle_time_min != null || row.cycle_time_max != null
+                    ? `${row.cycle_time_min ?? '?'}–${row.cycle_time_max ?? '?'}`
+                    : NOT_CONFIRMED,
+        },
+        {
+            title: 'Hours/day',
+            width: 120,
+            render: (_: unknown, row: WorkCenter) => stated(row.capacity_hours_per_day),
+        },
+        {
+            title: 'State',
+            width: 110,
+            render: (_: unknown, row: WorkCenter) =>
+                row.is_active ? <Tag color="success">In service</Tag> : <Tag>Retired</Tag>,
+        },
+        ...(canManage
+            ? [
+                  {
+                      title: '',
+                      width: 80,
+                      fixed: 'right' as const,
+                      render: (_: unknown, row: WorkCenter) => (
+                          <Button size="small" onClick={() => open(row)}>
+                              Edit
+                          </Button>
+                      ),
+                  },
+              ]
+            : []),
+    ];
 
     return (
         <>
@@ -391,86 +342,113 @@ function MachinesTab() {
                 type="info"
                 showIcon
                 style={{ marginBottom: 16 }}
-                message="A blank limit means “not known”, and never blocks anything."
-                description="Only a stated limit constrains a configuration. Today every machine's cavity limits are blank — the factory's master workbook leaves them empty."
+                message="A blank limit reads “Not confirmed”, and never blocks anything."
+                description={
+                    <>
+                        Only a stated limit constrains a configuration. Where the factory's master workbook
+                        left a cavity range or cycle-time band empty, this master says “Not confirmed” rather
+                        than inventing a number — and a machine with nothing confirmed still runs everything.
+                    </>
+                }
                 closable
             />
-            <Space style={{ marginBottom: 16 }}>
-                <Switch checked={showInactive} onChange={setShowInactive} size="small" />
-                <Typography.Text>{showInactive ? 'Showing retired machines' : 'Showing active machines'}</Typography.Text>
+
+            <Space style={{ marginBottom: 16 }} wrap>
+                <Space size={8}>
+                    <Switch checked={showInactive} onChange={setShowInactive} size="small" />
+                    <Typography.Text>
+                        {showInactive ? 'Showing every machine, retired included' : 'Showing machines in service'}
+                    </Typography.Text>
+                </Space>
+                {canManage && (
+                    <Button type="primary" onClick={() => open('new')}>
+                        Add Machine
+                    </Button>
+                )}
             </Space>
+
+            {!canManage && (
+                <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 12 }}>
+                    Machine records are edited by the office.
+                </Typography.Paragraph>
+            )}
+
             <Table
                 rowKey="id"
                 size="small"
                 loading={isFetching}
                 dataSource={data?.data ?? []}
                 pagination={false}
-                columns={
-                    [
-                        { title: 'Code', dataIndex: 'code' },
-                        { title: 'Name', dataIndex: 'name' },
-                        { title: 'Class', dataIndex: 'capacity_class', render: (v: string) => v ?? '—' },
-                        {
-                            title: 'Cavities',
-                            render: (_: unknown, row: WorkCenter) =>
-                                row.permitted_cavities?.length
-                                    ? row.permitted_cavities.join(' / ')
-                                    : row.min_cavities || row.max_cavities
-                                      ? `${row.min_cavities ?? '?'}–${row.max_cavities ?? '?'}`
-                                      : '—',
-                        },
-                        {
-                            title: 'Cycle time (s)',
-                            render: (_: unknown, row: WorkCenter) =>
-                                row.cycle_time_min || row.cycle_time_max
-                                    ? `${row.cycle_time_min ?? '?'}–${row.cycle_time_max ?? '?'}`
-                                    : '—',
-                        },
-                        {
-                            title: '',
-                            render: (_: unknown, row: WorkCenter) => (
-                                <Button
-                                    size="small"
-                                    onClick={() => {
-                                        setEditing(row);
-                                        form.setFieldsValue({
-                                            ...row,
-                                            permitted_cavities: row.permitted_cavities?.join(', ') ?? '',
-                                        });
-                                    }}
-                                >
-                                    Edit
-                                </Button>
-                            ),
-                        },
-                    ] as never
-                }
+                scroll={{ x: 'max-content' }}
+                columns={columns as never}
             />
 
+            <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 12 }}>
+                A machine is retired, never deleted — every batch, downtime entry and day-bin balance already
+                recorded still points at its record, so it stays listed behind the filter above.
+            </Typography.Paragraph>
+
             <Modal
-                title={`Capabilities — ${editing?.name ?? ''}`}
+                title={editing === 'new' ? 'Add machine' : `Machine — ${editing?.code ?? ''}`}
                 open={editing !== null}
                 onCancel={() => setEditing(null)}
+                okText={editing === 'new' ? 'Add machine' : 'Save'}
                 confirmLoading={mutation.isPending}
                 onOk={() => form.validateFields().then((v) => mutation.mutate(v))}
+                maskClosable={false}
                 destroyOnHidden
+                width={640}
             >
                 <Form form={form} layout="vertical">
-                    <Form.Item name="name" label="Display name">
-                        <Input />
-                    </Form.Item>
-                    <Form.Item name="capacity_class" label="Capacity class">
-                        <Input placeholder="Small, High Capacity…" />
-                    </Form.Item>
+                    <Row gutter={12}>
+                        <Col span={8}>
+                            <Form.Item
+                                name="code"
+                                label="Code"
+                                rules={[{ required: true, message: 'A code is required.' }, { max: 32 }]}
+                                extra="The floor's own name for the machine."
+                            >
+                                <Input placeholder="MC-01" />
+                            </Form.Item>
+                        </Col>
+                        <Col span={16}>
+                            <Form.Item
+                                name="name"
+                                label="Display name"
+                                rules={[{ required: true, message: 'A name is required.' }, { max: 255 }]}
+                            >
+                                <Input placeholder="Machine 1" />
+                            </Form.Item>
+                        </Col>
+                    </Row>
+
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        Everything below is optional. Leave a field blank and it stays “Not confirmed” — the
+                        machine still runs, nothing is guessed, and it can be filled in the day the factory
+                        measures it.
+                    </Typography.Text>
+
+                    <Row gutter={12} style={{ marginTop: 16 }}>
+                        <Col span={12}>
+                            <Form.Item name="capacity_class" label="Capacity class">
+                                <Input placeholder="Small, High Capacity…" />
+                            </Form.Item>
+                        </Col>
+                        <Col span={12}>
+                            <Form.Item name="capacity_hours_per_day" label="Capacity (hours/day)">
+                                <InputNumber min={0} max={24} style={{ width: '100%' }} placeholder="Not confirmed" />
+                            </Form.Item>
+                        </Col>
+                    </Row>
                     <Row gutter={12}>
                         <Col span={12}>
                             <Form.Item name="min_cavities" label="Min cavities">
-                                <InputNumber min={1} style={{ width: '100%' }} />
+                                <InputNumber min={1} max={512} style={{ width: '100%' }} placeholder="Not confirmed" />
                             </Form.Item>
                         </Col>
                         <Col span={12}>
                             <Form.Item name="max_cavities" label="Max cavities">
-                                <InputNumber min={1} style={{ width: '100%' }} />
+                                <InputNumber min={1} max={512} style={{ width: '100%' }} placeholder="Not confirmed" />
                             </Form.Item>
                         </Col>
                     </Row>
@@ -484,15 +462,23 @@ function MachinesTab() {
                     <Row gutter={12}>
                         <Col span={12}>
                             <Form.Item name="cycle_time_min" label="Min cycle time (s)">
-                                <InputNumber min={0.1} style={{ width: '100%' }} />
+                                <InputNumber min={0.1} style={{ width: '100%' }} placeholder="Not confirmed" />
                             </Form.Item>
                         </Col>
                         <Col span={12}>
                             <Form.Item name="cycle_time_max" label="Max cycle time (s)">
-                                <InputNumber min={0.1} style={{ width: '100%' }} />
+                                <InputNumber min={0.1} style={{ width: '100%' }} placeholder="Not confirmed" />
                             </Form.Item>
                         </Col>
                     </Row>
+                    <Form.Item
+                        name="is_active"
+                        label="In service"
+                        valuePropName="checked"
+                        extra="Retired machines cannot be picked for a new run, and stay listed here with their history intact."
+                    >
+                        <Switch />
+                    </Form.Item>
                 </Form>
             </Modal>
         </>
@@ -820,7 +806,9 @@ function ImportTab() {
                         One row per line:{' '}
                         <Typography.Text code>machine, product, mould, colour, cycle time, cavities, weight, mapping id</Typography.Text>
                         . Copying straight from the workbook (tab-separated) works too. Every imported row lands as a{' '}
-                        <Typography.Text strong>draft</Typography.Text>.
+                        <Typography.Text strong>draft</Typography.Text> machine exception — read, checked and
+                        approved on <Link to="/production/standards">Product Standards</Link>, beside the
+                        product it belongs to. Nothing reaches the shop floor until it is approved there.
                     </Typography.Paragraph>
                     <Input.TextArea
                         rows={10}

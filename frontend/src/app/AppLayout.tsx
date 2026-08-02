@@ -91,13 +91,15 @@ const allNavItems: NavGroup[] = [
             { key: '/production/live-monitor', label: 'Live Monitor' },
             { key: '/production/standards', label: 'Product Standards' },
             // "Configuration" said nothing — it read like a second Product
-            // Standards. This destination is machine setup: exceptions,
-            // machine capabilities, downtime reasons, factory settings.
+            // Standards. This destination is the MACHINE side: the machine
+            // master and its capabilities, downtime reasons, factory settings,
+            // the workbook import. It absorbed the old Work Centers page,
+            // which edited the same WorkCenter rows from a narrower form;
+            // /production/work-centers now redirects here (App.tsx).
             { key: '/production/configuration', label: 'Machine Setup' },
             { key: '/production/boms', label: 'Bills of Material' },
             { key: '/production/shift-summary', label: 'Shift Summary' },
             { key: '/production/reports', label: 'Reports' },
-            { key: '/production/work-centers', label: 'Work Centers' },
             // Routings, Work Orders, MRP, Capacity Planning, Subcontract
             // Orders, and Rework Orders are deliberately NOT linked here.
             // WorkOrderService completes work orders by calling

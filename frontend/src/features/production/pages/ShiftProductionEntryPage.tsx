@@ -5124,8 +5124,14 @@ export default function ShiftProductionEntryPage() {
                                         what the shift actually produced.
                                     </Typography.Paragraph>
                                     <Space wrap>
-                                        <Link to="/production/configuration">
-                                            <Button type="primary">Open Master Mapping</Button>
+                                        {/* Product Standards, not Machine Setup:
+                                            what this product is missing is a
+                                            PRODUCT standard — weight, cycle time,
+                                            cavities, packing — and that is set and
+                                            approved on the standards workspace.
+                                            Machine Setup holds the machines. */}
+                                        <Link to="/production/standards">
+                                            <Button type="primary">Open Product Standards</Button>
                                         </Link>
                                         {replacementSuggestion && (
                                             <Button

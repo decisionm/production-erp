@@ -66,6 +66,23 @@ class ProductionConfigurationService
      * The single approved configuration governing one intended run, or null
      * when the product has none — in which case the caller falls back to the
      * item master and MUST label that as legacy/unconfigured.
+     *
+     * A stated mould or colour SELECTS a qualified configuration; it does not
+     * hide the general one. That distinction was a real bug: an equality
+     * filter (`where('colour', $colour)`) excluded the colour-null
+     * configuration entirely, so a machine holding one general approved
+     * standard resolved to NOTHING the moment a run stated its colour — while
+     * the batch preview, which resolves without a colour, found that same
+     * standard and quoted its figures. Preview and Start Batch could
+     * therefore disagree about whether a product was configured at all, and
+     * the run silently fell back to the item master.
+     *
+     * It also contradicted the ordering three lines below, which exists
+     * precisely to rank a colour-qualified row ABOVE a general one — an
+     * ordering that can only ever matter if both rows are in the result set.
+     * So the filter is a match-or-general one, and the specific-first
+     * ordering picks the winner: the Amber configuration when there is one,
+     * the general configuration when there is not.
      */
     public function resolve(int $workCenterId, int $itemId, ?int $moldId = null, ?string $colour = null, ?string $on = null): ?ProductionConfiguration
     {
@@ -76,8 +93,12 @@ class ProductionConfigurationService
             ->where('work_center_id', $workCenterId)
             ->where('item_id', $itemId)
             ->where('status', ConfigurationStatus::Approved->value)
-            ->when($moldId !== null, fn ($q) => $q->where('mold_id', $moldId))
-            ->when($colour !== null, fn ($q) => $q->where('colour', $colour))
+            ->when($moldId !== null, fn ($q) => $q->where(
+                fn ($sub) => $sub->where('mold_id', $moldId)->orWhereNull('mold_id'),
+            ))
+            ->when($colour !== null, fn ($q) => $q->where(
+                fn ($sub) => $sub->where('colour', $colour)->orWhereNull('colour'),
+            ))
             ->where(fn ($q) => $q->whereNull('effective_from')->orWhereDate('effective_from', '<=', $date))
             ->where(fn ($q) => $q->whereNull('effective_to')->orWhereDate('effective_to', '>=', $date))
             // Most specific first: a mould/colour-qualified configuration
@@ -86,6 +107,64 @@ class ProductionConfigurationService
             ->orderByRaw('CASE WHEN colour IS NULL THEN 1 ELSE 0 END')
             ->orderByDesc('effective_from')
             ->first();
+    }
+
+    /**
+     * Every configuration for one product, across all machines — the machine
+     * exceptions the Product Standards workspace expands under a row.
+     *
+     * @return Collection<int, ProductionConfiguration>
+     */
+    public function forItem(int $itemId): Collection
+    {
+        return $this->forItems([$itemId]);
+    }
+
+    /**
+     * The same list for many products at once — what the workspace needs to
+     * show exceptions on a page of fifty products without a query per row.
+     *
+     * ONE method rather than two because the ordering is the point. These
+     * rows appear twice on the same screen: inside the workspace row, and
+     * again when the expanded row fetches them from
+     * standards/{standard}/machine-exceptions. Two implementations would
+     * order them two ways — MC-10 above MC-02 in one and below it in the
+     * other — and the list would appear to reshuffle when it was opened.
+     *
+     * The order is the machine list's own (WorkCenterService::ordered):
+     * display_sequence, then the digits in the code, so MC-02 sorts before
+     * MC-10 and the exceptions read in the same sequence as the machines
+     * page. Callers name the relations they need — the workspace wants two
+     * and the endpoint wants five, and loading five for a page of fifty is
+     * three queries nobody reads.
+     *
+     * Every status, deliberately: a draft awaiting approval and a retired
+     * standard are both part of the answer to "what is different about this
+     * product on some machine?", and hiding the draft is how a configuration
+     * sits unapproved for a month without anyone seeing it.
+     *
+     * @param  list<int>  $itemIds
+     * @param  list<string>  $with
+     * @return Collection<int, ProductionConfiguration>
+     */
+    public function forItems(array $itemIds, array $with = ['workCenter', 'item', 'mold', 'bom', 'approvedBy']): Collection
+    {
+        if ($itemIds === []) {
+            return ProductionConfiguration::query()->whereRaw('1 = 0')->get();
+        }
+
+        return ProductionConfiguration::query()
+            ->with($with)
+            ->whereIn('production_configurations.item_id', $itemIds)
+            ->join('work_centers', 'work_centers.id', '=', 'production_configurations.work_center_id')
+            ->orderBy('production_configurations.item_id')
+            ->orderByRaw('work_centers.display_sequence IS NULL')
+            ->orderBy('work_centers.display_sequence')
+            ->orderByRaw('LENGTH(work_centers.code)')
+            ->orderBy('work_centers.code')
+            ->orderBy('production_configurations.id')
+            ->select('production_configurations.*')
+            ->get();
     }
 
     /** @param array<string, mixed> $data */
