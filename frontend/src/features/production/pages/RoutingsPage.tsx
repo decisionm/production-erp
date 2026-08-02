@@ -170,7 +170,7 @@ export default function RoutingsPage() {
                 title={`${detailRouting?.name} (${detailRouting?.item.sku})`}
                 open={detailRouting !== null}
                 onClose={() => setDetailRouting(null)}
-                width={560}
+                width="min(100vw, 560px)"
                 destroyOnHidden
             >
                 {detailRouting && (

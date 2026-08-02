@@ -112,6 +112,7 @@ const modules: HelpModule[] = [
                             HSN/SAC code (for GST), a reorder level, and a <b>Tracking Type</b>.
                         </Typography.Paragraph>
                         <Table
+                            scroll={{ x: 'max-content' }}
                             size="small"
                             pagination={false}
                             style={{ marginBottom: 12 }}
@@ -170,6 +171,7 @@ const modules: HelpModule[] = [
                             The three buttons at the top of this page:
                         </Typography.Paragraph>
                         <Table
+                            scroll={{ x: 'max-content' }}
                             size="small"
                             pagination={false}
                             style={{ marginBottom: 12 }}

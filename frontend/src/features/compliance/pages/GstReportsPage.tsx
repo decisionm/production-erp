@@ -43,10 +43,10 @@ function Gstr1Tab() {
             )}
 
             <Typography.Title level={5}>B2B (registered customers)</Typography.Title>
-            <Table rowKey="invoice_id" loading={isLoading} dataSource={data?.b2b} pagination={false} columns={gstr1Columns} />
+            <Table scroll={{ x: 'max-content' }} rowKey="invoice_id" loading={isLoading} dataSource={data?.b2b} pagination={false} columns={gstr1Columns} />
 
             <Typography.Title level={5} style={{ marginTop: 24 }}>B2C</Typography.Title>
-            <Table rowKey="invoice_id" loading={isLoading} dataSource={data?.b2c} pagination={false} columns={gstr1Columns} />
+            <Table scroll={{ x: 'max-content' }} rowKey="invoice_id" loading={isLoading} dataSource={data?.b2c} pagination={false} columns={gstr1Columns} />
 
             {data && (
                 <Space direction="vertical" style={{ marginTop: 24 }}>

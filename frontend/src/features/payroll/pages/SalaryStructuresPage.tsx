@@ -183,7 +183,7 @@ export default function SalaryStructuresPage() {
                 title={`Salary Structure — ${detailStructure?.employee?.name}`}
                 open={detailStructure !== null}
                 onClose={() => setDetailStructure(null)}
-                width={520}
+                width="min(100vw, 520px)"
                 destroyOnHidden
             >
                 {detailStructure && (

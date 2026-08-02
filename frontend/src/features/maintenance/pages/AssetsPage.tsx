@@ -254,7 +254,7 @@ export default function AssetsPage() {
                 title={`Barcode — ${barcodeAsset?.code}`}
                 open={barcodeAsset !== null}
                 onClose={() => setBarcodeAsset(null)}
-                width={420}
+                width="min(100vw, 420px)"
                 destroyOnHidden
             >
                 {barcodeAsset && <BarcodeDisplay code={barcodeAsset.code} label={barcodeAsset.name} />}

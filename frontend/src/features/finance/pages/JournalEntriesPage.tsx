@@ -215,7 +215,7 @@ export default function JournalEntriesPage() {
                 title={`Journal Entry #${detailEntry?.id}`}
                 open={detailEntry !== null}
                 onClose={() => setDetailEntry(null)}
-                width={600}
+                width="min(100vw, 600px)"
                 destroyOnHidden
             >
                 {detailEntry && (

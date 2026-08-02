@@ -368,7 +368,7 @@ export default function PurchaseOrdersPage() {
                 title={`Purchase Order #${detailOrder?.id}`}
                 open={detailOrder !== null}
                 onClose={() => setDetailOrder(null)}
-                width={620}
+                width="min(100vw, 620px)"
                 destroyOnHidden
             >
                 {detailOrder && (

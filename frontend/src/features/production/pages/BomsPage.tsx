@@ -369,7 +369,7 @@ export default function BomsPage() {
                 title={`${detailBom?.name} (${detailBom?.item.sku})`}
                 open={detailBom !== null}
                 onClose={() => setDetailBom(null)}
-                width={520}
+                width="min(100vw, 520px)"
                 destroyOnHidden
             >
                 {detailBom && (

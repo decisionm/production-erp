@@ -268,7 +268,7 @@ export default function OpportunitiesPage() {
                 title={detailOpportunity?.name}
                 open={detailOpportunity !== null}
                 onClose={() => setDetailOpportunity(null)}
-                width={440}
+                width="min(100vw, 440px)"
                 destroyOnHidden
             >
                 {detailOpportunity && (

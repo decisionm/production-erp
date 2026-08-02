@@ -374,6 +374,7 @@ function BatchCostSection({ cost, showsDetail }: { cost: BatchCost; showsDetail:
                         How the resin was allocated
                     </Typography.Text>
                     <Table
+                        scroll={{ x: 'max-content' }}
                         size="small"
                         rowKey={(row, index) => `${row.item_id}-${index}`}
                         pagination={false}
@@ -409,6 +410,7 @@ function BatchCostSection({ cost, showsDetail }: { cost: BatchCost; showsDetail:
                         Everything else, at its issued cost
                     </Typography.Text>
                     <Table
+                        scroll={{ x: 'max-content' }}
                         size="small"
                         rowKey={(row, index) => `${row.item_id}-${row.warehouse_id}-${index}`}
                         pagination={false}
@@ -800,6 +802,7 @@ function DowntimeSection({ row, logs, loading }: { row: ShiftProductionEntry; lo
                         )}
                     </Typography.Paragraph>
                     <Table
+                        scroll={{ x: 'max-content' }}
                         size="small"
                         rowKey="id"
                         pagination={false}
@@ -932,6 +935,7 @@ function VoucherPreviewSection({ preview, loading }: { preview: VoucherPreview |
                         }
                     />
                     <Table
+                        scroll={{ x: 'max-content' }}
                         size="small"
                         rowKey={(line) => `${line.side}-${line.item}-${line.godown}`}
                         pagination={false}
@@ -1783,6 +1787,7 @@ export default function ApproveProductionPage() {
                             <>
                                 <Typography.Title level={5} style={{ marginTop: 16 }}>Material Consumption</Typography.Title>
                                 <Table
+                                    scroll={{ x: 'max-content' }}
                                     size="small"
                                     rowKey="id"
                                     pagination={false}
@@ -1840,6 +1845,7 @@ export default function ApproveProductionPage() {
                             <>
                                 <Typography.Title level={5} style={{ marginTop: 16 }}>Scrap Detail</Typography.Title>
                                 <Table
+                                    scroll={{ x: 'max-content' }}
                                     size="small"
                                     rowKey="id"
                                     pagination={false}

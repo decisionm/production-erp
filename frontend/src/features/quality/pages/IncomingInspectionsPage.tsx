@@ -205,7 +205,7 @@ export default function IncomingInspectionsPage() {
                 title={`Inspection #${detailRow?.id}`}
                 open={detailRow !== null}
                 onClose={() => setDetailRow(null)}
-                width={480}
+                width="min(100vw, 480px)"
                 destroyOnHidden
             >
                 {detailRow && (

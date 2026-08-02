@@ -650,7 +650,7 @@ export default function GoodsReceiptsPage() {
                 title={`Goods Receipt #${detailReceipt?.id}`}
                 open={detailReceipt !== null}
                 onClose={() => setDetailReceipt(null)}
-                width={560}
+                width="min(100vw, 560px)"
                 destroyOnHidden
             >
                 {detailReceipt && (
@@ -694,7 +694,7 @@ export default function GoodsReceiptsPage() {
                 title={`Goods receipt #${createdReceipt?.id} — bag labels ready`}
                 open={createdReceipt !== null}
                 onClose={() => setCreatedReceipt(null)}
-                width={980}
+                width="min(100vw, 980px)"
                 destroyOnHidden
             >
                 {createdReceipt && (

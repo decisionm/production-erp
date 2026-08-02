@@ -300,7 +300,7 @@ function ReturnToProductionDrawer({
         <Drawer
             open={row !== null}
             onClose={onClose}
-            width={520}
+            width="min(100vw, 520px)"
             destroyOnHidden
             title={row ? `Return to production — ${row.batch_number ?? `batch #${row.id}`}` : 'Return to production'}
             footer={
@@ -469,7 +469,7 @@ function QualityCheckDrawer({
         <Drawer
             open={row !== null}
             onClose={onClose}
-            width={520}
+            width="min(100vw, 520px)"
             destroyOnHidden
             title={row ? `Quality check — ${row.batch_number ?? `batch #${row.id}`}` : 'Quality check'}
             footer={

@@ -192,7 +192,7 @@ export default function PurchaseRequisitionsPage() {
                 title={`Purchase Requisition #${detailRequisition?.id}`}
                 open={detailRequisition !== null}
                 onClose={() => setDetailRequisition(null)}
-                width={560}
+                width="min(100vw, 560px)"
                 destroyOnHidden
             >
                 {detailRequisition && (

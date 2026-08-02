@@ -561,6 +561,7 @@ export default function BinBayLoadingPage() {
                                     />
                                 )}
                                 <Table
+                                    scroll={{ x: 'max-content' }}
                                     size="small"
                                     rowKey="movement_id"
                                     columns={layerColumns}
@@ -609,6 +610,7 @@ export default function BinBayLoadingPage() {
                             />
                         ) : (
                             <Table
+                                scroll={{ x: 'max-content' }}
                                 size="small"
                                 rowKey="item_id"
                                 columns={requirementColumns}
@@ -620,6 +622,7 @@ export default function BinBayLoadingPage() {
 
                     <Card title="Load history">
                         <Table
+                            scroll={{ x: 'max-content' }}
                             size="small"
                             rowKey="id"
                             columns={historyColumns}

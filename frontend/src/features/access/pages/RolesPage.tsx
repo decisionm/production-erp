@@ -26,6 +26,7 @@ function PermissionGrid({ catalog, value, onChange }: PermissionGridProps) {
 
     return (
         <Table
+            scroll={{ x: 'max-content' }}
             size="small"
             pagination={false}
             rowKey="module"

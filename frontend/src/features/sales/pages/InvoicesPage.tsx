@@ -237,7 +237,7 @@ export default function InvoicesPage() {
                 title={`Invoice #${detailInvoice?.id}`}
                 open={detailInvoice !== null}
                 onClose={() => setDetailInvoice(null)}
-                width={620}
+                width="min(100vw, 620px)"
                 destroyOnHidden
             >
                 {detailInvoice && (

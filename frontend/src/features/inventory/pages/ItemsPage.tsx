@@ -282,7 +282,7 @@ export default function ItemsPage() {
                 title={`Barcode — ${barcodeItem?.sku}`}
                 open={barcodeItem !== null}
                 onClose={() => setBarcodeItem(null)}
-                width={420}
+                width="min(100vw, 420px)"
                 destroyOnHidden
             >
                 {barcodeItem && <BarcodeDisplay code={barcodeItem.sku} label={barcodeItem.name} />}

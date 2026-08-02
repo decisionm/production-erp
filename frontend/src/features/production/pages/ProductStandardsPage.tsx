@@ -821,6 +821,7 @@ function MachineExceptions({ standardId, itemId, productName }: { standardId: nu
 
             {rows.length > 0 && (
                 <Table<ProductionConfiguration>
+                    scroll={{ x: 'max-content' }}
                     rowKey="id"
                     size="small"
                     pagination={false}
@@ -1376,7 +1377,7 @@ function ProductConfigurationDrawer({
     return (
         <Drawer
             open
-            width={760}
+            width="min(100vw, 760px)"
             onClose={onClose}
             title={row.source_product_name}
             extra={

@@ -241,7 +241,7 @@ export default function SubcontractOrdersPage() {
                 title={`Subcontract Order #${detailOrder?.id}`}
                 open={detailOrder !== null}
                 onClose={() => setDetailOrder(null)}
-                width={560}
+                width="min(100vw, 560px)"
                 destroyOnHidden
             >
                 {detailOrder && (

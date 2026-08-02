@@ -153,6 +153,7 @@ export default function MaterialLotsPage() {
                     expandable={{
                         expandedRowRender: (lot) => (
                             <Table
+                                scroll={{ x: 'max-content' }}
                                 size="small"
                                 rowKey="id"
                                 pagination={false}
@@ -269,7 +270,7 @@ export default function MaterialLotsPage() {
                 title={`Bag labels — ${labelSelection?.lot.supplier_lot_no ?? (labelSelection ? `Lot #${labelSelection.lot.id}` : '')}`}
                 open={labelSelection !== null}
                 onClose={() => setLabelSelection(null)}
-                width={900}
+                width="min(100vw, 900px)"
                 destroyOnHidden
             >
                 {labelSelection && (
