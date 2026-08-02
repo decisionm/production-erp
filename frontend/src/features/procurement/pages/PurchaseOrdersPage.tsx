@@ -1,8 +1,8 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Typography } from 'antd';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Controller, useFieldArray, useForm } from 'react-hook-form';
+import { type Control, Controller, useFieldArray, useForm } from 'react-hook-form';
 import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import { listItems } from '@/features/inventory/api';
@@ -15,17 +15,83 @@ const orderSchema = z.object({
     order_date: z.string({ error: 'Order date is required' }),
     expected_date: z.string().optional(),
     notes: z.string().optional(),
+    // A Tally mirror: the real order lives in Tally (the PO/schedule source
+    // of truth); this entry records its exact identities read-only.
+    is_tally_mirror: z.boolean().optional(),
+    tally_order_no: z.string().trim().max(64).optional(),
     lines: z
         .array(
             z.object({
                 item_id: z.number({ error: 'Item is required' }),
                 quantity: z.number().gt(0, 'Quantity must be greater than 0'),
                 unit_price: z.number().min(0),
+                // Item/due-date delivery windows (their sum may not exceed
+                // the line — the server enforces it; the arrival screen
+                // consumes them oldest-due-first).
+                schedules: z
+                    .array(
+                        z.object({
+                            due_date: z.string({ error: 'Due date is required' }),
+                            quantity: z.number().gt(0, 'Quantity must be greater than 0'),
+                            tally_reference: z.string().trim().max(64).optional(),
+                        }),
+                    )
+                    .optional(),
             }),
         )
         .min(1, 'Add at least one line'),
-});
+}).refine(
+    (values) => !values.is_tally_mirror || (values.tally_order_no ?? '') !== '',
+    { message: 'A Tally mirror needs the exact Tally order number', path: ['tally_order_no'] },
+);
 type OrderFormValues = z.infer<typeof orderSchema>;
+
+/**
+ * Item/due-date delivery windows for one order line — the mirror of Tally's
+ * order allocations. Optional on an ERP-native order; the arrival screen
+ * consumes them oldest-due-first with an editable preview.
+ */
+function LineSchedulesEditor({ control, lineIndex }: { control: Control<OrderFormValues>; lineIndex: number }) {
+    const { fields, append, remove } = useFieldArray({ control, name: `lines.${lineIndex}.schedules` });
+
+    return (
+        <div style={{ marginLeft: 24, marginTop: 4 }}>
+            {fields.map((field, scheduleIndex) => (
+                <Space key={field.id} align="baseline" style={{ display: 'flex', marginTop: 4 }}>
+                    <Controller
+                        name={`lines.${lineIndex}.schedules.${scheduleIndex}.due_date`}
+                        control={control}
+                        render={({ field }) => (
+                            <DatePicker
+                                placeholder="Due date"
+                                onChange={(_, dateString) => field.onChange(dateString || undefined)}
+                            />
+                        )}
+                    />
+                    <Controller
+                        name={`lines.${lineIndex}.schedules.${scheduleIndex}.quantity`}
+                        control={control}
+                        render={({ field }) => <InputNumber {...field} min={0} placeholder="Qty" />}
+                    />
+                    <Controller
+                        name={`lines.${lineIndex}.schedules.${scheduleIndex}.tally_reference`}
+                        control={control}
+                        render={({ field }) => <Input {...field} placeholder="Tally ref (optional)" style={{ width: 160 }} />}
+                    />
+                    <Button size="small" danger onClick={() => remove(scheduleIndex)}>×</Button>
+                </Space>
+            ))}
+            <Button
+                size="small"
+                type="link"
+                style={{ paddingLeft: 0 }}
+                onClick={() => append({ due_date: undefined as unknown as string, quantity: undefined as unknown as number })}
+            >
+                + delivery schedule
+            </Button>
+        </div>
+    );
+}
 
 const statusColor: Record<PurchaseOrderStatus, string> = {
     draft: 'default',
@@ -131,6 +197,17 @@ export default function PurchaseOrdersPage() {
                         dataIndex: 'status',
                         render: (status: PurchaseOrderStatus) => <Tag color={statusColor[status]}>{status}</Tag>,
                     },
+                    {
+                        title: 'Source',
+                        render: (_, row) =>
+                            row.source === 'tally' ? (
+                                // The real order lives in Tally — this row is
+                                // its read-only mirror, corrected there.
+                                <Tag color="geekblue">Tally · {row.tally_order_no ?? 'mirror'}</Tag>
+                            ) : (
+                                <Typography.Text type="secondary">ERP</Typography.Text>
+                            ),
+                    },
                     { title: 'Vendor', render: (_, row) => row.vendor.name },
                     { title: 'Order Date', dataIndex: 'order_date' },
                     { title: 'Lines', render: (_, row) => row.lines.length },
@@ -161,7 +238,12 @@ export default function PurchaseOrdersPage() {
                 title="New Purchase Order"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
-                onOk={handleSubmit((values) => createMutation.mutate(values))}
+                onOk={handleSubmit(({ is_tally_mirror, tally_order_no, ...values }) =>
+                    createMutation.mutate({
+                        ...values,
+                        ...(is_tally_mirror ? { source: 'tally' as const, tally_order_no } : {}),
+                    }),
+                )}
                 confirmLoading={createMutation.isPending}
                 destroyOnHidden
                 width={760}
@@ -204,38 +286,67 @@ export default function PurchaseOrdersPage() {
                         <Controller name="notes" control={control} render={({ field }) => <Input {...field} />} />
                     </Form.Item>
 
+                    {/* Tally is the PO and delivery-schedule source of truth.
+                        A mirror records the real order's exact identities;
+                        it arrives already sent and is corrected in Tally,
+                        never edited here. */}
+                    <Form.Item label="Mirrored from Tally">
+                        <Space>
+                            <Controller
+                                name="is_tally_mirror"
+                                control={control}
+                                render={({ field }) => (
+                                    <Switch checked={field.value ?? false} onChange={field.onChange} />
+                                )}
+                            />
+                            <Controller
+                                name="tally_order_no"
+                                control={control}
+                                render={({ field }) => (
+                                    <Input {...field} placeholder="Exact Tally order no. (e.g. PO/2026/041)" style={{ width: 280 }} />
+                                )}
+                            />
+                        </Space>
+                        {errors.tally_order_no && (
+                            <div style={{ color: '#ff4d4f' }}>{errors.tally_order_no.message}</div>
+                        )}
+                    </Form.Item>
+
                     <Typography.Text strong>Lines</Typography.Text>
                     {errors.lines?.root && (
                         <div style={{ color: '#ff4d4f', marginBottom: 8 }}>{errors.lines.root.message}</div>
                     )}
                     {fields.map((field, index) => (
-                        <Space key={field.id} align="baseline" style={{ display: 'flex', marginTop: 8 }}>
-                            <Controller
-                                name={`lines.${index}.item_id`}
-                                control={control}
-                                render={({ field }) => (
-                                    <Select
-                                        {...field}
-                                        options={itemOptions}
-                                        showSearch
-                                        optionFilterProp="label"
-                                        style={{ width: 220 }}
-                                        placeholder="Item"
-                                    />
-                                )}
-                            />
-                            <Controller
-                                name={`lines.${index}.quantity`}
-                                control={control}
-                                render={({ field }) => <InputNumber {...field} min={0} placeholder="Quantity" />}
-                            />
-                            <Controller
-                                name={`lines.${index}.unit_price`}
-                                control={control}
-                                render={({ field }) => <InputNumber {...field} min={0} placeholder="Unit Price" />}
-                            />
-                            <Button danger onClick={() => remove(index)}>Remove</Button>
-                        </Space>
+                        <div key={field.id} style={{ marginTop: 8 }}>
+                            <Space align="baseline" style={{ display: 'flex' }}>
+                                <Controller
+                                    name={`lines.${index}.item_id`}
+                                    control={control}
+                                    render={({ field }) => (
+                                        <Select
+                                            {...field}
+                                            options={itemOptions}
+                                            showSearch
+                                            optionFilterProp="label"
+                                            style={{ width: 220 }}
+                                            placeholder="Item"
+                                        />
+                                    )}
+                                />
+                                <Controller
+                                    name={`lines.${index}.quantity`}
+                                    control={control}
+                                    render={({ field }) => <InputNumber {...field} min={0} placeholder="Quantity" />}
+                                />
+                                <Controller
+                                    name={`lines.${index}.unit_price`}
+                                    control={control}
+                                    render={({ field }) => <InputNumber {...field} min={0} placeholder="Unit Price" />}
+                                />
+                                <Button danger onClick={() => remove(index)}>Remove</Button>
+                            </Space>
+                            <LineSchedulesEditor control={control} lineIndex={index} />
+                        </div>
                     ))}
                     <Button
                         type="dashed"

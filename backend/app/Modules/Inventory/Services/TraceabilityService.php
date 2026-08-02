@@ -153,7 +153,15 @@ class TraceabilityService
                     'barcode' => $barcodes[$seq - 1] ?? sprintf('LOT%d-B%d', $lot->id, $seq),
                     'original_kg' => $kg,
                     'remaining_kg' => $kg,
-                    'status' => MaterialBagStatus::InStore,
+                    // A bag arriving on a GRN is born WAITING QC (owner-
+                    // confirmed): its permanent identity and label exist from
+                    // this moment, but production cannot load it until
+                    // Incoming Inspection releases it. Lots created outside a
+                    // GRN (opening-stock backfill) skip the hold — there is
+                    // no arrival to inspect.
+                    'status' => ($data['grn_id'] ?? null) !== null
+                        ? MaterialBagStatus::WaitingQc
+                        : MaterialBagStatus::InStore,
                     'current_warehouse_id' => $data['warehouse_id'] ?? null,
                 ]);
             }

@@ -12,9 +12,16 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[Fillable([
     'vendor_id', 'purchase_requisition_id', 'status',
     'order_date', 'expected_date', 'notes', 'created_by',
+    'source', 'tally_order_no',
 ])]
 class PurchaseOrder extends Model
 {
+    /** A read-only mirror of an order that lives in Tally — corrected there, never here. */
+    public function isTallyMirror(): bool
+    {
+        return $this->source === 'tally';
+    }
+
     protected function casts(): array
     {
         return [

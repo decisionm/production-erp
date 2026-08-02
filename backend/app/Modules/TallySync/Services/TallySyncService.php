@@ -101,7 +101,7 @@ class TallySyncService
      */
     public function enqueueGoodsReceiptNote(GoodsReceiptNote $note): TallySyncEntry
     {
-        $note->loadMissing(['lines.item', 'warehouse', 'purchaseOrder.vendor']);
+        $note->loadMissing(['lines.item', 'lines.scheduleAllocations.schedule', 'warehouse', 'purchaseOrder.vendor']);
 
         $lines = $note->lines->map(fn ($line) => [
             // The exact Tally stock-item name (items are pulled from Tally, so
@@ -118,13 +118,30 @@ class TallySyncService
         return $this->enqueue($note, 'Receipt Note', [
             'voucher_type' => 'Receipt Note',
             'voucher_date' => $note->received_date?->toDateString(),
-            'voucher_number' => "GRN-{$note->id}",
+            'voucher_number' => $note->receipt_note_reference ?? "GRN-{$note->id}",
             'party_ledger' => $note->purchaseOrder?->vendor?->name,
             'party_gstin' => $note->purchaseOrder?->vendor?->gstin,
             'godown' => $this->godowns->resolveName($note->warehouse),
             'narration' => $note->notes,
             'lines' => $lines,
             'total_amount' => $totalAmount,
+            // ADDITIVE order identities (owner flow: Tally is the PO/schedule
+            // master; the arrival must reference the exact Tally order and
+            // carry a unique tracking number so Tally can clear the right
+            // outstanding allocation). The XML builder consumes these only
+            // once the real Receipt Note shape is proven — until then they
+            // ride the payload as recorded facts.
+            'tracking_number' => $note->tracking_number,
+            'tally_order_no' => $note->purchaseOrder?->tally_order_no,
+            'order_due_dates' => $note->lines
+                ->flatMap(fn ($line) => $line->scheduleAllocations->map(fn ($allocation) => [
+                    'due_date' => $allocation->schedule?->due_date?->toDateString(),
+                    'quantity' => $allocation->quantity,
+                    'tally_reference' => $allocation->schedule?->tally_reference,
+                ]))
+                ->filter(fn ($row) => $row['due_date'] !== null)
+                ->values()
+                ->all(),
         ]);
     }
 

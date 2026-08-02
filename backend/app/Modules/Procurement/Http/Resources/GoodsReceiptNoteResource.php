@@ -17,6 +17,8 @@ class GoodsReceiptNoteResource extends JsonResource
             'purchase_order_id' => $this->purchase_order_id,
             'warehouse' => WarehouseResource::make($this->whenLoaded('warehouse')),
             'reference' => $this->reference,
+            'receipt_note_reference' => $this->receipt_note_reference,
+            'tracking_number' => $this->tracking_number,
             'received_date' => $this->received_date?->toIso8601String(),
             'notes' => $this->notes,
             'lines' => GoodsReceiptNoteLineResource::collection($this->whenLoaded('lines')),

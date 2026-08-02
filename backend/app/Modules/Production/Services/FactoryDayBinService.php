@@ -206,6 +206,21 @@ class FactoryDayBinService
                 ]);
             }
 
+            // ARRIVAL HOLD (owner-confirmed): a bag keeps its permanent
+            // identity from the moment the lorry is unloaded, but it is not
+            // production's until Incoming QC says so.
+            if ($bag->status === MaterialBagStatus::WaitingQc) {
+                throw ValidationException::withMessages([
+                    'barcode' => "Bag {$bag->barcode} is waiting for incoming QC — it cannot be loaded until quality releases it.",
+                ]);
+            }
+
+            if ($bag->status === MaterialBagStatus::RejectedQc) {
+                throw ValidationException::withMessages([
+                    'barcode' => "Bag {$bag->barcode} was rejected by incoming QC — it is out of usable stock and cannot be loaded.",
+                ]);
+            }
+
             if ($bag->current_warehouse_id === null) {
                 throw ValidationException::withMessages([
                     'barcode' => "Bag {$bag->barcode} has no store warehouse recorded, so there is nowhere to move its stock from — register the lot with its warehouse first.",

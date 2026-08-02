@@ -39,4 +39,9 @@ class GoodsReceiptNoteLine extends Model
     {
         return $this->hasMany(MaterialLot::class, 'goods_receipt_note_line_id');
     }
+
+    public function scheduleAllocations(): HasMany
+    {
+        return $this->hasMany(GrnScheduleAllocation::class, 'goods_receipt_note_line_id');
+    }
 }

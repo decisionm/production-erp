@@ -23,6 +23,14 @@ class StorePurchaseOrderRequest extends FormRequest
             'lines.*.item_id' => ['required', 'integer', 'exists:items,id'],
             'lines.*.quantity' => ['required', 'numeric', 'gt:0'],
             'lines.*.unit_price' => ['required', 'numeric', 'min:0'],
+            // A Tally-mirror order: Tally is the PO/schedule source of truth,
+            // this row is its read-only reflection with the exact identities.
+            'source' => ['sometimes', 'in:erp,tally'],
+            'tally_order_no' => ['nullable', 'string', 'max:64', 'required_if:source,tally'],
+            'lines.*.schedules' => ['sometimes', 'array'],
+            'lines.*.schedules.*.due_date' => ['required_with:lines.*.schedules', 'date'],
+            'lines.*.schedules.*.quantity' => ['required_with:lines.*.schedules', 'numeric', 'gt:0'],
+            'lines.*.schedules.*.tally_reference' => ['nullable', 'string', 'max:64'],
         ];
     }
 }

@@ -33,6 +33,15 @@ class StoreGoodsReceiptRequest extends FormRequest
             ],
             'lines.*.quantity' => ['required', 'numeric', 'gt:0'],
             'lines.*.unit_cost' => ['nullable', 'numeric', 'min:0'],
+            // Arrival references (owner-confirmed): the Receipt Note reference
+            // is recorded at physical arrival; both default deterministically
+            // when blank so every arrival stays referenceable.
+            'receipt_note_reference' => ['nullable', 'string', 'max:64'],
+            'tracking_number' => ['nullable', 'string', 'max:64'],
+            // Edited allocation preview — omitted means oldest-due-first.
+            'lines.*.schedule_allocations' => ['sometimes', 'array', 'min:1'],
+            'lines.*.schedule_allocations.*.purchase_order_schedule_id' => ['required_with:lines.*.schedule_allocations', 'integer', 'exists:purchase_order_schedules,id'],
+            'lines.*.schedule_allocations.*.quantity' => ['required_with:lines.*.schedule_allocations', 'numeric', 'gt:0'],
             'lines.*.lots' => ['sometimes', 'array', 'min:1'],
             'lines.*.lots.*.supplier_lot_no' => ['nullable', 'string', 'max:100'],
             'lines.*.lots.*.bag_count' => ['required_with:lines.*.lots', 'integer', 'min:1', 'max:2000'],

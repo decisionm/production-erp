@@ -13,6 +13,10 @@ export interface IncomingInspection {
     inspection_date: string;
     inspected_by: string | null;
     notes: string | null;
+    /** What the disposition did to the arrival's bags, in words. */
+    bag_disposition_note?: string | null;
+    /** Reference a Rejections Out voucher will carry once its Tally shape is proven. */
+    rejections_out_reference?: string | null;
     created_at: string;
 }
 
