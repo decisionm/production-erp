@@ -134,17 +134,67 @@ class CancelTestBatchTest extends TestCase
         $this->assertSame(BatchStatus::InProgress, $entry->refresh()->batch_status);
     }
 
-    public function test_a_completed_batch_cannot_be_cancelled(): void
+    public function test_a_completed_batch_before_quality_can_be_cancelled(): void
     {
+        // Widened 03-Aug: a completed batch quality has not touched is exactly
+        // the case the factory needed, and its stock is reversible — the
+        // amendment flow has been giving those bookings back all along. This
+        // fixture has no consumption to reverse; the reversal path itself is
+        // the amendment flow's and is covered by its own suite.
         $this->actor();
         [$entry] = $this->runningBatch();
-        $entry->update(['batch_status' => BatchStatus::Completed]);
+        $entry->update(['batch_status' => BatchStatus::Completed, 'quantity_produced' => '100']);
 
         $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/cancel", [
-            'reason' => 'trying to erase a real shift',
+            'reason' => 'Entered against the wrong machine',
+        ])->assertOk();
+
+        $entry->refresh();
+        $this->assertSame(BatchStatus::Cancelled, $entry->batch_status);
+        $this->assertTrue($entry->config_snapshot['cancellation']['stock_reversed']);
+        $this->assertSame('completed', $entry->config_snapshot['cancellation']['previous_batch_status']);
+    }
+
+    public function test_a_completed_batch_after_quality_cannot_be_cancelled(): void
+    {
+        // The line that must never move: once quality has counted the bottles
+        // the figures are no longer the floor's to withdraw.
+        $user = $this->actor();
+        [$entry] = $this->runningBatch();
+        $entry->update([
+            'batch_status' => BatchStatus::Completed,
+            'quality_checked_at' => now(),
+            'quality_checked_by' => $user->id,
+        ]);
+
+        $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/cancel", [
+            'reason' => 'trying to erase a checked shift',
         ])->assertStatus(422);
 
         $this->assertSame(BatchStatus::Completed, $entry->refresh()->batch_status);
+    }
+
+    public function test_a_cancelled_batch_leaves_the_default_entry_list_but_stays_in_history(): void
+    {
+        // Entry #40 kept appearing after it was withdrawn: paginate() applied a
+        // batch_status predicate only inside its status branch, so an
+        // unfiltered read returned cancelled rows.
+        $this->actor();
+        [$entry] = $this->runningBatch();
+
+        $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/cancel", [
+            'reason' => 'demo batch',
+        ])->assertOk();
+
+        $listed = $this->getJson('/api/v1/production/shift-production-entries')->json('data');
+        $this->assertNotContains($entry->id, array_column($listed, 'id'));
+
+        // Never deleted — the row and its audit are still there.
+        $this->assertDatabaseHas('shift_production_entries', [
+            'id' => $entry->id,
+            'batch_status' => 'cancelled',
+            'cancellation_reason' => 'demo batch',
+        ]);
     }
 
     public function test_a_batch_with_recorded_scrap_cannot_be_cancelled(): void

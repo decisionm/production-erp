@@ -15,6 +15,7 @@ import {
     listShiftProductionEntries,
     pmApproveShiftProductionEntry,
     rejectShiftProductionEntry,
+    cancelShiftProductionEntry,
 } from '@/features/production/api';
 import FinishedCartonLabels from '@/features/production/components/FinishedCartonLabels';
 import type {
@@ -1365,6 +1366,8 @@ export default function ApproveProductionPage() {
     const [detailRow, setDetailRow] = useState<ShiftProductionEntry | null>(null);
     const [rejectingRow, setRejectingRow] = useState<ShiftProductionEntry | null>(null);
     const [rejectReason, setRejectReason] = useState('');
+    const [cancellingRow, setCancellingRow] = useState<ShiftProductionEntry | null>(null);
+    const [cancelReason, setCancelReason] = useState('');
     const queryClient = useQueryClient();
     const settings = useProductionSettings();
     const user = useAuthStore((s) => s.user);
@@ -1421,7 +1424,13 @@ export default function ApproveProductionPage() {
     // what it has always been.
     const qualityStageEnabled = (data?.data ?? []).some((row) => readQualityStageEnabled(row));
 
-    const invalidate = () => queryClient.invalidateQueries({ queryKey: ['production', 'shift-production-entries'] });
+    const invalidate = () => {
+        queryClient.invalidateQueries({ queryKey: ['production', 'shift-production-entries'] });
+        // The Shift Floor's machine cards read a DIFFERENT key. A cancelled
+        // batch that vanished from this queue but left its machine looking busy
+        // would be the same "it is still showing" complaint in a new place.
+        queryClient.invalidateQueries({ queryKey: ['production', 'active-batches'] });
+    };
 
     // The open batch's trays over its cartons, worked out once for the Packing
     // line below (null on any row where the figures don't reconcile).
@@ -1498,6 +1507,42 @@ export default function ApproveProductionPage() {
             });
         },
     });
+
+    /**
+     * CANCEL INCORRECT BATCH — a withdrawal, not a delete.
+     *
+     * Offered only before quality starts, which is the same line the server
+     * draws; the button is hidden after that rather than shown and refused,
+     * because a control that is always visible and usually fails teaches people
+     * to stop reading its message. The server re-checks everything regardless —
+     * this is only about not offering an action that cannot succeed.
+     */
+    const cancelMutation = useMutation({
+        mutationFn: ({ id, reason }: { id: number; reason: string }) => cancelShiftProductionEntry(id, reason),
+        onSuccess: () => {
+            invalidate();
+            setCancellingRow(null);
+            setCancelReason('');
+            setDetailRow(null);
+        },
+        onError: (error: any) => {
+            const errors = error?.response?.data?.errors;
+            Modal.error({
+                title: 'Could not cancel this batch',
+                // The server names exactly what blocked it (a quality check, an
+                // approval, carton labels, a Tally voucher). That sentence is
+                // the whole value of the refusal, so it is shown verbatim.
+                content: errors
+                    ? Object.values(errors).flat().join(' ')
+                    : (error?.response?.data?.message ?? 'Refresh and try again.'),
+            });
+        },
+    });
+
+    const canCancel = (row: ShiftProductionEntry): boolean =>
+        (row.batch_status === 'in_progress' || row.batch_status === 'completed')
+        && !row.quality?.checked
+        && row.status === 'pending';
 
     const chainStep = (row: ShiftProductionEntry): number => {
         if (row.status === 'pending') return 1;
@@ -1614,6 +1659,17 @@ export default function ApproveProductionPage() {
                                         <Button size="small" danger onClick={() => setRejectingRow(row)}>
                                             Reject
                                         </Button>
+                                        {/* Cancel is offered only before
+                                            quality starts — the same line the
+                                            server draws. Hidden rather than
+                                            shown-and-refused: a button that is
+                                            always there and usually fails is a
+                                            button people stop reading. */}
+                                        {canCancel(row) && (
+                                            <Button size="small" onClick={() => setCancellingRow(row)}>
+                                                Cancel test batch
+                                            </Button>
+                                        )}
                                     </>
                                 )}
                             </Space>
@@ -1906,6 +1962,9 @@ export default function ApproveProductionPage() {
                                     </span>
                                 </Tooltip>
                                 <Button danger onClick={() => setRejectingRow(detailRow)}>Reject</Button>
+                                {canCancel(detailRow) && (
+                                    <Button onClick={() => setCancellingRow(detailRow)}>Cancel test batch</Button>
+                                )}
                             </Space>
                         )}
                     </>
@@ -1931,6 +1990,50 @@ export default function ApproveProductionPage() {
                     placeholder="Reason (optional) — helps the supervisor fix and resubmit"
                     value={rejectReason}
                     onChange={(e) => setRejectReason(e.target.value)}
+                />
+            </Modal>
+
+            <Modal
+                maskClosable={false}
+                title={`Cancel test batch — ${cancellingRow?.batch_number ?? `#${cancellingRow?.id}`}`}
+                open={cancellingRow !== null}
+                onCancel={() => {
+                    setCancellingRow(null);
+                    setCancelReason('');
+                }}
+                onOk={() => cancellingRow && cancelMutation.mutate({ id: cancellingRow.id, reason: cancelReason })}
+                confirmLoading={cancelMutation.isPending}
+                okText="Cancel this batch"
+                okButtonProps={{ danger: true, disabled: cancelReason.trim().length < 3 }}
+                cancelText="Keep it"
+                destroyOnHidden
+            >
+                <Alert
+                    type="warning"
+                    showIcon
+                    style={{ marginBottom: 12 }}
+                    message="This withdraws the batch. It is not deleted."
+                    description={
+                        <>
+                            The batch keeps its number, machine, shift and start time, and stays readable in history
+                            with your name and reason on it. It leaves the machine cards and this approval queue.
+                            {cancellingRow?.batch_status === 'completed' && (
+                                <>
+                                    {' '}
+                                    <b>
+                                        This batch was completed, so the material it booked and the bottles it
+                                        received are given back at the same figures they were taken at.
+                                    </b>
+                                </>
+                            )}
+                        </>
+                    }
+                />
+                <Input.TextArea
+                    rows={3}
+                    placeholder="Why is this being cancelled? (required — it is the only record afterwards)"
+                    value={cancelReason}
+                    onChange={(e) => setCancelReason(e.target.value)}
                 />
             </Modal>
         </>

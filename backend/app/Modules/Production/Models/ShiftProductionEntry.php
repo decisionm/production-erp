@@ -125,6 +125,25 @@ class ShiftProductionEntry extends Model
         return $this->belongsTo(User::class, 'cancelled_by');
     }
 
+    /**
+     * The workbook row this run was judged against, and the approved machine
+     * exception that may have overridden it.
+     *
+     * Both ids were already stored on every batch; nothing could read them
+     * back as records, so no screen could say "the workbook says 5, this
+     * machine is set to 4, the run used 5". That sentence is the whole point
+     * of loading them.
+     */
+    public function productionStandard(): BelongsTo
+    {
+        return $this->belongsTo(ProductionStandard::class, 'production_standard_id');
+    }
+
+    public function productionConfiguration(): BelongsTo
+    {
+        return $this->belongsTo(ProductionConfiguration::class, 'production_configuration_id');
+    }
+
     public function supervisorSignedBy(): BelongsTo
     {
         return $this->belongsTo(Employee::class, 'supervisor_signed_by');

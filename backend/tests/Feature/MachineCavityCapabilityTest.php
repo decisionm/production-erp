@@ -26,7 +26,11 @@ class MachineCavityCapabilityTest extends TestCase
         $high = WorkCenter::create(['name' => 'Machine 10', 'code' => 'M10', 'is_active' => true]);
 
         config()->set('production.machine_capability.cavity_threshold', 6);
-        config()->set('production.machine_capability.high_cavity_work_center_ids', [$high->id]);
+        // BY CODE, never by id. The configured value used to be a work-centre
+        // id, and the `10` someone wrote meaning "Machine 10" was MC-05,
+        // "Machine 5" — every high-cavity product pointed at the wrong
+        // machine. A code cannot be mistaken for a row number.
+        config()->set('production.machine_capability.high_cavity_work_center_codes', [$high->code]);
 
         return [$low, $high];
     }
@@ -102,7 +106,7 @@ class MachineCavityCapabilityTest extends TestCase
     public function test_the_rule_switches_off_entirely_when_no_machines_are_configured(): void
     {
         [$low] = $this->machines();
-        config()->set('production.machine_capability.high_cavity_work_center_ids', []);
+        config()->set('production.machine_capability.high_cavity_work_center_codes', []);
 
         $service = new MachineCapabilityService;
 
@@ -141,25 +145,79 @@ class MachineCavityCapabilityTest extends TestCase
     public function test_the_rule_defaults_to_advisory_not_enforced(): void
     {
         // The safety property: a deployment whose .env was never edited must
-        // warn, never refuse. 12 of the master's 103 rows are affected, and a
-        // wrong cavity figure would otherwise make a real product unrunnable.
+        // warn, never refuse. Reaffirmed 03-Aug for first-day factory testing —
+        // a hard refusal stops a real shift over a cavity figure the master is
+        // still settling.
         $this->assertFalse((bool) config('production.machine_capability.enforced'));
     }
 
-    public function test_a_machines_own_declared_capability_beats_the_global_rule(): void
+    public function test_a_non_compliant_run_is_permitted_but_never_reported_as_compliant(): void
     {
-        // THE resolution for the Machine 9 contradiction: the daily sheets show
-        // 180ml PDL running 32 shifts at 6 cavities on Machine 9, while the
-        // global rule says 6+ belongs on Machine 10. The factory settles it on
-        // the Machines & Capabilities tab: declare Machine 9 capable up to 7,
-        // and its own declaration outranks the .env list — no deploy, no code.
+        // THE REGRESSION THIS EXISTS FOR: enforcement being off must not make
+        // the warning disappear or mark the run compliant. Those exception
+        // records are the evidence for deciding whether to switch enforcement
+        // on, so a permissive setting that silently reported "fine" would
+        // leave the log empty for exactly the wrong reason.
+        [$low] = $this->machines();
+        config()->set('production.machine_capability.enforced', false);
+
+        $service = new MachineCapabilityService;
+
+        // 6 cavities on a machine that is not MC-10: not compliant...
+        $this->assertFalse($service->compliesWithRecommendation(6, $low->id));
+        // ...but permitted, because enforcement is off...
+        $this->assertTrue($service->isPermitted(6, $low->id));
+        // ...and still spoken about, loudly.
+        $warning = $service->warningFor($this->standard(6), $low->id);
+        $this->assertNotNull($warning);
+        $this->assertSame('machine_cavity_restricted', $warning['code']);
+    }
+
+    public function test_five_cavities_is_not_restricted_because_the_rule_is_more_than_five(): void
+    {
+        // 03-Aug ruling: five is NOT automatically MC-10. The 60 ml Round Amber
+        // product carries a 5-cavity workbook standard and runs on MC-04.
+        [$low] = $this->machines();
+
+        $service = new MachineCapabilityService;
+
+        $this->assertFalse($service->isRestricted(5));
+        $this->assertTrue($service->allows(5, $low->id));
+        $this->assertTrue($service->isRestricted(6));
+    }
+
+    public function test_the_restricted_machine_resolves_by_code_not_by_row_id(): void
+    {
+        // THE MC-10 / ID-10 REGRESSION. Machine 10's row id is not 10 — the
+        // work-centre table starts at MC-01 = 6 — so a rule configured with the
+        // number 10 selected Machine 5. Configuring the CODE must select
+        // Machine 10 whatever its id happens to be.
+        [$low, $high] = $this->machines();
+        $decoy = WorkCenter::create(['name' => 'Machine 5', 'code' => 'M5', 'is_active' => true]);
+
+        $service = new MachineCapabilityService;
+
+        $this->assertSame([$high->id], $service->restrictedWorkCenterIds());
+        $this->assertNotContains($decoy->id, $service->restrictedWorkCenterIds());
+        $this->assertTrue($service->allows(7, $high->id));
+        $this->assertFalse($service->allows(7, $decoy->id));
+    }
+
+    public function test_the_factory_rule_outranks_a_machines_own_capability_at_or_above_the_threshold(): void
+    {
+        // REVERSED 03-Aug on the factory's instruction. A machine declaring
+        // itself capable of 6 no longer earns a 6-cavity mould: above the
+        // threshold the rule is the rule, or a capability row edited on the
+        // Machines & Capabilities tab would quietly override the factory's
+        // "more than five means Machine 10". Below the threshold the machine's
+        // own declaration still governs — see the two tests after this one.
         [$low] = $this->machines();
         $low->update(['max_cavities' => 7]);
 
         $service = new MachineCapabilityService;
 
-        $this->assertTrue($service->allows(6, $low->id));
-        $this->assertNull($service->warningFor($this->standard(6), $low->id));
+        $this->assertFalse($service->allows(6, $low->id));
+        $this->assertNotNull($service->warningFor($this->standard(6), $low->id));
     }
 
     public function test_a_machine_declaring_a_low_maximum_refuses_even_below_the_global_threshold(): void

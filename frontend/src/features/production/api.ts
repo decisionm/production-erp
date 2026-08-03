@@ -486,10 +486,24 @@ export interface ProductStandardsWorkspaceParams {
     per_page?: number;
 }
 
+/**
+ * Two approved machine configurations that both apply to the same product on
+ * the same machine at the same time. The resolver has to pick one, and until
+ * this was reported no screen admitted a choice had been made.
+ */
+export interface ConfigurationOverlap {
+    item_id: number;
+    work_center_id: number;
+    configuration_ids: number[];
+    /** True when the clashing rows disagree on cavities or cycle time — the case that changes expected output. */
+    values_differ: boolean;
+}
+
 export interface ProductStandardsWorkspacePage {
     data: ProductStandardsWorkspaceRow[];
     meta: Paginated<ProductStandardsWorkspaceRow>['meta'];
     summary: ProductStandardsSummary;
+    configuration_overlaps: ConfigurationOverlap[];
 }
 
 /**
@@ -509,7 +523,7 @@ export interface ProductStandardsWorkspacePage {
 export async function listProductionStandards(
     params: ProductStandardsWorkspaceParams = {},
 ): Promise<ProductStandardsWorkspacePage> {
-    const { data } = await api.get<WirePage<ProductStandardsWorkspaceRow> & { summary?: ProductStandardsSummary }>(
+    const { data } = await api.get<WirePage<ProductStandardsWorkspaceRow> & { summary?: ProductStandardsSummary; configuration_overlaps?: ConfigurationOverlap[] }>(
         '/production/standards',
         { params },
     );
@@ -527,6 +541,8 @@ export async function listProductionStandards(
         // count as "all" is the only honest fallback — inventing ready and
         // incomplete numbers would put a verdict on screen nothing computed.
         summary: data.summary ?? { ready: 0, incomplete: 0, all: data.total ?? rows.length },
+        // An older backend sends none; an empty list is the honest default.
+        configuration_overlaps: data.configuration_overlaps ?? [],
     };
 }
 
@@ -847,6 +863,22 @@ export async function rejectShiftProductionEntry(id: number, reason?: string): P
     const { data } = await api.post<{ data: ShiftProductionEntry }>(`/production/shift-production-entries/${id}/reject`, {
         reason,
     });
+    return data.data;
+}
+
+/**
+ * Withdraw a batch entered by mistake. NOT a delete: the record and its whole
+ * history survive, and the server refuses outright once quality, an approval,
+ * carton labels, a Tally voucher or a handover has touched it.
+ *
+ * The reason is required by the server and is the only thing that afterwards
+ * distinguishes "entered by mistake" from a real batch someone made vanish.
+ */
+export async function cancelShiftProductionEntry(id: number, reason: string): Promise<ShiftProductionEntry> {
+    const { data } = await api.post<{ data: ShiftProductionEntry }>(
+        `/production/shift-production-entries/${id}/cancel`,
+        { reason },
+    );
     return data.data;
 }
 

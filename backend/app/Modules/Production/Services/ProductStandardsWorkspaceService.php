@@ -104,7 +104,17 @@ class ProductStandardsWorkspaceService
         // The page links carry the filters. A "next page" that silently drops
         // the view and the search is a pager that walks you out of the screen
         // you were working in.
-        return ['page' => $paginator->withQueryString(), 'summary' => $summary];
+        return [
+            'page' => $paginator->withQueryString(),
+            'summary' => $summary,
+            // Overlapping approved configurations, surfaced on the page that
+            // owns them. Not a block and not a per-row flag: it is one banner
+            // saying "these products have two live machine settings that
+            // disagree, and one of them is wrong". Before this, the resolver
+            // simply picked one and no screen anywhere admitted a choice had
+            // been made.
+            'configuration_overlaps' => $this->configurations->overlappingApproved(),
+        ];
     }
 
     private function view(mixed $requested): string

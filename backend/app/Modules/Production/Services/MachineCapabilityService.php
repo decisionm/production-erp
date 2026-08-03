@@ -22,13 +22,49 @@ class MachineCapabilityService
 {
     public const WARNING_CODE = 'machine_cavity_restricted';
 
-    /** @return list<int> */
+    /**
+     * The configured machine CODES, verbatim.
+     *
+     * @return list<string>
+     */
+    public function restrictedWorkCenterCodes(): array
+    {
+        /** @var list<string> $codes */
+        $codes = config('production.machine_capability.high_cavity_work_center_codes', []);
+
+        return $codes;
+    }
+
+    /**
+     * The configured codes resolved to work-centre ids.
+     *
+     * Resolution is by CODE and never by id. The previous version of this
+     * method read ids straight from config, and the configured `10` — written
+     * meaning "Machine 10" — was MC-05, "Machine 5". Codes cannot be mistaken
+     * for row numbers, which is the whole point of the change.
+     *
+     * A code matching no machine resolves to nothing. That is reported by
+     * warningFor() rather than silently widening the rule to "any machine",
+     * because a restriction that quietly stops restricting is the failure mode
+     * this class exists to prevent.
+     *
+     * @return list<int>
+     */
     public function restrictedWorkCenterIds(): array
     {
-        /** @var list<int> $ids */
-        $ids = config('production.machine_capability.high_cavity_work_center_ids', []);
+        $codes = $this->restrictedWorkCenterCodes();
 
-        return $ids;
+        if ($codes === []) {
+            return [];
+        }
+
+        return WorkCenter::query()
+            ->whereIn('code', $codes)
+            ->orderBy('display_sequence')
+            ->orderBy('id')
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
     }
 
     public function threshold(): int
@@ -122,6 +158,36 @@ class MachineCapabilityService
         return ! ($machine->max_cavities !== null && $cavities > $machine->max_cavities);
     }
 
+    /**
+     * Does this run comply with the factory's machine recommendation?
+     *
+     * TWO SEPARATE QUESTIONS, and this is the first one:
+     *
+     *   compliesWithRecommendation() — is this the machine the rule names?
+     *   isEnforced()                 — is a non-compliant run refused?
+     *
+     * They are deliberately not collapsed. While enforcement is off, a
+     * non-compliant run PROCEEDS, and it must still be reported as
+     * non-compliant and recorded as an exception — that exception log is the
+     * evidence the factory will use to decide whether to switch enforcement
+     * on. Answering "compliant" merely because nothing was refused would make
+     * the log empty and the decision unmakeable.
+     */
+    public function compliesWithRecommendation(?int $cavities, ?int $workCenterId): bool
+    {
+        return $this->allows($cavities, $workCenterId);
+    }
+
+    /**
+     * Whether the run is PERMITTED right now, which is compliance plus the
+     * enforcement setting. With enforcement off every run is permitted,
+     * compliant or not.
+     */
+    public function isPermitted(?int $cavities, ?int $workCenterId): bool
+    {
+        return ! $this->isEnforced() || $this->compliesWithRecommendation($cavities, $workCenterId);
+    }
+
     public function allows(?int $cavities, ?int $workCenterId): bool
     {
         // No machine named yet (the supervisor has not picked one) is not a
@@ -132,6 +198,24 @@ class MachineCapabilityService
             return true;
         }
 
+        // AT OR ABOVE THE THRESHOLD THE FACTORY RULE IS FINAL, and it is
+        // checked FIRST — ahead of the machine's own declaration.
+        //
+        // The order matters and used to be the other way round. With the
+        // machine's own capability winning, a 5-cavity mould passed on any
+        // machine whose permitted list happened to include 5, and the factory's
+        // "five or more means Machine 10" would have been quietly overridden by
+        // a capability row somebody edited. Worse, a machine that declares
+        // nothing at all — which is nine of the ten here — fell through to the
+        // global rule and so behaved differently from one that does. The
+        // mandatory rule is not a default to be overridden; it is the rule.
+        if ($this->isRestricted($cavities)) {
+            return in_array($workCenterId, $this->restrictedWorkCenterIds(), true);
+        }
+
+        // Below the threshold, the machine's own stored capability governs —
+        // unchanged. This is the Machines & Capabilities tab staying the live
+        // control for everything the factory rule does not speak to.
         $machine = WorkCenter::query()->find($workCenterId);
 
         if ($machine !== null) {
@@ -141,13 +225,7 @@ class MachineCapabilityService
             }
         }
 
-        // The machine declares nothing about itself — fall back to the global
-        // threshold rule from config.
-        if (! $this->isRestricted($cavities)) {
-            return true;
-        }
-
-        return in_array($workCenterId, $this->restrictedWorkCenterIds(), true);
+        return true;
     }
 
     /**
@@ -160,11 +238,25 @@ class MachineCapabilityService
      *
      * @return array{code: string, message: string}|null
      */
-    public function warningFor(?ProductionStandard $standard, ?int $workCenterId): ?array
+    public function warningFor(?ProductionStandard $standard, ?int $workCenterId, ?int $activeCavities = null): ?array
     {
-        $cavities = $standard?->cavities;
+        // ACTIVE CAVITIES DECIDE, and the standard's figure is only the
+        // fallback for callers that have not resolved a run yet.
+        //
+        // The two can differ because a machine configuration can carry its own
+        // default — and a WRONG configuration is exactly how they came to
+        // differ for 60 ml Round Amber, where a duplicate automated row said 4
+        // against the standard's 5. The rule reads what the run actually uses
+        // so that a stale default cannot quietly move a product out of the
+        // rule's reach; it is not an endorsement of any particular default.
+        $cavities = $activeCavities ?? $standard?->cavities;
 
-        if ($this->allows($cavities, $workCenterId)) {
+        // Compliance is judged here and NOWHERE else consults enforcement to
+        // decide whether to speak. A permissive enforcement setting changes
+        // what happens next — the run is allowed — but it must never make a
+        // non-compliant run look compliant, or the day-one exception log would
+        // be empty precisely because enforcement was off.
+        if ($this->compliesWithRecommendation($cavities, $workCenterId)) {
             return null;
         }
 
@@ -174,7 +266,13 @@ class MachineCapabilityService
         // When the MACHINE'S OWN capability refused, say what the machine is
         // set up for — that is the figure someone maintains on the Machines &
         // Capabilities tab, and the message should point back at it.
-        if ($machine !== null && $this->machineVerdict($machine, (int) $cavities) === false) {
+        //
+        // Only reachable BELOW the threshold now. At or above it the factory
+        // rule decides and this branch must not speak, or a supervisor sent to
+        // Machine 10 would instead be told to go and edit a cavity range.
+        if (! $this->isRestricted($cavities)
+            && $machine !== null
+            && $this->machineVerdict($machine, (int) $cavities) === false) {
             $permitted = $machine->permitted_cavities;
             $setup = is_array($permitted) && $permitted !== []
                 ? 'cavities '.implode(', ', array_map('intval', $permitted))
@@ -202,20 +300,24 @@ class MachineCapabilityService
             ->all();
 
         $allowed = $names === []
-            // The configured ids do not exist in the work-centre master.
-            // Reported as ids rather than silently dropped: a rule pointing at
-            // nothing is a configuration error someone needs to see.
-            ? 'work centre '.implode(', ', array_map('strval', $this->restrictedWorkCenterIds()))
+            // The configured CODES match no machine. Reported as the codes
+            // themselves rather than silently dropped: a rule pointing at
+            // nothing is a configuration error someone needs to see, and the
+            // code is what they would go and fix.
+            ? 'machine code '.implode(', ', $this->restrictedWorkCenterCodes())
             : implode(' or ', $names);
 
         return [
             'code' => self::WARNING_CODE,
             'message' => sprintf(
-                'This standard runs %d cavities, and moulds of %d or more are set up for %s — you are starting it on %s. The batch will record that.',
+                'This standard runs %d cavities. Moulds of %d or more run only on %s — not on %s.%s',
                 (int) $cavities,
                 $this->threshold(),
                 $allowed,
                 $running,
+                $this->isEnforced()
+                    ? ' This batch cannot be started here.'
+                    : ' The batch will record that.',
             ),
         ];
     }

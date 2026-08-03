@@ -106,6 +106,11 @@ class ProductionStandardResolver
         ?ProductionStandardPackaging $packaging,
         int $itemId,
         ?int $workCenterId = null,
+        // The cavities this run will actually use, once a machine
+        // configuration has been resolved. The cavity rule is judged on this
+        // rather than on the standard's mould figure; null means the caller
+        // has not resolved a run yet and the standard stands in.
+        ?int $activeCavities = null,
     ): array {
         $warnings = [];
 
@@ -144,7 +149,7 @@ class ProductionStandardResolver
         // The cavity rule: high-cavity moulds belong on specific machines. Sits
         // with the other advisories on purpose — it is a "you should know",
         // and the run gets recorded either way.
-        $cavityWarning = $this->machineCapability->warningFor($standard, $workCenterId);
+        $cavityWarning = $this->machineCapability->warningFor($standard, $workCenterId, $activeCavities);
         if ($cavityWarning !== null) {
             $warnings[] = $cavityWarning;
         }

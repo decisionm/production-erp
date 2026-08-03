@@ -311,14 +311,50 @@ return [
      * real shifts and the factory wants it to bite.
      */
     'machine_capability' => [
+        // Confirmed by the factory 03-Aug: MORE THAN five cavities means
+        // Machine 10 — so 6, 7 and above. Five is NOT automatically MC-10:
+        // a 5-cavity mould may run elsewhere where an approved machine
+        // configuration supports it, and the 60 ml Round Amber case is exactly
+        // that. The check is `>= threshold`, so "greater than 5" is 6.
         'cavity_threshold' => (int) env('PROD_CAVITY_THRESHOLD', 6),
 
-        // Comma-separated work-centre IDs, e.g. "10" or "9,10".
-        'high_cavity_work_center_ids' => array_values(array_filter(
-            array_map('intval', array_map('trim', explode(',', (string) env('PROD_HIGH_CAVITY_WORK_CENTERS', '10')))),
-            fn (int $id) => $id > 0,
+        /*
+         * Machines by CODE, not by database id.
+         *
+         * This setting used to hold ids, with a comment explaining that ids
+         * survive a rename. They do — but the factory calls the machine
+         * "Machine 10", and the id of Machine 10 is 15, because the work-centre
+         * table starts at MC-01 = 6. The configured value was `10`, written by
+         * someone who meant Machine 10 and got MC-05 — "Machine 5". Every
+         * high-cavity product in the factory was pointed at the wrong machine,
+         * and the screen said "Machine 5 only" while the approved machine
+         * setting said MC-10.
+         *
+         * A code is the identity the floor actually uses and the one the
+         * factory would say out loud. It cannot be confused with a row number,
+         * which is the entire failure this replaces. A code that matches no
+         * machine resolves to nothing and is reported rather than silently
+         * dropped — see MachineCapabilityService.
+         */
+        'high_cavity_work_center_codes' => array_values(array_filter(
+            array_map('trim', explode(',', (string) env('PROD_HIGH_CAVITY_WORK_CENTER_CODES', 'MC-10'))),
+            fn (string $code) => $code !== '',
         )),
 
+        /*
+         * ADVISORY on purpose for first-day testing (03-Aug ruling).
+         *
+         * The rule makes MC-10 the RECOMMENDED machine at or above the
+         * threshold and says so loudly, but it does not refuse another
+         * machine — the exception is recorded against the batch instead. The
+         * factory is testing on a live floor, and a hard refusal on day one
+         * stops a real shift over a cavity figure the master is still settling
+         * (the 60 ml Round Amber case: two approved configurations disagreeing
+         * 4 against 5).
+         *
+         * Flip to true once the recorded exceptions show the rule matches what
+         * the floor actually does.
+         */
         'enforced' => (bool) env('PROD_CAVITY_RULE_ENFORCED', false),
     ],
 

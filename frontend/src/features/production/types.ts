@@ -80,7 +80,13 @@ export interface Shift {
     is_active: boolean;
 }
 
-export type BatchStatus = 'in_progress' | 'completed';
+/**
+ * `cancelled` is a batch withdrawn as a mistake. It is a terminal state that
+ * every "a batch that ran" query excludes by naming the other two, so a
+ * cancelled row leaves the machine cards and the approval queue without any of
+ * them being taught about it. The record itself is never deleted.
+ */
+export type BatchStatus = 'in_progress' | 'completed' | 'cancelled';
 export type ShiftProductionEntryStatus =
     | 'pending'
     | 'pm_approved'
@@ -761,10 +767,29 @@ export interface ShiftProductionEntry {
     /** SNAPSHOT copied from the item at Start Batch — never editable after. */
     standard_cycle_time: string | null;
     actual_cycle_time: string | null;
-    /** Snapshot from the item at Start Batch. */
+    /**
+     * MISLEADING NAME, kept because every past batch carries it: this is filled
+     * CONFIGURATION-FIRST, so it is the governing figure for the run and not
+     * necessarily the Excel workbook's. Read `figure_sources` below to tell the
+     * three apart, and never label this one "std".
+     */
     standard_cavities: number | null;
     /** Editable; defaults to standard. */
     active_cavities: number | null;
+    /**
+     * The three figures kept apart, so a screen can show the workbook's value,
+     * the machine exception's value and the run's own without presenting one as
+     * another. This is the fix for a supervisor reading "std: 4" on a product
+     * whose workbook row says 5.
+     */
+    figure_sources?: {
+        product_standard: { cavities: number | null; cycle_time: string | null; source_reference: string | null; label: string };
+        machine_configuration: { cavities: number | null; cycle_time: string | null; approved_by_person: boolean; label: string };
+        active: { cavities: number | null; cycle_time: string | null; cavities_source: string | null; cycle_time_source: string | null; label: string };
+    };
+    cancelled_at?: string | null;
+    cancelled_by?: { id: number; name: string } | null;
+    cancellation_reason?: string | null;
     /** Entered at Complete Batch. */
     running_hours: string | null;
     /** Entered at/after completion. */

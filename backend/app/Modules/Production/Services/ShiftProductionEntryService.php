@@ -67,7 +67,7 @@ class ShiftProductionEntryService
         private readonly BagCostAllocationService $bagCosts,
     ) {}
 
-    public function paginate(int $perPage = 20, ?ShiftProductionEntryStatus $status = null): LengthAwarePaginator
+    public function paginate(int $perPage = 20, ?ShiftProductionEntryStatus $status = null, bool $includeCancelled = false): LengthAwarePaginator
     {
         return ShiftProductionEntry::query()
             ->with([
@@ -82,6 +82,9 @@ class ShiftProductionEntryService
                 // batch ran must still be nameable in that batch's history.
                 'materialConsumptions.warehouse' => fn ($query) => $query->withTrashed(),
                 'scraps.scrapReason', 'approvedBy',
+                // Loaded so the resource can name all three figure sources
+                // apart — workbook, machine exception, and the run's own.
+                'productionStandard', 'productionConfiguration', 'cancelledBy',
                 'downtimeEvents.reason',
                 'tallySyncEntries',
                 // The quality queue and the approval queue are the same list
@@ -90,6 +93,17 @@ class ShiftProductionEntryService
                 // who reduced it.
                 'qualityCheckedBy',
             ])
+            // CANCELLED ROWS ARE NOT WORK. This list is the approval queue and
+            // the production views; a batch withdrawn as a mistake must leave
+            // them the moment it is cancelled.
+            //
+            // The filter is here rather than only inside the status branch
+            // below, which is the bug it fixes: with no status filter there was
+            // no batch_status predicate at all, so an unfiltered read returned
+            // cancelled batches and entry #40 kept appearing after it had been
+            // withdrawn. History keeps them — `include_cancelled` is how the
+            // audit view asks, and nothing else passes it.
+            ->when(! $includeCancelled, fn ($query) => $query->where('batch_status', '!=', BatchStatus::Cancelled->value))
             ->when($status, function ($query) use ($status) {
                 // The approval `status` column defaults to "pending" at row
                 // creation regardless of batch_status — an in_progress
@@ -385,11 +399,31 @@ class ShiftProductionEntryService
                     // months later when the rule has since been changed.
                     'machine_cavity_rule' => [
                         'threshold' => $this->machineCapability->threshold(),
+                        // Codes as well as ids. The ids are what the rule
+                        // tested; the codes are what it MEANT, and a snapshot
+                        // holding only ids is how "10" came to mean Machine 5
+                        // for every batch recorded before this was fixed.
+                        'restricted_work_center_codes' => $this->machineCapability->restrictedWorkCenterCodes(),
                         'restricted_work_center_ids' => $this->machineCapability->restrictedWorkCenterIds(),
+                        'enforced' => $this->machineCapability->isEnforced(),
+                        // THE RULE IS JUDGED ON ACTIVE CAVITIES — the cavities
+                        // this run actually uses, which is the factory's own
+                        // wording ("if active cavities are 5 or more"). Both
+                        // figures are recorded, because the question afterwards
+                        // is which one the rule read.
+                        'active_cavities' => $effective['cavities'],
                         'standard_cavities' => $standard?->cavities,
-                        'applies' => $this->machineCapability->isRestricted($standard?->cavities),
-                        'complied' => $this->machineCapability->allows($standard?->cavities, (int) $data['work_center_id']),
-                        'overridden_by' => $this->machineCapability->allows($standard?->cavities, (int) $data['work_center_id'])
+                        'applies' => $this->machineCapability->isRestricted($effective['cavities']),
+                        // COMPLIANCE AND PERMISSION ARE RECORDED SEPARATELY.
+                        // While enforcement is off a non-compliant run is
+                        // permitted and still recorded as non-compliant — these
+                        // exceptions are the evidence for deciding whether to
+                        // switch enforcement on, so collapsing them into one
+                        // "it was fine" flag would erase the very thing being
+                        // gathered.
+                        'complied' => $this->machineCapability->compliesWithRecommendation($effective['cavities'], (int) $data['work_center_id']),
+                        'permitted' => $this->machineCapability->isPermitted($effective['cavities'], (int) $data['work_center_id']),
+                        'exception_recorded_by' => $this->machineCapability->compliesWithRecommendation($effective['cavities'], (int) $data['work_center_id'])
                             ? null : $createdBy,
                     ],
                 ],
@@ -483,6 +517,25 @@ class ShiftProductionEntryService
                     // intentionally NOT settable here — see startBatch().
                     'actual_cycle_time' => array_key_exists('actual_cycle_time', $data) ? $data['actual_cycle_time'] : $entry->actual_cycle_time,
                     'active_cavities' => array_key_exists('active_cavities', $data) ? $data['active_cavities'] : $entry->active_cavities,
+                    // WHO CHOSE THE ACTIVE CAVITIES, recomputed here.
+                    //
+                    // Completion may change active_cavities, and until now
+                    // cavities_source was left holding whatever Start Batch
+                    // decided. Batch #43 is the proof: a person typed 5 at
+                    // completion over a configured 4, and the row still claimed
+                    // `configuration` — the snapshot asserting the machine
+                    // configuration supplied a number no configuration holds.
+                    // A figure a person entered is an override and says so.
+                    'cavities_source' => (array_key_exists('active_cavities', $data)
+                        && $data['active_cavities'] !== null
+                        && (int) $data['active_cavities'] !== (int) $entry->active_cavities)
+                            ? 'override'
+                            : $entry->cavities_source,
+                    'override_by' => (array_key_exists('active_cavities', $data)
+                        && $data['active_cavities'] !== null
+                        && (int) $data['active_cavities'] !== (int) $entry->active_cavities)
+                            ? $completedBy
+                            : $entry->override_by,
                     'running_hours' => $data['running_hours'] ?? null,
                     'qc_rejection_kg' => $data['qc_rejection_kg'] ?? null,
                     'notes' => $data['notes'] ?? $entry->notes,
@@ -2325,9 +2378,11 @@ class ShiftProductionEntryService
             // a finished shift silently erased.
             $locked = ShiftProductionEntry::query()->lockForUpdate()->findOrFail($entry->id);
 
-            if ($locked->batch_status !== BatchStatus::InProgress) {
+            $wasCompleted = $locked->batch_status === BatchStatus::Completed;
+
+            if (! $wasCompleted && $locked->batch_status !== BatchStatus::InProgress) {
                 throw ValidationException::withMessages([
-                    'entry' => 'Only a running batch can be cancelled. This batch is '.$locked->batch_status->value.'.',
+                    'entry' => 'Only a running batch, or a completed batch quality has not yet checked, can be cancelled. This batch is '.$locked->batch_status->value.'.',
                 ]);
             }
 
@@ -2339,16 +2394,13 @@ class ShiftProductionEntryService
                 $blockers[] = 'it has already been through approval ('.$locked->status->value.')';
             }
             if ($locked->quality_checked_at !== null) {
-                $blockers[] = 'it has a quality check recorded';
+                $blockers[] = 'quality has already checked it';
             }
-            if ($locked->materialConsumptions()->exists()) {
-                $blockers[] = 'material has been consumed against it';
+            if ($locked->plant_manager_signed_at !== null) {
+                $blockers[] = 'the plant manager has signed it';
             }
-            if ($locked->dayBinMovements()->exists()) {
-                $blockers[] = 'it has day-bin movements';
-            }
-            if ($locked->scraps()->exists()) {
-                $blockers[] = 'scrap has been recorded against it';
+            if ($locked->accountant_signed_at !== null) {
+                $blockers[] = 'accounts has signed it';
             }
             if ($locked->cartons()->exists()) {
                 $blockers[] = 'carton labels have been generated';
@@ -2360,11 +2412,46 @@ class ShiftProductionEntryService
                 $blockers[] = 'a shift handover created a following segment';
             }
 
+            // Consumption and scrap are blockers on a RUNNING batch and not on
+            // a completed one — the difference is whether there is a booking to
+            // reverse. A completed batch's issues and finished-goods receipt
+            // are exactly what reverseCompletionEffects() gives back; a running
+            // batch has no completion to reverse, so material against it means
+            // this is not the untouched mis-start the action is for.
+            if (! $wasCompleted) {
+                if ($locked->materialConsumptions()->exists()) {
+                    $blockers[] = 'material has been consumed against it';
+                }
+                if ($locked->scraps()->exists()) {
+                    $blockers[] = 'scrap has been recorded against it';
+                }
+            }
+
+            // Day-bin movements are never reversed here. The day bin is a
+            // physical place on the floor — resin that left it did leave it,
+            // and no status change puts it back in the bin.
+            if ($locked->dayBinMovements()->exists()) {
+                $blockers[] = 'it has day-bin movements, which cancelling cannot put back';
+            }
+
             if ($blockers !== []) {
                 throw ValidationException::withMessages([
                     'entry' => 'This batch cannot be cancelled because '.implode(', and ', $blockers).
-                        '. Cancelling is only for a batch started by mistake that has produced nothing.',
+                        '. Cancelling is only for a batch entered by mistake that quality and approval have not yet touched.',
                 ]);
+            }
+
+            $previousBatchStatus = $locked->batch_status->value;
+            $previousStatus = $locked->status->value;
+
+            // The completion's own stock, given back inside THIS transaction:
+            // each consumption line received at the unit cost its own issue
+            // recorded, and the finished-goods receipt issued back out. Reused
+            // rather than reimplemented — the amendment flow has run this exact
+            // reversal against completed pre-quality batches all along, and a
+            // second copy written here would be a second thing to keep correct.
+            if ($wasCompleted) {
+                $this->reverseCompletionEffects($entry, $locked, $cancelledBy);
             }
 
             $locked->forceFill([
@@ -2372,6 +2459,20 @@ class ShiftProductionEntryService
                 'cancelled_at' => now(),
                 'cancelled_by' => $cancelledBy,
                 'cancellation_reason' => $reason,
+                // The state it was cancelled FROM, and whether stock was given
+                // back. A cancelled row's own batch_status no longer remembers
+                // either, and "was this batch's stock reversed?" is the first
+                // question anyone auditing it will ask.
+                'config_snapshot' => array_merge($locked->config_snapshot ?? [], [
+                    'cancellation' => [
+                        'previous_batch_status' => $previousBatchStatus,
+                        'previous_status' => $previousStatus,
+                        'stock_reversed' => $wasCompleted,
+                        'at' => now()->toIso8601String(),
+                        'by' => $cancelledBy,
+                        'reason' => $reason,
+                    ],
+                ]),
             ])->save();
 
             return $locked->fresh(['item', 'workCenter', 'shift', 'cancelledBy']);

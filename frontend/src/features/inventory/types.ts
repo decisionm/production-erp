@@ -23,6 +23,12 @@ export interface Item {
     /** Standard cavity count of the item's mold. */
     standard_cavities: number | null;
     tracking_type: ItemTrackingType;
+    /**
+     * The Tally stock item this product IS, once Tally has synced it. Present
+     * means vouchers naming this product will post; absent means production can
+     * still run and only the voucher waits — the "Tally mapping pending" state.
+     */
+    tally_stock_item_guid: string | null;
     is_active: boolean;
     created_at: string;
 }
