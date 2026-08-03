@@ -93,13 +93,29 @@ export default function TallySettingsPage() {
                         >
                             Download Tally Sync Agent (Windows)
                         </Button>
-                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                            If nothing happens, Chrome may have blocked it — check Downloads and choose{' '}
-                            <b>Keep</b>, or right-click the button and pick <b>Save link as…</b>
+                        {/* THE VERSION, SAID OUT LOUD. This block fetched
+                            `version` from the very first commit and never once
+                            rendered it, so the only way to know which build the
+                            server was offering was to read the filename out of
+                            the link. Someone comparing "what is on the site" to
+                            "what is installed on the Tally PC" had nothing to
+                            compare, and an agent that had simply never been
+                            reinstalled looked like a stale download page. */}
+                        <Typography.Text style={{ fontSize: 13 }}>
+                            Latest version: <b>{data.agent.version ?? 'unknown'}</b>
+                            {data.agent.built_at ? ` · built ${data.agent.built_at.slice(0, 10)}` : ''}
+                            {' · '}
+                            {(data.agent.size / (1024 * 1024)).toFixed(1)} MB
                         </Typography.Text>
                         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                            {(data.agent.size / (1024 * 1024)).toFixed(1)} MB
-                            {data.agent.built_at ? ` · built ${data.agent.built_at.slice(0, 10)}` : ''}
+                            Check this against the version shown in the agent's own Settings window on the Tally
+                            PC. If they differ, the agent has not been reinstalled — quitting and reopening it
+                            does not update it.
+                        </Typography.Text>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            If nothing happens when you click Download, Chrome may have blocked it — check
+                            Downloads and choose <b>Keep</b>, or right-click the button and pick{' '}
+                            <b>Save link as…</b>
                         </Typography.Text>
                     </Space>
                 ) : (
