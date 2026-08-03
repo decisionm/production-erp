@@ -2292,6 +2292,93 @@ class ShiftProductionEntryService
     }
 
     /**
+     * Withdraw a batch that should never have been started.
+     *
+     * This is NOT the undo button for production. It exists for exactly one
+     * situation: somebody pressed Start Batch by mistake — a demo, a test, the
+     * wrong machine — and the running batch now holds that machine, because
+     * the start guard refuses a second batch while one is in progress. Before
+     * this existed the only cure was editing the database by hand.
+     *
+     * WHY IT REFUSES SO MUCH. Everything a real batch touches is a fact
+     * somewhere else: material left the day bin, the quality gate counted
+     * bottles, a manager signed, cartons were labelled and possibly shipped, a
+     * voucher went to Tally. Cancelling a batch that produced any of those
+     * would orphan them — the batch would vanish from every queue while its
+     * consequences stayed on the books, which is worse than the stuck machine
+     * this method is here to fix. So the entry must be untouched in every one
+     * of those respects, and the check is a refusal rather than a cleanup: this
+     * method deliberately CANNOT reverse anything, so it may only ever run
+     * where there is nothing to reverse.
+     *
+     * The row is kept, never deleted. Its number, machine, shift and start time
+     * remain readable, with who cancelled it and why — a batch that disappeared
+     * silently would be indistinguishable from data loss.
+     *
+     * @throws ValidationException when the batch is not running, or has any dependency
+     */
+    public function cancelTestBatch(ShiftProductionEntry $entry, ?int $cancelledBy, string $reason): ShiftProductionEntry
+    {
+        return DB::transaction(function () use ($entry, $cancelledBy, $reason) {
+            // Re-read under a lock. Without it, a Complete landing between the
+            // checks below and the write would be overwritten by the cancel —
+            // a finished shift silently erased.
+            $locked = ShiftProductionEntry::query()->lockForUpdate()->findOrFail($entry->id);
+
+            if ($locked->batch_status !== BatchStatus::InProgress) {
+                throw ValidationException::withMessages([
+                    'entry' => 'Only a running batch can be cancelled. This batch is '.$locked->batch_status->value.'.',
+                ]);
+            }
+
+            // Each blocker names the thing that exists, because "cannot
+            // cancel" without the reason sends someone to the database.
+            $blockers = [];
+
+            if ($locked->status !== ShiftProductionEntryStatus::Pending) {
+                $blockers[] = 'it has already been through approval ('.$locked->status->value.')';
+            }
+            if ($locked->quality_checked_at !== null) {
+                $blockers[] = 'it has a quality check recorded';
+            }
+            if ($locked->materialConsumptions()->exists()) {
+                $blockers[] = 'material has been consumed against it';
+            }
+            if ($locked->dayBinMovements()->exists()) {
+                $blockers[] = 'it has day-bin movements';
+            }
+            if ($locked->scraps()->exists()) {
+                $blockers[] = 'scrap has been recorded against it';
+            }
+            if ($locked->cartons()->exists()) {
+                $blockers[] = 'carton labels have been generated';
+            }
+            if ($locked->tallySyncEntries()->exists()) {
+                $blockers[] = 'a Tally voucher has been raised for it';
+            }
+            if ($locked->childSegments()->exists()) {
+                $blockers[] = 'a shift handover created a following segment';
+            }
+
+            if ($blockers !== []) {
+                throw ValidationException::withMessages([
+                    'entry' => 'This batch cannot be cancelled because '.implode(', and ', $blockers).
+                        '. Cancelling is only for a batch started by mistake that has produced nothing.',
+                ]);
+            }
+
+            $locked->forceFill([
+                'batch_status' => BatchStatus::Cancelled,
+                'cancelled_at' => now(),
+                'cancelled_by' => $cancelledBy,
+                'cancellation_reason' => $reason,
+            ])->save();
+
+            return $locked->fresh(['item', 'workCenter', 'shift', 'cancelledBy']);
+        });
+    }
+
+    /**
      * Rejection is allowed from any pre-MD stage and sends the entry back to
      * the supervisor with a reason — it never reaches the next gate.
      */

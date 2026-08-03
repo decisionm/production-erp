@@ -524,6 +524,9 @@ Route::prefix('v1')->group(function () {
             // inspected before the approval that posts it.
             Route::get('shift-production-entries/{shift_production_entry}/voucher-preview', VoucherPreviewController::class);
             Route::post('shift-production-entries/{shift_production_entry}/reject', [ShiftProductionEntryController::class, 'reject']);
+            // Withdraw a batch started by mistake, so its machine is not held
+            // by a demo run. Refuses any batch that has produced anything.
+            Route::post('shift-production-entries/{shift_production_entry}/cancel', [ShiftProductionEntryController::class, 'cancel']);
 
             Route::post('shift-summaries', [ShiftSummaryController::class, 'store']);
             Route::get('shift-summaries/report', [ShiftSummaryController::class, 'report']);

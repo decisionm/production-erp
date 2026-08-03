@@ -168,6 +168,12 @@ class ShiftProductionEntryResource extends JsonResource
             'accountant_signed_at' => $this->accountant_signed_at?->toIso8601String(),
             'approved_by' => UserResource::make($this->whenLoaded('approvedBy')),
             'approved_at' => $this->approved_at?->toIso8601String(),
+            // The cancellation audit. Emitted unconditionally rather than only
+            // when set: a screen asking "was this withdrawn?" needs a null it
+            // can trust, not a missing key it has to guess about.
+            'cancelled_at' => $this->cancelled_at?->toIso8601String(),
+            'cancelled_by' => UserResource::make($this->whenLoaded('cancelledBy')),
+            'cancellation_reason' => $this->cancellation_reason,
             'operator' => EmployeeResource::make($this->whenLoaded('operator')),
             // Free text — the helper isn't necessarily an Employee master.
             'helper_name' => $this->helper_name,

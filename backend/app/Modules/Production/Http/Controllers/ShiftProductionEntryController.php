@@ -4,6 +4,7 @@ namespace App\Modules\Production\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Production\Http\Requests\AmendBatchRequest;
+use App\Modules\Production\Http\Requests\CancelShiftProductionEntryRequest;
 use App\Modules\Production\Http\Requests\CompleteBatchRequest;
 use App\Modules\Production\Http\Requests\HandoverRequest;
 use App\Modules\Production\Http\Requests\RejectShiftProductionEntryRequest;
@@ -96,6 +97,17 @@ class ShiftProductionEntryController extends Controller
     {
         return ShiftProductionEntryResource::make(
             $this->entries->reject($shiftProductionEntry, $request->user()->id, $request->validated('reason')),
+        );
+    }
+
+    /**
+     * Cancel a batch started by mistake, freeing its machine. Refuses outright
+     * if the batch has produced anything at all — see the service.
+     */
+    public function cancel(CancelShiftProductionEntryRequest $request, ShiftProductionEntry $shiftProductionEntry): ShiftProductionEntryResource
+    {
+        return ShiftProductionEntryResource::make(
+            $this->entries->cancelTestBatch($shiftProductionEntry, $request->user()?->id, $request->validated('reason')),
         );
     }
 
