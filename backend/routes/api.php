@@ -294,6 +294,12 @@ Route::prefix('v1')->group(function () {
             Route::post('items', [TallySyncAgentController::class, 'items']);
             Route::post('masters', [TallySyncAgentController::class, 'masters']);
             Route::post('companies', [TallySyncAgentController::class, 'companies']);
+
+            // READ-ONLY godown-wise stock summary, reported and discarded. The
+            // route says `preview` because there is no sibling that writes: an
+            // opening-stock import is a separate, explicitly-approved act, not
+            // something a sync loop can reach.
+            Route::post('stock-summary/preview', [TallySyncAgentController::class, 'stockSummaryPreview']);
         });
 
         Route::prefix('hrms')->middleware('module:hrms')->group(function () {

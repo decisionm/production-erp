@@ -20,16 +20,17 @@ class ItemSyncService
      * @param  array<int, array{guid: string, name: string, base_unit?: string|null, alter_id?: int|null}>  $tallyItems
      * @return array{created: int, updated: int, total: int}
      */
-    public function sync(array $tallyItems): array
+    /** @param  string|null  $company  the Tally company these items came from. */
+    public function sync(array $tallyItems, ?string $company = null): array
     {
         $created = 0;
         $updated = 0;
 
         // One transaction for the whole batch: a mid-batch failure shouldn't
         // leave the item master half-updated for that pull cycle.
-        DB::transaction(function () use ($tallyItems, &$created, &$updated) {
+        DB::transaction(function () use ($tallyItems, $company, &$created, &$updated) {
             foreach ($tallyItems as $tallyItem) {
-                $result = $this->items->upsertFromTally($tallyItem);
+                $result = $this->items->upsertFromTally($tallyItem + ($company !== null ? ['company' => $company] : []));
 
                 $result['created'] ? $created++ : $updated++;
             }

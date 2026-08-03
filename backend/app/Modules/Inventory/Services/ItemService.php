@@ -63,6 +63,10 @@ class ItemService
                 'tally_alter_id' => $data['alter_id'] ?? $item->tally_alter_id,
                 'tally_synced_at' => now(),
                 'item_group_id' => $groupId ?? $item->item_group_id,
+                // Whose Tally this row came from. Only overwritten when the
+                // pull actually stated it — an older agent that says nothing
+                // must not erase provenance already recorded.
+                'tally_company' => $data['company'] ?? $item->tally_company,
             ]);
 
             // A previously deleted item reappearing in Tally means it's live
@@ -81,6 +85,7 @@ class ItemService
             'name' => $data['name'],
             'uom' => $data['base_unit'] ?? 'PCS',
             'tally_stock_item_guid' => $data['guid'],
+            'tally_company' => $data['company'] ?? null,
             'tally_alter_id' => $data['alter_id'] ?? null,
             'tally_synced_at' => now(),
             'item_group_id' => $groupId,

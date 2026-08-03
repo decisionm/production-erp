@@ -2,6 +2,8 @@ import { Tray, Menu, nativeImage, shell, app } from 'electron';
 import path from 'path';
 import { getStatus, runSyncCycle, setPaused } from './sync';
 import { runMastersSync } from './mastersSync';
+import { runStockSummaryPreview } from './stockSummarySync';
+import { getConfig } from './config';
 import { logFilePath } from './logger';
 import { isConfigured } from './config';
 
@@ -42,6 +44,13 @@ function buildMenu(onOpenSettings: () => void): Menu {
             },
         },
         { type: 'separator' },
+        {
+            // READ-ONLY, and the label says so. This reads Tally's closing
+            // position and asks the ERP to report on it; it imports nothing and
+            // cannot change stock on either side.
+            label: 'Read Stock Summary (preview only)',
+            click: () => void runStockSummaryPreview(getConfig().stockSummaryAsOf).then(refresh).catch(refresh),
+        },
         { label: 'View Logs', click: () => void shell.openPath(logFilePath()) },
         { label: 'Settings…', click: onOpenSettings },
         { type: 'separator' },

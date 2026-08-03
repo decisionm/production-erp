@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['code', 'name', 'is_active', 'tally_guid', 'tally_parent_name', 'parent_id'])]
+#[Fillable(['code', 'name', 'is_active', 'tally_guid', 'tally_company', 'tally_parent_name', 'parent_id'])]
 class Warehouse extends Model
 {
     use SoftDeletes;

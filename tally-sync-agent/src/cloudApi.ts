@@ -1,6 +1,7 @@
 import axios, { type AxiosInstance } from 'axios';
 import { getConfig } from './config';
 import type { MastersPayload } from './tally/masters';
+import type { StockSummaryPayload } from './tally/stockSummary';
 
 /**
  * Matches App\Modules\TallySync\Http\Controllers\TallySyncAgentController
@@ -68,6 +69,27 @@ export async function syncMasters(payload: MastersPayload, company: string): Pro
     // server refuses masters from a different company than the instance is
     // bound to, preventing cross-company data corruption.
     const { data } = await client().post<{ data: MastersSyncSummary }>('/masters', { ...payload, company });
+    return data.data;
+}
+
+export interface StockSummaryPreview {
+    company: string;
+    as_of: string;
+    totals: { lines: number; mapped: number; unmapped: number; foreign_godown: number };
+    lines: Array<Record<string, unknown>>;
+}
+
+/**
+ * Send a Stock Summary to the cloud for PREVIEW ONLY.
+ *
+ * Writes nothing on either side: the server matches each line to an ERP item by
+ * Tally GUID, reports what it found, and returns. Importing it as opening stock
+ * is a separate, explicitly-approved call — deliberately not something a sync
+ * loop can trigger, because an opening balance posted twice is not a mistake
+ * anyone spots by looking at a screen.
+ */
+export async function previewStockSummary(payload: StockSummaryPayload): Promise<StockSummaryPreview> {
+    const { data } = await client().post<{ data: StockSummaryPreview }>('/stock-summary/preview', payload);
     return data.data;
 }
 

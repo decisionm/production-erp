@@ -41,12 +41,20 @@ class WarehouseService
      * @param  array<int, array{guid: string, name: string, parent?: string|null}>  $godowns
      * @return array{created: int, updated: int, total: int}
      */
-    public function syncGodownsFromTally(array $godowns): array
+    /**
+     * @param  string|null  $company  the Tally company these godowns came from.
+     *                                Recorded on every row: without it a
+     *                                foreign company's godown is
+     *                                indistinguishable from a real one, which
+     *                                is how six of them came to be live here.
+     */
+    public function syncGodownsFromTally(array $godowns, ?string $company = null): array
     {
-        return HierarchyUpsert::sync(Warehouse::class, $godowns, fn (array $row): array => [
+        return HierarchyUpsert::sync(Warehouse::class, $godowns, fn (array $row): array => array_filter([
             'code' => $this->uniqueCodeFrom($row['name']),
             'is_active' => true,
-        ]);
+            'tally_company' => $company,
+        ], fn ($value) => $value !== null));
     }
 
     private function uniqueCodeFrom(string $name): string

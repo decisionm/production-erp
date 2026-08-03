@@ -33,11 +33,18 @@ class MasterSyncService
      * }  $payload
      * @return array<string, array{created: int, updated: int, total: int}>
      */
-    public function sync(array $payload): array
+    /**
+     * @param  string|null  $company  the Tally company this payload came from,
+     *                                stamped onto every row it writes. Null only
+     *                                for an older agent that does not send it —
+     *                                and an unstamped row is exactly the state
+     *                                the six foreign godowns were found in.
+     */
+    public function sync(array $payload, ?string $company = null): array
     {
         $summary = [];
 
-        DB::transaction(function () use ($payload, &$summary): void {
+        DB::transaction(function () use ($payload, $company, &$summary): void {
             // Order matters: parents/groups first so the leaves that reference
             // them (items → item_groups, ledgers → ledger_groups) resolve links.
             if (! empty($payload['item_groups'])) {
@@ -45,7 +52,7 @@ class MasterSyncService
             }
 
             if (! empty($payload['godowns'])) {
-                $summary['godowns'] = $this->warehouses->syncGodownsFromTally($payload['godowns']);
+                $summary['godowns'] = $this->warehouses->syncGodownsFromTally($payload['godowns'], $company);
             }
 
             if (! empty($payload['ledger_groups'])) {
@@ -57,7 +64,7 @@ class MasterSyncService
             }
 
             if (! empty($payload['items'])) {
-                $summary['items'] = $this->items->sync($payload['items']);
+                $summary['items'] = $this->items->sync($payload['items'], $company);
             }
         });
 
