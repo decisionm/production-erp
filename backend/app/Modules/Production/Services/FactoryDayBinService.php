@@ -14,10 +14,8 @@ use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Inventory\Services\WarehouseService;
 use App\Modules\Production\Models\DayBinMovement;
-use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\DayBinMovementType;
 use App\Modules\Production\Models\ShiftMaterialConsumption;
-use App\Modules\Production\Models\ShiftProductionEntry;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -179,7 +177,6 @@ class FactoryDayBinService
         ?int $supervisorId = null,
         ?string $ackReason = null,
         ?string $ackNote = null,
-        ?int $intendedEntryId = null,
     ): array {
         $warehouse = $this->warehouse();
         if ($warehouse === null) {
@@ -195,7 +192,7 @@ class FactoryDayBinService
             ]);
         }
 
-        return DB::transaction(function () use ($barcode, $quantityKg, $recordedBy, $supervisorId, $ackReason, $ackNote, $intendedEntryId) {
+        return DB::transaction(function () use ($barcode, $quantityKg, $recordedBy, $supervisorId, $ackReason, $ackNote) {
             $bag = MaterialBag::query()->where('barcode', $barcode)->lockForUpdate()->first();
             if ($bag === null) {
                 throw ValidationException::withMessages([
@@ -294,7 +291,7 @@ class FactoryDayBinService
             // — all to record a move that did not happen.
             //
             // What the load IS, is recorded below and beside: the day-bin
-            // ledger row (bag, kg, who, when, intended batch) and the common
+            // ledger row (bag, kg, who, when) and the common
             // pool fold that gives the material a rate. Company stock changes
             // exactly once, later, when an approved batch's consumption is
             // booked — and that same quantity is what reaches Tally.
@@ -311,12 +308,6 @@ class FactoryDayBinService
             // needs no machine and no segment window (commonResinEstimate).
             $movement = $this->ledger->record([
                 'work_center_id' => null,
-                // WHAT THE OPERATOR SAID THEY WERE LOADING FOR — intent, kept
-                // in its own column so nothing can read it as proof that this
-                // bag's material became that batch. It mixes at the input; no
-                // record can say otherwise. Null is a complete answer: the
-                // floor tops the common input up between runs.
-                'intended_shift_production_entry_id' => $this->validIntendedEntryId($intendedEntryId),
                 'item_id' => $lot->item_id,
                 'type' => DayBinMovementType::Load->value,
                 'material_bag_id' => $bag->id,
@@ -786,46 +777,5 @@ class FactoryDayBinService
             ->whereNotNull('tally_guid')
             ->when($bin !== null, fn ($query) => $query->where('id', '!=', $bin->id))
             ->pluck('id');
-    }
-
-    /**
-     * The intended batch, validated — or null.
-     *
-     * ONLY A RUNNING BATCH may be selected. A completed, cancelled or approved
-     * run is not something material can still be loaded "for", and offering one
-     * would let a scan point at a batch whose figures are already submitted.
-     *
-     * A batch that LATER completes or is cancelled keeps the reference it was
-     * given: this validates the choice at the moment it is made and never
-     * revisits it, because the operator's statement was true when they made it
-     * and history must not be rewritten to match what happened afterwards. The
-     * column is nullOnDelete for the same reason — the kilograms were really
-     * poured, whatever became of the run they were aimed at.
-     */
-    private function validIntendedEntryId(?int $entryId): ?int
-    {
-        if ($entryId === null) {
-            return null;
-        }
-
-        $entry = ShiftProductionEntry::query()->find($entryId);
-
-        if ($entry === null) {
-            throw ValidationException::withMessages([
-                'intended_shift_production_entry_id' => 'That batch no longer exists.',
-            ]);
-        }
-
-        if ($entry->batch_status !== BatchStatus::InProgress) {
-            throw ValidationException::withMessages([
-                'intended_shift_production_entry_id' => sprintf(
-                    'Batch %s is %s, so material cannot be loaded for it. Pick a running batch, or leave it blank.',
-                    $entry->batch_number ?? "#{$entry->id}",
-                    $entry->batch_status->value,
-                ),
-            ]);
-        }
-
-        return $entry->id;
     }
 }

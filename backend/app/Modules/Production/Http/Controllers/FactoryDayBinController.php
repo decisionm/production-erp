@@ -120,9 +120,6 @@ class FactoryDayBinController extends Controller
             isset($validated['supervisor_id']) ? (int) $validated['supervisor_id'] : null,
             isset($validated['balance_ack_reason']) ? (string) $validated['balance_ack_reason'] : null,
             isset($validated['balance_ack_note']) ? (string) $validated['balance_ack_note'] : null,
-            isset($validated['intended_shift_production_entry_id'])
-                ? (int) $validated['intended_shift_production_entry_id']
-                : null,
         );
 
         return response()->json(['data' => [

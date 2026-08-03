@@ -154,72 +154,40 @@ class CommonInputLoadIsNotStockTest extends TestCase
             ->where('item_id', $this->resin->id)->where('warehouse_id', $this->godown->id)->value('quantity'));
     }
 
-    public function test_the_intended_batch_is_recorded_as_intent_and_kept_apart_from_the_factual_column(): void
+    public function test_a_common_input_scan_carries_no_batch_and_no_machine(): void
     {
+        // THE FLOW THIS PROTECTS. One common resin input; a bag is never
+        // assigned to a machine and never to a batch — not as an assignment and
+        // not as an intent. Several runs draw from the pool afterwards, and
+        // cost comes from the pool's weighted average, so any per-bag claim
+        // about which run used it would be invented.
+        //
+        // An intended-batch field was briefly added and withdrawn the same day.
+        // This test is what stops it coming back: it fails the moment a scan
+        // starts carrying a run.
         $this->actor();
         $this->bag();
         $batch = $this->runningBatch();
 
+        // Sent deliberately, the way an old client or a re-added field would.
+        // It must reach nothing.
         $this->postJson('/api/v1/production/day-bin/load-bag', [
             'barcode' => 'BAG-1',
+            'work_center_id' => $batch->work_center_id,
             'intended_shift_production_entry_id' => $batch->id,
         ])->assertOk();
 
         $movement = DayBinMovement::query()->sole();
 
-        $this->assertSame($batch->id, $movement->intended_shift_production_entry_id);
-        // THE DISTINCTION THAT MATTERS. shift_production_entry_id means "this
-        // movement belongs to this batch" and is read as fact. Material mixes
-        // at the common input, so nothing may claim this bag became that batch.
-        $this->assertNull($movement->shift_production_entry_id);
-        $this->assertNull($movement->work_center_id);
-    }
+        $this->assertNull($movement->work_center_id, 'A common-input scan must name no machine.');
+        $this->assertNull($movement->shift_production_entry_id, 'A common-input scan must name no batch.');
+        $this->assertNull(
+            $movement->getAttributes()['intended_shift_production_entry_id'] ?? null,
+            'The retired intended-batch column must stay null — nothing may write a run onto a scan.',
+        );
 
-    public function test_a_load_without_an_intended_batch_is_a_complete_record(): void
-    {
-        // The floor tops the common input up between runs. A scan with no
-        // batch chosen is normal, not deficient.
-        $this->actor();
-        $this->bag();
-
-        $this->postJson('/api/v1/production/day-bin/load-bag', ['barcode' => 'BAG-1'])->assertOk();
-
-        $this->assertNull(DayBinMovement::query()->sole()->intended_shift_production_entry_id);
-    }
-
-    public function test_a_batch_that_is_not_running_cannot_be_selected(): void
-    {
-        $this->actor();
-        $this->bag();
-        $batch = $this->runningBatch();
-        $batch->update(['batch_status' => BatchStatus::Completed]);
-
-        $this->postJson('/api/v1/production/day-bin/load-bag', [
-            'barcode' => 'BAG-1',
-            'intended_shift_production_entry_id' => $batch->id,
-        ])->assertStatus(422);
-
-        // Refused before anything was written — no half-applied scan.
-        $this->assertSame(0, DayBinMovement::query()->count());
-    }
-
-    public function test_the_reference_survives_the_batch_being_cancelled_afterwards(): void
-    {
-        // Validated at the moment the choice is made and never revisited: the
-        // operator's statement was true when they made it, and the kilograms
-        // were really poured whatever became of the run they were aimed at.
-        $this->actor();
-        $this->bag();
-        $batch = $this->runningBatch();
-
-        $this->postJson('/api/v1/production/day-bin/load-bag', [
-            'barcode' => 'BAG-1',
-            'intended_shift_production_entry_id' => $batch->id,
-        ])->assertOk();
-
-        $batch->update(['batch_status' => BatchStatus::Cancelled]);
-
-        $this->assertSame($batch->id, DayBinMovement::query()->sole()->intended_shift_production_entry_id);
+        // And the bag itself still belongs to no machine.
+        $this->assertNull($movement->materialBag->day_bin_work_center_id);
     }
 
     public function test_a_transfer_to_the_same_warehouse_is_refused(): void
