@@ -14,8 +14,10 @@ use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Inventory\Services\WarehouseService;
 use App\Modules\Production\Models\DayBinMovement;
+use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\DayBinMovementType;
 use App\Modules\Production\Models\ShiftMaterialConsumption;
+use App\Modules\Production\Models\ShiftProductionEntry;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -177,6 +179,7 @@ class FactoryDayBinService
         ?int $supervisorId = null,
         ?string $ackReason = null,
         ?string $ackNote = null,
+        ?int $intendedEntryId = null,
     ): array {
         $warehouse = $this->warehouse();
         if ($warehouse === null) {
@@ -192,7 +195,7 @@ class FactoryDayBinService
             ]);
         }
 
-        return DB::transaction(function () use ($barcode, $quantityKg, $recordedBy, $supervisorId, $warehouse, $ackReason, $ackNote) {
+        return DB::transaction(function () use ($barcode, $quantityKg, $recordedBy, $supervisorId, $ackReason, $ackNote, $intendedEntryId) {
             $bag = MaterialBag::query()->where('barcode', $barcode)->lockForUpdate()->first();
             if ($bag === null) {
                 throw ValidationException::withMessages([
@@ -223,15 +226,20 @@ class FactoryDayBinService
 
             if ($bag->current_warehouse_id === null) {
                 throw ValidationException::withMessages([
-                    'barcode' => "Bag {$bag->barcode} has no store warehouse recorded, so there is nowhere to move its stock from — register the lot with its warehouse first.",
+                    'barcode' => "Bag {$bag->barcode} has no store recorded against it — register the lot with its warehouse first.",
                 ]);
             }
 
-            if ($bag->current_warehouse_id === $warehouse->id) {
-                throw ValidationException::withMessages([
-                    'barcode' => "Bag {$bag->barcode} already sits in the day-bin warehouse — there is nothing to move.",
-                ]);
-            }
+            // THE "ALREADY IN THE DAY BIN" REFUSAL IS GONE, with the transfer
+            // it existed to protect.
+            //
+            // It refused a scan whose bag already sat in the day-bin
+            // warehouse, which was right while loading MOVED stock between two
+            // warehouses. Under one accounting godown the store and the day bin
+            // are the same warehouse for every bag in the factory, so that
+            // check would have refused EVERY SCAN — the common input would have
+            // stopped working the moment the roles were pointed at the real
+            // Tally godown.
 
             $remaining = bcadd((string) $bag->remaining_kg, '0', 4);
             $quantity = $quantityKg !== null ? bcadd($quantityKg, '0', 4) : $remaining;
@@ -273,15 +281,23 @@ class FactoryDayBinService
                 $notes = 'Acting supervisor: '.($supervisor?->name ?? "user #{$supervisorId}");
             }
 
-            $this->stock->recordTransfer(
-                itemId: $lot->item_id,
-                fromWarehouseId: $bag->current_warehouse_id,
-                toWarehouseId: $warehouse->id,
-                quantity: $quantity,
-                reference: self::BAG_LOAD_REFERENCE_PREFIX.$bag->barcode,
-                notes: $notes,
-                createdBy: $recordedBy,
-            );
+            // NO STOCK MOVEMENT. A scan is an OPERATIONAL record, not an
+            // accounting one.
+            //
+            // Loading used to transfer the kilograms from the store warehouse
+            // into a day-bin warehouse, which described something real while
+            // those were two different places. With one accounting godown they
+            // are the same place: the material has not left the company, has
+            // not left the godown, and has not been consumed. A transfer would
+            // decrement and re-increment one balance, mint a paired movement on
+            // every scan, and make any report that counts transfers double-count
+            // — all to record a move that did not happen.
+            //
+            // What the load IS, is recorded below and beside: the day-bin
+            // ledger row (bag, kg, who, when, intended batch) and the common
+            // pool fold that gives the material a rate. Company stock changes
+            // exactly once, later, when an approved batch's consumption is
+            // booked — and that same quantity is what reaches Tally.
 
             // THE KILOGRAM RECORD. Inside the same transaction as the bag
             // decrement and the transfer, so a scan can never leave stock
@@ -295,6 +311,12 @@ class FactoryDayBinService
             // needs no machine and no segment window (commonResinEstimate).
             $movement = $this->ledger->record([
                 'work_center_id' => null,
+                // WHAT THE OPERATOR SAID THEY WERE LOADING FOR — intent, kept
+                // in its own column so nothing can read it as proof that this
+                // bag's material became that batch. It mixes at the input; no
+                // record can say otherwise. Null is a complete answer: the
+                // floor tops the common input up between runs.
+                'intended_shift_production_entry_id' => $this->validIntendedEntryId($intendedEntryId),
                 'item_id' => $lot->item_id,
                 'type' => DayBinMovementType::Load->value,
                 'material_bag_id' => $bag->id,
@@ -316,11 +338,23 @@ class FactoryDayBinService
             [$rate] = $this->rates->rateFor($lot);
             $this->pool->fold((int) $lot->item_id, $quantity, $rate);
 
+            // THE MATERIAL'S ACCOUNTING BALANCE, READ WHERE IT ACTUALLY SITS
+            // — the bag's own store — and deliberately NOT where the day bin
+            // points.
+            //
+            // This used to read the day-bin warehouse and firstOrFail(). That
+            // row existed only because the load had just created it by
+            // transferring stock in. With the transfer gone there is no such
+            // row, and firstOrFail() turned every successful scan into a 404.
+            //
+            // first(), never firstOrFail(): a material with no balance row yet
+            // is a real state on day one, and a scan that recorded the load
+            // correctly must not fail because there was nothing to report back.
             $balance = StockBalance::query()
                 ->with('item')
                 ->where('item_id', $lot->item_id)
-                ->where('warehouse_id', $warehouse->id)
-                ->firstOrFail();
+                ->where('warehouse_id', $bag->current_warehouse_id)
+                ->first();
 
             return [
                 'bag' => $bag->load('lot.item'),
@@ -752,5 +786,46 @@ class FactoryDayBinService
             ->whereNotNull('tally_guid')
             ->when($bin !== null, fn ($query) => $query->where('id', '!=', $bin->id))
             ->pluck('id');
+    }
+
+    /**
+     * The intended batch, validated — or null.
+     *
+     * ONLY A RUNNING BATCH may be selected. A completed, cancelled or approved
+     * run is not something material can still be loaded "for", and offering one
+     * would let a scan point at a batch whose figures are already submitted.
+     *
+     * A batch that LATER completes or is cancelled keeps the reference it was
+     * given: this validates the choice at the moment it is made and never
+     * revisits it, because the operator's statement was true when they made it
+     * and history must not be rewritten to match what happened afterwards. The
+     * column is nullOnDelete for the same reason — the kilograms were really
+     * poured, whatever became of the run they were aimed at.
+     */
+    private function validIntendedEntryId(?int $entryId): ?int
+    {
+        if ($entryId === null) {
+            return null;
+        }
+
+        $entry = ShiftProductionEntry::query()->find($entryId);
+
+        if ($entry === null) {
+            throw ValidationException::withMessages([
+                'intended_shift_production_entry_id' => 'That batch no longer exists.',
+            ]);
+        }
+
+        if ($entry->batch_status !== BatchStatus::InProgress) {
+            throw ValidationException::withMessages([
+                'intended_shift_production_entry_id' => sprintf(
+                    'Batch %s is %s, so material cannot be loaded for it. Pick a running batch, or leave it blank.',
+                    $entry->batch_number ?? "#{$entry->id}",
+                    $entry->batch_status->value,
+                ),
+            ]);
+        }
+
+        return $entry->id;
     }
 }

@@ -120,11 +120,20 @@ class FactoryDayBinController extends Controller
             isset($validated['supervisor_id']) ? (int) $validated['supervisor_id'] : null,
             isset($validated['balance_ack_reason']) ? (string) $validated['balance_ack_reason'] : null,
             isset($validated['balance_ack_note']) ? (string) $validated['balance_ack_note'] : null,
+            isset($validated['intended_shift_production_entry_id'])
+                ? (int) $validated['intended_shift_production_entry_id']
+                : null,
         );
 
         return response()->json(['data' => [
             'bag' => MaterialBagResource::make($result['bag']),
-            'day_bin' => FactoryDayBinMaterialResource::make($result['balance']),
+            // The material's stock where it is held. Null when no balance row
+            // exists yet — the scan is still a complete record without one,
+            // and a load no longer moves stock, so there may be nothing here
+            // to report.
+            'day_bin' => $result['balance'] !== null
+                ? FactoryDayBinMaterialResource::make($result['balance'])
+                : null,
             // The load row the scan just wrote, echoed back so the floor
             // screen can confirm the kg it credited without a second read.
             // Its work_center is null and stays null.
