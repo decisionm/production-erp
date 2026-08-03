@@ -147,7 +147,11 @@ export function buildStartBatchRecipeUrl(draft: StartBatchResumeDraft): string {
  * "which Start Batch was this".
  */
 export function buildStartBatchStandardUrl(draft: StartBatchResumeDraft): string {
-    return `/production/standards?${encodeStartBatchResume(draft, 'configure').toString()}`;
+    // Product Standards is a tab of Production Configuration now. The old
+    // /production/standards URL still redirects here carrying its query
+    // string, but a blocked Start Batch is the one trip that must not depend
+    // on a redirect surviving — so it names the real destination directly.
+    return `/production/configuration?tab=products&${encodeStartBatchResume(draft, 'configure').toString()}`;
 }
 
 export function buildStartBatchReturnUrl(

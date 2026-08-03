@@ -89,14 +89,15 @@ const allNavItems: NavGroup[] = [
             // page itself still answers at /production/bin-bay (App.tsx).
             { key: '/production/approve-production', label: 'Approve Production' },
             { key: '/production/live-monitor', label: 'Live Monitor' },
-            { key: '/production/standards', label: 'Product Standards' },
-            // "Configuration" said nothing — it read like a second Product
-            // Standards. This destination is the MACHINE side: the machine
-            // master and its capabilities, downtime reasons, factory settings,
-            // the workbook import. It absorbed the old Work Centers page,
-            // which edited the same WorkCenter rows from a narrower form;
-            // /production/work-centers now redirects here (App.tsx).
-            { key: '/production/configuration', label: 'Machine Setup' },
+            // ONE configuration destination, not two. Product Standards and
+            // Machine Setup were separate menu entries, and nothing in either
+            // name told a supervisor which one owned the setting they were
+            // looking for — so this entry now opens a workspace whose tabs are
+            // Product Standards, Machines & Capabilities, Downtime Reasons,
+            // Factory Rules and Import from Workbook. Both retired URLs still
+            // answer as redirects (App.tsx): /production/standards keeps its
+            // query string, /production/work-centers lands on the machines tab.
+            { key: '/production/configuration', label: 'Production Configuration' },
             { key: '/production/boms', label: 'Bills of Material' },
             { key: '/production/shift-summary', label: 'Shift Summary' },
             { key: '/production/reports', label: 'Reports' },
