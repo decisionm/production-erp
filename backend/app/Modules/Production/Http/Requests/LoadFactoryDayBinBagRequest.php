@@ -38,10 +38,6 @@ class LoadFactoryDayBinBagRequest extends FormRequest
     public function rules(): array
     {
         return [
-            // The batch the operator picked at the common input. Optional and
-            // often absent — loading between runs is normal. Validated as a
-            // RUNNING batch in the service, where the batch state lives.
-            'intended_shift_production_entry_id' => ['sometimes', 'nullable', 'integer', 'exists:shift_production_entries,id'],
             'barcode' => ['required', 'string', 'exists:material_bags,barcode'],
             // Absent = the whole bag (its remaining_kg); present = a weighed
             // partial load. Partial loads and the bag's remaining balance are

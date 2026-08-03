@@ -109,14 +109,6 @@ class DayBinLedgerService
                 'work_center_id' => $workCenterId,
                 'item_id' => $itemId,
                 'shift_production_entry_id' => $entryId,
-                // The batch the operator SELECTED at the common input, passed
-                // straight through. Kept in its own column and never folded
-                // into shift_production_entry_id above: that one is read as
-                // fact ("this movement belongs to this batch"), and material
-                // mixing at the common input means no record can claim a bag
-                // became a batch. Intent is useful; asserting it as proof is
-                // the claim the owner removed.
-                'intended_shift_production_entry_id' => $data['intended_shift_production_entry_id'] ?? null,
                 'type' => $type,
                 'material_bag_id' => $data['material_bag_id'] ?? null,
                 'quantity_kg' => $quantity,

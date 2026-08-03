@@ -19,10 +19,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 #[Fillable([
     'work_center_id', 'item_id', 'shift_production_entry_id',
-    // The batch the operator SELECTED at the common input. Intent, never
-    // proof — see the migration. Kept apart from shift_production_entry_id so
-    // nothing can read it as "this material became that batch".
-    'intended_shift_production_entry_id', 'type',
+    'type',
     'material_bag_id', 'quantity_kg', 'recorded_by', 'recorded_at',
     // Why this machine was topped up while the estimate still expected
     // material in it — see the balance-ack migration.
@@ -54,18 +51,24 @@ class DayBinMovement extends Model
         return $this->belongsTo(ShiftProductionEntry::class);
     }
 
-    /**
-     * The batch chosen on screen when this material was loaded.
+    /*
+     * `intended_shift_production_entry_id` EXISTS ON THIS TABLE AND IS NEVER
+     * WRITTEN OR READ.
      *
-     * NOT the batch that consumed it. Material mixes at the common input, so
-     * no record can say which kilogram reached which run — this is what the
-     * operator was aiming at, and it is named so that a join can never quietly
-     * turn it into a traceability claim.
+     * It was added, shipped, and withdrawn within the same day. The idea was to
+     * record which batch the operator was loading for — but the factory's flow
+     * has one common resin input with NO bag-to-batch assignment and no
+     * bag-to-batch intent, and a column holding "which batch this bag was for"
+     * rebuilds exactly the claim that flow exists to prevent, however carefully
+     * it is labelled. Several runs draw from the pool; cost comes from the
+     * pool's weighted average.
+     *
+     * Left in place, nullable and unused, rather than dropped: the column is
+     * already live, every row in it is null, and dropping a column on a
+     * production table to tidy up is a bigger risk than an unused one. It is
+     * absent from $fillable so nothing can write it by accident, and it has no
+     * relation, so nothing can read it into a screen.
      */
-    public function intendedShiftProductionEntry(): BelongsTo
-    {
-        return $this->belongsTo(ShiftProductionEntry::class, 'intended_shift_production_entry_id');
-    }
 
     /**
      * Read-only cross-module relation — bag-state writes stay behind
