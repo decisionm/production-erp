@@ -64,20 +64,33 @@ If anyone tells you the bag scan books material out in Tally, that is wrong.
 
 From the approved batch to the lorry.
 
-### Step 1 — Approve the shift (Production → Approve Production)
+### Step 1 — Finish the batch (Production → Shift Floor)
 
-The shift is entered on the Shift Floor and then approved here.
-**Cartons do not get barcodes until the batch is approved.**
+Complete and count the batch on the Shift Floor.
 
-### Step 2 — Print the carton labels
+**Cartons cannot be labelled until the batch is completed.** If you try earlier the
+system says so: *"this batch is still running — cartons are labelled once the batch is
+completed and counted."* That is on purpose — before the batch is finished the packed
+count is still moving.
 
-Once the batch is approved, every packed carton is given its own **permanent barcode**
-— one per box. Print them and stick one on each carton.
+Note this is **completed**, not approved. You do not have to wait for the approvals.
 
-The button is **Print / Reprint**. As with bag labels, a reprint gives you back the
-*same* barcode. A carton keeps its number for life.
+### Step 2 — Make the carton labels (Production → Approve Production)
 
-### Step 3 — Scan the cartons out (Sales → Deliveries)
+Open the entry for that batch. Once the batch is completed you will see a section
+called **Carton Labels**. Press the **Carton labels** button.
+
+Every packed box gets its own **permanent barcode** naming its batch.
+
+### Step 3 — Print them (**Print / Reprint**)
+
+The labels appear on screen. Press **Print / Reprint** and stick one on each carton.
+
+Pressing **Carton labels** a second time does **not** create new numbers — it gives you
+back exactly the same ones. Generate and reprint are the same button. A carton keeps
+its number for life.
+
+### Step 4 — Scan the cartons out (Sales → Deliveries)
 
 Open the delivery and use the box that says:
 
@@ -101,8 +114,8 @@ time. Two people scanning at once cannot send the same box twice.
 | Print or reprint a bag label | Inventory → Material Receipts & Bag Labels |
 | Record incoming quality check | Quality → Incoming Inspections |
 | Put a bag onto the floor | Production → Shift Floor → Load Material |
-| Approve a finished shift | Production → Approve Production |
-| Print or reprint carton labels | On the approved batch |
+| Complete and count a batch | Production → Shift Floor |
+| Make or reprint carton labels | Production → Approve Production → **Carton Labels** |
 | Send cartons out | Sales → Deliveries |
 
 ---
