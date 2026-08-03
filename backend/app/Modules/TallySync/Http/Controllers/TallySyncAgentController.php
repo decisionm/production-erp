@@ -4,7 +4,9 @@ namespace App\Modules\TallySync\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Core\Services\AppSettingService;
+use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\TallySync\Http\Requests\FailTallySyncEntryRequest;
+use App\Modules\TallySync\Http\Requests\StockSummaryPreviewRequest;
 use App\Modules\TallySync\Http\Requests\SyncCompaniesRequest;
 use App\Modules\TallySync\Http\Requests\SyncItemsRequest;
 use App\Modules\TallySync\Http\Requests\SyncMastersRequest;
@@ -12,6 +14,7 @@ use App\Modules\TallySync\Http\Resources\TallySyncEntryResource;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Services\ItemSyncService;
 use App\Modules\TallySync\Services\MasterSyncService;
+use App\Modules\TallySync\Services\StockSummaryPreviewService;
 use App\Modules\TallySync\Services\TallySyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -133,13 +136,91 @@ class TallySyncAgentController extends Controller
             $this->agentLog($request, 'company.bound', ['company' => $incoming]);
         }
 
-        $summary = $masterSync->sync($data);
+        $summary = $masterSync->sync($data, $incoming);
 
         $this->agentLog($request, 'masters.received', ['company' => $incoming] + $summary);
 
         return response()->json([
             'data' => $summary,
         ]);
+    }
+
+    /**
+     * A godown-wise Stock Summary from the agent, REPORTED ON AND DISCARDED.
+     *
+     * Writes nothing — no item, no warehouse, no stock movement, no voucher.
+     * The agent reads Tally's closing position read-only, this reports what it
+     * would mean here, and importing it as opening stock is a separate act a
+     * person approves after reading the report.
+     *
+     * Company-guarded exactly like the masters pull, and for the same reason:
+     * six godowns from another company are already in this system because
+     * nothing checked. Here the guard is unconditional — there is no
+     * trust-on-first-use branch, because an opening balance is never the thing
+     * that should be allowed to bind an instance to a company.
+     */
+    public function stockSummaryPreview(
+        StockSummaryPreviewRequest $request,
+        StockSummaryPreviewService $preview,
+        AppSettingService $settings,
+    ): JsonResponse {
+        abort_unless($request->user()?->tokenCan('tally-sync:masters'), 403, 'Token missing the tally-sync:masters ability.');
+
+        $data = $request->validated();
+        $incoming = $data['company'];
+        $bound = $settings->get(TallySettingsController::KEY_COMPANY);
+
+        abort_if(
+            $bound !== null && $bound !== $incoming,
+            409,
+            "This ERP is bound to Tally company '{$bound}'. Refusing a stock summary from '{$incoming}'.",
+        );
+
+        abort_if(
+            $bound === null,
+            409,
+            'No Tally company is selected for this ERP yet. Choose one in Settings before reading a stock summary.',
+        );
+
+        // The company's GUID prefix, learned from the one godown this instance
+        // already holds for it. Lines pointing at a godown outside that prefix
+        // are flagged as another company's.
+        $result = $preview->preview($data['lines'], $this->boundCompanyGuidPrefix());
+
+        $this->agentLog($request, 'stock-summary.previewed', [
+            'company' => $incoming,
+            'as_of' => $data['as_of'],
+        ] + $result['totals']);
+
+        return response()->json([
+            'data' => [
+                'company' => $incoming,
+                'as_of' => $data['as_of'],
+                'imported' => false,
+                'totals' => $result['totals'],
+                'lines' => $result['lines'],
+            ],
+        ]);
+    }
+
+    /**
+     * The GUID prefix of the company this instance is bound to, derived from
+     * the warehouses already synced for it. Null when it cannot be established
+     * — in which case the preview simply does not make a cross-company claim,
+     * rather than inventing one.
+     */
+    private function boundCompanyGuidPrefix(): ?string
+    {
+        $prefixes = Warehouse::query()
+            ->whereNotNull('tally_guid')
+            ->pluck('tally_guid')
+            ->map(fn (string $guid) => implode('-', array_slice(explode('-', $guid), 0, 5)))
+            ->countBy();
+
+        // The majority prefix among synced godowns is this company's. With the
+        // foreign rows outnumbering the real one this would be wrong, which is
+        // exactly why it returns null unless one prefix is unambiguous.
+        return $prefixes->count() === 1 ? (string) $prefixes->keys()->first() : null;
     }
 
     /**

@@ -16,7 +16,7 @@ use Illuminate\Support\Facades\DB;
     'nos_per_pouch', 'pouches_per_box',
     'colour', 'standard_cycle_time', 'standard_cavities',
     'tracking_type', 'is_active',
-    'tally_stock_item_guid', 'tally_alter_id', 'tally_synced_at', 'item_group_id',
+    'tally_stock_item_guid', 'tally_company', 'tally_alter_id', 'tally_synced_at', 'item_group_id',
 ])]
 class Item extends Model
 {
