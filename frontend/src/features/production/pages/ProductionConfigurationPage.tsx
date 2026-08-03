@@ -19,8 +19,9 @@ import {
     Typography,
 } from 'antd';
 import { useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { listAllWarehouses } from '@/features/inventory/api';
+import ProductStandardsPage from '@/features/production/pages/ProductStandardsPage';
 import { hasManageAccess } from '@/features/auth/permissions';
 import { useAuthStore } from '@/features/auth/store';
 import {
@@ -39,25 +40,35 @@ import type { FactoryWarehouseRole, WorkCenterWritePayload } from '@/features/pr
 import type { DowntimeReason, ImportResult, WorkCenter } from '@/features/production/types';
 
 /**
- * Machine Setup — the MACHINE side of the factory, editable without a deploy.
+ * Production Configuration — ONE place where the factory is set up, editable
+ * without a deploy.
  *
- * The split this page now holds up: everything here belongs to a MACHINE (the
- * machine master and its capabilities, downtime reasons, factory settings, the
- * workbook import). Everything belonging to a PRODUCT — agreed weight, cycle
- * time, cavities, packing, active recipe, required colour, Tally identity and
- * the machine-by-machine exceptions to those figures — lives on Product
- * Standards (/production/standards) and is approved there.
+ * This page used to be called Machine Setup and hold only the machine half,
+ * while Product Standards sat in the menu as a separate page holding the
+ * product half. That split was the owner's complaint: nothing on either screen
+ * told you which of the two owned the setting you were looking for, so a
+ * supervisor had to already know the answer to find it.
  *
- * The Machine Exceptions tab used to live here and no longer does. It read as a
- * second product list competing with Product Standards, which is exactly the
- * confusion this split removes: an exception is a fact about a product, so it
- * sits beside that product's other figures rather than in a separate workspace.
+ * The two halves are now tabs of one workspace, products first because that is
+ * the screen the floor opens daily. Nothing was merged in the database: the
+ * Product Standards tab renders exactly the component the old page rendered,
+ * against exactly the same endpoints and the same permissions. Only the door
+ * changed — /production/standards still resolves, as a redirect that keeps its
+ * query string (see App.tsx).
  */
 
-/** Tab keys, in tab order. `?tab=` accepts exactly these; anything else lands on machines. */
-const TAB_KEYS = ['machines', 'downtime', 'settings', 'import'] as const;
+/**
+ * Tab keys, in tab order. `?tab=` accepts exactly these; anything else lands
+ * on the default.
+ *
+ * `products` is the default because it answers the question the factory
+ * actually asks this page ("can this product run, and if not, what is
+ * missing?"). `machines` is still addressable by name, which is what the
+ * retired /production/work-centers URL redirects to.
+ */
+const TAB_KEYS = ['products', 'machines', 'downtime', 'settings', 'import'] as const;
 type TabKey = (typeof TAB_KEYS)[number];
-const DEFAULT_TAB: TabKey = 'machines';
+const DEFAULT_TAB: TabKey = 'products';
 
 export default function ProductionConfigurationPage() {
     // Addressable tabs. Without this, "Machine Setup → Factory Settings" in
@@ -70,13 +81,12 @@ export default function ProductionConfigurationPage() {
 
     return (
         <div style={{ padding: 24 }}>
-            <Typography.Title level={3}>Machine Setup</Typography.Title>
+            <Typography.Title level={3}>Production Configuration</Typography.Title>
             <Typography.Paragraph type="secondary" style={{ maxWidth: 820 }}>
-                The machine side of the factory — the machine master and what each machine can run, the
-                downtime reasons the floor picks from, the factory-wide settings, and the workbook import.
-                Products are not set up here: every product's agreed weight, cycle time, cavities, packing,
-                recipe, required colour and its machine exceptions live on{' '}
-                <Link to="/production/standards">Product Standards</Link>, and are approved there.
+                Everything the factory is set up with, in one place. Products and what they run to, the
+                machines and what each one can do, the downtime reasons the floor picks from, and the
+                factory-wide rules. Nothing here moves stock or posts to Tally — it only decides what the
+                shop floor is allowed to do.
             </Typography.Paragraph>
 
             <Tabs
@@ -84,15 +94,16 @@ export default function ProductionConfigurationPage() {
                 onChange={(key) => {
                     const next = new URLSearchParams(searchParams);
                     next.set('tab', key);
-                    // Replace, not push: clicking through four tabs should not
-                    // cost four Back presses to leave the page.
+                    // Replace, not push: clicking through the tabs should not
+                    // cost one Back press each to leave the page.
                     setSearchParams(next, { replace: true });
                 }}
                 items={[
+                    { key: 'products', label: 'Product Standards', children: <ProductStandardsPage embedded /> },
                     { key: 'machines', label: 'Machines & Capabilities', children: <MachinesTab /> },
                     { key: 'downtime', label: 'Downtime Reasons', children: <DowntimeReasonsTab /> },
-                    { key: 'settings', label: 'Factory Settings', children: <SettingsTab /> },
-                    { key: 'import', label: 'Import', children: <ImportTab /> },
+                    { key: 'settings', label: 'Factory Rules', children: <SettingsTab /> },
+                    { key: 'import', label: 'Import from Workbook', children: <ImportTab /> },
                 ]}
             />
         </div>
@@ -762,6 +773,14 @@ function SettingsTab() {
  * Paste rows from the factory workbook (Excel copies as tab-separated) and
  * see exactly what would happen before anything is written. The dry run is
  * the default and the write is a second, separate click.
+ *
+ * The BEHAVIOUR here is deliberately unchanged — it is useful and it is safe:
+ * check first, write second, and everything written lands as a draft that a
+ * person still has to approve. What changed is that the screen now says so.
+ * It was labelled "Import", which told the reader nothing about which file it
+ * wanted, what it would create, or what it would overwrite — so the honest
+ * response to it was to not touch it. The panel below answers those three
+ * questions in the order they get asked.
  */
 function ImportTab() {
     const queryClient = useQueryClient();
@@ -801,16 +820,53 @@ function ImportTab() {
     });
 
     return (
-        <Row gutter={16}>
+        <>
+            <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message="What this screen does"
+                description={
+                    <>
+                        <Typography.Paragraph style={{ marginBottom: 8 }}>
+                            <Typography.Text strong>What to paste.</Typography.Text> Rows copied out of the
+                            factory machine workbook in Excel. Select the rows, copy, paste into the box below —
+                            one machine-and-product line per row, in this order:{' '}
+                            <Typography.Text code>
+                                machine, product, mould, colour, cycle time, cavities, weight, mapping id
+                            </Typography.Text>
+                            . Commas work too. There is no file to upload.
+                        </Typography.Paragraph>
+                        <Typography.Paragraph style={{ marginBottom: 8 }}>
+                            <Typography.Text strong>What it creates.</Typography.Text> One{' '}
+                            <Typography.Text strong>draft machine setting</Typography.Text> per row — this
+                            product, run on this machine, at these cavities, this cycle time and this weight.
+                            A draft does nothing on its own. Somebody has to open the product on the{' '}
+                            <Typography.Text strong>Product Standards</Typography.Text> tab and approve it
+                            before any machine runs to it.
+                        </Typography.Paragraph>
+                        <Typography.Paragraph style={{ marginBottom: 0 }}>
+                            <Typography.Text strong>What it never changes.</Typography.Text> It never edits a
+                            product's own agreed figures, never changes packing, never touches stock, never
+                            posts anything to Tally, and never alters a setting the factory has already
+                            approved — a row that clashes with an existing one is reported as a{' '}
+                            <Typography.Text strong>conflict</Typography.Text> and skipped, not applied.
+                            Press <Typography.Text strong>Check first</Typography.Text> to see exactly what
+                            would happen; nothing at all is written until you press the second button.
+                        </Typography.Paragraph>
+                    </>
+                }
+            />
+            <Row gutter={16}>
             <Col xs={24} lg={10}>
-                <Card size="small" title="Paste rows">
+                <Card size="small" title="Paste rows from the workbook">
                     <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
                         One row per line:{' '}
                         <Typography.Text code>machine, product, mould, colour, cycle time, cavities, weight, mapping id</Typography.Text>
                         . Copying straight from the workbook (tab-separated) works too. Every imported row lands as a{' '}
-                        <Typography.Text strong>draft</Typography.Text> machine exception — read, checked and
-                        approved on <Link to="/production/standards">Product Standards</Link>, beside the
-                        product it belongs to. Nothing reaches the shop floor until it is approved there.
+                        <Typography.Text strong>draft</Typography.Text> machine setting — read, checked and
+                        approved on the <Typography.Text strong>Product Standards</Typography.Text> tab, beside
+                        the product it belongs to. Nothing reaches the shop floor until it is approved there.
                     </Typography.Paragraph>
                     <Input.TextArea
                         rows={10}
@@ -825,7 +881,7 @@ function ImportTab() {
                             loading={mutation.isPending}
                             onClick={() => mutation.mutate(true)}
                         >
-                            Dry run ({rows.length})
+                            Check first ({rows.length} rows) — writes nothing
                         </Button>
                         <Button
                             danger
@@ -833,7 +889,7 @@ function ImportTab() {
                             loading={mutation.isPending}
                             onClick={() => mutation.mutate(false)}
                         >
-                            Import {result?.summary.create ?? 0} as drafts
+                            Create {result?.summary.create ?? 0} drafts for approval
                         </Button>
                     </Space>
                 </Card>
@@ -842,7 +898,7 @@ function ImportTab() {
                 {result && (
                     <Card
                         size="small"
-                        title={result.dry_run ? 'Dry run — nothing written' : 'Imported'}
+                        title={result.dry_run ? 'Checked — nothing was written' : 'Drafts created — approve them on Product Standards'}
                         extra={
                             <Space>
                                 <Tag color="success">{result.summary.create ?? 0} create</Tag>
@@ -884,6 +940,7 @@ function ImportTab() {
                     </Card>
                 )}
             </Col>
-        </Row>
+            </Row>
+        </>
     );
 }

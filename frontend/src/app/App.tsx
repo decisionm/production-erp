@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import RolesPage from '@/features/access/pages/RolesPage';
 import UsersPage from '@/features/access/pages/UsersPage';
 import ChangePasswordPage from '@/features/auth/pages/ChangePasswordPage';
@@ -30,7 +30,6 @@ import RoutingsPage from '@/features/production/pages/RoutingsPage';
 import ScrapReasonsPage from '@/features/production/pages/ScrapReasonsPage';
 import ProductionConfigurationPage from '@/features/production/pages/ProductionConfigurationPage';
 import LiveMonitorPage from '@/features/production/pages/LiveMonitorPage';
-import ProductStandardsPage from '@/features/production/pages/ProductStandardsPage';
 import ShiftProductionEntryPage from '@/features/production/pages/ShiftProductionEntryPage';
 import ShiftsPage from '@/features/production/pages/ShiftsPage';
 import ShiftSummaryPage from '@/features/production/pages/ShiftSummaryPage';
@@ -119,7 +118,15 @@ export default function App() {
                                     <Route path="/production/shifts" element={<ShiftsPage />} />
                                     <Route path="/production/shift-production" element={<ShiftProductionEntryPage />} />
                                     <Route path="/production/live-monitor" element={<LiveMonitorPage />} />
-                                    <Route path="/production/standards" element={<ProductStandardsPage />} />
+                                    {/* Product Standards is a TAB of Production
+                                        Configuration now, not a page of its own. The old
+                                        URL is kept because real links carry state to it:
+                                        the blocked-Start-Batch return trip and the Tally
+                                        sync failure deep-links both arrive here with a
+                                        query string that MUST survive the hop, which is
+                                        why this is a component and not the plain
+                                        <Navigate> used for Work Centers above. */}
+                                    <Route path="/production/standards" element={<ProductStandardsRedirect />} />
                                     {/* The central factory day bin (a warehouse). The
                                         per-machine bag-level bin bay below it is the
                                         optional detail, not the main path. */}
@@ -178,4 +185,28 @@ export default function App() {
             </Routes>
         </BrowserRouter>
     );
+}
+
+/**
+ * The retired Product Standards URL, kept alive with its query string intact.
+ *
+ * A plain <Navigate to="…?tab=products"> would have been shorter and wrong.
+ * Two real callers send a user to /production/standards carrying state:
+ *
+ *  - a blocked Start Batch (startBatchResume's `phase=configure` params),
+ *    which is how a supervisor gets back to the batch they were starting;
+ *  - the Tally sync failure links, which arrive as
+ *    `?view=incomplete&missing_tally=1`.
+ *
+ * Dropping those parameters would not look broken — it would land the reader
+ * on a full, ready-filtered table with no way back to their batch, which is
+ * worse than an error. So the incoming search is preserved and `tab` is
+ * merged in on top of it.
+ */
+function ProductStandardsRedirect() {
+    const { search } = useLocation();
+    const params = new URLSearchParams(search);
+    params.set('tab', 'products');
+
+    return <Navigate to={`/production/configuration?${params.toString()}`} replace />;
 }

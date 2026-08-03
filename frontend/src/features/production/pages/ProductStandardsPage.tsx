@@ -1598,7 +1598,19 @@ function ProductConfigurationDrawer({
 
 // ---------------------------------------------------------------------------
 
-export default function ProductStandardsPage() {
+/**
+ * `embedded` is set when this renders as the Product Standards TAB of
+ * Production Configuration, which is now the only way a user reaches it. All
+ * it suppresses is the page-level heading — the workspace already sits under
+ * a tab labelled "Product Standards", and repeating it as an H3 two lines
+ * below reads as two screens stacked on top of each other.
+ *
+ * Nothing else is conditional on it. The data, the endpoints, the filters,
+ * the drawer and the permission checks are identical in both modes, because
+ * "preserve all data and permissions" is only true if there is no second code
+ * path that could quietly stop being.
+ */
+export default function ProductStandardsPage({ embedded = false }: { embedded?: boolean }) {
     /**
      * Arrived here from a blocked Start Batch.
      *
@@ -1751,12 +1763,14 @@ export default function ProductStandardsPage() {
 
     return (
         <>
-            <Row justify="space-between" align="middle" gutter={[8, 8]} style={{ marginBottom: 4 }}>
-                <Col>
-                    <Typography.Title level={3} style={{ marginBottom: 0 }}>
-                        Product Standards
-                    </Typography.Title>
-                </Col>
+            <Row justify={embedded ? 'end' : 'space-between'} align="middle" gutter={[8, 8]} style={{ marginBottom: 4 }}>
+                {!embedded && (
+                    <Col>
+                        <Typography.Title level={3} style={{ marginBottom: 0 }}>
+                            Product Standards
+                        </Typography.Title>
+                    </Col>
+                )}
                 <Col>
                     <Button type="primary" onClick={() => setAdding(true)}>
                         New product standard
