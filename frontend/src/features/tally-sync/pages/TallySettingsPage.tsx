@@ -74,18 +74,48 @@ export default function TallySettingsPage() {
                 </Typography.Paragraph>
                 {data.agent ? (
                     <Space direction="vertical" size={4}>
+                        {/* `download`, and deliberately NOT target="_blank".
+                            The installer is served as application/x-executable
+                            with no Content-Disposition, so a new-tab navigation
+                            left Chrome opening a blank tab and doing nothing —
+                            the button looked broken while the file was sitting
+                            there perfectly reachable. `download` asks the
+                            browser to save rather than navigate, which it
+                            honours because this is the same origin as the app.
+                            Chrome takes the saved name from the URL path and
+                            ignores the `?v=` cache-buster, so the file lands as
+                            tally-sync-agent-setup-<version>.exe. */}
                         <Button
                             type="primary"
                             icon={<DownloadOutlined />}
                             href={data.agent.url}
-                            target="_blank"
-                            rel="noreferrer"
+                            download
                         >
                             Download Tally Sync Agent (Windows)
                         </Button>
-                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                            {(data.agent.size / (1024 * 1024)).toFixed(1)} MB
+                        {/* THE VERSION, SAID OUT LOUD. This block fetched
+                            `version` from the very first commit and never once
+                            rendered it, so the only way to know which build the
+                            server was offering was to read the filename out of
+                            the link. Someone comparing "what is on the site" to
+                            "what is installed on the Tally PC" had nothing to
+                            compare, and an agent that had simply never been
+                            reinstalled looked like a stale download page. */}
+                        <Typography.Text style={{ fontSize: 13 }}>
+                            Latest version: <b>{data.agent.version ?? 'unknown'}</b>
                             {data.agent.built_at ? ` · built ${data.agent.built_at.slice(0, 10)}` : ''}
+                            {' · '}
+                            {(data.agent.size / (1024 * 1024)).toFixed(1)} MB
+                        </Typography.Text>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            Check this against the version shown in the agent's own Settings window on the Tally
+                            PC. If they differ, the agent has not been reinstalled — quitting and reopening it
+                            does not update it.
+                        </Typography.Text>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            If nothing happens when you click Download, Chrome may have blocked it — check
+                            Downloads and choose <b>Keep</b>, or right-click the button and pick{' '}
+                            <b>Save link as…</b>
                         </Typography.Text>
                     </Space>
                 ) : (
