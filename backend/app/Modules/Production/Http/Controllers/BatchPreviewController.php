@@ -217,7 +217,19 @@ class BatchPreviewController extends Controller
                 // The resolved configuration goes in too: without it the
                 // preview told a machine WITH approved settings that it had
                 // none.
-                'warnings' => $this->standards->warningsFor($standard, $packaging, $item->id, $workCenter?->id),
+                // Active cavities passed through, so the preview's cavity
+                // warning is judged on what this run will actually use — the
+                // same figure the estimation above is built from, and the same
+                // one startBatch records against the batch. Without it the
+                // preview would warn off the mould's figure and disagree with
+                // the batch it is previewing.
+                'warnings' => $this->standards->warningsFor(
+                    $standard,
+                    $packaging,
+                    $item->id,
+                    $workCenter?->id,
+                    $data['active_cavities'] ?? $configuration?->default_cavities ?? $standard?->cavities,
+                ),
             ],
         ]);
     }

@@ -96,6 +96,45 @@ class ShiftProductionEntryResource extends JsonResource
             'actual_cycle_time' => $this->actual_cycle_time,
             'standard_cavities' => $this->standard_cavities,
             'active_cavities' => $this->active_cavities,
+
+            /*
+             * THE THREE SOURCES, NAMED SEPARATELY.
+             *
+             * `standard_cavities` above is a misnomer this block exists to
+             * undo: it is filled configuration-first, so a screen labelling it
+             * "std" tells a supervisor they are reading the Excel workbook when
+             * they are reading a machine exception. That is precisely how the
+             * 60 ml Round Amber product displayed 4 cavities for days while
+             * both the workbook and the Configuration screen said 5.
+             *
+             * The column keeps its name and value — renaming it would rewrite
+             * history on every past batch. What is added is the truth beside
+             * it: what the WORKBOOK said, what the MACHINE said, and what the
+             * run actually used. A screen can now show all three and never
+             * again present one as the other. Nulls are emitted rather than
+             * omitted so a reader can tell "no machine value" from "not loaded".
+             */
+            'figure_sources' => [
+                'product_standard' => [
+                    'cavities' => $this->productionStandard?->cavities,
+                    'cycle_time' => $this->productionStandard?->cycle_time,
+                    'source_reference' => $this->productionStandard?->source_reference,
+                    'label' => 'Product Standard (Excel workbook)',
+                ],
+                'machine_configuration' => [
+                    'cavities' => $this->productionConfiguration?->default_cavities,
+                    'cycle_time' => $this->productionConfiguration?->default_cycle_time,
+                    'approved_by_person' => $this->productionConfiguration?->approved_by !== null,
+                    'label' => 'Machine Configuration (approved exception)',
+                ],
+                'active' => [
+                    'cavities' => $this->active_cavities,
+                    'cycle_time' => $this->actual_cycle_time ?? $this->standard_cycle_time,
+                    'cavities_source' => $this->cavities_source,
+                    'cycle_time_source' => $this->cycle_time_source,
+                    'label' => 'Active on this run',
+                ],
+            ],
             'running_hours' => $this->running_hours,
             'qc_rejection_kg' => $this->qc_rejection_kg,
             // Computed, never stored — shaping only, the math lives in the

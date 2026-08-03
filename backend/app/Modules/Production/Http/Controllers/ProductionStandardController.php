@@ -49,7 +49,10 @@ class ProductionStandardController extends Controller
             max(1, (int) $request->query('page', 1)),
         );
 
-        return response()->json($result['page']->toArray() + ['summary' => $result['summary']]);
+        return response()->json($result['page']->toArray() + [
+            'summary' => $result['summary'],
+            'configuration_overlaps' => $result['configuration_overlaps'],
+        ]);
     }
 
     /**

@@ -22,6 +22,7 @@ import {
     Tooltip,
     Typography,
 } from 'antd';
+import type { FormInstance } from 'antd';
 import dayjs from 'dayjs';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -1088,8 +1089,94 @@ function AttachItemModal({ standard, onClose }: { standard: ProductStandardsWork
 // Adding a product the workbook does not carry
 // ---------------------------------------------------------------------------
 
+/**
+ * THE EXACT TALLY PRODUCT, PICKED BY A PERSON — never matched by the software.
+ *
+ * The list is the synced Tally catalogue itself, searched by name or SKU. There
+ * is no ranking, no "closest match", and no create-if-missing: every option in
+ * the list is a real Tally item that already exists, so choosing one cannot
+ * mint a duplicate ERP product for something Tally already carries. That
+ * duplication is the failure this replaces — a second item for a bottle Tally
+ * already knows means two stock balances and a voucher naming the wrong one.
+ *
+ * Leaving it blank is a legitimate answer. A product with no Tally item still
+ * runs; only the voucher waits, and the label says exactly that rather than
+ * implying the floor is blocked.
+ */
+function TallyItemPicker({ form }: { form: FormInstance<NewStandardForm> }) {
+    const { data: items, isFetching } = useQuery({
+        queryKey: ['inventory', 'items', 'all'],
+        queryFn: listAllItems,
+    });
+
+    const chosenId = Form.useWatch('item_id', form);
+    const chosen = items?.data.find((i) => i.id === chosenId) ?? null;
+
+    const options = (items?.data ?? [])
+        .filter((i) => i.is_active)
+        .map((i) => ({
+            value: i.id,
+            // Searched on, so it must contain both names the factory uses.
+            label: `${i.name}${i.sku && i.sku !== i.name ? ` · ${i.sku}` : ''}`,
+            hasGuid: Boolean(i.tally_stock_item_guid),
+        }));
+
+    return (
+        <Form.Item
+            name="item_id"
+            label="Tally product"
+            extra="Search the products already synced from Tally. Leave blank if this product is not in Tally yet."
+        >
+            <Select
+                allowClear
+                showSearch
+                loading={isFetching}
+                optionFilterProp="label"
+                placeholder="Search by product name or code…"
+                options={options}
+                optionRender={(option) => (
+                    <Space>
+                        <span>{option.label}</span>
+                        {(option.data as { hasGuid: boolean }).hasGuid ? (
+                            <Tag color="green">In Tally</Tag>
+                        ) : (
+                            <Tag color="orange">Tally mapping pending</Tag>
+                        )}
+                    </Space>
+                )}
+                notFoundContent={
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        No Tally product matches. Leave this blank — production can still run, and the voucher waits
+                        until the product exists in Tally.
+                    </Typography.Text>
+                }
+            />
+            {chosen && (
+                <Typography.Paragraph style={{ fontSize: 12, marginTop: 6, marginBottom: 0 }}>
+                    {chosen.tally_stock_item_guid ? (
+                        <Typography.Text type="success">
+                            Exact Tally product: <b>{chosen.name}</b> — vouchers will sync.
+                        </Typography.Text>
+                    ) : (
+                        <Typography.Text type="warning">
+                            <b>Tally mapping pending.</b> {chosen.name} is not in Tally yet, so production can run but
+                            the voucher will not sync until it exists there.
+                        </Typography.Text>
+                    )}
+                </Typography.Paragraph>
+            )}
+        </Form.Item>
+    );
+}
+
 interface NewStandardForm {
     source_product_name: string;
+    /**
+     * The exact Tally product this standard is for, picked from the synced
+     * catalogue. Optional: a product with no Tally item still RUNS, only its
+     * voucher waits — so a standard may be prepared before the mapping exists.
+     */
+    item_id?: number;
     /** Required by the backend, but undefined until the person types it. */
     cavities?: number;
     unit_weight_grams?: number;
@@ -1162,6 +1249,7 @@ function NewStandardModal({ onClose, initialName }: { onClose: () => void; initi
 
         create.mutate({
             source_product_name: v.source_product_name.trim(),
+            item_id: v.item_id ?? null,
             cavities: v.cavities,
             unit_weight_grams: v.unit_weight_grams,
             cycle_time: v.cycle_time,
@@ -1189,10 +1277,12 @@ function NewStandardModal({ onClose, initialName }: { onClose: () => void; initi
             width={640}
         >
             <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-                For a product the workbook does not carry. It is added unattached and marked the same way an import
-                marks a row nobody has signed off — attach its Tally item from the table afterwards, the same way as
-                any other row.
+                For a product the workbook does not carry. Pick its exact Tally product below if it already exists —
+                that is the whole point of the field: it reuses the item Tally already synced instead of creating a
+                second one that then has to be reconciled.
             </Typography.Paragraph>
+
+            <TallyItemPicker form={form} />
 
             {/* Opened from a blocked Start Batch: the product is already known,
                 so it arrives typed. Still editable — the workbook's wording and
@@ -1834,6 +1924,40 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
                         >
                             Back to Start Batch
                         </Button>
+                    }
+                />
+            )}
+
+            {/* TWO LIVE MACHINE SETTINGS FOR ONE PRODUCT.
+                A warning, never a block: these rows already exist on a running
+                factory, so refusing work over them would stop the floor rather
+                than fix the data. What was missing is that the software picked
+                one silently and no screen ever said so. */}
+            {(data?.configuration_overlaps?.length ?? 0) > 0 && (
+                <Alert
+                    type="warning"
+                    showIcon
+                    style={{ marginBottom: 16 }}
+                    message={`${data!.configuration_overlaps.length} product${data!.configuration_overlaps.length === 1 ? ' has' : 's have'} two machine settings that both apply`}
+                    description={
+                        <>
+                            The same product has more than one approved setting live on the same machine, so the
+                            software has to choose one. It now always chooses the newest approved one, but where the
+                            settings disagree on cavities or cycle time, <b>the expected output and efficiency for
+                            that product are unreliable until the wrong one is retired.</b>
+                            <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+                                {data!.configuration_overlaps.map((o) => (
+                                    <li key={`${o.item_id}-${o.work_center_id}`}>
+                                        Settings {o.configuration_ids.join(' and ')}
+                                        {o.values_differ ? (
+                                            <Typography.Text type="danger"> — the figures disagree</Typography.Text>
+                                        ) : (
+                                            ' — same figures, but still two rows'
+                                        )}
+                                    </li>
+                                ))}
+                            </ul>
+                        </>
                     }
                 />
             )}

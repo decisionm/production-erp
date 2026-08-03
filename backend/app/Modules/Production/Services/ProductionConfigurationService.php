@@ -106,7 +106,120 @@ class ProductionConfigurationService
             ->orderByRaw('CASE WHEN mold_id IS NULL THEN 1 ELSE 0 END')
             ->orderByRaw('CASE WHEN colour IS NULL THEN 1 ELSE 0 END')
             ->orderByDesc('effective_from')
+            // THE NEWEST APPROVED REVISION WINS, explicitly.
+            //
+            // Without this last clause two approved configurations that tie on
+            // mould, colour and effective_from left the winner to whatever the
+            // storage engine returned first. That is exactly what happened to
+            // 60 ml Round Amber: configurations #62 (4 cavities) and #63 (5)
+            // were both approved on MC-04 at the same instant with no
+            // effective dates, all three clauses tied, and the run silently
+            // took #62's 4 against a Product Standard of 5. The choice was a
+            // row accident, and it would have flipped on an index rebuild.
+            //
+            // approved_at first because that is the revision's own date;
+            // id last so the ordering is total and can never tie again.
+            ->orderByDesc('approved_at')
+            ->orderByDesc('id')
             ->first();
+    }
+
+    /**
+     * Approved configurations that overlap: same product, same machine, same
+     * mould, same colour, with effective windows that both cover some date.
+     *
+     * A REPORT, NOT A REFUSAL, and deliberately so. The overlaps already exist
+     * — six groups on the live instance, four of them contradicting each other
+     * on cavities — so a validation rule that started rejecting saves would
+     * block work over rows somebody has to look at anyway. Naming them is the
+     * thing that was missing: the resolver picked one silently, and no screen
+     * ever said there had been a choice.
+     *
+     * `values_differ` separates the two cases that matter. Two overlapping rows
+     * carrying identical figures are untidy; two carrying 4 and 5 cavities are
+     * a wrong expected-output figure on every run of that product.
+     *
+     * @return list<array{item_id: int, work_center_id: int, configuration_ids: list<int>, values_differ: bool}>
+     */
+    public function overlappingApproved(): array
+    {
+        $approved = ProductionConfiguration::query()
+            ->where('status', ConfigurationStatus::Approved->value)
+            ->get(['id', 'item_id', 'work_center_id', 'mold_id', 'colour', 'effective_from', 'effective_to', 'default_cavities', 'default_cycle_time']);
+
+        $groups = [];
+
+        foreach ($approved as $configuration) {
+            $key = implode('|', [
+                $configuration->item_id,
+                $configuration->work_center_id,
+                $configuration->mold_id ?? '-',
+                $configuration->colour ?? '-',
+            ]);
+            $groups[$key][] = $configuration;
+        }
+
+        $out = [];
+
+        foreach ($groups as $rows) {
+            if (count($rows) < 2) {
+                continue;
+            }
+
+            // Only pairs whose windows actually meet. Two rows that took over
+            // from one another in sequence are correct history, not a clash.
+            $clashing = [];
+
+            foreach ($rows as $i => $a) {
+                foreach ($rows as $j => $b) {
+                    if ($j <= $i || ! $this->windowsOverlap($a, $b)) {
+                        continue;
+                    }
+                    $clashing[$a->id] = $a;
+                    $clashing[$b->id] = $b;
+                }
+            }
+
+            if ($clashing === []) {
+                continue;
+            }
+
+            $values = array_unique(array_map(
+                fn (ProductionConfiguration $c) => $c->default_cavities.'|'.$c->default_cycle_time,
+                $clashing,
+            ));
+
+            $first = reset($clashing);
+
+            $out[] = [
+                'item_id' => (int) $first->item_id,
+                'work_center_id' => (int) $first->work_center_id,
+                'configuration_ids' => array_values(array_map(fn ($c) => (int) $c->id, $clashing)),
+                'values_differ' => count($values) > 1,
+            ];
+        }
+
+        return $out;
+    }
+
+    /** Do two effective windows cover any common date? Null is open-ended. */
+    private function windowsOverlap(ProductionConfiguration $a, ProductionConfiguration $b): bool
+    {
+        $aFrom = $a->effective_from;
+        $aTo = $a->effective_to;
+        $bFrom = $b->effective_from;
+        $bTo = $b->effective_to;
+
+        // a starts after b ends, or b starts after a ends → no overlap.
+        if ($aFrom !== null && $bTo !== null && $aFrom > $bTo) {
+            return false;
+        }
+
+        if ($bFrom !== null && $aTo !== null && $bFrom > $aTo) {
+            return false;
+        }
+
+        return true;
     }
 
     /**
