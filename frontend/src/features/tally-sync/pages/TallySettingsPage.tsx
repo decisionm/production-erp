@@ -74,15 +74,29 @@ export default function TallySettingsPage() {
                 </Typography.Paragraph>
                 {data.agent ? (
                     <Space direction="vertical" size={4}>
+                        {/* `download`, and deliberately NOT target="_blank".
+                            The installer is served as application/x-executable
+                            with no Content-Disposition, so a new-tab navigation
+                            left Chrome opening a blank tab and doing nothing —
+                            the button looked broken while the file was sitting
+                            there perfectly reachable. `download` asks the
+                            browser to save rather than navigate, which it
+                            honours because this is the same origin as the app.
+                            Chrome takes the saved name from the URL path and
+                            ignores the `?v=` cache-buster, so the file lands as
+                            tally-sync-agent-setup-<version>.exe. */}
                         <Button
                             type="primary"
                             icon={<DownloadOutlined />}
                             href={data.agent.url}
-                            target="_blank"
-                            rel="noreferrer"
+                            download
                         >
                             Download Tally Sync Agent (Windows)
                         </Button>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            If nothing happens, Chrome may have blocked it — check Downloads and choose{' '}
+                            <b>Keep</b>, or right-click the button and pick <b>Save link as…</b>
+                        </Typography.Text>
                         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                             {(data.agent.size / (1024 * 1024)).toFixed(1)} MB
                             {data.agent.built_at ? ` · built ${data.agent.built_at.slice(0, 10)}` : ''}
