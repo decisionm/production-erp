@@ -18,7 +18,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * All writes go through DayBinLedgerService.
  */
 #[Fillable([
-    'work_center_id', 'item_id', 'shift_production_entry_id', 'type',
+    'work_center_id', 'item_id', 'shift_production_entry_id',
+    // The batch the operator SELECTED at the common input. Intent, never
+    // proof — see the migration. Kept apart from shift_production_entry_id so
+    // nothing can read it as "this material became that batch".
+    'intended_shift_production_entry_id', 'type',
     'material_bag_id', 'quantity_kg', 'recorded_by', 'recorded_at',
     // Why this machine was topped up while the estimate still expected
     // material in it — see the balance-ack migration.
@@ -48,6 +52,19 @@ class DayBinMovement extends Model
     public function shiftProductionEntry(): BelongsTo
     {
         return $this->belongsTo(ShiftProductionEntry::class);
+    }
+
+    /**
+     * The batch chosen on screen when this material was loaded.
+     *
+     * NOT the batch that consumed it. Material mixes at the common input, so
+     * no record can say which kilogram reached which run — this is what the
+     * operator was aiming at, and it is named so that a join can never quietly
+     * turn it into a traceability claim.
+     */
+    public function intendedShiftProductionEntry(): BelongsTo
+    {
+        return $this->belongsTo(ShiftProductionEntry::class, 'intended_shift_production_entry_id');
     }
 
     /**

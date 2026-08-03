@@ -13,6 +13,7 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Valuation: moving average cost per item+warehouse (the simpler of the
@@ -146,6 +147,21 @@ class StockMovementService
         ?int $batchId = null,
         ?int $serialNumberId = null,
     ): array {
+        // A TRANSFER TO THE PLACE IT ALREADY IS, IS NOT A TRANSFER.
+        //
+        // Defensive, and it earns its place: under one accounting godown every
+        // "from" and "to" in this factory is the same warehouse. A caller that
+        // slipped through would decrement and re-increment one balance and mint
+        // a paired movement — total stock unchanged, but every report counting
+        // transfers double-counts, and the ledger fills with moves that never
+        // happened. Refused loudly rather than silently absorbed, because a
+        // caller asking for this has a bug worth seeing.
+        if ($fromWarehouseId === $toWarehouseId) {
+            throw ValidationException::withMessages([
+                'warehouse' => 'A transfer must move stock between two different warehouses.',
+            ]);
+        }
+
         return DB::transaction(function () use ($itemId, $fromWarehouseId, $toWarehouseId, $quantity, $reference, $movementDate, $notes, $createdBy, $batchId, $serialNumberId) {
             // A transfer never runs negative: moving material you do not
             // have is not a truth about the floor, it is a typo.

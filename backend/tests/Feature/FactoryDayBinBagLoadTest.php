@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use App\Modules\Inventory\Models\Enums\MaterialBagStatus;
-use App\Modules\Inventory\Models\Enums\StockMovementType;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\MaterialBag;
 use App\Modules\Inventory\Models\MaterialLot;
@@ -130,12 +129,20 @@ class FactoryDayBinBagLoadTest extends TestCase
         $response->assertJsonPath('data.bag.remaining_kg', '0.0000');
         $response->assertJsonPath('data.bag.status', 'consumed');
         $response->assertJsonPath('data.day_bin.item_id', $this->resin->id);
-        $response->assertJsonPath('data.day_bin.quantity_kg', '25.0000');
         $response->assertJsonPath('data.day_bin.item.sku', 'PET-RESIN');
 
-        // Bin rose, store fell, bag emptied — by exactly the same 25 kg.
-        $this->assertSame('25.0000', $this->binBalance());
-        $this->assertSame('75.0000', $this->storeResin->fresh()->quantity);
+        // A SCAN DOES NOT MOVE COMPANY STOCK. The material has not left the
+        // company, has not left the accounting godown, and has not been
+        // consumed — it has been poured into the common input, which is an
+        // operational fact recorded on the day-bin ledger and nowhere else.
+        // Company stock changes exactly once, later, when an approved batch's
+        // consumption is booked.
+        $this->assertNull($this->binBalance(), 'A scan must not create stock in a day-bin warehouse.');
+        $this->assertSame('100.0000', $this->storeResin->fresh()->quantity, 'A scan must not reduce store stock.');
+        $this->assertSame(0, StockMovement::query()->count(), 'A scan must write no stock movement at all.');
+
+        // What the scan DID record: the bag emptied, and the kilograms on the
+        // day-bin ledger.
         $this->assertSame('0.0000', $bag->fresh()->remaining_kg);
         $this->assertSame(MaterialBagStatus::Consumed, $bag->fresh()->status);
         // NO MACHINE IS STAMPED ON THE BAG. The owner's correction (2-Aug)
@@ -156,15 +163,13 @@ class FactoryDayBinBagLoadTest extends TestCase
         $this->assertSame($bag->id, $movement->material_bag_id);
         $this->assertNull($movement->shift_production_entry_id);
 
-        // The record is the EXISTING transfer pair, referencing the bag —
-        // created_by is the authenticated user (the audit identity).
-        $out = StockMovement::query()->where('type', StockMovementType::TransferOut)->sole();
-        $in = StockMovement::query()->where('type', StockMovementType::TransferIn)->sole();
-        $this->assertSame($this->store->id, $out->warehouse_id);
-        $this->assertSame($this->dayBin->id, $in->warehouse_id);
-        $this->assertSame('Day bin load — bag LOT1-B1', $in->reference);
-        $this->assertSame($user->id, $in->created_by);
-        $this->assertSame($user->id, $out->created_by);
+        // THERE IS NO TRANSFER PAIR ANY MORE. This assertion used to read one
+        // out and check its warehouses; the pair described a move between a
+        // store and a day-bin warehouse, which stopped being two places the
+        // moment the factory settled on one accounting godown. The audit
+        // identity now lives on the ledger row.
+        $this->assertSame(0, StockMovement::query()->count());
+        $this->assertSame($user->id, $movement->recorded_by);
     }
 
     public function test_the_acting_supervisor_is_a_note_never_the_audit_identity(): void
@@ -179,9 +184,13 @@ class FactoryDayBinBagLoadTest extends TestCase
             'supervisor_id' => $supervisor->id,
         ])->assertOk();
 
-        $in = StockMovement::query()->where('type', StockMovementType::TransferIn)->sole();
-        $this->assertSame('Acting supervisor: Sendhil P', $in->notes);
-        $this->assertSame($user->id, $in->created_by);
+        // The acting supervisor is a NOTE on the ledger row, and the audit
+        // identity stays the authenticated user. Read off the day-bin movement
+        // now that a scan writes no stock movement to carry it.
+        $movement = DayBinMovement::query()->sole();
+        $this->assertSame($user->id, $movement->recorded_by);
+        $this->assertSame(0, StockMovement::query()->count());
+        $this->assertNotSame($supervisor->id, $movement->recorded_by);
     }
 
     // (b) a weighed partial load ----------------------------------------------
@@ -197,11 +206,14 @@ class FactoryDayBinBagLoadTest extends TestCase
             'quantity_kg' => '10.5',
         ])->assertOk()
             ->assertJsonPath('data.bag.remaining_kg', '14.5000')
-            ->assertJsonPath('data.bag.status', 'in_store')
-            ->assertJsonPath('data.day_bin.quantity_kg', '10.5000');
+            ->assertJsonPath('data.bag.status', 'in_store');
 
-        $this->assertSame('10.5000', $this->binBalance());
-        $this->assertSame('89.5000', $this->storeResin->fresh()->quantity);
+        // A PARTIAL POUR IS STILL NOT A STOCK MOVE. Only the poured kg reach
+        // the ledger; the remainder stays in the bag, and company stock is
+        // untouched either way.
+        $this->assertNull($this->binBalance());
+        $this->assertSame('100.0000', $this->storeResin->fresh()->quantity);
+        $this->assertSame(0, StockMovement::query()->count());
         $this->assertSame('14.5000', $bag->fresh()->remaining_kg);
         $this->assertSame(MaterialBagStatus::InStore, $bag->fresh()->status);
         // The bag stays in the store holding its remainder, and carries no
