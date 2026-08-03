@@ -12,10 +12,24 @@ name: Read server log
 # Deliberately NOT a general shell. The command is fixed (tail + optional
 # grep), so this workflow cannot be repurposed into arbitrary remote
 # execution by editing an input.
+#
+# `log` is a CHOICE, never a path. The obvious way to let this read a second
+# file would be a free-text filename input — and that is precisely what would
+# turn a read-only log tail into "read any file on the server the deploy user
+# can reach". The two real logs are named here instead, and the remote command
+# maps a fixed keyword to a fixed location. An input that is not one of the two
+# keywords cannot be submitted at all.
 
 on:
   workflow_dispatch:
     inputs:
+      log:
+        description: 'Which log to read.'
+        type: choice
+        default: laravel
+        options:
+          - laravel
+          - tally-agent
       lines:
         description: 'How many lines from the end of the log.'
         type: string
@@ -60,10 +74,27 @@ jobs:
           # broken out of.
           PATTERN=$(printf '%s' "${{ inputs.pattern }}" | tr -d "'\\\\\`\$")
 
+          # The keyword → file mapping. Written as a shell case on the RUNNER
+          # (not interpolated into the remote command) so the only strings that
+          # can ever reach the server are the two literals below.
+          #
+          # The agent log is written by Laravel's `daily` driver, so it is
+          # tally-agent-YYYY-MM-DD.log, not tally-agent.log — the newest
+          # matching file is picked on the server, which is also what makes
+          # "today's log" the default answer without passing a date.
+          case "${{ inputs.log }}" in
+            tally-agent)
+              TARGET='"$(ls -1t storage/logs/tally-agent-*.log 2>/dev/null | head -n 1)"'
+              ;;
+            *)
+              TARGET='storage/logs/laravel.log'
+              ;;
+          esac
+
           if [ -n "$PATTERN" ]; then
-            REMOTE="tail -n 4000 storage/logs/laravel.log | grep -i -- '$PATTERN' | tail -n $LINES"
+            REMOTE="tail -n 4000 $TARGET | grep -i -- '$PATTERN' | tail -n $LINES"
           else
-            REMOTE="tail -n $LINES storage/logs/laravel.log"
+            REMOTE="tail -n $LINES $TARGET"
           fi
 
           ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
@@ -75,9 +106,9 @@ jobs:
         if: always()
         run: |
           {
-            echo "### Live Laravel log"
+            echo "### Live server log — ${{ inputs.log }}"
             echo
-            echo "lines: \`${{ inputs.lines }}\` · pattern: \`${{ inputs.pattern }}\`"
+            echo "log: \`${{ inputs.log }}\` · lines: \`${{ inputs.lines }}\` · pattern: \`${{ inputs.pattern }}\`"
             echo
             echo '```'
             cat log-output.txt 2>/dev/null || echo "(no output captured)"
