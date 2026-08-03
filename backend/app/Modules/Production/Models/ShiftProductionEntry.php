@@ -27,6 +27,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
     'supervisor_signed_by', 'supervisor_signed_at', 'plant_manager_signed_by', 'plant_manager_signed_at',
     'accountant_signed_by', 'accountant_signed_at',
     'status', 'rejection_reason', 'approved_by', 'approved_at',
+    'cancelled_at', 'cancelled_by', 'cancellation_reason',
     'operator_id', 'notes', 'created_by', 'completed_by', 'parent_entry_id',
     // The quality gate between completion and the PM's approval.
     'quality_reviewed_nos', 'quality_ok_nos', 'quality_rejected_nos',
@@ -75,6 +76,7 @@ class ShiftProductionEntry extends Model
             'plant_manager_signed_at' => 'datetime',
             'accountant_signed_at' => 'datetime',
             'approved_at' => 'datetime',
+            'cancelled_at' => 'datetime',
         ];
     }
 
@@ -116,6 +118,11 @@ class ShiftProductionEntry extends Model
     public function approvedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'approved_by');
+    }
+
+    public function cancelledBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'cancelled_by');
     }
 
     public function supervisorSignedBy(): BelongsTo
