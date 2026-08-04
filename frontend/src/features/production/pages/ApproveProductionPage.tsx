@@ -1664,10 +1664,20 @@ export default function ApproveProductionPage() {
                                             server draws. Hidden rather than
                                             shown-and-refused: a button that is
                                             always there and usually fails is a
-                                            button people stop reading. */}
+                                            button people stop reading.
+
+                                            LABELLED "Cancel batch", not "Cancel
+                                            test batch". It was named for the one
+                                            demo entry it was built to withdraw,
+                                            but it is a permanent control sitting
+                                            beside every real batch on a live
+                                            floor — and a supervisor reading
+                                            "test" next to this morning's
+                                            production has been told something
+                                            false about their own work. */}
                                         {canCancel(row) && (
                                             <Button size="small" onClick={() => setCancellingRow(row)}>
-                                                Cancel test batch
+                                                Cancel batch
                                             </Button>
                                         )}
                                     </>
@@ -1963,7 +1973,7 @@ export default function ApproveProductionPage() {
                                 </Tooltip>
                                 <Button danger onClick={() => setRejectingRow(detailRow)}>Reject</Button>
                                 {canCancel(detailRow) && (
-                                    <Button onClick={() => setCancellingRow(detailRow)}>Cancel test batch</Button>
+                                    <Button onClick={() => setCancellingRow(detailRow)}>Cancel batch</Button>
                                 )}
                             </Space>
                         )}
@@ -1995,7 +2005,7 @@ export default function ApproveProductionPage() {
 
             <Modal
                 maskClosable={false}
-                title={`Cancel test batch — ${cancellingRow?.batch_number ?? `#${cancellingRow?.id}`}`}
+                title={`Cancel batch ${cancellingRow?.batch_number ?? `#${cancellingRow?.id}`}`}
                 open={cancellingRow !== null}
                 onCancel={() => {
                     setCancellingRow(null);
