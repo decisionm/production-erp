@@ -11,6 +11,7 @@ use App\Modules\TallySync\Http\Requests\SyncCompaniesRequest;
 use App\Modules\TallySync\Http\Requests\SyncItemsRequest;
 use App\Modules\TallySync\Http\Requests\SyncMastersRequest;
 use App\Modules\TallySync\Http\Resources\TallySyncEntryResource;
+use App\Modules\TallySync\Models\TallyStockSnapshot;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Services\ItemSyncService;
 use App\Modules\TallySync\Services\MasterSyncService;
@@ -187,13 +188,29 @@ class TallySyncAgentController extends Controller
         // are flagged as another company's.
         $result = $preview->preview($data['lines'], $this->boundCompanyGuidPrefix());
 
+        // KEPT SO A PERSON CAN READ IT. Storing is not applying: this row moves
+        // no stock and posts nothing. Before this, the answer went back to the
+        // agent and the server kept nothing, so the only way to see what Tally
+        // said was to read a log file on the factory PC — and a snapshot nobody
+        // can look at never becomes an opening balance anybody trusts.
+        $snapshot = TallyStockSnapshot::create([
+            'company' => $incoming,
+            'as_of' => $data['as_of'],
+            'lines' => $result['lines'],
+            'totals' => $result['totals'],
+            'status' => TallyStockSnapshot::STATUS_PENDING,
+            'created_by' => $request->user()?->id,
+        ]);
+
         $this->agentLog($request, 'stock-summary.previewed', [
+            'snapshot_id' => $snapshot->id,
             'company' => $incoming,
             'as_of' => $data['as_of'],
         ] + $result['totals']);
 
         return response()->json([
             'data' => [
+                'snapshot_id' => $snapshot->id,
                 'company' => $incoming,
                 'as_of' => $data['as_of'],
                 'imported' => false,

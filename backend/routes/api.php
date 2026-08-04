@@ -89,6 +89,7 @@ use App\Modules\Sales\Http\Controllers\InvoiceController;
 use App\Modules\Sales\Http\Controllers\SalesCostInsightController;
 use App\Modules\Sales\Http\Controllers\SalesOrderController;
 use App\Modules\TallySync\Http\Controllers\TallySettingsController;
+use App\Modules\TallySync\Http\Controllers\TallyStockSnapshotController;
 use App\Modules\TallySync\Http\Controllers\TallySyncAgentController;
 use App\Modules\TallySync\Http\Controllers\TallySyncAgentTokenController;
 use App\Modules\TallySync\Http\Controllers\TallySyncController;
@@ -272,6 +273,12 @@ Route::prefix('v1')->group(function () {
                 Route::delete('agent-tokens/{tokenId}', [TallySyncAgentTokenController::class, 'destroy']);
 
                 // Tally configuration (company selection + ledger-role mappings).
+                // Tally's own closing stock, read and then — separately, and
+                // only ever by an explicit call — turned into opening balances.
+                Route::get('stock-snapshots', [TallyStockSnapshotController::class, 'index']);
+                Route::get('stock-snapshots/{tally_stock_snapshot}', [TallyStockSnapshotController::class, 'show']);
+                Route::post('stock-snapshots/{tally_stock_snapshot}/apply', [TallyStockSnapshotController::class, 'apply']);
+
                 Route::get('settings', [TallySettingsController::class, 'show']);
                 Route::put('settings/company', [TallySettingsController::class, 'updateCompany']);
                 Route::put('settings/ledger-mappings', [TallySettingsController::class, 'updateLedgerMappings']);
