@@ -49,7 +49,37 @@ class StartBatchRequest extends FormRequest
                 'integer',
                 Rule::exists('warehouses', 'id')->where('is_active', true),
             ],
-            'production_date' => ['nullable', 'date'],
+            // BACKDATING IS REAL WORK, not an error to be prevented. A shift
+            // that ran last night gets entered this morning; a supervisor
+            // catching up on paperwork enters three days at once. Refusing it
+            // does not make the data truer, it makes the floor file everything
+            // under the day they happened to type it — which is exactly what
+            // happened before this rule existed, and it lands a shift in the
+            // wrong day's Tally voucher and the wrong day's report.
+            //
+            // So it is allowed, with one rule that is always on and one that is
+            // the factory's to choose:
+            //
+            //   - NEVER THE FUTURE, unconditionally. Production that has not
+            //     happened cannot be recorded, and a fat-fingered year is the
+            //     likeliest way a batch ends up dated 2027. No caller has a
+            //     legitimate reason to file tomorrow's shift.
+            //   - a floor, only when configured. It is deliberately OFF by
+            //     default: this endpoint is a versioned product surface, and a
+            //     hard floor here would refuse the legitimate callers that
+            //     backfill history — the migration that seeds last quarter, the
+            //     integration that replays a month. The factory's own window is
+            //     set in config and enforced in the Start dialog's date picker,
+            //     which is where a supervisor's mistyped month actually gets
+            //     caught. Adding the floor unconditionally broke 86 existing
+            //     tests, every one of them a caller stating a historical date
+            //     the contract had always accepted.
+            'production_date' => array_filter([
+                'nullable',
+                'date',
+                'before_or_equal:today',
+                $this->backdateFloor() ? 'after_or_equal:'.$this->backdateFloor() : null,
+            ]),
             'operator_id' => [
                 'nullable',
                 'integer',
@@ -91,6 +121,51 @@ class StartBatchRequest extends FormRequest
             'planned_downtime.*.downtime_reason_id' => ['required', 'integer', 'exists:downtime_reasons,id'],
             'planned_downtime.*.minutes' => ['required', 'numeric', 'gt:0', 'max:1440'],
             'planned_downtime.*.note' => ['sometimes', 'nullable', 'string', 'max:500'],
+        ];
+    }
+
+    /**
+     * The earliest production date this request will accept, or null for no
+     * floor at all (the default — see the rule above for why).
+     *
+     * 'month' is the factory's stated answer to "how far back do you need to
+     * enter?" (05-Aug). It is read as the 1st of the current month OR a week
+     * back, whichever reaches further: on the 2nd of a month a strict month
+     * floor would refuse last night's shift, which is the very entry the
+     * feature exists to allow.
+     */
+    private function backdateFloor(): ?string
+    {
+        $limit = config('production.backdate_limit', 'none');
+
+        if ($limit === 'none' || $limit === null || $limit === '') {
+            return null;
+        }
+
+        if ($limit === 'month') {
+            return min(
+                now()->startOfMonth()->toDateString(),
+                now()->subWeek()->toDateString(),
+            );
+        }
+
+        return (int) $limit > 0
+            ? now()->subDays((int) $limit)->toDateString()
+            : null;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            // Said in floor language, because this is the message a supervisor
+            // sees at 6am. The default rule text ("must be a date before or
+            // equal to today") does not tell them what to do next.
+            'production_date.before_or_equal' => 'This date is in the future. A batch can only be recorded for a day that has already happened.',
+            'production_date.after_or_equal' => 'That date is too far back. Production can be entered from '
+                .($this->backdateFloor() ?? '').' onwards — check the month is right.',
         ];
     }
 }
