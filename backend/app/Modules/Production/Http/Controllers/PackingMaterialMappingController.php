@@ -51,6 +51,27 @@ class PackingMaterialMappingController extends Controller
      * correction replaces the answer in force rather than stacking a second
      * row behind it.
      */
+    /**
+     * The lists the completion screen's dropdowns are built from — every item
+     * that could be a carton, a tray, a film or a roll of tape.
+     *
+     * The screen used to print a sentence when it could not resolve a material:
+     * "…has no packing-material mapping yet, so nothing is prefilled. Set one on
+     * the packing-materials master…". The owner's answer to that (05-Aug) was
+     * "why so many English notes, will they really read them" — and he is right,
+     * because the supervisor reading it has neither the access nor the time to
+     * administer master data mid-shift.
+     *
+     * A line that cannot be resolved needs a PICKER, not a paragraph. This is
+     * what fills it. It also serves the case the sentence never addressed at
+     * all: the 100 ml cartons ran out, so today this product goes in a 90 ml
+     * box. That is not a data error to be corrected later, it is Tuesday.
+     */
+    public function options(): JsonResponse
+    {
+        return response()->json(['data' => $this->mappings->optionsByKind()]);
+    }
+
     public function store(StorePackingMaterialMappingRequest $request): JsonResponse
     {
         $mapping = $this->mappings->upsert($request->validated(), $request->user()?->id);
