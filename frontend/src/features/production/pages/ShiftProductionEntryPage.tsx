@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Checkbox, Col, Descriptions, Drawer, Form, Input, InputNumber, type InputRef, message, Modal, Radio, Row, Select, Space, Table, Tag, TimePicker, Tooltip, Typography } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, type InputRef, message, Modal, Radio, Row, Select, Space, Table, Tag, TimePicker, Tooltip, Typography } from 'antd';
 import dayjs from 'dayjs';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -15,6 +15,7 @@ import type { Item } from '@/features/inventory/types';
 import HandoverModal from '@/features/production/components/HandoverModal';
 import {
     amendBatch,
+    cancelShiftProductionEntry,
     listPendingEntries,
     closeDowntimeLog,
     closeMoldChangeLog,
@@ -1339,6 +1340,14 @@ export default function ShiftProductionEntryPage() {
     // Phase 6 traceability targets — only ever set from UI that itself only
     // renders when settings.traceability_enabled is true.
     const [handoverEntry, setHandoverEntry] = useState<ShiftProductionEntry | null>(null);
+    // Withdrawing a run started by mistake, from the card it was started on.
+    const [cancellingEntry, setCancellingEntry] = useState<ShiftProductionEntry | null>(null);
+    const [cancelReason, setCancelReason] = useState('');
+    // The day the work actually happened. Null on the common path (the floor
+    // does not type a date and the shift clock answers); set only when somebody
+    // is entering a shift that already ran — see the picker in the Start
+    // dialog for why that case is ordinary rather than exceptional.
+    const [startDateChosen, setStartDateChosen] = useState<string | null>(null);
     const queryClient = useQueryClient();
     const navigate = useNavigate();
     // Phone or tablet-in-portrait. The Completed Today list is the only thing
@@ -1655,7 +1664,25 @@ export default function ShiftProductionEntryPage() {
     // A Configure Recipe round-trip may cross a shift/date boundary. Preserve
     // the date the supervisor originally reviewed instead of silently filing
     // the batch under whatever the wall clock says when they return.
-    const startProductionDate = startProductionDateOverride ?? today;
+    // An explicitly chosen date beats both: the supervisor typing up last
+    // night's shift has said which day it was, and neither the wall clock nor a
+    // preserved round-trip date knows better than they do.
+    const startProductionDate = startDateChosen ?? startProductionDateOverride ?? today;
+    // How far back the picker offers. Mirrors the 'month' window in
+    // StartBatchRequest::backdateFloor(): the 1st of this month OR a week back,
+    // whichever reaches further — on the 2nd, a strict month floor would refuse
+    // last night's shift, which is the entry this field exists for.
+    //
+    // The server's floor is OFF by default (its other callers backfill history),
+    // so this picker is where the factory's own window is actually applied.
+    // Offering a day the server would refuse is worse than not offering it: the
+    // supervisor fills the form, submits, and gets a 422 they cannot act on.
+    const backdateFloor = useMemo(() => {
+        const monthStart = dayjs().startOf('month');
+        const weekBack = dayjs().subtract(7, 'day').startOf('day');
+
+        return weekBack.isBefore(monthStart) ? weekBack : monthStart;
+    }, []);
     // The clock's ACTUAL current context (not the shift the user is viewing) —
     // a running batch outside it is a carryover to flag, independent of which
     // shift tab is selected.
@@ -2155,6 +2182,38 @@ export default function ShiftProductionEntryPage() {
         setStartAnyway(false);
         setShortageReason('');
     }, [startingMachine, startItemId]);
+
+    // A chosen date belongs to ONE dialog session. Left standing, the next
+    // batch someone starts would silently inherit yesterday — the same class of
+    // mistake this field exists to fix, only harder to spot because nobody
+    // typed it the second time. Keyed on the machine alone, not the product: a
+    // product change inside one dialog is still the same act of entry.
+    useEffect(() => {
+        setStartDateChosen(null);
+    }, [startingMachine]);
+
+    const cancelEntryMutation = useMutation({
+        mutationFn: ({ id, reason }: { id: number; reason: string }) => cancelShiftProductionEntry(id, reason),
+        onSuccess: () => {
+            invalidate();
+            setCancellingEntry(null);
+            setCancelReason('');
+            message.success('Batch cancelled. The machine is free.');
+        },
+        onError: (error: any) => {
+            const errors = error?.response?.data?.errors;
+            Modal.error({
+                // The server is the authority on whether a batch may still be
+                // withdrawn — a quality check recorded a second ago closes the
+                // door, and it says so by name. Surfacing its words beats a
+                // generic failure the supervisor cannot act on.
+                title: 'Could not cancel this batch',
+                content: errors
+                    ? Object.values(errors).flat().join(' ')
+                    : (error?.response?.data?.message ?? 'Please try again.'),
+            });
+        },
+    });
 
     const startMutation = useMutation({
         mutationFn: (values: StartBatchFormValues) => {
@@ -4760,6 +4819,36 @@ export default function ShiftProductionEntryPage() {
                                                     Hand Over Shift
                                                 </Button>
                                             )}
+                                            {/* STOPPING A RUN STARTED BY MISTAKE, from the
+                                                screen where the mistake is visible.
+
+                                                The action itself already existed, but only on
+                                                Approve Production — a queue of COMPLETED
+                                                batches awaiting sign-off. A supervisor who has
+                                                just started the wrong product is standing here,
+                                                looking at this card, and no amount of knowing
+                                                the system would suggest the approval queue.
+                                                Reported from the floor during live use as
+                                                "unable to delete or stop" (05-Aug).
+
+                                                Shown only while quality has not signed: after
+                                                that a second person has certified the figures
+                                                and the batch stops being withdrawable, which
+                                                is the same rule the approval queue applies and
+                                                the server enforces regardless. */}
+                                            {running && !running.quality?.checked && running.status === 'pending' && (
+                                                <Button
+                                                    block
+                                                    danger
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setCancellingEntry(running);
+                                                        setCancelReason('');
+                                                    }}
+                                                >
+                                                    Cancel Batch
+                                                </Button>
+                                            )}
                                         </Space>
                                     )}
                                 </Card>
@@ -5685,7 +5774,84 @@ export default function ShiftProductionEntryPage() {
                             render={({ field }) => <Select {...field} options={employeeOptions} showSearch optionFilterProp="label" allowClear />}
                         />
                     </Form.Item>
+                    {/* WHICH DAY THE WORK HAPPENED.
+
+                        Entering a shift after it ran is ordinary factory work —
+                        last night's production gets typed up this morning, and a
+                        supervisor catching up enters several days at once. The
+                        API always accepted a production date; this screen never
+                        asked for one, so every catch-up entry was filed under
+                        the day somebody happened to type it, landing in the
+                        wrong day's Tally voucher and the wrong day's report with
+                        nothing on screen to say so (floor report, 05-Aug).
+
+                        Pre-filled with the shift-aware today, so the common path
+                        is unchanged and nobody has to touch it. Bounded to what
+                        the server will actually accept: no future day, nothing
+                        before the 1st of this month. */}
+                    <Form.Item
+                        label="Production date"
+                        extra={
+                            startProductionDate === today
+                                ? 'Today. Change it only if this shift already ran on an earlier day.'
+                                : undefined
+                        }
+                    >
+                        <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                            <DatePicker
+                                style={{ width: '100%' }}
+                                allowClear={false}
+                                format="DD MMM YYYY"
+                                value={dayjs(startProductionDate)}
+                                disabledDate={(d) => d.isAfter(dayjs(), 'day') || d.isBefore(backdateFloor, 'day')}
+                                onChange={(d) => setStartDateChosen(d ? d.format('YYYY-MM-DD') : null)}
+                            />
+                            {startProductionDate !== today && (
+                                // Loud on purpose. A date quietly different from
+                                // today is the one mistake nobody re-reads the
+                                // form to catch, and it is invisible afterwards
+                                // until the day's report comes out wrong.
+                                <Alert
+                                    type="warning"
+                                    showIcon
+                                    message={`This batch will be recorded for ${dayjs(startProductionDate).format('DD MMM YYYY')}, not today.`}
+                                />
+                            )}
+                        </Space>
+                    </Form.Item>
                 </Form>
+            </Modal>
+
+            {/* Withdrawing a run started by mistake. Same action and same server
+                rules as the approval queue's — this only puts it where the
+                mistake is seen. */}
+            <Modal
+                title={`Cancel batch — ${cancellingEntry?.work_center.name} · ${cancellingEntry?.item.sku}`}
+                open={cancellingEntry !== null}
+                onCancel={() => setCancellingEntry(null)}
+                onOk={() => {
+                    if (cancellingEntry) cancelEntryMutation.mutate({ id: cancellingEntry.id, reason: cancelReason.trim() });
+                }}
+                okText="Cancel this batch"
+                okButtonProps={{ danger: true, disabled: cancelReason.trim().length < 5, loading: cancelEntryMutation.isPending }}
+                cancelText="Keep it running"
+            >
+                <Typography.Paragraph>
+                    This withdraws batch <Typography.Text code>{cancellingEntry?.batch_number}</Typography.Text> and frees{' '}
+                    {cancellingEntry?.work_center.name}. Any stock this batch moved is reversed.
+                </Typography.Paragraph>
+                <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
+                    The batch is not deleted — it stays on the record as cancelled, with your reason and your name, so the
+                    machine's history still explains the gap.
+                </Typography.Paragraph>
+                <Form.Item label="Why is it being cancelled?" required style={{ marginBottom: 0 }}>
+                    <Input.TextArea
+                        rows={3}
+                        value={cancelReason}
+                        onChange={(e) => setCancelReason(e.target.value)}
+                        placeholder="e.g. started on the wrong product"
+                    />
+                </Form.Item>
             </Modal>
 
             <Drawer

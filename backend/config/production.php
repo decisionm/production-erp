@@ -475,4 +475,32 @@ return [
             'machine_active' => env('PROD_READINESS_MACHINE_ACTIVE', 'block'),
         ],
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | How far back a batch may be dated
+    |--------------------------------------------------------------------------
+    |
+    | Backdating is ordinary factory work: last night's shift gets typed up this
+    | morning, and a supervisor catching up enters several days at once (floor
+    | report, 05-Aug). Refusing that does not make the data truer — it files the
+    | work under whichever day somebody happened to type it.
+    |
+    |   'none'  (default) no floor. The API has always accepted a historical
+    |           date and callers depend on it — migrations that seed past
+    |           quarters, integrations that replay a month. Turning a floor on
+    |           unconditionally refused 86 of them.
+    |   'month' the 1st of this month, or a week back, whichever reaches
+    |           further. The week matters: on the 2nd, a strict month floor
+    |           would refuse last night's shift.
+    |   <int>   a rolling window of that many days.
+    |
+    | A FUTURE date is refused under every setting — that rule lives in
+    | StartBatchRequest and is not configurable, because production that has not
+    | happened cannot be recorded.
+    |
+    | The Start dialog's date picker offers exactly this window, so a mistyped
+    | month is caught where a supervisor can see it rather than in a 422.
+    */
+    'backdate_limit' => env('PROD_BACKDATE_LIMIT', 'none'),
 ];
