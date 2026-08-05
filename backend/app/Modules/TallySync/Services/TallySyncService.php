@@ -9,6 +9,7 @@ use App\Modules\Procurement\Models\GoodsReceiptNote;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
 use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
+use App\Modules\Production\Services\ShiftProductionEntryService;
 use App\Modules\Sales\Models\Delivery;
 use App\Modules\Sales\Models\Invoice;
 use App\Modules\TallySync\Models\Enums\TallyLedgerRole;
@@ -323,6 +324,32 @@ class TallySyncService
             'quantity' => $entry->quantity_produced,
         ]];
 
+        // SCRAP IS A SECOND PRODUCED LINE, because the factory's own books say
+        // so. Reading 38 real Stock Journals out of their Tally settled a
+        // question this code had been holding open: "Pet Scrap" arrives as an
+        // INWARD line in 31 of them, in Kgs, priced between ₹17 and ₹32 — scrap
+        // kept as valued stock, not thrown away. The owner confirmed it
+        // (05-Aug: "yes book scrap"), and a voucher missing a line their
+        // accountant has posted daily for months is a voucher they have to
+        // correct by hand every time.
+        //
+        // The QUANTITY is the mass that did not become sellable product:
+        // confirmed rejection + lumps, the same two figures the material
+        // reconciliation subtracts. That is what makes the arithmetic close —
+        // issued = good + rejection + lumps + unaccounted — so the scrap line
+        // and the reconciliation can never disagree about the same shift.
+        //
+        // Still driven by the configured scrap item and still silent without
+        // one: the name has to be the exact Tally stock item, and guessing
+        // between "Pet Scrap", "PET Scrap - Amber" and "PET Scrap - Lumps"
+        // (all three exist in their masters) would book real weight against the
+        // wrong master and surface as a Tally rejection days later.
+        $scrapLine = $this->producedScrapLine($entry);
+
+        if ($scrapLine !== null) {
+            $produced[] = $scrapLine;
+        }
+
         // Scraps ride along as DATA AND NARRATION ONLY — never as a stock line.
         // Crediting rejected pieces or regrind back into Tally as a valued item
         // needs an answer this factory has not given: the owner's ruling is
@@ -405,10 +432,85 @@ class TallySyncService
      * 237 rejects should say so on its own voucher record, and an absence
      * nobody notices is how the figure stops being looked at.
      *
+     * The scrap this batch made, as an INWARD stock line — the factory's own
+     * practice, read out of 31 of their 38 Stock Journals and confirmed by the
+     * owner (05-Aug).
+     *
+     * Null when no scrap item is configured, or when the shift made no scrap.
+     * Both are silences with meaning and neither is a zero line: a voucher
+     * carrying "Pet Scrap 0.0000" invites Tally to create a movement for
+     * nothing, and a shift that genuinely scrapped nothing should say nothing.
+     *
+     * @return array{item: string, quantity: string}|null
+     */
+    private function producedScrapLine(ShiftProductionEntry $entry): ?array
+    {
+        $item = $this->scrapItem();
+
+        if ($item === null) {
+            return null;
+        }
+
+        // RESOLVED LAZILY, not injected. ShiftProductionEntryService reaches
+        // this class through VoucherPreviewService, so a constructor dependency
+        // the other way is a container cycle — it does not fail as a clear
+        // error either, it recurses until PHP dies mid-test ("premature end of
+        // process"), which is a far worse thing to debug than one app() call.
+        $metrics = app(ShiftProductionEntryService::class)->productionMetrics($entry);
+
+        if ($metrics === null) {
+            return null;
+        }
+
+        // The mass that did not become sellable product. Both halves come from
+        // the reconciliation's own figures so the two can never disagree.
+        $kg = bcadd(
+            (string) ($metrics['confirmed_rejection_kg'] ?? '0'),
+            (string) ($metrics['lumps_kg'] ?? '0'),
+            4,
+        );
+
+        if (bccomp($kg, '0', 4) !== 1) {
+            return null;
+        }
+
+        return ['item' => $item->name, 'quantity' => $kg];
+    }
+
+    /**
+     * The exact Tally stock item scrap posts against, or null when the factory
+     * has not named one.
+     *
+     * By SKU first, then by exact name — the same two-step the ERP's own scrap
+     * receipt uses, so one setting drives both and they cannot name different
+     * items. Never a pattern match: "Pet Scrap", "PET Scrap - Amber",
+     * "PET Scrap - Lumps" and "Pet Bottles Scrap" all exist in this factory's
+     * masters, and a near-miss books real weight against the wrong one.
+     */
+    private function scrapItem(): ?Item
+    {
+        $configured = config('production.scrap.rejected_item_sku');
+
+        if ($configured === null || $configured === '') {
+            return null;
+        }
+
+        return Item::query()->where('sku', $configured)->first()
+            ?? Item::query()->where('name', $configured)->first();
+    }
+
+    /**
      * @return array{kind: string, item: ?string, quantity: string, unit: string, reason: string}|null
      */
     private function withheldScrapLine(ShiftProductionEntry $entry): ?array
     {
+        // Nothing to withhold once the scrap line actually posts — the figure is
+        // on the voucher, and a "held back" note beside a posted line would be
+        // simply untrue.
+        if ($this->scrapItem() !== null) {
+            return null;
+        }
+
         $kg = '0.0000';
         $scrapNos = '0';
 
