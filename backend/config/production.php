@@ -345,9 +345,25 @@ return [
          * which is the entire failure this replaces. A code that matches no
          * machine resolves to nothing and is reported rather than silently
          * dropped — see MachineCapabilityService.
+         *
+         * BOTH SPELLINGS OF THE SAME MACHINE ARE LISTED, and that is not
+         * indecision. The factory's own paperwork calls its machines ASB-1 to
+         * ASB-10 — the handwritten production report, the idle-time report and
+         * the mould-change log all do — while this database calls them MC-01 to
+         * MC-10. Renaming them to match the floor is queued work, and the moment
+         * it happens a rule keyed only to "MC-10" stops matching the machine it
+         * was written for.
+         *
+         * That failure is quiet in the way that matters: the high-cavity rule
+         * simply stops recommending anything, every machine looks equally
+         * permitted, and nothing on screen says a rule went missing. Listing
+         * both means the rename can happen in any order — data first or config
+         * first — without a window where the rule is silently absent. A code
+         * matching no machine is already reported, so the spare entry costs
+         * nothing.
          */
         'high_cavity_work_center_codes' => array_values(array_filter(
-            array_map('trim', explode(',', (string) env('PROD_HIGH_CAVITY_WORK_CENTER_CODES', 'MC-10'))),
+            array_map('trim', explode(',', (string) env('PROD_HIGH_CAVITY_WORK_CENTER_CODES', 'MC-10,ASB-10'))),
             fn (string $code) => $code !== '',
         )),
 

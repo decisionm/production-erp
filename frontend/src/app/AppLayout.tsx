@@ -253,10 +253,20 @@ const allNavItems: NavGroup[] = [
  * worse than an absence. An absence is a roadmap; an empty screen is a broken
  * promise.
  *
- * DECIDED BY COUNTING ROWS, not by taking the complaint at face value. Leads 0,
- * journal entries 0, payroll runs 0 — hidden. But employees 7, assets 4 and GST
- * rates 6, so HRMS, Maintenance and Compliance stay. HRMS in particular was on
- * the manager's list and holds the operator names every shift entry reads.
+ * DECIDED BY COUNTING ROWS, not by taking the complaint at face value — with one
+ * correction worth recording, because it was mine. Leads 0, journal entries 0 and
+ * payroll runs 0 are hidden. Assets and GST rates carry real data, so Maintenance
+ * and Compliance stay.
+ *
+ * HRMS was kept for a day on the strength of 7 employee rows, and that was wrong
+ * twice over. The count came from the DEV database rather than the live one, and
+ * the rows are seed data: EMP-001 to EMP-007, no names on them, and not one
+ * referenced as an operator by any production entry. The owner said it plainly —
+ * "those are dummy data". A module whose only content is fixtures is precisely
+ * what this list exists to hide.
+ *
+ * The lesson lives here rather than in a commit message nobody re-reads: count on
+ * the machine the decision is about.
  *
  * PERMISSIONS COULD NOT ANSWER THIS. Visibility is granted by `<module>.view`,
  * and the people who open this app are Administrators who hold every permission
@@ -278,18 +288,14 @@ const ADOPTED_MODULES = new Set([
     // Master data and access, needed to administer any of the above.
     'users',
     'roles',
-    // Sales: 1 order and the delivery/invoice screens are already in use, and
-    // sales orders are the demand side of the spine.
+    // Sales stays because it is the demand side of the spine the factory is
+    // being taken through next — purchase order through to sales received, the
+    // manager's own request. Not kept on a row count; see the note above.
     'sales',
-    // HRMS STAYS, and the manager's list was wrong about this one. It holds the
-    // 7 employee records that Production's own operator picker reads — the
-    // supervisors and machine operators named on every shift entry. Hiding it
-    // would leave the factory unable to add an operator, which is a regression
-    // dressed as tidying up. Counted, not assumed.
-    'hrms',
-    // Maintenance (4 assets) and Compliance (6 GST rates) both carry real rows.
-    // Neither was named by the manager and neither is empty, so neither is this
-    // change's business.
+    // Neither was named by the manager, so neither is this change's business.
+    // Left visible on that ground alone rather than on a count, after the HRMS
+    // mistake: absence of a complaint is a fact about the complaint, which is
+    // all this list is judging.
     'maintenance',
     'compliance',
 ]);
