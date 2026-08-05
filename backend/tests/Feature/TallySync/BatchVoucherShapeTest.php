@@ -420,7 +420,11 @@ class BatchVoucherShapeTest extends TestCase
         $this->assertStringContainsString('120 pieces rejected during the run', $scrap['reason']);
         $this->assertStringContainsString('200 pieces on its scrap lines', $scrap['reason']);
         $this->assertStringContainsString('4.5000 kg of lumps and scrap', $scrap['reason']);
-        $this->assertStringContainsString('kept as stock or thrown away', $scrap['reason']);
+        // The reason states the RULING, not an open question. The owner settled
+        // it on 05-Aug — rejects and lumps are discarded — and a note that still
+        // says "we have not decided" is how a decision gets re-litigated.
+        $this->assertStringContainsString('discards rejects and lumps', $scrap['reason']);
+        $this->assertStringNotContainsString('has not yet said', $scrap['reason']);
 
         $preview = $this->previewFor($entry);
         $this->assertTrue($preview['postable'], 'A withheld scrap line must not block a good voucher.');

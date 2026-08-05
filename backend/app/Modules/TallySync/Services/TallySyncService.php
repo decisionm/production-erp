@@ -388,10 +388,22 @@ class TallySyncService
     /**
      * The scrap this batch made, stated as a withheld line — never as stock.
      *
-     * Rejected pieces and lumps are both real and both already recorded in the
-     * ERP's own stock; what is missing is the owner's answer to "are they kept
-     * as stock or thrown away", and the two answers book different vouchers.
-     * So the figure is carried, the reason is carried, and no line is posted.
+     * THE OWNER HAS NOW ANSWERED (05-Aug): "rejects and lumps are discarded."
+     * That settles the question this line used to say was open, and it settles
+     * it in favour of what the code already did — nothing is posted to Tally,
+     * because discarded material is not stock anybody owns. The figures are
+     * still carried so the accountant can see what the shift threw away; they
+     * are simply not a voucher line.
+     *
+     * The consumption side needs no adjustment and that is worth stating,
+     * because it looks like an omission: the resin that became a reject was
+     * genuinely consumed, and the resin line already includes it (produced
+     * counts are net of rejects while consumption covers everything moulded).
+     * Discarding the bottle does not un-consume the resin.
+     *
+     * Kept as a WITHHELD line rather than dropped entirely: a shift that made
+     * 237 rejects should say so on its own voucher record, and an absence
+     * nobody notices is how the figure stops being looked at.
      *
      * @return array{kind: string, item: ?string, quantity: string, unit: string, reason: string}|null
      */
@@ -435,10 +447,10 @@ class TallySyncService
             // different populations and are stated, not added, in the reason.
             'quantity' => $kg,
             'unit' => 'kg',
-            'reason' => 'This batch recorded '.implode(', ', $counted).'. No scrap line is posted to Tally: the '
-                .'owner has not yet said whether rejected pieces and lumps are kept as stock or thrown away, and '
-                .'the two answers make different vouchers. The scrap stays recorded in the ERP\'s own stock — only '
-                .'the Tally line is held back, and it can be added the day the answer comes.',
+            'reason' => 'This batch recorded '.implode(', ', $counted).'. No scrap line is posted to Tally because '
+                .'the factory discards rejects and lumps (owner ruling, 05-Aug) — discarded material is not stock '
+                .'anyone owns. The resin they used is already on the consumption line above; only the bottle is '
+                .'thrown away, not the material that went into it.',
         ];
     }
 
