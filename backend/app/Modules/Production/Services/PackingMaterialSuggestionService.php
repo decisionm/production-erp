@@ -149,12 +149,46 @@ class PackingMaterialSuggestionService
             $entries[] = $this->entry(PackingMaterialMapping::KIND_CARTON, $carton, $standard, 'carton_spec');
         }
 
+        // A BAG-PACKED PRODUCT HAS ONE PACKING MATERIAL AND NOTHING ELSE.
+        //
+        // The factory's own words (05-Aug): "when HM, no need to use the tray or
+        // pouch and other packing material." Their sheet proves it without
+        // being asked — all 17 rows whose carton column holds an HM or LD bag
+        // carry no tray spec and no film spec at all.
+        //
+        // Returning here rather than filtering below is the point: a bag is not
+        // a carton with parts missing, it is a different way to pack, and every
+        // line after this one is dosed PER CARTON. There is no carton, so a
+        // tray line, a film line and a tape line would each be a real material
+        // quoted against a container that does not exist — and tape's own miss
+        // said so out loud ("no metres-per-box row paired to this carton").
+        if ($this->isBag($carton)) {
+            return $entries;
+        }
+
         if ($tray !== null) {
             $entries[] = $this->entry(PackingMaterialMapping::KIND_TRAY, $tray, $standard, 'tray_spec');
         }
 
         if ($film !== null) {
-            $entries[] = $this->entry(PackingMaterialMapping::KIND_POUCH_FILM, $film, $standard, 'pouch_spec');
+            // ONE POUCH PER TRAY, not one per carton.
+            //
+            // The factory (05-Aug): "along with the tray, the pouch also needs
+            // to calculate — five trays, five pouches." Their arithmetic backs
+            // it in all 55 tray rows: bottles/tray × trays/box = bottles/box, so
+            // a box of 810 is five trays of 162, and each tray is covered.
+            //
+            // Dosing this per carton — which is what it did — quoted ONE film
+            // for a box that really consumes five or six. Not a rounding
+            // difference: an under-count of five-sixths on every tray-packed
+            // shift, invisible in Tally until somebody counted the film shelf.
+            $entries[] = $this->entry(
+                PackingMaterialMapping::KIND_POUCH_FILM,
+                $film,
+                $standard,
+                'pouch_spec',
+                $tray !== null ? PackingMaterialMapping::KIND_TRAY : null,
+            );
         }
 
         // Tape last and keyed off the CARTON: tape is dosed by the box it
@@ -168,6 +202,28 @@ class PackingMaterialSuggestionService
     }
 
     /**
+     * Is this spec a poly bag rather than a carton?
+     *
+     * Judged on the VALUE, never on which column it sits in. The workbook uses
+     * one CARTON column for two different things — a carton size ("100ML") and
+     * a bag size ("HM 30.5*49", "LD 28.5 X 38") — and one row files a bag under
+     * TRAY, so the column cannot be trusted to say what kind of thing it names.
+     *
+     * HM and LD are the factory's own prefixes for the two bag families their
+     * Tally carries: "Hm Polythene Bags - 30.5 x 49 x 200G" and
+     * "LDPE COVER (28.5x38x120G)".
+     */
+    private function isBag(?string $spec): bool
+    {
+        if ($spec === null) {
+            return false;
+        }
+
+        return (bool) preg_match('/^\s*(hm|ld)\b/i', $spec)
+            || (bool) preg_match('/^\s*ld\d/i', $spec);   // "LD28.5 X 39", written closed up
+    }
+
+    /**
      * One material, resolved or explained.
      *
      * @return array{
@@ -177,9 +233,18 @@ class PackingMaterialSuggestionService
      *     reason: string,
      * }
      */
-    private function entry(string $kind, string $spec, ProductionStandard $standard, string $column): array
+    private function entry(string $kind, string $spec, ProductionStandard $standard, string $column, ?string $basisKind = null): array
     {
+        // $basisKind re-bases the quantity onto another kind's container while
+        // leaving the material and its unit alone. Used for one case: a film on
+        // a tray-packed product is counted per TRAY, not per carton.
         $basis = PackingMaterialMapping::KIND_BASIS[$kind];
+
+        if ($basisKind !== null) {
+            $rebased = PackingMaterialMapping::KIND_BASIS[$basisKind];
+            $basis['basis'] = $rebased['basis'];
+            $basis['quantity_basis'] = $rebased['quantity_basis'];
+        }
         $mapping = $this->mappings->resolve($kind, $spec);
         $filing = $this->filing($kind, $mapping, $basis);
 
