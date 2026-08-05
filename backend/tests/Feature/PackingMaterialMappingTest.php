@@ -522,6 +522,98 @@ class PackingMaterialMappingTest extends TestCase
     // ----------------------------------------- (3) the suggestion the floor
     // actually reads -----------------------------------------------------
 
+    public function test_a_bag_packed_product_gets_the_bag_and_nothing_else(): void
+    {
+        // THE FACTORY'S RULE, verbatim (05-Aug): "when HM, no need to use the
+        // tray or pouch and other packing material." Their own sheet proves it
+        // without being asked — all 17 rows whose carton column holds an HM or
+        // LD bag carry no tray spec and no film spec at all.
+        //
+        // Specs are set here for tray and film DELIBERATELY, so the rule is
+        // tested rather than the fixture: even when the columns are filled, a
+        // bag-packed product must not quote them. Every line after the bag is
+        // dosed per CARTON, and a bag-packed product has no carton — so a tray,
+        // film or tape line would be a real material quoted against a container
+        // that does not exist.
+        $standard = $this->standard($this->bottle, [
+            'carton' => 'HM 30.5*49',
+            'tray' => '60ML',
+            'pouch' => '750*610',
+        ]);
+
+        $kinds = collect(app(PackingMaterialSuggestionService::class)->forStandard($standard))
+            ->pluck('kind')->all();
+
+        $this->assertSame(['carton'], $kinds, 'A bag is the whole pack — no tray, no film, no tape.');
+    }
+
+    public function test_the_bag_rule_reads_the_value_not_the_column(): void
+    {
+        // The workbook files a bag under TRAY on one row and uses its CARTON
+        // column for both carton sizes and bag sizes. So the column cannot say
+        // what kind of thing a spec names — only the value can. LD written
+        // closed up ("LD28.5 X 39", one real row) counts too.
+        foreach (['HM 30.5*49', 'LD 28.5 X 38', 'LD 30 X 49', 'LD28.5 X 39', 'hm 30 x 49'] as $bag) {
+            // Unsaved: the rule reads three spec columns and nothing else, and
+            // persisting five near-identical standards would only trip the
+            // production_standards uniqueness that exists for a different reason.
+            $standard = new ProductionStandard(['carton_spec' => $bag, 'tray_spec' => '60ML']);
+
+            $this->assertSame(
+                ['carton'],
+                collect(app(PackingMaterialSuggestionService::class)->forStandard($standard))->pluck('kind')->all(),
+                "\"{$bag}\" is a bag and must suppress every other packing line.",
+            );
+        }
+
+        // And an ordinary carton is untouched by the rule.
+        $standard = new ProductionStandard(['carton_spec' => '170ML', 'tray_spec' => '60ML']);
+        $this->assertSame(
+            ['carton', 'tray', 'tape'],
+            collect(app(PackingMaterialSuggestionService::class)->forStandard($standard))->pluck('kind')->all(),
+        );
+    }
+
+    public function test_a_film_on_a_tray_packed_product_is_counted_per_tray(): void
+    {
+        // ONE POUCH PER TRAY. The factory (05-Aug): "along with the tray, the
+        // pouch also needs to calculate — five trays, five pouches." Their
+        // arithmetic backs it in all 55 tray rows of the workbook:
+        // bottles/tray x trays/box = bottles/box, so a box of 810 is five trays
+        // of 162 and each tray is covered.
+        //
+        // Dosed per carton — which it was — one film is quoted for a box that
+        // really consumes five. An under-count of four fifths on every
+        // tray-packed shift, invisible in Tally until the film shelf is counted.
+        $standard = $this->standard($this->bottle, [
+            'carton' => '170ML', 'tray' => '60ML', 'pouch' => '750*610',
+        ]);
+
+        $film = collect(app(PackingMaterialSuggestionService::class)->forStandard($standard))
+            ->firstWhere('kind', 'pouch_film');
+
+        $this->assertNotNull($film);
+        $this->assertSame('trays', $film['quantity_basis']);
+        $this->assertSame('per_tray', $film['basis']);
+        // The MATERIAL and its units are untouched — only the container it is
+        // counted against changed. Film is still grams per piece into kg.
+        $this->assertSame('kg', $film['unit']);
+        $this->assertSame('g', $film['factor_unit']);
+    }
+
+    public function test_a_film_on_a_product_with_no_tray_stays_counted_per_carton(): void
+    {
+        // A pouch-packed product has no tray to cover, so its film keeps the
+        // carton basis. The re-base is for the tray case and nothing else.
+        $standard = $this->standard($this->bottle, ['carton' => '170ML', 'pouch' => '750*610']);
+
+        $film = collect(app(PackingMaterialSuggestionService::class)->forStandard($standard))
+            ->firstWhere('kind', 'pouch_film');
+
+        $this->assertSame('cartons', $film['quantity_basis']);
+        $this->assertSame('per_carton', $film['basis']);
+    }
+
     public function test_the_preview_carries_a_packing_line_per_material_with_its_factor(): void
     {
         $this->actingAsProduction();
