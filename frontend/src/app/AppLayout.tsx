@@ -238,6 +238,62 @@ const allNavItems: NavGroup[] = [
     },
 ];
 
+/**
+ * The modules this factory has actually adopted.
+ *
+ * WHAT THIS IS NOT. It is not a list of what is built. CRM, Finance and Payroll
+ * are real features with real screens behind them — Leads alone is 500 lines —
+ * and every one of their endpoints still works for anything that calls it.
+ * Nothing here is deleted or disabled.
+ *
+ * WHAT IT IS. A menu of modules a factory is not using yet reads as a half-built
+ * product, and it read that way to the owner's manager (05-Aug): "why CRM, HRMS,
+ * payroll pages, where we don't have anything, and finance too." He was looking
+ * at working screens with no data in them — the same experience as a stub, and
+ * worse than an absence. An absence is a roadmap; an empty screen is a broken
+ * promise.
+ *
+ * DECIDED BY COUNTING ROWS, not by taking the complaint at face value. Leads 0,
+ * journal entries 0, payroll runs 0 — hidden. But employees 7, assets 4 and GST
+ * rates 6, so HRMS, Maintenance and Compliance stay. HRMS in particular was on
+ * the manager's list and holds the operator names every shift entry reads.
+ *
+ * PERMISSIONS COULD NOT ANSWER THIS. Visibility is granted by `<module>.view`,
+ * and the people who open this app are Administrators who hold every permission
+ * by definition. The only way to hide a module by permission was to strip it
+ * from the role that also runs production.
+ *
+ * ADD A LINE THE DAY A MODULE GOES INTO USE. That is the whole maintenance
+ * burden, and it is deliberately in source rather than in a settings screen: a
+ * factory adopting a module is a decision made once, not a toggle anyone should
+ * flip by accident on a live floor.
+ */
+const ADOPTED_MODULES = new Set([
+    // The production spine — what this deployment exists to run.
+    'inventory',
+    'production',
+    'procurement',
+    'quality',
+    'tally-sync',
+    // Master data and access, needed to administer any of the above.
+    'users',
+    'roles',
+    // Sales: 1 order and the delivery/invoice screens are already in use, and
+    // sales orders are the demand side of the spine.
+    'sales',
+    // HRMS STAYS, and the manager's list was wrong about this one. It holds the
+    // 7 employee records that Production's own operator picker reads — the
+    // supervisors and machine operators named on every shift entry. Hiding it
+    // would leave the factory unable to add an operator, which is a regression
+    // dressed as tidying up. Counted, not assumed.
+    'hrms',
+    // Maintenance (4 assets) and Compliance (6 GST rates) both carry real rows.
+    // Neither was named by the manager and neither is empty, so neither is this
+    // change's business.
+    'maintenance',
+    'compliance',
+]);
+
 function buildNavItems(user: User | null) {
     return allNavItems
         .map((item) => {
@@ -246,9 +302,16 @@ function buildNavItems(user: User | null) {
             // before the children filter below, which handles groups like
             // Administration where individual children carry their own,
             // more granular module instead.
+            // Not adopted by this factory yet — hidden whatever the user's
+            // permissions say. Checked BEFORE permissions, because an
+            // Administrator holds every permission and would otherwise see every
+            // module regardless of whether the factory uses it.
+            if (item.module && !ADOPTED_MODULES.has(item.module)) return null;
             if (item.module && !hasModuleAccess(user, item.module)) return null;
             if (item.children) {
-                const children = item.children.filter((child) => !child.module || hasModuleAccess(user, child.module));
+                const children = item.children.filter(
+                    (child) => !child.module || (ADOPTED_MODULES.has(child.module) && hasModuleAccess(user, child.module)),
+                );
                 if (children.length === 0) return null;
                 return { ...item, children };
             }
