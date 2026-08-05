@@ -3230,7 +3230,22 @@ export default function ShiftProductionEntryPage() {
     // the same figure the kg arithmetic below has always used. Blank when the
     // product master has no weight: an invented weight would silently invent
     // every kg computed from it.
-    const resinGramsSuggested = resinSuggestion.grams ?? nominalWeight;
+    // ONE BOTTLE, ONE WEIGHT — the product's own, the same figure the Production
+    // and Rejection rows use.
+    //
+    // The precedence used to run the other way, and it put two different weights
+    // on one panel while the formula line claimed they were "the bottle weight
+    // above". The factory's paper report (05-Aug, shift A) shows why that is
+    // never right: WT is a SINGLE column, and every kg on the row is computed
+    // from it. ASB-1 ran 100 RC at 12.0 g and reported 120.96 + 2.84 = 123.80
+    // consumed; our panel showed 133.09, because it took 12.9 g — which is
+    // 100 EA WOR's weight, the product ASB-3 was running on the same shift.
+    //
+    // Two real products, two real weights, and the wrong one reached the resin
+    // line through a standard attached to the wrong item. Preferring the
+    // product's own weight cannot make that mistake: a bottle weighs what it
+    // weighs, whatever a standard says.
+    const resinGramsSuggested = nominalWeight ?? resinSuggestion.grams;
     useEffect(() => {
         if (!completingEntry || resinGramsSuggested === null) return;
         if (resinGramsTouchedRef.current) return;
@@ -7614,7 +7629,7 @@ export default function ShiftProductionEntryPage() {
                                     value={`${fmtNum(resinShownKg)} kg`}
                                     formula={
                                         resinIsCalculated
-                                            ? 'production kg + rejection kg + lumps kg, at the bottle weight above'
+                                            ? 'production kg + rejection kg + lumps kg'
                                             // No bin is ever put on a scale in this
                                             // factory, so "from a day-bin weighment"
                                             // named a step nobody performs. What is
