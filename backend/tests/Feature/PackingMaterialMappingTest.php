@@ -680,7 +680,13 @@ class PackingMaterialMappingTest extends TestCase
         // A null with a reason the screen prints is the point. A plausible
         // guess here reaches a real dispatch.
         $this->assertStringContainsString('750*610', $lines['pouch_film']['reason']);
-        $this->assertStringContainsString('no packing-material mapping', $lines['pouch_film']['reason']);
+        // SHORT ENOUGH TO BE READ. The owner, seeing the old thirty-word
+        // version on the floor mid-shift (05-Aug): "why so many English notes,
+        // will they really read them." A line with no item needs a picker, not
+        // a paragraph — so the reason names the spec and stops.
+        $this->assertStringContainsString('750*610', $lines['pouch_film']['reason']);
+        $this->assertStringContainsString('choose', $lines['pouch_film']['reason']);
+        $this->assertLessThan(60, mb_strlen($lines['pouch_film']['reason']));
         // The kind's unit still stands — it is a property of the material,
         // not of the item that is missing.
         $this->assertSame('kg', $lines['pouch_film']['unit']);
@@ -711,7 +717,8 @@ class PackingMaterialMappingTest extends TestCase
         $this->assertNull($lines['pouch_film']['factor']);
         // ...and the reason says which half of the answer is missing, so the
         // blank field is explained rather than just blank.
-        $this->assertStringContainsString('per-piece weight is not set', $lines['pouch_film']['reason']);
+        $this->assertStringContainsString('per-piece weight not set', $lines['pouch_film']['reason']);
+        $this->assertLessThan(70, mb_strlen($lines['pouch_film']['reason']));
     }
 
     public function test_an_inferred_spec_is_still_usable_but_the_reason_says_it_was_inferred(): void

@@ -358,26 +358,42 @@ class PackingMaterialSuggestionService
     private function reason(string $kind, string $spec, ?PackingMaterialMapping $mapping, array $filing): string
     {
         $label = match ($kind) {
-            PackingMaterialMapping::KIND_CARTON => 'Carton spec',
-            PackingMaterialMapping::KIND_TRAY => 'Tray spec',
-            PackingMaterialMapping::KIND_POUCH_FILM => 'Pouch film spec',
-            default => 'Tape for carton spec',
+            PackingMaterialMapping::KIND_CARTON => 'Carton',
+            PackingMaterialMapping::KIND_TRAY => 'Tray',
+            PackingMaterialMapping::KIND_POUCH_FILM => 'Pouch',
+            default => 'Tape',
         };
 
+        // SHORT ENOUGH TO BE READ. The owner, seeing this screen on the floor
+        // (05-Aug): "why so many English notes, will they really read them, this
+        // does not look like a good production application."
+        //
+        // He is right, and the old sentence proved it: "Carton spec '100 ML
+        // CARTON' has no packing-material mapping yet, so nothing is prefilled.
+        // Set one on the packing-materials master to have this line arrive
+        // filled in." Thirty words telling a supervisor mid-shift to go and
+        // administer master data they have no access to. Nobody reads it, and
+        // reading it would not help.
+        //
+        // A line with no item needs a PICKER, not a paragraph — the spec is
+        // named so the operator can recognise which line is asking, and the
+        // choosing happens in the control beside it.
         if ($mapping === null) {
-            return "{$label} \"{$spec}\" has no packing-material mapping yet, so nothing is prefilled. "
-                .'Set one on the packing-materials master to have this line arrive filled in.';
+            return "{$label} \"{$spec}\" — choose the material";
         }
 
         $item = (string) $mapping->item?->name;
 
+        // The arithmetic used to be spelled out in prose ("cartons x 120 g /
+        // 1000 = kg"). The screen already shows the factor, the count and the
+        // result in adjacent columns, so the sentence restated three numbers the
+        // operator can see. What is left is the dose, which is the one thing the
+        // columns do not say on their own.
         return match ($kind) {
-            PackingMaterialMapping::KIND_CARTON => "{$label} \"{$spec}\" is \"{$item}\" — one box per carton packed.",
-            PackingMaterialMapping::KIND_TRAY => "{$label} \"{$spec}\" is \"{$item}\" — one tray per tray packed.",
+            PackingMaterialMapping::KIND_CARTON, PackingMaterialMapping::KIND_TRAY => $item,
             PackingMaterialMapping::KIND_POUCH_FILM => $mapping->factor() === null
-                ? "{$label} \"{$spec}\" is \"{$item}\", but its per-piece weight is not set, so no kg can be quoted."
-                : "{$label} \"{$spec}\" is \"{$item}\" — one film wraps one carton's contents at "
-                    ."{$mapping->factor()} g each, so cartons × {$mapping->factor()} g ÷ 1000 = kg.",
+                ? "{$item} — per-piece weight not set"
+                : "{$item} · {$mapping->factor()} g each",
             default => $this->tapeReason($label, $spec, $item, $mapping, $filing),
         };
     }
