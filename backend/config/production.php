@@ -226,14 +226,24 @@ return [
      * Scrap" as a produced line on their daily Stock Journals, so the item
      * exists in THEIR world — it has simply never been mirrored here.
      *
-     * Name it here (by SKU, else by exact item name) and the scrap receipt
-     * happens. Leave it null — the default, because guessing which item is
-     * "the scrap one" would silently book real weight against the wrong
-     * master and the mistake would surface as a Tally rejection days later —
-     * and the rejection is still recorded in full, the finished-goods issue
-     * still happens, and the skipped receipt is written onto the entry where
-     * the approval screen shows it. Under-recording a movement is
-     * recoverable; mis-recording one against a guessed item is not.
+     * LEAVE THIS NULL. The owner has now ruled (05-Aug): "rejects and lumps are
+     * discarded." Discarded material is not stock, so there is nothing to
+     * receive — and the null default, which used to mean "we have not decided",
+     * now means "we have, and the answer is no receipt".
+     *
+     * That distinction matters because the two states behave identically and
+     * would drift apart silently. Setting an SKU here would start accumulating
+     * scrap stock the factory says it throws away, and the first sign of it
+     * would be a stock report nobody can reconcile against the floor.
+     *
+     * The half that DOES still happen is the finished-goods issue: rejected
+     * pieces stop counting as sellable product the moment quality rejects them.
+     * Mass out without mass in is correct here — the mass left the factory.
+     *
+     * If that ruling is ever revisited, name the item here (by SKU, else exact
+     * name) and the receipt resumes with no code change. Guessing which item is
+     * "the scrap one" would book real weight against the wrong master and
+     * surface as a Tally rejection days later, so it stays explicit.
      */
     'scrap' => [
         'rejected_item_sku' => env('PROD_SCRAP_ITEM_SKU'),

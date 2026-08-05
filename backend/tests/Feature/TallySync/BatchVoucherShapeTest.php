@@ -420,12 +420,74 @@ class BatchVoucherShapeTest extends TestCase
         $this->assertStringContainsString('120 pieces rejected during the run', $scrap['reason']);
         $this->assertStringContainsString('200 pieces on its scrap lines', $scrap['reason']);
         $this->assertStringContainsString('4.5000 kg of lumps and scrap', $scrap['reason']);
-        $this->assertStringContainsString('kept as stock or thrown away', $scrap['reason']);
+        // The reason states the RULING, not an open question. The owner settled
+        // it on 05-Aug — rejects and lumps are discarded — and a note that still
+        // says "we have not decided" is how a decision gets re-litigated.
+        $this->assertStringContainsString('discards rejects and lumps', $scrap['reason']);
+        $this->assertStringNotContainsString('has not yet said', $scrap['reason']);
 
         $preview = $this->previewFor($entry);
         $this->assertTrue($preview['postable'], 'A withheld scrap line must not block a good voucher.');
         $this->assertNotEmpty($preview['notes']);
         $this->assertStringContainsString('No scrap line is posted to Tally', implode(' ', $preview['notes']));
+    }
+
+    public function test_scrap_posts_as_a_second_produced_line_once_the_item_is_named(): void
+    {
+        // THE FACTORY'S OWN PRACTICE, read out of 38 real Stock Journals from
+        // their Tally: "Pet Scrap" arrives as an INWARD line in 31 of them, in
+        // Kgs, priced between Rs 17 and Rs 32 per kg. Confirmed by the owner
+        // (05-Aug: "yes book scrap"). A voucher missing the line their
+        // accountant posts daily is one they correct by hand every time.
+        $scrapItem = Item::create(['sku' => 'PET-SCRAP', 'name' => 'Pet Scrap', 'uom' => 'Kgs.']);
+        config(['production.scrap.rejected_item_sku' => 'PET-SCRAP']);
+
+        $entry = $this->completedEntry(['quantity_scrap' => '120']);
+        $this->consume($entry, $this->resin, '160.0000');
+        $entry->scraps()->create(['type' => 'lumps', 'quantity_kg' => '4.5000']);
+
+        $payload = $this->payloadFor($entry);
+
+        $names = collect($payload['produced'])->pluck('item')->all();
+        $this->assertContains($scrapItem->name, $names, 'Scrap must ride the voucher as a produced line.');
+        $this->assertCount(2, $payload['produced'], 'The product and its scrap — nothing else.');
+
+        // SHAPE UNCHANGED. A produced line is ['item', 'quantity'] and the
+        // scrap line is not a special case with extra keys.
+        $line = collect($payload['produced'])->firstWhere('item', $scrapItem->name);
+        $this->assertSame(['item', 'quantity'], array_keys($line));
+        $this->assertTrue(bccomp($line['quantity'], '0', 4) === 1);
+
+        // And it is no longer described as withheld, because it is not.
+        $this->assertNull($this->withheldOfKind($payload['withheld'], PackingVoucherLines::WITHHELD_SCRAP));
+    }
+
+    public function test_a_named_scrap_item_adds_no_line_when_the_shift_scrapped_nothing(): void
+    {
+        // A zero line would invite Tally to create a movement for nothing.
+        Item::create(['sku' => 'PET-SCRAP', 'name' => 'Pet Scrap', 'uom' => 'Kgs.']);
+        config(['production.scrap.rejected_item_sku' => 'PET-SCRAP']);
+
+        $entry = $this->completedEntry();
+        $this->consume($entry, $this->resin, '160.0000');
+
+        $this->assertCount(1, $this->payloadFor($entry)['produced']);
+    }
+
+    public function test_an_unnamed_scrap_item_still_withholds_rather_than_guessing(): void
+    {
+        // "Pet Scrap", "PET Scrap - Amber", "PET Scrap - Lumps" and "Pet Bottles
+        // Scrap" all exist in this factory's masters. With none named, the
+        // figure is reported and no weight is booked against a guess.
+        config(['production.scrap.rejected_item_sku' => null]);
+
+        $entry = $this->completedEntry(['quantity_scrap' => '120']);
+        $this->consume($entry, $this->resin, '160.0000');
+        $entry->scraps()->create(['type' => 'lumps', 'quantity_kg' => '4.5000']);
+
+        $payload = $this->payloadFor($entry);
+        $this->assertCount(1, $payload['produced']);
+        $this->assertNotNull($this->withheldOfKind($payload['withheld'], PackingVoucherLines::WITHHELD_SCRAP));
     }
 
     public function test_a_batch_with_no_scrap_says_nothing_about_scrap(): void
