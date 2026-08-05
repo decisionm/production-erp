@@ -379,6 +379,80 @@ class PackingMaterialMappingService
      *
      * @return Collection<int, object{id: int, name: string}>
      */
+    /**
+     * Every item that could plausibly BE a carton, a tray, a film or a roll of
+     * tape — the lists the completion screen's dropdowns are built from.
+     *
+     * WHY THIS EXISTS SEPARATELY from the matcher's own pool. The matcher is
+     * trying to prove ONE answer, so its word list is tuned to avoid false
+     * positives at the cost of missing things. A dropdown wants the opposite: a
+     * person is choosing, and a missing option is worse than an extra one.
+     * Sharing one list would force one of those two jobs to lose.
+     *
+     * It also covers what the matcher cannot. `Poly Olefin Pouch` is the film
+     * this factory actually consumes — 233 kg on one real Stock Journal at
+     * Rs 296/kg — and not one word in the matcher's film pool matches it.
+     *
+     * Deliberately NOT the word "cover" on its own. Their catalogue is full of
+     * BOTTLES named "...Cover" ("L.180 Ml Hybrid Pet Bottle Clear Cover-14.5gms"
+     * is a bottle, not a film), and a dropdown holding thirty bottles is the same
+     * failure as no dropdown at all.
+     *
+     * Active items only. Twenty belonging to another company were deactivated on
+     * 5 August precisely so the floor could not pick them; a list that offers
+     * them again undoes that in one afternoon.
+     *
+     * @return array<string, list<array{id: int, name: string, uom: ?string}>>
+     */
+    public function optionsByKind(): array
+    {
+        $words = [
+            PackingMaterialMapping::KIND_CARTON => ['master box', 'master carton'],
+            // PAD and LAYER are the factory's own words for a tray that is not
+            // called a tray — "500 Ml PAD" appears in their Stock Journal.
+            PackingMaterialMapping::KIND_TRAY => ['tray', 'pad', 'layer'],
+            // The bags belong here: 17 products pack straight into an HM or LD
+            // bag, and that bag is the whole pack.
+            PackingMaterialMapping::KIND_POUCH_FILM => [
+                'ldpe', 'polythene', 'olefin', 'shrink film', 'stretch film',
+            ],
+            PackingMaterialMapping::KIND_TAPE => ['packing tape'],
+        ];
+
+        $items = DB::table('items')
+            ->select('id', 'name', 'uom')
+            ->whereNull('deleted_at')
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get();
+
+        $out = [];
+
+        foreach ($words as $kind => $needles) {
+            $out[$kind] = $items
+                ->filter(function (object $item) use ($needles): bool {
+                    $name = mb_strtolower((string) $item->name);
+
+                    foreach ($needles as $needle) {
+                        if (str_contains($name, $needle)) {
+                            return true;
+                        }
+                    }
+
+                    return false;
+                })
+                ->map(fn (object $item) => [
+                    'id' => (int) $item->id,
+                    'name' => (string) $item->name,
+                    'uom' => $item->uom === null ? null : (string) $item->uom,
+                ])
+                ->values()
+                ->all();
+        }
+
+        return $out;
+    }
+
     private function catalogue(): Collection
     {
         return DB::table('items')

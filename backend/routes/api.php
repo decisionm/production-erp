@@ -512,6 +512,10 @@ Route::prefix('v1')->group(function () {
             // answers the rest — which cartons take Green tape, which of two
             // identically-named trays a shift consumes. Same guard as
             // masterbatch-dosings: .view reads, .manage writes.
+            // The dropdown lists — every item that could be a carton, tray,
+            // film or tape. Read before the mappings themselves, because a
+            // screen needs the choices whether a mapping exists or not.
+            Route::get('packing-material-options', [PackingMaterialMappingController::class, 'options']);
             Route::get('packing-material-mappings', [PackingMaterialMappingController::class, 'index']);
             Route::post('packing-material-mappings', [PackingMaterialMappingController::class, 'store']);
             Route::delete('packing-material-mappings/{packing_material_mapping}', [PackingMaterialMappingController::class, 'destroy']);
