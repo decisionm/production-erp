@@ -246,7 +246,25 @@ return [
      * surface as a Tally rejection days later, so it stays explicit.
      */
     'scrap' => [
-        'rejected_item_sku' => env('PROD_SCRAP_ITEM_SKU'),
+        /*
+         * DEFAULTS TO "Pet Scrap", on evidence rather than convenience.
+         *
+         * That exact name arrives as an INWARD line in 31 of the 38 real Stock
+         * Journals exported from this factory's Tally, in Kgs at Rs 17-32/kg,
+         * and the owner confirmed it (05-Aug: "yes book scrap"). It is the only
+         * one of the four scrap items in their masters that their own books
+         * actually use — the others (PET Scrap - Amber, - Clear, - Lumps, Pet
+         * Bottles Scrap) appear in none of the 38.
+         *
+         * A default rather than a required env var because the alternative is
+         * worse in a way that already bit us: with this null the scrap line is
+         * silently absent from every voucher, and "silently absent" is exactly
+         * the failure mode a factory discovers at a stock count. An env override
+         * still wins for any deployment whose Tally names it differently, and a
+         * name matching no item still resolves to null and withholds the line
+         * rather than guessing.
+         */
+        'rejected_item_sku' => env('PROD_SCRAP_ITEM_SKU', 'Pet Scrap'),
     ],
 
     /*
