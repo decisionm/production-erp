@@ -297,6 +297,56 @@ class PouchAndCoverDosesTest extends TestCase
         $this->assertSame(0, bccomp((string) $this->dose('carton', 'HM 30 X 49'), '50.0000', 4));
     }
 
+    public function test_a_row_that_names_an_item_but_states_no_dose_gets_the_counted_one(): void
+    {
+        // THIS IS WHY THE COVER STILL WEIGHED NOTHING ON LIVE. The catalogue seed
+        // creates a mapping for every spec it finds in a standard, so
+        // 'LD 28.5 X 38' and 'LD 30 X 49' already had pouch_film rows — naming
+        // the right cover and carrying no grams at all. Treating those as
+        // "already answered" left four products with a cover line that resolved
+        // an item and still computed nothing.
+        //
+        // A row is not a figure. Filling a blank dose is not overruling anyone.
+        $items = $this->catalogue();
+
+        $row = PackingMaterialMapping::query()->create([
+            'spec_kind' => 'pouch_film',
+            'spec_value' => 'LD 30 X 49',
+            'item_id' => $items['LDPE  COVER (30x49x120G)']->id,
+            'note' => 'Matched from the catalogue.',
+        ]);
+
+        $this->seedDoses();
+
+        $this->assertSame(0, bccomp((string) $this->dose('pouch_film', 'LD 30 X 49'), '50.0000', 4));
+        // The item and the note it arrived with are left exactly as they were.
+        $fresh = $row->fresh();
+        $this->assertSame($items['LDPE  COVER (30x49x120G)']->id, $fresh->item_id);
+        $this->assertSame('Matched from the catalogue.', $fresh->note);
+    }
+
+    public function test_a_row_someone_withdrew_is_left_withdrawn_even_with_no_dose(): void
+    {
+        // Soft-deleted is an answer in its own right — a decision not to prefill
+        // this spec — and it must outrank a figure from a photograph whether or
+        // not the row ever carried grams.
+        $items = $this->catalogue();
+
+        $row = PackingMaterialMapping::query()->create([
+            'spec_kind' => 'pouch_film',
+            'spec_value' => 'LD 30 X 49',
+            'item_id' => $items['LDPE  COVER (30x49x120G)']->id,
+        ]);
+        $row->delete();
+
+        $this->seedDoses();
+
+        $this->assertNull(
+            PackingMaterialMapping::query()->withTrashed()->find($row->id)?->grams_per_piece,
+            'A withdrawn row was quietly re-dosed.',
+        );
+    }
+
     public function test_a_figure_a_person_already_set_is_never_overwritten(): void
     {
         $items = $this->catalogue();
