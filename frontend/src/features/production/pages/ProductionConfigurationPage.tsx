@@ -689,7 +689,7 @@ function FactoryWarehousesCard() {
             )}
             {row(
                 'Packing Material Store',
-                'Where cartons, trays, film pouches and tape are issued from on the Tally voucher. No fallback: cartons must not come out of the resin store, so this one is never guessed.',
+                'Where cartons, trays, pouches and tape are issued from on the Tally voucher. No fallback: cartons must not come out of the resin store, so this one is never guessed.',
                 'packing_material_warehouse_id',
                 settings?.packing_material_warehouse_id,
                 settings?.packing_material_resolved_warehouse_id,

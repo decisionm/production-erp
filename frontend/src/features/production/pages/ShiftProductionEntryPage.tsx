@@ -662,7 +662,18 @@ function readPackingSuggestions(raw: SuggestedPackingMaterial[] | null | undefin
             // that share a carton spec because the kind leads.
             key: `${kind}:${itemId ?? 'unmapped'}:${spec ?? index}`,
             kind,
-            label: { carton: 'Carton', tray: 'Tray', film: 'Film', tape: 'Tape', other: 'Packing material' }[kind],
+            // POUCH, NOT FILM. The owner asked for this in as many words
+            // (06-Aug): "insted of film, we need, that is pouch". The factory
+            // calls it a pouch, their Tally item is "Poly Olefin Pouch", and
+            // their dose sheet is headed "Pouch" — "Film" was our word, nobody
+            // else's, and a supervisor matching a screen against a paper sheet
+            // should not have to translate.
+            //
+            // The KEY stays 'film'. That is the wire's own kind, derived from
+            // PackingMaterialMapping::KIND_POUCH_FILM and stored in spec_kind;
+            // renaming it would break the mapping lookup and every stored row.
+            // Only the word on the screen changes.
+            label: { carton: 'Carton', tray: 'Tray', film: 'Pouch', tape: 'Tape', other: 'Packing material' }[kind],
             itemId,
             itemName: wireText(row.item?.name),
             // The wire's unit, always — it is the unit the wire's own FACTOR is
@@ -3726,21 +3737,52 @@ export default function ShiftProductionEntryPage() {
             const pickedId = packingItemPicks[row.key] ?? null;
             const itemId = pickedId ?? row.itemId;
             const picked = pickedId !== null;
-            const options = packingOptions?.[row.kind] ?? [];
+            const catalogue = packingOptions?.[row.kind] ?? [];
+
+            // The picked material's own name wins, then the mapping's, then the
+            // catalogue as a fallback for a backend that sends an id without a
+            // name.
+            const resolvedName =
+                catalogue.find((option) => option.id === itemId)?.name
+                ?? (picked ? null : row.itemName)
+                ?? itemById(itemId)?.name
+                ?? null;
+
+            // A MAPPED MATERIAL THE DROPDOWN DOES NOT HOLD MUST STILL SHOW ITS
+            // NAME.
+            //
+            // antd renders a Select's raw `value` when no option matches it, so
+            // a tray mapped to item 602 printed "602" in the box — and the owner
+            // read that as a quantity, which is exactly what it looks like
+            // sitting next to a Kg field (06-Aug, with a screenshot).
+            //
+            // The cause is not known and this does not depend on knowing it: an
+            // item deactivated after it was mapped, a name the kind's word
+            // filter does not match, an options read that 403'd — all three end
+            // the same way. So the row's own material is prepended to its
+            // options, which guarantees a match and therefore a name.
+            //
+            // `Item #602` is the last resort rather than a bare 602: a labelled
+            // id reads as a debugging aid, which is what it is. A bare number in
+            // a box beside a quantity reads as a quantity.
+            const options =
+                itemId !== null && itemId !== undefined && ! catalogue.some((option) => option.id === itemId)
+                    ? [
+                          {
+                              id: itemId,
+                              name: resolvedName ?? `Item #${itemId}`,
+                              uom: itemById(itemId)?.uom ?? null,
+                          },
+                          ...catalogue,
+                      ]
+                    : catalogue;
 
             return {
                 ...row,
                 itemId,
                 picked,
                 options,
-                // The picked material's own name wins, then the mapping's, then
-                // the catalogue as a fallback for a backend that sends an id
-                // without a name.
-                itemName:
-                    options.find((option) => option.id === itemId)?.name
-                    ?? (picked ? null : row.itemName)
-                    ?? itemById(itemId)?.name
-                    ?? null,
+                itemName: resolvedName,
                 calculated,
                 quantity,
                 touched,
@@ -5642,7 +5684,7 @@ export default function ShiftProductionEntryPage() {
                                     </Descriptions.Item>
                                 )}
                                 {batchPreview?.standard?.pouch_spec && (
-                                    <Descriptions.Item label="Pouch film">
+                                    <Descriptions.Item label="Pouch">
                                         {batchPreview.standard.pouch_spec}
                                     </Descriptions.Item>
                                 )}
