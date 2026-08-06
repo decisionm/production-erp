@@ -42,4 +42,21 @@ return [
 
     'release_idle_minutes' => (int) env('TALLY_RELEASE_IDLE_MINUTES', 15),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Factory timezone
+    |--------------------------------------------------------------------------
+    |
+    | The ONE definition of the factory's wall clock. app.timezone stays UTC
+    | (changing it on a live system would silently shift the meaning of every
+    | stored timestamp), so any comparison between now() and a factory
+    | wall-clock string — a shifts.end_time, a day boundary — must localize
+    | the wall-clock side through this timezone first. now() alone is never
+    | compared against a wall-clock string. Scripts outside Laravel
+    | (scripts/factory-knowledge) honour the same FACTORY_TIMEZONE variable.
+    |
+    */
+
+    'factory_timezone' => env('FACTORY_TIMEZONE', 'Asia/Kolkata'),
+
 ];

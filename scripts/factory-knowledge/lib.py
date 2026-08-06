@@ -31,6 +31,7 @@ import hashlib
 import json
 import os
 import re
+import zoneinfo
 from pathlib import Path
 
 ID_RE = re.compile(r"^DEC-(\d{8})-(\d{3})$")
@@ -70,6 +71,16 @@ def create_exclusive(path: Path, content: str) -> None:
         handle.write(content)
 
 
+def factory_today() -> datetime.date:
+    """Today on the FACTORY's wall clock, never the host's. Decisions are
+    confirmed in factory time (IST), but CI runners sit in UTC — where every
+    decision recorded between 18:30 and midnight IST looked future-dated
+    until 05:30 IST (first CI run of this job, 07-Aug). Same variable and
+    default as config('tally-sync.factory_timezone') in the app."""
+    tz = zoneinfo.ZoneInfo(os.environ.get("FACTORY_TIMEZONE", "Asia/Kolkata"))
+    return datetime.datetime.now(tz).date()
+
+
 def validate_date(value: str) -> str | None:
     """None when valid; the problem when not. ONE implementation — the shape
     check, the calendar check and the not-in-the-future check were starting
@@ -82,7 +93,7 @@ def validate_date(value: str) -> str | None:
         parsed = datetime.date.fromisoformat(value)
     except ValueError:
         return f"{value!r} is not a real calendar date"
-    if parsed > datetime.date.today():
+    if parsed > factory_today():
         return f"{value!r} is in the future — a decision cannot be confirmed on a date that has not happened"
     return None
 

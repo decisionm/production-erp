@@ -123,8 +123,11 @@ class ShiftVoucherReleaseGate
         }
 
         // TIME columns come back as "HH:MM:SS" strings ("HH:MM" in some
-        // drivers) — Carbon::parse takes both.
-        $endsAt = Carbon::parse("{$date} {$shift->end_time}");
+        // drivers) — Carbon::parse takes both. end_time is factory
+        // WALL-CLOCK, so it must be read in the factory timezone: the app
+        // clock is UTC, and a bare parse would hold every voucher ~5.5h
+        // past its real shift end.
+        $endsAt = Carbon::parse("{$date} {$shift->end_time}", config('tally-sync.factory_timezone'));
 
         return $shift->start_time > $shift->end_time ? $endsAt->addDay() : $endsAt;
     }

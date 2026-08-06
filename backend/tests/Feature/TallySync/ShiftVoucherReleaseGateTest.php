@@ -58,6 +58,10 @@ class ShiftVoucherReleaseGateTest extends TestCase
         // Pinned rather than read from the default so these assertions
         // fail loudly if the default ever moves.
         config(['tally-sync.release_idle_minutes' => 15]);
+        // The mechanics tests below run clock and wall-clock in ONE frame
+        // on purpose; the UTC-app/IST-factory split is pinned separately by
+        // test_shift_end_is_factory_wall_clock_not_app_clock.
+        config(['tally-sync.factory_timezone' => 'UTC']);
 
         // The morning shift ends at 14:00 — every "held vs released"
         // assertion below is relative to THIS row's end_time, exactly as
@@ -103,6 +107,25 @@ class ShiftVoucherReleaseGateTest extends TestCase
         return app(TallySyncService::class)->pending()
             ->map(fn (TallySyncEntry $entry) => $entry->voucherNumber())
             ->all();
+    }
+
+    public function test_shift_end_is_factory_wall_clock_not_app_clock(): void
+    {
+        // The live pin: app clock UTC, factory wall clock IST. The 14:00
+        // end_time means 14:00 IST = 08:30 UTC — the voucher must release
+        // moments after that, NOT at 14:00 UTC (which would hold every
+        // shift voucher ~5.5 hours past its real shift end).
+        config(['tally-sync.factory_timezone' => 'Asia/Kolkata']);
+
+        $this->travelTo(Carbon::parse('2026-07-23 08:20:00', 'UTC')); // 13:50 IST, shift still on
+        $this->approvedEntry('5000');
+        $this->assertSame([], $this->offered(), 'At 13:50 IST the shift is still collecting');
+
+        $this->travelTo(Carbon::parse('2026-07-23 08:31:00', 'UTC')); // 14:01 IST: ended, quiet period runs
+        $this->assertSame([], $this->offered(), 'Quiet period still holds just after shift end');
+
+        $this->travelTo(Carbon::parse('2026-07-23 08:36:00', 'UTC')); // 14:06 IST: idle-hold satisfied
+        $this->assertCount(1, $this->offered(), 'Released moments after 14:00 IST, not at 14:00 UTC');
     }
 
     public function test_a_shift_voucher_is_held_while_its_shift_is_still_collecting(): void
