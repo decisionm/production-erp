@@ -3,9 +3,9 @@
 namespace App\Console\Commands;
 
 use App\Modules\Production\Models\Shift;
-use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\WorkCenter;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Call the machines and the shifts what the factory calls them.
@@ -161,6 +161,61 @@ class RenameToFactoryNames extends Command
         return ['renamed' => $renamed, 'kept' => $kept, 'skipped' => $skipped];
     }
 
+    /**
+     * Move everything that names $from onto $to. Returns how many rows moved, or
+     * null when the merge would break a uniqueness rule and must not proceed.
+     *
+     * shift_summaries is unique on (shift_id, production_date), so if both shifts
+     * hold a summary for one day the repoint would collide — and forcing it would
+     * silently discard one day's summary. Refusing the whole merge keeps the
+     * duplicate visible and the history intact, which is the safe direction.
+     */
+    private function repoint(Shift $from, Shift $to, bool $write): ?int
+    {
+        $clash = DB::table('shift_summaries')
+            ->where('shift_id', $from->id)
+            ->whereIn('production_date', DB::table('shift_summaries')
+                ->where('shift_id', $to->id)
+                ->pluck('production_date'))
+            ->exists();
+
+        if ($clash) {
+            return null;
+        }
+
+        // Every table that carries a shift_id. Listed rather than discovered,
+        // because a table added later must be a deliberate decision here: a
+        // merge that silently misses one leaves orphaned history pointing at a
+        // shift nobody can see.
+        $tables = [
+            'shift_production_entries',
+            'machine_downtime_logs',
+            'mold_change_logs',
+            'power_interruption_logs',
+            'shift_stock_counts',
+            'shift_summaries',
+        ];
+
+        $moved = 0;
+
+        foreach ($tables as $table) {
+            $rows = DB::table($table)->where('shift_id', $from->id);
+            $count = $rows->count();
+
+            if ($count === 0) {
+                continue;
+            }
+
+            if ($write) {
+                DB::table($table)->where('shift_id', $from->id)->update(['shift_id' => $to->id]);
+            }
+
+            $moved += $count;
+        }
+
+        return $moved;
+    }
+
     /** @return array{renamed: int, kept: int, skipped: list<string>} */
     private function shifts(bool $write): array
     {
@@ -197,17 +252,38 @@ class RenameToFactoryNames extends Command
                     continue;
                 }
 
-                // Only a row that has recorded nothing. A duplicate a supervisor
-                // has already filed a shift against is real work, and switching
-                // it off would hide that batch's own shift from every screen that
-                // reads it back.
-                if (ShiftProductionEntry::query()->where('shift_id', $twin->id)->exists()) {
-                    $skipped[] = "shift \"{$twinName}\" ({$start}) duplicates an older one but has production against it";
+                /** @var Shift $primary */
+                $primary = $group->first();
+
+                // MERGED, NOT JUST SWITCHED OFF.
+                //
+                // The first version of this refused to touch a duplicate that had
+                // production against it, and reported it instead. That guard was
+                // right to exist and wrong to stop there: the owner's reply was
+                // "THERE IS NOT NIGHT, SHIFT A TO C", with a screenshot of a
+                // picker still offering four shifts for three.
+                //
+                // Two rows at 22:00 are ONE shift. A batch filed against either
+                // ran on the 22:00 shift, so repointing it at the surviving row
+                // loses nothing and asserts nothing new — which is exactly why
+                // this is a merge and not a deletion. Every table that names a
+                // shift is repointed, or the duplicate is left whole; there is no
+                // state where half a shift's history moves.
+                $moved = $this->repoint($twin, $primary, $write);
+
+                if ($moved === null) {
+                    $skipped[] = "shift \"{$twinName}\" ({$start}) cannot merge — it and the surviving shift both "
+                        .'have a summary for the same day, and one would overwrite the other';
 
                     continue;
                 }
 
-                $this->line(sprintf('  %-12s    deactivated — duplicate of the %s shift', $twinName, $start));
+                $this->line(sprintf(
+                    '  %-12s    merged into "%s"%s',
+                    $twinName,
+                    $primary->name,
+                    $moved > 0 ? " — {$moved} record".($moved === 1 ? '' : 's').' repointed' : '',
+                ));
 
                 if ($write) {
                     $twin->forceFill(['is_active' => false])->save();
