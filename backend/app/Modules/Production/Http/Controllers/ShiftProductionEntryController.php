@@ -7,12 +7,15 @@ use App\Modules\Production\Http\Requests\AmendBatchRequest;
 use App\Modules\Production\Http\Requests\CancelShiftProductionEntryRequest;
 use App\Modules\Production\Http\Requests\CompleteBatchRequest;
 use App\Modules\Production\Http\Requests\HandoverRequest;
+use App\Modules\Production\Http\Requests\IngestShiftPageRequest;
 use App\Modules\Production\Http\Requests\RejectShiftProductionEntryRequest;
 use App\Modules\Production\Http\Requests\StartBatchRequest;
 use App\Modules\Production\Http\Resources\ShiftProductionEntryResource;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
 use App\Modules\Production\Models\ShiftProductionEntry;
+use App\Modules\Production\Services\ShiftPageEntryService;
 use App\Modules\Production\Services\ShiftProductionEntryService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
@@ -39,6 +42,27 @@ class ShiftProductionEntryController extends Controller
     public function active(): AnonymousResourceCollection
     {
         return ShiftProductionEntryResource::collection($this->entries->activeBatches());
+    }
+
+    /**
+     * Record a whole page of the factory's production report in one submit.
+     *
+     * The owner's priority (05-Aug): "the daily production entry, each page needs
+     * to enter in our app." Ten to twelve machine rows, entered together, instead
+     * of two dialogs each.
+     *
+     * ALWAYS 200, even when rows fail, and that is the contract rather than
+     * laziness about status codes. A page is not one thing that either worked or
+     * did not: eleven shifts genuinely happened and the twelfth genuinely could
+     * not be recorded, and a 422 would throw away the eleven along with the
+     * report of what went wrong with the twelfth. The body says per row which is
+     * which; the caller renders it.
+     */
+    public function ingestPage(IngestShiftPageRequest $request, ShiftPageEntryService $pages): JsonResponse
+    {
+        return response()->json([
+            'data' => $pages->ingest($request->validated(), $request->user()?->id),
+        ]);
     }
 
     public function store(StartBatchRequest $request): ShiftProductionEntryResource

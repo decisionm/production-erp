@@ -525,6 +525,11 @@ Route::prefix('v1')->group(function () {
             // GET and side-effect free: the SPA calls it on every product or
             // machine change while the supervisor fills the form.
             Route::get('shift-production-entries/preview', BatchPreviewController::class);
+            // A WHOLE PAGE of the factory's production report, entered at once
+            // — ten to twelve machine rows instead of two dialogs each. Declared
+            // before the apiResource so the literal segment is matched ahead of
+            // anything the resource might route.
+            Route::post('shift-production-entries/page', [ShiftProductionEntryController::class, 'ingestPage']);
             Route::apiResource('shift-production-entries', ShiftProductionEntryController::class)->only(['index', 'store']);
             Route::post('shift-production-entries/{shift_production_entry}/complete', [ShiftProductionEntryController::class, 'complete']);
             // Correcting a completed batch that quality has not touched yet —
