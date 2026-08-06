@@ -156,6 +156,91 @@ class PouchAndCoverDosesTest extends TestCase
         $this->assertNull($this->dose('pouch_film', '710x610'));
     }
 
+    public function test_the_uncounted_hm_bag_gets_no_dose_at_all(): void
+    {
+        // The dose sheet has four cover rows and none of them is HM 30 x 49. An
+        // earlier version of this command gave it the LD 30x49 count of 20,
+        // because the two are the same width and height — but the HM bags are
+        // 200 gauge and the LDPE covers 120, and the sheet's own measurements say
+        // what that means: HM 30.5x49 is 90.9 g where LD 30x49 is 50 g.
+        //
+        // So a dimension is not a weight, and this size must arrive on the floor
+        // as blank rather than as 50 g.
+        $this->catalogue();
+        $this->seedDoses();
+
+        $this->assertNull($this->dose('carton', 'HM 30 X 49'));
+        $this->assertNull($this->dose('carton', 'HM 30*49'));
+    }
+
+    public function test_the_wrong_figure_already_seeded_is_withdrawn(): void
+    {
+        // It went live. A command that only stops writing a bad number leaves the
+        // bad number in the table, prefilled onto a packing line and posted to
+        // Tally — so it takes its own output back.
+        $items = $this->catalogue();
+
+        foreach (['HM 30 X 49', 'HM 30*49'] as $spec) {
+            PackingMaterialMapping::query()->create([
+                'spec_kind' => 'carton',
+                'spec_value' => $spec,
+                'item_id' => $items['Hm Polythene Bags -  30 x 49 x 200G']->id,
+                'grams_per_piece' => '50.0000',
+                'note' => 'Factory count, 06-Aug: 1 kg = 20 nos.',
+            ]);
+        }
+
+        $this->seedDoses();
+
+        $this->assertNull($this->dose('carton', 'HM 30 X 49'));
+        $this->assertNull($this->dose('carton', 'HM 30*49'));
+
+        // HARD deleted, not trashed: the "already answered" check reads
+        // withTrashed, so a trashed row would block the factory's real figure
+        // from ever being seeded.
+        $this->assertSame(
+            0,
+            PackingMaterialMapping::query()->withTrashed()->where('spec_value', 'HM 30 X 49')->count(),
+            'A withdrawn dose left in the trash would silently block the real answer.',
+        );
+    }
+
+    public function test_withdrawal_only_touches_this_commands_own_untouched_row(): void
+    {
+        // The narrow predicate is the whole safety of a delete against live master
+        // data: same spec, but a figure a person set or edited is theirs.
+        $items = $this->catalogue();
+
+        PackingMaterialMapping::query()->create([
+            'spec_kind' => 'carton',
+            'spec_value' => 'HM 30 X 49',
+            'item_id' => $items['Hm Polythene Bags -  30 x 49 x 200G']->id,
+            'grams_per_piece' => '88.0000',
+            'note' => 'Weighed on the floor, 1 kg = 11 bags.',
+        ]);
+
+        $this->seedDoses();
+
+        $this->assertSame(0, bccomp((string) $this->dose('carton', 'HM 30 X 49'), '88.0000', 4));
+    }
+
+    public function test_a_dry_run_withdraws_nothing(): void
+    {
+        $items = $this->catalogue();
+
+        PackingMaterialMapping::query()->create([
+            'spec_kind' => 'carton',
+            'spec_value' => 'HM 30 X 49',
+            'item_id' => $items['Hm Polythene Bags -  30 x 49 x 200G']->id,
+            'grams_per_piece' => '50.0000',
+            'note' => 'Factory count, 06-Aug: 1 kg = 20 nos.',
+        ]);
+
+        $this->seedDoses(write: false);
+
+        $this->assertSame(0, bccomp((string) $this->dose('carton', 'HM 30 X 49'), '50.0000', 4));
+    }
+
     public function test_a_figure_a_person_already_set_is_never_overwritten(): void
     {
         $items = $this->catalogue();

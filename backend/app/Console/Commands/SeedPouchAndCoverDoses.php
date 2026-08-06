@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Production\Models\PackingMaterialMapping;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 
 /**
  * How much a pouch or a cover weighs, from the factory's own counted figures.
@@ -63,7 +64,6 @@ class SeedPouchAndCoverDoses extends Command
      */
     private const COVERS = [
         [['HM 30.5*49', 'HM 30.5 X 49', 'HM 30.5X49'], 11, 'Hm Polythene Bags -  30.5 x 49 x 200G'],
-        [['HM 30 X 49', 'HM 30*49'], 20, 'Hm Polythene Bags -  30 x 49 x 200G'],
         [['LD 28.5 X 38', 'LD28.5 X 39', 'LD 28.5 X 39', 'LD28.5 X 38'], 25, 'LDPE  COVER (28.5x38x120G)'],
         [['LD 30 X 49', 'LD 30X49'], 20, 'LDPE  COVER (30x49x120G)'],
     ];
@@ -78,7 +78,60 @@ class SeedPouchAndCoverDoses extends Command
      *
      * @var list<string>
      */
-    private const UNANSWERED = ['710x610', '710*610', '710 X 610'];
+    private const UNANSWERED = [
+        '710x610', '710*610', '710 X 610',
+        // HM 30 X 49 IS ON THIS LIST BECAUSE I PUT A WRONG NUMBER ON IT.
+        //
+        // The dose sheet's four cover rows are HM 30.5x49 = 11, LD 28.5x39 = 25,
+        // LD 30x49 = 20 and LD 30.5x39 = 15. There is no HM 30 x 49 on it. The
+        // first version of this command took the LD 30x49 count of 20 and applied
+        // it to the HM bag of the same dimensions, on the unstated assumption that
+        // width and height decide what a bag weighs.
+        //
+        // They do not — the GAUGE does, and the item names carry it: the HM bags
+        // are 200G and the LDPE covers 120G. The sheet says so itself, on rows
+        // measured by the factory: an HM 30.5x49 is 90.9 g and an LD 30x49 is
+        // 50 g at all but identical area. Nearly twice the weight, for the ratio
+        // 200:120. So 50 g for an HM 30x49 was not a rounding error, it was a
+        // fabricated measurement — roughly 40% under — and it went live for half
+        // an hour before I caught it.
+        //
+        // It is NOT replaced with an interpolated ~83 g. That would be the same
+        // mistake with better arithmetic. The factory weighed a kilogram of every
+        // other size; they can weigh this one.
+        'HM 30 X 49', 'HM 30*49', 'HM 30X49',
+    ];
+
+    /**
+     * Doses this command wrote and must take back.
+     *
+     * A seeded figure that turns out to be wrong cannot be left to rot in a live
+     * table: it is prefilled onto a packing line and posted to Tally. So the
+     * command withdraws its own bad rows, and the predicate is deliberately
+     * narrow — kind, spec, the exact note this command writes, AND the exact
+     * grams. Change any one of those, by editing the figure in the app or by
+     * answering it properly, and the row no longer matches and is left alone.
+     * The command only ever deletes a row it can prove is its own untouched
+     * output.
+     *
+     * @var list<array{0: string, 1: list<string>, 2: string, 3: string}>
+     */
+    private const WITHDRAW = [
+        [PackingMaterialMapping::KIND_CARTON, ['HM 30 X 49', 'HM 30*49'], '50.0000', 'Factory count, 06-Aug: 1 kg = 20 nos.'],
+    ];
+
+    /**
+     * A size the factory DID count that has no item in their Tally.
+     *
+     * LD 30.5 x 39 is 15 to the kilogram on the dose sheet. Their packing
+     * catalogue holds LDPE covers in 28.5x38, 29x40, 29x48, 30x49 and 20x33 —
+     * no 30.5x39. So there is nothing to map the count to, and reporting it is
+     * the only honest handling: either the item exists under a name I have not
+     * seen, or the sheet's 30.5 is the 30 x 49 row written twice.
+     *
+     * @var array<string, int>
+     */
+    private const COUNTED_WITHOUT_ITEM = ['LD 30.5 X 39' => 15];
 
     /**
      * Round a decimal string to 4dp, half up, without touching a float.
@@ -98,6 +151,57 @@ class SeedPouchAndCoverDoses extends Command
         return mb_strtolower(trim((string) preg_replace('/\s+/', ' ', $name)));
     }
 
+    /**
+     * Delete the doses listed in WITHDRAW, and say what was relying on them.
+     *
+     * HARD delete, not soft. Nothing stores a mapping's id — a completion copies
+     * the quantity it filed onto its own consumption line — so removing the row
+     * changes what the NEXT screen suggests and rewrites no history. A soft
+     * delete would be worse than useless here: the "already answered" check
+     * below reads withTrashed on purpose, so a trashed row would silently block
+     * the factory's real figure from ever landing.
+     *
+     * @return list<string>
+     */
+    private function withdraw(bool $write): array
+    {
+        $notes = [];
+
+        foreach (self::WITHDRAW as [$kind, $specs, $grams, $note]) {
+            foreach ($specs as $spec) {
+                $row = PackingMaterialMapping::query()
+                    ->where('spec_kind', $kind)
+                    ->where('spec_value', $spec)
+                    ->where('note', $note)
+                    ->first();
+
+                if ($row === null || bccomp((string) $row->grams_per_piece, $grams, 4) !== 0) {
+                    continue;
+                }
+
+                // How much this actually reached. A spec no product carries was
+                // an error in a table; one that products carry was an error on
+                // the floor's screen, and the difference belongs in the output
+                // rather than in an assumption.
+                $carrying = DB::table('production_standards')
+                    ->where('carton_spec', $spec)
+                    ->whereNull('deleted_at')
+                    ->count();
+
+                $notes[] = sprintf(
+                    '"%s" (%s g) withdrawn — never counted by the factory; %d product standard%s carried it',
+                    $spec, $grams, $carrying, $carrying === 1 ? '' : 's',
+                );
+
+                if ($write) {
+                    $row->forceDelete();
+                }
+            }
+        }
+
+        return $notes;
+    }
+
     public function handle(): int
     {
         $write = (bool) $this->option('write');
@@ -106,6 +210,8 @@ class SeedPouchAndCoverDoses extends Command
             $this->warn('DRY RUN — nothing written. Re-run with --write to apply.');
             $this->line('');
         }
+
+        $withdrawn = $this->withdraw($write);
 
         $set = 0;
         $kept = 0;
@@ -178,14 +284,25 @@ class SeedPouchAndCoverDoses extends Command
         }
 
         $this->line('');
-        $this->table(['set', 'already answered', 'item missing'], [[$set, $kept, count($missing)]]);
+        $this->table(
+            ['set', 'already answered', 'item missing', 'withdrawn'],
+            [[$set, $kept, count($missing), count($withdrawn)]],
+        );
 
         foreach ($missing as $note) {
             $this->warn('  '.$note);
         }
 
+        foreach ($withdrawn as $note) {
+            $this->error('  '.$note);
+        }
+
         foreach (self::UNANSWERED as $spec) {
             $this->warn("  \"{$spec}\" has no counted figure on the dose sheet — still needs the factory.");
+        }
+
+        foreach (self::COUNTED_WITHOUT_ITEM as $spec => $nosPerKg) {
+            $this->warn("  \"{$spec}\" was counted (1 kg = {$nosPerKg} nos) but no item of that size exists in Tally — ask which item it is.");
         }
 
         return self::SUCCESS;

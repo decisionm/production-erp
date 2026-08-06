@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, Input, Modal, Space, Switch, Table, TimePicker, Typography } from 'antd';
+import { Button, Form, Input, Modal, Space, Switch, Table, Tag, TimePicker, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
@@ -20,6 +20,13 @@ export default function ShiftsPage() {
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['production', 'shifts'], queryFn: listShifts });
+
+    // Running shifts first, then retired, each still in start-time order as the
+    // API returns them.
+    const rows = [
+        ...(data?.data.filter((shift) => shift.is_active) ?? []),
+        ...(data?.data.filter((shift) => !shift.is_active) ?? []),
+    ];
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<ShiftFormValues>({
         resolver: zodResolver(shiftSchema),
@@ -44,23 +51,37 @@ export default function ShiftsPage() {
                 <Button type="primary" onClick={() => setModalOpen(true)}>New Shift</Button>
             </Space>
             <Typography.Paragraph type="secondary">
-                Used by Shift Production Entries to record which shift an item was made in.
+                Which shift a production entry was made in. Retired shifts stay listed because
+                past entries point at them, but only the running ones are offered on the floor.
             </Typography.Paragraph>
 
             <Table<Shift>
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
-                dataSource={data?.data}
+                // Running shifts first. A retired row sorted in between two live
+                // ones reads as a fourth shift — which is exactly the complaint
+                // that got the duplicates merged: "THERE IS NOT NIGHT, SHIFT A TO C".
+                dataSource={rows}
                 pagination={false}
                 columns={[
-                    { title: 'Name', dataIndex: 'name' },
+                    {
+                        title: 'Name',
+                        dataIndex: 'name',
+                        render: (name: string, shift) =>
+                            shift.is_active ? name : <Typography.Text type="secondary" delete>{name}</Typography.Text>,
+                    },
                     { title: 'Start Time', dataIndex: 'start_time' },
                     { title: 'End Time', dataIndex: 'end_time' },
                     {
                         title: 'Active',
                         dataIndex: 'is_active',
-                        render: (active: boolean) => <Switch checked={active} disabled size="small" />,
+                        // The tag says the word. A switch that is merely off does not
+                        // tell a supervisor whether the shift is gone or just paused.
+                        render: (active: boolean) =>
+                            active
+                                ? <Switch checked disabled size="small" />
+                                : <Tag>Retired</Tag>,
                     },
                 ]}
             />
