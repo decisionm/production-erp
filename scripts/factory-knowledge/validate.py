@@ -128,12 +128,48 @@ def validate_manifest(root: Path, errors: list[str]) -> None:
             errors.append(f"manifest {name}: status must be present/missing/external/endpoint")
 
 
+def validate_prose_references(root: Path, errors: list[str]) -> None:
+    """Every DEC-/FC- id mentioned in the knowledge prose must exist.
+
+    Added after the cold-session review found two wrong DEC-ids in
+    PENDING-OWNER-QUESTIONS.md — hand-typed cross-references are exactly the
+    place ids go stale, and exactly what a regex can check. FC ids are
+    checked against the constitution's headings the same way."""
+    known_dec = {p.stem for p in (root / "decisions").glob("DEC-*.md")} if (root / "decisions").is_dir() else set()
+    constitution = root / "FACTORY-CONSTITUTION.md"
+    known_fc = set(re.findall(r"## (FC-\d{2})", constitution.read_text(encoding="utf-8"))) if constitution.exists() else set()
+
+    prose: list[Path] = [
+        p for p in [
+            root / "PENDING-OWNER-QUESTIONS.md",
+            root / "SOURCE-PRIORITY.md",
+            constitution,
+        ] if p.exists()
+    ]
+    skills_dir = root.parent.parent / ".claude" / "skills"
+    if skills_dir.is_dir():
+        prose.extend(sorted(skills_dir.glob("*/SKILL.md")))
+    agents = root.parent.parent / "AGENTS.md"
+    if agents.exists():
+        prose.append(agents)
+
+    for path in prose:
+        text = path.read_text(encoding="utf-8")
+        for rid in set(re.findall(r"DEC-\d{8}-\d{3}", text)):
+            if rid not in known_dec:
+                errors.append(f"{path.name}: references {rid}, which does not exist in decisions/")
+        for fc in set(re.findall(r"FC-\d{2}", text)):
+            if known_fc and fc not in known_fc:
+                errors.append(f"{path.name}: references {fc}, which is not a heading in FACTORY-CONSTITUTION.md")
+
+
 def main() -> int:
     root = knowledge_root()
     errors: list[str] = []
 
     validate_decisions(root, errors)
     validate_manifest(root, errors)
+    validate_prose_references(root, errors)
 
     # The generated view must match its inputs.
     import subprocess

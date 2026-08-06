@@ -150,6 +150,17 @@ mv "$ROOT/decisions/DEC-20260806-00b.md" "$ROOT/decisions/DEC-20260806-002.md"
 generate >/dev/null 2>&1; validate >/dev/null 2>&1
 check "duplicate id (and filename mismatch) fails" 1 $?
 
+echo "T11 a prose reference to a nonexistent decision fails (cold-session review gap)"
+fixture
+record --statement "A rule." --scope test --confirmed-by owner \
+  --confirmed-at 2026-08-06 --source-type pr --source-ref "PR #1" >/dev/null 2>&1
+generate >/dev/null 2>&1
+printf '# Pending\n\n## Q1 x\n\nAnswered by DEC-20260806-001.\n' > "$ROOT/PENDING-OWNER-QUESTIONS.md"
+validate >/dev/null 2>&1; A=$?
+printf '# Pending\n\n## Q1 x\n\nAnswered by DEC-20991231-999.\n' > "$ROOT/PENDING-OWNER-QUESTIONS.md"
+validate >/dev/null 2>&1; B=$?
+check "real id passes ($A), phantom id fails ($B)" 0 $(( A == 0 && B == 1 ? 0 : 1 ))
+
 unset FACTORY_KNOWLEDGE_ROOT
 echo
 echo "── ${PASS} passed, ${FAIL} failed ──"
