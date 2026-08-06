@@ -254,6 +254,37 @@ class PackingMaterialSuggestionService
             $entries[] = $this->entry(PackingMaterialMapping::KIND_TAPE, $carton, $standard, 'carton_spec');
         }
 
+        // THE TWO STANDING LINES: the final carton and the polymer cover over it.
+        //
+        // The owner has asked for these four times — "one big box carton, one
+        // more big carton has to come" (05-Aug), "one final box for all the
+        // batches completion need to be add in consumption" and "still final 1
+        // carton box and polymer cover mising" (06-Aug).
+        //
+        // They are NOT specs on a product, which is why they took so long to
+        // place: the workbook has no column for either and the 38 Tally journals
+        // never name one. They are standing facts about how this factory ships,
+        // so they are held once, for every product, under STANDING_SPEC.
+        //
+        // GATED ON THERE BEING A CARTON, and that is a judgement worth stating:
+        // 17 workbook rows pack straight into an HM or LD bag with no box at all,
+        // and the factory's own rule for those is that the bag is the whole pack
+        // ("when HM, no need to use the tray or pouch and other packing
+        // material"). An outer box over a product that has no box, and a cover
+        // over that, would be two invented lines on a live voucher. If the floor
+        // says bags get them too, the gate is one condition.
+        if ($carton !== null) {
+            foreach ([PackingMaterialMapping::KIND_FINAL_CARTON, PackingMaterialMapping::KIND_POLYMER_COVER] as $standing) {
+                $entries[] = $this->entry(
+                    $standing,
+                    PackingMaterialMapping::STANDING_SPEC,
+                    $standard,
+                    'carton_spec',
+                    label: $standing === PackingMaterialMapping::KIND_FINAL_CARTON ? 'Final carton' : 'Polymer cover',
+                );
+            }
+        }
+
         return $entries;
     }
 
@@ -380,6 +411,12 @@ class PackingMaterialSuggestionService
             'factor' => $mapping?->factor() ?? (in_array($kind, [
                 PackingMaterialMapping::KIND_CARTON,
                 PackingMaterialMapping::KIND_TRAY,
+                // One outer box is one outer box, mapped or not — the same reason
+                // a carton's factor is 1 whether or not a mapping says so. The
+                // POLYMER COVER is deliberately absent: it is quoted in kilograms
+                // off a grams figure, and defaulting that to 1 would read "1 Kg
+                // of cover" on the floor and issue it.
+                PackingMaterialMapping::KIND_FINAL_CARTON,
             ], true) ? '1' : null),
             'unit' => $basis['unit'],
             'factor_unit' => $basis['factor_unit'],
@@ -465,6 +502,8 @@ class PackingMaterialSuggestionService
             PackingMaterialMapping::KIND_CARTON => 'Carton',
             PackingMaterialMapping::KIND_TRAY => 'Tray',
             PackingMaterialMapping::KIND_POUCH_FILM => 'Pouch',
+            PackingMaterialMapping::KIND_FINAL_CARTON => 'Final carton',
+            PackingMaterialMapping::KIND_POLYMER_COVER => 'Polymer cover',
             default => 'Tape',
         };
 
@@ -495,9 +534,10 @@ class PackingMaterialSuggestionService
         // columns do not say on their own.
         return match ($kind) {
             PackingMaterialMapping::KIND_CARTON, PackingMaterialMapping::KIND_TRAY => $item,
-            PackingMaterialMapping::KIND_POUCH_FILM => $mapping->factor() === null
+            PackingMaterialMapping::KIND_POUCH_FILM, PackingMaterialMapping::KIND_POLYMER_COVER => $mapping->factor() === null
                 ? "{$item} — per-piece weight not set"
                 : "{$item} · {$mapping->factor()} g each",
+            PackingMaterialMapping::KIND_FINAL_CARTON => $item,
             default => $this->tapeReason($label, $spec, $item, $mapping, $filing),
         };
     }

@@ -569,7 +569,7 @@ class PackingMaterialMappingTest extends TestCase
         // And an ordinary carton is untouched by the rule.
         $standard = new ProductionStandard(['carton_spec' => '170ML', 'tray_spec' => '60ML']);
         $this->assertSame(
-            ['carton', 'tray', 'tape'],
+            ['carton', 'tray', 'tape', 'final_carton', 'polymer_cover'],
             collect(app(PackingMaterialSuggestionService::class)->forStandard($standard))->pluck('kind')->all(),
         );
     }
@@ -628,7 +628,7 @@ class PackingMaterialMappingTest extends TestCase
 
         // Four materials for this product: the box, the tray, the film that
         // wraps the carton's contents, and the tape that seals it.
-        $this->assertSame(['carton', 'tray', 'pouch_film', 'tape'], $lines->keys()->all());
+        $this->assertSame(['carton', 'tray', 'pouch_film', 'tape', 'final_carton', 'polymer_cover'], $lines->keys()->all());
 
         $this->assertSame('170 Ml Master Box', $lines['carton']['item']['name']);
         $this->assertSame('1', $lines['carton']['factor']);

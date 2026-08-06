@@ -417,6 +417,16 @@ class PackingMaterialMappingService
                 'ldpe', 'polythene', 'olefin', 'shrink film', 'stretch film',
             ],
             PackingMaterialMapping::KIND_TAPE => ['packing tape'],
+            // The FINAL carton comes from the same family as the inner one — the
+            // factory's outer box is still a master box or a carton in their
+            // catalogue, and nobody has said it is a separate product line. The
+            // supervisor picks which; this only decides what the list offers.
+            PackingMaterialMapping::KIND_FINAL_CARTON => ['master box', 'master carton', 'corrugated', 'carton'],
+            // The polymer cover is the same family as the covers already mapped:
+            // LDPE and HM polythene. Deliberately NOT the bare word "cover" —
+            // this catalogue has bottles named "...Cover", and offering a bottle
+            // as a packing material is how the wrong item reaches a voucher.
+            PackingMaterialMapping::KIND_POLYMER_COVER => ['ldpe', 'polythene', 'polyolefin', 'poly olefin'],
         ];
 
         $items = DB::table('items')
