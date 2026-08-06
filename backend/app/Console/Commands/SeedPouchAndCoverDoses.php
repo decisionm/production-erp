@@ -103,6 +103,22 @@ class SeedPouchAndCoverDoses extends Command
     ];
 
     /**
+     * Which production_standards column a mapping kind is looked up through.
+     *
+     * Mirrors PackingMaterialSuggestionService::forStandard(), which resolves
+     * carton_spec as carton, tray_spec as tray and pouch_spec as pouch_film. A
+     * dose is only ever reachable through its own kind's column, so any report
+     * about what a dose REACHED has to read this and not guess.
+     *
+     * @var array<string, string>
+     */
+    private const SPEC_COLUMN = [
+        PackingMaterialMapping::KIND_CARTON => 'carton_spec',
+        PackingMaterialMapping::KIND_TRAY => 'tray_spec',
+        PackingMaterialMapping::KIND_POUCH_FILM => 'pouch_spec',
+    ];
+
+    /**
      * Doses this command wrote and must take back.
      *
      * A seeded figure that turns out to be wrong cannot be left to rot in a live
@@ -184,25 +200,50 @@ class SeedPouchAndCoverDoses extends Command
                 // the floor's screen, and the difference belongs in the output
                 // rather than in an assumption.
                 //
-                // EVERY SPEC COLUMN, not just the carton one. The first version
-                // of this counted carton_spec alone and reported "0 product
-                // standards carried it" for HM 30 X 49 — which was wrong, and
-                // wrong in the direction that makes an error look harmless. The
-                // workbook puts that same cover in the POUCH column on two
-                // products (750ML KIDNEY, 500ML KIDNEY LONG NECK), because a
-                // cover can be either the whole pack or the wrap that goes over
-                // a finished box. A spec string is not owned by one column.
+                // SCOPED TO THIS MAPPING'S OWN KIND, because a dose is only ever
+                // reachable through the column that looks that kind up:
+                // forStandard() resolves carton_spec as carton, tray_spec as
+                // tray and pouch_spec as pouch_film, and the mapping key is
+                // (spec_kind, spec_value).
+                //
+                // A previous version widened this to all three columns to "be
+                // safe" and made the report WRONG in the other direction. The
+                // withdrawn HM 30 X 49 row is a CARTON mapping; that cover
+                // appears in the workbook's pouch column twice and its carton
+                // column not at all, so widening turned a correct "0 products
+                // carried it" into "2" — telling an operator a fabricated,
+                // 40%-under figure had reached two live products when it had
+                // reached none. An over-report on a withdrawal notice is not the
+                // harmless direction; it is a false alarm about live vouchers.
+                $column = self::SPEC_COLUMN[$kind];
+
                 $carrying = DB::table('production_standards')
+                    ->whereNull('deleted_at')
+                    ->where($column, $spec)
+                    ->count();
+
+                // The same spec under a DIFFERENT kind is worth saying out loud
+                // rather than folding into the count: those products never used
+                // this dose, but they do carry the size, so they are the ones
+                // left with a blank line until the factory weighs it.
+                $elsewhere = DB::table('production_standards')
                     ->whereNull('deleted_at')
                     ->where(fn ($q) => $q
                         ->where('carton_spec', $spec)
                         ->orWhere('tray_spec', $spec)
                         ->orWhere('pouch_spec', $spec))
-                    ->count();
+                    ->count() - $carrying;
 
                 $notes[] = sprintf(
-                    '"%s" (%s g) withdrawn — never counted by the factory; %d product standard%s carried it',
-                    $spec, $grams, $carrying, $carrying === 1 ? '' : 's',
+                    '"%s" (%s g) withdrawn as a %s dose — never counted by the factory; %d product standard%s used it%s',
+                    $spec,
+                    $grams,
+                    $kind,
+                    $carrying,
+                    $carrying === 1 ? '' : 's',
+                    $elsewhere > 0
+                        ? sprintf(' (%d more carry the same size in another column and never used this dose)', $elsewhere)
+                        : '',
                 );
 
                 if ($write) {
@@ -229,9 +270,24 @@ class SeedPouchAndCoverDoses extends Command
         $kept = 0;
         $missing = [];
 
+        // THE COVERS ARE SEEDED UNDER BOTH KINDS, because the workbook writes
+        // them in two different columns and the mapping is keyed on the column's
+        // kind.
+        //
+        // 17 rows put a cover in the CARTON column — those products pack straight
+        // into the bag and it is the whole pack. 6 rows put one in the POUCH
+        // column, where it is the cover that goes over a finished box: 400ML
+        // ROUND, 90ML RIB, 500ML ROUND / IFF, 450ML RIBBED and the two kidney
+        // bottles.
+        //
+        // Seeded under carton only, those 6 rows looked up kind 'pouch_film',
+        // found nothing, and arrived on the floor as a cover line with no weight
+        // and no kilograms — the same silent blank the masterbatch row had. The
+        // weight of an LD 30 x 49 does not depend on which column names it.
         foreach ([
             [self::POUCHES, PackingMaterialMapping::KIND_POUCH_FILM],
             [self::COVERS, PackingMaterialMapping::KIND_CARTON],
+            [self::COVERS, PackingMaterialMapping::KIND_POUCH_FILM],
         ] as [$table, $kind]) {
             foreach ($table as [$specs, $nosPerKg, $itemName]) {
                 // WHITESPACE-TOLERANT, because their Tally names carry double

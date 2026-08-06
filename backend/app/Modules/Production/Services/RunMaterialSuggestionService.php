@@ -279,7 +279,30 @@ class RunMaterialSuggestionService
         // master and nowhere else, and almost no product has a dosing row — so
         // the masterbatch line showed a material, no grams and no kg, and
         // nothing was consumed. "master batch not added" (owner, 06-Aug).
-        $percent = $item === null ? null : $this->masterbatchPercent();
+        // THE PERCENTAGE IS A PROPERTY OF THE BOTTLE, NOT OF THE COLOURANT, so it
+        // is sent whenever this run takes a masterbatch at all — even when the
+        // masters could not settle WHICH one.
+        //
+        // Gating it on $item was wrong and the owner found it immediately
+        // (06-Aug): "still masterbatch auto fill not happening, i know for clear
+        // there is not master batch but i am testing for amber". Two of the six
+        // resolution outcomes hand back a null item on a bottle that certainly
+        // takes colour — 'ambiguous_colour' when two amber materials exist, and
+        // 'no_colour' when the item master is blank — and in both the supervisor
+        // picks the material themselves. The dose has to follow their pick.
+        //
+        // Clear is the one case that must NOT carry a percentage: no masterbatch
+        // goes into a colourless bottle, and a dose offered there is a wrong
+        // Tally line waiting for one careless tab.
+        $takesMasterbatch = $resolved['source'] !== 'clear';
+        $percent = $takesMasterbatch ? $this->masterbatchPercent() : null;
+
+        // grams_per_bottle STILL REQUIRES A MATERIAL. A dose quoted with no
+        // colourant named is a block disagreeing with itself, and this one is
+        // read by Sales as well as by the floor. What travels instead is the
+        // percentage and the bottle weight — enough for the screen to compute
+        // the dose the moment a supervisor names the material, and nothing at
+        // all until they do.
         $derived = $stated !== null || $item === null
             ? null
             : $this->engine->gramsFromPercent($bottleGrams, $percent);
@@ -296,7 +319,10 @@ class RunMaterialSuggestionService
             // screen can offer the percentage as the editable field and
             // recompute grams from it without inventing either number.
             'percent' => $percent,
-            'bottle_grams' => $item === null ? null : $bottleGrams,
+            // The weight the percentage applies to, sent on the same terms as the
+            // percentage itself — the screen recomputes grams when a supervisor
+            // changes the percentage, and it must not have to guess at a bottle.
+            'bottle_grams' => $takesMasterbatch ? $bottleGrams : null,
             // Which of the two produced the grams — so a supervisor can see
             // whether they are looking at a figure someone set for this bottle
             // or the factory's standard percentage applied to its weight.
