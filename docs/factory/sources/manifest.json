@@ -27,6 +27,60 @@
     "status": "endpoint",
     "type": "live-erp"
   },
+  "paper-report-20260804-shift-b-back": {
+    "name": "Paper report back page, 04-Aug Shift B",
+    "notes": "ASB-2 'HR cavity Zone-1 flash issue, cavity removed and silicon pasted' 5 h breakdown; rejection reason 'Stup Rej - P.F'; PET RESIN STOCK (DAY BIN) section blank.",
+    "path": "docs/factory/sources/paper-reports/paper-2026-08-04-shift-B-back.jpg",
+    "sha256": "00a069ac0707aa4f8b502e276144dbd274b10d235d9c55b06a3a20f47d3d996e",
+    "status": "present",
+    "type": "physical-process",
+    "verified_at": "2026-08-07"
+  },
+  "paper-report-20260804-shift-b-production": {
+    "name": "Paper production report, 04-Aug Shift B (front)",
+    "notes": "All ten machines; 500 kid Rib C at 23 g on ASB-10 (236.992 kg / 10,304 nos), 100 RC at 12 g, 100 EmA Sangam 144/720 on ASB-3, 175 TC C 20 g 115/575.",
+    "path": "docs/factory/sources/paper-reports/paper-2026-08-04-shift-B-production.jpg",
+    "sha256": "e7e73032ffb02d130e1a4bb5101e087e3fc781d3b305f060ea2a73e75ed93362",
+    "status": "present",
+    "type": "physical-process",
+    "verified_at": "2026-08-07"
+  },
+  "paper-report-20260804-shift-c-back": {
+    "name": "Paper report back page, 04-Aug Shift C",
+    "notes": "Mold change ASB-3 '100 ml Sanga -> 100 ml EmA' 11:00-12:00; rejection vocabulary (Drop out, M/c Startup, MDCH/Startup, Weak Bottle, Cavity out, String); day-bin section blank.",
+    "path": "docs/factory/sources/paper-reports/paper-2026-08-04-shift-C-back.jpg",
+    "sha256": "ee82a87c379d8c8e5a6c80afcf2280619caffd4180aac65f08d260ea669ca5df",
+    "status": "present",
+    "type": "physical-process",
+    "verified_at": "2026-08-07"
+  },
+  "paper-report-20260804-shift-c-production": {
+    "name": "Paper production report, 04-Aug Shift C (front)",
+    "notes": "ASB-2 logs 2,115 rejects of 5,280; 100ML EMA (WOR) 162/810 on ASB-3 plus unnumbered EMA Sangam second-run row; 500 ML K RIB 23 g (285.131 kg / 12,397 nos).",
+    "path": "docs/factory/sources/paper-reports/paper-2026-08-04-shift-C-production.jpg",
+    "sha256": "4153dab44d9e1a223a0bca82915921dabda2ba5947ce1ea160eeb914bcd28718",
+    "status": "present",
+    "type": "physical-process",
+    "verified_at": "2026-08-07"
+  },
+  "paper-report-20260805-shift-a-back": {
+    "name": "Paper report back page, 05-Aug Shift A",
+    "notes": "Mold-change log ASB-7 '200 rectangle A 20g -> 200 RA 20g' 07:45-08:45; ASB-2 mould breakdown 1:45; day-bin section blank.",
+    "path": "docs/factory/sources/paper-reports/paper-2026-08-05-shift-A-back.jpg",
+    "sha256": "a7e3ce57b2a2134dbcee151c9aaebf465e39a01d6ac36c2df6a4d7b2de24dfd6",
+    "status": "present",
+    "type": "physical-process",
+    "verified_at": "2026-08-07"
+  },
+  "paper-report-20260805-shift-a-production": {
+    "name": "Paper production report, 05-Aug Shift A (front)",
+    "notes": "ASB-4 and ASB-7 each listed twice (second runs); 500 K Rib 23 g arithmetically exact (307.34 kg / 13,363 nos = 23.000 g); 100 RC 12 g exact (120.96 kg / 10,080 nos).",
+    "path": "docs/factory/sources/paper-reports/paper-2026-08-05-shift-A-production.jpg",
+    "sha256": "09b026b7055fdc82badf280067984db50c12813e17700e8f93e28f357672cb64",
+    "status": "present",
+    "type": "physical-process",
+    "verified_at": "2026-08-07"
+  },
   "paper-reports-workbook": {
     "name": "Swaashpet paper production + idle reports (ideal and actual)",
     "path": "docs/factory-paper-entry/Swaashpet_Paper_Reports_Ideal_and_Actual.xlsx",
@@ -35,6 +89,15 @@
     "status": "present",
     "type": "workbook",
     "verified_at": "2026-08-06"
+  },
+  "tally-consumption-screen-20260807": {
+    "name": "Tally consumption screen photo (07-Aug)",
+    "notes": "Books Packing Tape - Transparent in whole Nos (rolls) at a per-roll rate; per-product Master Box items (200 Ml Round Master Box); 500 Ml PAD; produced item 'L. 500 ml Kidney RIB clear Pet'.",
+    "path": "docs/factory/sources/paper-reports/tally-consumption-screen.jpg",
+    "sha256": "ee92930c47bbd76e5571dbbeae26d55a7b22543b0306e4b9e942ee6f78355513",
+    "status": "present",
+    "type": "tally",
+    "verified_at": "2026-08-07"
   },
   "tally-consumption-snapshot": {
     "name": "Tally sync and consumption snapshot workbook",
