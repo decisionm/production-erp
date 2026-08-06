@@ -57,13 +57,35 @@ class RenameToFactoryNames extends Command
      * is an assumption — so it is written here where someone can disagree with
      * it, not buried in a string comparison.
      *
+     * "Shift A", not a bare "A", after the owner's correction (06-Aug): "it
+     * thought Shift A, Shift B and Shift C will be the renamed value."
+     *
+     * He is right, and the reason is that a shift name is not always read beside
+     * a label saying "Shift". It appears in a batch summary, on an approval row,
+     * in a report column — and a cell containing only "A" is a letter, not a
+     * shift. The paper prints SHIFT and A in two boxes; a screen with one box
+     * needs both words in it.
+     *
      * @var array<string, string>
      */
     private const SHIFT_LETTER = [
-        '06:00' => 'A',
-        '14:00' => 'B',
-        '22:00' => 'C',
+        '06:00' => 'Shift A',
+        '14:00' => 'Shift B',
+        '22:00' => 'Shift C',
     ];
+
+    /**
+     * The bare letters this command wrote on its FIRST run, before that
+     * correction.
+     *
+     * Listed so a second run recognises its own earlier output as a default to
+     * replace. Without this, "A" would be treated as a name the factory chose
+     * itself and left alone forever — the non-destructive rule protecting the
+     * very mistake it was meant to prevent.
+     *
+     * @var list<string>
+     */
+    private const OWN_EARLIER_OUTPUT = ['A', 'B', 'C'];
 
     public function handle(): int
     {
@@ -166,13 +188,13 @@ class RenameToFactoryNames extends Command
 
             // Only the three names this deployment shipped with. Anything else
             // is the factory's own wording and stays.
-            if (! in_array($name, ['Morning', 'Afternoon', 'Night'], true)) {
+            if (! in_array($name, ['Morning', 'Afternoon', 'Night', ...self::OWN_EARLIER_OUTPUT], true)) {
                 $skipped[] = "shift \"{$name}\" ({$start}) is not a default name — leaving the factory's own";
 
                 continue;
             }
 
-            $this->line(sprintf('  %-10s -> %-10s (starts %s)', $name, $letter, $start));
+            $this->line(sprintf('  %-12s -> %-10s (starts %s)', $name, $letter, $start));
 
             if ($write) {
                 $shift->forceFill(['name' => $letter])->save();

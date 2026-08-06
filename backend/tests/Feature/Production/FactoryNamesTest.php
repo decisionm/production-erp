@@ -78,9 +78,11 @@ class FactoryNamesTest extends TestCase
 
         // A is the day's FIRST shift. Keyed on start time rather than on the
         // name being replaced, so the assumption is auditable.
-        $this->assertSame('A', Shift::query()->where('start_time', 'like', '06:00%')->value('name'));
-        $this->assertSame('B', Shift::query()->where('start_time', 'like', '14:00%')->value('name'));
-        $this->assertSame('C', Shift::query()->where('start_time', 'like', '22:00%')->value('name'));
+        // "Shift A", not a bare "A". A cell containing only a letter — in a
+        // report column, on an approval row — is a letter, not a shift.
+        $this->assertSame('Shift A', Shift::query()->where('start_time', 'like', '06:00%')->value('name'));
+        $this->assertSame('Shift B', Shift::query()->where('start_time', 'like', '14:00%')->value('name'));
+        $this->assertSame('Shift C', Shift::query()->where('start_time', 'like', '22:00%')->value('name'));
     }
 
     public function test_the_batch_number_a_machine_mints_does_not_change(): void
@@ -164,7 +166,7 @@ class FactoryNamesTest extends TestCase
         $this->rename();
 
         $this->assertSame($first, [WorkCenter::query()->sole()->code, Shift::query()->sole()->name]);
-        $this->assertSame(['ASB-4', 'C'], $first);
+        $this->assertSame(['ASB-4', 'Shift C'], $first);
     }
 
     public function test_a_dry_run_writes_nothing(): void

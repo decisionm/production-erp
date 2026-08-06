@@ -1939,55 +1939,43 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
                     showIcon
                     style={{ marginBottom: 16 }}
                     message={`${data!.configuration_overlaps.length} product${data!.configuration_overlaps.length === 1 ? ' has' : 's have'} two machine settings that both apply`}
+                    // WHAT IT SAYS, NOT WHY IT MATTERS. Three sentences used to
+                    // explain resolution order and unreliable efficiency to
+                    // somebody who cannot act on either. The owner's verdict
+                    // (06-Aug): "why these errors" — a warning without an action
+                    // is anxiety, and a paragraph is not an action.
+                    //
+                    // The newest approved setting wins; that rule is in the
+                    // resolver and its own tests, which is where a rule belongs.
+                    // What a person needs HERE is which two rows clash.
                     description={
-                        <>
-                            The same product has more than one approved setting live on the same machine, so the
-                            software has to choose one. It now always chooses the newest approved one, but where the
-                            settings disagree on cavities or cycle time, <b>the expected output and efficiency for
-                            that product are unreliable until the wrong one is retired.</b>
-                            <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
-                                {data!.configuration_overlaps.map((o) => (
-                                    <li key={`${o.item_id}-${o.work_center_id}`}>
-                                        Settings {o.configuration_ids.join(' and ')}
-                                        {o.values_differ ? (
-                                            <Typography.Text type="danger"> — the figures disagree</Typography.Text>
-                                        ) : (
-                                            ' — same figures, but still two rows'
-                                        )}
-                                    </li>
-                                ))}
-                            </ul>
-                        </>
+                        <ul style={{ margin: 0, paddingLeft: 18 }}>
+                            {data!.configuration_overlaps.map((o) => (
+                                <li key={`${o.item_id}-${o.work_center_id}`}>
+                                    Settings {o.configuration_ids.join(' and ')}
+                                    {o.values_differ ? (
+                                        <Typography.Text type="danger"> — figures disagree</Typography.Text>
+                                    ) : (
+                                        ' — same figures'
+                                    )}
+                                </li>
+                            ))}
+                        </ul>
                     }
                 />
             )}
 
-            {/* The distinction that explains two Start Batch notices. Stated here
-                because this is the page people arrive at looking for it. */}
-            <Alert
-                type="info"
-                showIcon
-                style={{ marginBottom: 16 }}
-                message="Which machines a product runs on"
-                description={
-                    <>
-                        {threshold !== null && restrictedNames.length > 0 ? (
-                            <>
-                                The <b>MACHINES</b> column is the factory's own rule, not a list anyone maintains: under{' '}
-                                {threshold} cavities a mould runs on <b>any</b> machine, and at {threshold} or more it is
-                                set up on <b>{restrictedNames.join(' or ')}</b>. Change the rule on{' '}
-                                <Link to="/production/configuration?tab=machines">Machines &amp; Capabilities</Link> and
-                                this column follows.{' '}
-                            </>
-                        ) : null}
-                        A <b>standard</b> is what a product runs to wherever it runs. A <b>machine exception</b> is only
-                        needed when a product runs differently on one machine than the workbook says — those live in
-                        each product's own drawer here, together with their approval, rather than on a list of their
-                        own.
-                    </>
-                }
-            />
+            {/* THE "Which machines a product runs on" PANEL IS GONE.
 
+                Five sentences explaining a rule the software already applies by
+                itself: under the threshold a mould runs anywhere, at or above it
+                the mould is set up on the big machine. The MACHINES column shows
+                the answer on every row. The owner's verdict (06-Aug): "this is
+                unnecessary."
+
+                He is right, and the test is the one worth keeping: if a column
+                needs a paragraph above it to be understood, the column is wrong.
+                This one is not — it names machines. Nothing needed saying. */}
             <Space style={{ marginBottom: 8 }} wrap size={12}>
                 <Segmented<ProductStandardsView>
                     value={view}
@@ -2002,10 +1990,6 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
                     ]}
                 />
             </Space>
-            <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 12 }}>
-                The three counts describe every product matching the filters below — not the page, and not the view.
-                Switching view never changes the number that told you to switch.
-            </Typography.Paragraph>
 
             <Space style={{ marginBottom: 12 }} wrap>
                 <Input.Search
