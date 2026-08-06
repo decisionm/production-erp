@@ -610,9 +610,24 @@ class ShiftProductionEntryService
                     // a soft delete, and "short 118.9980 kg of item #592"
                     // is the message this whole change exists to stop
                     // showing anyone.
+                    $short = Item::withTrashed()->find($line['item_id']);
+
                     $shortfalls[] = [
                         'item_id' => (int) $line['item_id'],
-                        'item_name' => Item::withTrashed()->find($line['item_id'])?->name,
+                        'item_name' => $short?->name,
+                        // THE ITEM'S OWN UNIT, frozen with the name.
+                        //
+                        // Not every shortfall is kilograms, and the screen used
+                        // to say it was: the approval desk read "4 kg of 15ml
+                        // Round Master Box" and "28 kg of 60 Ml Tray" (owner,
+                        // 06-Aug), which are Nos items — a carton is a carton.
+                        // Only the resin and the masterbatch are weighed.
+                        //
+                        // The stored key stays `short_kg` because snapshots
+                        // already written carry it, and the column feeding it is
+                        // `quantity_issued_kg` for every kind of line; the unit
+                        // is what was missing, not the number.
+                        'item_uom' => $short?->uom,
                         'warehouse_id' => (int) $warehouseId,
                         'warehouse_name' => Warehouse::withTrashed()->find($warehouseId)?->name,
                         'short_kg' => $shortfallKg,
@@ -2763,7 +2778,8 @@ class ShiftProductionEntryService
      *     reconciliation_unaccounted_kg: ?string, unaccounted_band: ?string,
      *     blocks_approval: bool,
      *     stock_shortfalls: list<array{item_id: ?int, item_name: ?string,
-     *         warehouse_id: ?int, warehouse_name: ?string, short_kg: string}>,
+     *         warehouse_id: ?int, warehouse_name: ?string, short_kg: string,
+     *         item_uom: ?string}>,
      * }|null
      */
     public function productionMetrics(ShiftProductionEntry $entry): ?array
@@ -2970,8 +2986,8 @@ class ShiftProductionEntryService
      * Empty list, never null: a screen must be able to say "no shortfall"
      * without distinguishing that from "this field is missing".
      *
-     * @return list<array{item_id: ?int, item_name: ?string, warehouse_id: ?int,
-     *     warehouse_name: ?string, short_kg: string}>
+     * @return list<array{item_id: ?int, item_name: ?string, item_uom: ?string,
+     *     warehouse_id: ?int, warehouse_name: ?string, short_kg: string}>
      */
     private function stockShortfalls(ShiftProductionEntry $entry): array
     {
@@ -2984,6 +3000,10 @@ class ShiftProductionEntryService
         return array_values(array_map(fn (array $line) => [
             'item_id' => isset($line['item_id']) ? (int) $line['item_id'] : null,
             'item_name' => $line['item_name'] ?? null,
+            // Absent on a snapshot written before the unit was frozen. Null
+            // rather than a defaulted 'kg': the screen prints no unit at all
+            // there, which is honest, where "kg" beside a carton count is not.
+            'item_uom' => $line['item_uom'] ?? null,
             'warehouse_id' => isset($line['warehouse_id']) ? (int) $line['warehouse_id'] : null,
             'warehouse_name' => $line['warehouse_name'] ?? null,
             'short_kg' => (string) ($line['short_kg'] ?? '0'),

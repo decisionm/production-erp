@@ -440,16 +440,30 @@ const NO_PICK: FixedRowPick = { itemId: null, reason: null };
  * the wrong key is an empty picker on the floor — the very defect this reads
  * away — so both spellings are accepted rather than assumed.
  */
-function readSuggestion(raw: SuggestedMaterial | null | undefined): FixedRowPick & { grams: number | null } {
-    if (!raw) return { ...NO_PICK, grams: null };
+function readSuggestion(
+    raw: SuggestedMaterial | null | undefined,
+): FixedRowPick & { grams: number | null; percent: number | null; bottleGrams: number | null } {
+    if (!raw) return { ...NO_PICK, grams: null, percent: null, bottleGrams: null };
     const itemId = raw.item?.id ?? raw.item_id ?? null;
     const rawGrams = raw.grams_per_bottle;
     const grams = typeof rawGrams === 'number' ? rawGrams : toNum(rawGrams ?? null);
+    // The masterbatch block also states the PERCENTAGE the factory doses at and
+    // the bottle weight it applies to — the two numbers the screen needs to
+    // recompute grams when a supervisor changes the percentage, instead of
+    // guessing at a bottle weight of its own. Widened locally: the resin block
+    // carries neither, and this is the only reader.
+    const extra = raw as SuggestedMaterial & { percent?: unknown; bottle_grams?: unknown };
+    const positive = (value: unknown): number | null => {
+        const n = typeof value === 'number' ? value : toNum((value as string | null) ?? null);
+        return n !== null && Number.isFinite(n) && n > 0 ? n : null;
+    };
     return {
         itemId: itemId ?? null,
         // A non-positive or unreadable figure is not a dosing — same rule the
         // backend applies before it will compute a kg from one.
         grams: grams !== null && Number.isFinite(grams) && grams > 0 ? grams : null,
+        percent: positive(extra.percent),
+        bottleGrams: positive(extra.bottle_grams),
         reason: (raw.reason ?? '').trim() || null,
     };
 }
@@ -3410,6 +3424,43 @@ export default function ShiftProductionEntryPage() {
     // a borrowed figure is what books the wrong kg to Tally.
     const mbGramsSuggested =
         mbDosingGrams ?? (mbItemIdWatch != null && mbItemIdWatch === mbSuggestion.itemId ? mbSuggestion.grams : null);
+
+    // ---- The masterbatch PERCENTAGE ---------------------------------------
+    // The factory doses masterbatch as a percentage of the bottle, and the
+    // percentage — not the grams — is the figure a supervisor changes when a run
+    // needs more colour. So the percentage is the box they type in, and the
+    // grams and kg are derived from it.
+    //
+    // Held in local state rather than on the form: it is not submitted. What
+    // reaches Tally is the kg, computed from grams, and the percentage is how
+    // those grams were arrived at. Putting it on the payload would invent a
+    // field the API has no column for.
+    //
+    // `null` means "not overridden here" — the box then shows the backend's
+    // standard, or what the grams currently in the box work out to if someone
+    // typed those directly. It is NOT defaulted to 2.5 locally: the standard
+    // lives in config on the server (production.masterbatch_percent) and a
+    // second copy of it here is a second thing to change.
+    const [mbPercent, setMbPercent] = useState<number | null>(null);
+    /** The bottle weight the percentage applies to, from the run's own preview. */
+    const mbBottleGrams = mbSuggestion.bottleGrams;
+    // Shown only when there is a weight to take a percentage OF, and only on a
+    // row that names a masterbatch.
+    const mbPercentApplies = mbBottleGrams !== null && mbItemIdWatch != null;
+    /**
+     * What the percentage box reads: the supervisor's own figure, else whatever
+     * the grams in the box actually come to, else the factory's standard.
+     *
+     * Deriving it back from the grams is what keeps the two boxes honest about
+     * each other — a dosing row of 0.4 g on a 12.9 g bottle shows as 3.1%, so a
+     * supervisor can see that this product is dosed above standard without
+     * having to do the division.
+     */
+    const mbPercentShown =
+        mbPercent ??
+        (mbGramsWatch != null && mbGramsWatch > 0 && mbBottleGrams !== null
+            ? Math.round((mbGramsWatch / mbBottleGrams) * 100 * 100) / 100
+            : mbSuggestion.percent);
     useEffect(() => {
         if (!completingEntry || mbGramsSuggested === null) return;
         if (mbGramsTouchedRef.current) return;
@@ -3451,6 +3502,10 @@ export default function ShiftProductionEntryPage() {
         mbGramsTouchedRef.current = false;
         mbKgTouchedRef.current = false;
         mbKgWeighedRef.current = false;
+        // The percentage goes with them. A percentage typed for one colour is
+        // not a statement about the next one — the box refills from the new
+        // material's own standard, exactly as the grams do.
+        setMbPercent(null);
         completeForm.setValue('mb_grams_per_bottle', null);
         completeForm.setValue('mb_kg', null);
     }, [mbItemIdWatch, completeForm]);
@@ -3783,6 +3838,7 @@ export default function ShiftProductionEntryPage() {
             mbKgWeighedRef.current = false;
             resinGramsTouchedRef.current = false;
             mbGramsTouchedRef.current = false;
+            setMbPercent(null);
             mbLastItemIdRef.current = undefined;
 
             completeForm.reset({
@@ -4733,6 +4789,7 @@ export default function ShiftProductionEntryPage() {
                             mbKgWeighedRef.current = false;
                             resinGramsTouchedRef.current = false;
                             mbGramsTouchedRef.current = false;
+                            setMbPercent(null);
                             // And the packing rows: a fresh batch recalculates
                             // every carton, tray, film and tape figure from its
                             // own packing entry, with no edit carried over from
@@ -7043,7 +7100,50 @@ export default function ShiftProductionEntryPage() {
                                         />
                                     </Form.Item>
                                 </Col>
-                                <Col xs={12} sm={7}>
+                                {/* THE PERCENTAGE, which is how this factory states a
+                                    masterbatch dose — 2.5% of the bottle's weight
+                                    (their July books: amber at 0.32 g on a 12.9 g
+                                    bottle). The owner (06-Aug): "the standard
+                                    percentage is per bottle, so need to convert into
+                                    kg, so they can change the percentage if they want
+                                    to use more."
+
+                                    So it is EDITABLE and it drives the grams beside
+                                    it, which drive the kg. Shown only when the bottle
+                                    weight is known, because a percentage of an unknown
+                                    weight computes nothing and an empty box that can
+                                    never fill is worse than no box. */}
+                                {mbPercentApplies && (
+                                    <Col xs={8} sm={4}>
+                                        <InputNumber
+                                            value={mbPercentShown}
+                                            size="large"
+                                            min={0}
+                                            step={0.05}
+                                            placeholder="%"
+                                            suffix="%"
+                                            style={{ width: '100%' }}
+                                            onChange={(value) => {
+                                                const percent = typeof value === 'number' ? value : null;
+                                                setMbPercent(percent);
+                                                // The grams follow the percentage — and
+                                                // are marked as the floor's own, so the
+                                                // dosing suggestion stops overwriting
+                                                // them. Same 4dp half-up as
+                                                // ProductionCalculationEngine::
+                                                // gramsFromPercent, which is the
+                                                // authority for this figure.
+                                                if (percent === null || percent <= 0 || mbBottleGrams === null) return;
+                                                mbGramsTouchedRef.current = true;
+                                                completeForm.setValue(
+                                                    'mb_grams_per_bottle',
+                                                    Math.round(((mbBottleGrams * percent) / 100) * 10000) / 10000,
+                                                );
+                                            }}
+                                        />
+                                    </Col>
+                                )}
+                                <Col xs={mbPercentApplies ? 8 : 12} sm={mbPercentApplies ? 5 : 7}>
                                     <Controller
                                         name="mb_grams_per_bottle"
                                         control={completeForm.control}
@@ -7061,13 +7161,21 @@ export default function ShiftProductionEntryPage() {
                                                     // master's for this batch, and the
                                                     // total kg follows it live.
                                                     mbGramsTouchedRef.current = true;
+                                                    // Typing grams DIRECTLY takes the
+                                                    // percentage box off the wheel: the
+                                                    // two would otherwise each recompute
+                                                    // the other and the box would fight
+                                                    // the person typing in it. The
+                                                    // percentage then reports what the
+                                                    // typed grams come to.
+                                                    setMbPercent(null);
                                                     field.onChange(value);
                                                 }}
                                             />
                                         )}
                                     />
                                 </Col>
-                                <Col xs={12} sm={7}>
+                                <Col xs={mbPercentApplies ? 8 : 12} sm={mbPercentApplies ? 5 : 7}>
                                     <Controller
                                         name="mb_kg"
                                         control={completeForm.control}
@@ -7674,28 +7782,33 @@ export default function ShiftProductionEntryPage() {
                                     type="warning"
                                     showIcon
                                     style={{ marginBottom: 12 }}
-                                    message={`More than 100% (${results.efficiencyPct}%) — a machine cannot produce more than its standard allows`}
+                                    message={`${results.efficiencyPct}% of standard${
+                                        results.ct !== null ? ` (${fmtNum(results.ct)} s cycle)` : ''
+                                    } — check the count, hours and cavities${
+                                        results.cavities !== null ? ` (${results.cavities})` : ''
+                                    }`}
+                                    /* ONE LINE, AND A BUTTON.
+                                       This block was 66 words over three
+                                       paragraphs, and the owner quoted every one
+                                       of them back (06-Aug) asking what they were
+                                       for. They restated three things the screen
+                                       already shows: the percentage (in the
+                                       heading), the cycle time (beside Actual
+                                       Cycle Time, a few rows up) and the fact
+                                       that a warning is not a block — which is
+                                       what a yellow Alert with a live Submit
+                                       button already means.
+                                       What survives is what a supervisor cannot
+                                       see for themselves: WHICH three figures to
+                                       re-check, and a button that scrolls to
+                                       them. Never a gate, and the warning still
+                                       clears itself as the figures are
+                                       corrected — the percentage is a dependency
+                                       of the same memo. */
                                     description={
-                                        <>
-                                            <Typography.Paragraph style={{ marginBottom: 8 }}>
-                                                Fix it here on this screen — nothing on the configuration pages needs changing.
-                                                Re-check the three figures on this drawer: the produced count
-                                                {usePackingLines ? ' (the packing lines it is summed from)' : ''}, the running hours,
-                                                and the active cavities
-                                                {results.cavities !== null ? ` (${results.cavities} this run)` : ''}. The percentage
-                                                updates as you correct them, and this warning goes away on its own once it is back
-                                                under the standard.
-                                            </Typography.Paragraph>
-                                            <Button size="small" type="link" style={{ padding: 0, height: 'auto' }} onClick={scrollToRunDetails}>
-                                                Adjust here — go to Running Hours &amp; Active Cavities ↑
-                                            </Button>
-                                            <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
-                                                {results.ct !== null
-                                                    ? `The standard this is measured against is ${fmtNum(results.ct)} s cycle time — shown beside Actual Cycle Time above. `
-                                                    : ''}
-                                                You can still submit this batch — this is a warning, not a block.
-                                            </Typography.Text>
-                                        </>
+                                        <Button size="small" type="link" style={{ padding: 0, height: 'auto' }} onClick={scrollToRunDetails}>
+                                            Adjust here — Running Hours &amp; Active Cavities ↑
+                                        </Button>
                                     }
                                 />
                             )}

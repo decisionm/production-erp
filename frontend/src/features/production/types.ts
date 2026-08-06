@@ -221,9 +221,9 @@ export interface ProductionMetrics {
  * receiving the material or entering opening stock. It is never the
  * supervisor's problem and it never blocks the floor.
  *
- * THESE FIVE KEYS ARE THE WHOLE WIRE SHAPE, and they are exactly what
+ * THESE SIX KEYS ARE THE WHOLE WIRE SHAPE, and they are exactly what
  * ShiftProductionEntryService::stockShortfalls() emits — item_id, item_name,
- * warehouse_id, warehouse_name, short_kg — frozen onto the entry's
+ * item_uom, warehouse_id, warehouse_name, short_kg — frozen onto the entry's
  * config_snapshot at completion and read straight back off it. An earlier draft
  * of this file also declared requested_kg/available_kg/resulting_balance_kg and
  * `item`/`warehouse` relation objects "in case the resource lands under a
@@ -241,6 +241,13 @@ export interface ProductionMetrics {
 export interface StockShortfall {
     item_id?: number | null;
     item_name?: string | null;
+    /**
+     * The item's own unit, frozen with its name. Absent on snapshots written
+     * before it was — the screen then prints the bare figure, because "kg"
+     * beside a carton count is a wrong statement and no unit is merely a
+     * missing one.
+     */
+    item_uom?: string | null;
     warehouse_id?: number | null;
     warehouse_name?: string | null;
     /** kg issued beyond the recorded balance. Numeric string — print, never round. */
@@ -255,6 +262,15 @@ export interface ReadableStockShortfall {
     warehouse: string;
     /** Numeric string as sent, trailing zeros trimmed; null when not stated. */
     shortKg: string | null;
+    /**
+     * The unit to print after the figure, or null for none.
+     *
+     * Not every shortfall is weighed: the approval desk read "4 kg of 15ml
+     * Round Master Box" and "28 kg of 60 Ml Tray" (owner, 06-Aug) off a
+     * hardcoded "kg". Cartons and trays are counted in Nos; only the resin and
+     * the masterbatch are kilograms.
+     */
+    unit: string | null;
 }
 
 /**
@@ -312,6 +328,10 @@ export function readStockShortfalls(
             (line.warehouse_name ?? '').trim() ||
             (line.warehouse_id != null ? `unnamed store (id ${line.warehouse_id})` : 'unnamed store'),
         shortKg: trimNumeric(line.short_kg),
+        // Printed exactly as the item master spells it — this factory's Tally
+        // writes "Kgs.", "Nos", "KGS" — because that is the unit the store
+        // counts in, and tidying it here would invent a unit of our own.
+        unit: (line.item_uom ?? '').trim() || null,
     }));
 }
 

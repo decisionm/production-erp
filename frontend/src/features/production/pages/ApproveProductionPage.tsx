@@ -744,8 +744,18 @@ function StockShortfallSection({ shortfalls }: { shortfalls: ReadableStockShortf
                     <ul style={{ margin: '4px 0 8px', paddingLeft: 18 }}>
                         {shortfalls.map((line) => (
                             <li key={line.key}>
-                                <Typography.Text strong>{line.shortKg ?? '—'} kg</Typography.Text> of {line.item} came
-                                out of {line.warehouse} that the stock record did not have
+                                {/* THE ITEM'S OWN UNIT, not a hardcoded "kg".
+                                    This read "4 kg of 15ml Round Master Box" and
+                                    "28 kg of 60 Ml Tray" (owner, 06-Aug) — both
+                                    counted in Nos. A carton is a carton; only the
+                                    resin and the masterbatch are weighed. A
+                                    snapshot too old to carry the unit prints the
+                                    bare figure rather than a wrong one. */}
+                                <Typography.Text strong>
+                                    {line.shortKg ?? '—'}
+                                    {line.unit ? ` ${line.unit}` : ''}
+                                </Typography.Text>{' '}
+                                of {line.item} came out of {line.warehouse} that the stock record did not have
                             </li>
                         ))}
                     </ul>

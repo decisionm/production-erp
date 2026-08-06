@@ -289,6 +289,40 @@ class ProductionCalculationEngine
      * @param  int|null  $bottles  pieces produced (good bottles), not kg
      * @param  string|null  $gramsPerBottle  the dosing master's figure, in GRAMS
      */
+    /**
+     * Grams of masterbatch in one bottle, from a percentage of the bottle's own
+     * weight.
+     *
+     * The factory states masterbatch as a percentage (2.5% — their July books;
+     * see config/production.php), and a percentage of a weight is the only way
+     * to turn that into the grams Tally needs. 2.5% of a 12.9 g bottle is
+     * 0.3225 g, which is what those journals actually book.
+     *
+     * Null in, null out, and a non-positive percentage or weight is not a
+     * figure — the same rule as every other dose here. A 0.0000 g dose on
+     * screen asserts the factory has said this colour takes no colourant, and
+     * a missing config value has said no such thing.
+     */
+    public function gramsFromPercent(?string $bottleGrams, ?string $percent): ?string
+    {
+        if ($bottleGrams === null || $percent === null) {
+            return null;
+        }
+
+        if (bccomp($bottleGrams, '0', 4) !== 1 || bccomp($percent, '0', 4) !== 1) {
+            return null;
+        }
+
+        // At 8dp before rounding once, like masterbatchKg below: this figure is
+        // multiplied by a shift's bottles and posted, so the rounding happens
+        // at the boundary and not on the way there.
+        $grams = bcdiv(bcmul($bottleGrams, $percent, 8), '100', 8);
+
+        // +0.00005 then truncate at 4dp IS round-half-up — bcmath has no
+        // rounding of its own.
+        return bcadd($grams, '0.00005', 4);
+    }
+
     public function masterbatchKg(?int $bottles, ?string $gramsPerBottle): ?string
     {
         if ($bottles === null || $gramsPerBottle === null) {
