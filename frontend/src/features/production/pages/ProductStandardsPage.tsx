@@ -1394,7 +1394,7 @@ function NewStandardModal({ onClose, initialName }: { onClose: () => void; initi
                         </Form.Item>
                     </Col>
                     <Col xs={24} sm={8}>
-                        <Form.Item name="pouch_spec" label="Pouch film">
+                        <Form.Item name="pouch_spec" label="Pouch">
                             <Input maxLength={64} placeholder="e.g. HM 30.5*49" />
                         </Form.Item>
                     </Col>

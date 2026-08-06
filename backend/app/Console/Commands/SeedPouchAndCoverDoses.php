@@ -183,9 +183,21 @@ class SeedPouchAndCoverDoses extends Command
                 // an error in a table; one that products carry was an error on
                 // the floor's screen, and the difference belongs in the output
                 // rather than in an assumption.
+                //
+                // EVERY SPEC COLUMN, not just the carton one. The first version
+                // of this counted carton_spec alone and reported "0 product
+                // standards carried it" for HM 30 X 49 — which was wrong, and
+                // wrong in the direction that makes an error look harmless. The
+                // workbook puts that same cover in the POUCH column on two
+                // products (750ML KIDNEY, 500ML KIDNEY LONG NECK), because a
+                // cover can be either the whole pack or the wrap that goes over
+                // a finished box. A spec string is not owned by one column.
                 $carrying = DB::table('production_standards')
-                    ->where('carton_spec', $spec)
                     ->whereNull('deleted_at')
+                    ->where(fn ($q) => $q
+                        ->where('carton_spec', $spec)
+                        ->orWhere('tray_spec', $spec)
+                        ->orWhere('pouch_spec', $spec))
                     ->count();
 
                 $notes[] = sprintf(
