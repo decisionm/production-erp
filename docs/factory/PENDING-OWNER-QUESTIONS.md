@@ -278,9 +278,14 @@ the factory can pick one: (a) somebody will occasionally weigh or count the
 input — even monthly — and a count/re-anchor flow returns, making the
 balance honest again after each count; (b) nobody ever will — then every
 screen must present the figure as an estimate that drifts over time, never
-as a fact. **Blocks (gating):** building any count/re-anchor flow, and the
-final labelling of the estimate on the Day Bin screen.
-*Open since 2026-08-07.*
+as a fact. New evidence 07-Aug: the paper report form itself HAS a
+"PET RESIN STOCK IN KGS" section with a dedicated PET RESIN (DAY BIN) row —
+and all three photographed shifts (04-Aug B/C, 05-Aug A,
+`docs/factory/sources/paper-reports/` on main) left it BLANK. The floor is
+not filling in the count the form already asks for, which is itself a data
+point for which future the factory picks. **Blocks (gating):** building any
+count/re-anchor flow, and the final labelling of the estimate on the Day
+Bin screen. *Open since 2026-08-07.*
 
 ## Q25 · The EMA family — which master product(s), or two new rows?
 
