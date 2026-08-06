@@ -10,24 +10,23 @@ This repo serves a LIVE factory (SWAASHPET POLYMERS). What the factory has
 decided, and what is still an open question, is recorded — do not re-derive
 it from transcripts or guess it from code:
 
-- `docs/factory/FACTORY-CONSTITUTION.md` — durable boundaries (FC-01..07)
+- `docs/factory/FACTORY-CONSTITUTION.md` — durable boundaries (the FC-NN entries)
 - `docs/factory/CURRENT-DECISIONS.md` — decisions in force (generated view)
 - `docs/factory/PENDING-OWNER-QUESTIONS.md` — open; **nothing there is a fact**
 - `docs/factory/SOURCE-PRIORITY.md` — what outranks what when sources disagree
-- `docs/factory/sources/manifest.yaml` — where the original evidence lives
+- `docs/factory/sources/manifest.json` — where the original evidence lives
 
-Rules that override any convenience:
-- **Unconfirmed discussion is not a decision.** Only the owner confirms; a
-  confirmation is recorded via the `record-factory-decision` skill, with an
-  artifact behind it. Memory is not evidence.
-- Read original sources before derived data or old transcripts.
-- A consequential factory-flow ambiguity is discussed with the owner BEFORE
-  implementation — add it to PENDING-OWNER-QUESTIONS, don't pick an answer.
+The shared rules — owner authority, discussion is not a decision, memory is
+not evidence, the hard safety lines — live ONCE, in `AGENTS.md` (imported
+above). What is specific to a Claude session:
 - Classify the task and load the matching skill from `.claude/skills/`
   (recording a decision, deploying, reconciling stock, batch lifecycle)
   instead of improvising the procedure.
+- A consequential factory-flow ambiguity is discussed with the owner BEFORE
+  implementation — add it to PENDING-OWNER-QUESTIONS, don't pick an answer.
 - Session start: `scripts/factory-knowledge/status.sh` prints live state;
-  `scripts/factory-knowledge/check.sh` validates the knowledge files.
+  `scripts/factory-knowledge/check.sh` validates the knowledge files
+  (exit 0 sound · 1 broken · 2 could-not-run).
 
 Old point-in-time plans are frozen in `docs/archive/` — history, not truth.
 

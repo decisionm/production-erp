@@ -24,7 +24,7 @@ lives where it is pointed to, once, and nowhere else.
    are touching; the full records are in `decisions/`.
 3. Read ORIGINAL evidence before derived data or old transcripts —
    `docs/factory/SOURCE-PRIORITY.md` says what outranks what, and
-   `docs/factory/sources/manifest.yaml` says where the originals are.
+   `docs/factory/sources/manifest.json` says where the originals are.
 4. Run `scripts/factory-knowledge/check.sh` — if the knowledge system is
    broken, fix or report that before trusting it.
 

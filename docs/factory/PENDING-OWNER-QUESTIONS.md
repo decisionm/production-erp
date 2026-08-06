@@ -19,10 +19,16 @@ box. Until one No is defined (a 65 m roll → 65?), tape is display-only and
 never posts (FC-03). **Blocks:** tape consumption reaching Tally.
 *Open since 2026-07-31.*
 
-## Q2 · Pouch `710 x 610` — how many to the kilogram?
+## Q2 · Pouch `710 x 610` — is the size real, and how many to the kilogram?
 
-In live standards, absent from the counted dose sheet. Sits between 750
-(71/kg) and 780 (59/kg) — which is exactly why it is not interpolated.
+In live standards, absent from the counted dose sheet — and SMALLER than
+every size the factory counted (750/780/835 × 610), so no bracket exists to
+tempt an interpolation: a real 710 pouch would run MORE than 71 to the
+kilogram, outside the counted range entirely. (An earlier wording here
+claimed 710 "sits between 750 and 780" — arithmetically false, caught in
+review 07-Aug; the file whose contract is "never interpolate" must not set
+up a wrong guess itself.) Two answers needed: is `710 x 610` a real pouch or
+a transcription slip, and if real, the counted nos-per-kg.
 **Blocks:** pouch kg on products carrying that spec. *Open since 2026-08-06.*
 
 ## Q3 · `HM 30 x 49` bag — how many to the kilogram?

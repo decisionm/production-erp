@@ -26,8 +26,11 @@ voucher preview: what posts, what is withheld and why, any stock shortfall
 
 TALLY — one Stock Journal per batch via the agent's queue. IN: produced
 bottles + PET Scrap (FC-02). OUT: resin and masterbatch from the day bin,
-packing from the packing store (FC-04). Withheld: tape until its unit is
-answered (FC-03); any standing line with no item named.
+packing from the packing store (FC-04). What is withheld
+is DATA, not doctrine: read FC-03 and the packing mappings for the current
+answer (tape's metres-vs-Nos question, standing lines with no item named) —
+the day the owner answers, the data changes and this file must not be the
+stale copy that says otherwise.
 
 ## Hard rules when touching this flow
 

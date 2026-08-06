@@ -1,0 +1,6 @@
+# The knowledge system is byte-exact: LF only, everywhere it validates.
+docs/factory/** text eol=lf
+scripts/factory-knowledge/** text eol=lf
+.claude/skills/** text eol=lf
+AGENTS.md text eol=lf
+CLAUDE.md text eol=lf

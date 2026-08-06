@@ -12,7 +12,8 @@
 # broken state (reviewed 06 Aug: the old version showed one truncated error
 # line and exited 0).
 set -uo pipefail
-cd "$(dirname "$0")/../.."
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR/../.."
 
 echo "── factory status ($(date '+%Y-%m-%d %H:%M')) ──"
 echo "branch:   $(git branch --show-current)  @ $(git rev-parse --short HEAD)"
@@ -34,12 +35,11 @@ fi
 
 # Full output on failure, one-line banner on success — never a truncated
 # middle that hides "N problem(s)".
-PYBIN="${PYTHON3:-python3}"
-if ! command -v "$PYBIN" >/dev/null 2>&1; then
-  echo "validation: CANNOT RUN — ${PYBIN} not found on this machine"
-  exit 2
-fi
-validation=$("$PYBIN" scripts/factory-knowledge/validate.py 2>&1); vexit=$?
+# Validation is DELEGATED to check.sh — its interpreter probe, its exit
+# contract (0 sound / 1 failed / 2 cannot run), one implementation. The two
+# scripts re-implementing the same probe was exactly the copy-paste drift
+# mechanism that let the manifest.yaml pointer go stale (reviewed 07-Aug).
+validation=$(bash "$SCRIPT_DIR/check.sh" 2>&1); vexit=$?
 if [ "$vexit" -eq 0 ]; then
   echo "$validation" | head -1
 else

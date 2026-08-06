@@ -29,12 +29,12 @@ from __future__ import annotations
 
 import argparse
 import datetime
-import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import ID_RE, canonical_record, knowledge_root, load_decisions, parse_record
+from lib import (ID_RE, canonical_record, create_exclusive, knowledge_root,
+                 load_decisions, parse_record, validate_date, write_exact)
 
 
 def next_id(existing: list[dict], date: str) -> str:
@@ -42,7 +42,10 @@ def next_id(existing: list[dict], date: str) -> str:
     taken = [
         int(m.group(2))
         for d in existing
-        if (m := ID_RE.match(d.get("id", ""))) and m.group(1) == compact
+        # str() before matching: an id of JSON null crashed ID_RE.match with
+        # a TypeError (reviewed 07-Aug) — the validator had this guard, the
+        # one script a human runs interactively did not.
+        if (m := ID_RE.match(str(d.get("id") or ""))) and m.group(1) == compact
     ]
     return f"DEC-{compact}-{(max(taken) + 1) if taken else 1:03d}"
 
@@ -71,21 +74,39 @@ def main() -> int:
               "Memory is not evidence.", file=sys.stderr)
         return 2
 
-    date = args.confirmed_at or datetime.date.today().isoformat()
-    # Shape AND calendar. A shape-only regex accepted 2026-13-45 and minted a
-    # mis-sorted immutable id (reviewed 06 Aug); fromisoformat alone accepts
-    # dash-less forms in 3.11, so both checks stand.
-    if not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
-        print(f"REFUSED: --confirmed-at must be YYYY-MM-DD, got {date!r}", file=sys.stderr)
+    # A blank scope — an unset shell variable, typically — writes a record
+    # that scope-based conflict review can never match (reviewed 07-Aug).
+    scopes = [scope.strip() for scope in args.scope]
+    if not scopes or any(not scope for scope in scopes):
+        print("REFUSED: every --scope must be a non-empty word.", file=sys.stderr)
         return 2
-    try:
-        datetime.date.fromisoformat(date)
-    except ValueError:
-        print(f"REFUSED: {date!r} is not a real calendar date.", file=sys.stderr)
+
+    date = args.confirmed_at or datetime.date.today().isoformat()
+    # ONE date rule, shared with the validator (lib.validate_date): shape,
+    # real calendar, and not in the future.
+    problem = validate_date(date)
+    if problem:
+        print(f"REFUSED: --confirmed-at {problem}", file=sys.stderr)
         return 2
 
     root = knowledge_root()
-    decisions = load_decisions(root)
+    # ERROR BOUNDARY (reviewed 07-Aug): one malformed record anywhere in the
+    # store made this tool traceback on load, with valid arguments. A broken
+    # store is a named refusal that points at the fixer, not a crash.
+    try:
+        decisions = load_decisions(root)
+    except ValueError as err:
+        print(f"REFUSED: the knowledge store is unreadable — {err}\n"
+              "Run scripts/factory-knowledge/check.sh and fix that first.", file=sys.stderr)
+        return 2
+
+    ids = [str(d.get("id") or "") for d in decisions]
+    if len(ids) != len(set(ids)):
+        # by_id would silently keep the LAST duplicate, so a supersede could
+        # flip the wrong file. Undefined behaviour on duplicate input becomes
+        # a named refusal (self-sweep, 07-Aug).
+        print("REFUSED: duplicate ids in the store — run check.sh and fix that first.", file=sys.stderr)
+        return 2
     by_id = {d.get("id"): d for d in decisions}
 
     for old_id in args.supersedes:
@@ -100,15 +121,6 @@ def main() -> int:
     new_id = next_id(decisions, date)
 
     out_path = root / "decisions" / f"{new_id}.md"
-    # NEVER OVERWRITE. next_id counts parsed ids, not filenames — a record
-    # whose id: field is mistyped leaves its FILENAME occupied while its id
-    # goes uncounted, and write_text would have clobbered it silently
-    # (reviewed 06 Aug). Immutability gets enforced at write time, not
-    # promised in prose.
-    if out_path.exists():
-        print(f"REFUSED: {out_path.name} already exists on disk but its id: field does not "
-              f"parse as {new_id}. Fix that record first; nothing was written.", file=sys.stderr)
-        return 2
 
     # PREPARE EVERY SUPERSEDE FLIP BEFORE WRITING ANYTHING — and as data,
     # not string surgery: parse, mutate the dict, re-serialize canonically.
@@ -117,28 +129,47 @@ def main() -> int:
     flips: dict[Path, str] = {}
     for old_id in args.supersedes:
         old_path = Path(by_id[old_id]["_path"])
-        old_meta, old_body = parse_record(old_path.read_text(encoding="utf-8"), path=old_path.name)
+        old_meta = {k: v for k, v in by_id[old_id].items() if not k.startswith("_")}
         old_meta["status"] = "superseded"
         old_meta["superseded_by"] = new_id
-        flips[old_path] = canonical_record(old_meta, old_body)
+        flips[old_path] = canonical_record(old_meta, by_id[old_id]["_body"])
 
     meta = {
         "id": new_id,
         "status": "current",
         "confirmed_by": "owner",
         "confirmed_at": date,
-        "scope": list(args.scope),
+        "scope": scopes,
         "source": {"type": args.source_type, "reference": args.source_ref},
     }
     if args.supersedes:
         meta["supersedes"] = list(args.supersedes)
 
-    (root / "decisions").mkdir(parents=True, exist_ok=True)
-    out_path.write_text(canonical_record(meta, args.statement), encoding="utf-8")
+    try:
+        (root / "decisions").mkdir(parents=True, exist_ok=True)
+    except OSError as err:
+        # SELF-SWEEP (07-Aug): the load boundary above did not cover the
+        # write side — a permissions problem was still a raw traceback.
+        print(f"REFUSED: cannot write to the knowledge store — {err}", file=sys.stderr)
+        return 2
+    # EXCLUSIVE CREATE — one syscall does what a check-then-write pair
+    # cannot: no overwrite of an id-mistyped occupant, and no window for two
+    # concurrent recorders to clobber each other (reviewed 06/07-Aug).
+    # Immutability enforced at write time, not promised in prose.
+    try:
+        create_exclusive(out_path, canonical_record(meta, args.statement))
+    except FileExistsError:
+        print(f"REFUSED: {out_path.name} already exists on disk (its id: field does not parse "
+              f"as {new_id}, or a concurrent recorder got there first). Nothing was written.",
+              file=sys.stderr)
+        return 2
+    except OSError as err:
+        print(f"REFUSED: cannot write {out_path.name} — {err}", file=sys.stderr)
+        return 2
 
-    # The pre-verified flips — statement text is never touched.
+    # The pre-computed flips — statement text is never touched.
     for old_path, new_text in flips.items():
-        old_path.write_text(new_text, encoding="utf-8")
+        write_exact(old_path, new_text)
 
     print(out_path)
     return 0

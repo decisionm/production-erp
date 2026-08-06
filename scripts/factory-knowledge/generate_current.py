@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import knowledge_root, load_decisions
+from lib import knowledge_root, load_decisions, read_exact, write_exact
 
 HEADER = """\
 # Current factory decisions
@@ -64,23 +64,38 @@ def render(decisions: list[dict]) -> str:
 
 
 def main() -> int:
+    # STRICT FLAGS. The old test was `"--check" in sys.argv`, so a typo
+    # (--chcek) was silently ignored and the script took the DESTRUCTIVE
+    # default — overwriting the very view whose staleness the caller was
+    # trying to detect (reviewed 07-Aug). argparse makes an unknown flag an
+    # error in a tool whose sibling is a validator.
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--check", action="store_true",
+                        help="verify the view matches decisions/ without writing")
+    args = parser.parse_args()
+
     root = knowledge_root()
     target = root / "CURRENT-DECISIONS.md"
     try:
         content = render(load_decisions(root))
-    except Exception as err:  # noqa: BLE001 — a CLI whose contract is "named
-        # error, never a traceback" catches everything at the boundary. A
-        # malformed record is a validation problem with a name, not a crash —
-        # and never a reason to write a half-built view over a good one.
+    except (ValueError, KeyError, AttributeError, TypeError, OSError) as err:
+        # The EXPECTED failure classes, named — a malformed record, a
+        # clobbered field, an unreadable file. Narrowed from a blanket
+        # except (reviewed 07-Aug): anything outside these classes is a
+        # genuine bug and SHOULD traceback rather than hide. Never a reason
+        # to write a half-built view over a good one.
         print(f"cannot generate: {type(err).__name__}: {err}", file=sys.stderr)
         return 1
-    if "--check" in sys.argv:
-        if not target.exists() or target.read_text(encoding="utf-8") != content:
+    if args.check:
+        # read_exact: the default text-mode read folds CRLF to LF, so a
+        # line-ending-mangled view compared equal (reviewed 07-Aug).
+        if not target.exists() or read_exact(target) != content:
             print("STALE: CURRENT-DECISIONS.md does not match decisions/. Regenerate.",
                   file=sys.stderr)
             return 1
         return 0
-    target.write_text(content, encoding="utf-8")
+    write_exact(target, content)
     print(target)
     return 0
 

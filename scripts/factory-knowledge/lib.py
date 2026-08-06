@@ -26,6 +26,7 @@ It parses files; humans and the owner decide facts.
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 import os
@@ -40,8 +41,50 @@ ID_RE = re.compile(r"^DEC-(\d{8})-(\d{3})$")
 # there is a golden-bytes test (T15) that fails the moment these drift.
 JSON_KW = {"indent": 2, "ensure_ascii": False, "separators": (",", ": ")}
 FIELD_ORDER = ["id", "status", "confirmed_by", "confirmed_at",
-               "scope", "supersedes", "superseded_by", "source"]
+               "scope", "supersedes", "superseded_by", "source", "integrity"]
 SOURCE_ORDER = ["type", "reference"]
+
+
+def read_exact(path: Path) -> str:
+    """Read WITHOUT newline translation. Python's default text mode folds
+    \r\n to \n on read, which made the byte-canonical check CRLF-blind: a
+    whole-file line-ending edit — Windows' native behaviour, and the factory
+    PC is Windows — validated as sound (reviewed 07-Aug). Every validation
+    read goes through here so the bytes judged are the bytes on disk."""
+    with open(path, encoding="utf-8", newline="") as handle:
+        return handle.read()
+
+
+def write_exact(path: Path, content: str) -> None:
+    """Write WITHOUT newline translation — on Windows the default translates
+    \n to \r\n, emitting non-canonical records natively (reviewed 07-Aug)."""
+    with open(path, "w", encoding="utf-8", newline="") as handle:
+        handle.write(content)
+
+
+def create_exclusive(path: Path, content: str) -> None:
+    """Exclusive create — 'x' mode closes the check-then-write race two
+    concurrent recorders could exploit to silently clobber each other
+    (reviewed 07-Aug). Raises FileExistsError; callers name the refusal."""
+    with open(path, "x", encoding="utf-8", newline="") as handle:
+        handle.write(content)
+
+
+def validate_date(value: str) -> str | None:
+    """None when valid; the problem when not. ONE implementation — the shape
+    check, the calendar check and the not-in-the-future check were starting
+    to copy-paste between the recorder and the validator (reviewed 07-Aug),
+    and a future date mints an id that pins itself above every real decision
+    in the newest-first view until that date arrives."""
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", value):
+        return f"{value!r} is not YYYY-MM-DD"
+    try:
+        parsed = datetime.date.fromisoformat(value)
+    except ValueError:
+        return f"{value!r} is not a real calendar date"
+    if parsed > datetime.date.today():
+        return f"{value!r} is in the future — a decision cannot be confirmed on a date that has not happened"
+    return None
 
 
 def knowledge_root() -> Path:
@@ -73,10 +116,30 @@ def canonical_meta(meta: dict) -> str:
     return json.dumps(ordered, **JSON_KW)
 
 
+def payload_hash(meta: dict, statement: str) -> str:
+    """sha256 over the WHOLE payload — every metadata field except the hash
+    itself, plus the statement bytes — serialized canonically.
+
+    RULE B (owner, 07-Aug): a guarantee must cover the thing that matters,
+    not the wrapper. Canonical-form checking alone pinned the envelope: a
+    hand edit that kept canonical shape — a reworded statement, a swapped
+    scope — was byte-perfect and validated sound. The hash makes every field
+    and the statement part of one sealed payload: any tool-less edit breaks
+    it. (It is tamper-EVIDENT against hand edits, not cryptographic proof
+    against a determined forger who re-runs the algorithm — the same honest
+    bar the canonical form itself sets, now covering content.)"""
+    body = {k: v for k, v in meta.items() if k != "integrity"}
+    sealed = canonical_meta(body) + "\n\n" + statement.strip("\n") + "\n"
+    return "sha256:" + hashlib.sha256(sealed.encode("utf-8")).hexdigest()
+
+
 def canonical_record(meta: dict, statement: str) -> str:
-    """Full canonical file bytes: metadata, exactly one blank line, the
-    statement, one trailing newline."""
-    return canonical_meta(meta) + "\n\n" + statement.strip("\n") + "\n"
+    """Full canonical file bytes: metadata (integrity hash recomputed, never
+    trusted from the caller), exactly one blank line, the statement, one
+    trailing newline."""
+    sealed = {k: v for k, v in meta.items() if k != "integrity"}
+    sealed["integrity"] = payload_hash(sealed, statement)
+    return canonical_meta(sealed) + "\n\n" + statement.strip("\n") + "\n"
 
 
 def parse_record(text: str, *, path: str = "?") -> tuple[dict, str]:
@@ -84,6 +147,8 @@ def parse_record(text: str, *, path: str = "?") -> tuple[dict, str]:
 
     raw_decode returns the exact byte offset where the JSON object ends —
     there are no fences, so there is nothing a stray `---` can truncate."""
+    if "\r" in text:
+        raise ValueError(f"{path}: CRLF line endings — the canonical format is LF-only")
     try:
         meta, end = json.JSONDecoder().raw_decode(text)
     except json.JSONDecodeError as err:
@@ -108,7 +173,7 @@ def load_decisions(root: Path | None = None) -> list[dict]:
     if not decisions_dir.is_dir():
         return out
     for path in sorted(decisions_dir.glob("*.md")):
-        meta, body = parse_record(path.read_text(encoding="utf-8"), path=str(path))
+        meta, body = parse_record(read_exact(path), path=str(path))
         meta["_path"] = str(path)
         meta["_body"] = body
         out.append(meta)
@@ -125,9 +190,14 @@ def load_manifest(root: Path | None = None) -> dict:
     root = root or knowledge_root()
     path = root / "sources" / "manifest.json"
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        loaded = json.loads(read_exact(path))
     except json.JSONDecodeError as err:
         raise ValueError(f"manifest.json: invalid JSON ({err})") from None
+    if not isinstance(loaded, dict):
+        # A top-level array crashed .items() three calls later with a raw
+        # traceback (reviewed 07-Aug) — wrong type is a named error here.
+        raise ValueError("manifest.json: top level must be a JSON object")
+    return loaded
 
 
 def sha256_of(path: Path) -> str:

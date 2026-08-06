@@ -12,7 +12,9 @@ the sequence is what keeps a bad deploy from reaching a running shift.
 
 1. Branch → `./vendor/bin/pint --dirty`, `php artisan test` (backend),
    `npm run typecheck && npm run build` (frontend). All green BEFORE the PR.
-2. PR → wait for both checks → merge → GitHub Actions deploys automatically.
+2. PR → wait for ALL checks (never a counted number — this repo has added
+   checks before and will again) → merge → GitHub Actions deploys
+   automatically.
 3. Watch the deploy run to completion. `scripts/factory-knowledge/status.sh`
    shows the latest deploy state and SHA.
 4. Deploys run ONLY these seeders: Permission, Shift,
