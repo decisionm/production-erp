@@ -115,3 +115,19 @@ several decision records but live only in a Downloads folder — the same way
 `Transactions.xml` was lost. May they be committed under
 `docs/factory/sources/`? **Blocks:** durable evidence for DEC-20260806-001.
 *Open since 2026-08-06.*
+
+## Q14 · Should FILE-PATH references be validated the way DEC-/FC- ids now are?
+
+The validator resolves every DEC-/FC- id across records and prose, but a
+file-path reference is unchecked free text — and the gap is not
+hypothetical: immutable record DEC-20260806-001 cites
+`sources/manifest.yaml`, a file the 06-Aug migration renamed to
+manifest.json, and validation says sound. (Found by the owner's own
+verification, 06-Aug; originally reserved for a third-party review that was
+then cancelled, re-homed here 07-Aug so the gap has an owner.)
+Three shapes the answer could take: validate path-like references in
+EDITABLE prose only, leaving immutable records as dated history; validate
+records too and supersede -001 with a corrected reference; or accept stale
+paths in records as the price of immutability and say so in
+SOURCE-PRIORITY. **Blocks:** nothing operational — a truthfulness gap:
+records can point at files that no longer exist. *Open since 2026-08-07.*

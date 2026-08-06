@@ -21,9 +21,10 @@ THE HONEST LIMITATIONS, still true and still stated: semantic conflict
 between two decisions needs the human recording the newer one (the
 record-factory-decision skill's first step). The integrity hash is
 tamper-EVIDENT against hand edits, not cryptographic proof against a
-determined forger. FILE-PATH references inside record bodies are NOT yet
-validated — that question is explicitly reserved for the Codex review
-(owner, 06-Aug) and is not quietly pre-empted here.
+determined forger. FILE-PATH references inside record bodies and prose are
+NOT yet validated — an open owner question (PENDING-OWNER-QUESTIONS Q14,
+07-Aug), with DEC-20260806-001's stale manifest.yaml pointer as the live
+instance. Not silently pre-empted here; not silently forgotten either.
 """
 
 from __future__ import annotations
