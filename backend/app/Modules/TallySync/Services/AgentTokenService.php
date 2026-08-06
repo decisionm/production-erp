@@ -9,7 +9,7 @@ use Laravel\Sanctum\PersonalAccessToken;
 
 /**
  * Issues/revokes the Sanctum tokens the local sync agent authenticates
- * with — see TALLY-SYNC-MASTER-PLAN.md §5 and tally-sync-agent/README.md.
+ * with — see docs/archive/TALLY-SYNC-MASTER-PLAN.md §5 and tally-sync-agent/README.md.
  * Every token is scoped to exactly tally-sync:poll + tally-sync:report,
  * never broader, and all of them belong to one auto-provisioned,
  * password-less service user rather than a real staff account — so
@@ -23,7 +23,7 @@ class AgentTokenService
     private const AGENT_EMAIL = 'tally-sync-agent@system.local';
 
     // poll = fetch pending vouchers, report = ack/fail them, items/masters = push
-    // the Tally masters back up (masters pull, TALLY-SYNC-MASTER-PLAN.md §3).
+    // the Tally masters back up (masters pull, docs/archive/TALLY-SYNC-MASTER-PLAN.md §3).
     // `items` stays for the item-only endpoint; `masters` covers the full pull
     // (item groups, godowns, ledgers, items).
     private const ABILITIES = ['tally-sync:poll', 'tally-sync:report', 'tally-sync:items', 'tally-sync:masters'];

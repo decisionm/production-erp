@@ -11,6 +11,18 @@ on:
   pull_request:
 
 jobs:
+  # The knowledge system's "validation will fail" promises are only promises
+  # if something actually runs the validator — this branch itself shipped a
+  # committed __pycache__ that local discipline missed (reviewed 06 Aug).
+  # Read-only, seconds, no dependencies beyond bare python3.
+  factory-knowledge:
+    name: Factory knowledge validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/factory-knowledge/check.sh
+      - run: scripts/factory-knowledge/tests/run_tests.sh
+
   app:
     name: Frontend build + backend tests
     runs-on: ubuntu-latest

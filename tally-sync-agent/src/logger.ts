@@ -1,7 +1,7 @@
 import log from 'electron-log';
 
 /**
- * Rotating file log — the audit trail TALLY-SYNC-MASTER-PLAN.md §5 requires
+ * Rotating file log — the audit trail docs/archive/TALLY-SYNC-MASTER-PLAN.md §5 requires
  * ("which voucher, from whom, when"), since nobody on the cloud side has
  * visibility into this machine's local network. Default location:
  * %APPDATA%/tally-sync-agent/logs/main.log on Windows.

@@ -11,7 +11,7 @@ import { escapeXml } from './voucherBuilders/xmlHelpers';
  * tested standalone against a real Tally instance. Also deliberately DEFENSIVE:
  * real client Tally data varies by version and setup, so every field is treated
  * as optional, values are sanitised, and matching is on the stable GUID — never
- * on names or an assumed structure. See TALLY-SYNC-MASTER-PLAN.md section 3.
+ * on names or an assumed structure. See docs/archive/TALLY-SYNC-MASTER-PLAN.md section 3.
  */
 
 export interface TallyTarget {

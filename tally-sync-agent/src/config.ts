@@ -6,7 +6,7 @@ import Store from 'electron-store';
  * (never in this repo — see .gitignore). cloudApiToken is a Sanctum
  * personal access token scoped to exactly tally-sync:poll and
  * tally-sync:report (see README "Getting a token") — never a full-access
- * token, per TALLY-SYNC-MASTER-PLAN.md §5.
+ * token, per docs/archive/TALLY-SYNC-MASTER-PLAN.md §5.
  */
 export interface AgentConfig {
     cloudApiBaseUrl: string;

@@ -15,7 +15,11 @@ use Illuminate\Database\Eloquent\Collection;
  * wave). Pure aggregation — no writes, no schema, no Tally. Every per-entry
  * figure is computed by ShiftProductionEntryService (productionMetrics /
  * consumptionVariance); this service only queries, iterates, and sums —
- * the formulas live in exactly one place (SHIFT-REDESIGN-FORMULAS.md).
+ * the formulas live in exactly one place: ProductionCalculationEngine and
+ * the tests that pin it. (This comment used to name
+ * SHIFT-REDESIGN-FORMULAS.md as that place; the doc froze on 28-Jul, the
+ * August live-feedback PRs changed the formulas, and it is archived as
+ * history — docs/archive/INDEX.md says the same.)
  *
  * Aggregation rule (dictionary row 24): day/period efficiency is
  * Σ actual PIECES / Σ expected PIECES × 100 — a RATIO OF SUMS, never the

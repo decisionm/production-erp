@@ -1,0 +1,72 @@
+{
+  "_format": [
+    "Source registry — where the original evidence lives. POINTS at evidence, never contains it.",
+    "Statuses: present (in repo at path, sha256 pinned — validate.py checks both) · missing (once read, no longer held; notes say what is needed) · external (outside the repo, at risk) · endpoint (a live system, queried fresh).",
+    "Keys starting with _ are documentation, not sources. Canonical JSON: edit via tooling or re-run validation until byte-canonical."
+  ],
+  "dose-sheet-photos": {
+    "name": "Handwritten pouch and cover count sheets (2 photos, 06 Aug)",
+    "notes": "AT RISK — same failure mode as Transactions.xml. Owner permission to commit requested (PENDING Q13). The per-piece column on these sheets is rounded and unusable; only the counts are measurements.",
+    "path": "~/Downloads/WhatsApp Image 2026-08-06 at 12.24.*.jpeg",
+    "scope": "nos-per-kg counts: pouches 71/56/59; covers 11/25/20/15",
+    "status": "external",
+    "type": "physical-process",
+    "verified_at": "2026-08-06"
+  },
+  "erppro-29jul-rows": {
+    "name": "ERPPro legacy export, 29 Jul rows",
+    "notes": "Untracked (storage is gitignored). Superseded for most purposes by workbook-product-master; kept for cross-checking legacy names.",
+    "path": "backend/storage/app/erppro-29jul-rows.json",
+    "status": "external",
+    "type": "workbook"
+  },
+  "live-erp": {
+    "name": "Live ERP instance",
+    "notes": "Count on live, never on dev — dev fixture counts caused a wrong HRMS call once. Master data changes only via the manual GitHub workflows, dry-run first.",
+    "path": "https://erpdemo.amrtech.in",
+    "status": "endpoint",
+    "type": "live-erp"
+  },
+  "paper-reports-workbook": {
+    "name": "Swaashpet paper production + idle reports (ideal and actual)",
+    "path": "docs/factory-paper-entry/Swaashpet_Paper_Reports_Ideal_and_Actual.xlsx",
+    "scope": "handwritten shift pages transcribed; per-shift resin and MB; no packing columns on paper",
+    "sha256": "61856433fef3bc134eeacbdc7aad42ac14dc49e01dde03b6093e70e36bb1776c",
+    "status": "present",
+    "type": "workbook",
+    "verified_at": "2026-08-06"
+  },
+  "tally-consumption-snapshot": {
+    "name": "Tally sync and consumption snapshot workbook",
+    "path": "docs/factory-paper-entry/Tally_Sync_and_Consumption_Snapshot.xlsx",
+    "scope": "consumption cross-check against Tally",
+    "sha256": "629ba6d03e14495d50e7d15c878dfab542907d778dce0f920c3f647f64aa6813",
+    "status": "present",
+    "type": "workbook",
+    "verified_at": "2026-08-06"
+  },
+  "tally-transactions-xml": {
+    "name": "Transactions.xml — 38 real Stock Journals, SWAASHPET 26-27, exported 30 Jul",
+    "notes": "Read on 05 Aug (UTF-16). Ground truth for FC-02/03/04 and the resin/masterbatch decisions. DELETED from Downloads since — ask the factory to re-share, then commit under docs/factory/sources/. Findings preserved in decision records and PR bodies only.",
+    "path": "~/Downloads/Transactions.xml",
+    "status": "missing",
+    "type": "tally"
+  },
+  "tally-via-agent": {
+    "name": "Tally (factory PC, via sync agent)",
+    "notes": "Agent-initiated, one-directional. The ERP never reaches Tally directly. Stock summaries arrive as read-only preview snapshots.",
+    "path": "agent:tally-sync-agent",
+    "status": "endpoint",
+    "type": "tally"
+  },
+  "workbook-product-master": {
+    "name": "Factory workbook, all 103 product rows (extracted)",
+    "notes": "Canonical tracked copy. backend/storage/app/product-master-rows.json is the same bytes but gitignored — cite the fixture. 18 of 103 rows are pack variants, not products.",
+    "path": "backend/tests/fixtures/product-master-rows.json",
+    "scope": "products, cavities, unit weights, cycle times, carton/tray/pouch specs, pack counts",
+    "sha256": "dd7e64100180394f1cd249fed9bc58bc76161c7b7e57d5b5402d925cd5bce60b",
+    "status": "present",
+    "type": "workbook",
+    "verified_at": "2026-08-06"
+  }
+}

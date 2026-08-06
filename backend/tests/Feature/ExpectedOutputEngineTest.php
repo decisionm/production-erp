@@ -18,7 +18,7 @@ use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
 
 /**
- * The expected-output engine (SHIFT-REDESIGN-FORMULAS.md #22-24, #9/#10/#20):
+ * The expected-output engine (docs/archive/SHIFT-REDESIGN-FORMULAS.md #22-24, #9/#10/#20):
  * expected pieces/boxes from the molding standards, PIECE-grain efficiency
  * (actual pieces / expected pieces — the box ratio threw away loose pieces
  * and compounded two roundings; see CompletionDowntimeTest for the owner's

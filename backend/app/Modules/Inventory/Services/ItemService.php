@@ -44,7 +44,7 @@ class ItemService
      * name — Tally names get renamed and contain spaces/slashes). ERP-only
      * fields (tracking_type, reorder_level, description) are left untouched on
      * update, since Tally has no concept of them — see the split-ownership rule
-     * in TALLY-SYNC-MASTER-PLAN.md §3. `parent` is the item's Tally stock-group
+     * in docs/archive/TALLY-SYNC-MASTER-PLAN.md §3. `parent` is the item's Tally stock-group
      * name; it's resolved to item_group_id if that group has been pulled.
      *
      * @param  array{guid: string, name: string, base_unit?: string|null, alter_id?: int|null, parent?: string|null}  $data

@@ -9,7 +9,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('items', function (Blueprint $table) {
-            // Masters flow Tally -> ERP (TALLY-SYNC-MASTER-PLAN.md §3): Tally is
+            // Masters flow Tally -> ERP (docs/archive/TALLY-SYNC-MASTER-PLAN.md §3): Tally is
             // the source of truth for item existence/naming. Match on Tally's
             // stable GUID rather than name, so a rename in Tally doesn't orphan
             // the ERP item. Nullable + unique: ERP-only items keep a null GUID

@@ -9,7 +9,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('shift_production_entries', function (Blueprint $table) {
-            // Expected-output engine inputs (SHIFT-REDESIGN-FORMULAS.md
+            // Expected-output engine inputs (docs/archive/SHIFT-REDESIGN-FORMULAS.md
             // #22-24, #30). standard_* are SNAPSHOTS copied from the item at
             // Start Batch — the standard the shift actually ran against, kept
             // even if the item master changes later. Never writable through

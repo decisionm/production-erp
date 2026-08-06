@@ -27,7 +27,7 @@ use Illuminate\Validation\ValidationException;
 
 /**
  * Fast shop-floor capture, modeled as a batch lifecycle rather than a
- * single-step form — see PRODUCTION-SUPERVISOR-UX-PLAN.md §1. One machine
+ * single-step form — see docs/archive/PRODUCTION-SUPERVISOR-UX-PLAN.md §1. One machine
  * can run several different items in one shift (mold change in between),
  * so this table intentionally allows multiple rows per machine per shift;
  * there is no unique constraint forcing one row per machine.
@@ -173,7 +173,7 @@ class ShiftProductionEntryService
         return DB::transaction(function () use ($data, $createdBy) {
             // A machine can only physically run one item at a time — reject a
             // second "Start Batch" if this machine already has one in_progress,
-            // per PRODUCTION-SUPERVISOR-UX-PLAN.md §2 ("two people can
+            // per docs/archive/PRODUCTION-SUPERVISOR-UX-PLAN.md §2 ("two people can
             // genuinely tap the same machine at once").
             //
             // THE MACHINE ROW IS LOCKED FIRST, and this ordering is the whole
@@ -2747,7 +2747,7 @@ class ShiftProductionEntryService
     }
 
     /**
-     * The expected-output engine (SHIFT-REDESIGN-FORMULAS.md #22-24 and the
+     * The expected-output engine (docs/archive/SHIFT-REDESIGN-FORMULAS.md #22-24 and the
      * QC/reconciliation rows #9/#10/#20) — the "did the machine produce what
      * physics says it should" block, distinct from consumptionVariance()'s
      * norm-based material question. Pure computation, no writes. Null for a

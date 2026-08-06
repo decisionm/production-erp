@@ -17,7 +17,7 @@ use Tests\TestCase;
 
 /**
  * The reports wave: read-only production / reconciliation / traceability
- * report endpoints. Central rule under test (SHIFT-REDESIGN-FORMULAS.md
+ * report endpoints. Central rule under test (docs/archive/SHIFT-REDESIGN-FORMULAS.md
  * row 24): period efficiency is Σ actual PIECES / Σ expected PIECES × 100 —
  * a ratio of sums, NEVER the average of row percentages — and rows with a
  * null piece expectation (standards not captured) contribute to NEITHER sum.

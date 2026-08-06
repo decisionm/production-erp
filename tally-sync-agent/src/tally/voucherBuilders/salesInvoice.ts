@@ -18,7 +18,7 @@ export interface SalesInvoicePayload {
 /**
  * BEST-EFFORT TEMPLATE — NOT YET VALIDATED AGAINST A REAL TALLY INSTANCE.
  *
- * Per TALLY-SYNC-MASTER-PLAN.md §3: the reliable way to get this right is
+ * Per docs/archive/TALLY-SYNC-MASTER-PLAN.md §3: the reliable way to get this right is
  * to create one real Sales voucher by hand in Tally, export it as XML
  * (Gateway of Tally → Display/Export → the voucher → Export), and match
  * this structure to that export exactly — Tally's accepted tag set and

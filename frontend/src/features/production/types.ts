@@ -1136,7 +1136,7 @@ export interface ReworkOrder {
 }
 
 // ---------------------------------------------------------------------------
-// Lot/barcode traceability (Phase 6, SHIFT-REDESIGN-TRACEABILITY-DESIGN.md).
+// Lot/barcode traceability (Phase 6, docs/archive/SHIFT-REDESIGN-TRACEABILITY-DESIGN.md).
 // Everything below is served ONLY when config('production.traceability_enabled')
 // is true — with the flag off these endpoints 404 and no UI references them.
 // Shapes mirror the design doc's data model verbatim.

@@ -1487,7 +1487,7 @@ export default function ShiftProductionEntryPage() {
         queryFn: () => listShiftProductionEntries(),
         // Several people can act on any of the floor's machines ad hoc, no
         // fixed assignment — poll so one supervisor's screen reflects what
-        // another just did. See PRODUCTION-SUPERVISOR-UX-PLAN.md §2.
+        // another just did. See docs/archive/PRODUCTION-SUPERVISOR-UX-PLAN.md §2.
         refetchInterval: 20000,
     });
     /**
