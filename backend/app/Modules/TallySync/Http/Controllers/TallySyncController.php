@@ -42,4 +42,16 @@ class TallySyncController extends Controller
     {
         return TallySyncEntryResource::make($this->sync->retry($tallySyncEntry, request()->user()?->id));
     }
+
+    /**
+     * The accountant's "Release now" on a held shift voucher
+     * (DEC-20260807-002) — skips the rest of the shift-end/idle wait and
+     * lets the agent collect on its next poll. 422s (from the service)
+     * when the voucher is not actually being held, so a stale page gets
+     * told what happened instead of a no-op dressed as success.
+     */
+    public function release(TallySyncEntry $tallySyncEntry): TallySyncEntryResource
+    {
+        return TallySyncEntryResource::make($this->sync->releaseNow($tallySyncEntry, request()->user()?->id));
+    }
 }

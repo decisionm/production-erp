@@ -267,6 +267,7 @@ Route::prefix('v1')->group(function () {
             Route::middleware('module:tally-sync')->group(function () {
                 Route::get('entries', [TallySyncController::class, 'index']);
                 Route::post('entries/{tally_sync_entry}/retry', [TallySyncController::class, 'retry']);
+                Route::post('entries/{tally_sync_entry}/release', [TallySyncController::class, 'release']);
 
                 Route::get('agent-tokens', [TallySyncAgentTokenController::class, 'index']);
                 Route::post('agent-tokens', [TallySyncAgentTokenController::class, 'store']);

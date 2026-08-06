@@ -25,4 +25,21 @@ return [
 
     'voucher_granularity' => env('TALLY_VOUCHER_GRANULARITY', 'batch'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Shift-voucher release idle-hold (DEC-20260807-002)
+    |--------------------------------------------------------------------------
+    |
+    | Under 'shift' granularity a voucher is offered to the agent only when
+    | its shift's end_time has passed for its production date AND at least
+    | this many minutes have passed since the voucher's last merge — so a
+    | trickle of post-shift approvals keeps consolidating instead of the
+    | agent's next poll freezing the voucher after the first one. The
+    | accountant's "Release now" button overrides the wait. Irrelevant in
+    | 'batch' mode, where vouchers are never held.
+    |
+    */
+
+    'release_idle_minutes' => (int) env('TALLY_RELEASE_IDLE_MINUTES', 15),
+
 ];

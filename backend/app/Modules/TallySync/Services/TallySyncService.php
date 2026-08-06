@@ -42,6 +42,7 @@ class TallySyncService
         private readonly TallyLedgerMappingService $ledgerMappings,
         private readonly TallyGodownResolver $godowns,
         private readonly PackingVoucherLines $packing,
+        private readonly ShiftVoucherReleaseGate $releaseGate,
     ) {}
 
     public function enqueueSalesInvoice(Invoice $invoice): TallySyncEntry
@@ -659,6 +660,9 @@ class TallySyncService
                     'payload' => $this->shiftVoucherPayload($joining, $number, $entry),
                     'status' => TallySyncStatus::Pending,
                     'attempts' => 0,
+                    // Creation is the first merge — it starts the release
+                    // gate's idle-hold clock (ShiftVoucherReleaseGate).
+                    'last_merged_at' => now(),
                 ]);
 
                 ShiftProductionEntry::query()
@@ -680,6 +684,10 @@ class TallySyncService
                 ->get();
             $voucher->update([
                 'payload' => $this->shiftVoucherPayload($members, $voucher->payload['voucher_number'], $entry),
+                // Every merge re-arms the release gate's quiet period: the
+                // voucher leaves only after it has sat untouched for the
+                // configured idle-hold (DEC-20260807-002).
+                'last_merged_at' => now(),
             ]);
 
             return $voucher->fresh();
@@ -762,7 +770,14 @@ class TallySyncService
         $entries = TallySyncEntry::query()
             ->where('status', TallySyncStatus::Pending)
             ->orderBy('id')
-            ->get();
+            ->get()
+            // The release gate fronts the hand-out: a shift voucher whose
+            // shift is still collecting (or that merged less than the
+            // idle-hold ago) is not offered, so its merge window below
+            // stays open (DEC-20260807-002). Batch vouchers and anything
+            // already delivered pass untouched — see ShiftVoucherReleaseGate.
+            ->reject(fn (TallySyncEntry $entry) => $this->releaseGate->withholds($entry))
+            ->values();
 
         // First delivery closes the merge window (see the shift-voucher
         // merge query). Unacked vouchers keep reappearing on later polls.
@@ -900,6 +915,42 @@ class TallySyncService
             'error_message' => null,
             'delivered_at' => null,
             'payload' => $payload,
+        ]);
+
+        return $entry;
+    }
+
+    /**
+     * The accountant's "Release now" — DEC-20260807-002's manual override
+     * on the shift-voucher release gate. Marks the voucher deliverable
+     * immediately; the agent collects it on its next poll (within ~90 s).
+     * Persisted (released_at / released_by) so who released what stays
+     * auditable.
+     *
+     * Refused for anything the gate is not actually holding: a stale page
+     * asking to release a voucher that is already with the agent — or
+     * already in Tally — deserves the honest answer, not a silent no-op
+     * that looks like it did something.
+     *
+     * @throws ValidationException
+     */
+    public function releaseNow(TallySyncEntry $entry, ?int $userId = null): TallySyncEntry
+    {
+        if ($entry->isInTally()) {
+            throw ValidationException::withMessages([
+                'entry' => "This voucher is already in Tally as {$entry->voucherNumber()} — there is nothing to release.",
+            ]);
+        }
+
+        if (! $this->releaseGate->withholds($entry)) {
+            throw ValidationException::withMessages([
+                'entry' => "{$entry->voucherNumber()} is not waiting for release — it is already on its way to the agent.",
+            ]);
+        }
+
+        $entry->update([
+            'released_at' => now(),
+            'released_by' => $userId,
         ]);
 
         return $entry;

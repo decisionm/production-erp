@@ -52,6 +52,13 @@ class VoucherPostedOnceTest extends TestCase
         // quality gate is not what this suite is about (see
         // BatchQualityStageTest for it).
         config(['production.approvals.quality_stage_enabled' => false]);
+
+        // The shift-voucher release gate is neutralised the same way
+        // ShiftVoucherGranularityTest does it: fixtures sit on a long-past
+        // production date, so a zero idle-hold hands vouchers out
+        // immediately — this suite pins delivered_at/double-post
+        // semantics, not the release rule (ShiftVoucherReleaseGateTest).
+        config(['tally-sync.release_idle_minutes' => 0]);
     }
 
     private function actAsStaff(): void

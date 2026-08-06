@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Modal, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { Link } from 'react-router-dom';
-import { listAllTallySyncEntries, retryTallySyncEntry } from '@/features/tally-sync/api';
+import { listAllTallySyncEntries, releaseTallySyncEntry, retryTallySyncEntry } from '@/features/tally-sync/api';
 import type { TallySyncEntry, TallySyncStatus } from '@/features/tally-sync/types';
 
 const statusColor: Record<TallySyncStatus, string> = {
@@ -100,6 +100,7 @@ export default function TallySyncPage() {
     // someone who has to go and look something up in Tally.
     const [outcomes, setOutcomes] = useState<Record<number, ResyncOutcome>>({});
     const [retryingId, setRetryingId] = useState<number | null>(null);
+    const [releasingId, setReleasingId] = useState<number | null>(null);
     const [resyncingAll, setResyncingAll] = useState(false);
     const [report, setReport] = useState<{ id: number; voucher: string; ok: boolean; message: string }[] | null>(null);
 
@@ -122,7 +123,7 @@ export default function TallySyncPage() {
     const total = data?.total ?? 0;
     const truncated = total > entries.length;
 
-    const busy = retryingId !== null || resyncingAll;
+    const busy = retryingId !== null || releasingId !== null || resyncingAll;
 
     /**
      * The all-clear, worded to cover exactly what was actually looked at.
@@ -148,6 +149,28 @@ export default function TallySyncPage() {
             setOutcomes((prev) => ({ ...prev, [entry.id]: { ok: false, message: resyncMessage(error) } }));
         } finally {
             setRetryingId(null);
+            await queryClient.invalidateQueries({ queryKey: ['tally-sync', 'entries'] });
+        }
+    }
+
+    /**
+     * The accountant's override on a held shift voucher: skip the rest of
+     * the shift-end/quiet-period wait and let the agent collect it on its
+     * next check. The 422 for "not actually held any more" is shown word
+     * for word, same as the resync refusals.
+     */
+    async function releaseOne(entry: TallySyncEntry) {
+        setReleasingId(entry.id);
+        try {
+            await releaseTallySyncEntry(entry.id);
+            setOutcomes((prev) => ({
+                ...prev,
+                [entry.id]: { ok: true, message: 'Released — the agent will collect it on its next check.' },
+            }));
+        } catch (error) {
+            setOutcomes((prev) => ({ ...prev, [entry.id]: { ok: false, message: resyncMessage(error) } }));
+        } finally {
+            setReleasingId(null);
             await queryClient.invalidateQueries({ queryKey: ['tally-sync', 'entries'] });
         }
     }
@@ -342,8 +365,26 @@ export default function TallySyncPage() {
                     },
                     {
                         title: 'Status',
-                        dataIndex: 'status',
-                        render: (status: TallySyncStatus) => <Tag color={statusColor[status]}>{statusLabel[status]}</Tag>,
+                        render: (_, row) =>
+                            row.hold ? (
+                                // A held shift voucher is deliberately not with
+                                // the agent yet (DEC-20260807-002) — different
+                                // claim from "waiting for agent", which reads
+                                // as "the factory machine should have taken
+                                // this already".
+                                <Space direction="vertical" size={0}>
+                                    <Tag color="blue">
+                                        {row.hold.phase === 'collecting' ? 'Collecting the shift' : 'Quiet period'}
+                                    </Tag>
+                                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                        {row.hold.phase === 'collecting'
+                                            ? `Collecting until ${instant(row.hold.shift_ends_at)}`
+                                            : `Waiting: quiet period — last entry joined ${instant(row.hold.last_merged_at)}`}
+                                    </Typography.Text>
+                                </Space>
+                            ) : (
+                                <Tag color={statusColor[row.status]}>{statusLabel[row.status]}</Tag>
+                            ),
                     },
                     {
                         title: 'Tries',
@@ -407,8 +448,23 @@ export default function TallySyncPage() {
                     },
                     {
                         title: 'Actions',
-                        render: (_, row) =>
-                            row.status === 'failed' && (
+                        render: (_, row) => {
+                            if (row.hold) {
+                                return (
+                                    <Tooltip title="Send this shift's voucher to Tally without waiting for the shift end / quiet period. Expand the row first to see exactly what will post.">
+                                        <Button
+                                            size="small"
+                                            loading={releasingId === row.id}
+                                            disabled={busy && releasingId !== row.id}
+                                            onClick={() => releaseOne(row)}
+                                        >
+                                            Release now
+                                        </Button>
+                                    </Tooltip>
+                                );
+                            }
+
+                            return row.status === 'failed' && (
                                 <Button
                                     danger
                                     size="small"
@@ -418,7 +474,8 @@ export default function TallySyncPage() {
                                 >
                                     Resync
                                 </Button>
-                            ),
+                            );
+                        },
                     },
                 ]}
                 expandable={{

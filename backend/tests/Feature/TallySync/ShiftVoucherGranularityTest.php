@@ -56,6 +56,14 @@ class ShiftVoucherGranularityTest extends TestCase
         // BatchQualityStageTest.
         config(['production.approvals.quality_stage_enabled' => false]);
 
+        // The release gate is deliberately neutralised: this suite pins
+        // aggregation and delivery semantics, and its fixtures sit on a
+        // long-past production date whose shift has ended — a zero
+        // idle-hold releases vouchers immediately, exactly as pending()
+        // behaved before the gate existed. The gate itself is pinned in
+        // ShiftVoucherReleaseGateTest.
+        config(['tally-sync.release_idle_minutes' => 0]);
+
         $this->shift = Shift::create(['name' => 'Morning', 'start_time' => '06:00', 'end_time' => '14:00']);
         $this->machine = WorkCenter::create(['code' => 'M-01', 'name' => 'Machine 1']);
         $this->bottle = Item::create(['sku' => 'BTL-500', 'name' => '500ml PET Bottle', 'uom' => 'NOS']);
