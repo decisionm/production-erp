@@ -1,13 +1,12 @@
 # Shift-voucher consolidation — the release rule the owner must pick
 
-**Status: options paper, not a decision.** The owner asked (07-Aug-2026) for
-ONE consolidated Stock Journal per shift — same product on one line,
-consumption combined — and asked whether release should be manual
-("Sync Now") or timed. This document lays out what already exists, why the
-config flip alone does not deliver the ask, and the release-rule options.
-The choice is the owner's: it is PENDING-OWNER-QUESTIONS Q15 (rule),
-Q16 (flip boundary) and Q17 (accountant preview). Nothing here is built
-beyond what is cited; nothing gets built until the owner picks.
+**Status: DECIDED — see DEC-20260807-001 / -002 / -003** (07-Aug-2026,
+owner): per-shift granularity; release when the shift has ended AND the
+voucher has been idle ≥N minutes (default 15) since its last merge, with a
+manual accountant "Release now" override — the A+D+override option below;
+posting gate unchanged. Q15 and Q17 are resolved; Q16 (flip boundary and
+reading the live env first) stays open until the deploy-day flip. The rest
+of this paper is preserved as the option analysis that fed the decision.
 
 Related pending question: **Q11** — the accountant's own practice is ONE
 consolidated journal per **day**. Per-shift consolidation gives 3 vouchers a

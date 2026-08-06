@@ -121,7 +121,10 @@ Their practice is ONE consolidated journal per day (owner: "consolidated
 one"); the ERP posts one voucher per batch — same stock effect, ~10× the
 voucher count. The accountant should hear this from the factory before they
 see it, or it reads as a malfunction. **Blocks:** nothing technical —
-trust. *Open since 2026-08-05.*
+trust. *Open since 2026-08-05.* **Partially resolved 2026-08-07** — the
+COUNT half: DEC-20260807-001 chose per-shift (~3/day) with the accountant's
+one-per-day practice explicitly considered. Still open: the accountant
+hearing it from the factory before the flip day.
 
 ## Q12 · Five floor-process questions asked on 22 Jul, never answered
 
@@ -158,19 +161,13 @@ paths in records as the price of immutability and say so in
 SOURCE-PRIORITY. **Blocks:** nothing operational — a truthfulness gap:
 records can point at files that no longer exist. *Open since 2026-08-07.*
 
-## Q15 · Consolidated shift voucher — which release rule?
+## Q15 · Consolidated shift voucher — which release rule? — RESOLVED
 
-The owner asked (07-Aug) for ONE Stock Journal per shift and asked
-manual-vs-timed release. Shift aggregation already exists in code
-(`TALLY_VOUCHER_GRANULARITY=shift`), but without a release rule the agent's
-90-second poll freezes each voucher almost immediately and a real shift
-still fragments into `-2/-3` follow-ups — the flip alone does not deliver
-the ask. Options with costs and edge cases:
-`docs/SHIFT-VOUCHER-RELEASE-OPTIONS.md` — A shift-end, B fixed clock,
-C manual accountant release, D idle-hold, or A+D with a manual override
-(a prior reviewer's recommendation, not a decision). **Blocks:** the whole
-consolidation ask — nothing is scoped or built until this is picked.
-*Open since 2026-08-07.*
+**Resolved 2026-08-07 by DEC-20260807-001 (per-shift granularity) and
+DEC-20260807-002 (release when shift end has passed AND ≥N idle minutes
+since the voucher's last merge, N default 15; manual accountant override
+kept; tray's "Sync Now" unchanged).** The options considered:
+`docs/SHIFT-VOUCHER-RELEASE-OPTIONS.md`.
 
 ## Q16 · Granularity flip — at which boundary, and after verifying what?
 
@@ -187,7 +184,7 @@ is inference, and the value must be READ (SSH grep of live `.env`, or the
 `tally-sync-status` workflow once Actions returns) before any flip is
 planned. **Blocks:** scheduling the flip. *Open since 2026-08-07.*
 
-## Q17 · Does the accountant preview the consolidated voucher before it posts?
+## Q17 · Does the accountant preview the consolidated voucher before it posts? — RESOLVED
 
 Ties to Q11 (the accountant's practice is one consolidated journal per
 DAY; per-shift consolidation still means 3/day) and to option C in
@@ -198,6 +195,11 @@ include the manual mechanism; if not, a timed rule can run unattended.
 Ask the accountant, via the factory (per Q11 — they should hear about the
 change before they see it). **Blocks:** choosing between Q15's options.
 *Open since 2026-08-07.*
+
+**Resolved 2026-08-07 by DEC-20260807-002 and DEC-20260807-003:** the timed
+rule runs unattended, the accountant keeps a manual "Release now" override
+(with the existing voucher preview) rather than a mandatory approval step —
+the posting gate stays entry-level approval, which remains final.
 
 ## Q18 · Products where the paper form's standards disagree with the workbook master — PARTLY RESOLVED
 
