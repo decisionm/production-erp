@@ -5378,7 +5378,16 @@ export default function ShiftProductionEntryPage() {
                     {(batchPreview?.variants?.length ?? 0) > 1 && (
                         <Form.Item
                             label="Which standard is this run?"
-                            extra="Same product, different cavity / weight / cycle time."
+                            // WAS FALSE for the commonest case, and said so
+                            // confidently. 18 of the workbook's 103 rows are one
+                            // product counted two ways — identical cavities,
+                            // weight and cycle time, differing only in how many
+                            // bottles go in a box. A hint naming the three things
+                            // that do NOT differ is worse than no hint: it tells
+                            // a supervisor to look for a difference that is not
+                            // there. The pack count is now in the labels
+                            // themselves, so this says the one true thing.
+                            extra="Same product, packed or run differently."
                         >
                             <Radio.Group
                                 value={selectedStandardId}
