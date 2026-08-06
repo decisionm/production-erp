@@ -7,12 +7,17 @@ is different in this folder.
 
 ## Status
 
-**Since 05 Aug 2026 this agent posts real vouchers to the factory's live
-Tally** (first proven sync: batch #45), and real Stock Journals have been
-read back through it. Treat it as production software touching real books,
-not a prototype. The README's body below its status line is scaffold-era
-(22 Jul) and marked as such there — trust CI, the ERP-side voucher tests,
-and this file over those paragraphs.
+**Since 05 Aug 2026 this agent posts real production STOCK JOURNALS to the
+factory's live Tally** (first proven sync: batch #45), and real Stock
+Journals have been read back through it. Treat it as production software
+touching real books, not a prototype.
+
+**The Sales-invoice builder is NOT part of that claim.** It has never
+posted to a live Tally and emits no GST tax ledger entries — enabling
+Sales sync without validating it first would post GST-less sales vouchers
+into real books. The README's scaffold-era warnings stay CURRENT for that
+path; for the journal path they are history. Trust CI, the ERP-side
+voucher-shape tests, and this file over the README's older paragraphs.
 
 ## The one safety rule that matters most here
 

@@ -2,7 +2,7 @@
 
 The local Windows tray app from `docs/archive/TALLY-SYNC-MASTER-PLAN.md` §11/Phase 3 (archived) — bridges the ERP's cloud Tally sync queue to a local Tally installation's XML-HTTP gateway. Runs on-site, on the same machine as Tally (or one that can reach it on the LAN); the cloud ERP never talks to Tally directly.
 
-**Status: in production since 05 Aug 2026** — posting real vouchers to the factory's live Tally (first proven sync: batch #45) and reading Stock Journals back. Everything below this line was written at scaffold stage (22 Jul); where it says "scaffold", "starting skeleton", or "needs a real Tally instance", read it as the pre-production plan, not the current state — the voucher shapes and response parsing have since been validated against the live instance. `CLAUDE.md` in this folder carries the current operating rules.
+**Status: the STOCK/MANUFACTURING JOURNAL path is in production since 05 Aug 2026** — posting real production Stock Journals to the factory's live Tally (first proven sync: batch #45) and reading real Stock Journals back. That claim is deliberately scoped: **the Sales-invoice builder (`src/tally/voucherBuilders/salesInvoice.ts`) has NEVER been validated against a live Tally and still emits no GST tax ledger entries (CGST/SGST/IGST)** — do not enable Sales voucher sync on the strength of this status line; its scaffold-era warnings below remain CURRENT for that path. Everything else below this line was written at scaffold stage (22 Jul): for the journal path, read it as pre-production history; for the Sales path, read it as still true. `CLAUDE.md` in this folder carries the current operating rules.
 
 ## Architecture
 
