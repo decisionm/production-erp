@@ -452,8 +452,10 @@ class FactoryDayBinService
      * WHAT THE FACTORY HOLDS IN WIP RIGHT NOW, as stock — the LOCATION
      * question, deliberately not the machine one. It is the ordinary balance
      * of the internal WIP warehouse and is readable without picking a
-     * machine, because in the books there is nothing per machine to pick:
-     * that is what machineResinEstimate() answers instead.
+     * machine, because in the books there is nothing per machine to pick —
+     * and there is no per-machine estimate either (owner's correction,
+     * 2-Aug): the "how much is standing in the input?" question is answered
+     * factory-wide, by commonResinEstimate().
      *
      * `materials` is empty (not an error) when nothing is there, and the
      * whole read answers `warehouse: null` when no warehouse is configured

@@ -391,10 +391,15 @@ Route::prefix('v1')->group(function () {
             // with their current store kg. Plain masters+balances read —
             // like the bin read above, never traceability-gated.
             Route::get('factory-day-bin/raw-materials', [FactoryDayBinController::class, 'rawMaterials']);
-            // ESTIMATED RESIN REMAINING PER MACHINE (optional
-            // ?work_center_id=): scanned loads into that machine minus the
-            // calculated consumption of its batches, per material, all time.
-            // This is where "how much is left on that machine?" is answered.
+            // ESTIMATED RESIN REMAINING IN THE COMMON INPUT, factory-wide:
+            // every load of a material minus its calculated consumption
+            // across ALL machines, one row per material. There is NO
+            // per-machine answer — the owner's correction (2-Aug) removed
+            // the machine dimension, and ?work_center_id= is accepted and
+            // deliberately ignored, kept only so an old floor tablet's read
+            // keeps working (see MachineResinQueryRequest — delete once the
+            // floor has reloaded). The PATH keeps its legacy per-machine
+            // name for the same tablets; the ANSWER is factory-wide.
             //
             // It REPLACED factory-day-bin/reconciliation, which compared a
             // derived expected closing against a physical bin weight — the
@@ -402,7 +407,7 @@ Route::prefix('v1')->group(function () {
             // (31-Jul), so the read asked a question nobody answers. Plain
             // ledger+consumption read, so outside the traceability gate like
             // its two neighbours above.
-            Route::get('machine-resin', [FactoryDayBinController::class, 'machineResin']);
+            Route::get('machine-resin', [FactoryDayBinController::class, 'commonResinEstimate']);
 
             // FINISHED CARTON IDENTITIES: generated once per completed batch
             // (idempotent), reprinted as a plain read, and looked up by scan

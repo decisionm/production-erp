@@ -22,7 +22,7 @@ use Illuminate\Http\JsonResponse;
  * top of it — one figure per material for the whole factory, never per
  * machine (owner's correction, 2-Aug).
  *
- * The reads (show, machineResin) are deliberately OUTSIDE the
+ * The reads (show, commonResinEstimate) are deliberately OUTSIDE the
  * traceability-gated route group: they are the plain path (warehouses,
  * balances, ledger rows and consumption rows) and must exist whether or not
  * the barcode/bag surfaces do. loadBag is the exception — it resolves a
@@ -73,7 +73,7 @@ class FactoryDayBinController extends Controller
      *
      * A read, so production.view is enough.
      */
-    public function machineResin(MachineResinQueryRequest $request): JsonResponse
+    public function commonResinEstimate(MachineResinQueryRequest $request): JsonResponse
     {
         $request->validated();
 
