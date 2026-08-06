@@ -4662,7 +4662,7 @@ export default function ShiftProductionEntryPage() {
                     // tap — completion is not blocked, it just does not happen
                     // from here.
                     const completeElsewhere =
-                        `${wc.name} is running the ${owningShiftName} shift's batch. ` +
+                        `${wc.code} is running the ${owningShiftName} shift's batch. ` +
                         `Complete it from the ${owningShiftName} tab, or hand it over to ` +
                         `${effectiveShift?.name ?? 'this shift'} first.`;
                     // The date only when it is not this shift's own production
@@ -4813,7 +4813,28 @@ export default function ShiftProductionEntryPage() {
                                               : undefined
                                     }
                                 >
-                                    <Typography.Text strong>{wc.name}</Typography.Text>
+                                    {/* THE CODE, NOT THE NAME, because this is a
+                                        floor screen and the code is what the
+                                        floor calls the machine.
+
+                                        Their handwritten production report has a
+                                        column headed M/C NO. and every row of it
+                                        reads ASB-1 to ASB-10. The codes were
+                                        renamed to match on 6 August — and the card
+                                        went on showing `name`, which is still
+                                        "Machine 1". So the rename changed nothing
+                                        a supervisor could see, and the owner said
+                                        exactly that: "nothing seems to reflect in
+                                        the application."
+
+                                        The name is left alone rather than renamed
+                                        because one thing still resolves machines
+                                        by it (ImportMachineConfigurations reads
+                                        the workbook's machine column and looks up
+                                        "Machine 3"), and because the office
+                                        vocabulary is worth keeping where the
+                                        office reads it. This is not that place. */}
+                                    <Typography.Text strong>{wc.code}</Typography.Text>
                                     <div style={{ marginTop: 4, marginBottom: 6 }}>
                                         {down && <Tag color="error">Down — {down.nature_of_problem}</Tag>}
                                         {!down && moldChange && <Tag color="warning">Mold Change</Tag>}
