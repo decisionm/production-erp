@@ -34,7 +34,12 @@ fi
 
 # Full output on failure, one-line banner on success — never a truncated
 # middle that hides "N problem(s)".
-validation=$(python3 scripts/factory-knowledge/validate.py 2>&1); vexit=$?
+PYBIN="${PYTHON3:-python3}"
+if ! command -v "$PYBIN" >/dev/null 2>&1; then
+  echo "validation: CANNOT RUN — ${PYBIN} not found on this machine"
+  exit 2
+fi
+validation=$("$PYBIN" scripts/factory-knowledge/validate.py 2>&1); vexit=$?
 if [ "$vexit" -eq 0 ]; then
   echo "$validation" | head -1
 else

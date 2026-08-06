@@ -39,8 +39,11 @@ the evidence before recording, not to skip the owner.
 ## Validation honesty
 
 `scripts/factory-knowledge/validate.py` proves the decision set is
-*structurally* sound (ids, evidence present, supersession chains intact,
-generated view fresh). It cannot detect two decisions that contradict each
+*structurally* sound: ids, evidence present, supersession chains intact,
+generated view fresh, every prose DEC-/FC- reference resolving, and — since
+the 06-Aug migration — every record byte-identical to the tool's own
+canonical serialization, which rejects hand-edits as a class
+(DEC-20260806-012). It cannot detect two decisions that contradict each
 other *in meaning*. That judgement belongs to whoever records the newer
 decision — which is why the `record-factory-decision` skill's first step is
 to read the current decisions in the same scope before writing one.

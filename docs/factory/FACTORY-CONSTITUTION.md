@@ -91,3 +91,16 @@ to happen.
   PR #129, PR #134.
 - **Confirmed:** 2026-08-06 · **Status:** active
 - **Affects:** production completion, tally-sync
+
+## FC-08 · Raw decision records are machine format; the owner reads CURRENT-DECISIONS.md
+
+The record files in `decisions/` are a tool-managed, canonical machine format.
+The owner's reading surface — and the human surface generally — is
+`CURRENT-DECISIONS.md`, plain markdown. If any process, skill, message or
+review ever asks the owner to read or hand-edit a raw record file, that is a
+bug in the process, not a task for the owner.
+
+- **Source:** owner instruction, 06 Aug 2026 (JSON-migration approval,
+  condition 2); enforced by canonical-form validation (DEC-20260806-012).
+- **Confirmed:** 2026-08-06 · **Status:** active
+- **Affects:** knowledge system, review chain

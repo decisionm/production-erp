@@ -9,9 +9,13 @@ WHAT IS CHECKED, deterministically:
                exists, is marked superseded, and points back via
                `superseded_by`; no record is current and superseded at once.
   CURRENT-DECISIONS.md   byte-identical to regeneration (a stale view fails).
-  sources/manifest.yaml  parses; every entry with status "present" names a file
-               that exists and matches its recorded sha256; entries with
-               status "missing" must say in `notes` what is needed.
+  sources/manifest.json  valid, CANONICAL JSON; every "present" entry names a
+               repo file that exists and matches its pinned sha256; "missing"
+               entries must say in notes what is needed; a leftover
+               manifest.yaml beside it is an error (one truth).
+
+  CANONICAL FORM: every record must byte-match the tool's own serialization
+  of its parsed content — hand-edits fail as a class (DEC-20260806-012).
 
 THE HONEST LIMITATION, stated here because pretending otherwise is worse:
 this validator proves STRUCTURAL integrity, not semantic truth. Two current
@@ -30,7 +34,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import datetime
 
-from lib import ID_RE, as_list, knowledge_root, parse_front_matter, parse_manifest_text, sha256_of
+from lib import ID_RE, canonical_manifest, canonical_record, knowledge_root, load_manifest, parse_record, sha256_of
 
 REQUIRED = ["id", "status", "confirmed_by", "confirmed_at", "scope", "source"]
 
@@ -42,11 +46,33 @@ def validate_decisions(root: Path, errors: list[str]) -> None:
         return
 
     for path in sorted(decisions_dir.glob("*.md")):
+        raw = path.read_text(encoding="utf-8")
         try:
-            meta, body = parse_front_matter(path.read_text(encoding="utf-8"), path=path.name)
+            meta, body = parse_record(raw, path=path.name)
         except ValueError as err:
             errors.append(str(err))
             continue
+
+        # CANONICAL-FORM ENFORCEMENT — the structural guarantee that replaced
+        # four individually-patched parser holes (06-Aug migration). A record
+        # either byte-matches what the tool serializes from its own parsed
+        # content, or it was hand-edited — which is unsupported by owner
+        # decision (DEC-20260806-012). This also catches unknown/typo fields,
+        # reordered keys, and stray whitespace, as a class.
+        try:
+            if canonical_record({k: v for k, v in meta.items()}, body) != raw:
+                errors.append(f"{path.name}: not canonical — records are tool-written "
+                              "(DEC-20260806-012); recreate it with record_decision.py")
+        except ValueError as err:
+            errors.append(f"{path.name}: {err}")
+
+        # Strict types — JSON gives real arrays and maps; anything else is an
+        # error, never a tolerated variant.
+        if not isinstance(meta.get("scope"), list) or not all(isinstance(x, str) for x in meta.get("scope") or []):
+            errors.append(f"{path.name}: scope must be an array of strings")
+        if "supersedes" in meta and (not isinstance(meta["supersedes"], list)
+                                     or not all(isinstance(x, str) for x in meta["supersedes"])):
+            errors.append(f"{path.name}: supersedes must be an array of strings")
 
         # `id:` with no value parses to None — str() it before matching, or
         # the validator itself dies with a TypeError traceback and reports
@@ -68,7 +94,7 @@ def validate_decisions(root: Path, errors: list[str]) -> None:
             errors.append(f"{rid}: confirmed_by must be owner — only the owner confirms decisions")
         if meta.get("status") not in ("current", "superseded"):
             errors.append(f"{rid}: status must be current or superseded, got {meta.get('status')!r}")
-        if not as_list(meta.get("scope")):
+        if not meta.get("scope"):
             errors.append(f"{rid}: scope must be non-empty")
         source = meta.get("source")
         if not isinstance(source, dict) or not source.get("reference", "").strip():
@@ -93,11 +119,7 @@ def validate_decisions(root: Path, errors: list[str]) -> None:
         decisions[rid] = meta
 
     for rid, meta in decisions.items():
-        # as_list: an inline `supersedes: DEC-...` is one-item data, not a
-        # string to iterate character by character (reviewed 06 Aug — the old
-        # loop produced sixteen one-letter "does not exist" errors while the
-        # reverse check passed by substring accident).
-        for old in as_list(meta.get("supersedes")):
+        for old in (meta.get("supersedes") or []):
             if old not in decisions:
                 errors.append(f"{rid}: supersedes {old}, which does not exist")
             elif decisions[old].get("status") != "superseded":
@@ -106,28 +128,35 @@ def validate_decisions(root: Path, errors: list[str]) -> None:
                 errors.append(f"{rid}: supersedes {old}, but {old}.superseded_by is "
                               f"{decisions[old].get('superseded_by')!r}")
         by = meta.get("superseded_by")
-        if by and (by not in decisions or rid not in as_list(decisions[by].get("supersedes"))):
+        if by and (by not in decisions or rid not in (decisions[by].get("supersedes") or [])):
             errors.append(f"{rid}: superseded_by {by}, but {by} does not list it in supersedes")
 
 
 def validate_manifest(root: Path, errors: list[str]) -> None:
-    manifest = root / "sources" / "manifest.yaml"
+    if (root / "sources" / "manifest.yaml").exists():
+        errors.append("legacy sources/manifest.yaml still exists beside manifest.json — "
+                      "two truths; delete the yaml (migrated 06-Aug)")
+    manifest = root / "sources" / "manifest.json"
     if not manifest.exists():
-        errors.append("sources/manifest.yaml is missing")
+        errors.append("sources/manifest.json is missing")
         return
     try:
-        # Parsed directly, never by wrapping in frontmatter fences — the fence
-        # trick let a literal `---` line inside the manifest end parsing early
-        # and everything below it went silently unvalidated (reviewed 06 Aug).
-        meta = parse_manifest_text(manifest.read_text(encoding="utf-8"), path="manifest.yaml")
+        meta = load_manifest(root)
     except ValueError as err:
         errors.append(str(err))
         return
 
+    if canonical_manifest(meta) != manifest.read_text(encoding="utf-8"):
+        errors.append("manifest.json is not canonical — re-serialize it "
+                      "(sorted keys, pinned JSON parameters)")
+
     # Entries are top-level keys, each a one-level map.
     repo_root = root.parent.parent
     for name, entry in meta.items():
+        if name.startswith("_"):
+            continue  # documentation keys, not sources
         if not isinstance(entry, dict):
+            errors.append(f"manifest {name}: entry must be an object")
             continue
         status = entry.get("status")
         if status == "present":
@@ -174,7 +203,7 @@ def validate_prose_references(root: Path, errors: list[str]) -> None:
             root / "PENDING-OWNER-QUESTIONS.md",
             root / "SOURCE-PRIORITY.md",
             constitution,
-            root / "sources" / "manifest.yaml",
+            root / "sources" / "manifest.json",
             # The records themselves: a statement citing "supersedes DEC-x"
             # is exactly the hand-typed reference this check exists for, and
             # the first version never scanned them (reviewed 06 Aug).

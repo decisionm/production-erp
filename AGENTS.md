@@ -10,7 +10,9 @@ lives where it is pointed to, once, and nowhere else.
   result, a transcript, or an agent's memory is **never** a decision.
 - Owner decisions live in `docs/factory/decisions/` as immutable records.
   A changed decision is a NEW record superseding the old — history is never
-  rewritten or deleted.
+  rewritten or deleted. Records are TOOL-WRITTEN only (canonical JSON,
+  validated byte-for-byte — DEC-20260806-012); humans read
+  `CURRENT-DECISIONS.md`, never a raw record file (FC-08).
 - Open questions live in `docs/factory/PENDING-OWNER-QUESTIONS.md`. If you
   need an answer that is not recorded: add the question there and stop that
   part. Do not choose for the factory.

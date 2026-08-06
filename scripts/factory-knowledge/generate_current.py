@@ -22,6 +22,9 @@ HEADER = """\
 
 One line per decision still in force, newest first. The full record — evidence,
 scope, what it replaced — is the file named by the ID in `decisions/`.
+
+THIS FILE IS THE HUMAN SURFACE (FC-08). The record files behind it are a
+tool-managed machine format — nobody should ever be sent to read one raw.
 """
 
 

@@ -34,7 +34,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import ID_RE, knowledge_root, load_decisions
+from lib import ID_RE, canonical_record, knowledge_root, load_decisions, parse_record
 
 
 def next_id(existing: list[dict], date: str) -> str:
@@ -110,52 +110,31 @@ def main() -> int:
               f"parse as {new_id}. Fix that record first; nothing was written.", file=sys.stderr)
         return 2
 
-    # PREPARE EVERY SUPERSEDE FLIP BEFORE WRITING ANYTHING. The old approach
-    # replaced the literal string 'status: current' and silently no-opped on
-    # any other spelling (status: "current"), leaving the new record written
-    # and history half-flipped (reviewed 06 Aug). Line-based, counted, and
-    # verified up front — either the whole operation is possible or none of
-    # it happens.
+    # PREPARE EVERY SUPERSEDE FLIP BEFORE WRITING ANYTHING — and as data,
+    # not string surgery: parse, mutate the dict, re-serialize canonically.
+    # A dict mutation cannot silently no-op the way a string replace did
+    # (reviewed 06 Aug). Statement text is carried through verbatim.
     flips: dict[Path, str] = {}
     for old_id in args.supersedes:
         old_path = Path(by_id[old_id]["_path"])
-        text = old_path.read_text(encoding="utf-8")
-        new_text, hits = re.subn(
-            r"(?m)^status:.*$",
-            f"status: superseded\nsuperseded_by: {new_id}",
-            text,
-            count=1,
-        )
-        if hits != 1:
-            print(f"REFUSED: cannot find the status line in {old_path.name} to mark it "
-                  "superseded. Nothing was written.", file=sys.stderr)
-            return 2
-        flips[old_path] = new_text
+        old_meta, old_body = parse_record(old_path.read_text(encoding="utf-8"), path=old_path.name)
+        old_meta["status"] = "superseded"
+        old_meta["superseded_by"] = new_id
+        flips[old_path] = canonical_record(old_meta, old_body)
 
-    lines = [
-        "---",
-        f"id: {new_id}",
-        "status: current",
-        "confirmed_by: owner",
-        f"confirmed_at: {date}",
-        "scope:",
-        *[f"  - {s}" for s in args.scope],
-    ]
+    meta = {
+        "id": new_id,
+        "status": "current",
+        "confirmed_by": "owner",
+        "confirmed_at": date,
+        "scope": list(args.scope),
+        "source": {"type": args.source_type, "reference": args.source_ref},
+    }
     if args.supersedes:
-        lines.append("supersedes:")
-        lines.extend(f"  - {s}" for s in args.supersedes)
-    lines += [
-        "source:",
-        f"  type: {args.source_type}",
-        f"  reference: \"{args.source_ref}\"",
-        "---",
-        "",
-        args.statement.strip(),
-        "",
-    ]
+        meta["supersedes"] = list(args.supersedes)
 
     (root / "decisions").mkdir(parents=True, exist_ok=True)
-    out_path.write_text("\n".join(lines), encoding="utf-8")
+    out_path.write_text(canonical_record(meta, args.statement), encoding="utf-8")
 
     # The pre-verified flips — statement text is never touched.
     for old_path, new_text in flips.items():

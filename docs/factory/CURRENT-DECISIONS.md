@@ -6,8 +6,13 @@
 One line per decision still in force, newest first. The full record — evidence,
 scope, what it replaced — is the file named by the ID in `decisions/`.
 
-**16 current · 0 superseded**
+THIS FILE IS THE HUMAN SURFACE (FC-08). The record files behind it are a
+tool-managed machine format — nobody should ever be sent to read one raw.
 
+**17 current · 0 superseded**
+
+- **DEC-20260806-012** (2026-08-06, knowledge-system) — Decision-record files are written and modified ONLY by the factory-knowledge tools. Hand-written or hand-edited records are unsupported: every record must byte-match the canonical tool serialization (pinned JSON parameters), and validation fails any file that does not. The owner's human surface is CURRENT-DECISIONS.md; raw records are machine format (FC-08). This deliberately ends the earlier practice in which hand-written records were an accepted path — that practice appeared in the original test fixtures and enabled four reviewer-reproduced parser bypasses.
+  - evidence: Owner approval message 06-Aug-2026 (JSON migration go-ahead, conditions 2 and 3), recorded same day on branch feat/factory-knowledge-system; consolidated review finding #12 documents the old hand-written path
 - **DEC-20260806-011** (2026-08-06, products, packing) — Duplicate workbook rows for one bottle are PACK VARIANTS of a single product, not separate products — 18 of 103 rows. The variant label carries the box count (840/box vs 810/box) so the floor can tell them apart.
   - evidence: PR #122 (box count on the label); workbook-product-master (18 variant rows)
 - **DEC-20260806-010** (2026-08-06, production) — A masterbatch is resolved from the item's own colour column and the factory's colour map — NEVER by scanning material names for colour words (that once pre-selected a WHITE masterbatch on a non-white run). Scrap items are never colourant candidates, which is why colour derivation has a masterbatch-only scope.

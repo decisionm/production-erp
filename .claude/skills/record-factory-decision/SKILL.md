@@ -38,5 +38,12 @@ it. Anything less goes to `docs/factory/PENDING-OWNER-QUESTIONS.md` instead.
 ## Never
 
 - Edit an existing record's statement (history is immutable — supersede it).
+- **Hand-write or hand-edit ANY record file.** Records are canonical JSON
+  written only by `record_decision.py`; validation byte-compares every file
+  against the tool's own serialization and fails anything else
+  (DEC-20260806-012). A record that needs changing is superseded through the
+  tool, full stop.
+- Send the owner to read a raw record file — the owner's surface is
+  `CURRENT-DECISIONS.md` (FC-08).
 - Hand-edit `CURRENT-DECISIONS.md` (generated; validation will fail).
 - Record on the owner's behalf because "it's obviously what they meant".
