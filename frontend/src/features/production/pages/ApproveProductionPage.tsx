@@ -790,7 +790,7 @@ function DowntimeSection({ row, logs, loading }: { row: ShiftProductionEntry; lo
             )}
             {!loading && !outsideWindow && mine.length === 0 && (
                 <Typography.Text type="secondary">
-                    No breakdown logged on {row.work_center?.name ?? 'this machine'} on {row.production_date}.
+                    No breakdown logged on {row.work_center?.code ?? 'this machine'} on {row.production_date}.
                 </Typography.Text>
             )}
             {!loading && mine.length > 0 && (
@@ -1597,7 +1597,10 @@ export default function ApproveProductionPage() {
                 columns={[
                     { title: 'Date', dataIndex: 'production_date' },
                     { title: 'Shift', render: (_, row) => row.shift?.name ?? '—' },
-                    { title: 'Machine', render: (_, row) => row.work_center?.name ?? '—' },
+                    // The code — ASB-3, the identity on the paper's M/C NO.
+                    // column — with the office name only as a fallback for a
+                    // row whose code never loaded.
+                    { title: 'Machine', render: (_, row) => row.work_center?.code ?? row.work_center?.name ?? '—' },
                     { title: 'Item', render: (_, row) => itemLabel(row.item) },
                     { title: 'Batch #', dataIndex: 'batch_number', render: (v: string | null) => v ?? '—' },
                     { title: 'Produced', dataIndex: 'quantity_produced' },
@@ -1689,7 +1692,7 @@ export default function ApproveProductionPage() {
             />
 
             <Drawer
-                title={`Batch #${detailRow?.id} — ${detailRow?.work_center?.name ?? '—'} · ${detailRow?.item?.sku ?? '—'}`}
+                title={`Batch #${detailRow?.id} — ${detailRow?.work_center?.code ?? detailRow?.work_center?.name ?? '—'} · ${detailRow?.item?.sku ?? '—'}`}
                 open={detailRow !== null}
                 onClose={() => setDetailRow(null)}
                 width="min(100vw, 520px)"
