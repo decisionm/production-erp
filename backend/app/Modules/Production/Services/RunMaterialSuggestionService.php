@@ -748,10 +748,16 @@ class RunMaterialSuggestionService
 
         return match ($resolved['source']) {
             'clear' => 'Clear takes no masterbatch',
-            'no_colour' => 'Colour not set on this bottle — choose the masterbatch',
+            'no_colour' => 'Colour not set on this bottle',
             'factory_map', 'item_colour' => $resolved['item']->name.$dose,
-            'ambiguous_colour' => count($resolved['tied']).' '.$shade.' materials — choose one',
-            default => 'No masterbatch mapped for '.($shade === '' ? 'this colour' : $shade).' — choose one',
+            // A COUNT, NOT AN INSTRUCTION. The screen prints this beside the row
+            // whether or not a material ends up named, and "choose one" under a
+            // named material contradicts it: the owner's screenshot read "Master
+            // Batch Amber, 2 masterbatches match Amber — pick the one that went
+            // in" (06-Aug). As a plain count it explains an empty box AND gives a
+            // reason to check a filled one.
+            'ambiguous_colour' => count($resolved['tied']).' '.$shade.' materials in the masters',
+            default => 'No masterbatch mapped for '.($shade === '' ? 'this colour' : $shade),
         };
     }
 

@@ -491,7 +491,7 @@ class RunMaterialSuggestionTest extends TestCase
         $this->assertNotSame($this->whiteMb->id, $mb['item']['id'] ?? null);
         // ...and the reason says what to do about it.
         $this->assertStringContainsString('Red', $mb['reason']);
-        $this->assertSame('No masterbatch mapped for Red — choose one', $mb['reason']);
+        $this->assertSame('No masterbatch mapped for Red', $mb['reason']);
 
         // The resin row is unaffected: a colour nobody has configured must
         // not cost the supervisor the resin pre-fill as well.
@@ -514,11 +514,14 @@ class RunMaterialSuggestionTest extends TestCase
         $this->assertNull($mb['item']);
         $this->assertNull($mb['suggested_kg']);
         $this->assertSame('ambiguous_colour', $mb['source']);
-        // The sentence states HOW MANY and stops. It used to list both names,
-        // which is the sort of prose the owner asked to be cut (05-Aug) — and
-        // the picker beside this row already shows the candidates, so the names
-        // were being printed twice on one line.
-        $this->assertSame('2 Amber materials — choose one', $mb['reason']);
+        // A COUNT, and it stops there. It used to list both names, which is the
+        // prose the owner asked to be cut (05-Aug) — the picker beside the row
+        // already shows the candidates. And it no longer says "choose one":
+        // this sentence is printed beside the row even once a material IS named,
+        // where an instruction to choose contradicts the name sitting next to it
+        // (06-Aug). A count is true in both states.
+        $this->assertSame('2 Amber materials in the masters', $mb['reason']);
+        $this->assertStringNotContainsString('choose', $mb['reason']);
 
         // One row of factory-stated DATA settles it permanently — and the
         // dosing follows the chosen material.
@@ -596,7 +599,7 @@ class RunMaterialSuggestionTest extends TestCase
 
         $this->assertNull($mb['item']);
         $this->assertSame('no_colour', $mb['source']);
-        $this->assertSame('Colour not set on this bottle — choose the masterbatch', $mb['reason']);
+        $this->assertSame('Colour not set on this bottle', $mb['reason']);
     }
 
     public function test_the_run_reports_the_colour_it_was_started_with(): void
