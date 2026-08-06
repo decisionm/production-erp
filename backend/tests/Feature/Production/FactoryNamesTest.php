@@ -8,6 +8,7 @@ use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\WorkCenter;
+use Database\Seeders\ShiftSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
@@ -83,6 +84,78 @@ class FactoryNamesTest extends TestCase
         $this->assertSame('Shift A', Shift::query()->where('start_time', 'like', '06:00%')->value('name'));
         $this->assertSame('Shift B', Shift::query()->where('start_time', 'like', '14:00%')->value('name'));
         $this->assertSame('Shift C', Shift::query()->where('start_time', 'like', '22:00%')->value('name'));
+    }
+
+    public function test_a_seeder_made_duplicate_is_deactivated_and_the_original_keeps_the_name(): void
+    {
+        // WHAT ACTUALLY HAPPENED ON THE LIVE FACTORY. ShiftSeeder ran on every
+        // deploy keyed on NAME, so renaming Morning to "Shift A" left no
+        // "Morning" for it to find and it created one — every deploy, until the
+        // floor's picker offered six shifts for three. The owner spotted it:
+        // "still A, B C also there, morning afternoon also there".
+        $original = Shift::create(['name' => 'A', 'start_time' => '06:00', 'end_time' => '14:00', 'is_active' => true]);
+        $twin = Shift::create(['name' => 'Morning', 'start_time' => '06:00', 'end_time' => '14:00', 'is_active' => true]);
+
+        $this->rename();
+
+        // The OLDEST row at a start time is the real one — production has been
+        // pointing at it all along — so it takes the name.
+        $this->assertSame('Shift A', $original->fresh()->name);
+        // The twin is switched off, not deleted: deleting a row anything might
+        // reference trades a cosmetic problem for a broken one.
+        $this->assertFalse((bool) $twin->fresh()->is_active);
+        $this->assertSame(2, Shift::query()->count());
+        $this->assertSame(1, Shift::query()->where('is_active', true)->count());
+    }
+
+    public function test_a_duplicate_with_production_against_it_is_reported_not_switched_off(): void
+    {
+        // A supervisor may already have filed a shift against the duplicate.
+        // That is real work, and deactivating it would hide that batch's own
+        // shift from every screen that reads it back.
+        $original = Shift::create(['name' => 'A', 'start_time' => '06:00', 'end_time' => '14:00', 'is_active' => true]);
+        $used = Shift::create(['name' => 'Morning', 'start_time' => '06:00', 'end_time' => '14:00', 'is_active' => true]);
+
+        $warehouse = Warehouse::create([
+            'code' => 'SWA', 'name' => 'SWAASHPET POLYMERS PVT LTD', 'is_active' => true,
+            'tally_guid' => '7cabb80e-0000-0000-0000-00000000003e',
+        ]);
+        $machine = WorkCenter::create(['code' => 'ASB-1', 'name' => 'ASB-1', 'is_active' => true]);
+        $product = Item::create(['sku' => 'BTL', 'name' => 'Bottle', 'uom' => 'Nos.', 'is_active' => true]);
+
+        ShiftProductionEntry::create([
+            'shift_id' => $used->id,
+            'work_center_id' => $machine->id,
+            'item_id' => $product->id,
+            'warehouse_id' => $warehouse->id,
+            'production_date' => '2026-08-06',
+            'batch_number' => '20260806-M01-001',
+            'batch_status' => 'completed',
+            'status' => 'pending',
+        ]);
+
+        $this->rename();
+
+        $this->assertTrue((bool) $used->fresh()->is_active, 'A duplicate carrying real work must stay usable.');
+        $this->assertSame('Shift A', $original->fresh()->name);
+    }
+
+    public function test_the_seeder_no_longer_duplicates_a_renamed_shift(): void
+    {
+        // The root cause, fixed at source. firstOrCreate(['name' => 'Morning'])
+        // was idempotent on its own terms and still duplicated data — because
+        // IDEMPOTENT ON A MUTABLE FIELD IS NOT IDEMPOTENT. A name is renamed; a
+        // start time is what the shift is.
+        Shift::create(['name' => 'Shift A', 'start_time' => '06:00', 'end_time' => '14:00', 'is_active' => true]);
+
+        $this->seed(ShiftSeeder::class);
+
+        // The 06:00 shift is recognised by its start time and left alone; only
+        // the two genuinely missing shifts are created.
+        $this->assertSame(3, Shift::query()->count());
+        $sixAm = Shift::query()->get()->filter(fn ($s) => str_starts_with((string) $s->start_time, '06:00'));
+        $this->assertCount(1, $sixAm);
+        $this->assertSame('Shift A', $sixAm->first()->name);
     }
 
     public function test_the_batch_number_a_machine_mints_does_not_change(): void
