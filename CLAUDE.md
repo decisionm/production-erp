@@ -2,6 +2,35 @@
 
 Instructions for Claude Code (and any future contributor) working in this repo. Read this before touching `backend/`.
 
+@AGENTS.md
+
+## The factory knowledge system — read before any factory decision
+
+This repo serves a LIVE factory (SWAASHPET POLYMERS). What the factory has
+decided, and what is still an open question, is recorded — do not re-derive
+it from transcripts or guess it from code:
+
+- `docs/factory/FACTORY-CONSTITUTION.md` — durable boundaries (FC-01..07)
+- `docs/factory/CURRENT-DECISIONS.md` — decisions in force (generated view)
+- `docs/factory/PENDING-OWNER-QUESTIONS.md` — open; **nothing there is a fact**
+- `docs/factory/SOURCE-PRIORITY.md` — what outranks what when sources disagree
+- `docs/factory/sources/manifest.yaml` — where the original evidence lives
+
+Rules that override any convenience:
+- **Unconfirmed discussion is not a decision.** Only the owner confirms; a
+  confirmation is recorded via the `record-factory-decision` skill, with an
+  artifact behind it. Memory is not evidence.
+- Read original sources before derived data or old transcripts.
+- A consequential factory-flow ambiguity is discussed with the owner BEFORE
+  implementation — add it to PENDING-OWNER-QUESTIONS, don't pick an answer.
+- Classify the task and load the matching skill from `.claude/skills/`
+  (recording a decision, deploying, reconciling stock, batch lifecycle)
+  instead of improvising the procedure.
+- Session start: `scripts/factory-knowledge/status.sh` prints live state;
+  `scripts/factory-knowledge/check.sh` validates the knowledge files.
+
+Old point-in-time plans are frozen in `docs/archive/` — history, not truth.
+
 ## What this project is
 
 A Manufacturing ERP for the Indian market (GST/TDS/PF/ESI compliance, Tally integration) covering Inventory, Production, Procurement, Sales/CRM, Finance, HRMS, Payroll, Quality, and Maintenance. Full context lives in three planning docs at repo root — read them before making architecture-level decisions, don't re-derive from scratch:

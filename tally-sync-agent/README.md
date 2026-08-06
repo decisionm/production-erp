@@ -1,8 +1,8 @@
 # Tally Sync Agent
 
-The local Windows tray app from `TALLY-SYNC-MASTER-PLAN.md` §11/Phase 3 — bridges the ERP's cloud Tally sync queue to a local Tally installation's XML-HTTP gateway. Runs on-site, on the same machine as Tally (or one that can reach it on the LAN); the cloud ERP never talks to Tally directly.
+The local Windows tray app from `docs/archive/TALLY-SYNC-MASTER-PLAN.md` §11/Phase 3 (archived) — bridges the ERP's cloud Tally sync queue to a local Tally installation's XML-HTTP gateway. Runs on-site, on the same machine as Tally (or one that can reach it on the LAN); the cloud ERP never talks to Tally directly.
 
-**Status: scaffold.** The infrastructure (tray, settings, polling loop, logging, Tally response parsing, packaging) is real and runs. The two XML voucher builders (Sales, Journal) are **best-effort templates, not yet validated against a real Tally instance** — see "What still needs a real Tally instance" below before trusting this in production.
+**Status: in production since 05 Aug 2026** — posting real vouchers to the factory's live Tally (first proven sync: batch #45) and reading Stock Journals back. The paragraph below this one was written at scaffold stage (22 Jul) and is kept for history; see `CLAUDE.md` in this folder for current operating rules.
 
 ## Architecture
 
