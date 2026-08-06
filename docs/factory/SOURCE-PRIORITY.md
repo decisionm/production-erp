@@ -30,7 +30,7 @@ the accountant does, check rung 3. Two real cases from this project:
   the journals were right (→ DEC-20260805-001).
 - The owner twice proposed a 2.25% masterbatch standard; the July journals
   dose amber at 0.32 g on a 12.9 g bottle, which is 2.5%. 2.5% was recorded
-  (→ DEC-20260806-004).
+  (→ DEC-20260806-003).
 
 The order stands: in both cases the *final owner confirmation* — made while
 looking at the evidence — is the recorded decision. The lesson is to bring

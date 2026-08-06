@@ -56,7 +56,7 @@ which, or weigh it). **Blocks:** the polymer-cover line posting.
 
 ## Q7 · Which masterbatch for White, Black, Green, Yellow?
 
-Amber is answered (DEC-20260806-005). Still ambiguous in the masters:
+Amber is answered (DEC-20260806-004). Still ambiguous in the masters:
 White (4 candidates — **the journals consume `Master Batch - Pet White`**, a
 proposed answer awaiting the owner's word), Black (2), Green (2), Yellow (2).
 One `production:map-masterbatch-colour` run each. **Blocks:** pre-selection on
@@ -107,5 +107,5 @@ the app was built — confirm rather than assume:
 The two 06-Aug photos (pouch and cover counts) are cited as evidence by
 several decision records but live only in a Downloads folder — the same way
 `Transactions.xml` was lost. May they be committed under
-`docs/factory/sources/`? **Blocks:** durable evidence for DEC-20260806-003.
+`docs/factory/sources/`? **Blocks:** durable evidence for DEC-20260806-001.
 *Open since 2026-08-06.*
