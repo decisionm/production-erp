@@ -10,6 +10,11 @@ answer.
 Format: `## Q<n>` heading · the question · what is known so far · what it
 blocks · open-since date.
 
+Numbering: question numbers are assigned at MERGE time, not at branch time.
+A branch adding questions rebases on main first and takes the next free
+number — several branches cut from the same main will otherwise all claim
+the same numbers (this happened at Q15, four branches deep, 07-Aug).
+
 ---
 
 ## Q1 · How many metres of tape are in one Tally "No"?
@@ -172,3 +177,57 @@ include the manual mechanism; if not, a timed rule can run unattended.
 Ask the accountant, via the factory (per Q11 — they should hear about the
 change before they see it). **Blocks:** choosing between Q15's options.
 *Open since 2026-08-07.*
+
+## Q18 · Seven products where the paper form's standards disagree with the workbook master
+
+Comparing the transcribed paper "Ideal" columns (01–04 Aug logbooks,
+`docs/factory-paper-entry/Swaashpet_Paper_Reports_Ideal_and_Actual.xlsx`)
+against the workbook product master (`product-master-rows.json`, the source
+of the ERP's Production Standards) surfaces disagreements that are either a
+stale standard or a wrong norm — both poison every consumption-variance and
+efficiency judgement for that product:
+
+| Paper product (Ideal) | Paper says | Master says |
+|---|---|---|
+| 500 K/Rib (ASB-10, all 4 days) | WT **23 g** | 500ML KIDNEY **28–30 g** (no 23 g row) |
+| 100 RC | WT **12 g**, 168/tray, 840/box | 100ML ROUND only exists at **12.9 g** |
+| 450 Rib C | CT **19.3–21.65 s** | 450ML RIBBED CLEAR CT **16.5 s** |
+| 200 Rectangle/Sanjar | **114/tray, 570/box** | 200ML RECTANGLE SANGAM **92/tray, 368/box** |
+| 175 TCC (↔ 200CC 43MM NECK?) | WT **20 g**, CT 14.4–15.6 | WT **19.5 g**, CT **missing** |
+| 100 Ema Sangam / ENA (WDE) | **144/tray, 720/box** | closest is 100ML BRUTE **144/576** |
+| 180 Hyb | **289**/box (pouch) | 180ML HYBRID OLD pouch **256** |
+| 60 RA | CT **11.2–12 s** | 60ML ROUND CT **10.8 s** (10 g variant) |
+
+The paper's 23 g kidney weight is self-consistent across every row (the
+sheet's own consumption check balances at 23 g), so it is not a one-off
+slip — at ~12,500 pcs/shift, 23 g vs 28 g is a ~60 kg/shift difference in
+the resin norm on the fleet's highest-volume machine. DEC-20260805-005
+makes the paper report the arbiter when weight figures disagree, but these
+figures are handwriting-OCR and the workbook's own README says to verify
+before live use — so each row needs the factory's confirmation before any
+standard is edited. Which column is current, per product?
+**Blocks:** honest consumption norms and efficiency figures for these
+products; entry of the corresponding 01–04 Aug paper rows. *Open since
+2026-08-07.*
+
+## Q19 · Does machine ASB-11 exist?
+
+The 03-Aug Shift B paper report has an ASB-11 row (100 RC, 12 g — mostly
+rejection and lumps, production count blank). DEC-20260806-008 records the
+floor codes as ASB-1..ASB-10, and the ERP has ten machines. Is ASB-11 a
+real eleventh machine, or a transcription/OCR slip for another machine?
+**Blocks:** entering that paper row; the machine roster if real.
+*Open since 2026-08-07.*
+
+## Q20 · Is the paper form's "Ideal CT" the fixed standard, or the cycle time the machine was actually set to that run?
+
+The paper's ideal cycle-time column changes from shift to shift for the
+same product (100 RA appears as 11.6, 11.87, 11.89 and 12.4 s across four
+days; 450 Rib spans 19.3–21.65 s), which a fixed standard would not do.
+The ERP snapshots a standard CT at Start Batch and measures efficiency
+against it, and separately records an actual CT at completion. If the
+paper column is really "the setting dialed in today", the ERP's efficiency
+(vs the fixed standard) will read differently from what the floor expects,
+and the difference is by design, not error. Which is it?
+**Blocks:** interpreting efficiency disagreements between the paper form
+and the ERP; Q18's cycle-time rows. *Open since 2026-08-07.*
