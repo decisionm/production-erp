@@ -131,3 +131,44 @@ records too and supersede -001 with a corrected reference; or accept stale
 paths in records as the price of immutability and say so in
 SOURCE-PRIORITY. **Blocks:** nothing operational — a truthfulness gap:
 records can point at files that no longer exist. *Open since 2026-08-07.*
+
+## Q15 · Consolidated shift voucher — which release rule?
+
+The owner asked (07-Aug) for ONE Stock Journal per shift and asked
+manual-vs-timed release. Shift aggregation already exists in code
+(`TALLY_VOUCHER_GRANULARITY=shift`), but without a release rule the agent's
+90-second poll freezes each voucher almost immediately and a real shift
+still fragments into `-2/-3` follow-ups — the flip alone does not deliver
+the ask. Options with costs and edge cases:
+`docs/SHIFT-VOUCHER-RELEASE-OPTIONS.md` — A shift-end, B fixed clock,
+C manual accountant release, D idle-hold, or A+D with a manual override
+(a prior reviewer's recommendation, not a decision). **Blocks:** the whole
+consolidation ask — nothing is scoped or built until this is picked.
+*Open since 2026-08-07.*
+
+## Q16 · Granularity flip — at which boundary, and after verifying what?
+
+Two parts. (1) The flip should land at a date boundary (before Shift A's
+first approval) so no Day-Book date is half batch-shaped, half
+shift-shaped — the code guard makes a mid-stream flip safe against
+double-posting, so this is a books-legibility choice, not a correctness
+one. Confirm the boundary. (2) The LIVE box's current
+`TALLY_VOUCHER_GRANULARITY` is unverified: deploy rsync-excludes `.env`,
+and the read-only status workflow was unusable during the 07-Aug GitHub
+Actions outage. Every artifact points to `batch` (the default; the archived
+delivery plan deferred the flip; no record of flipping exists) — but that
+is inference, and the value must be READ (SSH grep of live `.env`, or the
+`tally-sync-status` workflow once Actions returns) before any flip is
+planned. **Blocks:** scheduling the flip. *Open since 2026-08-07.*
+
+## Q17 · Does the accountant preview the consolidated voucher before it posts?
+
+Ties to Q11 (the accountant's practice is one consolidated journal per
+DAY; per-shift consolidation still means 3/day) and to option C in
+`docs/SHIFT-VOUCHER-RELEASE-OPTIONS.md`: a server-side release button
+rendering the voucher through the existing `VoucherPreviewService` before
+it goes. If the accountant wants eyes-on-before-post, the release rule must
+include the manual mechanism; if not, a timed rule can run unattended.
+Ask the accountant, via the factory (per Q11 — they should hear about the
+change before they see it). **Blocks:** choosing between Q15's options.
+*Open since 2026-08-07.*
