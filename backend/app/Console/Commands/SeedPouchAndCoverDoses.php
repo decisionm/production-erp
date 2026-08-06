@@ -322,10 +322,41 @@ class SeedPouchAndCoverDoses extends Command
                         ->where('spec_value', $spec)
                         ->first();
 
-                    // A figure a person has already set outranks one seeded from
-                    // a photograph — including a row they withdrew on purpose.
-                    if ($existing !== null) {
+                    // A FIGURE a person has already set outranks one seeded from a
+                    // photograph — including a row they withdrew on purpose.
+                    //
+                    // A ROW IS NOT A FIGURE, though, and that distinction cost the
+                    // cover its weight. The catalogue seed creates a mapping for
+                    // every spec it finds in a live standard, so 'LD 28.5 X 38'
+                    // and 'LD 30 X 49' already had pouch_film rows — naming the
+                    // right cover and carrying no grams at all. Skipping them as
+                    // "already answered" left four products (400ML ROUND, 90ML
+                    // RIB, 500ML ROUND / IFF, 450ML RIBBED) with a cover line that
+                    // resolved an item and still computed nothing.
+                    //
+                    // So a row with no dose gets the counted one, and nothing else
+                    // about it is touched — not the item, not the note anyone
+                    // wrote. Filling a blank is not overruling an answer.
+                    // Trashed counts as answered whatever its dose: a row somebody
+                    // withdrew in the app is a decision not to prefill this spec,
+                    // and re-filling it would overrule them silently.
+                    if ($existing !== null && ($existing->grams_per_piece !== null || $existing->trashed())) {
                         $kept++;
+
+                        continue;
+                    }
+
+                    if ($existing !== null) {
+                        $this->line(sprintf(
+                            '  %-11s %-16s -> %-38s 1 kg = %2d, so %s g each  (filled a blank dose)',
+                            $kind, $spec, $item->name, $nosPerKg, $grams,
+                        ));
+
+                        if ($write) {
+                            $existing->forceFill(['grams_per_piece' => $grams])->save();
+                        }
+
+                        $set++;
 
                         continue;
                     }
