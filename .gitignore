@@ -1,5 +1,8 @@
 # Local Claude Code session/tool state — not project content.
-.claude/
+# Claude Code: skills are version-controlled (shared workflows); local
+# settings and session state stay untracked.
+.claude/*
+!.claude/skills/
 
 # VSCode Local History extension — not project content.
 .history/
