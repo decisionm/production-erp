@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\DB;
  * Inbound masters sync: takes the clean JSON stock-item list the local agent
  * pulls from Tally's XML gateway and upserts it into the ERP's item master.
  * The agent owns the Tally-XML translation; this side only ever sees plain
- * JSON (TALLY-SYNC-MASTER-PLAN.md §3). Item writes go through Inventory's
+ * JSON (docs/archive/TALLY-SYNC-MASTER-PLAN.md §3). Item writes go through Inventory's
  * ItemService, never Item directly, per the module-boundary rule in CLAUDE.md.
  */
 class ItemSyncService

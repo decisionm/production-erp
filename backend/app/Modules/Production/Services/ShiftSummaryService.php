@@ -15,7 +15,7 @@ use App\Modules\Production\Models\ShiftSummary;
 /**
  * The Shift KPI Summary is a computed rollup of the Production Report and
  * Idle Time Report, not an independent data source — see
- * TALLY-SYNC-MASTER-PLAN.md §10's shift-KPI analysis. Only two fields on
+ * docs/archive/TALLY-SYNC-MASTER-PLAN.md §10's shift-KPI analysis. Only two fields on
  * this table are genuinely new raw inputs (target_production_kg,
  * power_consumption_units); everything else in report() is arithmetic over
  * shift_production_entries (Phase 2a) and Phase 2b's downtime/mold-change/

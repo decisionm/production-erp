@@ -19,7 +19,7 @@ const parser = new XMLParser({ ignoreAttributes: false });
  * LINEERROR counts). This parses that shape, but Tally's exact response
  * fields have historically varied a little by version — if `success` comes
  * back wrong against your real instance, log rawResponse and adjust the
- * checks below rather than guessing. See TALLY-SYNC-MASTER-PLAN.md §3's
+ * checks below rather than guessing. See docs/archive/TALLY-SYNC-MASTER-PLAN.md §3's
  * "errors hide in HTTP 200" gotcha.
  */
 export async function postVoucherXml(xml: string): Promise<TallyImportResult> {

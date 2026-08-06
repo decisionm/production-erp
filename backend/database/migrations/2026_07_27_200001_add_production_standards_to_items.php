@@ -10,7 +10,7 @@ return new class extends Migration
     {
         Schema::table('items', function (Blueprint $table) {
             // Molding standards for the expected-output engine
-            // (SHIFT-REDESIGN-FORMULAS.md #22/#23): EST BOX needs cycle time
+            // (docs/archive/SHIFT-REDESIGN-FORMULAS.md #22/#23): EST BOX needs cycle time
             // and cavity count as item master data. All nullable — they only
             // apply to molded finished goods and arrive as a data load.
             $table->string('colour', 32)->nullable()->after('nos_per_box');

@@ -12,7 +12,7 @@ return new class extends Migration
         // what already happened" flow. Phase 2's batch lifecycle creates a
         // row at "Start Batch" (machine + item only) before the quantity is
         // known, filled in at "Complete Batch" — see
-        // PRODUCTION-SUPERVISOR-UX-PLAN.md §1.
+        // docs/archive/PRODUCTION-SUPERVISOR-UX-PLAN.md §1.
         Schema::table('shift_production_entries', function (Blueprint $table) {
             $table->decimal('quantity_produced', 15, 4)->nullable()->default(null)->change();
         });

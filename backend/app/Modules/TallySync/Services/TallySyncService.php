@@ -179,7 +179,7 @@ class TallySyncService
      * consumes the raw materials issued that shift and produces the finished
      * item into the warehouse godown, carrying the batch number. The agent
      * decides the exact voucher shape (Manufacturing Journal if Tally BOM is
-     * enabled, else a plain Stock Journal) — TALLY-SYNC-MASTER-PLAN.md §6.
+     * enabled, else a plain Stock Journal) — docs/archive/TALLY-SYNC-MASTER-PLAN.md §6.
      */
     public function enqueueShiftProductionEntry(ShiftProductionEntry $entry): ?TallySyncEntry
     {
