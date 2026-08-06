@@ -14,15 +14,22 @@ Numbering: question numbers are assigned at MERGE time, not at branch time.
 A branch adding questions rebases on main first and takes the next free
 number — several branches cut from the same main will otherwise all claim
 the same numbers (this happened at Q15, four branches deep, 07-Aug).
+Q21/Q22 are claimed by open PR #139 and Q23/Q24 by open PR #141; new
+questions continue from Q25. The same merge-time rule governs DECISION ids:
+`record_decision.py` assigns the next free id from the store it runs
+against, so a branch carrying unmerged records must re-mint them (same
+statements and sources) after rebasing onto a main that already holds those
+ids — validation refuses duplicates.
 
 ---
 
-## Q1 · How many metres of tape are in one Tally "No"?
+## Q1 · How many metres of tape are in one Tally "No"? — RESOLVED
 
-Tally counts `Packing Tape - Transparent` in Nos; the factory gave metres per
-box. Until one No is defined (a 65 m roll → 65?), tape is display-only and
-never posts (FC-03). **Blocks:** tape consumption reaching Tally.
-*Open since 2026-07-31.*
+**Resolved 2026-08-07 by DEC-20260807-005: one No = one roll = 65 metres
+(owner-confirmed; the photographed Tally consumption screen books tape in
+whole Nos at a per-roll rate).** Tape stays display-only until the posting
+work is separately scoped — the decision defines the unit, it does not
+flip the switch. Was open since 2026-07-31 — the oldest question here.
 
 ## Q2 · Pouch `710 x 610` — is the size real, and how many to the kilogram?
 
@@ -56,7 +63,12 @@ no 30.5×39. Either the item exists under another name, or the sheet wrote the
 The standing line exists on every boxed batch (PR #136) and posts nothing
 until named. Also confirm the count: built as ONE per batch from the owner's
 "one final box for all the batches completion" — editable on the row.
-**Blocks:** the final-carton line posting. *Open since 2026-08-05.*
+New evidence 07-Aug: Tally has per-product "`<product>` Master Box" items —
+the photographed consumption screen books `200 Ml Round Master Box` in Nos
+(`docs/factory/sources/paper-reports/tally-consumption-screen.jpg`) — so
+the answer may be per-product master-box items rather than one generic
+carton item. **Blocks:** the final-carton line posting.
+*Open since 2026-08-05.*
 
 ## Q6 · The POLYMER COVER — which Tally item, and what does one weigh?
 
@@ -178,7 +190,19 @@ Ask the accountant, via the factory (per Q11 — they should hear about the
 change before they see it). **Blocks:** choosing between Q15's options.
 *Open since 2026-08-07.*
 
-## Q18 · Seven products where the paper form's standards disagree with the workbook master
+## Q18 · Products where the paper form's standards disagree with the workbook master — PARTLY RESOLVED
+
+**Update 2026-08-07, against the photographed 04/05-Aug paper reports and
+the owner's confirmations:** the 500 K/Rib row is resolved by
+DEC-20260807-001 (a DISTINCT 23 g product, `L. 500 ml Kidney RIB clear
+Pet`, missing from the master — not a wrong norm); the 100 RC row by
+DEC-20260807-004 (a distinct 12.0 g variant, same reading); the
+cycle-time rows (450 Rib C, 60 RA, and every other CT delta) are reframed
+by DEC-20260807-003 — the paper CT is the run's dialed-in setting, so CT
+differences are observations, not norm errors. The 175 TCC row moved to
+Q26 and the 100 Ema row to Q25 as their own questions. **Still open here:**
+the pack-count rows — 200 Rectangle/Sanjar (paper 114/570 vs master
+92/368) and 180 Hyb (paper 289/box vs master 256).
 
 Comparing the transcribed paper "Ideal" columns (01–04 Aug logbooks,
 `docs/factory-paper-entry/Swaashpet_Paper_Reports_Ideal_and_Actual.xlsx`)
@@ -210,24 +234,40 @@ standard is edited. Which column is current, per product?
 products; entry of the corresponding 01–04 Aug paper rows. *Open since
 2026-08-07.*
 
-## Q19 · Does machine ASB-11 exist?
+## Q19 · Does machine ASB-11 exist? — RESOLVED
 
-The 03-Aug Shift B paper report has an ASB-11 row (100 RC, 12 g — mostly
-rejection and lumps, production count blank). DEC-20260806-008 records the
-floor codes as ASB-1..ASB-10, and the ERP has ten machines. Is ASB-11 a
-real eleventh machine, or a transcription/OCR slip for another machine?
-**Blocks:** entering that paper row; the machine roster if real.
-*Open since 2026-08-07.*
+**Resolved 2026-08-07 by DEC-20260807-002: no. An extra or unnumbered
+"ASB-" row is a SECOND RUN on an existing machine around a mold change —
+the photographed 05-Aug A sheet lists ASB-4 and ASB-7 twice with its
+mold-change log explaining the ASB-7 pair, and 04-Aug C's unnumbered row
+is ASB-3's short EMA Sangam run. The roster stays ASB-1..ASB-10
+(DEC-20260806-008).**
 
-## Q20 · Is the paper form's "Ideal CT" the fixed standard, or the cycle time the machine was actually set to that run?
+## Q20 · Is the paper form's "Ideal CT" the fixed standard, or the cycle time the machine was actually set to that run? — RESOLVED
 
-The paper's ideal cycle-time column changes from shift to shift for the
-same product (100 RA appears as 11.6, 11.87, 11.89 and 12.4 s across four
-days; 450 Rib spans 19.3–21.65 s), which a fixed standard would not do.
-The ERP snapshots a standard CT at Start Batch and measures efficiency
-against it, and separately records an actual CT at completion. If the
-paper column is really "the setting dialed in today", the ERP's efficiency
-(vs the fixed standard) will read differently from what the floor expects,
-and the difference is by design, not error. Which is it?
-**Blocks:** interpreting efficiency disagreements between the paper form
-and the ERP; Q18's cycle-time rows. *Open since 2026-08-07.*
+**Resolved 2026-08-07 by DEC-20260807-003: it is the dialed-in cycle time
+of that run — an observation, not a standard. Paper-CT vs master-CT
+differences are not norm errors, and efficiency comparisons must treat
+the paper CT as the run's observed setting; the ERP's snapshotted
+standard CT remains the yardstick.** Was open since 2026-08-07.
+
+## Q25 · The EMA family — which master product(s), or two new rows?
+
+The photographed paper reports run TWO 100 ml EMA variants daily on ASB-3,
+both at 12.9 g: `100 EMA (WOR)` at 162/tray, 810/box and `100 EMA Sangam`
+at 144/tray, 720/box (04-Aug C shows both around a logged mold change;
+04-Aug B runs Sangam; 05-Aug A runs WOR). The product master has NO EMA
+rows at all — the closest by pack count is 100ML BRUTE (144/576, which
+matches neither). Which existing master product(s) do the two EMA runs map
+to — or are both to be added as new rows? **Blocks:** entering the ASB-3
+paper rows; EMA consumption norms. *Open since 2026-08-07.*
+
+## Q26 · Is the paper's "175 TC C" the master's "200CC (43MM NECK)"?
+
+Pack counts match exactly — the paper runs 175 TC C at 115/tray, 575/box
+every photographed shift, and the master's `200CC  (43MM NECK)` row holds
+115/575 (in its pouch columns). But the weights differ (paper 20 g vs
+master 19.5 g) and the master row has NO cycle time, so nothing else can
+corroborate. One product under two names — with one weight figure to
+correct — or two different products? **Blocks:** entering the ASB-9 paper
+rows; that row's weight norm. *Open since 2026-08-07.*

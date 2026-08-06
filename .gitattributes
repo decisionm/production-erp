@@ -1,5 +1,10 @@
 # The knowledge system is byte-exact: LF only, everywhere it validates.
 docs/factory/** text eol=lf
+# ...except photographic evidence: images are binary, and the manifest's
+# sha256 pins are over the raw bytes — text normalization would corrupt both.
+docs/factory/sources/**/*.jpg binary
+docs/factory/sources/**/*.jpeg binary
+docs/factory/sources/**/*.png binary
 scripts/factory-knowledge/** text eol=lf
 .claude/skills/** text eol=lf
 AGENTS.md text eol=lf
