@@ -9,6 +9,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch: {}
 
 jobs:
   # The knowledge system's "validation will fail" promises are only promises
