@@ -1,0 +1,92 @@
+name: Rename to factory names
+
+# Renames the machines to ASB-1..ASB-10 and the shifts to A/B/C — the names on
+# the factory's own paperwork — ON THE SERVER, over the same SSH key the deploy
+# uses.
+#
+# Their handwritten PRODUCTION REPORT, IDLE TIME REPORT and mould-change log all
+# write ASB-n and shift A/B/C. This database shipped with MC-01..MC-10 and
+# Morning/Afternoon/Night, so a supervisor holding the paper and reading the
+# screen was reading two vocabularies for one factory.
+#
+# ONLY THE CODE CHANGES on a machine, never its office name: the screens render
+# "Machine 3 (MC-03)", which becomes "Machine 3 (ASB-3)" and reads correctly to
+# both the floor and the office.
+#
+# Batch numbers are unaffected — generateBatchNumber() takes the first digit run
+# and pads it to two, so MC-01 and ASB-1 both mint "M01". Pinned by
+# FactoryNamesTest so it cannot quietly stop being true.
+#
+#
+# Idempotent and non-destructive: an already-renamed row is skipped, and a name
+# the factory chose itself is reported and left alone. Nothing overwrites a
+# human answer with a computed one.
+#
+# Same reasoning as the product-master import workflow: this writes master data,
+# so it must be a deliberate act rather than a deploy side effect — but the only
+# other way to run it is an interactive SSH session, and repeated password
+# failures trip the host's brute-force protection (which has already broken one
+# deploy). Actions holds a key that works.
+#
+# Manual only. DRY RUN by default.
+
+on:
+  workflow_dispatch:
+    inputs:
+      write:
+        description: 'Actually write. Leave false for a dry run that changes nothing.'
+        type: boolean
+        default: false
+
+concurrency:
+  group: rename-to-factory-names
+  cancel-in-progress: false
+
+jobs:
+  rename:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Check hPanel → Advanced → SSH Access, and whether brute-force protection has banned the runner. Re-running often clears a transient failure."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      - name: Report what is about to run
+        run: |
+          if [ "${{ inputs.write }}" = "true" ]; then
+            echo "::warning::RENAMING live machines and shifts."
+          else
+            echo "Dry run — nothing will be written."
+          fi
+
+      - name: Run it
+        run: |
+          set -o pipefail
+          FLAGS=""
+          [ "${{ inputs.write }}" = "true" ] && FLAGS="$FLAGS --write"
+
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && /opt/alt/php84/usr/bin/php artisan production:rename-to-factory-names $FLAGS" \
+            2>&1 | tee output.txt
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Rename to factory names"
+            echo
+            echo "write: \`${{ inputs.write }}\`"
+            echo
+            echo '```'
+            cat output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
