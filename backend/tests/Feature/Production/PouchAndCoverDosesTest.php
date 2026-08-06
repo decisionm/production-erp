@@ -4,7 +4,9 @@ namespace Tests\Feature\Production;
 
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Production\Models\PackingMaterialMapping;
+use App\Modules\Production\Models\ProductionStandard;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Tests\TestCase;
 
 /**
@@ -140,9 +142,17 @@ class PouchAndCoverDosesTest extends TestCase
         $items = $this->catalogue();
         $this->seedDoses();
 
-        $row = PackingMaterialMapping::query()->where('spec_value', 'LD 30 X 49')->sole();
+        // Scoped by KIND, because a cover legitimately carries two rows now: one
+        // under 'carton' (17 workbook rows pack straight into the bag) and one
+        // under 'pouch_film' (6 rows put a cover over a finished box). Same
+        // cover, same weight, two columns that can name it.
+        $rows = PackingMaterialMapping::query()->where('spec_value', 'LD 30 X 49')->get();
 
-        $this->assertSame($items['LDPE  COVER (30x49x120G)']->id, $row->item_id);
+        $this->assertCount(2, $rows);
+
+        foreach ($rows as $row) {
+            $this->assertSame($items['LDPE  COVER (30x49x120G)']->id, $row->item_id);
+        }
     }
 
     public function test_the_unanswered_size_is_left_unset(): void
@@ -203,6 +213,52 @@ class PouchAndCoverDosesTest extends TestCase
             PackingMaterialMapping::query()->withTrashed()->where('spec_value', 'HM 30 X 49')->count(),
             'A withdrawn dose left in the trash would silently block the real answer.',
         );
+    }
+
+    public function test_the_withdrawal_notice_counts_only_the_column_its_kind_is_read_from(): void
+    {
+        // The withdrawn HM 30 X 49 row is a CARTON dose, and a carton dose is
+        // only ever reached through carton_spec — forStandard() resolves
+        // carton_spec as carton, tray_spec as tray, pouch_spec as pouch_film,
+        // and the mapping key is (spec_kind, spec_value).
+        //
+        // This is pinned because the count has been wrong in BOTH directions. It
+        // first read carton_spec alone and missed that the workbook carries this
+        // cover in the pouch column; widened to all three columns, it then
+        // reported "2 product standards carried it" for a dose those two products
+        // could never have used — a false alarm about live vouchers, which on a
+        // withdrawal notice is not the harmless direction.
+        $items = $this->catalogue();
+        $bottle = Item::create(['sku' => 'B1', 'name' => '750ML KIDNEY', 'uom' => 'Nos', 'is_active' => true]);
+
+        PackingMaterialMapping::query()->create([
+            'spec_kind' => 'carton',
+            'spec_value' => 'HM 30 X 49',
+            'item_id' => $items['Hm Polythene Bags -  30 x 49 x 200G']->id,
+            'grams_per_piece' => '50.0000',
+            'note' => 'Factory count, 06-Aug: 1 kg = 20 nos.',
+        ]);
+
+        // Exactly the workbook's shape: the cover sits in the POUCH column.
+        ProductionStandard::create([
+            'item_id' => $bottle->id,
+            'source_product_name' => '750ML KIDNEY',
+            'pouch_spec' => 'HM 30 X 49',
+            'status' => 'ready',
+        ]);
+
+        // Read the output rather than chaining expectsOutputToContain twice: both
+        // phrases live on ONE line, and the chained matcher checks them against
+        // separate lines.
+        $this->assertSame(0, Artisan::call('production:seed-pouch-doses', ['--write' => true]));
+        $output = Artisan::output();
+
+        // Zero — the carton dose reached nothing.
+        $this->assertStringContainsString('0 product standards used it', $output);
+        // And the one that carries the size in the pouch column is named
+        // separately, because it is a different fact: no wrong figure reached it,
+        // but it has no figure at all until the factory weighs the bag.
+        $this->assertStringContainsString('1 more carry the same size in another column', $output);
     }
 
     public function test_withdrawal_only_touches_this_commands_own_untouched_row(): void

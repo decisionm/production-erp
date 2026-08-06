@@ -673,7 +673,16 @@ function readPackingSuggestions(raw: SuggestedPackingMaterial[] | null | undefin
             // PackingMaterialMapping::KIND_POUCH_FILM and stored in spec_kind;
             // renaming it would break the mapping lookup and every stored row.
             // Only the word on the screen changes.
-            label: { carton: 'Carton', tray: 'Tray', film: 'Pouch', tape: 'Tape', other: 'Packing material' }[kind],
+            // THE BACKEND'S OWN WORD FIRST, when it sends one. The pouch column
+            // holds both pouches and HM/LD covers, and only the backend knows
+            // which this row is — the rule (isBag) lives in
+            // PackingMaterialSuggestionService and a second copy here would be a
+            // second thing to get wrong. It sends `label: "Cover"` for a cover
+            // and nothing for everything else, so the map below stays the
+            // default for every ordinary row.
+            label:
+                wireText((row as SuggestedPackingMaterial & { label?: unknown }).label as string | null | undefined)
+                ?? { carton: 'Carton', tray: 'Tray', film: 'Pouch', tape: 'Tape', other: 'Packing material' }[kind],
             itemId,
             itemName: wireText(row.item?.name),
             // The wire's unit, always — it is the unit the wire's own FACTOR is
@@ -3433,8 +3442,37 @@ export default function ShiftProductionEntryPage() {
     // material the suggestion is not a stand-in for that material's dosing — a
     // suggestion's grams under someone else's colour is a borrowed figure, and
     // a borrowed figure is what books the wrong kg to Tally.
+    /** The bottle weight the percentage applies to, from the run's own preview. */
+    const mbBottleGrams = mbSuggestion.bottleGrams;
+
+    /**
+     * The factory's standard dose for THIS BOTTLE — 2.5% of its weight.
+     *
+     * This one is not material-specific and must not be gated as if it were. A
+     * dosing row is a statement about one colourant on one product, so borrowing
+     * it across materials books the wrong kg; a percentage of the bottle is a
+     * statement about the BOTTLE, and it applies to whichever masterbatch the row
+     * names.
+     *
+     * That distinction is why the row still came up empty after the percentage
+     * shipped (owner, 06-Aug: "still masterbatch auto fill not happening ... i am
+     * testing for amber"). The suggestion's grams only transferred when the row
+     * named the backend's own suggested item — but this drawer pre-selects from
+     * the day bin and from the catalogue, so on an amber run with two amber
+     * materials in the masters the ids differ and nothing filled.
+     */
+    const mbPercentGrams =
+        mbBottleGrams !== null && mbSuggestion.percent !== null
+            ? Math.round(((mbBottleGrams * mbSuggestion.percent) / 100) * 10000) / 10000
+            : null;
+
     const mbGramsSuggested =
-        mbDosingGrams ?? (mbItemIdWatch != null && mbItemIdWatch === mbSuggestion.itemId ? mbSuggestion.grams : null);
+        mbDosingGrams
+        ?? (mbItemIdWatch != null && mbItemIdWatch === mbSuggestion.itemId ? mbSuggestion.grams : null)
+        // Any masterbatch the row names, once one is named. Never with the box
+        // empty: no material means no dose, which is the whole reason the row is
+        // hidden on a clear run.
+        ?? (mbItemIdWatch != null ? mbPercentGrams : null);
 
     // ---- The masterbatch PERCENTAGE ---------------------------------------
     // The factory doses masterbatch as a percentage of the bottle, and the
@@ -3453,8 +3491,6 @@ export default function ShiftProductionEntryPage() {
     // lives in config on the server (production.masterbatch_percent) and a
     // second copy of it here is a second thing to change.
     const [mbPercent, setMbPercent] = useState<number | null>(null);
-    /** The bottle weight the percentage applies to, from the run's own preview. */
-    const mbBottleGrams = mbSuggestion.bottleGrams;
     // Shown only when there is a weight to take a percentage OF, and only on a
     // row that names a masterbatch.
     const mbPercentApplies = mbBottleGrams !== null && mbItemIdWatch != null;
@@ -3680,10 +3716,30 @@ export default function ShiftProductionEntryPage() {
         // where the real issued quantities are.
         if (amending) return [];
         const round4 = (n: number) => Math.round(n * 10000) / 10000;
+        // THE POUCH COUNT HAS A FALLBACK, and the cover line is why.
+        //
+        // An HM/LD cover in the pouch column is counted per COVER, and a cover
+        // holds a stated number of bottles (the workbook's nos_per_pouch: 145 for
+        // 400ML ROUND, 110 and 161 for the two kidney bottles). `no_of_pouches`
+        // carries that count — but only sometimes: the auto-suggest that fills it
+        // stands down when the standard declares its packing modes, and the
+        // packing lines only write it back for a line whose mode is 'pouch'. So a
+        // product whose declared modes are box and tray leaves the field null,
+        // and the cover line would have arrived blank — which is precisely the
+        // silent nothing this whole day has been spent removing.
+        //
+        // Derived the same way the auto-suggest derives it, from the same
+        // rounding config, so the fallback and the typed figure cannot disagree
+        // about what a full cover is. A count the supervisor typed always wins.
+        const derivedPouches =
+            completingEntry?.item.nos_per_pouch && quantityProduced
+                ? roundPer(quantityProduced / completingEntry.item.nos_per_pouch, settings?.packing_rounding)
+                : null;
+
         const counts: Record<PackingBasis, { count: number | null; word: string }> = {
             carton: { count: goodBoxesWatch ?? null, word: 'cartons' },
             tray: { count: traysWatch ?? null, word: 'trays' },
-            pouch: { count: pouchesWatch ?? null, word: 'pouches' },
+            pouch: { count: pouchesWatch ?? derivedPouches, word: 'pouches' },
             bottle: { count: quantityProduced ?? null, word: 'bottles' },
         };
 
@@ -3737,41 +3793,69 @@ export default function ShiftProductionEntryPage() {
             const pickedId = packingItemPicks[row.key] ?? null;
             const itemId = pickedId ?? row.itemId;
             const picked = pickedId !== null;
-            const catalogue = packingOptions?.[row.kind] ?? [];
+            // KEYED ON THE WIRE'S KIND, NOT THE DRAWER'S.
+            //
+            // THIS IS THE 602. The options endpoint keys its lists on the wire
+            // kind — carton, tray, pouch_film, tape — while this file normalises
+            // pouch_film to 'film' the moment a suggestion is read
+            // (packingKindOf). So `packingOptions['film']` was undefined and the
+            // POUCH row's dropdown was empty on every batch that has ever run.
+            // antd then printed the Select's raw value, which is how the owner
+            // came to be looking at "602" beside a Kg box (06-Aug) — 602 being
+            // the item id of Poly Olefin Pouch.
+            //
+            // Carton, tray and tape were unaffected because their two names
+            // happen to coincide. Only this one had a translation to do and no
+            // place doing it.
+            const catalogue = packingOptions?.[row.kind === 'film' ? 'pouch_film' : row.kind] ?? [];
 
             // The picked material's own name wins, then the mapping's, then the
             // catalogue as a fallback for a backend that sends an id without a
             // name.
+            // The picked material's own name wins, then the mapping's, then the
+            // catalogue. `row.itemName` is NOT skipped when a pick is in play any
+            // more: it was, and that meant a pick the catalogue could not name
+            // fell through to `Item #602` — the fix's own control reintroducing
+            // the bug it exists to prevent. A pick that resolves to the same id
+            // the mapping already held has the same name either way.
             const resolvedName =
                 catalogue.find((option) => option.id === itemId)?.name
-                ?? (picked ? null : row.itemName)
+                ?? (itemId === row.itemId ? row.itemName : null)
                 ?? itemById(itemId)?.name
                 ?? null;
 
-            // A MAPPED MATERIAL THE DROPDOWN DOES NOT HOLD MUST STILL SHOW ITS
-            // NAME.
+            // A BELT-AND-BRACES NAME FOR A MATERIAL THE LIST STILL DOES NOT HOLD.
             //
-            // antd renders a Select's raw `value` when no option matches it, so
-            // a tray mapped to item 602 printed "602" in the box — and the owner
-            // read that as a quantity, which is exactly what it looks like
-            // sitting next to a Kg field (06-Aug, with a screenshot).
+            // With the key fixed above, the pouch catalogue arrives and this
+            // almost never fires. It stays because the list is filtered — active
+            // items whose name carries one of the kind's words — and a mapping
+            // can legitimately point outside it: an item the factory deactivated
+            // after it was mapped (twenty were, on 5 August), a name no word
+            // matches, or an options read that 403'd. In all three the row must
+            // still say WHICH material it means rather than printing an id.
             //
-            // The cause is not known and this does not depend on knowing it: an
-            // item deactivated after it was mapped, a name the kind's word
-            // filter does not match, an options read that 403'd — all three end
-            // the same way. So the row's own material is prepended to its
-            // options, which guarantees a match and therefore a name.
+            // DISABLED, and that is the point rather than an oversight. Those
+            // items are excluded on purpose — the deactivated ones so the floor
+            // cannot pick them — so re-offering one as a selectable choice would
+            // undo that. It shows the name; it is not a route back in.
             //
-            // `Item #602` is the last resort rather than a bare 602: a labelled
-            // id reads as a debugging aid, which is what it is. A bare number in
-            // a box beside a quantity reads as a quantity.
+            // Keyed on the MAPPING's item, never on the resolved one: if it
+            // tracked the current pick, choosing any catalogue item would drop
+            // this entry and make the mapping's own material unreachable in a
+            // Select that has no allowClear.
+            const mapped = row.itemId;
             const options =
-                itemId !== null && itemId !== undefined && ! catalogue.some((option) => option.id === itemId)
+                mapped !== null && ! catalogue.some((option) => option.id === mapped)
                     ? [
                           {
-                              id: itemId,
-                              name: resolvedName ?? `Item #${itemId}`,
-                              uom: itemById(itemId)?.uom ?? null,
+                              id: mapped,
+                              // `Item #602` only if even the catalogue cannot name
+                              // it: a labelled id reads as the debugging aid it
+                              // is, where a bare number beside a Kg box reads as a
+                              // quantity.
+                              name: row.itemName ?? itemById(mapped)?.name ?? `Item #${mapped}`,
+                              uom: itemById(mapped)?.uom ?? null,
+                              disabled: true,
                           },
                           ...catalogue,
                       ]
@@ -7365,6 +7449,10 @@ export default function ShiftProductionEntryPage() {
                                                 options={row.options.map((option) => ({
                                                     value: option.id,
                                                     label: option.uom ? `${option.name} · ${option.uom}` : option.name,
+                                                    // Set on the mapping's own material when the
+                                                    // catalogue excludes it — shown so the row can
+                                                    // name itself, not offered as a choice.
+                                                    disabled: (option as { disabled?: boolean }).disabled ?? false,
                                                 }))}
                                                 // The whole catalogue for this
                                                 // kind, searchable — eleven

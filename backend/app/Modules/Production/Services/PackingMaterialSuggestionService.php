@@ -114,6 +114,30 @@ class PackingMaterialSuggestionService
      */
     private const CONVERSION_SCALE = 8;
 
+    /**
+     * How a COVER in the pouch column is counted.
+     *
+     * Not a carton and not a tray, so there is no kind whose basis it can
+     * borrow: a cover holds a stated number of BOTTLES. The workbook says how
+     * many in its nos_per_pouch column — 145 for 400ML ROUND, 110 and 161 for
+     * the two kidney bottles, 83 for 500ML ROUND / IFF, 120 for 450ML RIBBED —
+     * and the drawer already carries that count in `no_of_pouches`.
+     *
+     * 'per_pouch' is the wire's word and the frontend already reads it (its
+     * basis matcher tests for "pouch"), so the count follows without the
+     * frontend needing to know what a cover is.
+     *
+     * The unit pair is the pouch's own: the sheet gives covers per KILOGRAM
+     * (11, 25, 20, 15) so the factor is grams a piece and the quantity is kg,
+     * exactly as for a pouch. Only the count differs.
+     */
+    private const COVER_BASIS = [
+        'basis' => 'per_pouch',
+        'quantity_basis' => 'covers',
+        'unit' => 'kg',
+        'factor_unit' => 'g',
+    ];
+
     public function __construct(private readonly PackingMaterialMappingService $mappings) {}
 
     /**
@@ -130,7 +154,7 @@ class PackingMaterialSuggestionService
      *     kind: string, spec: string, item: ?array{id: int, name: string},
      *     basis: string, quantity_basis: string, factor: ?string,
      *     unit: string, factor_unit: string, submit_as_stock: bool,
-     *     reason: string,
+     *     reason: string, label: ?string,
      * }>
      */
     public function forStandard(?ProductionStandard $standard): array
@@ -170,7 +194,39 @@ class PackingMaterialSuggestionService
             $entries[] = $this->entry(PackingMaterialMapping::KIND_TRAY, $tray, $standard, 'tray_spec');
         }
 
-        if ($film !== null) {
+        if ($film !== null && $this->isBag($film)) {
+            // A COVER IN THE POUCH COLUMN IS NOT A POUCH, and it must not be
+            // counted like one.
+            //
+            // The workbook's pouch column holds two different things. 67 rows
+            // name a poly-olefin pouch (750*610, 780*610, 835*610) and 6 name an
+            // HM or LD COVER — the owner's own distinction (06-Aug): "if it is
+            // pocu 750*610, 835*610 and 780*610 ... if it is single packaging
+            // conver like HM and Ld, we have the calcuatio".
+            //
+            // They are counted differently and the sheet says so. A pouch goes
+            // over a TRAY, so five trays take five pouches. A cover holds a
+            // stated number of BOTTLES — the workbook's nos_per_pouch column:
+            // 145 for 400ML ROUND, 110 for 750ML KIDNEY, 161 for 500ML KIDNEY
+            // LONG NECK, 83 for 500ML ROUND / IFF, 120 for 450ML RIBBED.
+            //
+            // Dosing a cover per tray would have been badly wrong rather than
+            // slightly: 90ML RIB packs 10 trays to a box, so a per-tray cover
+            // books ten covers where the box takes about one. And it is not
+            // one-per-box either — 400ML ROUND is 240 bottles a box over 145 to
+            // a cover, which is 1.66 covers, not 1.
+            //
+            // The weights are the counted ones from the same sheet as the
+            // pouches (11, 25, 20 and 15 to the kilogram).
+            $entries[] = $this->entry(
+                PackingMaterialMapping::KIND_POUCH_FILM,
+                $film,
+                $standard,
+                'pouch_spec',
+                basis: self::COVER_BASIS,
+                label: 'Cover',
+            );
+        } elseif ($film !== null) {
             // ONE POUCH PER TRAY, not one per carton.
             //
             // The factory (05-Aug): "along with the tray, the pouch also needs
@@ -226,19 +282,32 @@ class PackingMaterialSuggestionService
     /**
      * One material, resolved or explained.
      *
+     *
+     * @param  ?array{basis: string, quantity_basis: string, unit: string, factor_unit: string}  $basis
      * @return array{
      *     kind: string, spec: string, item: ?array{id: int, name: string},
      *     basis: string, quantity_basis: string, factor: ?string,
      *     unit: string, factor_unit: string, submit_as_stock: bool,
-     *     reason: string,
+     *     reason: string, label: ?string,
      * }
      */
-    private function entry(string $kind, string $spec, ProductionStandard $standard, string $column, ?string $basisKind = null): array
-    {
+    private function entry(
+        string $kind,
+        string $spec,
+        ProductionStandard $standard,
+        string $column,
+        ?string $basisKind = null,
+        ?array $basis = null,
+        ?string $label = null,
+    ): array {
         // $basisKind re-bases the quantity onto another kind's container while
-        // leaving the material and its unit alone. Used for one case: a film on
+        // leaving the material and its unit alone. Used for one case: a pouch on
         // a tray-packed product is counted per TRAY, not per carton.
-        $basis = PackingMaterialMapping::KIND_BASIS[$kind];
+        //
+        // $basis replaces the whole thing, for the cover in the pouch column —
+        // its count is neither a carton nor a tray but a stated number of
+        // bottles, so there is no kind to borrow a basis from.
+        $basis ??= PackingMaterialMapping::KIND_BASIS[$kind];
 
         if ($basisKind !== null) {
             $rebased = PackingMaterialMapping::KIND_BASIS[$basisKind];
@@ -257,11 +326,19 @@ class PackingMaterialSuggestionService
             ],
             'basis' => $basis['basis'],
             'quantity_basis' => $basis['quantity_basis'],
+            // THE WORD THIS ROW IS CALLED ON SCREEN, when the kind alone cannot
+            // say it. The pouch column holds both pouches and covers, and the
+            // owner distinguishes them explicitly — so the row that names a
+            // cover says "Cover". Sent from here rather than worked out again in
+            // the frontend: the rule for what is a cover (isBag) lives in this
+            // class, and a second copy of it on the other side is a second thing
+            // to get wrong.
+            'label' => $label,
             'factor' => $filing['factor'],
             'unit' => $filing['unit'],
             'factor_unit' => $filing['factor_unit'],
             'submit_as_stock' => $filing['submit_as_stock'],
-            'reason' => $this->reason($kind, $spec, $mapping, $filing).$this->inferredNote($standard, $column),
+            'reason' => $this->reason($kind, $spec, $mapping, $filing, $label).$this->inferredNote($standard, $column),
         ];
     }
 
@@ -378,9 +455,13 @@ class PackingMaterialSuggestionService
      *
      * @param  array{factor: ?string, unit: string, factor_unit: string, submit_as_stock: bool, metres_per_unit: ?string}  $filing
      */
-    private function reason(string $kind, string $spec, ?PackingMaterialMapping $mapping, array $filing): string
+    private function reason(string $kind, string $spec, ?PackingMaterialMapping $mapping, array $filing, ?string $override = null): string
     {
-        $label = match ($kind) {
+        // $override is the caller's own word for the row, used for the one case
+        // the kind cannot name: an HM/LD COVER sitting in the pouch column is a
+        // cover, not a pouch, and the unresolved-row sentence has to ask for the
+        // right thing ("Cover \"LD 30 X 49\" — choose the material").
+        $label = $override ?? match ($kind) {
             PackingMaterialMapping::KIND_CARTON => 'Carton',
             PackingMaterialMapping::KIND_TRAY => 'Tray',
             PackingMaterialMapping::KIND_POUCH_FILM => 'Pouch',
