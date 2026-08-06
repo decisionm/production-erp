@@ -35,7 +35,7 @@ class FinishedCartonService
         return DB::transaction(function () use ($entry, $userId) {
             $existing = $entry->cartons()->count();
             if ($existing > 0) {
-                return $entry->cartons()->orderBy('id')->get();
+                return $this->listFor($entry);
             }
 
             // Packed = gross where a quality check has already netted the
@@ -90,8 +90,22 @@ class FinishedCartonService
                 ]);
             }
 
-            return $entry->cartons()->orderBy('id')->get();
+            return $this->listFor($entry);
         });
+    }
+
+    /**
+     * The batch's cartons, loaded for the label: each carton carries its item
+     * and the (one, shared) entry with machine and shift, so the resource can
+     * print the batch spine and compute the net weight without a query per
+     * box. This is also the reprint read — identities never change.
+     */
+    public function listFor(ShiftProductionEntry $entry): Collection
+    {
+        $entry->loadMissing(['workCenter', 'shift']);
+
+        return $entry->cartons()->with('item')->orderBy('id')->get()
+            ->each(fn (FinishedCarton $carton) => $carton->setRelation('entry', $entry));
     }
 
     /** The traceability read: one scanned carton back to its batch. */

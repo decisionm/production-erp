@@ -2447,6 +2447,21 @@ export interface FinishedCarton {
     is_partial: boolean;
     status: 'in_stock' | 'dispatched';
     delivery_id: number | null;
+    /**
+     * NET weight in kg: pieces × the run's resolved unit weight — the same
+     * figure the server computes every stored kilogram from. Null when the
+     * run resolved no weight. There is deliberately no gross weight: it needs
+     * the empty carton's tare, which exists nowhere in the data (pending
+     * owner question Q15) — a missing figure is omitted, never invented.
+     */
+    net_weight_kg?: string | null;
+    /**
+     * Customer/PO for a batch made against a sales order. Blank-capable and
+     * blank today: the schema has no batch→sales-order linkage (cartons meet
+     * an order only at dispatch scan), so the server always sends null. The
+     * label renders it only when a real linkage one day fills it.
+     */
+    sales_order?: { customer: string | null; order_no: string | null } | null;
     /** The traceability spine: which batch this physical box came from. */
     batch?: {
         shift_production_entry_id: number;
@@ -2454,6 +2469,8 @@ export interface FinishedCarton {
         production_date: string | null;
         machine: string | null;
         shift: string | null;
+        /** The run's box size — pack variants differ by exactly this figure. */
+        nos_per_box?: string | null;
     };
     created_at: string | null;
 }

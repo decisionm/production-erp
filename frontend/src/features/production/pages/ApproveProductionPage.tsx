@@ -873,11 +873,12 @@ function SourceMaterialSection() {
 }
 
 /**
- * CARTON BARCODE LABELS for a completed batch's packed boxes. One click mints
- * them (the server is idempotent — a second click returns the same permanent
- * codes, so generate and reprint are the same button) and shows the printable
- * labels inline. Only offered once the batch is completed: before that the
- * packed count is still moving.
+ * CARTON LABEL REPRINT (DEC-20260807-001). The labels PRINT on the Shift
+ * Floor, the moment the batch completes — the packer sticks them there. This
+ * desk keeps the same screen as the reprint: the server is idempotent, so
+ * the click returns the identical permanent codes and can never mint a
+ * second identity for a box. Only offered once the batch is completed:
+ * before that the packed count is still moving.
  */
 function CartonLabelsSection({ row }: { row: ShiftProductionEntry }) {
     const [cartons, setCartons] = useState<FinishedCarton[] | null>(null);
@@ -895,15 +896,15 @@ function CartonLabelsSection({ row }: { row: ShiftProductionEntry }) {
 
     return (
         <>
-            <Typography.Title level={5} style={{ marginTop: 16 }}>Carton Labels</Typography.Title>
+            <Typography.Title level={5} style={{ marginTop: 16 }}>Carton Labels — Reprint</Typography.Title>
             {cartons === null ? (
                 <>
                     <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
-                        Every packed box gets a permanent barcode naming its batch — scanned later at dispatch.
-                        Codes never change, so this button also reprints existing labels.
+                        Labels print on the Shift Floor when the batch completes — this is the reprint.
+                        Codes are permanent: reprinting produces the identical labels, never new ones.
                     </Typography.Text>
                     <Button loading={generateMutation.isPending} onClick={() => generateMutation.mutate()}>
-                        Carton labels
+                        Reprint carton labels
                     </Button>
                 </>
             ) : (

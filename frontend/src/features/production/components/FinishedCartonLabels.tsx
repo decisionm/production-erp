@@ -3,6 +3,7 @@ import { Button, Card, Col, Empty, Row, Space, Tag, Typography } from 'antd';
 import JsBarcode from 'jsbarcode';
 import BarcodeDisplay from '@/components/barcode/BarcodeDisplay';
 import type { FinishedCarton } from '@/features/production/types';
+import { COMPANY_NAME } from '@/lib/company';
 
 interface FinishedCartonLabelsProps {
     cartons: FinishedCarton[];
@@ -11,6 +12,13 @@ interface FinishedCartonLabelsProps {
 function fmtPieces(value: string): string {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parseFloat(parsed.toFixed(4)).toLocaleString('en-IN') : value;
+}
+
+function fmtKg(value: string): string {
+    const parsed = Number(value);
+    return Number.isFinite(parsed)
+        ? parsed.toLocaleString('en-IN', { maximumFractionDigits: 3 })
+        : value;
 }
 
 function escapeHtml(value: string): string {
@@ -38,14 +46,40 @@ function barcodeSvg(code: string): string {
     }
 }
 
+/**
+ * The human-readable lines under the barcode (DEC-20260807-002). Weight is
+ * NET only — gross needs the empty carton's tare, which the factory has not
+ * stated (pending Q15), and a figure the data cannot support is omitted, not
+ * estimated. Customer/PO appears only when the batch really is against a
+ * sales order — no such linkage exists in the schema today, so the line
+ * simply never renders yet.
+ */
 function labelDetails(carton: FinishedCarton): string[] {
     const sku = carton.item?.sku ?? 'Item';
-    return [
+    const lines = [
         `${sku} — ${carton.item?.name ?? 'Finished goods'}`,
         `${fmtPieces(carton.pieces)} pcs${carton.is_partial ? ' · PARTIAL BOX' : ''}`,
+    ];
+    if (carton.batch?.nos_per_box != null) {
+        lines.push(`Nos per box: ${fmtPieces(carton.batch.nos_per_box)}`);
+    }
+    if (carton.net_weight_kg != null) {
+        lines.push(`Net weight: ${fmtKg(carton.net_weight_kg)} kg`);
+    }
+    lines.push(
         `Batch ${carton.batch?.batch_number ?? '—'} · ${carton.batch?.production_date ?? '—'}`,
         `${carton.batch?.machine ?? '—'} · ${carton.batch?.shift ?? '—'} shift`,
-    ];
+    );
+    if (carton.sales_order) {
+        const so = [
+            carton.sales_order.customer,
+            carton.sales_order.order_no ? `PO ${carton.sales_order.order_no}` : null,
+        ]
+            .filter(Boolean)
+            .join(' · ');
+        if (so) lines.push(so);
+    }
+    return lines;
 }
 
 function printAll(cartons: FinishedCarton[]) {
@@ -58,9 +92,9 @@ function printAll(cartons: FinishedCarton[]) {
             const details = labelDetails(carton);
             return `
                 <section class="carton-label">
-                    <div class="title">${escapeHtml(details[0])}</div>
+                    <div class="company">${escapeHtml(COMPANY_NAME)}</div>
                     ${barcodeSvg(carton.carton_no)}
-                    ${details.slice(1).map((detail) => `<div>${escapeHtml(detail)}</div>`).join('')}
+                    ${details.map((detail) => `<div>${escapeHtml(detail)}</div>`).join('')}
                 </section>
             `;
         })
@@ -82,7 +116,13 @@ function printAll(cartons: FinishedCarton[]) {
                         text-align: center;
                     }
                     .carton-label:last-child { break-after: auto; }
-                    .carton-label .title { font-size: 15px; font-weight: 700; margin-bottom: 2mm; }
+                    .carton-label .company {
+                        font-size: 14px;
+                        font-weight: 700;
+                        text-transform: uppercase;
+                        letter-spacing: 0.05em;
+                        margin-bottom: 2mm;
+                    }
                     .carton-label div { font-size: 12px; margin-top: 1mm; }
                 </style>
             </head>
@@ -96,9 +136,10 @@ function printAll(cartons: FinishedCarton[]) {
 
 /**
  * The printable barcode labels for a completed batch's cartons — one CODE128
- * label per physical box, the batch spine printed under the code so a box on
- * a pallet months later still names its batch, machine and shift. Codes are
- * permanent: reprinting produces the identical label.
+ * label per physical box: the company name on top, then the code, then the
+ * pack facts (pieces, nos per box, net weight) and the batch spine, so a box
+ * on a pallet months later still names its batch, machine and shift. Codes
+ * are permanent: reprinting produces the identical label.
  */
 export default function FinishedCartonLabels({ cartons }: FinishedCartonLabelsProps) {
     if (cartons.length === 0) {
@@ -135,12 +176,12 @@ export default function FinishedCartonLabels({ cartons }: FinishedCartonLabelsPr
                             >
                                 <BarcodeDisplay
                                     code={carton.carton_no}
-                                    label={details[0]}
-                                    printDetails={details.slice(1)}
+                                    label={COMPANY_NAME}
+                                    printDetails={details}
                                     printButtonLabel="Print / Reprint"
                                 />
                                 <Typography.Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
-                                    {details[1]} · {details[2]}
+                                    {details.slice(1, 4).join(' · ')}
                                 </Typography.Text>
                             </Card>
                         </Col>

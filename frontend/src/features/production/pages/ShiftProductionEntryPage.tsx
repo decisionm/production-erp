@@ -1,3 +1,4 @@
+import { PrinterOutlined } from '@ant-design/icons';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Checkbox, Col, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, type InputRef, message, Modal, Radio, Row, Select, Space, Table, Tag, TimePicker, Tooltip, Typography } from 'antd';
@@ -12,6 +13,7 @@ import { useAuthStore } from '@/features/auth/store';
 import { listAllEmployees } from '@/features/hrms/api';
 import { listAllItems, listAllWarehouses } from '@/features/inventory/api';
 import type { Item } from '@/features/inventory/types';
+import CartonPrintModal from '@/features/production/components/CartonPrintModal';
 import HandoverModal from '@/features/production/components/HandoverModal';
 import {
     amendBatch,
@@ -1324,6 +1326,11 @@ export default function ShiftProductionEntryPage() {
     const [startProductionDateOverride, setStartProductionDateOverride] = useState<string | null>(null);
     const [startResumeNotice, setStartResumeNotice] = useState<StartBatchResumeOutcome | null>(null);
     const [completingEntry, setCompletingEntry] = useState<ShiftProductionEntry | null>(null);
+    // THE PACKER'S PRINT (DEC-20260807-001): which completed batch's carton
+    // labels are open for printing. Set automatically the moment a completion
+    // goes in, and from a button on any completed row — the person packing
+    // prints here on the floor; the Approval Desk's screen is the reprint.
+    const [cartonPrintEntry, setCartonPrintEntry] = useState<ShiftProductionEntry | null>(null);
     // The SAME drawer, re-opened on a batch that was already completed. Held as
     // an id rather than a second entry object so there is exactly one source of
     // truth for what is on screen (`completingEntry`) and this only answers
@@ -4118,6 +4125,21 @@ export default function ShiftProductionEntryPage() {
     };
 
     /**
+     * The packer's door back into the labels (DEC-20260807-001): any
+     * completed batch can print its carton barcodes from the floor. Codes are
+     * permanent and generation is idempotent, so this one button is print and
+     * reprint alike — it can never mint a second identity for a box.
+     */
+    const cartonLabelControlFor = (row: ShiftProductionEntry): ReactNode => {
+        if (row.batch_status !== 'completed') return null;
+        return (
+            <Button size="small" icon={<PrinterOutlined />} onClick={() => setCartonPrintEntry(row)}>
+                Carton labels
+            </Button>
+        );
+    };
+
+    /**
      * The Configure Item door out of Start Batch, and the way back in.
      *
      * It carries the whole setup — machine, shift, production date, product,
@@ -4371,6 +4393,16 @@ export default function ShiftProductionEntryPage() {
             // tell that the second submission is the one that stood.
             if (wasAmendment) {
                 message.success('Corrected figures saved — the batch is back with quality for its check.', 6);
+            }
+
+            // THE LABELS PRINT NOW (DEC-20260807-001): completion is the
+            // moment the packer sticks the barcodes on the boxes, so the
+            // print dialog opens itself. Not on a correction — the codes were
+            // minted (and likely printed) at the original completion, and a
+            // batch that packed nothing has nothing to label.
+            const packed = Number(entry.gross_quantity_produced ?? entry.quantity_produced ?? 0);
+            if (!wasAmendment && Number.isFinite(packed) && packed > 0) {
+                setCartonPrintEntry(entry);
             }
         },
         onError: (error: any) => {
@@ -5302,7 +5334,10 @@ export default function ShiftProductionEntryPage() {
                                     <strong>{fmtPieces(row.quantity_scrap)}</strong>
                                 </Typography.Text>
                             </div>
-                            <div style={{ marginTop: 8 }}>{correctionControlFor(row)}</div>
+                            <Space size={4} wrap style={{ marginTop: 8 }}>
+                                {cartonLabelControlFor(row)}
+                                {correctionControlFor(row)}
+                            </Space>
                         </Card>
                     ))}
                 </Space>
@@ -5362,7 +5397,10 @@ export default function ShiftProductionEntryPage() {
                                     <Tag color={approvalColor[row.status]} style={{ marginInlineEnd: 0 }}>
                                         {row.status}
                                     </Tag>
-                                    <div style={{ marginTop: 4 }}>{correctionControlFor(row)}</div>
+                                    <Space size={4} wrap style={{ marginTop: 4 }}>
+                                        {cartonLabelControlFor(row)}
+                                        {correctionControlFor(row)}
+                                    </Space>
                                 </>
                             ),
                         },
@@ -5408,13 +5446,21 @@ export default function ShiftProductionEntryPage() {
                                             </span>
                                         </Typography.Text>
                                     </div>
-                                    {correctionControlFor(entry)}
+                                    <Space size={4} wrap>
+                                        {cartonLabelControlFor(entry)}
+                                        {correctionControlFor(entry)}
+                                    </Space>
                                 </div>
                             </Card>
                         ))}
                     </Space>
                 </div>
             )}
+
+            {/* The packer's print dialog — opens itself at completion and from
+                the Carton labels button on any completed row. The Approval
+                Desk's copy of this screen is the REPRINT (DEC-20260807-001). */}
+            <CartonPrintModal entry={cartonPrintEntry} onClose={() => setCartonPrintEntry(null)} />
 
             <Modal
                 maskClosable={false}

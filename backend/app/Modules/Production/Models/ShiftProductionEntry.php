@@ -80,6 +80,41 @@ class ShiftProductionEntry extends Model
         ];
     }
 
+    /**
+     * WHAT ONE PIECE OF THIS RUN WEIGHS, in grams — the entry's frozen
+     * config_snapshot first (Start Batch resolved configuration → standard →
+     * item master and froze the answer there), the item master's
+     * nominal_weight_grams only as a fallback for legacy rows whose snapshot
+     * predates the key. Every kilogram the server stores for this entry is
+     * computed from this figure, and every screen must show the same one
+     * (DEC-20260805-005) — which is why this lives once, on the model.
+     *
+     * The snapshot stores the weight as a string and writes '' when nothing
+     * resolved, so blanks are rejected before any bcmath call — and a zero
+     * or negative weight is "no weight", not a weight of zero.
+     */
+    public function resolvedUnitWeightGrams(?Item $item = null): ?string
+    {
+        $candidates = [
+            $this->config_snapshot['unit_weight_grams'] ?? null,
+            ($item ?? $this->item)?->nominal_weight_grams,
+        ];
+
+        foreach ($candidates as $candidate) {
+            $weight = trim((string) ($candidate ?? ''));
+
+            if ($weight === '' || ! is_numeric($weight)) {
+                continue;
+            }
+
+            if (bccomp($weight, '0', 4) === 1) {
+                return $weight;
+            }
+        }
+
+        return null;
+    }
+
     public function shift(): BelongsTo
     {
         return $this->belongsTo(Shift::class);

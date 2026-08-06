@@ -282,6 +282,18 @@ count/re-anchor flow will be built. The paper form's own PET RESIN (DAY
 BIN) row — blank on all three photographed shifts — already showed the
 floor takes no such count.** Was open since 2026-08-07.
 
+## Q23 · What does an empty carton weigh? (tare, for the label's gross weight)
+
+The owner asked for net AND gross weight on the carton label
+(DEC-20260807-002). Net is computable — pieces × the run's resolved unit
+weight ("one bottle, one weight", DEC-20260805-005). Gross needs the empty
+carton's own weight (tare), and no tare figure exists anywhere in the data:
+not on the item master, not in the production standards, not in the
+workbook columns that were imported. A tare must be WEIGHED and stated, per
+carton spec — never estimated. Until then the label prints net weight only
+and no gross line at all. **Blocks:** the gross-weight line on the carton
+label. *Open since 2026-08-07.*
+
 ## Q24 · Resin on the carton label — should the consumed GRADE print? — NARROWED
 
 DEC-20260807-006 settles the larger half of this question as it stands on
