@@ -84,9 +84,9 @@ const allNavItems: NavGroup[] = [
             // Day Bin is the factory's single central balance, fed by an
             // ordinary transfer or the Shift Floor's Load Material scan.
             { key: '/production/day-bin', label: 'Day Bin' },
-            // Bin Bay Loading is deliberately unlinked: the owner replaced the
-            // bag-scan page with the Shift Floor's central Load Material — the
-            // page itself still answers at /production/bin-bay (App.tsx).
+            // Bin Bay Loading is GONE, not just unlinked (DEC-20260807-006):
+            // the floor's only load flow is the Shift Floor's central Load
+            // Material scan into the common resin input.
             { key: '/production/approve-production', label: 'Approve Production' },
             { key: '/production/live-monitor', label: 'Live Monitor' },
             // ONE configuration destination, not two. Product Standards and

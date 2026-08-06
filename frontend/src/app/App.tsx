@@ -18,7 +18,6 @@ import ReliabilityReportPage from '@/features/maintenance/pages/ReliabilityRepor
 import SchedulesPage from '@/features/maintenance/pages/SchedulesPage';
 import MaintenanceWorkOrdersPage from '@/features/maintenance/pages/WorkOrdersPage';
 import ApproveProductionPage from '@/features/production/pages/ApproveProductionPage';
-import BinBayLoadingPage from '@/features/production/pages/BinBayLoadingPage';
 import BomsPage from '@/features/production/pages/BomsPage';
 import CapacityPlanPage from '@/features/production/pages/CapacityPlanPage';
 import FactoryDayBinPage from '@/features/production/pages/FactoryDayBinPage';
@@ -131,7 +130,6 @@ export default function App() {
                                         per-machine bag-level bin bay below it is the
                                         optional detail, not the main path. */}
                                     <Route path="/production/day-bin" element={<FactoryDayBinPage />} />
-                                    <Route path="/production/bin-bay" element={<BinBayLoadingPage />} />
                                     <Route path="/production/shift-summary" element={<ShiftSummaryPage />} />
                                     <Route path="/production/approve-production" element={<ApproveProductionPage />} />
                                     <Route path="/production/reports" element={<ProductionReportsPage />} />

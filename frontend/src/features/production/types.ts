@@ -1908,14 +1908,11 @@ export interface StandardWarning {
 }
 
 // ---------------------------------------------------------------------------
-// The CENTRAL bin bay (/production/bin-bay/*, traceability-gated like every
-// shape above). Material is loaded into a machine's day bin ONCE, at the bay
-// — never re-declared inside a batch.
-//
-// A load is an inventory LOCATION movement: the material travels store →
-// machine day bin and nothing else happens. It is NOT consumption (that is
-// derived later, at batch completion, from the day-bin count) and it NEVER
-// posts a Tally voucher.
+// The bin-bay AVAILABILITY read (GET /production/bin-bay/availability,
+// traceability-gated like every shape above): the machine-scoped ledger
+// balance with its source-lot layers, and the run's recipe priced against
+// it. READ ONLY — the Bin Bay loading page and its write are gone
+// (DEC-20260807-006); loads happen through the common input's bag scan.
 // ---------------------------------------------------------------------------
 
 /**
@@ -1979,20 +1976,6 @@ export interface BinBayAvailabilityResponse {
     bin: BinBayAvailability | null;
     /** Null unless a product_item_id + expected_pieces pair was asked for. */
     requirement: BinBayRequirement | null;
-}
-
-/** Who loaded what into a bay, when, off which bag — newest first. */
-export interface BinBayHistoryRow {
-    id: number;
-    recorded_at: string | null;
-    quantity_kg: string;
-    /** Loading is central: normally null, set only when a load is tied to a running segment. */
-    shift_production_entry_id: number | null;
-    item: { id: number; name: string; sku: string | null } | null;
-    material_bag_id: number | null;
-    barcode: string | null;
-    lot: { id: number; supplier_lot_no: string | null } | null;
-    loaded_by: { id: number; name: string } | null;
 }
 
 /**

@@ -3,19 +3,21 @@
 namespace App\Modules\Production\Http\Controllers;
 
 use App\Http\Controllers\Controller;
-use App\Modules\Production\Http\Requests\BinBayLoadRequest;
-use App\Modules\Production\Http\Resources\DayBinMovementResource;
 use App\Modules\Production\Services\BinBayService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 /**
- * The central bin bay. Material is loaded into a machine's day bin HERE,
- * once, by the bay — every batch screen then reads the bin instead of
- * asking the supervisor to declare material again.
+ * READ ONLY: the machine-scoped ledger view the Start Batch dialog prices a
+ * run against — what the ledger holds of a material (with its source-lot
+ * layers) and the recipe's expected-vs-available per component.
  *
- * A load is an inventory location movement (store → machine day bin): not
- * consumption, and never a Tally post. See BinBayService's docblock.
+ * The Bin Bay LOADING surface that used to live beside this read — the
+ * per-machine page, bin-bay/load and bin-bay/history — is gone
+ * (DEC-20260807-006): the floor's only load flow is the common resin
+ * input's bag scan (FactoryDayBinController::loadBag), which names no
+ * machine. Historical machine-stamped rows remain in the ledger this
+ * read serves, as the audit record of the previous understanding.
  */
 class BinBayController extends Controller
 {
@@ -53,38 +55,5 @@ class BinBayController extends Controller
                 )
                 : null,
         ]]);
-    }
-
-    /** Who loaded what into this bay, when, off which bag — newest first. */
-    public function history(Request $request): JsonResponse
-    {
-        $validated = $request->validate([
-            'work_center_id' => ['required', 'integer', 'exists:work_centers,id'],
-            'item_id' => ['nullable', 'integer', 'exists:items,id'],
-            'limit' => ['nullable', 'integer', 'min:1', 'max:200'],
-        ]);
-
-        return response()->json(['data' => $this->binBay->loadHistoryFor(
-            (int) $validated['work_center_id'],
-            isset($validated['item_id']) ? (int) $validated['item_id'] : null,
-            (int) ($validated['limit'] ?? 50),
-        )]);
-    }
-
-    /**
-     * Scan a bag into the bay. Delegates to the one loader in the system
-     * (Inventory's TraceabilityService, via BinBayService) — bag balance,
-     * FIFO policy and ledger row in a single transaction.
-     */
-    public function load(BinBayLoadRequest $request): DayBinMovementResource
-    {
-        $movement = $this->binBay->load($request->movementData(), $request->attributedUserId());
-
-        // recordedBy is eager-loaded on purpose: DayBinMovementResource only
-        // emits `recorded_by` whenLoaded, and the bay screen's whole point is
-        // showing who fed the machine.
-        return DayBinMovementResource::make(
-            $movement->load(['item', 'materialBag.lot', 'recordedBy', 'workCenter']),
-        );
     }
 }
