@@ -108,13 +108,18 @@ class FactoryNamesTest extends TestCase
         $this->assertSame(1, Shift::query()->where('is_active', true)->count());
     }
 
-    public function test_a_duplicate_with_production_against_it_is_reported_not_switched_off(): void
+    public function test_a_duplicate_carrying_production_is_merged_into_the_survivor(): void
     {
-        // A supervisor may already have filed a shift against the duplicate.
-        // That is real work, and deactivating it would hide that batch's own
-        // shift from every screen that reads it back.
-        $original = Shift::create(['name' => 'A', 'start_time' => '06:00', 'end_time' => '14:00', 'is_active' => true]);
-        $used = Shift::create(['name' => 'Morning', 'start_time' => '06:00', 'end_time' => '14:00', 'is_active' => true]);
+        // The first version REFUSED to touch a duplicate with production against
+        // it. That guard was right to exist and wrong to stop there — the owner's
+        // reply was "THERE IS NOT NIGHT, SHIFT A TO C", with a picker still
+        // offering four shifts for three.
+        //
+        // Two rows at 22:00 are ONE shift. A batch filed against either ran on the
+        // 22:00 shift, so repointing it at the survivor loses nothing and asserts
+        // nothing new. That is why this is a merge and not a deletion.
+        $primary = Shift::create(['name' => 'C', 'start_time' => '22:00', 'end_time' => '06:00', 'is_active' => true]);
+        $twin = Shift::create(['name' => 'Night', 'start_time' => '22:00', 'end_time' => '06:00', 'is_active' => true]);
 
         $warehouse = Warehouse::create([
             'code' => 'SWA', 'name' => 'SWAASHPET POLYMERS PVT LTD', 'is_active' => true,
@@ -123,8 +128,8 @@ class FactoryNamesTest extends TestCase
         $machine = WorkCenter::create(['code' => 'ASB-1', 'name' => 'ASB-1', 'is_active' => true]);
         $product = Item::create(['sku' => 'BTL', 'name' => 'Bottle', 'uom' => 'Nos.', 'is_active' => true]);
 
-        ShiftProductionEntry::create([
-            'shift_id' => $used->id,
+        $entry = ShiftProductionEntry::create([
+            'shift_id' => $twin->id,
             'work_center_id' => $machine->id,
             'item_id' => $product->id,
             'warehouse_id' => $warehouse->id,
@@ -136,8 +141,37 @@ class FactoryNamesTest extends TestCase
 
         $this->rename();
 
-        $this->assertTrue((bool) $used->fresh()->is_active, 'A duplicate carrying real work must stay usable.');
-        $this->assertSame('Shift A', $original->fresh()->name);
+        // The batch now belongs to the surviving shift, which is named properly.
+        $this->assertSame($primary->id, $entry->fresh()->shift_id);
+        $this->assertSame('Shift C', $primary->fresh()->name);
+        // And the duplicate is switched off, not deleted — nothing that ever
+        // referenced it is left pointing at a missing row.
+        $this->assertFalse((bool) $twin->fresh()->is_active);
+        $this->assertNotNull(Shift::query()->find($twin->id));
+    }
+
+    public function test_a_merge_that_would_overwrite_a_days_summary_is_refused(): void
+    {
+        // shift_summaries is unique on (shift_id, production_date). If both shifts
+        // hold a summary for one day, repointing collides — and forcing it would
+        // silently discard a day's summary. Refusing the whole merge keeps the
+        // duplicate visible and the history intact, which is the safe direction.
+        $primary = Shift::create(['name' => 'C', 'start_time' => '22:00', 'end_time' => '06:00', 'is_active' => true]);
+        $twin = Shift::create(['name' => 'Night', 'start_time' => '22:00', 'end_time' => '06:00', 'is_active' => true]);
+
+        foreach ([$primary, $twin] as $shift) {
+            \DB::table('shift_summaries')->insert([
+                'shift_id' => $shift->id,
+                'production_date' => '2026-08-06',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        $this->rename();
+
+        $this->assertTrue((bool) $twin->fresh()->is_active, 'A merge that would lose a summary must not happen.');
+        $this->assertSame(2, \DB::table('shift_summaries')->count());
     }
 
     public function test_the_seeder_no_longer_duplicates_a_renamed_shift(): void
