@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Modules\Production\Models\Shift;
+use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\WorkCenter;
 use Illuminate\Console\Command;
 
@@ -167,12 +168,57 @@ class RenameToFactoryNames extends Command
         $kept = 0;
         $skipped = [];
 
-        foreach (Shift::query()->orderBy('start_time')->get() as $shift) {
-            $name = trim((string) $shift->name);
-            // Stored as a time; compared on HH:MM so a seconds component or a
-            // full timestamp does not defeat the lookup.
-            $start = substr((string) $shift->start_time, 0, 5);
+        // ONE SHIFT PER START TIME, and the grouping is the point.
+        //
+        // The live factory reached SIX shifts — two per start time — because the
+        // deploy-time seeder matched on name: renaming Morning to "Shift A" left
+        // no "Morning" for it to find, so it created one, every deploy. That
+        // seeder now keys on start time, but the duplicates it already made are
+        // still here and the floor's picker still offers all six.
+        //
+        // So: the OLDEST shift at each start time is the real one — it is the row
+        // production has been pointing at all along — and it gets the name. A
+        // newer twin is the seeder's own artefact and is deactivated rather than
+        // deleted, because deleting a row anything might reference trades a
+        // cosmetic problem for a broken one.
+        $groups = Shift::query()->orderBy('id')->get()
+            ->groupBy(fn (Shift $shift) => substr((string) $shift->start_time, 0, 5));
+
+        foreach ($groups as $start => $group) {
             $letter = self::SHIFT_LETTER[$start] ?? null;
+
+            // Every shift after the first at this start time.
+            foreach ($group->skip(1) as $twin) {
+                $twinName = trim((string) $twin->name);
+
+                if (! $twin->is_active) {
+                    $kept++;
+
+                    continue;
+                }
+
+                // Only a row that has recorded nothing. A duplicate a supervisor
+                // has already filed a shift against is real work, and switching
+                // it off would hide that batch's own shift from every screen that
+                // reads it back.
+                if (ShiftProductionEntry::query()->where('shift_id', $twin->id)->exists()) {
+                    $skipped[] = "shift \"{$twinName}\" ({$start}) duplicates an older one but has production against it";
+
+                    continue;
+                }
+
+                $this->line(sprintf('  %-12s    deactivated — duplicate of the %s shift', $twinName, $start));
+
+                if ($write) {
+                    $twin->forceFill(['is_active' => false])->save();
+                }
+
+                $renamed++;
+            }
+
+            /** @var Shift $shift */
+            $shift = $group->first();
+            $name = trim((string) $shift->name);
 
             if ($letter !== null && $name === $letter) {
                 $kept++;
