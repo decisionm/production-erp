@@ -1,0 +1,80 @@
+name: Match stock to Tally
+
+# Makes the ERP's stock balances EQUAL a Tally stock summary, item by item and
+# godown by godown. Dry by default: without write=true it prints every balance
+# that would move, in both directions, and changes nothing.
+#
+# THIS IS NOT THE OPENING-STOCK APPLY. That one receipts Tally's closing balance
+# — it ADDS, and a later snapshot applied that way is twice the stock with no
+# error anywhere. This one moves only the DIFFERENCE, so it is safe to run again
+# on every fresh snapshot, which is the only way "sync the live stock" can be a
+# monthly habit rather than a one-off.
+#
+# Take the stock summary from the Windows sync agent first; this reads the most
+# recent one unless a snapshot id is given.
+
+on:
+  workflow_dispatch:
+    inputs:
+      snapshot:
+        description: 'Snapshot id. Leave blank for the most recent one.'
+        type: string
+        required: false
+      write:
+        description: 'Actually write. Leave false for a dry run that changes nothing.'
+        type: boolean
+        default: false
+
+concurrency:
+  group: reconcile-stock-to-tally
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Check hPanel → Advanced → SSH Access, and whether brute-force protection has banned the runner. Re-running often clears a transient failure."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      - name: Report what is about to run
+        run: |
+          if [ "${{ inputs.write }}" = "true" ]; then
+            echo "::warning::MATCHING live stock balances to Tally. Movements are written to the stock ledger."
+          else
+            echo "Dry run — nothing will be written."
+          fi
+
+      - name: Run it
+        run: |
+          set -o pipefail
+          FLAGS=""
+          [ -n "${{ inputs.snapshot }}" ] && FLAGS="$FLAGS --snapshot=${{ inputs.snapshot }}"
+          [ "${{ inputs.write }}" = "true" ] && FLAGS="$FLAGS --write"
+
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && /opt/alt/php84/usr/bin/php artisan tally:reconcile-stock $FLAGS" \
+            2>&1 | tee output.txt
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo '### Match stock to Tally'
+            echo ''
+            echo "write: \`${{ inputs.write }}\`  ·  snapshot: \`${{ inputs.snapshot || 'latest' }}\`"
+            echo ''
+            echo '```'
+            tail -c 60000 output.txt 2>/dev/null || echo '(no output captured)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
