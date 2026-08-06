@@ -1719,3 +1719,27 @@ export async function lookupCarton(cartonNo: string): Promise<FinishedCarton> {
     );
     return data.data;
 }
+
+/**
+ * One choosable packing material — an item, and the unit its quantity is in.
+ */
+export interface PackingMaterialOption {
+    id: number;
+    name: string;
+    uom: string | null;
+}
+
+/**
+ * The lists the completion screen's packing pickers are built from, keyed by
+ * kind: `carton`, `tray`, `pouch_film`, `tape`.
+ *
+ * Fetched once per session rather than per row. The catalogue changes when Tally
+ * masters are pulled, not while a supervisor is filling in a shift, and four
+ * requests per drawer open would be four requests for the same answer.
+ */
+export async function listPackingMaterialOptions(): Promise<Record<string, PackingMaterialOption[]>> {
+    const { data } = await api.get<{ data: Record<string, PackingMaterialOption[]> }>(
+        '/production/packing-material-options',
+    );
+    return data.data;
+}

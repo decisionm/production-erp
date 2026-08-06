@@ -16,6 +16,7 @@ import HandoverModal from '@/features/production/components/HandoverModal';
 import {
     amendBatch,
     cancelShiftProductionEntry,
+    listPackingMaterialOptions,
     listPendingEntries,
     closeDowntimeLog,
     closeMoldChangeLog,
@@ -1768,6 +1769,24 @@ export default function ShiftProductionEntryPage() {
     const invalidateMoldChange = () => queryClient.invalidateQueries({ queryKey: ['production', 'mold-change-logs'] });
 
     const settings = useProductionSettings();
+    /**
+     * The choosable packing materials, by kind.
+     *
+     * Fetched once and cached for the session: the catalogue changes when Tally
+     * masters are pulled, not while a supervisor fills in a shift, and four
+     * requests per drawer-open would be four requests for one unchanging answer.
+     *
+     * A failure here leaves the pickers empty rather than blocking a completion.
+     * The mapping's own suggestion still fills every row it can resolve, so the
+     * floor is no worse off than before the pickers existed — and a batch that
+     * cannot be completed because a dropdown would not load is a far worse
+     * outcome than a batch completed without one.
+     */
+    const { data: packingOptions } = useQuery({
+        queryKey: ['production', 'packing-material-options'],
+        queryFn: listPackingMaterialOptions,
+        staleTime: 30 * 60 * 1000,
+    });
     // The over-100% ceiling as the BACKEND rules it, so the pre-submit panel
     // and the approvers' screen never disagree about the same batch.
     const efficiencyCeiling = settings?.tolerances?.efficiency_over ?? EFFICIENCY_CEILING_PCT;
@@ -2409,6 +2428,26 @@ export default function ShiftProductionEntryPage() {
      * Cleared when the drawer opens on a new batch, exactly like the refs above.
      */
     const [packingEdits, setPackingEdits] = useState<Record<string, number | null>>({});
+    /**
+     * WHICH material each packing row is actually using today — same contract as
+     * the figures above, for the item rather than the quantity.
+     *
+     * Two situations need this, and neither is a data error to be corrected
+     * later. The first: no mapping resolved, so the row had nothing to offer and
+     * printed a sentence asking a supervisor mid-shift to go and administer
+     * master data they have no access to. The owner's verdict on that (05-Aug)
+     * was "why so many English notes, will they really read them".
+     *
+     * The second is the one he raised first, and no wording of a note could ever
+     * have answered it: THE 100 ML CARTONS RAN OUT, so today this product goes in
+     * a 90 ml box. That is Tuesday. A mapping is a standing default, not a claim
+     * about what is on the shelf this morning.
+     *
+     * Keyed on the row's identity for the same reason the edits above are — the
+     * preview refetches on every keystroke, and an index-keyed choice would
+     * re-attach itself to whichever material landed in that slot next.
+     */
+    const [packingItemPicks, setPackingItemPicks] = useState<Record<string, number>>({});
     // `packingSourceId` — the store the supervisor named for the packing rows —
     // is gone with the picker that set it. Nothing reads a packing-line
     // warehouse any more, so holding the state would only be a value to reset.
@@ -3621,11 +3660,32 @@ export default function ShiftProductionEntryPage() {
                       ? `${count.toLocaleString('en-IN')} ${basisWord}${perUnitPart} × ${fmtNum(row.gramsPerPiece, 4)} g = ${fmtNum(calculated, 4)} ${row.unit}`
                       : `${count.toLocaleString('en-IN')} ${basisWord} × ${perUnitText} = ${fmtNum(calculated, 4)} ${row.unit}`;
 
+            // THE SUPERVISOR'S CHOICE OUTRANKS THE MAPPING, and it has to
+            // outrank it here rather than only in the dropdown's own display:
+            // the submission reads `itemId` off these rows, so a pick applied
+            // any later would show one material on screen and send another.
+            //
+            // It also has to survive a row the mapping could not resolve at all
+            // (pickedId with row.itemId null), which is the case that used to
+            // print a paragraph instead of offering a choice.
+            const pickedId = packingItemPicks[row.key] ?? null;
+            const itemId = pickedId ?? row.itemId;
+            const picked = pickedId !== null;
+            const options = packingOptions?.[row.kind] ?? [];
+
             return {
                 ...row,
-                // The mapping names the item; the catalogue is only a fallback
-                // for a backend that sends the id without the name.
-                itemName: row.itemName ?? itemById(row.itemId)?.name ?? null,
+                itemId,
+                picked,
+                options,
+                // The picked material's own name wins, then the mapping's, then
+                // the catalogue as a fallback for a backend that sends an id
+                // without a name.
+                itemName:
+                    options.find((option) => option.id === itemId)?.name
+                    ?? (picked ? null : row.itemName)
+                    ?? itemById(itemId)?.name
+                    ?? null,
                 calculated,
                 quantity,
                 touched,
@@ -3636,6 +3696,8 @@ export default function ShiftProductionEntryPage() {
         amending,
         packingSuggestions,
         packingEdits,
+        packingItemPicks,
+        packingOptions,
         goodBoxesWatch,
         traysWatch,
         pouchesWatch,
@@ -3707,6 +3769,7 @@ export default function ShiftProductionEntryPage() {
             // No packing edit survives into a correction — the packing rows are
             // switched off for it entirely (see the packingRows memo).
             setPackingEdits({});
+            setPackingItemPicks({});
 
             // A loaded kilogram figure is a WEIGHED one: it is what the store
             // actually issued. Latching the rows that were loaded stops the
@@ -4055,6 +4118,7 @@ export default function ShiftProductionEntryPage() {
             // The packing edits belong to the batch that just went in — the
             // next one recalculates from its own cartons and trays.
             setPackingEdits({});
+            setPackingItemPicks({});
 
             // The batch WENT IN. A material whose recorded stock could not
             // cover it is not the supervisor's problem to solve at 6am, and
@@ -4674,6 +4738,8 @@ export default function ShiftProductionEntryPage() {
                             // own packing entry, with no edit carried over from
                             // the batch before it.
                             setPackingEdits({});
+                            setPackingItemPicks({});
+            setPackingItemPicks({});
                             // Forget which masterbatch the LAST batch ended on,
                             // so this batch's pre-selection counts as a first
                             // sighting and blanks nothing.
@@ -7027,25 +7093,6 @@ export default function ShiftProductionEntryPage() {
                                 // Never a zero quantity against an item nobody
                                 // has chosen, and never a reason not to
                                 // complete the batch.
-                                if (row.itemId === null) {
-                                    return (
-                                        <Typography.Text
-                                            key={row.key}
-                                            type="secondary"
-                                            style={{ display: 'block', fontSize: 12, marginTop: 6 }}
-                                        >
-                                            {/* The mapping's own sentence when
-                                                it sends one — it already names
-                                                the spec and says what is
-                                                missing, and saying it twice in
-                                                two wordings reads as two
-                                                different problems. */}
-                                            {row.reason ??
-                                                `${row.label}${row.spec ? ` “${row.spec}”` : ''} — no packing item mapped yet, so nothing is counted for it.`}
-                                        </Typography.Text>
-                                    );
-                                }
-
                                 // The one grey line under the row: the
                                 // arithmetic, then the mapping's own sentence —
                                 // which is also where an inferred spec is
@@ -7112,10 +7159,71 @@ export default function ShiftProductionEntryPage() {
 
                                 return (
                                     <Row key={row.key} gutter={[8, 8]} align="middle" style={{ marginTop: 4 }}>
+                                        {/* THE MATERIAL IS CHOSEN, NOT EXPLAINED.
+
+                                            This was a plain label, and beside it
+                                            — on any row the mapping could not
+                                            resolve — a thirty-word paragraph
+                                            telling a supervisor mid-shift to go
+                                            and administer master data they have
+                                            no access to. Nobody reads that, and
+                                            reading it would not help.
+
+                                            A dropdown on EVERY row, not only the
+                                            unresolved ones, because the owner's
+                                            first packing question was not about
+                                            missing mappings at all: the 100 ml
+                                            cartons ran out, so today this product
+                                            goes in a 90 ml box. A mapping is a
+                                            standing default, not a claim about
+                                            what is on the shelf this morning. */}
                                         <Col xs={24} sm={14}>
-                                            <Typography.Text>{row.itemName ?? row.label}</Typography.Text>
-                                            <Typography.Text type="secondary" style={{ fontSize: 12, marginLeft: 6 }}>
+                                            <Select
+                                                size="large"
+                                                style={{ width: '100%' }}
+                                                value={row.itemId ?? undefined}
+                                                options={row.options.map((option) => ({
+                                                    value: option.id,
+                                                    label: option.uom ? `${option.name} · ${option.uom}` : option.name,
+                                                }))}
+                                                // The whole catalogue for this
+                                                // kind, searchable — eleven
+                                                // cartons and eleven trays is a
+                                                // scroll, not a search, but the
+                                                // film list is longer and a
+                                                // supervisor knows the size they
+                                                // are holding.
+                                                showSearch
+                                                optionFilterProp="label"
+                                                // The spec, so the row says which
+                                                // material it is asking about even
+                                                // before one is chosen. This is
+                                                // what the paragraph was for, in
+                                                // five words instead of thirty.
+                                                placeholder={
+                                                    row.spec
+                                                        ? `${row.label} “${row.spec}” — choose`
+                                                        : `${row.label} — choose`
+                                                }
+                                                // A withheld row's material is not
+                                                // going anywhere, so offering to
+                                                // change it would be offering a
+                                                // choice with no consequence.
+                                                disabled={!row.submitAsStock}
+                                                onChange={(value: number) =>
+                                                    setPackingItemPicks((current) => ({ ...current, [row.key]: value }))
+                                                }
+                                            />
+                                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                                                 {row.label}
+                                                {/* Said once, quietly, and only
+                                                    when it is true: the row is no
+                                                    longer running the standing
+                                                    default. An approver reading
+                                                    the batch later has no other
+                                                    way to know a substitution
+                                                    happened. */}
+                                                {row.picked ? ' · changed for this batch' : ''}
                                             </Typography.Text>
                                         </Col>
                                         <Col xs={12} sm={10}>

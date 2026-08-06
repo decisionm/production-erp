@@ -237,6 +237,43 @@ class PackingRuleEdgeCasesTest extends TestCase
         }
     }
 
+    public function test_an_unmapped_carton_still_quotes_one_per_box(): void
+    {
+        // WHAT MAKES THE PICKER USABLE. Once the completion screen lets a
+        // supervisor choose the carton, the quantity beside their choice has to
+        // compute — and one carton is one carton whether or not a mapping row
+        // exists to say so.
+        //
+        // Read only off the mapping, an unmapped row came back with a null
+        // factor, so a chosen carton counted nothing. That is the worst of the
+        // three states: a mapped row posts, an empty row visibly posts nothing,
+        // and this one looks answered while posting nothing.
+        $rows = collect(app(PackingMaterialSuggestionService::class)->forStandard(
+            // "100 ML CARTON" and "100ML TRAY" both map in this factory, but no
+            // mapping exists in this test's database at all — which is exactly
+            // the unmapped case.
+            $this->standard(['carton' => '100 ML CARTON', 'tray' => '100ML TRAY'])
+        ))->keyBy('kind');
+
+        $this->assertNull($rows['carton']['item'], 'Unmapped: no item is suggested.');
+        $this->assertSame('1', $rows['carton']['factor'], 'One carton per box packed, mapping or not.');
+        $this->assertSame('1', $rows['tray']['factor'], 'One tray per tray packed, mapping or not.');
+    }
+
+    public function test_an_unmapped_film_or_tape_still_refuses_to_guess_a_dose(): void
+    {
+        // The other half of the same rule, and the more important half. Film is
+        // dosed in grams per piece and tape in metres per box; neither has a
+        // structural default, so neither may be defaulted. A guessed dose is a
+        // wrong weight on a live voucher — the null is the protection.
+        $rows = collect(app(PackingMaterialSuggestionService::class)->forStandard(
+            $this->standard(['carton' => '100ML', 'pouch' => '750*610'])
+        ))->keyBy('kind');
+
+        $this->assertNull($rows['pouch_film']['factor'], 'Film grams per piece cannot be guessed.');
+        $this->assertNull($rows['tape']['factor'], 'Tape metres per box cannot be guessed.');
+    }
+
     public function test_a_product_with_no_carton_spec_still_gets_its_other_materials(): void
     {
         // The bag rule keys off the carton spec, so a blank carton must not be

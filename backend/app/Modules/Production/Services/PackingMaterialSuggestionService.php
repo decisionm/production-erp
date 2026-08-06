@@ -280,7 +280,30 @@ class PackingMaterialSuggestionService
     private function filing(string $kind, ?PackingMaterialMapping $mapping, array $basis): array
     {
         $plain = [
-            'factor' => $mapping?->factor(),
+            // ONE CARTON IS ONE CARTON WHETHER OR NOT A MAPPING SAYS SO.
+            //
+            // The dose for carton and tray is a property of the KIND, not of the
+            // mapping row: PackingMaterialMapping::factor() already returns '1'
+            // for both, and it has no column it could return anything else from.
+            // Reading it only off the mapping meant an unmapped row came back
+            // with a null factor — so once the completion screen let a supervisor
+            // CHOOSE the carton, the quantity beside their choice stayed blank
+            // and the line submitted nothing.
+            //
+            // A row that names a material and counts none of it is the worst of
+            // the three states: the mapped row posts, the empty row visibly
+            // posts nothing, and this one looks answered while posting nothing.
+            // The owner's own words for the rule (05-Aug): "they need drop down
+            // in the carton but the number is 1, tray also as per the standard".
+            //
+            // Film and tape are untouched, and must be: film's factor is grams
+            // per piece and tape's is metres per box, and neither has a
+            // structural default — a guessed dose is a wrong weight on a
+            // voucher, which is exactly what a null is protecting against.
+            'factor' => $mapping?->factor() ?? (in_array($kind, [
+                PackingMaterialMapping::KIND_CARTON,
+                PackingMaterialMapping::KIND_TRAY,
+            ], true) ? '1' : null),
             'unit' => $basis['unit'],
             'factor_unit' => $basis['factor_unit'],
             // True even for a row with no mapping and no factor: this flag
