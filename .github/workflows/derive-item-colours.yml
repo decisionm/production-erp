@@ -22,6 +22,10 @@ on:
         description: 'Skip packaging and raw material ("Master Batch Amber" IS the colourant, not an amber bottle). Keep true.'
         type: boolean
         default: true
+      only_masterbatch:
+        description: 'ONLY the colourants — what the masterbatch row resolves on. Never scrap, caps or tape. Turn only_products OFF with this.'
+        type: boolean
+        default: false
 
 concurrency:
   group: derive-item-colours
@@ -58,6 +62,7 @@ jobs:
           FLAGS=""
           [ "${{ inputs.write }}" = "true" ] && FLAGS="$FLAGS --write"
           [ "${{ inputs.only_products }}" = "true" ] && FLAGS="$FLAGS --only-products"
+          [ "${{ inputs.only_masterbatch }}" = "true" ] && FLAGS="$FLAGS --only-masterbatch"
 
           ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \

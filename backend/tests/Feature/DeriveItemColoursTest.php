@@ -111,6 +111,45 @@ class DeriveItemColoursTest extends TestCase
         $this->assertSame('Amber', $bottle->fresh()->colour);
     }
 
+    public function test_only_masterbatch_colours_the_colourants_and_nothing_else(): void
+    {
+        // THE LIVE INCIDENT THIS SCOPE EXISTS FOR. The masterbatch row came up
+        // empty on an amber run because no colourant on live carried a colour —
+        // resolveMasterbatchItem looks for kg-family items whose items.colour
+        // matches the run's, and 63 items were blank.
+        //
+        // --only-products cannot fix it: it skips the masterbatches by design.
+        // And running with no scope would colour the amber SCRAP too, which is a
+        // Kgs item and would then be offered to the floor as a masterbatch on
+        // every amber run. So this scope is the colourant family and nothing else.
+        $amber = $this->item('Master Batch Amber');
+        $arihant = $this->item('ARIHANT PET WHITE 1020 Master Batch');
+        $scrap = $this->item('PET Scrap - Amber');
+        $cap = $this->item('20mm Flip Top Cap -White');
+        $tape = $this->item('Packing Tape Green');
+        $bottle = $this->item('A.15ml Round Pet Bottle Amber-5gms');
+
+        $this->artisan('inventory:derive-item-colours --write --only-masterbatch')
+            ->assertSuccessful();
+
+        $this->assertSame('Amber', $amber->fresh()->colour);
+        // However their masters space it.
+        $this->assertSame('White', $arihant->fresh()->colour);
+
+        // And nothing else — least of all the scrap.
+        $this->assertNull($scrap->fresh()->colour, 'Amber scrap must never become a candidate colourant.');
+        $this->assertNull($cap->fresh()->colour);
+        $this->assertNull($tape->fresh()->colour);
+        $this->assertNull($bottle->fresh()->colour);
+    }
+
+    public function test_the_two_scopes_are_opposites_and_refuse_to_run_together(): void
+    {
+        $this->artisan('inventory:derive-item-colours --write --only-products --only-masterbatch')
+            ->expectsOutputToContain('opposites')
+            ->assertFailed();
+    }
+
     public function test_a_colour_word_inside_another_word_is_not_a_match(): void
     {
         // Whole words only. A name is not a colour just because it contains the

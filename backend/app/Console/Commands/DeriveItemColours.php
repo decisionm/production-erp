@@ -67,7 +67,8 @@ class DeriveItemColours extends Command
 
     protected $signature = 'inventory:derive-item-colours
         {--write : Actually write (default is a dry run)}
-        {--only-products : Skip anything that looks like packaging or raw material}';
+        {--only-products : Skip anything that looks like packaging or raw material}
+        {--only-masterbatch : ONLY the colourants — "Master Batch Amber" and friends. Never scrap, caps or tape.}';
 
     protected $description = 'Fill in items.colour from the colour already stated in the Tally item name';
 
@@ -83,8 +84,18 @@ class DeriveItemColours extends Command
         $ambiguous = [];
         $noColour = 0;
 
+        if ($this->option('only-products') && $this->option('only-masterbatch')) {
+            $this->error('--only-products and --only-masterbatch are opposites. Pick one.');
+
+            return self::FAILURE;
+        }
+
         foreach ($candidates as $item) {
             if ($this->option('only-products') && $this->looksLikePackaging((string) $item->name)) {
+                continue;
+            }
+
+            if ($this->option('only-masterbatch') && ! $this->looksLikeMasterbatch((string) $item->name)) {
                 continue;
             }
 
@@ -206,6 +217,33 @@ class DeriveItemColours extends Command
      * different reason — "Master Batch Amber" IS the colourant, not a bottle
      * that happens to be amber.
      */
+    /**
+     * Is this one of the COLOURANTS?
+     *
+     * A third scope, and the reason for it is a live incident. The masterbatch
+     * row on the completion drawer came up empty on an amber run (owner, 06-Aug:
+     * "still masterbatch auto fill not happening ... i am testing for amber"),
+     * and the cause was that no colourant carries a colour on live:
+     * resolveMasterbatchItem looks for kg-family items whose items.colour
+     * matches the run's, and 63 items were still blank.
+     *
+     * Neither existing scope could fix it safely. --only-products SKIPS the
+     * masterbatches by design (they are colourants, not amber bottles), and
+     * running with no scope at all would have coloured "PET Scrap - Amber" and
+     * "PET Scrap - Lumbs Amber" too — both Kgs items, which would make amber
+     * SCRAP a candidate colourant on every amber run and offer it to the floor
+     * as a masterbatch. That is the hazard --only-products exists to avoid, and
+     * it is not worth accepting to fix a dropdown.
+     *
+     * So this scope is exactly the colourant family and nothing else: the word
+     * "master batch", however the Tally masters space it. "ARIHANT PET WHITE
+     * 1020 Master Batch" is in; every cap, tape, tray and scrap is out.
+     */
+    private function looksLikeMasterbatch(string $name): bool
+    {
+        return preg_match('/master ?batch/i', $name) === 1;
+    }
+
     private function looksLikePackaging(string $name): bool
     {
         return preg_match(
