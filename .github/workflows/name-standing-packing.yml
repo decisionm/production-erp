@@ -1,0 +1,93 @@
+name: Name the final carton or polymer cover
+
+# Says which Tally item is the factory's FINAL CARTON, and which is the POLYMER
+# COVER that goes over it. One of each per batch, held once for every product.
+#
+# Neither is in the workbook and neither appears in the 38 Tally Stock Journals,
+# so they cannot be derived — the rows show on every boxed batch and post nothing
+# until an item is named here.
+#
+# Dry by default. The item is matched on its EXACT Tally name (whitespace
+# normalised, because their names carry double spaces); a near miss is refused and
+# the near misses printed, because naming the wrong outer box would issue the
+# wrong material on every voucher of every product.
+#
+# A polymer cover needs --grams: what ONE cover weighs. The counted sheet gives
+# covers per kilogram — 11 -> 90.9091 g, 25 -> 40 g, 20 -> 50 g, 15 -> 66.6667 g.
+
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: 'Which standing line'
+        type: choice
+        required: true
+        options:
+          - final_carton
+          - polymer_cover
+      item:
+        description: 'The item name exactly as Tally spells it'
+        type: string
+        required: true
+      grams:
+        description: 'Grams ONE piece weighs. Required for polymer_cover, ignored for final_carton.'
+        type: string
+        required: false
+      write:
+        description: 'Actually write. Leave false for a dry run that changes nothing.'
+        type: boolean
+        default: false
+
+concurrency:
+  group: name-standing-packing
+  cancel-in-progress: false
+
+jobs:
+  name:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Check hPanel → Advanced → SSH Access, and whether brute-force protection has banned the runner. Re-running often clears a transient failure."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      - name: Report what is about to run
+        run: |
+          if [ "${{ inputs.write }}" = "true" ]; then
+            echo "::warning::NAMING a standing packing material on the live database. It will appear on every boxed batch."
+          else
+            echo "Dry run — nothing will be written."
+          fi
+
+      - name: Run it
+        run: |
+          set -o pipefail
+          FLAGS="--kind='${{ inputs.kind }}' --item='${{ inputs.item }}'"
+          [ -n "${{ inputs.grams }}" ] && FLAGS="$FLAGS --grams='${{ inputs.grams }}'"
+          [ "${{ inputs.write }}" = "true" ] && FLAGS="$FLAGS --write"
+
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && /opt/alt/php84/usr/bin/php artisan production:name-standing-packing $FLAGS" \
+            2>&1 | tee output.txt
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo '### Name the final carton or polymer cover'
+            echo ''
+            echo "write: \`${{ inputs.write }}\`  ·  kind: \`${{ inputs.kind }}\`  ·  item: \`${{ inputs.item }}\`  ·  grams: \`${{ inputs.grams }}\`"
+            echo ''
+            echo '```'
+            tail -c 60000 output.txt 2>/dev/null || echo '(no output captured)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
