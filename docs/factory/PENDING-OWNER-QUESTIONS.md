@@ -251,6 +251,37 @@ differences are not norm errors, and efficiency comparisons must treat
 the paper CT as the run's observed setting; the ERP's snapshotted
 standard CT remains the yardstick.** Was open since 2026-08-07.
 
+## Q21 · Is the per-machine Bin Bay page dead, or does the floor still use it? — GATING
+
+The owner's 2-Aug correction made the resin input COMMON: one input point
+for the whole factory, a bag never assigned to a machine or batch (FC-01),
+and the Day Bin page and Shift Floor scan write loads with no machine. But
+the legacy Bin Bay page still answers at `/production/bin-bay` (unlinked
+from the menu, reachable by bookmark or an old tablet), and its write —
+`POST /production/bin-bay/load` — REQUIRES a `work_center_id`: every load
+through it is machine-stamped, the exact shape the 2-Aug model retired. If
+the floor has fully moved to the Day Bin page, Bin Bay should be removed —
+its writes contradict the model. If anyone still loads through it, that
+contradiction needs an owner ruling, not a developer's guess.
+**Blocks (gating):** removal or retention of the Bin Bay page and its write
+path, and any cleanup of machine-stamped loads. *Open since 2026-08-07.*
+
+## Q22 · Will the common resin input ever be physically counted — even monthly? — GATING
+
+The owner ruled 31-Jul that the factory takes no bin weight, and the
+reconciliation read that compared the estimate against a physical weight
+was removed with that ruling. Since then the common-input figure is
+Σ loads − Σ calculated consumption from the first load onward, with nothing
+to ever re-anchor it: every unscanned bag, spill and calculation drift
+accumulates in the figure permanently and silently. Two futures, and only
+the factory can pick one: (a) somebody will occasionally weigh or count the
+input — even monthly — and a count/re-anchor flow returns, making the
+balance honest again after each count; (b) nobody ever will — then every
+screen must present the figure as an estimate that drifts over time, never
+as a fact. **Blocks (gating):** building any count/re-anchor flow, and the
+final labelling of the estimate on the Day Bin screen.
+*Open since 2026-08-07.*
+
 ## Q25 · The EMA family — which master product(s), or two new rows?
 
 The photographed paper reports run TWO 100 ml EMA variants daily on ASB-3,
