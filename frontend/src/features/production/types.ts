@@ -741,6 +741,21 @@ export interface ShiftProductionEntry {
      * answer "nobody stated a colour", never "".
      */
     colour?: string | null;
+    /**
+     * What one bottle of THIS run weighs, frozen at Start into the same
+     * snapshot as the colour above — and the weight the server itself uses.
+     *
+     * `resolvedUnitWeightGrams()` reads this first and the item master only as
+     * a fallback, then computes every kilogram stored on the entry from it. A
+     * screen that previews its kilograms from the item master alone agrees
+     * whenever no configuration overrode the weight, and diverges silently the
+     * moment one does.
+     *
+     * Optional because a backend predating the field omits it; null is the real
+     * answer "this run froze no weight", in which case the item master's figure
+     * IS the truth rather than a guess at it.
+     */
+    unit_weight_grams?: string | null;
     batch_number: string | null;
     /**
      * NET of any quality rejection. The gate rewrites this column so every

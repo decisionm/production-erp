@@ -79,6 +79,26 @@ class ShiftProductionEntryResource extends JsonResource
             //
             // Null is a real answer ("nobody stated a colour"), never "".
             'colour' => $this->config_snapshot['colour'] ?? null,
+            // WHAT ONE BOTTLE OF THIS RUN WEIGHS, read out of the same snapshot
+            // and surfaced for the same reason the colour above is.
+            //
+            // This is the weight the SERVER uses. resolvedUnitWeightGrams()
+            // takes config_snapshot['unit_weight_grams'] first and the item
+            // master only as a fallback, and every kilogram stored on the entry
+            // — produced, rejection — is computed from it.
+            //
+            // Until now no client could read it back, so the completion drawer
+            // previewed its kilograms from the item master alone. Those agree
+            // whenever no configuration overrode the weight, and diverge
+            // silently the moment one does: the screen shows one figure and the
+            // server stores another, with nothing saying which is which. The
+            // factory found the same class of defect the hard way on 5 August,
+            // when two different weights sat on one panel under a line claiming
+            // they were the same.
+            //
+            // Null is a real answer — this run froze no weight, so the item
+            // master's is the truth and the screen should use exactly that.
+            'unit_weight_grams' => $this->config_snapshot['unit_weight_grams'] ?? null,
             'cycle_time_source' => $this->cycle_time_source,
             'cavities_source' => $this->cavities_source,
             'override_reason' => $this->override_reason,
