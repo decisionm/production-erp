@@ -1,0 +1,90 @@
+name: Map a colour to its masterbatch
+
+# Says which masterbatch a bottle colour uses, once, as data.
+#
+# Their masters hold more than one colourant for several colours — two ambers,
+# four whites, two blacks, two greens, two yellows — and the completion screen
+# deliberately refuses to choose between them: a wrong pre-selection books the
+# wrong material and looks like somebody checked it. The cost is that the floor
+# answers the same question on every batch.
+#
+# One row of this map ends it for a colour. Dry by default; it MERGES, so
+# answering white next month cannot drop the answer for amber.
+#
+# Answered so far (owner, 06-Aug, and confirmed against their own 38 Tally Stock
+# Journals): Amber -> "Master Batch Amber".
+
+on:
+  workflow_dispatch:
+    inputs:
+      colour:
+        description: 'The colour exactly as the item master spells it, e.g. Amber'
+        type: string
+        required: true
+      item:
+        description: 'The masterbatch item name exactly as Tally spells it, e.g. Master Batch Amber'
+        type: string
+        required: false
+      forget:
+        description: 'Set to the colour name to REMOVE it from the map instead'
+        type: string
+        required: false
+      write:
+        description: 'Actually write. Leave false for a dry run that changes nothing.'
+        type: boolean
+        default: false
+
+concurrency:
+  group: map-masterbatch-colour
+  cancel-in-progress: false
+
+jobs:
+  map:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Check hPanel → Advanced → SSH Access, and whether brute-force protection has banned the runner. Re-running often clears a transient failure."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      - name: Report what is about to run
+        run: |
+          if [ "${{ inputs.write }}" = "true" ]; then
+            echo "::warning::WRITING the masterbatch colour map on the live database."
+          else
+            echo "Dry run — nothing will be written."
+          fi
+
+      - name: Run it
+        run: |
+          set -o pipefail
+          FLAGS="--colour='${{ inputs.colour }}'"
+          [ -n "${{ inputs.item }}" ] && FLAGS="$FLAGS --item='${{ inputs.item }}'"
+          [ -n "${{ inputs.forget }}" ] && FLAGS="$FLAGS --forget='${{ inputs.forget }}'"
+          [ "${{ inputs.write }}" = "true" ] && FLAGS="$FLAGS --write"
+
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && /opt/alt/php84/usr/bin/php artisan production:map-masterbatch-colour $FLAGS" \
+            2>&1 | tee output.txt
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo '### Map a colour to its masterbatch'
+            echo ''
+            echo "write: \`${{ inputs.write }}\`  ·  colour: \`${{ inputs.colour }}\`  ·  item: \`${{ inputs.item }}\`"
+            echo ''
+            echo '```'
+            tail -c 60000 output.txt 2>/dev/null || echo '(no output captured)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

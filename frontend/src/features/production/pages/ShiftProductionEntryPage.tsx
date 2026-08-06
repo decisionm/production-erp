@@ -766,7 +766,14 @@ function suggestMasterbatchByColour(items: Item[] | undefined, colour: string | 
     const byColour = mbs.filter((i) => (i.colour ?? '').trim().toLowerCase() === c);
     if (byColour.length === 1) return { itemId: byColour[0].id, reason: `matched to the bottle's colour (${colour})` };
     if (byColour.length > 1) {
-        return { itemId: null, reason: `${byColour.length} masterbatches match ${colour} — pick the one that went in` };
+        // A STATEMENT, NOT AN INSTRUCTION. This sentence is printed beside the
+        // row whether or not a material ends up named, so "pick the one that went
+        // in" made the screen contradict itself: the owner's screenshot read
+        // "Master Batch Amber, 2 masterbatches match Amber — pick the one that
+        // went in" (06-Aug) — it named the material and told him to choose one.
+        // As a plain count it is true in both states: it explains an empty box,
+        // and beside a named material it is the reason to check that material.
+        return { itemId: null, reason: `${byColour.length} masterbatches match ${colour}` };
     }
     return NO_PICK;
 }
@@ -3612,6 +3619,12 @@ export default function ShiftProductionEntryPage() {
      * their own pick would be a lie about where the figure came from. A pick of
      * NOTHING keeps its reason ("two masterbatches match Amber"), because that
      * is the whole explanation for an empty box.
+     *
+     * An unresolved reason is therefore shown BESIDE A NAMED MATERIAL too, and
+     * that is why those sentences are worded as counts rather than as advice:
+     * "2 masterbatches match Amber" reads correctly under an empty box and under
+     * a chosen one. "pick the one that went in" did not — see the note where it
+     * is built.
      */
     const pickReason = (pick: FixedRowPick, selectedItemId: number | null | undefined): string | null =>
         pick.itemId === null ? pick.reason : pick.itemId === selectedItemId ? pick.reason : null;
