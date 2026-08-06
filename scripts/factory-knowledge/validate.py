@@ -28,7 +28,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import ID_RE, knowledge_root, parse_front_matter, sha256_of
+import datetime
+
+from lib import ID_RE, as_list, knowledge_root, parse_front_matter, parse_manifest_text, sha256_of
 
 REQUIRED = ["id", "status", "confirmed_by", "confirmed_at", "scope", "source"]
 
@@ -46,7 +48,10 @@ def validate_decisions(root: Path, errors: list[str]) -> None:
             errors.append(str(err))
             continue
 
-        rid = meta.get("id", "")
+        # `id:` with no value parses to None — str() it before matching, or
+        # the validator itself dies with a TypeError traceback and reports
+        # nothing (reviewed 06 Aug).
+        rid = str(meta.get("id") or "")
         if not ID_RE.match(rid):
             errors.append(f"{path.name}: id {rid!r} is not DEC-YYYYMMDD-NNN")
             continue
@@ -63,13 +68,21 @@ def validate_decisions(root: Path, errors: list[str]) -> None:
             errors.append(f"{rid}: confirmed_by must be owner — only the owner confirms decisions")
         if meta.get("status") not in ("current", "superseded"):
             errors.append(f"{rid}: status must be current or superseded, got {meta.get('status')!r}")
-        if not isinstance(meta.get("scope"), list) or not meta.get("scope"):
-            errors.append(f"{rid}: scope must be a non-empty list")
+        if not as_list(meta.get("scope")):
+            errors.append(f"{rid}: scope must be non-empty")
         source = meta.get("source")
         if not isinstance(source, dict) or not source.get("reference", "").strip():
             errors.append(f"{rid}: source.reference is empty — memory is not evidence")
-        if not re.match(r"^\d{4}-\d{2}-\d{2}$", str(meta.get("confirmed_at", ""))):
+        confirmed_at = str(meta.get("confirmed_at", ""))
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", confirmed_at):
             errors.append(f"{rid}: confirmed_at must be YYYY-MM-DD")
+        else:
+            # Shape alone accepted 2026-13-45 and let a mis-sorted immutable
+            # id validate as sound (reviewed 06 Aug).
+            try:
+                datetime.date.fromisoformat(confirmed_at)
+            except ValueError:
+                errors.append(f"{rid}: confirmed_at {confirmed_at!r} is not a real calendar date")
         if not body.strip():
             errors.append(f"{rid}: empty decision statement")
         if meta.get("status") == "current" and meta.get("superseded_by"):
@@ -80,7 +93,11 @@ def validate_decisions(root: Path, errors: list[str]) -> None:
         decisions[rid] = meta
 
     for rid, meta in decisions.items():
-        for old in meta.get("supersedes") or []:
+        # as_list: an inline `supersedes: DEC-...` is one-item data, not a
+        # string to iterate character by character (reviewed 06 Aug — the old
+        # loop produced sixteen one-letter "does not exist" errors while the
+        # reverse check passed by substring accident).
+        for old in as_list(meta.get("supersedes")):
             if old not in decisions:
                 errors.append(f"{rid}: supersedes {old}, which does not exist")
             elif decisions[old].get("status") != "superseded":
@@ -89,7 +106,7 @@ def validate_decisions(root: Path, errors: list[str]) -> None:
                 errors.append(f"{rid}: supersedes {old}, but {old}.superseded_by is "
                               f"{decisions[old].get('superseded_by')!r}")
         by = meta.get("superseded_by")
-        if by and (by not in decisions or meta["id"] not in (decisions[by].get("supersedes") or [])):
+        if by and (by not in decisions or rid not in as_list(decisions[by].get("supersedes"))):
             errors.append(f"{rid}: superseded_by {by}, but {by} does not list it in supersedes")
 
 
@@ -99,8 +116,10 @@ def validate_manifest(root: Path, errors: list[str]) -> None:
         errors.append("sources/manifest.yaml is missing")
         return
     try:
-        meta, _ = parse_front_matter("---\n" + manifest.read_text(encoding="utf-8") + "\n---",
-                                     path="manifest.yaml")
+        # Parsed directly, never by wrapping in frontmatter fences — the fence
+        # trick let a literal `---` line inside the manifest end parsing early
+        # and everything below it went silently unvalidated (reviewed 06 Aug).
+        meta = parse_manifest_text(manifest.read_text(encoding="utf-8"), path="manifest.yaml")
     except ValueError as err:
         errors.append(str(err))
         return
@@ -112,13 +131,23 @@ def validate_manifest(root: Path, errors: list[str]) -> None:
             continue
         status = entry.get("status")
         if status == "present":
+            # "Present" is the strongest claim in this file and gets the
+            # strictest check: a repo path, a pinned sha256, both verified.
+            # The old code skipped entries with no path and never required the
+            # pin, so "present; sha256 pinned" could pin nothing (reviewed
+            # 06 Aug).
             rel = entry.get("path", "")
-            target = (repo_root / rel) if rel and not rel.startswith(("http", "agent:")) else None
-            if target is None:
+            if not rel or rel.startswith(("http", "agent:", "~")):
+                errors.append(f"manifest {name}: status present needs a repo-relative path — "
+                              "an endpoint or home-dir source cannot be 'present'")
                 continue
+            target = repo_root / rel
             if not target.exists():
                 errors.append(f"manifest {name}: status present but {rel} does not exist")
-            elif entry.get("sha256") and sha256_of(target) != entry["sha256"]:
+            elif not entry.get("sha256"):
+                errors.append(f"manifest {name}: present without a sha256 pin — "
+                              "the integrity the manifest header promises")
+            elif sha256_of(target) != entry["sha256"]:
                 errors.append(f"manifest {name}: sha256 mismatch for {rel} — "
                               "the source changed; re-verify and update the manifest")
         elif status == "missing":
@@ -139,19 +168,26 @@ def validate_prose_references(root: Path, errors: list[str]) -> None:
     constitution = root / "FACTORY-CONSTITUTION.md"
     known_fc = set(re.findall(r"## (FC-\d{2})", constitution.read_text(encoding="utf-8"))) if constitution.exists() else set()
 
+    repo_root = root.parent.parent
     prose: list[Path] = [
         p for p in [
             root / "PENDING-OWNER-QUESTIONS.md",
             root / "SOURCE-PRIORITY.md",
             constitution,
+            root / "sources" / "manifest.yaml",
+            # The records themselves: a statement citing "supersedes DEC-x"
+            # is exactly the hand-typed reference this check exists for, and
+            # the first version never scanned them (reviewed 06 Aug).
+            *sorted((root / "decisions").glob("*.md")),
+            repo_root / "AGENTS.md",
+            repo_root / "CLAUDE.md",
+            repo_root / "tally-sync-agent" / "CLAUDE.md",
+            repo_root / "docs" / "archive" / "INDEX.md",
         ] if p.exists()
     ]
-    skills_dir = root.parent.parent / ".claude" / "skills"
+    skills_dir = repo_root / ".claude" / "skills"
     if skills_dir.is_dir():
         prose.extend(sorted(skills_dir.glob("*/SKILL.md")))
-    agents = root.parent.parent / "AGENTS.md"
-    if agents.exists():
-        prose.append(agents)
 
     for path in prose:
         text = path.read_text(encoding="utf-8")

@@ -10,3 +10,5 @@
 # Deployment build artifacts — contain the production APP_KEY, never commit.
 deployment_files/
 ~$*
+__pycache__/
+*.pyc

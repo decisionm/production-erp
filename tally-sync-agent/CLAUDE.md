@@ -5,13 +5,14 @@ app that bridges the cloud ERP's sync queue to the factory's local Tally.
 Root `CLAUDE.md` and `AGENTS.md` still apply here; this file adds only what
 is different in this folder.
 
-## Status — corrects the README
+## Status
 
-`README.md` §Status says "scaffold … not yet validated against a real Tally
-instance". That froze on 22 Jul. **Since 05 Aug this agent posts real
-vouchers to the factory's live Tally** (first proven sync: batch #45), and
-real Stock Journals have been read back through it. Treat it as production
-software touching real books, not a prototype.
+**Since 05 Aug 2026 this agent posts real vouchers to the factory's live
+Tally** (first proven sync: batch #45), and real Stock Journals have been
+read back through it. Treat it as production software touching real books,
+not a prototype. The README's body below its status line is scaffold-era
+(22 Jul) and marked as such there — trust CI, the ERP-side voucher tests,
+and this file over those paragraphs.
 
 ## The one safety rule that matters most here
 

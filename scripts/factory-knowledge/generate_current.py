@@ -26,27 +26,37 @@ scope, what it replaced — is the file named by the ID in `decisions/`.
 
 
 def render(decisions: list[dict]) -> str:
-    current = sorted(
-        (d for d in decisions if d.get("status") == "current"),
-        key=lambda d: d.get("id", ""), reverse=True,
-    )
-    superseded = sorted(
-        (d for d in decisions if d.get("status") == "superseded"),
-        key=lambda d: d.get("id", ""), reverse=True,
-    )
+    # DEFENSIVE ON EVERY FIELD. This runs on records validate.py may be about
+    # to reject — a missing id, a source clobbered into a list — and a
+    # renderer that tracebacks on them blocks regeneration of the view until
+    # someone hand-repairs a file (reviewed 06 Aug). Broken fields render as
+    # visibly broken; they never crash.
+    def sort_key(d: dict) -> str:
+        return str(d.get("id") or "")
+
+    current = sorted((d for d in decisions if d.get("status") == "current"),
+                     key=sort_key, reverse=True)
+    superseded = sorted((d for d in decisions if d.get("status") == "superseded"),
+                        key=sort_key, reverse=True)
 
     out = [HEADER]
     out.append(f"**{len(current)} current · {len(superseded)} superseded**\n")
     for d in current:
-        scopes = ", ".join(d.get("scope") or [])
-        statement = (d.get("_body") or "").split("\n")[0]
-        source = (d.get("source") or {}).get("reference", "")
-        out.append(f"- **{d['id']}** ({d.get('confirmed_at')}, {scopes}) — {statement}")
+        scope = d.get("scope")
+        scopes = ", ".join(scope) if isinstance(scope, list) else str(scope or "?")
+        # The WHOLE statement, whitespace-collapsed to one line. Taking only
+        # the first line silently hid every qualifying sentence after it —
+        # and this view is what a recorder reads to spot a conflict before
+        # writing a new decision (reviewed 06 Aug).
+        statement = " ".join((d.get("_body") or "").split())
+        src = d.get("source")
+        source = src.get("reference", "") if isinstance(src, dict) else ""
+        out.append(f"- **{d.get('id', '?')}** ({d.get('confirmed_at', '?')}, {scopes}) — {statement}")
         out.append(f"  - evidence: {source}")
     if superseded:
         out.append("\n## Superseded (history, still readable in decisions/)\n")
         for d in superseded:
-            out.append(f"- {d['id']} → replaced by {d.get('superseded_by', '?')}")
+            out.append(f"- {d.get('id', '?')} → replaced by {d.get('superseded_by', '?')}")
     return "\n".join(out) + "\n"
 
 
@@ -55,10 +65,11 @@ def main() -> int:
     target = root / "CURRENT-DECISIONS.md"
     try:
         content = render(load_decisions(root))
-    except ValueError as err:
-        # A malformed record is a validation problem with a name, not a crash —
-        # and emphatically not a reason to write a half-built view over a good one.
-        print(f"cannot generate: {err}", file=sys.stderr)
+    except Exception as err:  # noqa: BLE001 — a CLI whose contract is "named
+        # error, never a traceback" catches everything at the boundary. A
+        # malformed record is a validation problem with a name, not a crash —
+        # and never a reason to write a half-built view over a good one.
+        print(f"cannot generate: {type(err).__name__}: {err}", file=sys.stderr)
         return 1
     if "--check" in sys.argv:
         if not target.exists() or target.read_text(encoding="utf-8") != content:

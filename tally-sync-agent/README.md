@@ -2,7 +2,7 @@
 
 The local Windows tray app from `docs/archive/TALLY-SYNC-MASTER-PLAN.md` §11/Phase 3 (archived) — bridges the ERP's cloud Tally sync queue to a local Tally installation's XML-HTTP gateway. Runs on-site, on the same machine as Tally (or one that can reach it on the LAN); the cloud ERP never talks to Tally directly.
 
-**Status: in production since 05 Aug 2026** — posting real vouchers to the factory's live Tally (first proven sync: batch #45) and reading Stock Journals back. The paragraph below this one was written at scaffold stage (22 Jul) and is kept for history; see `CLAUDE.md` in this folder for current operating rules.
+**Status: in production since 05 Aug 2026** — posting real vouchers to the factory's live Tally (first proven sync: batch #45) and reading Stock Journals back. Everything below this line was written at scaffold stage (22 Jul); where it says "scaffold", "starting skeleton", or "needs a real Tally instance", read it as the pre-production plan, not the current state — the voucher shapes and response parsing have since been validated against the live instance. `CLAUDE.md` in this folder carries the current operating rules.
 
 ## Architecture
 

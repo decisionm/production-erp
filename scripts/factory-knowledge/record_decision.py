@@ -34,7 +34,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import ID_RE, knowledge_root, load_decisions, parse_front_matter
+from lib import ID_RE, knowledge_root, load_decisions
 
 
 def next_id(existing: list[dict], date: str) -> str:
@@ -72,8 +72,16 @@ def main() -> int:
         return 2
 
     date = args.confirmed_at or datetime.date.today().isoformat()
+    # Shape AND calendar. A shape-only regex accepted 2026-13-45 and minted a
+    # mis-sorted immutable id (reviewed 06 Aug); fromisoformat alone accepts
+    # dash-less forms in 3.11, so both checks stand.
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
         print(f"REFUSED: --confirmed-at must be YYYY-MM-DD, got {date!r}", file=sys.stderr)
+        return 2
+    try:
+        datetime.date.fromisoformat(date)
+    except ValueError:
+        print(f"REFUSED: {date!r} is not a real calendar date.", file=sys.stderr)
         return 2
 
     root = knowledge_root()
@@ -90,6 +98,40 @@ def main() -> int:
             return 2
 
     new_id = next_id(decisions, date)
+
+    out_path = root / "decisions" / f"{new_id}.md"
+    # NEVER OVERWRITE. next_id counts parsed ids, not filenames — a record
+    # whose id: field is mistyped leaves its FILENAME occupied while its id
+    # goes uncounted, and write_text would have clobbered it silently
+    # (reviewed 06 Aug). Immutability gets enforced at write time, not
+    # promised in prose.
+    if out_path.exists():
+        print(f"REFUSED: {out_path.name} already exists on disk but its id: field does not "
+              f"parse as {new_id}. Fix that record first; nothing was written.", file=sys.stderr)
+        return 2
+
+    # PREPARE EVERY SUPERSEDE FLIP BEFORE WRITING ANYTHING. The old approach
+    # replaced the literal string 'status: current' and silently no-opped on
+    # any other spelling (status: "current"), leaving the new record written
+    # and history half-flipped (reviewed 06 Aug). Line-based, counted, and
+    # verified up front — either the whole operation is possible or none of
+    # it happens.
+    flips: dict[Path, str] = {}
+    for old_id in args.supersedes:
+        old_path = Path(by_id[old_id]["_path"])
+        text = old_path.read_text(encoding="utf-8")
+        new_text, hits = re.subn(
+            r"(?m)^status:.*$",
+            f"status: superseded\nsuperseded_by: {new_id}",
+            text,
+            count=1,
+        )
+        if hits != 1:
+            print(f"REFUSED: cannot find the status line in {old_path.name} to mark it "
+                  "superseded. Nothing was written.", file=sys.stderr)
+            return 2
+        flips[old_path] = new_text
+
     lines = [
         "---",
         f"id: {new_id}",
@@ -113,15 +155,11 @@ def main() -> int:
     ]
 
     (root / "decisions").mkdir(parents=True, exist_ok=True)
-    out_path = root / "decisions" / f"{new_id}.md"
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
-    # Flip the superseded records' status — statement text is never touched.
-    for old_id in args.supersedes:
-        old_path = Path(by_id[old_id]["_path"])
-        text = old_path.read_text(encoding="utf-8")
-        text = text.replace("status: current", f"status: superseded\nsuperseded_by: {new_id}", 1)
-        old_path.write_text(text, encoding="utf-8")
+    # The pre-verified flips — statement text is never touched.
+    for old_path, new_text in flips.items():
+        old_path.write_text(new_text, encoding="utf-8")
 
     print(out_path)
     return 0
