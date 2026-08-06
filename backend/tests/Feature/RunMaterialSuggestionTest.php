@@ -417,7 +417,7 @@ class RunMaterialSuggestionTest extends TestCase
         // even though the item master holds a colour that has one.
         $clear = $this->preview($mislabelled, ['colour' => 'Clear'])['suggested_masterbatch'];
         $this->assertNull($clear['item']);
-        $this->assertSame('Clear bottles take no masterbatch.', $clear['reason']);
+        $this->assertSame('Clear takes no masterbatch', $clear['reason']);
     }
 
     public function test_a_clear_bottle_is_told_it_takes_no_masterbatch(): void
@@ -438,7 +438,7 @@ class RunMaterialSuggestionTest extends TestCase
         // The screen must be able to SAY this, not infer it from a null — a
         // blank box with no sentence reads as a question still to answer.
         $this->assertSame('clear', $mb['source']);
-        $this->assertSame('Clear bottles take no masterbatch.', $mb['reason']);
+        $this->assertSame('Clear takes no masterbatch', $mb['reason']);
     }
 
     public function test_an_amber_bottle_resolves_the_amber_masterbatch_and_its_quarter_gram(): void
@@ -456,8 +456,10 @@ class RunMaterialSuggestionTest extends TestCase
         // This IS the owner's rule for the colour: grams × bottles ÷ 1000.
         $this->assertSame('3.3333', $mb['suggested_kg']);
         $this->assertSame(13333, $mb['bottles']);
-        $this->assertStringContainsString('Master Batch Amber', $mb['reason']);
-        $this->assertStringContainsString('0.2500', $mb['reason']);
+        // Shortened deliberately (owner, 05-Aug: "why so many English notes").
+        // The material and the dose are what a person at the machine needs; the
+        // trailing zeros come off so 0.2500 reads as the 0.25 the factory said.
+        $this->assertSame('Master Batch Amber · 0.25 g/bottle', $mb['reason']);
     }
 
     public function test_a_colour_with_no_configured_masterbatch_never_borrows_another_colours_material(): void
@@ -489,7 +491,7 @@ class RunMaterialSuggestionTest extends TestCase
         $this->assertNotSame($this->whiteMb->id, $mb['item']['id'] ?? null);
         // ...and the reason says what to do about it.
         $this->assertStringContainsString('Red', $mb['reason']);
-        $this->assertStringContainsString('factory settings', $mb['reason']);
+        $this->assertSame('No masterbatch mapped for Red — choose one', $mb['reason']);
 
         // The resin row is unaffected: a colour nobody has configured must
         // not cost the supervisor the resin pre-fill as well.
@@ -512,8 +514,11 @@ class RunMaterialSuggestionTest extends TestCase
         $this->assertNull($mb['item']);
         $this->assertNull($mb['suggested_kg']);
         $this->assertSame('ambiguous_colour', $mb['source']);
-        $this->assertStringContainsString('Master Batch Amber', $mb['reason']);
-        $this->assertStringContainsString('Amber Master Batch (Arihant)', $mb['reason']);
+        // The sentence states HOW MANY and stops. It used to list both names,
+        // which is the sort of prose the owner asked to be cut (05-Aug) — and
+        // the picker beside this row already shows the candidates, so the names
+        // were being printed twice on one line.
+        $this->assertSame('2 Amber materials — choose one', $mb['reason']);
 
         // One row of factory-stated DATA settles it permanently — and the
         // dosing follows the chosen material.
@@ -522,11 +527,20 @@ class RunMaterialSuggestionTest extends TestCase
         $mapped = $this->preview(extra: ['quantity_produced' => 13333])['suggested_masterbatch'];
         $this->assertSame($second->id, $mapped['item']['id']);
         $this->assertSame('factory_map', $mapped['source']);
-        // No dosing exists for THAT material, so the grams stay blank rather
-        // than borrowing amber's 0.25 — null, never a zero.
-        $this->assertNull($mapped['grams_per_bottle']);
-        $this->assertNull($mapped['suggested_kg']);
-        $this->assertStringContainsString('mapped', $mapped['reason']);
+        // NO DOSING EXISTS FOR THAT MATERIAL, and the rule this test was written
+        // to protect is unchanged: amber's stated 0.25 g is NOT borrowed for it.
+        //
+        // What it gets instead is the factory's standard percentage of this
+        // bottle's own weight — 2.5% of 5 g = 0.125 g — which is not a borrowed
+        // figure but the same default every unweighed product now arrives with.
+        // Before that default existed this row came up blank, and a blank
+        // masterbatch line consumed nothing: "master batch not added"
+        // (owner, 06-Aug).
+        $this->assertSame(0, bccomp((string) $mapped['grams_per_bottle'], '0.1250', 4));
+        $this->assertSame(1, bccomp('0.2500', (string) $mapped['grams_per_bottle'], 4), 'Amber’s own dosing has been borrowed.');
+        $this->assertSame('percent', $mapped['grams_source']);
+        $this->assertSame(0, bccomp((string) $mapped['suggested_kg'], '1.6666', 4));
+        $this->assertSame('Amber Master Batch (Arihant) · 2.5% = 0.125 g/bottle', $mapped['reason']);
     }
 
     public function test_the_factory_can_map_a_colour_its_item_masters_cannot_answer(): void
@@ -582,7 +596,7 @@ class RunMaterialSuggestionTest extends TestCase
 
         $this->assertNull($mb['item']);
         $this->assertSame('no_colour', $mb['source']);
-        $this->assertStringContainsString('no colour', $mb['reason']);
+        $this->assertSame('Colour not set on this bottle — choose the masterbatch', $mb['reason']);
     }
 
     public function test_the_run_reports_the_colour_it_was_started_with(): void

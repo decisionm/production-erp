@@ -648,7 +648,11 @@ class PackingMaterialMappingTest extends TestCase
         $this->assertSame('m', $lines['tape']['unit']);
         // Tape is per CARTON, because tape seals the box.
         $this->assertSame('cartons', $lines['tape']['quantity_basis']);
-        $this->assertStringContainsString('still open', $lines['tape']['reason']);
+        // The unit is what the sentence must carry — metres against an item
+        // Tally counts in Nos. The rest of it (what is not posted, and how to
+        // answer the question) was 62 words the owner asked to be cut, 06-Aug.
+        $this->assertStringContainsString('2.2900 m per box', $lines['tape']['reason']);
+        $this->assertStringContainsString('Tally counts it in Nos', $lines['tape']['reason']);
 
         // NO totals anywhere: the counts are being typed as this is read, and
         // this endpoint is also what Start Batch calls, where nothing has
@@ -817,14 +821,25 @@ class PackingMaterialMappingTest extends TestCase
         // it rather than working the rule out again on its own side.
         $this->assertFalse($tape['submit_as_stock']);
 
-        // The reason says both halves out loud — that the figure is metres,
-        // and that it is therefore going nowhere. A withheld number nobody was
-        // told about is worse than no number.
-        $this->assertStringContainsString('still open', $tape['reason']);
-        $this->assertStringContainsString('NOT posted to stock or Tally', $tape['reason']);
-        // ...and names the two ways the factory can end it, because a caveat
-        // with no exit is just an apology.
-        $this->assertStringContainsString('metres per unit', $tape['reason']);
+        // The reason states the UNIT, which is the fact a figure cannot travel
+        // without: metres, against an item Tally counts in Nos.
+        $this->assertStringContainsString('Tally counts it in Nos', $tape['reason']);
+
+        // IT NO LONGER REPEATS THAT THE LINE IS WITHHELD, and that is the point
+        // of this assertion rather than an omission from it. The screen prints
+        // "NOT posted to stock or Tally until the tape unit is confirmed" as its
+        // own warning line above the row (ShiftProductionEntryPage), driven by
+        // the `submit_as_stock` boolean asserted above — so the old sentence was
+        // saying it a second time, in 62 words, on a screen a supervisor reads
+        // mid-shift. The owner quoted the whole paragraph back (06-Aug): "this
+        // note not necessary".
+        //
+        // The instruction for ENDING the caveat went with it: it told the floor
+        // to go and set metres-per-unit on a mapping they have no access to.
+        // That belongs to whoever administers the packing master, and the
+        // command that reports it every run already names it.
+        $this->assertStringNotContainsString('NOT posted', $tape['reason']);
+        $this->assertLessThan(90, strlen((string) $tape['reason']));
     }
 
     public function test_the_carton_tray_and_film_lines_are_untouched_by_the_tape_rule(): void
@@ -875,7 +890,9 @@ class PackingMaterialMappingTest extends TestCase
         // Unconverted, deliberately: 2.2900 m per box is what posts.
         $this->assertSame(self::TAPE_170_ROUND, $tape['factor']);
         $this->assertSame('m', $tape['unit']);
-        $this->assertStringContainsString('counted in Mtr', $tape['reason']);
+        // The item's own unit settles it, so nothing is converted and nothing
+        // is withheld — the sentence is just the dose.
+        $this->assertSame('Packing Tape - Transparent · 2.2900 m per box', $tape['reason']);
         $this->assertStringNotContainsString('NOT posted', $tape['reason']);
     }
 
@@ -956,7 +973,10 @@ class PackingMaterialMappingTest extends TestCase
 
         // The division is SHOWN. A bare 0.03523076 beside a carton count means
         // nothing to the floor without the two figures that produced it.
-        $this->assertStringContainsString('2.2900 ÷ 65.0000 = 0.03523076', $lines['tape']['reason']);
+        // The division used to be spelled out. The columns beside the row show
+        // the factor, the carton count and the result, so the sentence states
+        // the converted dose and its unit and stops.
+        $this->assertSame('Packing Tape - Transparent · 0.03523076 nos per box', $lines['tape']['reason']);
         $this->assertStringNotContainsString('NOT posted', $lines['tape']['reason']);
 
         // 100 cartons × the factor = the owner's own worked example. Asserted

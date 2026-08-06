@@ -344,7 +344,14 @@ class BatchVoucherShapeTest extends TestCase
         $this->assertSame('229.0000', $tape['quantity']);
         $this->assertSame('m', $tape['unit']);
         $this->assertStringContainsString('100 cartons × 2.2900 m = 229.0000 m.', $tape['reason']);
-        $this->assertStringContainsString('NOT posted', $tape['reason']);
+        // That it is not posted is carried by the STRUCTURE — this line is in
+        // `withheld` under WITHHELD_TAPE, not in `consumed`, and both are
+        // asserted above. The sentence used to say it again in 62 words, which
+        // the owner asked to be cut (06-Aug: "this note not necessary"). What
+        // the sentence must still carry is the UNIT, because metres against an
+        // item Tally counts in Nos is the whole reason for the withholding.
+        $this->assertStringContainsString('m per box', $tape['reason']);
+        $this->assertStringContainsString('Tally counts it in Nos', $tape['reason']);
 
         // Withholding is a decision, not a defect: the voucher still posts.
         $preview = $this->previewFor($entry);

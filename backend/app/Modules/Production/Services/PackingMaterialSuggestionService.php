@@ -433,34 +433,32 @@ class PackingMaterialSuggestionService
         $metres = $mapping->factor();
 
         if ($metres === null) {
-            return "{$label} \"{$spec}\" is \"{$item}\", but no metres-per-box figure is set, so no length can be quoted.";
+            return "{$item} — metres per box not set";
         }
 
-        $head = "{$label} \"{$spec}\" is \"{$item}\" at {$metres} m per box (owner, 31 Jul 2026) — ";
-
-        // Answered by a conversion: the arithmetic is spelled out in full,
-        // both figures and both units, because a factor of 0.03523076 beside a
-        // carton count is meaningless to the floor without the division that
-        // produced it.
+        // ALL THREE BRANCHES ARE ONE LINE NOW.
+        //
+        // The unanswered branch ran to 62 words, and the owner quoted the whole
+        // thing back (06-Aug) with three words of his own: "this note not
+        // necessary". He is right twice over — it was the longest sentence on a
+        // screen a supervisor reads mid-shift, and the screen ALREADY prints
+        // "not posted to stock or Tally" as its own warning line directly above
+        // it, so most of those words were the same fact a second time.
+        //
+        // What could not be dropped is the unit: this line is metres against an
+        // item Tally counts in Nos, and a figure whose unit is not stated is how
+        // 229 m got filed as 229 Nos on a live voucher once already. So the
+        // metres are named, and the reason they are not posted is the warning
+        // line's job, not this sentence's.
         if ($filing['metres_per_unit'] !== null) {
-            return $head."one Nos of it is {$filing['metres_per_unit']} m, so "
-                ."{$metres} ÷ {$filing['metres_per_unit']} = {$filing['factor']} Nos per box and cartons × that. "
-                .'Posted in Nos, the unit Tally counts this tape in.';
+            return "{$item} · {$filing['factor']} nos per box";
         }
 
-        // Answered by the item's own unit instead: nothing to convert.
         if ($filing['submit_as_stock']) {
-            return $head.'cartons × that. "'.$item.'" is counted in '.trim((string) $mapping->item?->uom)
-                .', so the metres are the Tally quantity as they stand.';
+            return "{$item} · {$metres} m per box";
         }
 
-        // Unanswered — the live case. The sentence says what is NOT happening,
-        // because a figure on screen that nobody told the supervisor was
-        // withheld from the voucher is worse than no figure at all.
-        return $head.'cartons × that. Tally counts tape in Nos and whether a "No" is a metre or a strip is still '
-            .'open with the factory, so this is METRES, not a Tally quantity: the line is shown for the record and '
-            .'NOT posted to stock or Tally. Set metres per unit on this mapping — or correct the item\'s unit to a '
-            .'length — and it will be counted.';
+        return "{$item} · {$metres} m per box — metres, and Tally counts it in Nos";
     }
 
     /**

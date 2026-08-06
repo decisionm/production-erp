@@ -442,6 +442,35 @@ return [
     'est_box_rounding' => env('PROD_EST_BOX_ROUNDING', 'round'),
 
     /*
+     * MASTERBATCH as a PERCENTAGE OF THE BOTTLE, the factory's standard dose.
+     *
+     * The floor states masterbatch as a percentage, not as grams: the owner
+     * (06-Aug) — "the standard percentage is per bottle, so need to convert
+     * into kg, so they can change the percentage if they want to use more".
+     *
+     * 2.5% IS FROM THEIR OWN BOOKS, not from a supplier sheet. The July and
+     * August Tally journals dose amber at 0.32 g per bottle, and their 100 ml
+     * amber bottle weighs 12.9 g:
+     *
+     *     0.32 ÷ 12.9      = 2.48%
+     *     2.5% of 12.9 g   = 0.3225 g   ← what those journals book
+     *     2.25% of 12.9 g  = 0.2903 g   ← ~10% light on every shift
+     *
+     * The owner asked twice whether the standard is 2.25% (06-Aug). It reads
+     * like the slip it is — 0.025 expressed as a percentage is 2.5, not 2.25 —
+     * and 2.25% does not reproduce a single July figure. So 2.5% is the
+     * default and the PERCENTAGE IS EDITABLE ON EVERY RUN, which is what the
+     * request actually asked for: a colour run heavier or lighter than
+     * standard is a decision the floor makes at the machine.
+     *
+     * A per-product masterbatch_dosings row still WINS over this. That table
+     * holds grams a person has stated for one colour on one product, and a
+     * stated figure outranks a derived one — this is the default for the 99%
+     * of products nobody has weighed individually, not a replacement for it.
+     */
+    'masterbatch_percent' => env('PROD_MASTERBATCH_PERCENT', '2.5'),
+
+    /*
      * Which rejection figure feeds total rejection when both exist.
      *
      * 'qc' (default, matches the workbook) — QC weighed it on a scale.

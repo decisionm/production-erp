@@ -183,6 +183,10 @@ class NegativeStockOnCompletionTest extends TestCase
         $this->assertSame([[
             'item_id' => $this->resin->id,
             'item_name' => 'Billion Pet Resin IV-0.8',
+            // The UNIT is frozen with the name, because not every shortfall is
+            // weighed: the approval desk printed "4 kg of 15ml Round Master Box"
+            // and "28 kg of 60 Ml Tray" off a hardcoded "kg" (owner, 06-Aug).
+            'item_uom' => 'Kgs.',
             'warehouse_id' => $this->dayBin->id,
             'warehouse_name' => 'Factory Day Bin',
             'short_kg' => '118.9980',
@@ -192,7 +196,7 @@ class NegativeStockOnCompletionTest extends TestCase
         $shortfalls = $response->json('data.metrics.stock_shortfalls');
         $this->assertCount(1, $shortfalls);
 
-        // THE CONTRACT, pinned by name. These five keys are what
+        // THE CONTRACT, pinned by name. These six keys are what
         // frontend/src/features/production/types.ts StockShortfall declares and
         // what readStockShortfalls() reads — item_name, warehouse_name and
         // short_kg are the three it prints. An earlier draft of that file also
@@ -202,9 +206,10 @@ class NegativeStockOnCompletionTest extends TestCase
         // approval drawer goes quiet; this assertion is what makes that fail
         // loudly instead.
         $this->assertSame(
-            ['item_id', 'item_name', 'warehouse_id', 'warehouse_name', 'short_kg'],
+            ['item_id', 'item_name', 'item_uom', 'warehouse_id', 'warehouse_name', 'short_kg'],
             array_keys($shortfalls[0]),
         );
+        $this->assertSame('Kgs.', $shortfalls[0]['item_uom']);
         $this->assertSame('Billion Pet Resin IV-0.8', $shortfalls[0]['item_name']);
         $this->assertSame('Factory Day Bin', $shortfalls[0]['warehouse_name']);
         $this->assertSame('118.9980', $shortfalls[0]['short_kg']);

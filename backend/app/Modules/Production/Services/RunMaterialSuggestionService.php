@@ -162,6 +162,10 @@ class RunMaterialSuggestionService
                 $product,
                 $this->colourFor($product, $configuration, $statedColour),
                 $bottles,
+                // The same bottle weight the resin block is quoting. A
+                // percentage dose is a percentage OF THIS BOTTLE, so the two
+                // blocks must not be able to disagree about what it weighs.
+                $this->unitWeightGramsFor($product, $configuration, $standard),
             ),
         ];
     }
@@ -245,19 +249,42 @@ class RunMaterialSuggestionService
      * @return array{
      *     item: ?array{id: int, name: string}, grams_per_bottle: ?string,
      *     bottles: ?int, suggested_kg: ?string, source: string, reason: string,
+     *     percent: ?string, bottle_grams: ?string, grams_source: ?string,
      * }
      */
-    public function masterbatchFor(Item $product, ?string $colour, ?int $bottles = null): array
-    {
+    public function masterbatchFor(
+        Item $product,
+        ?string $colour,
+        ?int $bottles = null,
+        ?string $bottleGrams = null,
+    ): array {
         $resolved = $this->resolveMasterbatchItem($product, $colour);
         $item = $resolved['item'];
 
-        // Grams come from the dosing master and nowhere else. No figure means
-        // null, never 0.0000 — a zero asserts the factory has said this
-        // colour needs no masterbatch, which nobody has said.
-        $grams = $item === null
+        // A STATED FIGURE FIRST. masterbatch_dosings holds grams a person has
+        // set for one colour on one product, and that outranks any percentage:
+        // the percentage is the standard, the dosing row is somebody's answer
+        // about this exact bottle.
+        $stated = $item === null
             ? null
             : $this->positiveGrams($this->dosings->resolve((int) $item->id, (int) $product->id)?->grams_per_bottle);
+
+        // THE FACTORY'S STANDARD, AS A PERCENTAGE OF THE BOTTLE — which is how
+        // the floor states it ("the standard percentage per bottle, so they can
+        // change the percentage if they want to use more"). 2.5% is their own
+        // July/August books: amber at 0.32 g on a 12.9 g bottle. See
+        // config/production.php for the arithmetic and for why it is not 2.25%.
+        //
+        // This is why the row used to arrive EMPTY. Grams came from the dosing
+        // master and nowhere else, and almost no product has a dosing row — so
+        // the masterbatch line showed a material, no grams and no kg, and
+        // nothing was consumed. "master batch not added" (owner, 06-Aug).
+        $percent = $item === null ? null : $this->masterbatchPercent();
+        $derived = $stated !== null || $item === null
+            ? null
+            : $this->engine->gramsFromPercent($bottleGrams, $percent);
+
+        $grams = $stated ?? $derived;
 
         return [
             'item' => $item === null ? null : ['id' => (int) $item->id, 'name' => (string) $item->name],
@@ -265,8 +292,30 @@ class RunMaterialSuggestionService
             'bottles' => $bottles,
             'suggested_kg' => $this->engine->masterbatchKg($bottles, $grams),
             'source' => $resolved['source'],
-            'reason' => $this->masterbatchReason($resolved, $colour, $grams),
+            // The percentage in force and the bottle it applies to, so the
+            // screen can offer the percentage as the editable field and
+            // recompute grams from it without inventing either number.
+            'percent' => $percent,
+            'bottle_grams' => $item === null ? null : $bottleGrams,
+            // Which of the two produced the grams — so a supervisor can see
+            // whether they are looking at a figure someone set for this bottle
+            // or the factory's standard percentage applied to its weight.
+            'grams_source' => $grams === null ? null : ($stated !== null ? 'dosing' : 'percent'),
+            'reason' => $this->masterbatchReason($resolved, $colour, $grams, $stated === null ? $percent : null),
         ];
+    }
+
+    /**
+     * The standard masterbatch percentage, as a positive decimal string.
+     *
+     * Read through positiveGrams for the same reason every other figure here
+     * is: a misconfigured '0' or 'abc' must degrade to "no percentage" — a
+     * blank box the floor can fill — rather than to a confident 0.0000 g dose
+     * on a live consumption line.
+     */
+    private function masterbatchPercent(): ?string
+    {
+        return $this->positiveGrams(config('production.masterbatch_percent'));
     }
 
     // ---------------------------------------------------------------- resin --
@@ -646,24 +695,44 @@ class RunMaterialSuggestionService
     }
 
     /**
+     * The sentence beside the masterbatch row.
+     *
+     * SHORT, for the reason the whole screen is being shortened — the owner,
+     * reading it on the floor (05-Aug): "why so many English notes, will they
+     * really read them". The old version of this method wrote up to 40 words
+     * telling a supervisor mid-shift to go and administer factory settings they
+     * have no access to. What a person at the machine needs is the material's
+     * name and the dose, because those are the two things the boxes beside it
+     * do not spell out.
+     *
      * @param  array{item: ?Item, source: string, tied: list<string>}  $resolved
+     * @param  ?string  $percent  The standard percentage, when the grams came FROM it
      */
-    private function masterbatchReason(array $resolved, ?string $colour, ?string $grams): string
+    private function masterbatchReason(array $resolved, ?string $colour, ?string $grams, ?string $percent = null): string
     {
         $shade = trim((string) $colour);
 
-        $dosing = $grams === null
-            ? ' No dosing figure is set for it, so the grams per bottle stay blank.'
-            : ' The factory’s dosing is '.$grams.' g per bottle.';
+        // The percentage is named when it is what produced the grams: a dose the
+        // floor may change starts by saying where it came from.
+        $dose = match (true) {
+            $grams === null => ' — dose not set',
+            $percent !== null => ' · '.$this->trimZeros($percent).'% = '.$this->trimZeros($grams).' g/bottle',
+            default => ' · '.$this->trimZeros($grams).' g/bottle',
+        };
 
         return match ($resolved['source']) {
-            'clear' => 'Clear bottles take no masterbatch.',
-            'no_colour' => 'This bottle has no colour on the item master, so the masterbatch cannot be resolved. Set the colour on the item, or map the colour to a masterbatch in factory settings.',
-            'factory_map' => $shade.' is mapped to '.$resolved['item']->name.' in factory settings.'.$dosing,
-            'item_colour' => $resolved['item']->name.' is the only '.$shade.' material in the masters.'.$dosing,
-            'ambiguous_colour' => 'More than one '.$shade.' material exists ('.implode(', ', $resolved['tied']).') — pick the masterbatch, or map '.$shade.' to one in factory settings.',
-            default => 'No masterbatch is set for '.$shade.'. Map '.$shade.' to a masterbatch in factory settings, or pick it here — another colour’s masterbatch is never offered.',
+            'clear' => 'Clear takes no masterbatch',
+            'no_colour' => 'Colour not set on this bottle — choose the masterbatch',
+            'factory_map', 'item_colour' => $resolved['item']->name.$dose,
+            'ambiguous_colour' => count($resolved['tied']).' '.$shade.' materials — choose one',
+            default => 'No masterbatch mapped for '.($shade === '' ? 'this colour' : $shade).' — choose one',
         };
+    }
+
+    /** 2.5000 reads as 2.5, and 0.3225 stays 0.3225. */
+    private function trimZeros(string $value): string
+    {
+        return str_contains($value, '.') ? rtrim(rtrim($value, '0'), '.') : $value;
     }
 
     /**
