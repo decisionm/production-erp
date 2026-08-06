@@ -3070,7 +3070,31 @@ export default function ShiftProductionEntryPage() {
         }
     }, [entryDayBin, completingEntry, traceabilityEnabled, applyDayBinConsumption]);
 
-    const nominalWeight = completingEntry?.item.nominal_weight_grams ? Number(completingEntry.item.nominal_weight_grams) : null;
+    /**
+     * WHAT ONE BOTTLE OF THIS RUN WEIGHS — the server's own answer, not a
+     * second opinion about it.
+     *
+     * Precedence mirrors resolvedUnitWeightGrams() exactly: the weight this run
+     * froze at Start, then the item master. Every kilogram the server stores on
+     * the entry is computed that way, so a preview using any other order shows
+     * a figure the entry will not hold.
+     *
+     * Reading the item master alone — which this did — agrees whenever no
+     * configuration overrode the weight and diverges silently the moment one
+     * does. Silent is the operative word: nothing on screen would say which of
+     * the two numbers the batch was recorded at.
+     */
+    const nominalWeight = useMemo(() => {
+        for (const candidate of [completingEntry?.unit_weight_grams, completingEntry?.item.nominal_weight_grams]) {
+            const grams = Number(candidate);
+
+            // Number(null) is 0 and Number(undefined) is NaN, so both fall
+            // through to the next candidate rather than reading as a weight.
+            if (Number.isFinite(grams) && grams > 0) return grams;
+        }
+
+        return null;
+    }, [completingEntry]);
     const previewProducedKg = nominalWeight && quantityProduced ? ((quantityProduced * nominalWeight) / 1000).toFixed(4) : null;
     const previewRejectionKg = nominalWeight && quantityScrap ? ((quantityScrap * nominalWeight) / 1000).toFixed(4) : null;
 
