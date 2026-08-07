@@ -72,7 +72,12 @@ export default function BarcodeDisplay({
     return (
         <Space direction="vertical" align="center" style={{ width: '100%' }}>
             {label && <Typography.Text type="secondary">{label}</Typography.Text>}
-            <svg ref={svgRef} />
+            {/* JsBarcode sets a fixed px width (2px/module — a 20-char carton
+                code is ~500px) plus a viewBox, so letting CSS cap it SCALES
+                the barcode into whatever card holds it instead of letting it
+                bleed across the modal. Print paths build their own SVG at
+                native size and are unaffected. */}
+            <svg ref={svgRef} style={{ maxWidth: '100%', height: 'auto' }} />
             <Button icon={<PrinterOutlined />} onClick={handlePrint}>
                 {printButtonLabel}
             </Button>
