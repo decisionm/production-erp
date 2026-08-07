@@ -13,6 +13,7 @@ use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\WorkCenter;
 use App\Modules\Production\Services\FactoryWarehouseResolver;
 use App\Modules\Production\Services\ShiftProductionEntryService;
+use App\Modules\TallySync\Models\Enums\TallySyncStatus;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Services\TallySyncService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -128,7 +129,10 @@ class ShiftVoucherGranularityTest extends TestCase
         $this->assertSame(1, TallySyncEntry::count(), 'Both approvals must land in ONE shift voucher');
 
         $voucher = TallySyncEntry::query()->sole();
-        $this->assertSame('Stock Journal', $voucher->tally_voucher_type);
+        // 'Manufacturing Journal' is the agent's DISPATCH KEY, not the XML it
+        // emits — that builder posts a plain Stock Journal. Labelling shift
+        // vouchers 'Stock Journal' shipped a type the agent refuses (07-Aug).
+        $this->assertSame('Manufacturing Journal', $voucher->tally_voucher_type);
         $this->assertSame("SJ-20260723-S{$this->shift->id}", $voucher->payload['voucher_number']);
         $this->assertSame('2026-07-23', $voucher->payload['voucher_date']);
 
@@ -256,13 +260,48 @@ class ShiftVoucherGranularityTest extends TestCase
         config(['tally-sync.voucher_granularity' => 'shift']);
         $shiftEra = $this->approve($this->pendingEntry('3000', [[$this->resin, '100.0000']], 'B-2'));
 
-        $voucher = TallySyncEntry::query()->where('tally_voucher_type', 'Stock Journal')->sole();
+        $voucher = TallySyncEntry::query()->where('syncable_type', (new Shift)->getMorphClass())->sole();
         $this->assertSame([$shiftEra->id], $voucher->payload['entry_ids'], 'Batch-era entry must not be swept');
         $this->assertNull($batchEra->fresh()->tally_sync_entry_id);
         $this->assertSame(
             [['item' => 'PET Resin', 'quantity' => '100.0000', 'godown' => 'RM Store']],
             $voucher->payload['consumed'],
         );
+    }
+
+    public function test_retry_relabels_and_rebuilds_a_voucher_frozen_under_the_builderless_label(): void
+    {
+        // The live regression this heals (entries #33/#34, 07-Aug): the first
+        // shift vouchers were enqueued under 'Stock Journal', a dispatch label
+        // the deployed agent has no builder for, and the agent failed them.
+        // A retry must regenerate BOTH the payload and the label — a retry
+        // that keeps the frozen label fails identically forever.
+        config(['tally-sync.voucher_granularity' => 'shift']);
+        $this->approve($this->pendingEntry('5000', [[$this->resin, '250.0000']], 'B-1'));
+
+        $voucher = TallySyncEntry::query()->sole();
+        $voucher->update([
+            'tally_voucher_type' => 'Stock Journal',
+            'payload' => array_merge($voucher->payload, ['voucher_type' => 'Stock Journal']),
+            'status' => TallySyncStatus::Failed,
+            'error_message' => 'No XML builder for voucher type "Stock Journal" (entry #33)',
+            'delivered_at' => now(),
+        ]);
+
+        app(TallySyncService::class)->retry($voucher->fresh());
+
+        $healed = $voucher->fresh();
+        $this->assertSame('Manufacturing Journal', $healed->tally_voucher_type);
+        $this->assertSame('Manufacturing Journal', $healed->payload['voucher_type']);
+        $this->assertSame(TallySyncStatus::Pending, $healed->status);
+        $this->assertNull($healed->delivered_at);
+        // The rebuilt payload carries the builder-contract fields the frozen
+        // one lacked, and the membership survived the rebuild.
+        $this->assertArrayHasKey('godown', $healed->payload);
+        $this->assertArrayHasKey('batch_number', $healed->payload);
+        $this->assertSame('FG Store', $healed->payload['godown']);
+        $this->assertNotEmpty($healed->payload['entry_ids']);
+        $this->assertStringContainsString('No XML builder', $healed->payload['resolution_log'][0]['previous_error']);
     }
 
     public function test_default_batch_granularity_keeps_the_per_entry_manufacturing_journal(): void

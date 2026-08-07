@@ -656,7 +656,12 @@ class TallySyncService
                     // no single entry. Members hang off tally_sync_entry_id.
                     'syncable_type' => (new Shift)->getMorphClass(),
                     'syncable_id' => $entry->shift_id,
-                    'tally_voucher_type' => 'Stock Journal',
+                    // The agent dispatches builders on this STRING, and the
+                    // builder registered as 'Manufacturing Journal' is the one
+                    // that emits the validated Stock Journal XML (its file
+                    // says so) — 'Stock Journal' as a label has no builder and
+                    // fails on the factory PC (entries #33/#34, 07-Aug demo).
+                    'tally_voucher_type' => 'Manufacturing Journal',
                     'payload' => $this->shiftVoucherPayload($joining, $number, $entry),
                     'status' => TallySyncStatus::Pending,
                     'attempts' => 0,
@@ -751,9 +756,18 @@ class TallySyncService
         $batches = $members->pluck('batch_number')->filter()->values();
 
         return [
-            'voucher_type' => 'Stock Journal',
+            // 'Manufacturing Journal' is the agent's dispatch key for the
+            // builder that posts a plain Stock Journal (see the enqueue-side
+            // comment); batch_number/godown complete that builder's payload
+            // contract. The voucher-level godown covers the produced lines —
+            // the builder reads per-line godowns for consumption only — and
+            // every member's completion books into the same FG store role,
+            // so the first member's warehouse speaks for all of them.
+            'voucher_type' => 'Manufacturing Journal',
             'voucher_date' => $entry->production_date->toDateString(),
             'voucher_number' => $voucherNumber,
+            'batch_number' => null,
+            'godown' => $this->godowns->resolveName($members->first()?->warehouse),
             'shift' => $members->first()?->shift?->name,
             'narration' => trim("Shift production — {$members->count()} entries"
                 .($batches->isNotEmpty() ? '. Batches: '.$batches->implode(', ') : '')),
@@ -915,6 +929,13 @@ class TallySyncService
             'error_message' => null,
             'delivered_at' => null,
             'payload' => $payload,
+            // The dispatch label rides with the regenerated payload: the
+            // first shift vouchers were enqueued under 'Stock Journal', a
+            // label the deployed agent has no builder for, and a retry that
+            // kept the frozen label would fail identically forever.
+            'tally_voucher_type' => is_string($payload['voucher_type'] ?? null)
+                ? $payload['voucher_type']
+                : $entry->tally_voucher_type,
         ]);
 
         return $entry;
@@ -976,6 +997,7 @@ class TallySyncService
 
         $fresh = match (true) {
             $source instanceof ShiftProductionEntry => $this->buildBatchVoucherPayload($source),
+            $source instanceof Shift => $this->rebuildShiftVoucherPayload($entry),
             default => null,
         };
 
@@ -987,6 +1009,28 @@ class TallySyncService
         $fresh['resolution_log'] = $entry->payload['resolution_log'] ?? [];
 
         return $fresh;
+    }
+
+    /**
+     * A shift voucher rebuilt from its member entries — the rows whose
+     * tally_sync_entry_id names this voucher, which is the authoritative
+     * membership tracker. The voucher number is kept from the frozen
+     * payload: it is the voucher's identity, not derived state.
+     */
+    private function rebuildShiftVoucherPayload(TallySyncEntry $voucher): ?array
+    {
+        $members = ShiftProductionEntry::query()
+            ->where('tally_sync_entry_id', $voucher->id)
+            ->get();
+
+        $first = $members->first();
+        $number = $voucher->payload['voucher_number'] ?? null;
+
+        if ($first === null || ! is_string($number)) {
+            return null;
+        }
+
+        return $this->shiftVoucherPayload($members, $number, $first);
     }
 
     private function enqueue(Model $syncable, string $voucherType, array $payload): TallySyncEntry
