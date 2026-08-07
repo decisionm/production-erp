@@ -72,13 +72,20 @@ export default function DeliveriesPage() {
                 message.error(`Carton ${trimmed} was already dispatched — it cannot leave twice.`);
                 return;
             }
+            // QUALITY REJECTED boxes never queue (DEC-20260807-013) — the
+            // server refuses them at submit too; this tells the person
+            // holding the box, loudly, now.
+            if (carton.quality?.verdict === 'quality_rejected') {
+                message.error(`Carton ${trimmed} is QUALITY REJECTED — do not ship.`, 6);
+                return;
+            }
             if (selectedOrder && !selectedOrder.lines.some((l) => l.item.id === carton.item?.id)) {
                 message.error(`Carton ${trimmed} holds ${carton.item?.sku ?? 'an item'} — this order does not carry it.`);
                 return;
             }
             setScannedCartons((prev) => [...prev, carton]);
             message.success(
-                `${trimmed}: ${Number(carton.pieces).toLocaleString('en-IN')} pcs · batch ${carton.batch?.batch_number ?? '—'}`,
+                `${trimmed}: ${Number(carton.pieces).toLocaleString('en-IN')} pcs · batch ${carton.batch?.batch_number ?? '—'}${carton.quality?.verdict === 'pending' ? ' · awaiting QC/approval' : ''}`,
             );
         } catch (error: any) {
             message.error(error?.response?.data?.message ?? `No carton carries the code ${trimmed}.`);
@@ -288,6 +295,8 @@ export default function DeliveriesPage() {
                                                 {carton.is_partial ? ' ' : ''}
                                             </span>
                                             {carton.is_partial && <Tag color="warning">Partial</Tag>}
+                                            {carton.quality?.verdict === 'pending' && <Tag>Awaiting QC/approval</Tag>}
+                                            {carton.quality?.verdict === 'approved' && <Tag color="success">QC approved</Tag>}
                                             <Button
                                                 size="small"
                                                 type="link"

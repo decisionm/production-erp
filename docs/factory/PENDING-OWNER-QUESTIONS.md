@@ -329,3 +329,14 @@ master 19.5 g) and the master row has NO cycle time, so nothing else can
 corroborate. One product under two names — with one weight figure to
 correct — or two different products? **Blocks:** entering the ASB-9 paper
 rows; that row's weight norm. *Open since 2026-08-07.*
+
+## Q27 · Dispatch of not-yet-approved batches — QC-pass required, accountant approval required, or ship-anytime as today?
+
+Dispatch scan now refuses cartons of a quality-REJECTED batch
+(DEC-20260807-013), and the scan/lookup shows a pending batch's state
+clearly. But a batch that has not yet been through QC or the approval
+chain can still be dispatched, exactly as before — the gate was
+deliberately NOT tightened without the owner's word. Three options: (a)
+require accountant approval before a carton may leave, (b) require only
+the QC pass, or (c) keep ship-anytime as today. **Blocks:** nothing —
+today's behaviour continues until answered. *Open since 2026-08-07.*

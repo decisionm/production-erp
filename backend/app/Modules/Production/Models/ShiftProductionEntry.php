@@ -223,6 +223,33 @@ class ShiftProductionEntry extends Model
     }
 
     /**
+     * The one plain word a carton scan renders about this batch's quality
+     * and approval truth (DEC-20260807-013): the sticker on the box never
+     * changes, so the SYSTEM's answer at scan time is what carries it.
+     *
+     *   'quality_rejected' — the batch was rejected (quality gate or the
+     *                        approval chain sent it back); its boxes must
+     *                        not ship and dispatch refuses them.
+     *   'approved'         — the accountant approved (Synced/Failed are
+     *                        post-approval Tally states; quality-wise the
+     *                        batch is through).
+     *   'pending'          — still in the chain. Dispatch does NOT block
+     *                        these (tightening that gate is open owner
+     *                        question Q27) but every scan shows the state.
+     */
+    public function cartonQualityVerdict(): string
+    {
+        return match ($this->status) {
+            ShiftProductionEntryStatus::Rejected => 'quality_rejected',
+            ShiftProductionEntryStatus::Approved,
+            ShiftProductionEntryStatus::AccountantApproved,
+            ShiftProductionEntryStatus::Synced,
+            ShiftProductionEntryStatus::Failed => 'approved',
+            default => 'pending',
+        };
+    }
+
+    /**
      * Sync attempts for this entry, newest first — read-only here; all
      * writes stay in the TallySync module. Exists so a failed entry can
      * surface its Tally error on the approval screen.
