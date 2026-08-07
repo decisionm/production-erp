@@ -2,6 +2,7 @@
 
 namespace App\Modules\TallySync\Http\Resources;
 
+use App\Modules\TallySync\Services\ShiftVoucherReleaseGate;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -26,6 +27,12 @@ class TallySyncEntryResource extends JsonResource
             // TallySyncService::pending() for why the stamp lands after the
             // rows are read.
             'delivered_at' => $this->delivered_at?->toIso8601String(),
+            'released_at' => $this->released_at?->toIso8601String(),
+            // Why a pending shift voucher is not with the agent yet — null
+            // once it is deliverable (or for batch vouchers, which are
+            // never held). Drives the "collecting / quiet period" copy and
+            // the Release now button on the Tally Sync page.
+            'hold' => $this->holdState(),
             'created_at' => $this->created_at?->toIso8601String(),
             // The story of a failed voucher's repair: each retry after a
             // failure records the previous error and that the payload was
@@ -33,6 +40,26 @@ class TallySyncEntryResource extends JsonResource
             // was fixed, it went through" stays readable afterwards.
             'resolution_log' => $this->payload['resolution_log'] ?? [],
             'fix' => $this->fixSuggestion(),
+        ];
+    }
+
+    /**
+     * The release gate's verdict, shaped for the wire.
+     *
+     * @return array{phase: string, shift_ends_at: ?string, last_merged_at: string, releasable_at: string}|null
+     */
+    private function holdState(): ?array
+    {
+        $hold = app(ShiftVoucherReleaseGate::class)->hold($this->resource);
+        if ($hold === null) {
+            return null;
+        }
+
+        return [
+            'phase' => $hold['phase'],
+            'shift_ends_at' => $hold['shift_ends_at']?->toIso8601String(),
+            'last_merged_at' => $hold['last_merged_at']->toIso8601String(),
+            'releasable_at' => $hold['releasable_at']->toIso8601String(),
         ];
     }
 

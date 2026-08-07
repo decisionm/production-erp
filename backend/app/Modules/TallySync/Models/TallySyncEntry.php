@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
 #[Fillable([
     'syncable_type', 'syncable_id', 'tally_voucher_type', 'payload',
     'status', 'attempts', 'error_message', 'synced_at', 'delivered_at',
+    'last_merged_at', 'released_at', 'released_by',
 ])]
 class TallySyncEntry extends Model
 {
@@ -20,6 +21,8 @@ class TallySyncEntry extends Model
             'status' => TallySyncStatus::class,
             'synced_at' => 'datetime',
             'delivered_at' => 'datetime',
+            'last_merged_at' => 'datetime',
+            'released_at' => 'datetime',
         ];
     }
 

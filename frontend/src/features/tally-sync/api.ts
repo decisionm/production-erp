@@ -63,6 +63,12 @@ export async function retryTallySyncEntry(id: number): Promise<TallySyncEntry> {
     return data.data;
 }
 
+/** The accountant's "Release now" on a held shift voucher (DEC-20260807-011). */
+export async function releaseTallySyncEntry(id: number): Promise<TallySyncEntry> {
+    const { data } = await api.post<{ data: TallySyncEntry }>(`/tally-sync/entries/${id}/release`);
+    return data.data;
+}
+
 export async function listAgentTokens(): Promise<Paginated<AgentToken>> {
     const { data } = await api.get<Paginated<AgentToken>>('/tally-sync/agent-tokens');
     return data;

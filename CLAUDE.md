@@ -86,6 +86,7 @@ Rules:
 - Cross-module reads/writes go through the other module's Service class, never directly through its Eloquent models. Keeps modules loosely coupled so `ERP-FEATURES.md` items can be built independently.
 - New API routes are added to `routes/api.php` under `/v1`, grouped by module, guarded by `auth:sanctum` unless deliberately public (like `/auth/login`).
 - Money and stock-quantity columns: always `decimal`, never `float`.
+- Factory wall-clock values (shift `end_time`s, day boundaries) are IST; `app.timezone` is UTC and must stay UTC on a live system. Never compare `now()` directly against a wall-clock string — localize the wall-clock side through `config('tally-sync.factory_timezone')` (env `FACTORY_TIMEZONE`, default `Asia/Kolkata`) first. Scripts outside Laravel honour the same env var (see `scripts/factory-knowledge/lib.py`).
 - Anything a user can "delete" that has transactional history (items, customers, vendors) uses soft deletes, not hard deletes.
 
 ## The frontend pattern
