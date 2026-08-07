@@ -30,8 +30,13 @@ bag belongs to no machine and no batch (FC-01, `docs/factory/`).
 ## Working here
 
 - Typecheck: `npm run typecheck` (CI runs it as "Tally sync agent typecheck")
-- Package: `npm run package:win` — installed on the factory PC by hand;
-  deploys of the web app do NOT update the agent
+- Package: `npm run package:win` — but real installers come from the
+  *Build Tally Sync Agent* CI workflow (Windows runner), and releasing one
+  follows the RELEASE RITUAL in the repo root's `DEPLOY.md`: build on CI →
+  review gate → manual publish dispatch. Publishing IS deploying — the
+  factory agent auto-updates from the published feed — so never dispatch
+  with `publish: true` for unreviewed code. Deploys of the web app do NOT
+  update the agent
 - Site install steps: `SITE-CHECKLIST.md`
 - Voucher shape questions: the ERP side owns them —
   `backend/app/Modules/TallySync/` and its tests are the contract
