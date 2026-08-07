@@ -9,8 +9,10 @@ scope, what it replaced — is the file named by the ID in `decisions/`.
 THIS FILE IS THE HUMAN SURFACE (FC-08). The record files behind it are a
 tool-managed machine format — nobody should ever be sent to read one raw.
 
-**30 current · 0 superseded**
+**31 current · 0 superseded**
 
+- **DEC-20260807-014** (2026-08-07, production, tally-sync) — The shift-granularity flip executed on live 07-Aug-2026 evening at the owner's direction, ahead of a consolidated-voucher demo — overriding, for this execution only, DEC-20260807-010's flip-at-a-date-boundary step. One mixed day (batch vouchers before the flip, shift vouchers after) was accepted by the owner; the granularity exclusion logic makes the mix double-post-safe by design. Executed via the flip-voucher-granularity workflow, dry-run first, effective config verified as 'shift'.
+  - evidence: Owner directive 07-Aug-2026 evening, relayed by Muthukumar (demo within 30 minutes; date-boundary preference overridden); executed by workflow run 31175545934 (dry run 31175409740 before it); resolves Q16
 - **DEC-20260807-013** (2026-08-07, production, packing, sales) — Carton identity is permanent — the sticker on the box never changes; the SYSTEM's answer when a carton is scanned is what carries the batch's quality and approval truth. A carton whose batch is quality-REJECTED must be refused at dispatch scan and must announce QUALITY REJECTED on any lookup. Batches not yet through QC/approval are NOT blocked at dispatch (whether dispatch should also require accountant approval, or QC-pass, is a separate open owner question), but the scan/lookup must show the pending state clearly.
   - evidence: Owner confirmation 07-Aug-2026: field gap found by the owner — dispatch scan accepted boxes of a quality-rejected batch; ruling that the sticker never changes and the system's scan answer carries the quality truth
 - **DEC-20260807-012** (2026-08-07, production, tally-sync) — The posting gate is unchanged by shift consolidation: vouchers contain only APPROVED entries and the accountant's approval remains final. A batch stuck in QA/approval does NOT hold its shift's voucher — approved later, it opens the standard -2/-3 follow-up voucher. A failed Tally send isolates to its own voucher with the existing retry and never blocks other vouchers.

@@ -25,6 +25,8 @@ is one and the same: any serially-numbered id minted on parallel branches
 collides, so assignment happens against the MERGED view — check every open
 branch for the highest id before minting, or re-mint at merge time (this
 happened again with DEC-20260807-001.., three branches deep, 07-Aug).
+DEC-20260807-014 is taken on main (the granularity-flip execution record);
+open PR #148 carries its own unmerged -014 and re-mints it at merge.
 
 ---
 
@@ -169,7 +171,7 @@ since the voucher's last merge, N default 15; manual accountant override
 kept; tray's "Sync Now" unchanged).** The options considered:
 `docs/SHIFT-VOUCHER-RELEASE-OPTIONS.md`.
 
-## Q16 · Granularity flip — at which boundary, and after verifying what?
+## Q16 · Granularity flip — at which boundary, and after verifying what? — RESOLVED
 
 Two parts. (1) The flip should land at a date boundary (before Shift A's
 first approval) so no Day-Book date is half batch-shaped, half
@@ -182,7 +184,14 @@ Actions outage. Every artifact points to `batch` (the default; the archived
 delivery plan deferred the flip; no record of flipping exists) — but that
 is inference, and the value must be READ (SSH grep of live `.env`, or the
 `tally-sync-status` workflow once Actions returns) before any flip is
-planned. **Blocks:** scheduling the flip. *Open since 2026-08-07.*
+planned. **Blocks:** scheduling the flip.
+
+**Resolved 2026-08-07 by DEC-20260807-014 — by execution: the owner
+directed the flip mid-day for the consolidated-voucher demo, overriding
+DEC-20260807-010's date-boundary step for this execution. The prior value
+WAS read first (dry run: variable absent, effective 'batch') and the
+post-write config verified as 'shift', both via the flip-voucher-granularity
+workflow.** Was open since 2026-08-07.
 
 ## Q17 · Does the accountant preview the consolidated voucher before it posts? — RESOLVED
 
