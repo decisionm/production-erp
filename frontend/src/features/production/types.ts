@@ -2462,6 +2462,21 @@ export interface FinishedCarton {
      * label renders it only when a real linkage one day fills it.
      */
     sales_order?: { customer: string | null; order_no: string | null } | null;
+    /**
+     * The batch's quality and approval truth (DEC-20260807-013). The sticker
+     * on the box is permanent — this block is the system's answer at scan
+     * time. 'quality_rejected' renders LOUD and the server also refuses the
+     * box at dispatch; 'pending' ships as today (open owner question Q27)
+     * but must show; packed_nos is gross, qc_approved_nos the netted figure
+     * once QC has counted (null before).
+     */
+    quality?: {
+        entry_status: string | null;
+        verdict: 'quality_rejected' | 'approved' | 'pending';
+        packed_nos: string;
+        qc_approved_nos: string | null;
+        qc_rejected_nos: number | null;
+    };
     /** The traceability spine: which batch this physical box came from. */
     batch?: {
         shift_production_entry_id: number;

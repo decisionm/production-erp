@@ -4,6 +4,7 @@ namespace App\Modules\Sales\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Inventory\Services\StockMovementService;
+use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
 use App\Modules\Production\Models\FinishedCarton;
 use App\Modules\Sales\Events\DeliveryDispatched;
 use App\Modules\Sales\Exceptions\OverDeliveryException;
@@ -132,7 +133,7 @@ class DeliveryService
         $byLine = [];
 
         foreach (array_values(array_unique($codes)) as $code) {
-            $carton = FinishedCarton::query()->where('carton_no', $code)->lockForUpdate()->first();
+            $carton = FinishedCarton::query()->with('entry')->where('carton_no', $code)->lockForUpdate()->first();
 
             if ($carton === null) {
                 throw ValidationException::withMessages([
@@ -142,6 +143,17 @@ class DeliveryService
             if ($carton->status !== FinishedCarton::STATUS_IN_STOCK) {
                 throw ValidationException::withMessages([
                     'carton_codes' => "Carton {$code} was already dispatched — it cannot leave twice.",
+                ]);
+            }
+
+            // QUALITY REJECTED boxes never leave (DEC-20260807-013): the
+            // sticker on the box is permanent, so the scan is where the
+            // batch's quality truth speaks. Batches merely NOT YET through
+            // QC/approval pass exactly as before — tightening that gate is
+            // open owner question Q27, not this guard's call.
+            if ($carton->entry?->status === ShiftProductionEntryStatus::Rejected) {
+                throw ValidationException::withMessages([
+                    'carton_codes' => "Carton {$code} is QUALITY REJECTED — its batch failed quality/approval and its boxes must not ship.",
                 ]);
             }
 

@@ -181,6 +181,119 @@ class FinishedCartonTest extends TestCase
         $this->assertSame('20260802-M01-001', $reprint[0]['batch']['batch_number']);
     }
 
+    /** An order + FG stock ready to dispatch against — the scan tests' stage. */
+    private function orderFor(string $stock = '2160', string $ordered = '2000'): SalesOrder
+    {
+        app(StockMovementService::class)->recordReceipt(
+            itemId: $this->bottle->id, warehouseId: $this->fg->id,
+            quantity: $stock, unitCost: '2.50', reference: 'seed',
+        );
+
+        $customer = Customer::create(['code' => 'CUST-1', 'name' => 'Aqua Traders']);
+        $order = SalesOrder::create([
+            'customer_id' => $customer->id,
+            'status' => SalesOrderStatus::Confirmed,
+            'order_date' => '2026-08-02',
+        ]);
+        $order->lines()->create([
+            'item_id' => $this->bottle->id, 'quantity' => $ordered,
+            'unit_price' => '4.50', 'quantity_delivered' => 0,
+        ]);
+
+        return $order;
+    }
+
+    /**
+     * THE QUALITY TRUTH AT THE DISPATCH DOOR (DEC-20260807-013): the sticker
+     * on the box never changes, so the system's answer at scan time carries
+     * the batch's quality/approval truth. A quality-REJECTED batch's boxes
+     * are refused by name; an approved batch passes exactly as before; a
+     * batch not yet through the chain also passes (tightening that gate is
+     * open owner question Q27) but the lookup says so.
+     */
+    public function test_a_rejected_batchs_carton_is_refused_at_dispatch_and_says_quality_rejected(): void
+    {
+        $entry = $this->completedEntry();
+        $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/cartons")->assertSuccessful();
+        $entry->update(['status' => ShiftProductionEntryStatus::Rejected]);
+
+        $order = $this->orderFor();
+
+        $response = $this->postJson('/api/v1/sales/deliveries', [
+            'sales_order_id' => $order->id,
+            'warehouse_id' => $this->fg->id,
+            'carton_codes' => ['20260802-M01-001-C01'],
+        ])->assertStatus(422);
+
+        // The refusal names the exact carton and says QUALITY REJECTED —
+        // the person hearing it is holding the box.
+        $this->assertStringContainsString('20260802-M01-001-C01', $response->json('message'));
+        $this->assertStringContainsString('QUALITY REJECTED', $response->json('message'));
+
+        // Nothing moved: the box stays in stock, the order untouched.
+        $this->assertSame('in_stock', FinishedCarton::query()->where('carton_no', '20260802-M01-001-C01')->value('status'));
+        $this->assertSame('0.0000', (string) $order->lines()->first()->fresh()->quantity_delivered);
+    }
+
+    public function test_an_approved_batchs_cartons_dispatch_exactly_as_before(): void
+    {
+        $entry = $this->completedEntry();
+        $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/cartons")->assertSuccessful();
+        $entry->update(['status' => ShiftProductionEntryStatus::Approved]);
+
+        $order = $this->orderFor();
+
+        $this->postJson('/api/v1/sales/deliveries', [
+            'sales_order_id' => $order->id,
+            'warehouse_id' => $this->fg->id,
+            'carton_codes' => ['20260802-M01-001-C01'],
+        ])->assertSuccessful();
+
+        $this->assertSame('600.0000', (string) $order->lines()->first()->fresh()->quantity_delivered);
+    }
+
+    public function test_the_lookup_carries_the_batchs_quality_truth(): void
+    {
+        $entry = $this->completedEntry('2160', '600');
+        $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/cartons")->assertSuccessful();
+
+        // Fresh from the floor: pending, QC not yet counted — packed is the
+        // gross figure and the QC columns are honestly null, not zero.
+        $quality = $this->getJson('/api/v1/production/cartons/20260802-M01-001-C01')
+            ->assertSuccessful()->json('data.quality');
+        $this->assertSame('pending', $quality['verdict']);
+        $this->assertSame('pending', $quality['entry_status']);
+        $this->assertSame('2160.0000', $quality['packed_nos']);
+        $this->assertNull($quality['qc_approved_nos']);
+        $this->assertNull($quality['qc_rejected_nos']);
+
+        // After the quality gate nets 160 rejects: packed stays gross, the
+        // approved figure is the netted count every downstream consumer reads.
+        $entry->update([
+            'gross_quantity_produced' => '2160',
+            'quantity_produced' => '2000',
+            'quality_reviewed_nos' => 2160,
+            'quality_ok_nos' => 2000,
+            'quality_rejected_nos' => 160,
+            'quality_checked_at' => now(),
+            'status' => ShiftProductionEntryStatus::Approved,
+        ]);
+        $quality = $this->getJson('/api/v1/production/cartons/20260802-M01-001-C01')
+            ->assertSuccessful()->json('data.quality');
+        $this->assertSame('approved', $quality['verdict']);
+        $this->assertSame('2160.0000', $quality['packed_nos']);
+        $this->assertSame('2000.0000', $quality['qc_approved_nos']);
+        $this->assertSame(160, $quality['qc_rejected_nos']);
+
+        // A rejected batch's lookup announces it — the identity never
+        // changes, the answer does (DEC-20260807-013).
+        $entry->update(['status' => ShiftProductionEntryStatus::Rejected]);
+        $quality = $this->getJson('/api/v1/production/cartons/20260802-M01-001-C01')
+            ->assertSuccessful()->json('data.quality');
+        $this->assertSame('quality_rejected', $quality['verdict']);
+        $this->assertSame('rejected', $quality['entry_status']);
+    }
+
     public function test_a_run_with_no_resolved_weight_prints_no_weight_rather_than_inventing_one(): void
     {
         $entry = $this->completedEntry('2160', '600');

@@ -40,6 +40,28 @@ class FinishedCartonResource extends JsonResource
             // real linkage exists this block gets filled; until then it is
             // honestly null. Never fabricate one for the label's sake.
             'sales_order' => null,
+            // THE BATCH'S QUALITY AND APPROVAL TRUTH (DEC-20260807-013). The
+            // sticker on the box never changes — this block is what tells a
+            // scanner whether the box may ship. packed_nos is the GROSS packed
+            // count (cartons are physical boxes packed before QC nets
+            // anything); qc_approved_nos is the NETTED figure once the quality
+            // gate has counted, honestly null before then. The verdict is the
+            // one word the UI renders loud: 'quality_rejected' boxes are also
+            // refused server-side at dispatch scan.
+            'quality' => $this->whenLoaded('entry', fn () => [
+                'entry_status' => $this->entry->status?->value,
+                'verdict' => $this->entry->cartonQualityVerdict(),
+                // bcadd(_, '0', 4) canonicalizes: these columns carry no
+                // Eloquent cast, so raw driver values differ (SQLite 2160,
+                // MySQL '2160.0000') — the API shape must not.
+                'packed_nos' => bcadd((string) ($this->entry->gross_quantity_produced ?? $this->entry->quantity_produced ?? '0'), '0', 4),
+                'qc_approved_nos' => $this->entry->quality_checked_at !== null
+                    ? bcadd((string) ($this->entry->quantity_produced ?? '0'), '0', 4)
+                    : null,
+                'qc_rejected_nos' => $this->entry->quality_checked_at !== null
+                    ? $this->entry->quality_rejected_nos
+                    : null,
+            ]),
             // The traceability spine: which batch, machine, shift and date
             // this physical box came from.
             'batch' => $this->whenLoaded('entry', fn () => [
