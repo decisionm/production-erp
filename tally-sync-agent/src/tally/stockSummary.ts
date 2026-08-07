@@ -1,19 +1,30 @@
 import axios from 'axios';
 import { XMLParser } from 'fast-xml-parser';
+import { withTallyGate } from './gate';
 import { escapeXml } from './voucherBuilders/xmlHelpers';
 import type { TallyTarget } from './masters';
 
 /**
- * Reads a GODOWN-WISE STOCK SUMMARY out of Tally, as at a closing date.
+ * Reads a GODOWN-WISE STOCK SUMMARY out of Tally, as at a closing date —
+ * ONE STOCK GROUP AT A TIME.
  *
- * STRICTLY READ-ONLY. This exports a collection; it never imports, alters or
+ * STRICTLY READ-ONLY. This exports collections; it never imports, alters or
  * writes anything to Tally. The same guarantee the masters export gives.
  *
- * Why it exists: the masters sync carries item and godown NAMES but no
- * quantities, so the ERP has never had an authoritative opening position — it
- * was filled with hand-typed "provisional" figures during rehearsal, and those
- * became indistinguishable from real stock. This is the read that replaces
- * them, straight from the books, per item per godown.
+ * Why chunked, and why there is deliberately NO whole-catalogue variant left
+ * in this file: on 07 Aug 2026 a single full-catalogue request — every
+ * StockItem with godown-wise closing quantity, rate and value — crashed the
+ * factory's live Tally on its own, from one click. Tally builds the entire
+ * report in memory before answering; per stock group it never has to. The
+ * lethal request must be impossible to build again, not merely discouraged.
+ *
+ * Each chunk asks for the DIRECT children of one stock group (BELONGSTO No),
+ * or of Tally's reserved root "Primary" for ungrouped items. Every item has
+ * exactly one parent, so iterating all groups plus Primary covers the
+ * catalogue exactly once. CHILDOF semantics against a real client Tally are
+ * the one thing this file cannot prove from here — which is why the caller
+ * (stockSummarySync) counts the items it received against the masters item
+ * list and says out loud when the two disagree, instead of trusting silently.
  *
  * Defensive in the same way masters.ts is, and for the same reason: real client
  * Tally data varies by version and setup. Every field is optional, values are
@@ -88,7 +99,11 @@ function tallyDate(iso: string): string {
     return iso.replace(/-/g, '').slice(0, 8);
 }
 
-function buildStockSummaryXml(company: string, asOf: string): string {
+/**
+ * The collection request for ONE chunk: the items directly under one stock
+ * group, or under the reserved root for ungrouped items (`group === null`).
+ */
+function buildStockSummaryChunkXml(company: string, asOf: string, group: string | null): string {
     const date = tallyDate(asOf);
 
     return (
@@ -103,6 +118,10 @@ function buildStockSummaryXml(company: string, asOf: string): string {
         '</STATICVARIABLES>' +
         '<TDL><TDLMESSAGE><COLLECTION NAME="AgentStockSummary" ISMODIFY="No" ISFIXED="No" ' +
         'ISINITIALIZE="No" ISOPTION="No" ISINTERNAL="No"><TYPE>StockItem</TYPE>' +
+        // The chunk boundary. BELONGSTO No = direct children only, so a
+        // sub-group's items arrive in the sub-group's own chunk and never twice.
+        `<CHILDOF>${group === null ? '$$SysName:Primary' : escapeXml(group)}</CHILDOF>` +
+        '<BELONGSTO>No</BELONGSTO>' +
         // BatchAllocations is where Tally puts the godown-wise breakdown. The
         // item-level closing figures are fetched too, so an item held in no
         // godown still arrives rather than vanishing from the snapshot.
@@ -158,29 +177,36 @@ function linesFor(node: any): StockSummaryLine[] {
 }
 
 /**
- * Pull the godown-wise stock summary for one company as at `asOf` (ISO date).
+ * Pull the godown-wise closing position for the items directly under ONE stock
+ * group (`group === null` → ungrouped items) as at `asOf` (ISO date).
  *
- * @param asOf closing date, e.g. '2026-08-02'
+ * ONE attempt, NO automatic retry — an invariant, not an omission. A timed-out
+ * request leaves Tally still computing; firing another while it does is
+ * exactly the stacking that kills it. The operator retries by running the
+ * read again, which resumes from the group that failed.
  */
-export async function exportStockSummary(target: TallyTarget, asOf: string): Promise<StockSummaryPayload> {
+export async function exportStockSummaryChunk(
+    target: TallyTarget,
+    asOf: string,
+    group: string | null,
+): Promise<StockSummaryLine[]> {
     const url = `http://${target.host}:${target.port}`;
-    const xml = buildStockSummaryXml(target.company, asOf);
+    const xml = buildStockSummaryChunkXml(target.company, asOf, group);
 
-    const { data } = await axios.post<string>(url, xml, {
-        headers: { 'Content-Type': 'text/xml' },
-        // A full stock summary is heavier than a master list; a real catalogue
-        // of several hundred items across godowns has been seen to take a while.
-        timeout: 120000,
-        responseType: 'text',
-    });
+    const { data } = await withTallyGate(() =>
+        axios.post<string>(url, xml, {
+            headers: { 'Content-Type': 'text/xml' },
+            // Generous for what is now a small request. A chunk that needs
+            // longer than this is a chunk Tally is struggling with, and the
+            // right response is to stop, not to wait harder.
+            timeout: 120000,
+            responseType: 'text',
+        }),
+    );
 
     const parsed = parser.parse(data);
     const collection = parsed?.ENVELOPE?.BODY?.DATA?.COLLECTION;
     const nodes = asArray(collection ? collection.STOCKITEM : undefined);
 
-    return {
-        company: target.company,
-        as_of: asOf,
-        lines: nodes.flatMap(linesFor),
-    };
+    return nodes.flatMap(linesFor);
 }

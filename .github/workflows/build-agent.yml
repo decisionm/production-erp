@@ -10,7 +10,16 @@ on:
     branches: [main]
     paths:
       - 'tally-sync-agent/**'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: >-
+          Publish to the ERP's live storage AND the auto-update feed (the
+          running factory agent will self-update to this build within hours).
+          Leave false to only build the installer as a downloadable artifact —
+          e.g. for a pre-merge build from a branch.
+        type: boolean
+        default: false
 
 concurrency:
   group: build-agent
@@ -63,7 +72,13 @@ jobs:
           retention-days: 7
 
   # Publish over SSH from Ubuntu (reuses the deploy key + proven SSH tooling).
+  # Publishing is the moment this build reaches the live factory: latest.yml
+  # on the feed makes the running agent self-update. Pushes to main always
+  # publish (that code is reviewed); a manual dispatch publishes only when
+  # explicitly asked to, so a branch build can exist for review/hand-install
+  # without deploying itself.
   publish:
+    if: github.event_name == 'push' || inputs.publish
     needs: build
     runs-on: ubuntu-latest
     steps:

@@ -2,7 +2,7 @@ import { Tray, Menu, nativeImage, shell, app } from 'electron';
 import path from 'path';
 import { getStatus, runSyncCycle, setPaused } from './sync';
 import { runMastersSync } from './mastersSync';
-import { runStockSummaryPreview } from './stockSummarySync';
+import { getStockReadStatus, runStockSummaryPreview } from './stockSummarySync';
 import { getConfig } from './config';
 import { logFilePath } from './logger';
 import { isConfigured } from './config';
@@ -12,6 +12,10 @@ let tray: Tray | null = null;
 function statusLabel(): string {
     const status = getStatus();
     if (!isConfigured()) return '⚠ Not configured — open Settings';
+    // The stock read narrates itself — the operator must see movement, not a
+    // silent "keep on loading" that invites a second click.
+    const stockRead = getStockReadStatus();
+    if (stockRead.running) return `⏳ Reading Stock Summary: ${stockRead.progress ?? 'starting…'}`;
     if (status.running) return 'Syncing…';
     if (status.paused) return '⏸ Paused';
     if (status.lastError) return `⚠ Last attempt failed: ${status.lastError.slice(0, 60)}`;
@@ -47,10 +51,20 @@ function buildMenu(onOpenSettings: () => void): Menu {
         {
             // READ-ONLY, and the label says so. This reads Tally's closing
             // position and asks the ERP to report on it; it imports nothing and
-            // cannot change stock on either side.
-            label: 'Read Stock Summary (preview only)',
-            click: () => void runStockSummaryPreview(getConfig().stockSummaryAsOf).then(refresh).catch(refresh),
+            // cannot change stock on either side. Disabled while a read runs —
+            // single-flight: the second click that used to stack a second
+            // full-catalogue export against a busy Tally can no longer exist.
+            label: getStockReadStatus().running
+                ? 'Reading Stock Summary… (already running)'
+                : 'Read Stock Summary (preview only)',
+            enabled: !getStockReadStatus().running,
+            click: () => void runStockSummaryPreview(getConfig().stockSummaryAsOf, refresh).then(refresh).catch(refresh),
         },
+        // How the last read ended — success with its line count, or where it
+        // failed and that clicking again resumes. Absent until a read has run.
+        ...(getStockReadStatus().lastOutcome
+            ? [{ label: getStockReadStatus().lastOutcome as string, enabled: false }]
+            : []),
         { label: 'View Logs', click: () => void shell.openPath(logFilePath()) },
         { label: 'Settings…', click: onOpenSettings },
         { type: 'separator' },

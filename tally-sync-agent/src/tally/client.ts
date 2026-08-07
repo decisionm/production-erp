@@ -2,6 +2,7 @@ import axios from 'axios';
 import { XMLParser } from 'fast-xml-parser';
 import { getConfig } from '../config';
 import logger from '../logger';
+import { withTallyGate } from './gate';
 
 export interface TallyImportResult {
     success: boolean;
@@ -28,11 +29,13 @@ export async function postVoucherXml(xml: string): Promise<TallyImportResult> {
 
     logger.debug(`Posting to Tally at ${url}`, { xmlLength: xml.length });
 
-    const { data: rawResponse } = await axios.post<string>(url, xml, {
-        headers: { 'Content-Type': 'text/xml' },
-        timeout: 30000,
-        responseType: 'text',
-    });
+    const { data: rawResponse } = await withTallyGate(() =>
+        axios.post<string>(url, xml, {
+            headers: { 'Content-Type': 'text/xml' },
+            timeout: 30000,
+            responseType: 'text',
+        }),
+    );
 
     let parsed: any;
     try {
@@ -72,7 +75,7 @@ export async function postVoucherXml(xml: string): Promise<TallyImportResult> {
 export async function pingTally(): Promise<boolean> {
     const cfg = getConfig();
     try {
-        await axios.get(`http://${cfg.tallyHost}:${cfg.tallyPort}`, { timeout: 5000 });
+        await withTallyGate(() => axios.get(`http://${cfg.tallyHost}:${cfg.tallyPort}`, { timeout: 5000 }));
         return true;
     } catch {
         return false;
