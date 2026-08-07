@@ -575,7 +575,7 @@ class SalesCostInsightService
         // Every suggested line is a material the workbook says the product
         // consumes, so all of them price (or honestly withhold the estimate).
         // The standing final-carton/polymer-cover exclusion that used to sit
-        // here died with the lines themselves (DEC-20260807-014).
+        // here died with the lines themselves (DEC-20260807-015).
         return array_map(
             fn (array $entry) => $this->packagingComponent($entry, $product, $packaging, $asOf),
             $entries,

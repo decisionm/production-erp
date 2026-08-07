@@ -257,7 +257,7 @@ class PackingMaterialSuggestionService
         // No standing lines follow. The per-batch "final carton" and "polymer
         // cover" the owner asked for in early August were his own
         // misunderstanding, corrected 07-Aug: real packing is the counted
-        // boxes plus tape across everything (DEC-20260807-014, superseding
+        // boxes plus tape across everything (DEC-20260807-015, superseding
         // DEC-20260806-006).
 
         return $entries;

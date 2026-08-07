@@ -25,8 +25,8 @@ is one and the same: any serially-numbered id minted on parallel branches
 collides, so assignment happens against the MERGED view — check every open
 branch for the highest id before minting, or re-mint at merge time (this
 happened again with DEC-20260807-001.., three branches deep, 07-Aug).
-DEC-20260807-014 is taken on main (the granularity-flip execution record);
-open PR #148 carries its own unmerged -014 and re-mints it at merge.
+DEC-20260807-014 is the granularity-flip execution record on main;
+PR #148's colliding -014 was re-minted as -015 at merge, per this rule.
 
 ---
 
@@ -76,7 +76,7 @@ the photographed consumption screen books `200 Ml Round Master Box` in Nos
 the answer may be per-product master-box items rather than one generic
 carton item. **Blocks:** the final-carton line posting.
 
-**Resolved 2026-08-07 by supersession — DEC-20260807-014 (superseding
+**Resolved 2026-08-07 by supersession — DEC-20260807-015 (superseding
 DEC-20260806-006): there is no per-batch final carton; the standing line is
 removed, so no Tally item needs naming.** Was open since 2026-08-05.
 
@@ -86,7 +86,7 @@ Same standing line. Needs the item name AND grams per cover (the counted
 sheet gives 11/kg → 90.9 g, 25/kg → 40 g, 20/kg → 50 g, 15/kg → 66.7 g — say
 which, or weigh it). **Blocks:** the polymer-cover line posting.
 
-**Resolved 2026-08-07 by supersession — DEC-20260807-014 (superseding
+**Resolved 2026-08-07 by supersession — DEC-20260807-015 (superseding
 DEC-20260806-006): there is no per-batch polymer cover; the standing line is
 removed, so neither the item name nor a per-cover weight is needed.**
 Was open since 2026-08-06.

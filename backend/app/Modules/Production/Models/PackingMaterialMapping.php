@@ -104,7 +104,7 @@ class PackingMaterialMapping extends Model
     public const KIND_TAPE = 'tape';
 
     // The per-batch "final carton" and "polymer cover" standing kinds that
-    // used to follow were removed by DEC-20260807-014 (superseding
+    // used to follow were removed by DEC-20260807-015 (superseding
     // DEC-20260806-006): real packing is the counted boxes plus tape across
     // everything — there is no standing per-batch line. Existing
     // 'final_carton'/'polymer_cover' rows in the mapping table (if any) are
