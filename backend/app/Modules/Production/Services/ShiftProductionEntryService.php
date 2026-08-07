@@ -3377,23 +3377,9 @@ class ShiftProductionEntryService
      */
     private function resolvedUnitWeightGrams(ShiftProductionEntry $entry, ?Item $item): ?string
     {
-        $candidates = [
-            $entry->config_snapshot['unit_weight_grams'] ?? null,
-            $item?->nominal_weight_grams,
-        ];
-
-        foreach ($candidates as $candidate) {
-            $weight = trim((string) ($candidate ?? ''));
-
-            if ($weight === '' || ! is_numeric($weight)) {
-                continue;
-            }
-
-            if (bccomp($weight, '0', 4) === 1) {
-                return $weight;
-            }
-        }
-
-        return null;
+        // One implementation, on the model — the carton label resource reads
+        // the same figure, and two copies of this rule is how a screen ends
+        // up showing a weight the server never computed with.
+        return $entry->resolvedUnitWeightGrams($item);
     }
 }

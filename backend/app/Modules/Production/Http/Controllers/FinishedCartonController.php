@@ -25,7 +25,7 @@ class FinishedCartonController extends Controller
     public function index(ShiftProductionEntry $shiftProductionEntry): AnonymousResourceCollection
     {
         return FinishedCartonResource::collection(
-            $shiftProductionEntry->cartons()->with('item')->orderBy('id')->get(),
+            $this->cartons->listFor($shiftProductionEntry),
         );
     }
 

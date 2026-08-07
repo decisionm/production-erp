@@ -148,4 +148,48 @@ class FinishedCartonTest extends TestCase
             'carton_codes' => ['20260802-M01-001-C01'],
         ])->assertStatus(422);
     }
+
+    /**
+     * THE ENRICHED LABEL (DEC-20260807-009): net weight = pieces × the run's
+     * resolved unit weight — the exact figure the server computes every
+     * stored kilogram from (DEC-20260805-005) — plus the run's nos-per-box
+     * and the batch spine, on the generate response AND the reprint read.
+     * sales_order is null until a real batch→order linkage exists; there is
+     * deliberately NO gross weight — no tare exists in the data (Q15).
+     */
+    public function test_labels_carry_net_weight_from_the_runs_resolved_unit_weight(): void
+    {
+        $entry = $this->completedEntry('2160', '600');
+        $entry->update(['config_snapshot' => ['unit_weight_grams' => '12.5']]);
+
+        $cartons = $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/cartons")
+            ->assertSuccessful()->json('data');
+
+        // 600 pieces × 12.5 g = 7.500 kg; the 360-piece partial = 4.500 kg.
+        $this->assertSame('7.500', $cartons[0]['net_weight_kg']);
+        $this->assertSame('4.500', $cartons[3]['net_weight_kg']);
+        $this->assertEquals(600, (float) $cartons[0]['batch']['nos_per_box']);
+        $this->assertSame('20260802-M01-001', $cartons[0]['batch']['batch_number']);
+        $this->assertSame('Machine 1', $cartons[0]['batch']['machine']);
+        $this->assertNull($cartons[0]['sales_order']);
+        $this->assertArrayNotHasKey('gross_weight_kg', $cartons[0]);
+
+        // The reprint read says exactly the same things.
+        $reprint = $this->getJson("/api/v1/production/shift-production-entries/{$entry->id}/cartons")
+            ->assertSuccessful()->json('data');
+        $this->assertSame('7.500', $reprint[0]['net_weight_kg']);
+        $this->assertSame('20260802-M01-001', $reprint[0]['batch']['batch_number']);
+    }
+
+    public function test_a_run_with_no_resolved_weight_prints_no_weight_rather_than_inventing_one(): void
+    {
+        $entry = $this->completedEntry('2160', '600');
+
+        $cartons = $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/cartons")
+            ->assertSuccessful()->json('data');
+
+        // No frozen snapshot weight, no item-master weight: the label carries
+        // no weight line at all — a missing figure is never interpolated.
+        $this->assertNull($cartons[0]['net_weight_kg']);
+    }
 }
