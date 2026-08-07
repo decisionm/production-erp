@@ -285,7 +285,7 @@ floor takes no such count.** Was open since 2026-08-07.
 ## Q23 · What does an empty carton weigh? (tare, for the label's gross weight)
 
 The owner asked for net AND gross weight on the carton label
-(DEC-20260807-002). Net is computable — pieces × the run's resolved unit
+(DEC-20260807-009). Net is computable — pieces × the run's resolved unit
 weight ("one bottle, one weight", DEC-20260805-005). Gross needs the empty
 carton's own weight (tare), and no tare figure exists anywhere in the data:
 not on the item master, not in the production standards, not in the

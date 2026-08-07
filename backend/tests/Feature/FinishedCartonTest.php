@@ -150,7 +150,7 @@ class FinishedCartonTest extends TestCase
     }
 
     /**
-     * THE ENRICHED LABEL (DEC-20260807-002): net weight = pieces × the run's
+     * THE ENRICHED LABEL (DEC-20260807-009): net weight = pieces × the run's
      * resolved unit weight — the exact figure the server computes every
      * stored kilogram from (DEC-20260805-005) — plus the run's nos-per-box
      * and the batch spine, on the generate response AND the reprint read.

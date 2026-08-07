@@ -873,7 +873,7 @@ function SourceMaterialSection() {
 }
 
 /**
- * CARTON LABEL REPRINT (DEC-20260807-001). The labels PRINT on the Shift
+ * CARTON LABEL REPRINT (DEC-20260807-008). The labels PRINT on the Shift
  * Floor, the moment the batch completes — the packer sticks them there. This
  * desk keeps the same screen as the reprint: the server is idempotent, so
  * the click returns the identical permanent codes and can never mint a

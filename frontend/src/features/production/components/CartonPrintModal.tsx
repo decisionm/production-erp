@@ -11,7 +11,7 @@ interface CartonPrintModalProps {
 }
 
 /**
- * THE SHIFT FLOOR'S CARTON LABEL PRINT (DEC-20260807-001): opens right when a
+ * THE SHIFT FLOOR'S CARTON LABEL PRINT (DEC-20260807-008): opens right when a
  * batch is completed — and from a button on any completed row — so the person
  * packing the boxes prints and sticks the labels there and then, instead of
  * waiting for the Approval Desk (whose screen remains as the reprint).

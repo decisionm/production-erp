@@ -47,7 +47,7 @@ function barcodeSvg(code: string): string {
 }
 
 /**
- * The human-readable lines under the barcode (DEC-20260807-002). Weight is
+ * The human-readable lines under the barcode (DEC-20260807-009). Weight is
  * NET only — gross needs the empty carton's tare, which the factory has not
  * stated (pending Q15), and a figure the data cannot support is omitted, not
  * estimated. Customer/PO appears only when the batch really is against a

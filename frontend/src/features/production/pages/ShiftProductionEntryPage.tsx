@@ -1326,7 +1326,7 @@ export default function ShiftProductionEntryPage() {
     const [startProductionDateOverride, setStartProductionDateOverride] = useState<string | null>(null);
     const [startResumeNotice, setStartResumeNotice] = useState<StartBatchResumeOutcome | null>(null);
     const [completingEntry, setCompletingEntry] = useState<ShiftProductionEntry | null>(null);
-    // THE PACKER'S PRINT (DEC-20260807-001): which completed batch's carton
+    // THE PACKER'S PRINT (DEC-20260807-008): which completed batch's carton
     // labels are open for printing. Set automatically the moment a completion
     // goes in, and from a button on any completed row — the person packing
     // prints here on the floor; the Approval Desk's screen is the reprint.
@@ -4125,7 +4125,7 @@ export default function ShiftProductionEntryPage() {
     };
 
     /**
-     * The packer's door back into the labels (DEC-20260807-001): any
+     * The packer's door back into the labels (DEC-20260807-008): any
      * completed batch can print its carton barcodes from the floor. Codes are
      * permanent and generation is idempotent, so this one button is print and
      * reprint alike — it can never mint a second identity for a box.
@@ -4395,7 +4395,7 @@ export default function ShiftProductionEntryPage() {
                 message.success('Corrected figures saved — the batch is back with quality for its check.', 6);
             }
 
-            // THE LABELS PRINT NOW (DEC-20260807-001): completion is the
+            // THE LABELS PRINT NOW (DEC-20260807-008): completion is the
             // moment the packer sticks the barcodes on the boxes, so the
             // print dialog opens itself. Not on a correction — the codes were
             // minted (and likely printed) at the original completion, and a
@@ -5459,7 +5459,7 @@ export default function ShiftProductionEntryPage() {
 
             {/* The packer's print dialog — opens itself at completion and from
                 the Carton labels button on any completed row. The Approval
-                Desk's copy of this screen is the REPRINT (DEC-20260807-001). */}
+                Desk's copy of this screen is the REPRINT (DEC-20260807-008). */}
             <CartonPrintModal entry={cartonPrintEntry} onClose={() => setCartonPrintEntry(null)} />
 
             <Modal
