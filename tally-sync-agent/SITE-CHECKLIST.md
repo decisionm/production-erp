@@ -35,6 +35,50 @@ Internal, development-side checklist — deliberately kept **out** of the client
 - [ ] Tally restarted mid-test once: queued voucher survives and syncs after Tally is back
 - [ ] The voucher's XML request/response pair captured from the agent log for the repo's validation records
 
+## Upgrading an existing site (installing over a running agent)
+
+The steps above are the FIRST install. An upgrade is smaller, but two of its
+steps exist because skipping them has already caused trouble once each:
+
+- [ ] **Quit the running tray app first** (right-click tray icon → Quit).
+      Installing while an old build is alive is how two agents once polled the
+      same queue at the same time (the v0.1.5 confusion)
+- [ ] Copy the new installer over (USB or trusted download) and run it —
+      same folder, over the old install. SmartScreen warning expected while
+      unsigned ("More info → Run anyway")
+- [ ] **Verify settings survived:** tray icon reappears; open Settings… —
+      cloud URL, agent token, Tally host (`127.0.0.1`), port (`9000`), exact
+      company name, poll interval must all still be filled in. They live in the
+      user profile (`%APPDATA%`), which the installer does not touch. **If
+      anything is blank, STOP and call — do not retype the token from memory**
+      (it is shown only once at creation; a blank here means issuing a new one)
+- [ ] Normal operation intact: vouchers sync as before within a couple of
+      minutes (or "Sync Vouchers Now" runs clean against an empty queue)
+
+## First chunked Stock Summary read (v0.3.0+)
+
+Background, so the caution makes sense: on 07 Aug 2026 ONE click of the old
+one-shot "Read Stock Summary" crashed the live Tally — it asked for the whole
+catalogue's godown-wise closing position in a single request. Since v0.3.0 the
+read goes ONE STOCK GROUP AT A TIME, the button is disabled while a read runs,
+and the tray narrates progress. The first run on a real Tally is also the
+validation of Tally's group-scoping behaviour, so treat it as a small test:
+
+- [ ] **Quiet window only:** after production hours, no batches posting
+- [ ] Click **Read Stock Summary (preview only)** — ONCE
+- [ ] Watch the tray label: "listing stock items…" → "group 1/N — …" counting
+      up → "sending to ERP for preview…" → a final line like
+      "✓ Last stock read: 653 line(s) sent for preview — nothing imported".
+      Tally should stay responsive throughout; each chunk is a small request
+- [ ] **Abort rule:** if Tally visibly goes sluggish during any chunk, stop —
+      click nothing further, close and reopen Tally when it recovers. What was
+      already read is KEPT; clicking the read once more later resumes from the
+      failed group instead of starting over. (A second click while it runs
+      does nothing — the button is disabled; that protection is the point)
+- [ ] If the final line warns **"INCOMPLETE COVERAGE"**, the snapshot is still
+      safe (nothing invented, nothing imported) — but tell the developers
+      before anyone trusts it as an opening position
+
 ## Leave-behind rules (tell whoever minds the PC)
 
 1. Keep this PC on and Tally open with the company loaded; if it's off, production sync simply waits — nothing is lost
