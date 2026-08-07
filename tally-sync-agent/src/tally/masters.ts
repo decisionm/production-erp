@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { XMLParser } from 'fast-xml-parser';
+import { withTallyGate } from './gate';
 import { escapeXml } from './voucherBuilders/xmlHelpers';
 
 /**
@@ -98,11 +99,13 @@ async function exportCollection(target: TallyTarget, tag: string, type: string, 
     const url = `http://${target.host}:${target.port}`;
     const xml = buildExportXml(type, fetchFields, target.company);
 
-    const { data } = await axios.post<string>(url, xml, {
-        headers: { 'Content-Type': 'text/xml' },
-        timeout: 60000,
-        responseType: 'text',
-    });
+    const { data } = await withTallyGate(() =>
+        axios.post<string>(url, xml, {
+            headers: { 'Content-Type': 'text/xml' },
+            timeout: 60000,
+            responseType: 'text',
+        }),
+    );
 
     const parsed = parser.parse(data);
     const collection = parsed?.ENVELOPE?.BODY?.DATA?.COLLECTION;
@@ -174,11 +177,13 @@ export async function exportCompanies(target: Pick<TallyTarget, 'host' | 'port'>
         '<TDL><TDLMESSAGE><COLLECTION NAME="List of Companies" ISMODIFY="No">' +
         '<TYPE>Company</TYPE><NATIVEMETHOD>Name</NATIVEMETHOD></COLLECTION></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>';
 
-    const { data } = await axios.post<string>(url, xml, {
-        headers: { 'Content-Type': 'text/xml' },
-        timeout: 30000,
-        responseType: 'text',
-    });
+    const { data } = await withTallyGate(() =>
+        axios.post<string>(url, xml, {
+            headers: { 'Content-Type': 'text/xml' },
+            timeout: 30000,
+            responseType: 'text',
+        }),
+    );
 
     const parsed = parser.parse(data);
     const collection = parsed?.ENVELOPE?.BODY?.DATA?.COLLECTION;
@@ -192,15 +197,19 @@ export async function exportCompanies(target: Pick<TallyTarget, 'host' | 'port'>
         .filter((name: string) => name !== '');
 }
 
-/** Pull every master type from Tally into one payload for POST /tally-sync/masters. */
+/**
+ * Pull every master type from Tally into one payload for POST /tally-sync/masters.
+ *
+ * SEQUENTIAL on purpose — this used to be a Promise.all, five collection
+ * exports hitting Tally at once. The gate would serialize them anyway, but the
+ * code should say what actually happens: one request to Tally at a time, ever.
+ */
 export async function exportMasters(target: TallyTarget): Promise<MastersPayload> {
-    const [item_groups, godowns, ledger_groups, ledgers, items] = await Promise.all([
-        exportItemGroups(target),
-        exportGodowns(target),
-        exportLedgerGroups(target),
-        exportLedgers(target),
-        exportItems(target),
-    ]);
+    const item_groups = await exportItemGroups(target);
+    const godowns = await exportGodowns(target);
+    const ledger_groups = await exportLedgerGroups(target);
+    const ledgers = await exportLedgers(target);
+    const items = await exportItems(target);
 
     return { item_groups, godowns, ledger_groups, ledgers, items };
 }
