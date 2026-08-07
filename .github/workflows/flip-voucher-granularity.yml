@@ -1,0 +1,100 @@
+name: Flip Tally voucher granularity
+
+# Sets TALLY_VOUCHER_GRANULARITY on the LIVE .env and rebuilds the config
+# caches, over the same SSH key the deploy uses. Exists because the flip is an
+# .env change and .env deliberately never rides a deploy (rsync excludes it).
+#
+# Dry by default: without `write` it only prints the current .env line and the
+# effective cached config value. Deliberately NOT a general shell — the
+# granularity is a CHOICE of two literals mapped on the runner, and no
+# free-text input reaches the remote command (same design as read-server-log).
+#
+# First use 07-Aug-2026: the owner directed the shift-granularity flip mid-day
+# for a demo, overriding DEC-20260807-010's date-boundary step for that
+# execution.
+
+on:
+  workflow_dispatch:
+    inputs:
+      granularity:
+        description: 'Voucher granularity to set.'
+        type: choice
+        default: shift
+        options:
+          - shift
+          - batch
+      write:
+        description: 'Apply it. Without this the run only prints the current value.'
+        type: boolean
+        default: false
+
+concurrency:
+  group: flip-voucher-granularity
+  cancel-in-progress: false
+
+jobs:
+  flip:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # ssh-keyscan can exit 0 having collected nothing, so check the
+          # output rather than the exit code (same trap as the deploy).
+          keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Re-running often clears a transient failure; otherwise check hPanel → Advanced → SSH Access and whether brute-force protection has banned the runner."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      - name: Flip (or dry-run)
+        run: |
+          set -o pipefail
+          # The keyword → value mapping, a shell case on the RUNNER so the only
+          # strings that can reach the server are the two literals below.
+          case "${{ inputs.granularity }}" in
+            batch) VALUE='batch' ;;
+            *)     VALUE='shift' ;;
+          esac
+
+          PHP='/opt/alt/php84/usr/bin/php'
+
+          if [ "${{ inputs.write }}" = "true" ]; then
+            REMOTE="cp .env .env.bak-granularity-flip \
+              && if grep -q '^TALLY_VOUCHER_GRANULARITY=' .env; then \
+                   sed -i 's/^TALLY_VOUCHER_GRANULARITY=.*/TALLY_VOUCHER_GRANULARITY=$VALUE/' .env; \
+                 else \
+                   printf '\nTALLY_VOUCHER_GRANULARITY=$VALUE\n' >> .env; \
+                 fi \
+              && $PHP artisan optimize:clear \
+              && $PHP artisan config:cache \
+              && $PHP artisan route:cache \
+              && $PHP artisan view:cache \
+              && echo '--- effective config ---' \
+              && $PHP artisan config:show tally-sync.voucher_granularity"
+          else
+            REMOTE="echo '--- .env line (dry run, nothing written) ---' \
+              && (grep '^TALLY_VOUCHER_GRANULARITY=' .env || echo 'TALLY_VOUCHER_GRANULARITY absent (default: batch)') \
+              && echo '--- effective config ---' \
+              && $PHP artisan config:show tally-sync.voucher_granularity"
+          fi
+
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && $REMOTE" \
+            2>&1 | tee flip-output.txt
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Voucher granularity — ${{ inputs.write == true && 'WRITE' || 'dry run' }} (${{ inputs.granularity }})"
+            echo
+            echo '```'
+            cat flip-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
