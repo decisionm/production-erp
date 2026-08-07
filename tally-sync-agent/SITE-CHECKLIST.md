@@ -43,9 +43,15 @@ steps exist because skipping them has already caused trouble once each:
 - [ ] **Quit the running tray app first** (right-click tray icon → Quit).
       Installing while an old build is alive is how two agents once polled the
       same queue at the same time (the v0.1.5 confusion)
-- [ ] Copy the new installer over (USB or trusted download) and run it —
-      same folder, over the old install. SmartScreen warning expected while
-      unsigned ("More info → Run anyway")
+- [ ] Get the new installer. The normal source is the ERP's own page:
+      **Tally Sync → Settings → "Download Tally Sync Agent (Windows)"** —
+      but that button serves whatever was last PUBLISHED, so first check the
+      "Latest version: X · built DATE" line under it says the version you
+      came to install. If it still shows the old version (a pre-review build
+      is deliberately not published there), carry the installer by USB or a
+      trusted download instead
+- [ ] Run it — same folder, over the old install. SmartScreen warning
+      expected while unsigned ("More info → Run anyway")
 - [ ] **Verify settings survived:** tray icon reappears; open Settings… —
       cloud URL, agent token, Tally host (`127.0.0.1`), port (`9000`), exact
       company name, poll interval must all still be filled in. They live in the
