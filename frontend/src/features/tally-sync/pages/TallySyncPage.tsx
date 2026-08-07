@@ -24,6 +24,31 @@ const statusLabel: Record<TallySyncStatus, string> = {
  */
 const statusRank: Record<TallySyncStatus, number> = { failed: 0, pending: 1, synced: 2 };
 
+/** One stock line of a production voucher, as the payload carries it. */
+type VoucherStockLine = { item: string; quantity: string; godown?: string | null };
+
+/**
+ * The produced[]/consumed[] arrays out of a production voucher's payload —
+ * batch and consolidated shift vouchers both carry them — or null for the
+ * voucher types that don't (sales, receipt/delivery notes, journals), which
+ * fall back to the raw payload view.
+ */
+function voucherStockLines(entry: TallySyncEntry, key: 'produced' | 'consumed'): VoucherStockLine[] | null {
+    const value = entry.payload?.[key];
+    if (!Array.isArray(value)) {
+        return null;
+    }
+
+    const lines = value.filter(
+        (line): line is VoucherStockLine =>
+            typeof line === 'object' && line !== null
+            && typeof (line as VoucherStockLine).item === 'string'
+            && typeof (line as VoucherStockLine).quantity === 'string',
+    );
+
+    return lines.length === value.length ? lines : null;
+}
+
 /** A string field out of the voucher payload, or null if it isn't usable. */
 function payloadText(entry: TallySyncEntry, key: string): string | null {
     const value = entry.payload?.[key];
@@ -103,6 +128,7 @@ export default function TallySyncPage() {
     const [releasingId, setReleasingId] = useState<number | null>(null);
     const [resyncingAll, setResyncingAll] = useState(false);
     const [report, setReport] = useState<{ id: number; voucher: string; ok: boolean; message: string }[] | null>(null);
+    const [viewing, setViewing] = useState<TallySyncEntry | null>(null);
 
     const entries = useMemo(
         () => [...(data?.entries ?? [])].sort(
@@ -449,31 +475,45 @@ export default function TallySyncPage() {
                     {
                         title: 'Actions',
                         render: (_, row) => {
+                            const view = (
+                                <Button size="small" onClick={() => setViewing(row)}>
+                                    View
+                                </Button>
+                            );
+
                             if (row.hold) {
                                 return (
-                                    <Tooltip title="Send this shift's voucher to Tally without waiting for the shift end / quiet period. Expand the row first to see exactly what will post.">
-                                        <Button
-                                            size="small"
-                                            loading={releasingId === row.id}
-                                            disabled={busy && releasingId !== row.id}
-                                            onClick={() => releaseOne(row)}
-                                        >
-                                            Release now
-                                        </Button>
-                                    </Tooltip>
+                                    <Space>
+                                        {view}
+                                        <Tooltip title="Send this shift's voucher to Tally without waiting for the shift end / quiet period. Press View first to see exactly what will post.">
+                                            <Button
+                                                size="small"
+                                                loading={releasingId === row.id}
+                                                disabled={busy && releasingId !== row.id}
+                                                onClick={() => releaseOne(row)}
+                                            >
+                                                Release now
+                                            </Button>
+                                        </Tooltip>
+                                    </Space>
                                 );
                             }
 
-                            return row.status === 'failed' && (
-                                <Button
-                                    danger
-                                    size="small"
-                                    loading={retryingId === row.id}
-                                    disabled={busy && retryingId !== row.id}
-                                    onClick={() => resyncOne(row)}
-                                >
-                                    Resync
-                                </Button>
+                            return (
+                                <Space>
+                                    {view}
+                                    {row.status === 'failed' && (
+                                        <Button
+                                            danger
+                                            size="small"
+                                            loading={retryingId === row.id}
+                                            disabled={busy && retryingId !== row.id}
+                                            onClick={() => resyncOne(row)}
+                                        >
+                                            Resync
+                                        </Button>
+                                    )}
+                                </Space>
                             );
                         },
                     },
@@ -489,6 +529,76 @@ export default function TallySyncPage() {
                     ),
                 }}
             />
+
+            <Modal
+                open={viewing !== null}
+                title={viewing ? `${voucherNumber(viewing)} — as it goes to Tally` : ''}
+                onCancel={() => setViewing(null)}
+                onOk={() => setViewing(null)}
+                width={720}
+                cancelButtonProps={{ style: { display: 'none' } }}
+            >
+                {viewing && (() => {
+                    const consumed = voucherStockLines(viewing, 'consumed');
+                    const produced = voucherStockLines(viewing, 'produced');
+                    const lineColumns = [
+                        { title: 'Item', dataIndex: 'item' },
+                        {
+                            title: 'Godown',
+                            render: (_: unknown, line: VoucherStockLine) =>
+                                line.godown ?? payloadText(viewing, 'godown') ?? '—',
+                        },
+                        { title: 'Quantity', dataIndex: 'quantity', align: 'right' as const },
+                    ];
+
+                    if (consumed === null || produced === null) {
+                        // Non-production vouchers (sales, notes, journals)
+                        // have no two-sided stock shape — show the payload.
+                        return (
+                            <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+                                {JSON.stringify(viewing.payload, null, 2)}
+                            </pre>
+                        );
+                    }
+
+                    return (
+                        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+                            <Space direction="vertical" size={0}>
+                                {/* What Tally RECEIVES: the production builder
+                                    emits a plain Stock Journal whatever the
+                                    dispatch label says — same layout as the
+                                    accountant's own vouchers. */}
+                                <span>Posts as a <strong>Stock Journal</strong> dated <strong>{payloadText(viewing, 'voucher_date') ?? '—'}</strong></span>
+                                {payloadText(viewing, 'shift') && <span>Shift: {payloadText(viewing, 'shift')}</span>}
+                                {payloadText(viewing, 'batch_number') && <span>Batch: {payloadText(viewing, 'batch_number')}</span>}
+                                {payloadText(viewing, 'narration') && (
+                                    <Typography.Text type="secondary">{payloadText(viewing, 'narration')}</Typography.Text>
+                                )}
+                            </Space>
+                            <div>
+                                <Typography.Text strong>Consumption (Source) — stock out</Typography.Text>
+                                <Table<VoucherStockLine>
+                                    size="small"
+                                    rowKey={(line) => `c-${line.item}-${line.godown ?? ''}`}
+                                    dataSource={consumed}
+                                    pagination={false}
+                                    columns={lineColumns}
+                                />
+                            </div>
+                            <div>
+                                <Typography.Text strong>Production (Destination) — stock in</Typography.Text>
+                                <Table<VoucherStockLine>
+                                    size="small"
+                                    rowKey={(line) => `p-${line.item}-${line.godown ?? ''}`}
+                                    dataSource={produced}
+                                    pagination={false}
+                                    columns={lineColumns}
+                                />
+                            </div>
+                        </Space>
+                    );
+                })()}
+            </Modal>
 
             <Modal
                 open={report !== null}
