@@ -339,7 +339,7 @@ class AtomicGoodsReceiptTraceabilityTest extends TestCase
         $this->assertSame(10, MaterialBag::query()->count());
     }
 
-    public function test_central_bin_load_rejects_a_segment_from_another_machine_before_decrementing_bag(): void
+    public function test_day_bin_load_rejects_a_segment_from_another_machine_before_decrementing_bag(): void
     {
         $resin = Item::create(['sku' => 'RM-PET', 'name' => 'PET Resin', 'uom' => 'Kgs']);
         $bottle = Item::create(['sku' => 'FG-1', 'name' => 'Bottle', 'uom' => 'Nos']);
@@ -366,7 +366,7 @@ class AtomicGoodsReceiptTraceabilityTest extends TestCase
             'warehouse_id' => $warehouse->id,
         ], null)->bags->first();
 
-        $this->postJson('/api/v1/production/bin-bay/load', [
+        $this->postJson('/api/v1/production/day-bin/load', [
             'work_center_id' => $machineB->id,
             'barcode' => $bag->barcode,
             'quantity_kg' => '5',

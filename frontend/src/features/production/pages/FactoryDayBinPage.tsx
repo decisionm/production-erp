@@ -577,7 +577,7 @@ export default function FactoryDayBinPage() {
             render: (_: unknown, row: CommonResinMaterial) => fmtQty(row.consumed_kg),
         },
         {
-            title: 'Estimated remaining',
+            title: 'Estimated remaining (never counted — drifts)',
             key: 'remaining',
             align: 'right' as const,
             render: (_: unknown, row: CommonResinMaterial) => {
@@ -855,7 +855,11 @@ export default function FactoryDayBinPage() {
                             × the standard weight per piece, plus lumps. Counted from the first load of each material,
                             so material burnt before anyone recorded a load is deliberately not subtracted. It is an
                             estimate, not a weight — nothing here is weighed, and it does not count batches still
-                            running, whose material has left the input but has not been calculated out yet.
+                            running, whose material has left the input but has not been calculated out yet. The factory
+                            never physically counts or weighs this input (owner, 07-Aug — DEC-20260807-007), so the
+                            figure is never re-anchored: an unscanned bag or a spill stays in it for good, and it
+                            drifts over time. Read it as an estimate, never as a counted fact — stock truth comes from
+                            the Tally reconcile.
                         </Typography.Paragraph>
 
                         {commonResinUnavailable ? (

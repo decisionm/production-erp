@@ -14,12 +14,17 @@ Numbering: question numbers are assigned at MERGE time, not at branch time.
 A branch adding questions rebases on main first and takes the next free
 number — several branches cut from the same main will otherwise all claim
 the same numbers (this happened at Q15, four branches deep, 07-Aug).
-Q21/Q22 are claimed by open PR #139 and Q23/Q24 by open PR #141; new
-questions continue from Q25. The same merge-time rule governs DECISION ids:
-`record_decision.py` assigns the next free id from the store it runs
-against, so a branch carrying unmerged records must re-mint them (same
-statements and sources) after rebasing onto a main that already holds those
-ids — validation refuses duplicates.
+Q23 is claimed by open PR #141 (whose Q24 already appears below, narrowed
+by DEC-20260807-006 — the narrowed wording wins at merge); Q21/Q22 are
+resolved below; new questions continue from Q27. The same merge-time rule
+governs DECISION ids: `record_decision.py` assigns the next free id from
+the store it runs against, so a branch carrying unmerged records must
+re-mint them (same statements and sources) after rebasing onto a main that
+already holds those ids — validation refuses duplicates. The defect class
+is one and the same: any serially-numbered id minted on parallel branches
+collides, so assignment happens against the MERGED view — check every open
+branch for the highest id before minting, or re-mint at merge time (this
+happened again with DEC-20260807-001.., three branches deep, 07-Aug).
 
 ---
 
@@ -95,8 +100,12 @@ products. *Open since 2026-08-01.*
 
 Both are real (journals: Relpet in 24/38, Polyster Chips in 7/38, same rate).
 Today the screen suggests by consumption history. Should any product be
-pinned to one? **Blocks:** nothing hard — suggestion quality only.
-*Open since 2026-08-05.*
+pinned to one? New evidence 07-Aug (owner, chat with his reviewer),
+supporting DEC-20260805-002: at goods receipt the store books Reliance
+deliveries as "Relpet" and everything else as normal PET resin ("PET
+Polyster Chips") — a booking convention at inward, not a per-product
+default, so this question stays open. **Blocks:** nothing hard —
+suggestion quality only. *Open since 2026-08-05.*
 
 ## Q10 · Batch #74's resin figure — 357.9 kg does not reconcile
 
@@ -250,6 +259,41 @@ of that run — an observation, not a standard. Paper-CT vs master-CT
 differences are not norm errors, and efficiency comparisons must treat
 the paper CT as the run's observed setting; the ERP's snapshotted
 standard CT remains the yardstick.** Was open since 2026-08-07.
+
+## Q21 · Is the per-machine Bin Bay page dead, or does the floor still use it? — RESOLVED
+
+**Resolved 2026-08-07 by DEC-20260807-006: dead. The floor's only resin
+flow is the centralized day bin — one crane-fed loading point, piped to
+all 10 machines; the supervisor scans the inward-generated bag barcode at
+load, and consumption is derived per batch at completion. The owner's
+flow description re-confirms the 2-Aug common-input correction verbatim.
+The Bin Bay page and the machine-stamped load path it drove are removed
+with this resolution; historical machine-stamped rows stay untouched as
+audit history.** Was open since 2026-08-07.
+
+## Q22 · Will the common resin input ever be physically counted — even monthly? — RESOLVED
+
+**Resolved 2026-08-07 by DEC-20260807-007: never (owner: "இல்ல, எடை போட
+மாட்டோம்"). The day-bin balance stays Σ loads − Σ calculated consumption
+with no re-anchor, ever; every screen showing it must present it as an
+ESTIMATE that drifts over time, never a counted fact — stock truth comes
+from the Tally reconcile (DEC-20260806-009), not this figure. No
+count/re-anchor flow will be built. The paper form's own PET RESIN (DAY
+BIN) row — blank on all three photographed shifts — already showed the
+floor takes no such count.** Was open since 2026-08-07.
+
+## Q24 · Resin on the carton label — should the consumed GRADE print? — NARROWED
+
+DEC-20260807-006 settles the larger half of this question as it stands on
+PR #141: physical lot segregation is OFF the table — the resin flow is one
+crane-fed input piped to all 10 machines, so a bag/lot/batch number on the
+carton label has no physical referent, and the 2-Aug common-input model
+stands re-confirmed. The ONLY remaining sub-question: should the label
+print the resin GRADE the batch actually consumed (Relpet G5801M / PET
+Polyster Chips — already on the batch's consumption lines)? Yes or no,
+owner's call. (PR #141 carries the pre-decision wording of this question;
+this narrowed wording wins at merge.) **Blocks:** any resin line on the
+carton label. *Open since 2026-08-07.*
 
 ## Q25 · The EMA family — which master product(s), or two new rows?
 

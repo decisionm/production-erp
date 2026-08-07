@@ -15,14 +15,16 @@ use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
 
 /**
- * The CENTRAL bin bay: material is loaded into a machine's day bin once, at
- * the bay, instead of being re-declared inside every batch.
+ * The bin-bay AVAILABILITY read: the machine-scoped ledger balance (with its
+ * source-lot layers) and a run's recipe priced against it — the figures the
+ * Start Batch dialog quotes.
  *
- * A load is an inventory LOCATION movement (store → machine day bin). These
- * tests pin exactly that: the kg leaves the bag and appears in the bin, the
- * source lot stays attached to it, the run's shortfall is computable, and
- * every load names who did it. Nothing here consumes stock or posts a
- * voucher, and no test asserts that it does.
+ * READ ONLY. The Bin Bay page, bin-bay/load and bin-bay/history are gone
+ * (DEC-20260807-006) — the floor's one load flow is the common input's bag
+ * scan. These tests seed the ledger through TraceabilityService directly
+ * (the day-bin/load endpoint's own writer, covered in TraceabilityTest);
+ * nothing here consumes stock or posts a voucher, and no test asserts that
+ * it does.
  */
 class BinBayTest extends TestCase
 {
@@ -73,7 +75,17 @@ class BinBayTest extends TestCase
         return $lot->bags->first();
     }
 
-    public function test_with_the_flag_off_every_bin_bay_route_is_a_404(): void
+    /** Seed the machine ledger the way day-bin/load's own writer does. */
+    private function loadIntoMachine(WorkCenter $machine, MaterialBag $bag, ?string $quantityKg, ?int $userId): void
+    {
+        app(TraceabilityService::class)->loadBagToDayBin(array_filter([
+            'work_center_id' => $machine->id,
+            'barcode' => $bag->barcode,
+            'quantity_kg' => $quantityKg,
+        ], fn ($value) => $value !== null), $userId);
+    }
+
+    public function test_with_the_flag_off_the_availability_read_is_a_404(): void
     {
         config(['production.traceability_enabled' => false]);
         $this->actingAsUserWithPermissions('production.manage');
@@ -82,31 +94,16 @@ class BinBayTest extends TestCase
         // An explicitly disabled deployment has no bin-bay surface.
         $this->getJson('/api/v1/production/bin-bay/availability?work_center_id='.$machine->id.'&item_id='.$resin->id)
             ->assertNotFound();
-        $this->getJson('/api/v1/production/bin-bay/history?work_center_id='.$machine->id)->assertNotFound();
-        $this->postJson('/api/v1/production/bin-bay/load', [
-            'work_center_id' => $machine->id, 'barcode' => 'X',
-        ])->assertNotFound();
     }
 
-    public function test_loading_five_kg_of_a_hundred_kg_bag_leaves_ninety_five_on_the_bag_and_five_in_the_bin(): void
+    public function test_availability_reports_the_ledger_balance_and_the_source_lot_layer_behind_it(): void
     {
         $this->enableTraceability();
-        $user = $this->actingAsUserWithPermissions('production.manage', 'production.view');
+        $user = $this->actingAsUserWithPermissions('production.view');
         [$resin, $warehouse, $machine] = $this->masters();
         $bag = $this->oneHundredKgBag($resin, $warehouse, $user->id);
 
-        $this->postJson('/api/v1/production/bin-bay/load', [
-            'work_center_id' => $machine->id,
-            'barcode' => $bag->barcode,
-            'quantity_kg' => 5,
-        ])->assertSuccessful()
-            ->assertJsonPath('data.quantity_kg', '5.0000')
-            ->assertJsonPath('data.type', 'load')
-            // The load is credited to whoever scanned it, by default.
-            ->assertJsonPath('data.recorded_by.id', $user->id);
-
-        // The bag keeps the balance — a partial pour does NOT move the bag.
-        $this->assertSame('95.0000', $bag->fresh()->remaining_kg);
+        $this->loadIntoMachine($machine, $bag, '5', $user->id);
 
         $bin = $this->getJson(
             '/api/v1/production/bin-bay/availability?work_center_id='.$machine->id.'&item_id='.$resin->id,
@@ -115,25 +112,6 @@ class BinBayTest extends TestCase
         $this->assertSame('5.0000', $bin['available_kg']);
         $this->assertSame('5.0000', $bin['loaded_kg']);
         $this->assertSame('0.0000', $bin['unattributed_kg']);
-    }
-
-    public function test_availability_reports_the_source_lot_layer_behind_the_bin_balance(): void
-    {
-        $this->enableTraceability();
-        $user = $this->actingAsUserWithPermissions('production.manage', 'production.view');
-        [$resin, $warehouse, $machine] = $this->masters();
-        $bag = $this->oneHundredKgBag($resin, $warehouse, $user->id);
-
-        $this->postJson('/api/v1/production/bin-bay/load', [
-            'work_center_id' => $machine->id,
-            'barcode' => $bag->barcode,
-            'quantity_kg' => 5,
-        ])->assertSuccessful();
-
-        $bin = $this->getJson(
-            '/api/v1/production/bin-bay/availability?work_center_id='.$machine->id.'&item_id='.$resin->id,
-        )->assertSuccessful()->json('data.bin');
-
         $this->assertSame(['id' => $resin->id, 'name' => 'PET Resin', 'sku' => 'RM-PET', 'uom' => 'Kgs'], $bin['item']);
         $this->assertCount(1, $bin['layers']);
 
@@ -167,9 +145,7 @@ class BinBayTest extends TestCase
         ], $user->id)->bags->first();
 
         foreach ([$older, $newer] as $bag) {
-            $this->postJson('/api/v1/production/bin-bay/load', [
-                'work_center_id' => $machine->id, 'barcode' => $bag->barcode, 'quantity_kg' => 10,
-            ])->assertSuccessful();
+            $this->loadIntoMachine($machine, $bag, '10', $user->id);
         }
 
         // A weighed count re-anchors the bin at 6 kg: 14 kg has been used,
@@ -193,7 +169,7 @@ class BinBayTest extends TestCase
     public function test_shortage_is_computed_when_the_recipe_expects_more_than_the_bin_holds(): void
     {
         $this->enableTraceability();
-        $user = $this->actingAsUserWithPermissions('production.manage', 'production.view');
+        $user = $this->actingAsUserWithPermissions('production.view');
         [$resin, $warehouse, $machine] = $this->masters();
         $bag = $this->oneHundredKgBag($resin, $warehouse, $user->id);
 
@@ -203,9 +179,7 @@ class BinBayTest extends TestCase
         $bom->lines()->create(['component_item_id' => $resin->id, 'quantity_per' => '0.0200']);
         $bom->lines()->create(['component_item_id' => $cap->id, 'quantity_per' => '1.0000']);
 
-        $this->postJson('/api/v1/production/bin-bay/load', [
-            'work_center_id' => $machine->id, 'barcode' => $bag->barcode, 'quantity_kg' => 5,
-        ])->assertSuccessful();
+        $this->loadIntoMachine($machine, $bag, '5', $user->id);
 
         $requirement = $this->getJson(
             '/api/v1/production/bin-bay/availability?work_center_id='.$machine->id
@@ -233,7 +207,7 @@ class BinBayTest extends TestCase
     public function test_a_bin_holding_enough_reports_a_zero_shortage_not_a_negative_one(): void
     {
         $this->enableTraceability();
-        $user = $this->actingAsUserWithPermissions('production.manage', 'production.view');
+        $user = $this->actingAsUserWithPermissions('production.view');
         [$resin, $warehouse, $machine] = $this->masters();
         $bag = $this->oneHundredKgBag($resin, $warehouse, $user->id);
 
@@ -241,10 +215,8 @@ class BinBayTest extends TestCase
         $bom = Bom::create(['item_id' => $bottle->id, 'name' => '1L Bottle recipe', 'version' => '1', 'is_active' => true]);
         $bom->lines()->create(['component_item_id' => $resin->id, 'quantity_per' => '0.0200']);
 
-        // Full-bag scan: the whole 100 kg goes to the bay.
-        $this->postJson('/api/v1/production/bin-bay/load', [
-            'work_center_id' => $machine->id, 'barcode' => $bag->barcode,
-        ])->assertSuccessful();
+        // Full-bag load: the whole 100 kg goes to the machine's ledger.
+        $this->loadIntoMachine($machine, $bag, null, $user->id);
         $this->assertSame('0.0000', $bag->fresh()->remaining_kg);
 
         $requirement = $this->getJson(
@@ -273,76 +245,20 @@ class BinBayTest extends TestCase
         $this->assertSame([], $requirement['components']);
     }
 
-    public function test_history_records_who_loaded_what_when_and_off_which_bag(): void
+    public function test_the_removed_load_and_history_routes_are_gone_even_with_traceability_on(): void
     {
         $this->enableTraceability();
-        $user = $this->actingAsUserWithPermissions('production.manage', 'production.view');
-        [$resin, $warehouse, $machine] = $this->masters();
-        $bag = $this->oneHundredKgBag($resin, $warehouse, $user->id);
-
-        $this->postJson('/api/v1/production/bin-bay/load', [
-            'work_center_id' => $machine->id, 'barcode' => $bag->barcode, 'quantity_kg' => 5,
-        ])->assertSuccessful();
-
-        $rows = $this->getJson('/api/v1/production/bin-bay/history?work_center_id='.$machine->id)
-            ->assertSuccessful()->json('data.rows');
-
-        $this->assertCount(1, $rows);
-        $this->assertSame('5.0000', $rows[0]['quantity_kg']);
-        $this->assertSame($bag->barcode, $rows[0]['barcode']);
-        $this->assertSame('RIL-2026-0714', $rows[0]['lot']['supplier_lot_no']);
-        $this->assertSame($resin->id, $rows[0]['item']['id']);
-        $this->assertSame($user->id, $rows[0]['loaded_by']['id']);
-        $this->assertSame($user->name, $rows[0]['loaded_by']['name']);
-        $this->assertNotNull($rows[0]['recorded_at']);
-        // Loading is CENTRAL — it is not tied to a batch unless asked for.
-        $this->assertNull($rows[0]['shift_production_entry_id']);
-    }
-
-    public function test_a_manager_may_credit_the_load_to_the_person_who_actually_carried_the_bag(): void
-    {
-        $this->enableTraceability();
-        $manager = $this->actingAsUserWithPermissions('production.manage', 'production.view');
-        $loader = User::factory()->create(['is_active' => true]);
-        [$resin, $warehouse, $machine] = $this->masters();
-        $bag = $this->oneHundredKgBag($resin, $warehouse, $manager->id);
-
-        $this->postJson('/api/v1/production/bin-bay/load', [
-            'work_center_id' => $machine->id,
-            'barcode' => $bag->barcode,
-            'quantity_kg' => 5,
-            'loaded_by' => $loader->id,
-        ])->assertSuccessful()->assertJsonPath('data.recorded_by.id', $loader->id);
-
-        $rows = $this->getJson('/api/v1/production/bin-bay/history?work_center_id='.$machine->id)
-            ->assertSuccessful()->json('data.rows');
-
-        $this->assertSame($loader->id, $rows[0]['loaded_by']['id']);
-    }
-
-    public function test_a_read_only_user_cannot_load_the_bay(): void
-    {
-        $this->enableTraceability();
-        $this->actingAsUserWithPermissions('production.view');
+        $this->actingAsUserWithPermissions('production.manage', 'production.view');
         [$resin, $warehouse, $machine] = $this->masters();
         $bag = $this->oneHundredKgBag($resin, $warehouse, null);
 
+        // DEC-20260807-006: the machine-stamped load path is dead, not gated.
         $this->postJson('/api/v1/production/bin-bay/load', [
             'work_center_id' => $machine->id, 'barcode' => $bag->barcode, 'quantity_kg' => 5,
-        ])->assertForbidden();
-
-        $this->assertSame('100.0000', $bag->fresh()->remaining_kg);
-    }
-
-    public function test_an_unknown_barcode_is_rejected_by_name(): void
-    {
-        $this->enableTraceability();
-        $this->actingAsUserWithPermissions('production.manage');
-        [, , $machine] = $this->masters();
-
-        $this->postJson('/api/v1/production/bin-bay/load', [
-            'work_center_id' => $machine->id, 'barcode' => 'NOT-A-BAG',
-        ])->assertStatus(422)->assertJsonValidationErrors('barcode');
+        ])->assertNotFound();
+        $this->getJson('/api/v1/production/bin-bay/history?work_center_id='.$machine->id)
+            ->assertNotFound();
+        $this->assertSame('100.0000', (string) $bag->fresh()->remaining_kg);
     }
 
     public function test_an_empty_bay_reports_zero_rather_than_failing(): void
@@ -357,8 +273,5 @@ class BinBayTest extends TestCase
 
         $this->assertSame('0.0000', $bin['available_kg']);
         $this->assertSame([], $bin['layers']);
-        $this->assertSame([], $this->getJson(
-            '/api/v1/production/bin-bay/history?work_center_id='.$machine->id,
-        )->assertSuccessful()->json('data.rows'));
     }
 }

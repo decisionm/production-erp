@@ -3,31 +3,23 @@
 namespace App\Modules\Production\Services;
 
 use App\Modules\Inventory\Models\Item;
-use App\Modules\Inventory\Services\TraceabilityService;
 use App\Modules\Production\Models\DayBinMovement;
 use App\Modules\Production\Models\Enums\DayBinMovementType;
 
 /**
- * The CENTRAL bin bay: material is loaded into a machine's day bin ONCE, at
- * the bay, by whoever is feeding the machine — not asked for again inside
- * every batch. This service is the read side of that workspace (what is in
- * the bin, which lots it came from, what the run still needs, who loaded
- * what) plus a thin delegation for the write.
+ * The READ side of the machine-scoped day-bin ledger: what the ledger holds
+ * of a material on one machine (and which lots fed it), and a run's recipe
+ * priced against that balance — the Start Batch dialog's shortage figures.
  *
- * WHAT A LOAD IS — and is not:
- * loading a bag into a bin bay is an INVENTORY LOCATION MOVEMENT. The
- * material travels from the store to the machine's day bin and nothing
- * else happens: it is NOT consumption, and it NEVER posts a Tally voucher.
- * Consumption is a separate, later figure derived at batch completion
- * (opening + Σ loaded − closing − Σ returned, DayBinLedgerService), and
- * only the approved batch reaches Tally. A bin bay full of resin has
- * consumed nothing.
+ * THE LOADING SURFACE IS GONE (DEC-20260807-006): the per-machine Bin Bay
+ * page, its bin-bay/load write and its bin-bay/history read were removed —
+ * the floor's only load flow is the common resin input's bag scan
+ * (FactoryDayBinService::loadBag), which names no machine. The
+ * machine-stamped Load rows this class still reads are the audit history of
+ * how the factory ran under the previous understanding, plus whatever the
+ * remaining day-bin endpoints record; they are read here, never written.
  *
  * Ownership boundaries this class deliberately respects:
- *  - the actual movement is written by Inventory's
- *    TraceabilityService::loadBagToDayBin (bag remaining_kg, the FIFO
- *    policy and the ledger append in one transaction) — there is exactly
- *    one loader in the system and it is not this one;
  *  - balances come from DayBinLedgerService, never re-derived here;
  *  - the recipe comes from BomService::activeFor — the same path
  *    BatchEstimationService uses for its expected-materials card.
@@ -39,7 +31,6 @@ class BinBayService
 {
     public function __construct(
         private readonly DayBinLedgerService $ledger,
-        private readonly TraceabilityService $traceability,
         private readonly BomService $boms,
     ) {}
 
@@ -215,77 +206,6 @@ class BinBayService
             'recipe_source' => 'bom',
             'components' => $components,
         ];
-    }
-
-    /**
-     * Who loaded what into this bin bay, when, off which bag — the audit
-     * trail the bay screen shows under the scan box, newest first.
-     *
-     * @return array{rows: list<array{
-     *     id: int, recorded_at: ?string, quantity_kg: string,
-     *     shift_production_entry_id: ?int,
-     *     item: ?array{id: int, name: string, sku: ?string},
-     *     material_bag_id: ?int, barcode: ?string,
-     *     lot: ?array{id: int, supplier_lot_no: ?string},
-     *     loaded_by: ?array{id: int, name: string},
-     * }>}
-     */
-    public function loadHistoryFor(int $workCenterId, ?int $itemId = null, int $limit = 50): array
-    {
-        $movements = DayBinMovement::query()
-            ->where('work_center_id', $workCenterId)
-            ->where('type', DayBinMovementType::Load->value)
-            ->when($itemId, fn ($query) => $query->where('item_id', $itemId))
-            ->with(['item' => fn ($query) => $query->withTrashed(), 'materialBag.lot', 'recordedBy'])
-            ->orderByDesc('recorded_at')
-            ->orderByDesc('id')
-            ->limit($limit)
-            ->get();
-
-        $rows = [];
-        foreach ($movements as $movement) {
-            $bag = $movement->materialBag;
-            $lot = $bag?->lot;
-            $item = $movement->item;
-            $user = $movement->recordedBy;
-
-            $rows[] = [
-                'id' => $movement->id,
-                'recorded_at' => $movement->recorded_at?->toIso8601String(),
-                'quantity_kg' => bcadd((string) $movement->quantity_kg, '0', 4),
-                'shift_production_entry_id' => $movement->shift_production_entry_id,
-                'item' => $item !== null
-                    ? ['id' => $item->id, 'name' => $item->name, 'sku' => $item->sku]
-                    : null,
-                'material_bag_id' => $movement->material_bag_id,
-                'barcode' => $bag?->barcode,
-                'lot' => $lot !== null
-                    ? ['id' => $lot->id, 'supplier_lot_no' => $lot->supplier_lot_no]
-                    : null,
-                'loaded_by' => $user !== null ? ['id' => $user->id, 'name' => $user->name] : null,
-            ];
-        }
-
-        return ['rows' => $rows];
-    }
-
-    /**
-     * The write, delegated verbatim to Inventory's TraceabilityService —
-     * bag remaining_kg, the FIFO policy and the ledger row are one
-     * transaction there and there is no second loader in this system.
-     *
-     * `$userId` is the person credited with the load (a users row — the
-     * ledger's recorded_by column is a users FK, NOT an employees one).
-     *
-     * @param  array{
-     *     work_center_id: int, barcode?: ?string, material_bag_id?: ?int,
-     *     quantity_kg?: string|float|null, shift_production_entry_id?: ?int,
-     *     override_fifo?: bool,
-     * }  $data
-     */
-    public function load(array $data, ?int $userId): DayBinMovement
-    {
-        return $this->traceability->loadBagToDayBin($data, $userId);
     }
 
     /**

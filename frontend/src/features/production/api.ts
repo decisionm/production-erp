@@ -11,7 +11,6 @@ import type {
     BatchPreview,
     BinBayAvailabilityResponse,
     FinishedCarton,
-    BinBayHistoryRow,
     Bom,
     DowntimeReason,
     FactorySetting,
@@ -1491,12 +1490,11 @@ export async function saveFactorySetting(payload: {
 }
 
 // ---------------------------------------------------------------------------
-// The CENTRAL bin bay. Material is loaded into a machine's day bin once, at
-// the bay — the batch screens then read the bin instead of asking for the
-// same declaration again.
-//
-// A load is an inventory LOCATION movement (store → machine day bin): not
-// consumption, and never a Tally post. Traceability-gated, same as the
+// The bin-bay AVAILABILITY read: the machine-scoped ledger balance and the
+// run's recipe priced against it — the Start Batch dialog's shortage
+// figures. READ ONLY: the Bin Bay page, its load write and its history read
+// are gone (DEC-20260807-006) — the floor's one load flow is the common
+// input's bag scan (loadFactoryDayBinBag). Traceability-gated, same as the
 // day-bin endpoints above.
 // ---------------------------------------------------------------------------
 
@@ -1515,42 +1513,6 @@ export async function getBinBayAvailability(
     const { data } = await api.get<{ data: BinBayAvailabilityResponse }>('/production/bin-bay/availability', {
         params,
     });
-    return data.data;
-}
-
-export async function getBinBayHistory(
-    workCenterId: number,
-    itemId?: number,
-    limit?: number,
-): Promise<BinBayHistoryRow[]> {
-    const { data } = await api.get<{ data: { rows: BinBayHistoryRow[] } }>('/production/bin-bay/history', {
-        params: { work_center_id: workCenterId, item_id: itemId, limit },
-    });
-    return data.data.rows;
-}
-
-export interface BinBayLoadPayload {
-    work_center_id: number;
-    /** The code on the bag — typed, gun-scanned or read by the camera. */
-    barcode: string;
-    /** Omit for a full-bag load (its whole remaining_kg); set for a weighed partial pour. */
-    quantity_kg?: number;
-    /** Optional: loading is central and normally not tied to a batch. */
-    shift_production_entry_id?: number;
-    /**
-     * Re-send after a FIFO refusal (422 with code 'fifo_order') — requires
-     * the `production.override-fifo` permission and records who overrode.
-     */
-    override_fifo?: boolean;
-    /**
-     * Credit the load to someone else (a users row, not an employee).
-     * Defaults to the authenticated user; naming another needs production.manage.
-     */
-    loaded_by?: number;
-}
-
-export async function loadBinBay(payload: BinBayLoadPayload): Promise<DayBinMovement> {
-    const { data } = await api.post<{ data: DayBinMovement }>('/production/bin-bay/load', payload);
     return data.data;
 }
 
