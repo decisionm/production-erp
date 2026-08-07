@@ -61,16 +61,20 @@ steps exist because skipping them has already caused trouble once each:
 - [ ] Normal operation intact: vouchers sync as before within a couple of
       minutes (or "Sync Vouchers Now" runs clean against an empty queue)
 
-## First probed Stock Summary read (v0.3.1+)
+## First probed Stock Summary read (v0.3.2+)
 
 Background, so the caution makes sense: on 07 Aug 2026 the one-shot read
-(v0.2.0) crashed the live Tally from ONE click, and the group-chunked read
-(v0.3.0) wedged TallyPrime twice on its first chunk the same day. Since
-v0.3.1 nothing heavy is sent to Tally until a light probe has PROVEN the
-scope is small: the plan is logged first, canary probes test Tally's
-filtering, groups over the cap are read one item at a time, and the risky
-scopes run last. The button is disabled while a read runs and the tray
-narrates every step. Treat the first run as a small test:
+(v0.2.0) crashed the live Tally from ONE click; the group-chunked read
+(v0.3.0) wedged TallyPrime twice on its first chunk; and v0.3.1's heavy
+fetch of a 12-item ungrouped scope hung it a third time even though a
+canary had passed on a named group. Since v0.3.2 EVERY scope is light-
+probed immediately before its own heavy request, the ungrouped scope is
+always read one item at a time (as is any group over the cap), the risky
+scopes run last, and an item whose single-item fetch times out is
+BLACKLISTED on disk — named in the log, skipped by every later run — so
+each attempt either completes or eliminates exactly one culprit. The
+button is disabled while a read runs and the tray narrates every step.
+Treat the first run as a small test:
 
 - [ ] **Quiet window only:** after production hours, no batches posting
 - [ ] Click **Read Stock Summary (preview only)** — ONCE

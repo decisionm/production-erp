@@ -16,10 +16,15 @@ import type { TallyTarget } from './masters';
  *    closing quantity, rate and value) crashed the live Tally from one click.
  *  - v0.3.0: chunking by stock group was not enough — the "ungrouped items"
  *    chunk wedged TallyPrime twice, deterministically, DURING the request.
- *    Either most of the catalogue is ungrouped, or CHILDOF does not scope on
- *    this Tally build; from the outside the two are indistinguishable.
+ *  - v0.3.1: a run-level canary on the smallest NAMED group passed, and the
+ *    heavy fetch of the ungrouped scope — 12 items by the masters list —
+ *    hung Tally anyway. A canary on one scope proves nothing about another:
+ *    `$$SysName:Primary` inside CHILDOF may fail open where a named group
+ *    filters fine, or one specific item's balances may hang Tally at any
+ *    request size. Probing must be PER SCOPE, and the ungrouped scope gets
+ *    no benefit of the doubt at all.
  *
- * So v0.3.1 stops assuming and starts probing. Two request weights exist:
+ * So this file stops assuming and probes everything. Two request weights:
  *
  *  LIGHT — Name + GUID only, no balances. The same class of request as the
  *  masters item list, which this Tally demonstrably serves every hour without
@@ -129,17 +134,29 @@ const HEAVY_FETCH =
     'BatchAllocations.ClosingRate, BatchAllocations.ClosingValue';
 
 /**
- * One collection request. Scope is always present: the direct children of one
- * stock group (BELONGSTO No), or of the reserved root for `group === null` —
- * optionally narrowed further to a single item name via a TDL filter formula.
+ * One collection request, narrowed by up to two independent mechanisms:
+ *
+ *  - `group` (a GroupScope): CHILDOF the named group's direct children
+ *    (BELONGSTO No), or of the reserved root for `group === null`. Omitted
+ *    entirely when `group` is `undefined`.
+ *  - `itemName`: a TDL filter formula pinning the collection to one item.
+ *
+ * Per-item requests deliberately pass NO group: the third 07-Aug incident
+ * showed the named-group CHILDOF canary passing while the "ungrouped items"
+ * scope still hung Tally — `$$SysName:Primary` inside CHILDOF is exactly the
+ * kind of expression that can fail open on some builds, so the per-item path
+ * must not depend on it. The name filter narrows from the full catalogue on
+ * its own, and it is canary-tested (light) before first heavy use.
  */
 function buildRequestXml(
     company: string,
     asOf: string,
-    group: GroupScope,
-    opts: { light: boolean; itemName?: string },
+    opts: { light: boolean; group?: GroupScope; itemName?: string },
 ): string {
     const date = tallyDate(asOf);
+    const childOf = opts.group !== undefined
+        ? `<CHILDOF>${opts.group === null ? '$$SysName:Primary' : escapeXml(opts.group)}</CHILDOF><BELONGSTO>No</BELONGSTO>`
+        : '';
     const filter = opts.itemName !== undefined
         ? '<FILTER>AgentStockPick</FILTER>'
         : '';
@@ -159,10 +176,7 @@ function buildRequestXml(
         '</STATICVARIABLES>' +
         '<TDL><TDLMESSAGE><COLLECTION NAME="AgentStockSummary" ISMODIFY="No" ISFIXED="No" ' +
         'ISINITIALIZE="No" ISOPTION="No" ISINTERNAL="No"><TYPE>StockItem</TYPE>' +
-        // The scope boundary. BELONGSTO No = direct children only, so a
-        // sub-group's items arrive in the sub-group's own scope and never twice.
-        `<CHILDOF>${group === null ? '$$SysName:Primary' : escapeXml(group)}</CHILDOF>` +
-        '<BELONGSTO>No</BELONGSTO>' +
+        childOf +
         filter +
         `<FETCH>${opts.light ? LIGHT_FETCH : HEAVY_FETCH}</FETCH>` +
         '</COLLECTION>' + filterFormula + '</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>'
@@ -230,45 +244,79 @@ function linesFor(node: any): StockSummaryLine[] {
 }
 
 /**
- * LIGHT probe of a scope: which item GUIDs does Tally hold directly under
- * this group (optionally narrowed to one item name)? No balances are computed
- * — safe even if the scope filter silently fails and this returns the world,
- * which is precisely the failure the caller uses it to detect.
+ * LIGHT probe of a group scope: which item GUIDs does Tally hold directly
+ * under this group? No balances are computed — safe even if the scope filter
+ * silently fails and this returns the world, which is precisely the failure
+ * the caller uses it to detect.
  */
-export async function probeScope(
+export async function probeGroupScope(
     target: TallyTarget,
     asOf: string,
     group: GroupScope,
-    itemName?: string,
 ): Promise<string[]> {
-    const xml = buildRequestXml(target.company, asOf, group, { light: true, itemName });
+    const xml = buildRequestXml(target.company, asOf, { light: true, group });
     const nodes = await post(target, xml, 60000);
 
     return nodes.map((n) => textOf(n.GUID)).filter((g) => g !== '');
 }
 
 /**
- * HEAVY read of one PRE-PROVEN scope: the godown-wise closing position for
- * the items directly under one stock group, or one named item within it.
- *
- * Callers must have probed the scope (or be operating under a run-level
- * canary that proved the mechanism) before calling this — see the module
- * comment. ONE attempt, NO automatic retry: a timed-out request leaves Tally
- * still computing, and firing another while it does is exactly the stacking
- * that kills it. The operator retries by running the read again, which
- * resumes where it stopped — after restarting Tally if it was left wedged.
+ * LIGHT probe of the item-name filter: which GUIDs match this exact name?
+ * Must return exactly the one expected item for the filter mechanism to be
+ * trusted with a heavy request. No group scoping involved — see
+ * buildRequestXml for why the per-item path avoids CHILDOF entirely.
  */
-export async function exportScope(
+export async function probeItemFilter(
+    target: TallyTarget,
+    asOf: string,
+    itemName: string,
+): Promise<string[]> {
+    const xml = buildRequestXml(target.company, asOf, { light: true, itemName });
+    const nodes = await post(target, xml, 60000);
+
+    return nodes.map((n) => textOf(n.GUID)).filter((g) => g !== '');
+}
+
+/**
+ * HEAVY read of one PRE-PROBED group scope: the godown-wise closing position
+ * for the items directly under one stock group.
+ *
+ * Callers must have light-probed THIS scope, THIS run, before calling — see
+ * the module comment. ONE attempt, NO automatic retry: a timed-out request
+ * leaves Tally still computing, and firing another while it does is exactly
+ * the stacking that kills it. The operator retries by running the read
+ * again, which resumes where it stopped — after restarting Tally if it was
+ * left wedged.
+ */
+export async function exportGroupScope(
     target: TallyTarget,
     asOf: string,
     group: GroupScope,
-    itemName?: string,
 ): Promise<StockSummaryLine[]> {
-    const xml = buildRequestXml(target.company, asOf, group, { light: false, itemName });
+    const xml = buildRequestXml(target.company, asOf, { light: false, group });
     // Generous for a scope already proven small. A proven-small request that
     // still needs longer than this is a Tally that is struggling, and the
     // right response is to stop, not to wait harder.
     const nodes = await post(target, xml, 120000);
+
+    return nodes.flatMap(linesFor);
+}
+
+/**
+ * HEAVY read of ONE item by exact name (filter only, no group scoping). The
+ * filter mechanism must have passed its light canary this run. The tighter
+ * timeout is deliberate: a single item's balances should return in seconds,
+ * and a single item that cannot answer inside this window is the poison-item
+ * signature the caller blacklists — waiting 120s just leaves Tally wedged
+ * longer before the same conclusion.
+ */
+export async function exportSingleItem(
+    target: TallyTarget,
+    asOf: string,
+    itemName: string,
+): Promise<StockSummaryLine[]> {
+    const xml = buildRequestXml(target.company, asOf, { light: false, itemName });
+    const nodes = await post(target, xml, 45000);
 
     return nodes.flatMap(linesFor);
 }

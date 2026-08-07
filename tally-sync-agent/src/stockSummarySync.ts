@@ -1,11 +1,15 @@
+import axios from 'axios';
 import { previewStockSummary, type StockSummaryPreview } from './cloudApi';
 import { getConfig, isConfigured } from './config';
 import logger from './logger';
+import { poisonedItems, poisonItem } from './stockReadState';
 import { exportItems, type ItemNode } from './tally/masters';
 import {
-    exportScope,
+    exportGroupScope,
+    exportSingleItem,
     nameFitsFilter,
-    probeScope,
+    probeGroupScope,
+    probeItemFilter,
     type GroupScope,
     type StockSummaryLine,
     type StockSummaryPayload,
@@ -13,35 +17,40 @@ import {
 
 /**
  * The Stock Summary preview run: read the godown-wise closing position out of
- * the local Tally — in scopes each PROVEN small before anything heavy is sent
- * — and send the complete set to the cloud to be REPORTED ON, never imported.
+ * the local Tally — every scope light-probed before its heavy request — and
+ * send the complete set to the cloud to be REPORTED ON, never imported.
  *
  * Manual only, on purpose. There is no loop and no interval, unlike the
  * voucher and masters syncs. An opening-stock snapshot is a one-off act tied
  * to a cutover date that a person chose.
  *
- * Shaped by two field incidents on 07 Aug 2026 (see tally/stockSummary.ts for
- * the request-level story). The run works like this:
+ * Shaped by THREE field incidents on 07 Aug 2026 (request-level story in
+ * tally/stockSummary.ts). The run works like this:
  *
  *   1. PLAN: pull the light masters item list (proven safe hourly), derive
  *      every group's item count, and LOG THE WHOLE PLAN before Tally is asked
- *      to compute anything.
- *   2. CANARY: light-probe the scoping mechanism(s) the plan will use. A
- *      probe that returns items outside its scope means Tally's filter is not
- *      filtering on this build — ABORT before any heavy request exists.
- *   3. EXECUTE, bounded, safest first: groups at or under the cap are read as
- *      one heavy chunk each; oversized groups are read ONE ITEM AT A TIME
- *      (each a trivially small request), and they run LAST, so the easy data
- *      is already secured if the long tail fails.
- *   4. HONESTY: the run ends by counting what arrived against what the
- *      masters list said exists, out loud.
+ *      to compute anything. The ungrouped scope is ALWAYS read per item — it
+ *      hung Tally three times today and gets no benefit of the doubt.
+ *   2. PROBE PER SCOPE: immediately before each heavy group request, light-
+ *      probe THAT scope. Items from outside it mean Tally's filter fails
+ *      open there — ABORT with nothing heavy sent. v0.3.1 proved a canary on
+ *      one scope says nothing about another.
+ *   3. EXECUTE, bounded, safest first: probed groups at or under the cap are
+ *      one heavy chunk each; oversized groups and the ungrouped scope are
+ *      read ONE ITEM AT A TIME via the name filter (no CHILDOF at all —
+ *      immune to `$$SysName:Primary` misbehaving), canary-tested light
+ *      before first heavy use, and they run LAST.
+ *   4. BLACKLIST, don't loop: a single item whose fetch times out is
+ *      recorded on disk as poisoned and NAMED in the log; the run stops
+ *      (Tally is likely wedged) and every later run skips it out loud. Each
+ *      attempt either completes or eliminates exactly one culprit.
+ *   5. HONESTY: the run ends by counting what arrived against what the
+ *      masters list said exists, out loud — poisoned and unfilterable items
+ *      included.
  *
  * Single-flight; a second trigger is rejected out loud, and the tray narrates
- * every step. NO AUTOMATIC RETRY anywhere on this path — invariant. A failed
- * scope stops the run; what was already read is kept, and the next manual
- * trigger resumes where it stopped. Tally must be restarted FIRST if it was
- * left wedged — the tray hint says so now, because on 07 Aug the old wording
- * ("click again to resume") invited a resume against a hung Tally.
+ * every step. NO AUTOMATIC RETRY anywhere on this path — invariant. Tally
+ * must be restarted FIRST after a hang — the tray hint says so.
  */
 
 export interface StockReadStatus {
@@ -63,8 +72,8 @@ export function getStockReadStatus(): StockReadStatus {
 }
 
 /**
- * A heavy (balance-carrying) request is never sent for a scope holding more
- * items than this. Groups over the cap are read one item at a time instead.
+ * A heavy (balance-carrying) group request is never sent for a scope holding
+ * more items than this. Groups over the cap are read one item at a time.
  */
 const ITEMS_PER_HEAVY_CHUNK_CAP = 40;
 
@@ -91,8 +100,9 @@ interface PlanEntry {
  * item-grained inside per-item scopes. Also kept when the Tally read finished
  * but the cloud POST failed: the re-run then skips everything and goes
  * straight to the POST. Discarded when the company or as-of date changes, and
- * on success. In-memory only: an agent restart starts clean, which is the
- * safe default for a report meant to be read fresh.
+ * on success. In-memory only (the poison list is the part that survives a
+ * restart — see stockReadState.ts): an agent restart otherwise starts clean,
+ * which is the safe default for a report meant to be read fresh.
  */
 let partial: {
     company: string;
@@ -110,6 +120,12 @@ function setProgress(progress: string | null, onProgress?: () => void): void {
 
 /** The corrected resume hint — Tally first, agent second. */
 const RESUME_HINT = 'If Tally hung, restart Tally FIRST; then click "Read Stock Summary" again to resume where it stopped';
+
+/** A timeout with no response — the "Tally is still computing" signature. */
+function isHangTimeout(err: unknown): boolean {
+    return axios.isAxiosError(err) && err.response === undefined
+        && (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT');
+}
 
 /**
  * Run one probed-and-bounded Stock Summary read end to end. `onProgress` lets
@@ -142,7 +158,7 @@ export async function runStockSummaryPreview(asOf: string, onProgress?: () => vo
         return preview;
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        state.lastOutcome = `⚠ Last stock read stopped: ${message.slice(0, 90)}`;
+        state.lastOutcome = `⚠ Last stock read stopped: ${message.slice(0, 110)}`;
         throw err;
     } finally {
         state.running = false;
@@ -154,7 +170,7 @@ async function readAndPreview(asOf: string, onProgress?: () => void): Promise<St
     const cfg = getConfig();
     const target = { host: cfg.tallyHost, port: cfg.tallyPort, company: cfg.tallyCompanyName };
 
-    logger.info('Stock Summary: read starting (read-only, probed scopes, no auto-retry)', {
+    logger.info('Stock Summary: read starting (read-only, per-scope probes, no auto-retry)', {
         tally: `${cfg.tallyHost}:${cfg.tallyPort}`,
         company: cfg.tallyCompanyName,
         asOf,
@@ -169,6 +185,16 @@ async function readAndPreview(asOf: string, onProgress?: () => void): Promise<St
         partial = null;
     }
 
+    const poisoned = poisonedItems();
+    const poisonedCount = Object.keys(poisoned).length;
+    if (poisonedCount > 0) {
+        logger.warn(
+            `Stock Summary: ${poisonedCount} item(s) are on the poison list from earlier hung runs and will be SKIPPED: `
+            + Object.values(poisoned).map((p) => `"${p.name}"`).join(', ')
+            + ' — a developer clears stock-read-state.json after fixing the item data in Tally.',
+        );
+    }
+
     // ---- 1. PLAN ---------------------------------------------------------
     setProgress('listing stock items…', onProgress);
     const items = await exportItems(target);
@@ -181,9 +207,6 @@ async function readAndPreview(asOf: string, onProgress?: () => void): Promise<St
         else byGroup.set(key, [item]);
     }
 
-    // Bounded chunks first (alphabetical, ungrouped leading), oversized
-    // per-item scopes LAST and smallest-first — the risky, slow work runs
-    // after the easy data is already secured.
     const keys = [...byGroup.keys()].sort((a, b) => {
         if (a === UNGROUPED) return -1;
         if (b === UNGROUPED) return 1;
@@ -197,17 +220,23 @@ async function readAndPreview(asOf: string, onProgress?: () => void): Promise<St
             scope: key === UNGROUPED ? null : key,
             label: key === UNGROUPED ? 'ungrouped items' : key,
             items: groupItems,
-            mode: groupItems.length <= ITEMS_PER_HEAVY_CHUNK_CAP ? 'chunk' : 'per-item',
+            // The ungrouped scope is ALWAYS per-item: it hung Tally three
+            // times on 07 Aug — as one chunk in v0.3.0 (twice) and as a
+            // 12-item chunk in v0.3.1. Named groups go per-item only when
+            // they exceed the cap.
+            mode: key === UNGROUPED || groupItems.length > ITEMS_PER_HEAVY_CHUNK_CAP ? 'per-item' : 'chunk',
         };
     });
+    // Bounded chunks first (alphabetical), per-item scopes LAST and
+    // smallest-first — the risky, slow work runs after the easy data is
+    // already secured.
     plan.sort((a, b) => {
         if (a.mode !== b.mode) return a.mode === 'chunk' ? -1 : 1;
         if (a.mode === 'per-item') return a.items.length - b.items.length;
         return 0;
     });
 
-    // The whole plan, out loud, BEFORE Tally is asked to compute anything —
-    // on 07 Aug the failed runs left no record of what they had intended.
+    // The whole plan, out loud, BEFORE Tally is asked to compute anything.
     logger.info(
         `Stock Summary: plan — ${items.length} item(s) in ${plan.length} scope(s), cap ${ITEMS_PER_HEAVY_CHUNK_CAP} item(s) per heavy request`,
         Object.fromEntries(plan.map((p) => [p.label, `${p.items.length} item(s), ${p.mode}`])),
@@ -217,9 +246,6 @@ async function readAndPreview(asOf: string, onProgress?: () => void): Promise<St
     const completed = partial?.completedGroups ?? new Set<string>();
     partial = { company: target.company, asOf, linesByGroup: done, completedGroups: completed };
 
-    // Item GUIDs already collected, rebuilt from the kept lines on resume.
-    // Also the cross-scope dedupe: the same item surfacing in two scopes must
-    // not become two opening balances.
     const seenGuids = new Set<string>();
     for (const lines of done.values()) {
         for (const line of lines) seenGuids.add(line.item_guid);
@@ -228,67 +254,11 @@ async function readAndPreview(asOf: string, onProgress?: () => void): Promise<St
         logger.info(`Stock Summary: resuming — ${completed.size} scope(s) and ${seenGuids.size} item(s) kept from the stopped run`);
     }
 
-    // ---- 2. CANARIES -----------------------------------------------------
-    // Probe the group-scoping mechanism on the SMALLEST named group (fall
-    // back to the root scope only when no named group exists). Light request:
-    // safe even if the filter fails wide open — that failure is the finding.
-    const namedForCanary = plan
-        .filter((p) => p.key !== UNGROUPED && p.items.length > 0)
-        .sort((a, b) => a.items.length - b.items.length)[0];
-    const canaryScope: PlanEntry | undefined = namedForCanary ?? plan.find((p) => p.items.length > 0);
-
-    if (canaryScope) {
-        setProgress(`checking Tally's group scoping (canary: ${canaryScope.label})…`, onProgress);
-
-        const expected = new Set(canaryScope.items.map((i) => i.guid));
-        const probed = await probeScope(target, asOf, canaryScope.scope);
-        const strangers = probed.filter((guid) => !expected.has(guid));
-
-        if (strangers.length > 0) {
-            logger.error(
-                `Stock Summary: ABORTED BEFORE ANY HEAVY REQUEST — the group-scoping canary failed. `
-                + `Scope "${canaryScope.label}" should hold ${expected.size} item(s) but the probe returned `
-                + `${probed.length}, including ${strangers.length} from outside the scope. CHILDOF does not `
-                + 'filter on this Tally build; a heavy request would have been the full catalogue again. '
-                + 'Nothing was read. This needs a developer, not a retry.',
-            );
-            throw new Error(`group-scoping canary failed on "${canaryScope.label}" — read aborted before any heavy request; tell the developers`);
-        }
-        if (probed.length < expected.size) {
-            logger.warn(
-                `Stock Summary: canary scope "${canaryScope.label}" returned ${probed.length} of ${expected.size} expected item(s) `
-                + '— group names may not round-trip exactly; the run continues and the final count will say what is missing.',
-            );
-        }
-        logger.info(`Stock Summary: group-scoping canary passed on "${canaryScope.label}" (${probed.length}/${expected.size} item(s))`);
-    }
-
-    // Probe the item-name filter only if the plan needs it, on one known item
-    // of the first per-item scope. It must return exactly that item.
-    const firstPerItem = plan.find((p) => p.mode === 'per-item');
-    if (firstPerItem) {
-        const probeItem = firstPerItem.items.find((i) => nameFitsFilter(i.name));
-        if (!probeItem) {
-            throw new Error(`every item name in oversized group "${firstPerItem.label}" contains a double-quote — per-item reads cannot run; tell the developers`);
-        }
-
-        setProgress(`checking Tally's item filter (canary: ${probeItem.name.slice(0, 40)})…`, onProgress);
-        const probed = await probeScope(target, asOf, firstPerItem.scope, probeItem.name);
-
-        if (probed.length !== 1 || probed[0] !== probeItem.guid) {
-            logger.error(
-                `Stock Summary: ABORTED BEFORE ANY HEAVY REQUEST — the item-filter canary failed. `
-                + `Filtering scope "${firstPerItem.label}" to item "${probeItem.name}" should return exactly that item; `
-                + `the probe returned ${probed.length} item(s). The oversized group(s) cannot be read safely on this `
-                + 'Tally build. Nothing heavy was sent. This needs a developer, not a retry.',
-            );
-            throw new Error('item-filter canary failed — read aborted before any heavy request; tell the developers');
-        }
-        logger.info('Stock Summary: item-filter canary passed');
-    }
-
-    // ---- 3. EXECUTE, bounded, safest first --------------------------------
+    // ---- 2/3. PROBE AND EXECUTE, safest first -----------------------------
     const total = plan.length;
+    let filterCanaryPassed = false;
+    let skippedQuoted = 0;
+    let skippedPoisoned = 0;
 
     for (let i = 0; i < total; i += 1) {
         const entry = plan[i];
@@ -300,11 +270,41 @@ async function readAndPreview(asOf: string, onProgress?: () => void): Promise<St
         }
 
         if (entry.mode === 'chunk') {
-            setProgress(`${position} (${entry.items.length} items)`, onProgress);
+            // Probe THIS scope, light, right before its heavy request.
+            setProgress(`probing ${position} (${entry.items.length} items)…`, onProgress);
+
+            const expected = new Set(entry.items.map((it) => it.guid));
+            let probedGuids: string[];
+            try {
+                probedGuids = await probeGroupScope(target, asOf, entry.scope);
+            } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                logger.error(`Stock Summary: light probe of ${position} failed — stopping. ${RESUME_HINT}.`, { message });
+                throw new Error(`probe of scope "${entry.label}" failed: ${message} — ${RESUME_HINT}`);
+            }
+
+            const strangers = probedGuids.filter((guid) => !expected.has(guid));
+            if (strangers.length > 0) {
+                logger.error(
+                    `Stock Summary: ABORTED — scope "${entry.label}" should hold ${expected.size} item(s) but its light probe `
+                    + `returned ${probedGuids.length}, including ${strangers.length} from outside it. Tally's group filter fails `
+                    + 'open on this scope; its heavy request would NOT have been bounded and was never sent. '
+                    + 'This needs a developer, not a retry.',
+                );
+                throw new Error(`group filter fails open on scope "${entry.label}" — read aborted before its heavy request; tell the developers`);
+            }
+            if (probedGuids.length < expected.size) {
+                logger.warn(
+                    `Stock Summary: ${position}: probe returned ${probedGuids.length} of ${expected.size} expected item(s) `
+                    + '— the group name may not round-trip exactly; the final count will say what is missing.',
+                );
+            }
+
+            setProgress(`${position} (${probedGuids.length} items)`, onProgress);
 
             let lines: StockSummaryLine[];
             try {
-                lines = await exportScope(target, asOf, entry.scope);
+                lines = await exportGroupScope(target, asOf, entry.scope);
             } catch (err) {
                 const message = err instanceof Error ? err.message : String(err);
                 logger.error(
@@ -327,15 +327,43 @@ async function readAndPreview(asOf: string, onProgress?: () => void): Promise<St
             continue;
         }
 
-        // Per-item scope: every request is one item, trivially small.
+        // ---- per-item scope ------------------------------------------------
+        // Canary the name-filter mechanism once per run, light, before its
+        // first heavy use: it must pin the collection to exactly one item.
+        if (!filterCanaryPassed) {
+            const probeItem = entry.items.find((it) => nameFitsFilter(it.name) && !poisoned[it.guid]);
+            if (!probeItem) {
+                throw new Error(`no usable item in "${entry.label}" to canary the name filter with — tell the developers`);
+            }
+
+            setProgress(`checking Tally's item filter (canary: ${probeItem.name.slice(0, 40)})…`, onProgress);
+            const probed = await probeItemFilter(target, asOf, probeItem.name);
+
+            if (probed.length !== 1 || probed[0] !== probeItem.guid) {
+                logger.error(
+                    `Stock Summary: ABORTED — the item-filter canary failed. Filtering to item "${probeItem.name}" should `
+                    + `return exactly that item; the light probe returned ${probed.length} item(s). Per-item reads cannot run `
+                    + 'safely on this Tally build; nothing heavy was sent for them. This needs a developer, not a retry.',
+                );
+                throw new Error('item-filter canary failed — per-item reads aborted before any heavy request; tell the developers');
+            }
+            logger.info('Stock Summary: item-filter canary passed');
+            filterCanaryPassed = true;
+        }
+
         const groupLines = done.get(entry.key) ?? [];
         done.set(entry.key, groupLines);
-        let skippedQuoted = 0;
 
         for (let j = 0; j < entry.items.length; j += 1) {
             const item = entry.items[j];
 
             if (seenGuids.has(item.guid)) continue;
+
+            if (poisoned[item.guid]) {
+                skippedPoisoned += 1;
+                logger.warn(`Stock Summary: ${position}: item "${item.name}" is on the poison list (hung Tally on ${poisoned[item.guid].at}) — SKIPPED`);
+                continue;
+            }
 
             if (!nameFitsFilter(item.name)) {
                 skippedQuoted += 1;
@@ -347,12 +375,31 @@ async function readAndPreview(asOf: string, onProgress?: () => void): Promise<St
 
             let lines: StockSummaryLine[];
             try {
-                lines = await exportScope(target, asOf, entry.scope, item.name);
+                lines = await exportSingleItem(target, asOf, item.name);
             } catch (err) {
                 const message = err instanceof Error ? err.message : String(err);
+
+                if (isHangTimeout(err)) {
+                    // The poison-item signature: one item, tiny request, no
+                    // answer. Blacklist it ON DISK before anything else — the
+                    // operator is about to restart Tally and probably the
+                    // agent too, and the whole point is that the next run
+                    // must not step on the same mine.
+                    poisonItem(item.guid, item.name, target.company);
+                    logger.error(
+                        `Stock Summary: ${position}: item "${item.name}" did not answer a single-item request — `
+                        + 'this is the item that has been hanging Tally. It is now BLACKLISTED on disk and every later '
+                        + `run will skip it automatically. Restart Tally, then click "Read Stock Summary" again — the run `
+                        + 'resumes past this item. Show this log line to the developers: the item\'s data in Tally needs '
+                        + 'looking at before it can ever be read.',
+                        { item: item.name, guid: item.guid, message },
+                    );
+                    throw new Error(`item "${item.name}" hangs Tally and is now blacklisted — restart Tally, then click again to resume past it`);
+                }
+
                 logger.error(
                     `Stock Summary: ${position} FAILED at item ${j + 1}/${entry.items.length} ("${item.name}") — stopping, NO automatic retry. `
-                    + `Everything read so far is kept, including ${groupLines.length} line(s) of this group. ${RESUME_HINT}.`,
+                    + `Everything read so far is kept. ${RESUME_HINT}.`,
                     { message },
                 );
                 throw new Error(`scope "${entry.label}", item ${j + 1}/${entry.items.length} failed: ${message} — ${RESUME_HINT}`);
@@ -371,13 +418,10 @@ async function readAndPreview(asOf: string, onProgress?: () => void): Promise<St
         }
 
         completed.add(entry.key);
-        logger.info(
-            `Stock Summary: ${position}: ${groupLines.length} line(s) across ${entry.items.length - skippedQuoted} item(s)`
-            + (skippedQuoted > 0 ? ` — ${skippedQuoted} item(s) SKIPPED (double-quote in name)` : ''),
-        );
+        logger.info(`Stock Summary: ${position}: ${groupLines.length} line(s) collected`);
     }
 
-    // ---- 4. HONESTY ------------------------------------------------------
+    // ---- 5. HONESTY ------------------------------------------------------
     const allLines = plan.flatMap((p) => done.get(p.key) ?? []);
     const itemsRead = seenGuids.size;
 
@@ -386,8 +430,11 @@ async function readAndPreview(asOf: string, onProgress?: () => void): Promise<St
     } else {
         logger.warn(
             `Stock Summary: read complete but INCOMPLETE COVERAGE — ${allLines.length} line(s) covering `
-            + `${itemsRead} of ${items.length} item(s). The missing items were NOT invented; `
-            + 'the preview on the ERP will simply not show them. Tell the developers before trusting this snapshot.',
+            + `${itemsRead} of ${items.length} item(s)`
+            + (skippedPoisoned > 0 ? `; ${skippedPoisoned} skipped as poisoned` : '')
+            + (skippedQuoted > 0 ? `; ${skippedQuoted} skipped (double-quote in name)` : '')
+            + '. The missing items were NOT invented; the preview on the ERP will simply not show them. '
+            + 'Tell the developers before trusting this snapshot.',
         );
     }
 
