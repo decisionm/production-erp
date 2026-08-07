@@ -61,26 +61,34 @@ steps exist because skipping them has already caused trouble once each:
 - [ ] Normal operation intact: vouchers sync as before within a couple of
       minutes (or "Sync Vouchers Now" runs clean against an empty queue)
 
-## First chunked Stock Summary read (v0.3.0+)
+## First probed Stock Summary read (v0.3.1+)
 
-Background, so the caution makes sense: on 07 Aug 2026 ONE click of the old
-one-shot "Read Stock Summary" crashed the live Tally — it asked for the whole
-catalogue's godown-wise closing position in a single request. Since v0.3.0 the
-read goes ONE STOCK GROUP AT A TIME, the button is disabled while a read runs,
-and the tray narrates progress. The first run on a real Tally is also the
-validation of Tally's group-scoping behaviour, so treat it as a small test:
+Background, so the caution makes sense: on 07 Aug 2026 the one-shot read
+(v0.2.0) crashed the live Tally from ONE click, and the group-chunked read
+(v0.3.0) wedged TallyPrime twice on its first chunk the same day. Since
+v0.3.1 nothing heavy is sent to Tally until a light probe has PROVEN the
+scope is small: the plan is logged first, canary probes test Tally's
+filtering, groups over the cap are read one item at a time, and the risky
+scopes run last. The button is disabled while a read runs and the tray
+narrates every step. Treat the first run as a small test:
 
 - [ ] **Quiet window only:** after production hours, no batches posting
 - [ ] Click **Read Stock Summary (preview only)** — ONCE
-- [ ] Watch the tray label: "listing stock items…" → "group 1/N — …" counting
-      up → "sending to ERP for preview…" → a final line like
+- [ ] Watch the tray label: "listing stock items…" → "checking Tally's group
+      scoping (canary…)" → "group 1/N — …" counting up (an oversized group
+      shows "item 45/612" style progress and takes a few minutes — that is
+      normal) → "sending to ERP for preview…" → a final line like
       "✓ Last stock read: 653 line(s) sent for preview — nothing imported".
-      Tally should stay responsive throughout; each chunk is a small request
-- [ ] **Abort rule:** if Tally visibly goes sluggish during any chunk, stop —
-      click nothing further, close and reopen Tally when it recovers. What was
-      already read is KEPT; clicking the read once more later resumes from the
-      failed group instead of starting over. (A second click while it runs
-      does nothing — the button is disabled; that protection is the point)
+      Tally should stay responsive throughout
+- [ ] If the read stops saying a **canary failed**: nothing heavy was sent,
+      Tally is fine, and no retry will help — tell the developers. That stop
+      is the protection working, not a malfunction
+- [ ] **Abort rule:** if Tally visibly goes sluggish during any scope, stop —
+      click nothing further. **Restart Tally FIRST** (Task Manager → end the
+      TallyPrime task if the window is frozen → reopen → load the company),
+      then click the read once more: it resumes where it stopped instead of
+      starting over. (A second click while it runs does nothing — the button
+      is disabled; that protection is the point)
 - [ ] If the final line warns **"INCOMPLETE COVERAGE"**, the snapshot is still
       safe (nothing invented, nothing imported) — but tell the developers
       before anyone trusts it as an opening position
