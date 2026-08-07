@@ -5,32 +5,43 @@ import { escapeXml } from './voucherBuilders/xmlHelpers';
 import type { TallyTarget } from './masters';
 
 /**
- * Reads a GODOWN-WISE STOCK SUMMARY out of Tally, as at a closing date —
- * ONE STOCK GROUP AT A TIME.
+ * Reads a GODOWN-WISE STOCK SUMMARY out of Tally, as at a closing date — in
+ * requests that are each PROVEN SMALL before they are sent.
  *
  * STRICTLY READ-ONLY. This exports collections; it never imports, alters or
  * writes anything to Tally. The same guarantee the masters export gives.
  *
- * Why chunked, and why there is deliberately NO whole-catalogue variant left
- * in this file: on 07 Aug 2026 a single full-catalogue request — every
- * StockItem with godown-wise closing quantity, rate and value — crashed the
- * factory's live Tally on its own, from one click. Tally builds the entire
- * report in memory before answering; per stock group it never has to. The
- * lethal request must be impossible to build again, not merely discouraged.
+ * The field history that shaped this file, both incidents on 07 Aug 2026:
+ *  - v0.2.0: ONE full-catalogue request (every StockItem with godown-wise
+ *    closing quantity, rate and value) crashed the live Tally from one click.
+ *  - v0.3.0: chunking by stock group was not enough — the "ungrouped items"
+ *    chunk wedged TallyPrime twice, deterministically, DURING the request.
+ *    Either most of the catalogue is ungrouped, or CHILDOF does not scope on
+ *    this Tally build; from the outside the two are indistinguishable.
  *
- * Each chunk asks for the DIRECT children of one stock group (BELONGSTO No),
- * or of Tally's reserved root "Primary" for ungrouped items. Every item has
- * exactly one parent, so iterating all groups plus Primary covers the
- * catalogue exactly once. CHILDOF semantics against a real client Tally are
- * the one thing this file cannot prove from here — which is why the caller
- * (stockSummarySync) counts the items it received against the masters item
- * list and says out loud when the two disagree, instead of trusting silently.
+ * So v0.3.1 stops assuming and starts probing. Two request weights exist:
  *
- * Defensive in the same way masters.ts is, and for the same reason: real client
- * Tally data varies by version and setup. Every field is optional, values are
- * sanitised, and nothing is matched on a name — the item GUID is the identity
- * carried to the server, so the ERP can join on the identifier it already
- * stores rather than guessing from text.
+ *  LIGHT — Name + GUID only, no balances. The same class of request as the
+ *  masters item list, which this Tally demonstrably serves every hour without
+ *  strain. Light requests are safe even when a scope filter silently fails
+ *  and they return the entire catalogue.
+ *
+ *  HEAVY — closing quantity/rate/value with the godown-wise batch breakdown.
+ *  This is the weight that kills. A heavy request is only ever sent for a
+ *  scope that a light probe has ALREADY proven returns a bounded number of
+ *  items. No probe, no heavy request — that is the contract of this file.
+ *
+ * Scoping mechanisms (CHILDOF for a group's direct children, a TDL name
+ * filter for a single item) are Tally-version-sensitive, which is exactly why
+ * the caller canary-tests each mechanism with a LIGHT request and aborts the
+ * whole run if Tally returns more than the scope should hold. The lethal
+ * request is not merely discouraged — it cannot be emitted, because every
+ * heavy request's scope was measured first.
+ *
+ * Defensive in the same way masters.ts is, and for the same reason: real
+ * client Tally data varies by version and setup. Every field is optional,
+ * values are sanitised, and nothing is matched on a name — the item GUID is
+ * the identity carried to the server.
  */
 
 const parser = new XMLParser({ ignoreAttributes: false, parseTagValue: false, trimValues: true });
@@ -54,6 +65,9 @@ export interface StockSummaryPayload {
     as_of: string;
     lines: StockSummaryLine[];
 }
+
+/** A stock-group scope: a group name, or null for items directly under Tally's root. */
+export type GroupScope = string | null;
 
 function clean(value: unknown): string {
     const raw = String(value ?? '');
@@ -100,11 +114,38 @@ function tallyDate(iso: string): string {
 }
 
 /**
- * The collection request for ONE chunk: the items directly under one stock
- * group, or under the reserved root for ungrouped items (`group === null`).
+ * Item names carrying a double-quote cannot be placed inside a TDL formula
+ * string safely — escapeXml's &quot; decodes back to a literal quote inside
+ * the formula and breaks it. The caller skips such items out loud instead.
  */
-function buildStockSummaryChunkXml(company: string, asOf: string, group: string | null): string {
+export function nameFitsFilter(name: string): boolean {
+    return !name.includes('"');
+}
+
+const LIGHT_FETCH = 'Name, GUID';
+const HEAVY_FETCH =
+    'Name, GUID, BaseUnits, ClosingBalance, ClosingRate, ClosingValue, ' +
+    'BatchAllocations.GodownName, BatchAllocations.ClosingBalance, ' +
+    'BatchAllocations.ClosingRate, BatchAllocations.ClosingValue';
+
+/**
+ * One collection request. Scope is always present: the direct children of one
+ * stock group (BELONGSTO No), or of the reserved root for `group === null` —
+ * optionally narrowed further to a single item name via a TDL filter formula.
+ */
+function buildRequestXml(
+    company: string,
+    asOf: string,
+    group: GroupScope,
+    opts: { light: boolean; itemName?: string },
+): string {
     const date = tallyDate(asOf);
+    const filter = opts.itemName !== undefined
+        ? '<FILTER>AgentStockPick</FILTER>'
+        : '';
+    const filterFormula = opts.itemName !== undefined
+        ? `<SYSTEM TYPE="Formulae" NAME="AgentStockPick">$Name = "${escapeXml(opts.itemName)}"</SYSTEM>`
+        : '';
 
     return (
         '<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>' +
@@ -118,23 +159,35 @@ function buildStockSummaryChunkXml(company: string, asOf: string, group: string 
         '</STATICVARIABLES>' +
         '<TDL><TDLMESSAGE><COLLECTION NAME="AgentStockSummary" ISMODIFY="No" ISFIXED="No" ' +
         'ISINITIALIZE="No" ISOPTION="No" ISINTERNAL="No"><TYPE>StockItem</TYPE>' +
-        // The chunk boundary. BELONGSTO No = direct children only, so a
-        // sub-group's items arrive in the sub-group's own chunk and never twice.
+        // The scope boundary. BELONGSTO No = direct children only, so a
+        // sub-group's items arrive in the sub-group's own scope and never twice.
         `<CHILDOF>${group === null ? '$$SysName:Primary' : escapeXml(group)}</CHILDOF>` +
         '<BELONGSTO>No</BELONGSTO>' +
-        // BatchAllocations is where Tally puts the godown-wise breakdown. The
-        // item-level closing figures are fetched too, so an item held in no
-        // godown still arrives rather than vanishing from the snapshot.
-        '<FETCH>Name, GUID, BaseUnits, ClosingBalance, ClosingRate, ClosingValue, ' +
-        'BatchAllocations.GodownName, BatchAllocations.ClosingBalance, ' +
-        'BatchAllocations.ClosingRate, BatchAllocations.ClosingValue</FETCH>' +
-        '</COLLECTION></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>'
+        filter +
+        `<FETCH>${opts.light ? LIGHT_FETCH : HEAVY_FETCH}</FETCH>` +
+        '</COLLECTION>' + filterFormula + '</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>'
     );
 }
 
 function asArray(node: unknown): any[] {
     if (node == null) return [];
     return Array.isArray(node) ? node : [node];
+}
+
+async function post(target: TallyTarget, xml: string, timeoutMs: number): Promise<any[]> {
+    const url = `http://${target.host}:${target.port}`;
+
+    const { data } = await withTallyGate(() =>
+        axios.post<string>(url, xml, {
+            headers: { 'Content-Type': 'text/xml' },
+            timeout: timeoutMs,
+            responseType: 'text',
+        }),
+    );
+
+    const parsed = parser.parse(data);
+    const collection = parsed?.ENVELOPE?.BODY?.DATA?.COLLECTION;
+    return asArray(collection ? collection.STOCKITEM : undefined);
 }
 
 /**
@@ -177,36 +230,45 @@ function linesFor(node: any): StockSummaryLine[] {
 }
 
 /**
- * Pull the godown-wise closing position for the items directly under ONE stock
- * group (`group === null` → ungrouped items) as at `asOf` (ISO date).
- *
- * ONE attempt, NO automatic retry — an invariant, not an omission. A timed-out
- * request leaves Tally still computing; firing another while it does is
- * exactly the stacking that kills it. The operator retries by running the
- * read again, which resumes from the group that failed.
+ * LIGHT probe of a scope: which item GUIDs does Tally hold directly under
+ * this group (optionally narrowed to one item name)? No balances are computed
+ * — safe even if the scope filter silently fails and this returns the world,
+ * which is precisely the failure the caller uses it to detect.
  */
-export async function exportStockSummaryChunk(
+export async function probeScope(
     target: TallyTarget,
     asOf: string,
-    group: string | null,
+    group: GroupScope,
+    itemName?: string,
+): Promise<string[]> {
+    const xml = buildRequestXml(target.company, asOf, group, { light: true, itemName });
+    const nodes = await post(target, xml, 60000);
+
+    return nodes.map((n) => textOf(n.GUID)).filter((g) => g !== '');
+}
+
+/**
+ * HEAVY read of one PRE-PROVEN scope: the godown-wise closing position for
+ * the items directly under one stock group, or one named item within it.
+ *
+ * Callers must have probed the scope (or be operating under a run-level
+ * canary that proved the mechanism) before calling this — see the module
+ * comment. ONE attempt, NO automatic retry: a timed-out request leaves Tally
+ * still computing, and firing another while it does is exactly the stacking
+ * that kills it. The operator retries by running the read again, which
+ * resumes where it stopped — after restarting Tally if it was left wedged.
+ */
+export async function exportScope(
+    target: TallyTarget,
+    asOf: string,
+    group: GroupScope,
+    itemName?: string,
 ): Promise<StockSummaryLine[]> {
-    const url = `http://${target.host}:${target.port}`;
-    const xml = buildStockSummaryChunkXml(target.company, asOf, group);
-
-    const { data } = await withTallyGate(() =>
-        axios.post<string>(url, xml, {
-            headers: { 'Content-Type': 'text/xml' },
-            // Generous for what is now a small request. A chunk that needs
-            // longer than this is a chunk Tally is struggling with, and the
-            // right response is to stop, not to wait harder.
-            timeout: 120000,
-            responseType: 'text',
-        }),
-    );
-
-    const parsed = parser.parse(data);
-    const collection = parsed?.ENVELOPE?.BODY?.DATA?.COLLECTION;
-    const nodes = asArray(collection ? collection.STOCKITEM : undefined);
+    const xml = buildRequestXml(target.company, asOf, group, { light: false, itemName });
+    // Generous for a scope already proven small. A proven-small request that
+    // still needs longer than this is a Tally that is struggling, and the
+    // right response is to stop, not to wait harder.
+    const nodes = await post(target, xml, 120000);
 
     return nodes.flatMap(linesFor);
 }
