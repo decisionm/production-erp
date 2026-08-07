@@ -1,6 +1,6 @@
 # Shift-voucher consolidation — the release rule the owner must pick
 
-**Status: DECIDED — see DEC-20260807-001 / -002 / -003** (07-Aug-2026,
+**Status: DECIDED — see DEC-20260807-010 / -002 / -003** (07-Aug-2026,
 owner): per-shift granularity; release when the shift has ended AND the
 voucher has been idle ≥N minutes (default 15) since its last merge, with a
 manual accountant "Release now" override — the A+D+override option below;

@@ -686,7 +686,7 @@ class TallySyncService
                 'payload' => $this->shiftVoucherPayload($members, $voucher->payload['voucher_number'], $entry),
                 // Every merge re-arms the release gate's quiet period: the
                 // voucher leaves only after it has sat untouched for the
-                // configured idle-hold (DEC-20260807-002).
+                // configured idle-hold (DEC-20260807-011).
                 'last_merged_at' => now(),
             ]);
 
@@ -774,7 +774,7 @@ class TallySyncService
             // The release gate fronts the hand-out: a shift voucher whose
             // shift is still collecting (or that merged less than the
             // idle-hold ago) is not offered, so its merge window below
-            // stays open (DEC-20260807-002). Batch vouchers and anything
+            // stays open (DEC-20260807-011). Batch vouchers and anything
             // already delivered pass untouched — see ShiftVoucherReleaseGate.
             ->reject(fn (TallySyncEntry $entry) => $this->releaseGate->withholds($entry))
             ->values();
@@ -921,7 +921,7 @@ class TallySyncService
     }
 
     /**
-     * The accountant's "Release now" — DEC-20260807-002's manual override
+     * The accountant's "Release now" — DEC-20260807-011's manual override
      * on the shift-voucher release gate. Marks the voucher deliverable
      * immediately; the agent collects it on its next poll (within ~90 s).
      * Persisted (released_at / released_by) so who released what stays

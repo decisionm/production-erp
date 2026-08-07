@@ -27,7 +27,7 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Shift-voucher release idle-hold (DEC-20260807-002)
+    | Shift-voucher release idle-hold (DEC-20260807-011)
     |--------------------------------------------------------------------------
     |
     | Under 'shift' granularity a voucher is offered to the agent only when

@@ -368,7 +368,7 @@ export default function TallySyncPage() {
                         render: (_, row) =>
                             row.hold ? (
                                 // A held shift voucher is deliberately not with
-                                // the agent yet (DEC-20260807-002) — different
+                                // the agent yet (DEC-20260807-011) — different
                                 // claim from "waiting for agent", which reads
                                 // as "the factory machine should have taken
                                 // this already".

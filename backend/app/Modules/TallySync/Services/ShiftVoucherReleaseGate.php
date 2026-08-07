@@ -9,7 +9,7 @@ use Carbon\CarbonInterface;
 use Illuminate\Support\Carbon;
 
 /**
- * When a shift voucher may be offered to the agent (DEC-20260807-002).
+ * When a shift voucher may be offered to the agent (DEC-20260807-011).
  *
  * Without this gate, "shift granularity" barely consolidates anything: the
  * agent polls every 90 seconds, pending() stamps delivered_at on the way
@@ -100,7 +100,7 @@ class ShiftVoucherReleaseGate
     /**
      * When this voucher's shift stops collecting, on the voucher's own
      * production date — from shifts.end_time, NEVER a hardcoded clock time
-     * (DEC-20260807-002: 7am/3pm/11pm are today's shift ends, not
+     * (DEC-20260807-011: 7am/3pm/11pm are today's shift ends, not
      * constants). Same overnight convention as Shift::productionDateFor —
      * an overnight shift's production date is the date it STARTED, so its
      * instance for date D ends at D+1's end_time (a 22:00→06:00 C shift

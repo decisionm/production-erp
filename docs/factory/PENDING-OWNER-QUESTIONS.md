@@ -122,7 +122,7 @@ one"); the ERP posts one voucher per batch — same stock effect, ~10× the
 voucher count. The accountant should hear this from the factory before they
 see it, or it reads as a malfunction. **Blocks:** nothing technical —
 trust. *Open since 2026-08-05.* **Partially resolved 2026-08-07** — the
-COUNT half: DEC-20260807-001 chose per-shift (~3/day) with the accountant's
+COUNT half: DEC-20260807-010 chose per-shift (~3/day) with the accountant's
 one-per-day practice explicitly considered. Still open: the accountant
 hearing it from the factory before the flip day.
 
@@ -163,8 +163,8 @@ records can point at files that no longer exist. *Open since 2026-08-07.*
 
 ## Q15 · Consolidated shift voucher — which release rule? — RESOLVED
 
-**Resolved 2026-08-07 by DEC-20260807-001 (per-shift granularity) and
-DEC-20260807-002 (release when shift end has passed AND ≥N idle minutes
+**Resolved 2026-08-07 by DEC-20260807-010 (per-shift granularity) and
+DEC-20260807-011 (release when shift end has passed AND ≥N idle minutes
 since the voucher's last merge, N default 15; manual accountant override
 kept; tray's "Sync Now" unchanged).** The options considered:
 `docs/SHIFT-VOUCHER-RELEASE-OPTIONS.md`.
@@ -196,7 +196,7 @@ Ask the accountant, via the factory (per Q11 — they should hear about the
 change before they see it). **Blocks:** choosing between Q15's options.
 *Open since 2026-08-07.*
 
-**Resolved 2026-08-07 by DEC-20260807-002 and DEC-20260807-003:** the timed
+**Resolved 2026-08-07 by DEC-20260807-011 and DEC-20260807-012:** the timed
 rule runs unattended, the accountant keeps a manual "Release now" override
 (with the existing voucher preview) rather than a mandatory approval step —
 the posting gate stays entry-level approval, which remains final.

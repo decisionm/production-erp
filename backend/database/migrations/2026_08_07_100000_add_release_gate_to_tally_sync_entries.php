@@ -5,7 +5,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * The shift-voucher release gate (DEC-20260807-002): a shift voucher is
+ * The shift-voucher release gate (DEC-20260807-011): a shift voucher is
  * offered to the agent only once its shift has ended AND it has sat quiet
  * for the configured idle-hold — or the accountant released it by hand.
  *

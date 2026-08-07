@@ -19,7 +19,7 @@ use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 /**
- * DEC-20260807-002: a shift voucher is offered to the agent only when BOTH
+ * DEC-20260807-011: a shift voucher is offered to the agent only when BOTH
  * its shift's end_time has passed for its production date (derived from
  * shifts.end_time, never a hardcoded clock) AND nothing has merged into it
  * for tally-sync.release_idle_minutes — or the accountant pressed "Release
@@ -202,7 +202,7 @@ class ShiftVoucherReleaseGateTest extends TestCase
     {
         // Late paperwork: first approval at 18:00 for the morning shift.
         // The shift-end condition is already satisfied; only the idle-hold
-        // applies (DEC-20260807-002).
+        // applies (DEC-20260807-011).
         $this->travelTo(Carbon::parse('2026-07-23 18:00:00'));
         $this->approvedEntry('5000');
         $voucher = TallySyncEntry::query()->sole();
@@ -273,7 +273,7 @@ class ShiftVoucherReleaseGateTest extends TestCase
         $sync->pending();
 
         // The released voucher is in the agent's hands — the next approval
-        // must not mutate it (DEC-20260807-003: the standard follow-up).
+        // must not mutate it (DEC-20260807-012: the standard follow-up).
         $this->travelTo(Carbon::parse('2026-07-23 10:30:00'));
         $this->approvedEntry('3000');
 
