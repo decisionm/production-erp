@@ -4,7 +4,7 @@ import path from 'path';
 import { testCloudConnection } from './cloudApi';
 import { getConfig, setConfig, type AgentConfig } from './config';
 import logger from './logger';
-import { runMastersSync, startMastersLoop, stopMastersLoop } from './mastersSync';
+import { runMastersSync } from './mastersSync';
 import { startSyncLoop, stopSyncLoop } from './sync';
 import { exportCompanies } from './tally/masters';
 import { createTray, destroyTray } from './tray';
@@ -101,8 +101,6 @@ ipcMain.handle('settings:save', (_event, config: AgentConfig) => {
     // not after a manual restart.
     stopSyncLoop();
     startSyncLoop();
-    stopMastersLoop();
-    startMastersLoop();
 });
 
 app.whenReady().then(() => {
@@ -118,7 +116,13 @@ app.whenReady().then(() => {
 
     createTray(openSettingsWindow);
     startSyncLoop();
-    startMastersLoop();
+    // NO automatic masters loop since v0.3.4. The factory's rule after the
+    // 07/08-Aug corruption scare: Tally is the single source of record and
+    // the agent must not read from it on its own — a timer that polled a
+    // recovering Tally every few minutes would violate that unprompted.
+    // Masters refresh remains available as the operator's deliberate act:
+    // the tray's "Pull Masters from Tally" and the Settings test actions.
+    // Voucher POSTING (the outbound sync loop above) is unchanged.
 
     // Auto-update: checks the generic feed (the ERP's /storage/agent/latest.yml,
     // set via package.json build.publish) on launch and every 6h, downloads a
@@ -155,6 +159,5 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
     stopSyncLoop();
-    stopMastersLoop();
     destroyTray();
 });
