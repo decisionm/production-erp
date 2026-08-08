@@ -61,6 +61,14 @@ steps exist because skipping them has already caused trouble once each:
 - [ ] Normal operation intact: vouchers sync as before within a couple of
       minutes (or "Sync Vouchers Now" runs clean against an empty queue)
 
+## No automatic reads from Tally (v0.3.4+)
+
+Since v0.3.4 the agent NEVER reads from Tally on a timer: the periodic
+masters loop is removed under the factory's post-corruption rule — Tally
+is the single source of record, and nothing polls it unprompted. Reads
+happen only as a deliberate operator act ("Pull Masters from Tally" in
+the tray, or the Settings tests). Voucher posting is unchanged.
+
 ## Stock Summary read — REMOVED in v0.3.3
 
 The tray item "Read Stock Summary (preview only)" is gone from v0.3.3.
