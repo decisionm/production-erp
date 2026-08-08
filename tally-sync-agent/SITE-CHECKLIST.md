@@ -61,7 +61,16 @@ steps exist because skipping them has already caused trouble once each:
 - [ ] Normal operation intact: vouchers sync as before within a couple of
       minutes (or "Sync Vouchers Now" runs clean against an empty queue)
 
-## First probed Stock Summary read (v0.3.2+)
+## Stock Summary read — REMOVED in v0.3.3
+
+The tray item "Read Stock Summary (preview only)" is gone from v0.3.3.
+Every variant of the read destabilised the live TallyPrime on 07-Aug-2026
+(details below, kept as history), and the factory then reported company
+data corruption. The read pipeline survives in code, trigger-less, until
+a safe read is proven. The checklist below applies only to builds ≤0.3.2
+— on those, the standing instruction is DO NOT CLICK the read item.
+
+## First probed Stock Summary read (v0.3.2 only — item removed in 0.3.3)
 
 Background, so the caution makes sense: on 07 Aug 2026 the one-shot read
 (v0.2.0) crashed the live Tally from ONE click; the group-chunked read
