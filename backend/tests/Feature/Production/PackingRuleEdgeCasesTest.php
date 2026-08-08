@@ -113,7 +113,7 @@ class PackingRuleEdgeCasesTest extends TestCase
                 $this->assertSame(['carton'], $kinds,
                     "\"{$spec}\" is a bag: it must be the whole pack, with no tray, film or tape.");
             } else {
-                $this->assertSame(['carton', 'tray', 'pouch_film', 'tape', 'final_carton', 'polymer_cover'], $kinds,
+                $this->assertSame(['carton', 'tray', 'pouch_film', 'tape'], $kinds,
                     "\"{$spec}\" is a carton: suppressing its tray, film or tape loses real material.");
             }
         }
@@ -127,7 +127,7 @@ class PackingRuleEdgeCasesTest extends TestCase
         foreach (self::OTHER_SPECS as [$spec, $_]) {
             $kinds = $this->kinds($this->standard(['carton' => '170ML', 'tray' => $spec]));
 
-            $this->assertSame(['carton', 'tray', 'tape', 'final_carton', 'polymer_cover'], $kinds,
+            $this->assertSame(['carton', 'tray', 'tape'], $kinds,
                 "\"{$spec}\" in the tray column must not change which materials a carton-packed product uses.");
         }
     }
@@ -138,7 +138,7 @@ class PackingRuleEdgeCasesTest extends TestCase
         // shortening of the rule gets wrong. "LAYER" and "450 LAYER" are trays.
         foreach (['LAYER', '450 LAYER'] as $spec) {
             $this->assertSame(
-                ['carton', 'tray', 'pouch_film', 'tape', 'final_carton', 'polymer_cover'],
+                ['carton', 'tray', 'pouch_film', 'tape'],
                 $this->kinds($this->standard(['carton' => '100ML', 'tray' => $spec, 'pouch' => '750*610'])),
                 "\"{$spec}\" is a tray. Treating it as a bag would drop three real material lines.",
             );

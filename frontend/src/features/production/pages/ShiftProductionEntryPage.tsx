@@ -474,11 +474,8 @@ function readSuggestion(
 // Which of the drawer's own counts a packing line is multiplied by. `null` is
 // a real value: a material whose mapping states no basis is shown, named, and
 // left for the supervisor to fill — never multiplied by a count nobody chose.
-// 'batch' is ONE per completion — the final carton and the polymer cover over
-// it. Not derived from any count on the drawer: a run that packs forty master
-// boxes still ships as one consignment in one outer box.
-type PackingBasis = 'carton' | 'tray' | 'pouch' | 'bottle' | 'batch';
-type PackingKind = 'carton' | 'tray' | 'film' | 'tape' | 'final_carton' | 'polymer_cover' | 'other';
+type PackingBasis = 'carton' | 'tray' | 'pouch' | 'bottle';
+type PackingKind = 'carton' | 'tray' | 'film' | 'tape' | 'other';
 
 /** One packing material, normalised — the shape the drawer computes from. */
 type PackingSuggestion = {
@@ -542,13 +539,6 @@ function packingKindOf(raw: SuggestedPackingMaterial): PackingKind {
             return 'film';
         case 'tape':
             return 'tape';
-        // These two keep their wire names, unlike pouch_film. The 602 came from
-        // exactly that mismatch — the options endpoint keys on the wire kind and
-        // this file renamed one of them — so nothing is renamed here again.
-        case 'final_carton':
-            return 'final_carton';
-        case 'polymer_cover':
-            return 'polymer_cover';
         default:
             return 'other';
     }
@@ -599,11 +589,6 @@ function isKgFamilyUom(uom: string | null | undefined): boolean {
  */
 function packingBasisOf(raw: SuggestedPackingMaterial, kind: PackingKind): PackingBasis | null {
     const stated = (wireText(raw.basis) ?? '').toLowerCase();
-    // BATCH FIRST. 'per_batch' contains neither "carton" nor "box", but the order
-    // is pinned anyway: a basis that ever gained one of those words would start
-    // multiplying the outer box by the carton count, and forty outer boxes on a
-    // voucher is not a rounding error.
-    if (/batch/.test(stated)) return 'batch';
     if (/carton|box/.test(stated)) return 'carton';
     if (/tray/.test(stated)) return 'tray';
     if (/pouch/.test(stated)) return 'pouch';
@@ -613,7 +598,6 @@ function packingBasisOf(raw: SuggestedPackingMaterial, kind: PackingKind): Packi
     // the owner settled 31 Jul that one film wraps a carton's contents and that
     // tape is dosed in metres PER BOX.
     if (kind === 'carton' || kind === 'film' || kind === 'tape') return 'carton';
-    if (kind === 'final_carton' || kind === 'polymer_cover') return 'batch';
     return null;
 }
 
@@ -705,8 +689,6 @@ function readPackingSuggestions(raw: SuggestedPackingMaterial[] | null | undefin
                     tray: 'Tray',
                     film: 'Pouch',
                     tape: 'Tape',
-                    final_carton: 'Final carton',
-                    polymer_cover: 'Polymer cover',
                     other: 'Packing material',
                 }[kind],
             itemId,
@@ -744,8 +726,8 @@ function readPackingSuggestions(raw: SuggestedPackingMaterial[] | null | undefin
             // invent a consumption figure nobody stated.
             perUnit:
                 perUnitStated ??
-                (kind === 'carton' || kind === 'tray' || kind === 'final_carton'
-                || ((kind === 'film' || kind === 'polymer_cover') && gramsPerPiece !== null)
+                (kind === 'carton' || kind === 'tray'
+                || (kind === 'film' && gramsPerPiece !== null)
                     ? 1
                     : null),
             gramsPerPiece,
@@ -3788,10 +3770,6 @@ export default function ShiftProductionEntryPage() {
             tray: { count: traysWatch ?? null, word: 'trays' },
             pouch: { count: pouchesWatch ?? derivedPouches, word: 'pouches' },
             bottle: { count: quantityProduced ?? null, word: 'bottles' },
-            // ONE. The final carton and the cover over it are per completion, and
-            // the figure stays editable on the row — a shift that really shipped
-            // two says two.
-            batch: { count: 1, word: 'batch' },
         };
 
         return packingSuggestions.map((row) => {

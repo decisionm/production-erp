@@ -572,29 +572,13 @@ class SalesCostInsightService
 
         // A STANDING LINE NOBODY HAS NAMED YET IS NOT AN UNKNOWN COST.
         //
-        // The final carton and the polymer cover are asked for on every batch and
-        // held once for the whole factory, so their rows appear on the completion
-        // screen before an item is chosen — that is how the question gets
-        // answered. But an unpriced component withholds the whole estimate
-        // ("never claims an allocation"), and two permanently-unnamed rows would
-        // have withheld every product's packing cost from Sales.
-        //
-        // The distinction is real and not a convenience: a product's own carton
-        // spec is a material the workbook SAYS it consumes, so an unmapped one is
-        // genuinely a cost this app cannot state. A standing line with no item is
-        // a material nobody has yet said anything about at all. Once it is
-        // mapped it prices exactly like the rest.
-        $costable = array_values(array_filter(
-            $entries,
-            fn (array $entry) => ! in_array($entry['kind'], [
-                PackingMaterialMapping::KIND_FINAL_CARTON,
-                PackingMaterialMapping::KIND_POLYMER_COVER,
-            ], true) || ($entry['item']['id'] ?? null) !== null,
-        ));
-
+        // Every suggested line is a material the workbook says the product
+        // consumes, so all of them price (or honestly withhold the estimate).
+        // The standing final-carton/polymer-cover exclusion that used to sit
+        // here died with the lines themselves (DEC-20260807-015).
         return array_map(
             fn (array $entry) => $this->packagingComponent($entry, $product, $packaging, $asOf),
-            $costable,
+            $entries,
         );
     }
 
