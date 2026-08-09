@@ -21,10 +21,13 @@ the ERP alone (`/api/v1/tally-sync/settings`). What it shows:
 - **Sundry Debtors: 230 ledgers**, plus ~400 more customer ledgers filed
   under REGIONAL groups (Tamil Nadu Region 105, Puducherry Region 91,
   Chennai 76, Villupuram 27, Kerala 17, Trichy 14, Madurai 10, Erode 10,
-  Salem 9, Andhra 9, Coimbatore 8, Thanjavur 8, Bangalore 7, ...). The
-  pulled list is flat, so whether those regional groups nest under Sundry
-  Debtors is unconfirmed (Q29 below) — but the naming (pharma companies,
-  agencies) says customers.
+  Salem 9, Andhra 9, Coimbatore 8, Thanjavur 8, Bangalore 7, ...).
+  **Owner-confirmed 09-Aug (DEC-20260809-002): the regional groups are
+  ALL customers** — Phase 1 treats them as debtors alongside Sundry
+  Debtors. The confirmation is of the BUSINESS meaning only: whether the
+  groups technically nest under Sundry Debtors in Tally's group tree
+  stays unverified until the first pull reads group parents, so Phase 1's
+  pull fetches each group's parent and VERIFIES rather than assumes.
 - **Sundry Creditors: 630 ledgers** — the supplier book Q28's
   accounts-payable question would draw on.
 - **Banking is real and busy**: 8 bank accounts + 5 OD/CC lines across
@@ -34,11 +37,13 @@ the ERP alone (`/api/v1/tally-sync/settings`). What it shows:
 - **Compliance is run in Tally**: full GST set (Output/Input CGST/SGST/
   IGST, RCM payable), TDS payable under 192/194C/194I(a)/194I(b)/194J/
   194Q, TCS on scrap 206C — plus legacy VAT/Excise ledgers (long history).
-- **Sales are booked directly in Tally**: 18 Sales-Accounts ledgers split
-  by category and tax ("Sale of PET Bottles – Local (18%)", interstate,
-  caps, jars, scrap – PET lumps & runners, mould development charges),
-  with Sales Return ledgers. The ERP's own Sales module holds demo-scale
-  data; the real invoicing lives in Tally (Q30 confirms the flow).
+- **Sales are booked directly in Tally — owner-confirmed 09-Aug
+  (DEC-20260809-003)**: 18 Sales-Accounts ledgers split by category and
+  tax ("Sale of PET Bottles – Local (18%)", interstate, caps, jars,
+  scrap – PET lumps & runners, mould development charges), with Sales
+  Return ledgers. The ERP's own Sales module is demo-scale; ALL real
+  invoicing lives in Tally, and **e-invoicing (IRN/QR) is not in use
+  today**. The bill-wise half of Q30 stays open for the accountant.
 - Expense structure: Direct/Indirect/Administrative/Selling, Employee
   Cost (+ Production), Finance Charges, provisions, staff advances.
 
@@ -90,7 +95,10 @@ probe makes it a measurement.
 
 **Data pulled** (one accountant-pressed run): ledger name, parent group,
 closing balance, as-of date — for Sundry Debtors, Sundry Creditors, the
-regional customer groups, and bank/cash groups. Nothing else.
+regional customer groups, and bank/cash groups — plus each GROUP's own
+parent, so DEC-20260809-002's nuance is closed by measurement: the first
+pull verifies whether the regional groups nest under Sundry Debtors
+instead of assuming it. Nothing else.
 
 **Server side:**
 - `tally_finance_snapshots`: one row per run (id, requested_by,
@@ -160,10 +168,13 @@ Note builder went wrong.
 
 ## 4 · Questions
 
-**Filed in PENDING-OWNER-QUESTIONS (owner):** Q29 (regional groups =
-customers under Sundry Debtors?), Q30 (sales booked directly in Tally +
-bill-wise details on?), Q31 (re-share the full Transactions export —
-also standing owed per the sources manifest).
+**Question status (09-Aug):** Q29 RESOLVED (DEC-20260809-002 — regional
+groups are all customers; group-tree nesting verified at first pull, not
+assumed). Q30 PARTLY RESOLVED (DEC-20260809-003 — all sales direct in
+Tally, no e-invoicing; the bill-wise half stays open and still gates
+Phase 2). Q31 OPEN — the owner is mailing the accountant for the full
+Day Book XML export (all voucher types) and for Tally's quietest
+half-hour.
 
 **For the owner to ask the accountant in person:**
 1. Which vouchers do you enter in a normal day — Receipts, Payments,
