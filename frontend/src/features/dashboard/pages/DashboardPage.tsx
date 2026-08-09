@@ -236,7 +236,11 @@ export default function DashboardPage() {
         enabled: canTally,
     });
 
-    const shiftList = shifts?.data ?? [];
+    // ACTIVE shifts only, same filter as the Shift Floor's own dropdown.
+    // Live still carries the deactivated Morning/Afternoon/Night rows from
+    // the pre-rename era (DEC-20260806-007, seeder incident PR #125) —
+    // rendering the raw list drew six segments on the live rail.
+    const shiftList = (shifts?.data ?? []).filter((s) => s.is_active);
     const activeShift = currentShift(shiftList, now);
     const productionDate = productionDateFor(activeShift, now);
 
