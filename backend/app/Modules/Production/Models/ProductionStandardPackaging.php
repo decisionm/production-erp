@@ -12,6 +12,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 ])]
 class ProductionStandardPackaging extends Model
 {
+    /**
+     * Serialized on every payload so each surface showing a packaging row —
+     * the Start Batch picker, the standards workspace — can say whether it
+     * is runnable without re-deriving the rule client-side.
+     */
+    protected $appends = ['is_complete'];
+
     public const MODE_POUCH = 'pouch';
 
     public const MODE_TRAY = 'tray';
@@ -33,6 +40,35 @@ class ProductionStandardPackaging extends Model
     public function standard(): BelongsTo
     {
         return $this->belongsTo(ProductionStandard::class, 'production_standard_id');
+    }
+
+    /**
+     * Whether this row can actually run a batch: pieces per box, plus the
+     * inner count its own mode calls for. The workbook import accepts
+     * half-stated rows on purpose (a "120 × ?" pouch line is a real fact
+     * about the sheet, worth showing on the standards page) — but a run
+     * that AUTO-adopts one gets a pouch figure with no carton figure, and
+     * item 423's single such row is what the Start Batch preview choked on.
+     * An incomplete row is display data, never run data: resolvePackaging()
+     * skips it and the run falls back to the item master's packing.
+     */
+    public function isComplete(): bool
+    {
+        $inner = match ($this->mode) {
+            self::MODE_POUCH => $this->nos_per_pouch,
+            self::MODE_TRAY => $this->nos_per_tray,
+            // Direct-to-box has no inner container; the box figure is the
+            // whole spec.
+            default => $this->nos_per_box,
+        };
+
+        return $this->nos_per_box !== null && $this->nos_per_box > 0
+            && $inner !== null && $inner > 0;
+    }
+
+    public function getIsCompleteAttribute(): bool
+    {
+        return $this->isComplete();
     }
 
     public function label(): string
