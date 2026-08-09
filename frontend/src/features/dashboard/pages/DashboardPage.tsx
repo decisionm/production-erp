@@ -6,7 +6,7 @@ import { Link } from 'react-router-dom';
 import { hasModuleAccess } from '@/features/auth/permissions';
 import { useAuthStore } from '@/features/auth/store';
 import { getDashboardSummary } from '@/features/dashboard/api';
-import type { RecentSalesOrder } from '@/features/dashboard/types';
+import type { DemandRow, IncomingStockRow, RecentSalesOrder } from '@/features/dashboard/types';
 import {
     getFactoryDayBin,
     listActiveBatches,
@@ -62,10 +62,17 @@ const fmtKg = (v: string): string => {
     return Number.isNaN(n) ? '—' : `${n.toLocaleString('en-IN', { maximumFractionDigits: 1 })} kg`;
 };
 
+const fmtQty = (v: string): string => {
+    const n = parseFloat(v);
+    return Number.isNaN(n) ? '—' : n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+};
+
 const statusColor: Record<string, string> = {
     draft: 'default',
     confirmed: 'blue',
+    sent: 'blue',
     partially_delivered: 'orange',
+    partially_received: 'orange',
     completed: 'green',
     cancelled: 'red',
 };
@@ -233,6 +240,13 @@ export default function DashboardPage() {
     const activeShift = currentShift(shiftList, now);
     const productionDate = productionDateFor(activeShift, now);
 
+    // The factory's own shift length (from shift data, like everything else
+    // here), for translating run-time estimates into shifts. Null without
+    // production access — hours are shown alone then.
+    const shiftMinutes = shiftList.map((s) => ((toMinutes(s.end_time) - toMinutes(s.start_time) + 1440) % 1440) || 480);
+    const avgShiftHours =
+        shiftMinutes.length > 0 ? shiftMinutes.reduce((a, b) => a + b, 0) / shiftMinutes.length / 60 : null;
+
     // Same derivation as the Live Monitor: newest in-progress batch per
     // machine, across all shifts and dates.
     const runningByMachine = new Map<number, ShiftProductionEntry>();
@@ -391,13 +405,99 @@ export default function DashboardPage() {
                 </section>
             )}
 
+            {inUse('sales') && summary?.demand && summary.demand.length > 0 && (
+                <section className="dash-band">
+                    <div className="dash-eyebrow">Order book · open orders against the shelf</div>
+                    <div className="dash-recent">
+                        <Table<DemandRow>
+                            rowKey={(r) => `${r.sales_order_id}-${r.item}`}
+                            size="small"
+                            pagination={false}
+                            scroll={{ x: 'max-content' }}
+                            dataSource={summary.demand}
+                            columns={[
+                                { title: 'Product', dataIndex: 'item' },
+                                { title: 'Customer', dataIndex: 'customer' },
+                                { title: 'Promised', dataIndex: 'expected_date', render: (d: string | null) => d ?? '—' },
+                                { title: 'Ordered', dataIndex: 'ordered', align: 'right', render: fmtQty },
+                                { title: 'Delivered', dataIndex: 'delivered', align: 'right', render: fmtQty },
+                                { title: 'In stock', dataIndex: 'on_hand', align: 'right', render: fmtQty },
+                                {
+                                    title: 'To produce',
+                                    dataIndex: 'to_produce',
+                                    align: 'right',
+                                    render: (v: string) =>
+                                        parseFloat(v) > 0 ? (
+                                            <Typography.Text strong>{fmtQty(v)}</Typography.Text>
+                                        ) : (
+                                            '—'
+                                        ),
+                                },
+                                {
+                                    title: 'Run time at standard',
+                                    render: (_: unknown, r: DemandRow) => {
+                                        if (parseFloat(r.to_produce) <= 0) return <Tag color="green">covered by stock</Tag>;
+                                        if (r.standard === 'none')
+                                            return <Typography.Text type="secondary">no standard recorded</Typography.Text>;
+                                        if (r.standard === 'ambiguous')
+                                            return (
+                                                <Typography.Text type="secondary">standard variants disagree</Typography.Text>
+                                            );
+                                        if (r.hours_at_standard === null) return '—';
+                                        const shiftsNeeded =
+                                            avgShiftHours !== null ? r.hours_at_standard / avgShiftHours : null;
+                                        return (
+                                            <>
+                                                ≈ {r.hours_at_standard} h
+                                                {shiftsNeeded !== null && ` · ${shiftsNeeded.toFixed(1)} shifts`}
+                                            </>
+                                        );
+                                    },
+                                },
+                            ]}
+                        />
+                    </div>
+                    <div className="dash-floor-foot">
+                        Run time is the shortfall at the product's standard cycle time — no downtime, no mould changes,
+                        no machine choice. A product without a recorded standard shows none rather than a guess.
+                    </div>
+                </section>
+            )}
+
+            {inUse('procurement') && summary?.incoming_stock && summary.incoming_stock.length > 0 && (
+                <section className="dash-band">
+                    <div className="dash-eyebrow">Stock coming in</div>
+                    <div className="dash-recent">
+                        <Table<IncomingStockRow>
+                            rowKey="id"
+                            size="small"
+                            pagination={false}
+                            scroll={{ x: 'max-content' }}
+                            dataSource={summary.incoming_stock}
+                            columns={[
+                                { title: 'Vendor', dataIndex: 'vendor' },
+                                { title: 'Items', dataIndex: 'items' },
+                                { title: 'Expected', dataIndex: 'expected_date', render: (d: string | null) => d ?? '—' },
+                                {
+                                    title: 'Status',
+                                    dataIndex: 'status',
+                                    render: (status: string) => (
+                                        <Tag color={statusColor[status] ?? 'default'}>{status}</Tag>
+                                    ),
+                                },
+                            ]}
+                        />
+                    </div>
+                </section>
+            )}
+
             <section className="dash-band">
                 <div className="dash-eyebrow">Office</div>
                 {isLoading || !summary ? (
                     <Skeleton active paragraph={{ rows: 2 }} style={{ marginTop: 12 }} />
                 ) : (
                     <div className="dash-ledger">
-                        {inUse('inventory') && (
+                        {inUse('inventory') && summary.inventory && (
                             <LedgerCell
                                 figure={String(summary.inventory.low_stock_items)}
                                 label="Low stock items"
@@ -405,7 +505,7 @@ export default function DashboardPage() {
                                 warn={summary.inventory.low_stock_items > 0}
                             />
                         )}
-                        {inUse('procurement') && (
+                        {inUse('procurement') && summary.procurement && (
                             <>
                                 <LedgerCell
                                     figure={String(summary.procurement.open_purchase_orders)}
@@ -419,7 +519,7 @@ export default function DashboardPage() {
                                 />
                             </>
                         )}
-                        {inUse('sales') && (
+                        {inUse('sales') && summary.sales && (
                             <>
                                 <LedgerCell
                                     figure={String(summary.sales.open_sales_orders)}
@@ -442,7 +542,7 @@ export default function DashboardPage() {
                                 />
                             </>
                         )}
-                        {inUse('quality') && (
+                        {inUse('quality') && summary.quality && (
                             <>
                                 <LedgerCell
                                     figure={String(summary.quality.open_ncrs)}
@@ -457,7 +557,7 @@ export default function DashboardPage() {
                                 />
                             </>
                         )}
-                        {inUse('maintenance') && (
+                        {inUse('maintenance') && summary.maintenance && (
                             <LedgerCell
                                 figure={String(summary.maintenance.open_work_orders)}
                                 label="Maintenance work orders"
@@ -467,14 +567,14 @@ export default function DashboardPage() {
                         {/* Pre-wired for adoption day: these render only once
                             'hrms' / 'crm' join ADOPTED_MODULES for the sidebar,
                             so both surfaces switch on in the same one-line edit. */}
-                        {inUse('hrms') && (
+                        {inUse('hrms') && summary.hrms && (
                             <LedgerCell
                                 figure={String(summary.hrms.pending_leave_requests)}
                                 label="Pending leave requests"
                                 to="/hrms/leave-requests"
                             />
                         )}
-                        {inUse('crm') && (
+                        {inUse('crm') && summary.crm && (
                             <>
                                 <LedgerCell
                                     figure={String(summary.crm.open_leads)}
@@ -492,7 +592,7 @@ export default function DashboardPage() {
                 )}
             </section>
 
-            {inUse('sales') && summary && summary.recent_sales_orders.length > 0 && (
+            {inUse('sales') && summary?.recent_sales_orders && summary.recent_sales_orders.length > 0 && (
                 <section className="dash-band">
                     <div className="dash-eyebrow">Recent sales orders</div>
                     <div className="dash-recent">

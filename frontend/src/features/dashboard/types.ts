@@ -13,38 +13,74 @@ export interface RecentSalesOrder {
     order_date: string | null;
 }
 
+/** One sent/partially-received PO — stock on its way in. */
+export interface IncomingStockRow {
+    id: number;
+    vendor: string;
+    expected_date: string | null;
+    status: string;
+    items: string;
+}
+
+/**
+ * One undelivered open sales-order line against the shelf. `hours_at_standard`
+ * is an estimate at the product's standard rate and exists only when the
+ * product carries exactly one usable (cycle time, cavities) pair — 'none'
+ * and 'ambiguous' standards deliberately get no figure.
+ */
+export interface DemandRow {
+    sales_order_id: number;
+    customer: string;
+    expected_date: string | null;
+    item: string;
+    ordered: string;
+    delivered: string;
+    remaining: string;
+    on_hand: string;
+    to_produce: string;
+    standard: 'ok' | 'none' | 'ambiguous';
+    hours_at_standard: number | null;
+}
+
+/**
+ * Every block is optional: the server includes only the blocks the user's
+ * role may see (DashboardService gates on `<module>.view`/`.manage`), so a
+ * missing block means "not yours to see", not "zero".
+ */
 export interface DashboardSummary {
-    inventory: {
+    inventory?: {
         total_items: number;
         total_warehouses: number;
         low_stock_items: number;
     };
-    procurement: {
+    procurement?: {
         open_purchase_orders: number;
         pending_requisitions: number;
     };
-    production: {
+    production?: {
         open_work_orders: number;
     };
-    sales: {
+    sales?: {
         open_sales_orders: number;
         orders_awaiting_delivery: number;
         receivables_outstanding: string;
     };
-    quality: {
+    quality?: {
         open_ncrs: number;
         open_capas: number;
     };
-    hrms: {
+    hrms?: {
         pending_leave_requests: number;
     };
-    crm: {
+    crm?: {
         open_leads: number;
         open_opportunities: number;
     };
-    maintenance: {
+    maintenance?: {
         open_work_orders: number;
     };
-    recent_work_orders: RecentWorkOrder[];
-    recent_sales_orders: RecentSalesOrder[];
+    incoming_stock?: IncomingStockRow[];
+    demand?: DemandRow[];
+    recent_work_orders?: RecentWorkOrder[];
+    recent_sales_orders?: RecentSalesOrder[];
 }
