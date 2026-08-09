@@ -15,6 +15,18 @@ function toMinutes(time: string): number {
     return Number(h) * 60 + Number(m);
 }
 
+/**
+ * The operational view of a shift list: only what the factory currently
+ * runs. Live keeps deactivated rows (Morning/Afternoon/Night, the rename
+ * era's leftovers) because history references them — a picker, the
+ * dashboard rail, or any clock derivation fed the RAW list will double
+ * every window. Feed these helpers through this filter, never the raw
+ * response (the six-segment rail defect, 09-Aug).
+ */
+export function activeShifts(shifts: Shift[]): Shift[] {
+    return shifts.filter((shift) => shift.is_active);
+}
+
 export function isOvernight(shift: Shift): boolean {
     return toMinutes(shift.start_time) > toMinutes(shift.end_time);
 }

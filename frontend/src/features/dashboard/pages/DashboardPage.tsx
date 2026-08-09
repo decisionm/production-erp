@@ -16,7 +16,7 @@ import {
     listShifts,
     listWorkCenters,
 } from '@/features/production/api';
-import { currentShift, productionDateFor } from '@/features/production/shiftClock';
+import { activeShifts, currentShift, productionDateFor } from '@/features/production/shiftClock';
 import type {
     MachineDowntimeLog,
     MoldChangeLog,
@@ -184,8 +184,10 @@ export default function DashboardPage() {
         queryFn: getDashboardSummary,
     });
     const { data: shifts } = useQuery({
-        queryKey: ['production', 'shifts'],
-        queryFn: listShifts,
+        // Distinct key from the unfiltered admin/history query — the two
+        // response shapes must never share a cache entry.
+        queryKey: ['production', 'shifts', 'active'],
+        queryFn: () => listShifts(true),
         enabled: canProduction,
     });
     const { data: workCenters } = useQuery({
@@ -236,7 +238,12 @@ export default function DashboardPage() {
         enabled: canTally,
     });
 
-    const shiftList = shifts?.data ?? [];
+    // The operational contract twice over: the query asks the server for
+    // active shifts only, and activeShifts() re-asserts it client-side.
+    // Live still carries the deactivated Morning/Afternoon/Night rows from
+    // the pre-rename era (DEC-20260806-007, seeder incident PR #125) —
+    // rendering the raw list drew six segments on the live rail.
+    const shiftList = activeShifts(shifts?.data ?? []);
     const activeShift = currentShift(shiftList, now);
     const productionDate = productionDateFor(activeShift, now);
 

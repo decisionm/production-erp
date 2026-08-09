@@ -115,6 +115,7 @@ php artisan test           # backend tests
 
 cd ../frontend
 npm run typecheck          # TypeScript type-check — must be clean
+npm run test               # vitest — pure-logic tests (shift clock contract, etc.)
 npm run build              # confirms the frontend actually builds into backend/public/build
 ```
 

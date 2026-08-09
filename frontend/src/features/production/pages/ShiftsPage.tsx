@@ -19,7 +19,7 @@ export default function ShiftsPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['production', 'shifts'], queryFn: listShifts });
+    const { data, isLoading } = useQuery({ queryKey: ['production', 'shifts'], queryFn: () => listShifts() });
 
     // Running shifts first, then retired, each still in start-time order as the
     // API returns them.

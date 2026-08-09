@@ -322,8 +322,18 @@ export async function createScrapReason(payload: CreateScrapReasonPayload): Prom
     return data.data;
 }
 
-export async function listShifts(): Promise<Paginated<Shift>> {
-    const { data } = await api.get<Paginated<Shift>>('/production/shifts');
+/**
+ * `active: true` is the operational contract — only shifts the factory
+ * currently runs, filtered server-side (mirrors listWorkCenters). Omit it
+ * for admin and history surfaces, which must still see the retired rows
+ * old records reference. Callers passing `active` must use a distinct
+ * query key (e.g. ['production','shifts','active']) so the two shapes
+ * never share a cache entry.
+ */
+export async function listShifts(active?: boolean): Promise<Paginated<Shift>> {
+    const { data } = await api.get<Paginated<Shift>>('/production/shifts', {
+        params: active === undefined ? undefined : { active: active ? 1 : 0 },
+    });
     return data;
 }
 
