@@ -2,6 +2,8 @@
 
 namespace App\Modules\Core\Services;
 
+use App\Modules\CRM\Services\LeadService;
+use App\Modules\CRM\Services\OpportunityService;
 use App\Modules\Finance\Services\AccountsReceivableService;
 use App\Modules\HRMS\Services\LeaveRequestService;
 use App\Modules\Inventory\Services\ItemService;
@@ -39,6 +41,8 @@ class DashboardService
         private readonly CapaService $capas,
         private readonly LeaveRequestService $leaveRequests,
         private readonly MaintenanceWorkOrderService $maintenanceWorkOrders,
+        private readonly LeadService $leads,
+        private readonly OpportunityService $opportunities,
     ) {}
 
     public function summary(): array
@@ -67,6 +71,10 @@ class DashboardService
             ],
             'hrms' => [
                 'pending_leave_requests' => $this->leaveRequests->pendingCount(),
+            ],
+            'crm' => [
+                'open_leads' => $this->leads->openCount(),
+                'open_opportunities' => $this->opportunities->openCount(),
             ],
             'maintenance' => [
                 'open_work_orders' => $this->maintenanceWorkOrders->openCount(),

@@ -38,6 +38,10 @@ export interface DashboardSummary {
     hrms: {
         pending_leave_requests: number;
     };
+    crm: {
+        open_leads: number;
+        open_opportunities: number;
+    };
     maintenance: {
         open_work_orders: number;
     };

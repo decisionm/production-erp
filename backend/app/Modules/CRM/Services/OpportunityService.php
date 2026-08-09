@@ -23,6 +23,14 @@ class OpportunityService
             ->paginate($perPage);
     }
 
+    /** Deals still in the pipeline — any stage before won or lost. */
+    public function openCount(): int
+    {
+        return Opportunity::query()
+            ->whereNotIn('stage', [OpportunityStage::Won, OpportunityStage::Lost])
+            ->count();
+    }
+
     public function create(array $data): Opportunity
     {
         return Opportunity::create([
