@@ -6,6 +6,7 @@ use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Sales\Models\Enums\SalesOrderStatus;
 use App\Modules\Sales\Models\SalesOrder;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 
 class SalesOrderService
@@ -23,6 +24,23 @@ class SalesOrderService
         return SalesOrder::query()
             ->whereIn('status', [SalesOrderStatus::Confirmed, SalesOrderStatus::PartiallyDelivered])
             ->count();
+    }
+
+    /**
+     * Open orders with their lines, soonest promise first (undated last) —
+     * the dashboard's order-book read.
+     *
+     * @return Collection<int, SalesOrder>
+     */
+    public function openWithLines(int $limit = 10): Collection
+    {
+        return SalesOrder::query()
+            ->with(['customer', 'lines.item'])
+            ->whereIn('status', [SalesOrderStatus::Confirmed, SalesOrderStatus::PartiallyDelivered])
+            ->orderByRaw('expected_date IS NULL, expected_date')
+            ->orderBy('id')
+            ->limit($limit)
+            ->get();
     }
 
     /**

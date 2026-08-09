@@ -21,6 +21,14 @@ class LeadService
             ->paginate($perPage);
     }
 
+    /** Leads still being worked — anything not yet converted or disqualified. */
+    public function openCount(): int
+    {
+        return Lead::query()
+            ->whereNotIn('status', [LeadStatus::Disqualified, LeadStatus::Converted])
+            ->count();
+    }
+
     public function create(array $data): Lead
     {
         return Lead::create([

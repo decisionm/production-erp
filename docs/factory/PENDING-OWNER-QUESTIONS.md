@@ -356,3 +356,15 @@ deliberately NOT tightened without the owner's word. Three options: (a)
 require accountant approval before a carton may leave, (b) require only
 the QC pass, or (c) keep ship-anytime as today. **Blocks:** nothing —
 today's behaviour continues until answered. *Open since 2026-08-07.*
+
+## Q28 · Does the factory want an accounts-payable (vendor payments) build?
+
+The dashboard's payments figure is receivables only — what customers owe
+the factory — and says so honestly. The other side, what the factory owes
+its VENDORS and when, has no module behind it: nothing tracks vendor
+bills, due dates or payments made, so no figure was faked onto the
+dashboard (PR #151 review, 09-Aug). If the owner wants vendor payments
+visible, that is a real Finance-module build to scope — bills against
+POs/GRNs, due dates, payment recording — not a dashboard cell. **Blocks:**
+nothing — the dashboard stays receivables-only until answered. *Open
+since 2026-08-09.*

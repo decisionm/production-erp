@@ -6,6 +6,7 @@ use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Procurement\Models\Enums\PurchaseOrderStatus;
 use App\Modules\Procurement\Models\PurchaseOrder;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 
 class PurchaseOrderService
@@ -16,6 +17,24 @@ class PurchaseOrderService
             ->with(['vendor', 'lines.item', 'lines.schedules'])
             ->orderByDesc('id')
             ->paginate($perPage);
+    }
+
+    /**
+     * Orders with stock still to arrive, soonest expected first (undated
+     * last) — the dashboard's "stock coming in" read. Drafts are excluded:
+     * nothing is coming until an order has been sent.
+     *
+     * @return Collection<int, PurchaseOrder>
+     */
+    public function upcoming(int $limit = 5): Collection
+    {
+        return PurchaseOrder::query()
+            ->with(['vendor', 'lines.item'])
+            ->whereIn('status', [PurchaseOrderStatus::Sent, PurchaseOrderStatus::PartiallyReceived])
+            ->orderByRaw('expected_date IS NULL, expected_date')
+            ->orderBy('id')
+            ->limit($limit)
+            ->get();
     }
 
     public function openCount(): int
