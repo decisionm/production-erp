@@ -9,8 +9,10 @@ scope, what it replaced — is the file named by the ID in `decisions/`.
 THIS FILE IS THE HUMAN SURFACE (FC-08). The record files behind it are a
 tool-managed machine format — nobody should ever be sent to read one raw.
 
-**31 current · 0 superseded**
+**31 current · 1 superseded**
 
+- **DEC-20260807-015** (2026-08-07, packing, tally-sync) — There is NO per-batch final carton and NO per-batch polymer cover — DEC-20260806-006 was built on the owner's own misunderstanding, corrected 07-Aug evening: real packing is the counted boxes plus tape across everything, nothing standing per batch. The two standing completion lines are removed from the completion flow entirely. They never posted to Tally (both stayed unmapped), so the correction is UI and payload cleanup with zero accounting impact.
+  - evidence: Owner correction 07-Aug-2026 evening, relayed by Muthukumar: real packing is the counted boxes plus tape across everything; there is no per-batch final carton and no per-batch polymer cover; re-confirmed in session ('we don't need this, I wrongly provided') with the live completion drawer still showing both lines
 - **DEC-20260807-014** (2026-08-07, production, tally-sync) — The shift-granularity flip executed on live 07-Aug-2026 evening at the owner's direction, ahead of a consolidated-voucher demo — overriding, for this execution only, DEC-20260807-010's flip-at-a-date-boundary step. One mixed day (batch vouchers before the flip, shift vouchers after) was accepted by the owner; the granularity exclusion logic makes the mix double-post-safe by design. Executed via the flip-voucher-granularity workflow, dry-run first, effective config verified as 'shift'.
   - evidence: Owner directive 07-Aug-2026 evening, relayed by Muthukumar (demo within 30 minutes; date-boundary preference overridden); executed by workflow run 31175545934 (dry run 31175409740 before it); resolves Q16
 - **DEC-20260807-013** (2026-08-07, production, packing, sales) — Carton identity is permanent — the sticker on the box never changes; the SYSTEM's answer when a carton is scanned is what carries the batch's quality and approval truth. A carton whose batch is quality-REJECTED must be refused at dispatch scan and must announce QUALITY REJECTED on any lookup. Batches not yet through QC/approval are NOT blocked at dispatch (whether dispatch should also require accountant approval, or QC-pass, is a separate open owner question), but the scan/lookup must show the pending state clearly.
@@ -51,8 +53,6 @@ tool-managed machine format — nobody should ever be sent to read one raw.
   - evidence: PR #121 (rename command), PR #126 (floor screens render the code); owner screenshots 06-Aug
 - **DEC-20260806-007** (2026-08-06, production) — The factory's shifts are Shift A (06:00), Shift B (14:00), Shift C (22:00) — keyed on START TIME, which is a shift's identity; a name is what gets renamed. There is no Night shift: the duplicate was merged into Shift C with its history repointed.
   - evidence: Owner 06-Aug 'THERE IS NOT NIGHT, SHIFT A TO C' (screenshot); PR #121, #125 (seeder fix), #127 (merge)
-- **DEC-20260806-006** (2026-08-06, packing, tally-sync) — Every boxed batch carries two STANDING packing lines — a final carton and a polymer cover over it — one of each PER BATCH (not per master box), editable on the row. Bag-packed products get neither. The Tally items are not yet named (PENDING Q5, Q6); until named the lines show and post nothing.
-  - evidence: Owner 05/06-Aug, four requests, quoted in PR #136 ('one final box for all the batches completion need to be add in consumption'); PR #136
 - **DEC-20260806-005** (2026-08-06, packing, tally-sync) — An HM/LD cover sitting in the POUCH column is a cover over a finished box, counted PER COVER: covers = bottles / nos_per_pouch (workbook figures 145, 110, 161, 83, 120). Never per tray (10x over-issue on 90ML RIB) and never one per box (400ML ROUND takes 1.66).
   - evidence: Owner 06-Aug 'if it is single packaging conver like HM and Ld, we have the calcuatio'; PR #132; workbook rows 76/78/80/81/98/99
 - **DEC-20260806-004** (2026-08-06, production) — The amber masterbatch is 'Master Batch Amber' (not 'Master Batch Pet Amber'). Mapped in masterbatch_colour_map so amber runs pre-select it.
@@ -73,3 +73,7 @@ tool-managed machine format — nobody should ever be sent to read one raw.
   - evidence: Relpet in 24/38 and PET Polyster Chips in 7/38 Stock Journals (Transactions.xml, 30 Jul export)
 - **DEC-20260805-001** (2026-08-05, production, tally-sync) — Scrap and lumps are NOT discarded from the books: they are produced PET Scrap (per colour) and post as an inward line on every production Stock Journal. The owner first said rejects are discarded, then reversed on seeing the journals — the accountant had been booking scrap all along.
   - evidence: 31 of 38 Stock Journals (Transactions.xml, 30 Jul export) book Pet Scrap inward at Rs.17-32/kg; PR #110; commit 824def3
+
+## Superseded (history, still readable in decisions/)
+
+- DEC-20260806-006 → replaced by DEC-20260807-015

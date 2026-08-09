@@ -103,42 +103,19 @@ class PackingMaterialMapping extends Model
     /** Sealing tape, dosed in metres per box and keyed by the CARTON spec. */
     public const KIND_TAPE = 'tape';
 
+    // The per-batch "final carton" and "polymer cover" standing kinds that
+    // used to follow were removed by DEC-20260807-015 (superseding
+    // DEC-20260806-006): real packing is the counted boxes plus tape across
+    // everything — there is no standing per-batch line. Existing
+    // 'final_carton'/'polymer_cover' rows in the mapping table (if any) are
+    // inert: nothing reads or writes those kinds any more.
+
     /** @var list<string> */
-    /**
-     * The FINAL carton — the outer box that goes over a finished master box.
-     *
-     * The owner, four times over two days: "one big box carton, one more big
-     * carton has to come", "one final box for all the batches completion need to
-     * be add in consumption", "still final 1 carton box ... missing".
-     *
-     * It is unlike the other four kinds in one way that decides its whole shape:
-     * it is NOT a property of the product. The workbook has no column for it and
-     * the 38 Tally journals never name one — it applies to every batch, so it is
-     * a standing line held once for the factory rather than a spec per bottle.
-     * Hence STANDING_SPEC below.
-     */
-    public const KIND_FINAL_CARTON = 'final_carton';
-
-    /** The polymer cover that goes over that final carton. Same standing shape. */
-    public const KIND_POLYMER_COVER = 'polymer_cover';
-
-    /**
-     * The spec_value the two standing kinds are stored under.
-     *
-     * The mapping table is keyed on (spec_kind, spec_value) and these two have no
-     * per-product spec to key on, so they take one literal row each. A word
-     * rather than an empty string, so a person reading the table can see that it
-     * means "every product" and not "a spec somebody forgot to fill in".
-     */
-    public const STANDING_SPEC = 'ALL PRODUCTS';
-
     public const KINDS = [
         self::KIND_CARTON,
         self::KIND_TRAY,
         self::KIND_POUCH_FILM,
         self::KIND_TAPE,
-        self::KIND_FINAL_CARTON,
-        self::KIND_POLYMER_COVER,
     ];
 
     /**
@@ -165,19 +142,6 @@ class PackingMaterialMapping extends Model
         self::KIND_TRAY => ['basis' => 'per_tray', 'quantity_basis' => 'trays', 'unit' => 'nos', 'factor_unit' => 'nos'],
         self::KIND_POUCH_FILM => ['basis' => 'per_carton', 'quantity_basis' => 'cartons', 'unit' => 'kg', 'factor_unit' => 'g'],
         self::KIND_TAPE => ['basis' => 'per_carton', 'quantity_basis' => 'cartons', 'unit' => 'm', 'factor_unit' => 'm'],
-        // ONE PER BATCH, which is what "one final box for all the batches
-        // completion" says. Not per carton: a run that packs 40 master boxes
-        // still goes out as one consignment in one outer box.
-        //
-        // The quantity is editable on the row like every other, so a shift that
-        // really shipped two says two. What must not happen is a count derived
-        // from the carton total, which would issue forty outer boxes and post
-        // them.
-        self::KIND_FINAL_CARTON => ['basis' => 'per_batch', 'quantity_basis' => 'batch', 'unit' => 'nos', 'factor_unit' => 'nos'],
-        // Also per batch — it covers the final carton, so there is one of each.
-        // Weighed like a pouch: the counted sheet gives covers per KILOGRAM, so
-        // the factor is grams a piece and the quantity is kg.
-        self::KIND_POLYMER_COVER => ['basis' => 'per_batch', 'quantity_basis' => 'batch', 'unit' => 'kg', 'factor_unit' => 'g'],
     ];
 
     /**
@@ -242,9 +206,7 @@ class PackingMaterialMapping extends Model
     public function factor(): ?string
     {
         return match ($this->spec_kind) {
-            // Both weighed materials read their grams: a polymer cover is bought
-            // by the kilogram exactly as a pouch is.
-            self::KIND_POUCH_FILM, self::KIND_POLYMER_COVER => $this->grams_per_piece === null ? null : (string) $this->grams_per_piece,
+            self::KIND_POUCH_FILM => $this->grams_per_piece === null ? null : (string) $this->grams_per_piece,
             self::KIND_TAPE => $this->metres_per_box === null ? null : (string) $this->metres_per_box,
             default => '1',
         };
