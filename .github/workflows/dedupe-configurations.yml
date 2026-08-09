@@ -1,0 +1,79 @@
+name: Dedupe machine configurations
+
+# Retires duplicate approved machine-product configurations ON THE SERVER,
+# over the same SSH key the deploy uses — the live pairs this exists for are
+# #49/#50 (B.100 Ml Round Clear-12.9gms on ASB-1) and #57/#58 (L.60ML Liquor
+# Clear 8.5 Gms). The command keeps the row the resolver already picks, so
+# the figure in force does not change — the ambiguity does.
+#
+# Same reasoning as every data command here: a master-data write must be a
+# deliberate act, not a deploy side effect, and interactive SSH trips the
+# host's brute-force protection. Manual only. DRY RUN by default.
+
+on:
+  workflow_dispatch:
+    inputs:
+      write:
+        description: 'Actually retire the losing rows. Leave false for a dry run that changes nothing.'
+        type: boolean
+        default: false
+      ids:
+        description: 'Only touch groups whose ids are ALL in this comma-separated list (e.g. 49,50). Blank = every duplicate group.'
+        type: string
+        default: ''
+
+concurrency:
+  group: dedupe-configurations
+  cancel-in-progress: false
+
+jobs:
+  dedupe:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Check hPanel → Advanced → SSH Access, and whether brute-force protection has banned the runner. Re-running often clears a transient failure."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      - name: Report what is about to run
+        run: |
+          if [ "${{ inputs.write }}" = "true" ]; then
+            echo "::warning::RETIRING duplicate configurations on the live database (ids: ${{ inputs.ids || 'all groups' }})."
+          else
+            echo "Dry run — nothing will be written."
+          fi
+
+      - name: Run it
+        run: |
+          set -o pipefail
+          FLAGS=""
+          [ "${{ inputs.write }}" = "true" ] && FLAGS="$FLAGS --write"
+          # Digits and commas only — the value cannot smuggle shell.
+          IDS=$(printf '%s' "${{ inputs.ids }}" | tr -cd '0-9,')
+          [ -n "$IDS" ] && FLAGS="$FLAGS --ids=$IDS"
+
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && /opt/alt/php84/usr/bin/php artisan production:dedupe-configurations $FLAGS" \
+            2>&1 | tee output.txt
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Dedupe machine configurations"
+            echo
+            echo "write: \`${{ inputs.write }}\` · ids: \`${{ inputs.ids || 'all groups' }}\`"
+            echo
+            echo '```'
+            cat output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
