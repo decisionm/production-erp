@@ -2,23 +2,12 @@ import { PrinterOutlined } from '@ant-design/icons';
 import { Button, Card, Col, Empty, Row, Space, Tag, Typography } from 'antd';
 import JsBarcode from 'jsbarcode';
 import BarcodeDisplay from '@/components/barcode/BarcodeDisplay';
+import { labelDetails } from '@/features/production/cartonLabel';
 import type { FinishedCarton } from '@/features/production/types';
 import { COMPANY_NAME } from '@/lib/company';
 
 interface FinishedCartonLabelsProps {
     cartons: FinishedCarton[];
-}
-
-function fmtPieces(value: string): string {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parseFloat(parsed.toFixed(4)).toLocaleString('en-IN') : value;
-}
-
-function fmtKg(value: string): string {
-    const parsed = Number(value);
-    return Number.isFinite(parsed)
-        ? parsed.toLocaleString('en-IN', { maximumFractionDigits: 3 })
-        : value;
 }
 
 function escapeHtml(value: string): string {
@@ -44,42 +33,6 @@ function barcodeSvg(code: string): string {
     } catch {
         return `<div style="font-size:18px;font-weight:700;">${escapeHtml(code)}</div>`;
     }
-}
-
-/**
- * The human-readable lines under the barcode (DEC-20260807-009). Weight is
- * NET only — gross needs the empty carton's tare, which the factory has not
- * stated (pending Q15), and a figure the data cannot support is omitted, not
- * estimated. Customer/PO appears only when the batch really is against a
- * sales order — no such linkage exists in the schema today, so the line
- * simply never renders yet.
- */
-function labelDetails(carton: FinishedCarton): string[] {
-    const sku = carton.item?.sku ?? 'Item';
-    const lines = [
-        `${sku} — ${carton.item?.name ?? 'Finished goods'}`,
-        `${fmtPieces(carton.pieces)} pcs${carton.is_partial ? ' · PARTIAL BOX' : ''}`,
-    ];
-    if (carton.batch?.nos_per_box != null) {
-        lines.push(`Nos per box: ${fmtPieces(carton.batch.nos_per_box)}`);
-    }
-    if (carton.net_weight_kg != null) {
-        lines.push(`Net weight: ${fmtKg(carton.net_weight_kg)} kg`);
-    }
-    lines.push(
-        `Batch ${carton.batch?.batch_number ?? '—'} · ${carton.batch?.production_date ?? '—'}`,
-        `${carton.batch?.machine ?? '—'} · ${carton.batch?.shift ?? '—'} shift`,
-    );
-    if (carton.sales_order) {
-        const so = [
-            carton.sales_order.customer,
-            carton.sales_order.order_no ? `PO ${carton.sales_order.order_no}` : null,
-        ]
-            .filter(Boolean)
-            .join(' · ');
-        if (so) lines.push(so);
-    }
-    return lines;
 }
 
 function printAll(cartons: FinishedCarton[]) {

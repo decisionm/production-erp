@@ -47,6 +47,11 @@ export const ADOPTED_MODULES = new Set([
     'procurement',
     'quality',
     'tally-sync',
+    // The internal carton trace tier — owner-decided (DEC-20260810-001), so
+    // adopted the day it shipped. Visibility is still permission-gated on
+    // top of this (carton-trace.view: Owner/PM/Accounts, never Supervisor);
+    // this line only lets the menu entry exist at all.
+    'carton-trace',
     // Master data and access, needed to administer any of the above.
     'users',
     'roles',

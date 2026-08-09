@@ -28,5 +28,23 @@ class PermissionSeeder extends Seeder
 
         $administrator = Role::findOrCreate('Administrator', 'web');
         $administrator->syncPermissions($permissions);
+
+        // THE INTERNAL CARTON TRACE TIER (DEC-20260810-001): visible to
+        // Owner, Plant Manager and Accounts logins ONLY — never Supervisor.
+        // The owner logs in as Administrator (which the sync above already
+        // hands every permission); Plant Manager and Accounts are the two
+        // named roles the approval chain already checks by exactly these
+        // strings (ShiftProductionEntryController), so the grant lands on
+        // the same identities that hold PM/Accountant approval today.
+        //
+        // givePermissionTo, NOT syncPermissions: these roles carry
+        // permissions configured through the Roles UI on the live instance,
+        // and this seeder re-runs on every deploy — it must only ever ADD
+        // its one permission, never rewrite what an administrator granted.
+        $cartonTrace = $permissions->firstWhere('name', 'carton-trace.view');
+
+        foreach (['Plant Manager', 'Accounts'] as $roleName) {
+            Role::findOrCreate($roleName, 'web')->givePermissionTo($cartonTrace);
+        }
     }
 }
