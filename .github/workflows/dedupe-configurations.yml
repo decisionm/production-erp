@@ -43,21 +43,30 @@ jobs:
           fi
           printf '%s\n' "$keys" >> ~/.ssh/known_hosts
 
+      # Inputs cross into shell ONLY via env: a `${{ }}` expression pasted
+      # into script text is the workflow-injection shape, and env is the
+      # boundary that makes the free-text ids input inert until sanitised.
       - name: Report what is about to run
+        env:
+          WRITE_RAW: ${{ inputs.write }}
+          IDS_RAW: ${{ inputs.ids }}
         run: |
-          if [ "${{ inputs.write }}" = "true" ]; then
-            echo "::warning::RETIRING duplicate configurations on the live database (ids: ${{ inputs.ids || 'all groups' }})."
+          if [ "$WRITE_RAW" = "true" ]; then
+            echo "::warning::RETIRING duplicate configurations on the live database (ids: ${IDS_RAW:-all groups})."
           else
             echo "Dry run — nothing will be written."
           fi
 
       - name: Run it
+        env:
+          WRITE_RAW: ${{ inputs.write }}
+          IDS_RAW: ${{ inputs.ids }}
         run: |
           set -o pipefail
           FLAGS=""
-          [ "${{ inputs.write }}" = "true" ] && FLAGS="$FLAGS --write"
+          [ "$WRITE_RAW" = "true" ] && FLAGS="$FLAGS --write"
           # Digits and commas only — the value cannot smuggle shell.
-          IDS=$(printf '%s' "${{ inputs.ids }}" | tr -cd '0-9,')
+          IDS=$(printf '%s' "$IDS_RAW" | tr -cd '0-9,')
           [ -n "$IDS" ] && FLAGS="$FLAGS --ids=$IDS"
 
           ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
@@ -67,11 +76,14 @@ jobs:
 
       - name: Summarise
         if: always()
+        env:
+          WRITE_RAW: ${{ inputs.write }}
+          IDS_RAW: ${{ inputs.ids }}
         run: |
           {
             echo "### Dedupe machine configurations"
             echo
-            echo "write: \`${{ inputs.write }}\` · ids: \`${{ inputs.ids || 'all groups' }}\`"
+            echo "write: \`$WRITE_RAW\` · ids: \`${IDS_RAW:-all groups}\`"
             echo
             echo '```'
             cat output.txt 2>/dev/null || echo "(no output captured)"
