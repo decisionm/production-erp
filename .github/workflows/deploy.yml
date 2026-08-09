@@ -14,6 +14,13 @@ name: Deploy to Hostinger
 on:
   push:
     branches: [main]
+    # Docs-only pushes (decision records, planning docs, READMEs) don't change
+    # what runs on the server — skip the full build-test-rsync cycle for them.
+    # A push touching BOTH docs and code still deploys: paths-ignore only skips
+    # the run when every changed file matches.
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
   workflow_dispatch: {}   # allows manual "Run workflow" from the Actions tab
 
 concurrency:
