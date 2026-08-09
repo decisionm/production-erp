@@ -95,6 +95,51 @@ class ShiftLifecycleContractTest extends TestCase
         ])->assertUnprocessable()->assertJsonValidationErrors('shift_id');
     }
 
+    public function test_a_mold_change_log_cannot_name_a_retired_shift(): void
+    {
+        $machine = WorkCenter::create(['code' => 'ASB-1', 'name' => 'Machine 1', 'is_active' => true]);
+
+        // Other required fields deliberately omitted — the pin is shift_id's
+        // own error, which reports regardless of its neighbours.
+        $this->postJson('/api/v1/production/mold-change-logs', [
+            'work_center_id' => $machine->id,
+            'shift_id' => $this->retired[2]->id,
+        ])->assertUnprocessable()->assertJsonValidationErrors('shift_id');
+    }
+
+    public function test_a_batch_preview_cannot_name_a_retired_shift(): void
+    {
+        $product = Item::create(['sku' => 'BTL', 'name' => 'Bottle', 'uom' => 'Nos.', 'is_active' => true]);
+
+        $this->getJson('/api/v1/production/shift-production-entries/preview?item_id='.$product->id.'&shift_id='.$this->retired[0]->id)
+            ->assertUnprocessable()->assertJsonValidationErrors('shift_id');
+    }
+
+    public function test_a_handover_cannot_bring_in_a_retired_shift(): void
+    {
+        config(['production.traceability_enabled' => true]);
+
+        Warehouse::create([
+            'code' => 'SWA', 'name' => 'SWAASHPET POLYMERS PVT LTD', 'is_active' => true,
+            'tally_guid' => '7cabb80e-0000-0000-0000-00000000003e',
+        ]);
+        $machine = WorkCenter::create(['code' => 'ASB-1', 'name' => 'Machine 1', 'is_active' => true]);
+        $product = Item::create(['sku' => 'BTL', 'name' => 'Bottle', 'uom' => 'Nos.', 'is_active' => true]);
+
+        $entry = $this->postJson('/api/v1/production/shift-production-entries', [
+            'shift_id' => $this->active[0]->id,
+            'work_center_id' => $machine->id,
+            'item_id' => $product->id,
+            'production_date' => now()->toDateString(),
+        ])->assertOk()->json('data.id');
+
+        // The INCOMING shift is a new operational choice — a retired row may
+        // not take it, whatever else the payload is missing.
+        $this->postJson("/api/v1/production/shift-production-entries/{$entry}/handover", [
+            'shift_id' => $this->retired[1]->id,
+        ])->assertUnprocessable()->assertJsonValidationErrors('shift_id');
+    }
+
     public function test_history_still_resolves_a_shift_retired_after_the_fact(): void
     {
         // The single Tally-linked warehouse the finished-goods fallback needs.
