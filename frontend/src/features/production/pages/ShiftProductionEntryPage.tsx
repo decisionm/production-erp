@@ -1422,7 +1422,7 @@ export default function ShiftProductionEntryPage() {
         [resumeFlowRequested, resumeQuery],
     );
 
-    const { data: shifts } = useQuery({ queryKey: ['production', 'shifts'], queryFn: listShifts });
+    const { data: shifts } = useQuery({ queryKey: ['production', 'shifts'], queryFn: () => listShifts() });
     const { data: workCenters } = useQuery({ queryKey: ['production', 'work-centers', 'active'], queryFn: () => listWorkCenters(true) });
     // Shop-floor pickers need the WHOLE reference list, not the default first
     // 20 — with 642 items the type-to-search Select would otherwise only ever

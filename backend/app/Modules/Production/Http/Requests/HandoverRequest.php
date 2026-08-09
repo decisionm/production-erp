@@ -25,7 +25,9 @@ class HandoverRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'shift_id' => ['required', 'integer', 'exists:shifts,id'],
+            // The INCOMING shift is a new operational choice, so it must be a
+            // shift the factory still runs — same contract as StartBatchRequest.
+            'shift_id' => ['required', 'integer', Rule::exists('shifts', 'id')->where('is_active', true)],
             'production_date' => ['nullable', 'date'],
             'operator_id' => ['nullable', 'integer', 'exists:employees,id'],
 

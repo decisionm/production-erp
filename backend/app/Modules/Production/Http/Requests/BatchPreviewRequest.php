@@ -3,6 +3,7 @@
 namespace App\Modules\Production\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class BatchPreviewRequest extends FormRequest
 {
@@ -23,7 +24,7 @@ class BatchPreviewRequest extends FormRequest
             'item_id' => ['required', 'integer', 'exists:items,id'],
             'work_center_id' => ['sometimes', 'nullable', 'integer', 'exists:work_centers,id'],
             'warehouse_id' => ['sometimes', 'nullable', 'integer', 'exists:warehouses,id'],
-            'shift_id' => ['sometimes', 'nullable', 'integer', 'exists:shifts,id'],
+            'shift_id' => ['sometimes', 'nullable', 'integer', Rule::exists('shifts', 'id')->where('is_active', true)],
             'planned_hours' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:24'],
             'active_cavities' => ['sometimes', 'nullable', 'integer', 'min:1'],
             'production_standard_id' => ['sometimes', 'nullable', 'integer', 'exists:production_standards,id'],

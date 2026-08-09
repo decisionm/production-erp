@@ -78,7 +78,7 @@ const BAG_STATUS_LABEL: Record<MaterialBagStatus, string> = {
 };
 
 function useShiftOptions() {
-    const { data: shifts } = useQuery({ queryKey: ['production', 'shifts'], queryFn: listShifts });
+    const { data: shifts } = useQuery({ queryKey: ['production', 'shifts'], queryFn: () => listShifts() });
     return (shifts?.data ?? []).filter((s) => s.is_active).map((s) => ({ value: s.id, label: s.name }));
 }
 

@@ -39,7 +39,7 @@ export default function ShiftSummaryPage() {
     const [productionDate, setProductionDate] = useState(dayjs().format('YYYY-MM-DD'));
     const queryClient = useQueryClient();
 
-    const { data: shifts } = useQuery({ queryKey: ['production', 'shifts'], queryFn: listShifts });
+    const { data: shifts } = useQuery({ queryKey: ['production', 'shifts'], queryFn: () => listShifts() });
     const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: listAllEmployees });
     const activeShifts = shifts?.data.filter((s) => s.is_active) ?? [];
     const shiftOptions = activeShifts.map((s) => ({ value: s.id, label: s.name }));

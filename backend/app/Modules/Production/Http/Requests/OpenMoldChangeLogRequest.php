@@ -3,6 +3,7 @@
 namespace App\Modules\Production\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class OpenMoldChangeLogRequest extends FormRequest
 {
@@ -15,7 +16,7 @@ class OpenMoldChangeLogRequest extends FormRequest
     {
         return [
             'work_center_id' => ['required', 'integer', 'exists:work_centers,id'],
-            'shift_id' => ['required', 'integer', 'exists:shifts,id'],
+            'shift_id' => ['required', 'integer', Rule::exists('shifts', 'id')->where('is_active', true)],
             'production_date' => ['nullable', 'date'],
             'changed_from_item_id' => ['nullable', 'integer', 'exists:items,id'],
             'changed_from_mold_id' => ['nullable', 'integer', 'exists:molds,id'],
