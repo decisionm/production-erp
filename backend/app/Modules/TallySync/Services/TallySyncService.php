@@ -656,12 +656,13 @@ class TallySyncService
                     // no single entry. Members hang off tally_sync_entry_id.
                     'syncable_type' => (new Shift)->getMorphClass(),
                     'syncable_id' => $entry->shift_id,
-                    // The agent dispatches builders on this STRING, and the
-                    // builder registered as 'Manufacturing Journal' is the one
-                    // that emits the validated Stock Journal XML (its file
-                    // says so) — 'Stock Journal' as a label has no builder and
-                    // fails on the factory PC (entries #33/#34, 07-Aug demo).
-                    'tally_voucher_type' => 'Manufacturing Journal',
+                    // The voucher's own honest label (DEC-20260807-010). The
+                    // agent dispatches builders on this STRING: agents >= 0.3.5
+                    // carry a 'Stock Journal' builder; older agents fail it
+                    // with "No XML builder" (entries #33/#34, 07-Aug), which is
+                    // why this label flips ONLY after the factory agent is
+                    // confirmed >= 0.3.5 — merging early recreates that outage.
+                    'tally_voucher_type' => 'Stock Journal',
                     'payload' => $this->shiftVoucherPayload($joining, $number, $entry),
                     'status' => TallySyncStatus::Pending,
                     'attempts' => 0,
@@ -756,14 +757,12 @@ class TallySyncService
         $batches = $members->pluck('batch_number')->filter()->values();
 
         return [
-            // 'Manufacturing Journal' is the agent's dispatch key for the
-            // builder that posts a plain Stock Journal (see the enqueue-side
-            // comment); batch_number/godown complete that builder's payload
-            // contract. The voucher-level godown covers the produced lines —
-            // the builder reads per-line godowns for consumption only — and
-            // every member's completion books into the same FG store role,
-            // so the first member's warehouse speaks for all of them.
-            'voucher_type' => 'Manufacturing Journal',
+            // The honest label (see the enqueue-side comment on agent
+            // sequencing). batch_number/godown stay: the 0.3.5 Stock Journal
+            // builder uses the voucher-level godown as the fallback for any
+            // line without its own, and keeping the contract identical means
+            // a voucher regenerated across the flip changes only this label.
+            'voucher_type' => 'Stock Journal',
             'voucher_date' => $entry->production_date->toDateString(),
             'voucher_number' => $voucherNumber,
             'batch_number' => null,
