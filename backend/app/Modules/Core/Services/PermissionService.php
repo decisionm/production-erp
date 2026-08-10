@@ -37,6 +37,16 @@ class PermissionService
         // this list, so a permission missing from here is stripped from every
         // role on the next save and the guard then 403s everyone.
         'machine-master' => 'Machine Master',
+        // The INTERNAL carton trace tier (DEC-20260810-001): a scanned
+        // carton's completion datetime, day-bin lot attribution and batch
+        // costing rate — Owner, Plant Manager and Accounts ONLY, an
+        // owner-worded widening of FC-06's rate scope for this one surface.
+        // Its own catalog entry (the machine-master precedent) because the
+        // audience differs from Production's: every supervisor scans cartons
+        // (the public lookup, under module:production), but the rates behind
+        // a batch are not the floor's to read — and only a catalog entry
+        // survives RoleService's grant intersection.
+        'carton-trace' => 'Carton Trace (Internal)',
         'sales' => 'Sales',
         'finance' => 'Finance',
         'quality' => 'Quality',

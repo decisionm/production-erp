@@ -2494,5 +2494,86 @@ export interface FinishedCarton {
         /** The run's box size — pack variants differ by exactly this figure. */
         nos_per_box?: string | null;
     };
+    /**
+     * Present on the LABEL reads only (generate/reprint —
+     * FinishedCartonLabelResource): the batch's completion date in factory
+     * wall-clock and its shift, for the printed label (DEC-20260810-001).
+     * The public scan lookup NEVER carries this key — the same decision
+     * freezes that response, so don't "fix" its absence there.
+     */
+    completion?: {
+        completed_on: string | null;
+        shift: string | null;
+    };
     created_at: string | null;
+}
+
+/**
+ * One lot line of the internal trace's day-bin attribution — the CALCULATED
+ * bin-held-these-lots claim, never a bag→batch identity (FC-01). rate_per_kg
+ * is FC-06 material: it exists on this tier only and must not be rendered
+ * anywhere outside the carton-trace surface.
+ */
+export interface CartonTraceLot {
+    material: string | null;
+    supplier_lot_no: string | null;
+    grn_reference: string | null;
+    inward_date: string | null;
+    rate_per_kg: string | null;
+    rate_source: string;
+    loaded_kg: string;
+}
+
+/**
+ * The INTERNAL carton trace tier (DEC-20260810-001), mirroring
+ * CartonInternalTraceResource. Served only to logins holding
+ * carton-trace.view — Owner (Administrator), Plant Manager, Accounts.
+ */
+export interface CartonInternalTrace {
+    carton: FinishedCarton;
+    completion: {
+        completed_at: string | null;
+        completed_on: string | null;
+        shift: string | null;
+    };
+    day_bin_attribution: {
+        /** The sentence this attribution must never be shown without. */
+        basis: string;
+        reason: string | null;
+        window: {
+            production_date: string;
+            shift: string;
+            timezone: string;
+            from: string;
+            until: string;
+        } | null;
+        lots: CartonTraceLot[];
+        unattributed_loaded_kg: string;
+    };
+    /**
+     * BagCostAllocationService::summary(withDetail) — totals, the
+     * accounting-allocation `basis` sentence, and the pool rates behind
+     * them (this tier is rate-bearing by the owner's word).
+     */
+    costing: {
+        as_of: string;
+        reason: string | null;
+        allocation_run: number | null;
+        material_cost_total: string | null;
+        resin_cost: string | null;
+        other_cost: string | null;
+        cost_per_accepted_unit: string | null;
+        accepted_quantity: string | null;
+        basis: string;
+        allocations?: Array<{
+            item_id: number;
+            item_name: string | null;
+            pool_rate: string | null;
+            quantity: string;
+            amount: string | null;
+            rate_source: string;
+            sentence: string;
+        }>;
+        other_lines?: Array<Record<string, unknown>>;
+    };
 }

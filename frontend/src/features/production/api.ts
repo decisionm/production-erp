@@ -10,6 +10,7 @@ import type {
     BalanceAckReason,
     BatchPreview,
     BinBayAvailabilityResponse,
+    CartonInternalTrace,
     FinishedCarton,
     Bom,
     DowntimeReason,
@@ -1688,6 +1689,19 @@ export async function generateCartons(entryId: number): Promise<FinishedCarton[]
 export async function lookupCarton(cartonNo: string): Promise<FinishedCarton> {
     const { data } = await api.get<{ data: FinishedCarton }>(
         `/production/cartons/${encodeURIComponent(cartonNo)}`,
+    );
+    return data.data;
+}
+
+/**
+ * The INTERNAL trace behind the same scan (DEC-20260810-001): completion
+ * datetime, shift, day-bin lot attribution and the batch's costing rate.
+ * 403s for anyone without carton-trace.view — Owner (Administrator), Plant
+ * Manager and Accounts only; never call it from a public/dispatch surface.
+ */
+export async function lookupCartonTrace(cartonNo: string): Promise<CartonInternalTrace> {
+    const { data } = await api.get<{ data: CartonInternalTrace }>(
+        `/production/cartons/${encodeURIComponent(cartonNo)}/trace`,
     );
     return data.data;
 }

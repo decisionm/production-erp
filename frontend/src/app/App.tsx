@@ -20,6 +20,7 @@ import MaintenanceWorkOrdersPage from '@/features/maintenance/pages/WorkOrdersPa
 import ApproveProductionPage from '@/features/production/pages/ApproveProductionPage';
 import BomsPage from '@/features/production/pages/BomsPage';
 import CapacityPlanPage from '@/features/production/pages/CapacityPlanPage';
+import CartonTracePage from '@/features/production/pages/CartonTracePage';
 import FactoryDayBinPage from '@/features/production/pages/FactoryDayBinPage';
 import MoldsPage from '@/features/production/pages/MoldsPage';
 import MrpPage from '@/features/production/pages/MrpPage';
@@ -117,6 +118,12 @@ export default function App() {
                                     <Route path="/production/shifts" element={<ShiftsPage />} />
                                     <Route path="/production/shift-production" element={<ShiftProductionEntryPage />} />
                                     <Route path="/production/live-monitor" element={<LiveMonitorPage />} />
+                                    {/* The internal carton trace tier (DEC-20260810-001).
+                                        The route itself is open like every other — the
+                                        SERVER's carton-trace permission is the gate (the
+                                        page 403s in place); the menu entry is hidden by
+                                        the same permission in AppLayout. */}
+                                    <Route path="/production/carton-trace" element={<CartonTracePage />} />
                                     {/* Product Standards is a TAB of Production
                                         Configuration now, not a page of its own. The old
                                         URL is kept because real links carry state to it:
