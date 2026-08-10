@@ -637,10 +637,55 @@ export async function listStandardItemCandidates(standardId: number): Promise<St
  * once "not attached"). That rule lives in the backend; this endpoint is the
  * by-hand equivalent of it.
  */
-export async function attachStandardItem(standardId: number, itemId: number): Promise<ProductionStandardRow> {
+export async function attachStandardItem(
+    standardId: number,
+    itemId: number,
+    // Re-pointing an ALREADY attached standard is a confirmed act
+    // (DEC-20260810-003) — the backend refuses without this flag, naming
+    // the consequence (future runs only; posted vouchers stay).
+    confirmReattach = false,
+): Promise<ProductionStandardRow> {
     const { data } = await api.post<{ data: ProductionStandardRow }>(
         `/production/standards/${standardId}/attach-item`,
-        { item_id: itemId },
+        confirmReattach ? { item_id: itemId, confirm_reattach: true } : { item_id: itemId },
+    );
+    return data.data;
+}
+
+/** One packaging variant's writable payload — counts per its mode, plus its own Tally identity. */
+export interface StandardPackagingPayload {
+    mode: 'pouch' | 'tray' | 'direct_box';
+    nos_per_pouch?: number | null;
+    pouches_per_box?: number | null;
+    nos_per_tray?: number | null;
+    trays_per_box?: number | null;
+    nos_per_box?: number | null;
+    is_default?: boolean;
+    /** The variant's own Tally identity; null = "use the product's" (said on screen, never guessed). */
+    item_id?: number | null;
+}
+
+/**
+ * Add the packing a product is really packed in (the 490/box tray the
+ * workbook never carried) — DEC-20260810-003.
+ */
+export async function addStandardPackaging(standardId: number, payload: StandardPackagingPayload): Promise<unknown> {
+    const { data } = await api.post<{ data: unknown }>(
+        `/production/standards/${standardId}/packagings`,
+        payload,
+    );
+    return data.data;
+}
+
+/** Correct one packaging variant — counts and/or its Tally identity. */
+export async function updateStandardPackaging(
+    standardId: number,
+    packagingId: number,
+    payload: StandardPackagingPayload,
+): Promise<unknown> {
+    const { data } = await api.put<{ data: unknown }>(
+        `/production/standards/${standardId}/packagings/${packagingId}`,
+        payload,
     );
     return data.data;
 }

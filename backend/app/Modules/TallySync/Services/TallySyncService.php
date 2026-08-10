@@ -214,9 +214,10 @@ class TallySyncService
      */
     private function isLocalFixtureEntry(ShiftProductionEntry $entry): bool
     {
-        $entry->loadMissing('item');
-
-        return $entry->item?->isLocalFixture() ?? false;
+        // Judged on the item the voucher will actually NAME — the resolved
+        // identity, not the base product. A real product resolving to a
+        // local-fixture identity would post a name Tally cannot accept.
+        return $entry->effectiveItem()?->isLocalFixture() ?? false;
     }
 
     /**
@@ -264,7 +265,7 @@ class TallySyncService
      */
     public function buildBatchVoucherPayload(ShiftProductionEntry $entry): array
     {
-        $entry->loadMissing(['item', 'warehouse', 'materialConsumptions.item', 'materialConsumptions.warehouse', 'scraps.scrapReason']);
+        $entry->loadMissing(['item', 'finishedItem', 'warehouse', 'materialConsumptions.item', 'materialConsumptions.warehouse', 'scraps.scrapReason']);
 
         // Where packing materials post out of — one server-side answer for the
         // whole voucher (PackingVoucherLines), null when this factory has not
@@ -321,7 +322,11 @@ class TallySyncService
         // FactoryWarehouseResolutionTest asserts these exact keys so that a
         // later "let's also name the godown per produced line" cannot slip in.
         $produced = [[
-            'item' => $entry->item->name,
+            // The RESOLVED identity (DEC-20260810-003): the packaging's own
+            // Tally item when the run's packaging carries one, frozen on the
+            // entry at completion; the product's item otherwise — which is
+            // every batch that predates the feature, unchanged.
+            'item' => $entry->effectiveItem()->name,
             'quantity' => $entry->quantity_produced,
         ]];
 
@@ -746,9 +751,14 @@ class TallySyncService
                 ];
             }
 
-            $key = "{$member->item_id}@{$member->warehouse_id}";
+            // Aggregated per RESOLVED identity (DEC-20260810-003), not per
+            // product: two packings of one product whose packagings carry
+            // different Tally items land as their two Tally lines, and two
+            // batches resolving to the same identity still merge into one.
+            $finishedId = $member->effectiveItemId();
+            $key = "{$finishedId}@{$member->warehouse_id}";
             $produced[$key] = [
-                'item' => $member->item->name,
+                'item' => $member->effectiveItem()->name,
                 'quantity' => bcadd($produced[$key]['quantity'] ?? '0.0000', (string) $member->quantity_produced, 4),
                 'godown' => $this->godowns->resolveName($member->warehouse),
             ];

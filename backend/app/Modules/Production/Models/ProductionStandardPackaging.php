@@ -2,6 +2,7 @@
 
 namespace App\Modules\Production\Models;
 
+use App\Modules\Inventory\Models\Item;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -9,6 +10,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[Fillable([
     'production_standard_id', 'mode', 'nos_per_pouch', 'pouches_per_box',
     'nos_per_tray', 'trays_per_box', 'nos_per_box', 'is_default',
+    // The Tally item THIS packing's production posts as (DEC-20260810-003).
+    // Null = no identity of its own — the run uses the product's item and
+    // the screen says so; an unknown identity stays editable, never guessed.
+    'item_id', 'item_set_by', 'item_set_at',
 ])]
 class ProductionStandardPackaging extends Model
 {
@@ -40,6 +45,12 @@ class ProductionStandardPackaging extends Model
     public function standard(): BelongsTo
     {
         return $this->belongsTo(ProductionStandard::class, 'production_standard_id');
+    }
+
+    /** The packing's own Tally identity, when it has one. */
+    public function tallyItem(): BelongsTo
+    {
+        return $this->belongsTo(Item::class, 'item_id');
     }
 
     /**

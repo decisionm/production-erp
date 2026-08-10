@@ -173,7 +173,7 @@ class ProductStandardsWorkspaceService
         $search = trim((string) ($filters['search'] ?? ''));
 
         return ProductionStandard::query()
-            ->with(['item', 'packagings'])
+            ->with(['item', 'packagings.tallyItem'])
             // The three filters the old index already honoured. Kept working
             // unchanged: the Start Batch "configure this product" return link
             // arrives carrying item_id, and a supervisor sent back from a

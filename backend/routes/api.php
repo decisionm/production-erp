@@ -62,6 +62,7 @@ use App\Modules\Production\Http\Controllers\ProductionConfigurationController;
 use App\Modules\Production\Http\Controllers\ProductionReportController;
 use App\Modules\Production\Http\Controllers\ProductionSettingsController;
 use App\Modules\Production\Http\Controllers\ProductionStandardController;
+use App\Modules\Production\Http\Controllers\ProductionStandardPackagingController;
 use App\Modules\Production\Http\Controllers\ReworkOrderController;
 use App\Modules\Production\Http\Controllers\RoutingController;
 use App\Modules\Production\Http\Controllers\ScrapReasonController;
@@ -483,6 +484,12 @@ Route::prefix('v1')->group(function () {
             Route::get('standards/{standard}/machine-exceptions', [ProductionStandardController::class, 'machineExceptions']);
             Route::post('standards/{standard}/attach-item', [ProductionStandardController::class, 'attachItem']);
             Route::post('standards', [ProductionStandardController::class, 'store']);
+            // Packaging variants of one standard, Tally identity included
+            // (DEC-20260810-003): add the packing the workbook never carried
+            // (the 490/box tray), set or correct each variant's own identity.
+            // Same group, so the POST and PUT need production.manage.
+            Route::post('standards/{standard}/packagings', [ProductionStandardPackagingController::class, 'store']);
+            Route::put('standards/{standard}/packagings/{packaging}', [ProductionStandardPackagingController::class, 'update']);
 
             Route::get('downtime-reasons', [DowntimeReasonController::class, 'index']);
             Route::post('downtime-reasons', [DowntimeReasonController::class, 'store']);

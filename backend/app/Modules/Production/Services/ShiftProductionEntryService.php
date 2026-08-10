@@ -684,9 +684,24 @@ class ShiftProductionEntryService
                 $this->downtime->record($entry, $line, $completedBy);
             }
 
-            $unitCost = $this->stock->currentAverageCost($entry->item_id, $entry->warehouse_id);
+            // THE TALLY IDENTITY THIS BATCH'S FINISHED GOODS MOVE AS
+            // (DEC-20260810-003): the selected packaging's own item when it
+            // carries one, else the product's — resolved HERE and frozen on
+            // the row, so the receipt below, the voucher, the labels and the
+            // trace all read one recorded answer instead of re-deriving it
+            // against a packaging somebody may since have edited. Re-resolved
+            // on every (re-)completion: an amendment reverses the old receipt
+            // under the OLD frozen identity first (reverseCompletionEffects),
+            // so re-freezing here cannot strand stock under a stale item.
+            $entry->finished_item_id = $entry->production_standard_packaging_id === null
+                ? null
+                : $entry->standardPackaging()->first()?->item_id;
+            $entry->save();
+
+            $finishedItemId = $entry->effectiveItemId();
+            $unitCost = $this->stock->currentAverageCost($finishedItemId, $entry->warehouse_id);
             $this->stock->recordReceipt(
-                itemId: $entry->item_id,
+                itemId: $finishedItemId,
                 warehouseId: $entry->warehouse_id,
                 quantity: (string) $data['quantity_produced'],
                 unitCost: $unitCost,
@@ -1132,7 +1147,12 @@ class ShiftProductionEntryService
 
         if ($produced !== null && bccomp((string) $produced, '0', 4) === 1) {
             $this->stock->recordIssue(
-                itemId: $entry->item_id,
+                // The identity the completion being reversed BOOKED under —
+                // the frozen finished_item_id, not a fresh resolution: if the
+                // packaging's identity was edited between the completion and
+                // this amendment, re-resolving would take the stock back off
+                // the wrong item. completeBatch() re-freezes after this runs.
+                itemId: $entry->effectiveItemId(),
                 warehouseId: $entry->warehouse_id,
                 quantity: (string) $produced,
                 reference: $reference.' amended',

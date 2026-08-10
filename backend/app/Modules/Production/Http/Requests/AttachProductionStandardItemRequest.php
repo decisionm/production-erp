@@ -34,6 +34,11 @@ class AttachProductionStandardItemRequest extends FormRequest
                 'integer',
                 Rule::exists('items', 'id')->whereNull('deleted_at'),
             ],
+            // Editable identity (DEC-20260810-003): re-pointing an ALREADY
+            // attached standard is a confirmed act, never a default — the
+            // service refuses without this flag and its message names the
+            // consequence.
+            'confirm_reattach' => ['sometimes', 'boolean'],
         ];
     }
 }
