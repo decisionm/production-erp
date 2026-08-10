@@ -127,6 +127,12 @@ class ProductionConfigurationDefaultsSeeder extends Seeder
             ['code' => 'DT-POWER', 'category' => 'Utilities', 'description' => 'Power outage', 'planning_type' => 'unplanned', 'reduces_runtime' => true, 'requires_note' => true, 'selectable_at_start' => true, 'confirmation_status' => 'To Confirm'],
             ['code' => 'DT-BREAKDOWN', 'category' => 'Machine', 'description' => 'Machine breakdown', 'planning_type' => 'unplanned', 'reduces_runtime' => true, 'requires_note' => true, 'selectable_at_start' => false, 'confirmation_status' => 'To Confirm'],
             ['code' => 'DT-MATERIAL', 'category' => 'Material', 'description' => 'Material shortage', 'planning_type' => 'unplanned', 'reduces_runtime' => true, 'requires_note' => true, 'selectable_at_start' => false, 'confirmation_status' => 'To Confirm'],
+            // The paper's most common idle cause — "given drying" appears on
+            // the 07-Aug report against two machines at once (ASB-6/7,
+            // 11:30–13:00). No note required: unlike "Other", the reason IS
+            // the explanation, and demanding extra words for the most common
+            // cause invites junk text on every row.
+            ['code' => 'DT-DRYING', 'category' => 'Material', 'description' => 'Material drying', 'planning_type' => 'unplanned', 'reduces_runtime' => true, 'requires_note' => false, 'selectable_at_start' => false, 'confirmation_status' => 'To Confirm'],
             ['code' => 'DT-QUALITY', 'category' => 'Quality', 'description' => 'Quality hold', 'planning_type' => 'unplanned', 'reduces_runtime' => true, 'requires_note' => true, 'selectable_at_start' => false, 'confirmation_status' => 'To Confirm'],
             ['code' => 'DT-OPERATOR', 'category' => 'People', 'description' => 'Operator unavailable', 'planning_type' => 'unplanned', 'reduces_runtime' => true, 'requires_note' => true, 'selectable_at_start' => false, 'confirmation_status' => 'To Confirm'],
             ['code' => 'DT-OTHER', 'category' => 'Other', 'description' => 'Other downtime', 'planning_type' => 'unplanned', 'reduces_runtime' => true, 'requires_note' => true, 'selectable_at_start' => false, 'confirmation_status' => 'To Confirm'],
