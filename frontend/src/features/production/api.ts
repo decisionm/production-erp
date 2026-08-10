@@ -1729,3 +1729,61 @@ export async function listPackingMaterialOptions(): Promise<Record<string, Packi
     );
     return data.data;
 }
+
+/**
+ * One row of the packing-material master, as the backend's describe() shapes
+ * it — the same shape the batch preview reads, which is the point: the
+ * maintenance screen and the floor's prefill cannot disagree about a row.
+ */
+export interface PackingMaterialMappingRow {
+    id: number;
+    spec_kind: 'carton' | 'tray' | 'pouch_film' | 'tape';
+    spec_value: string;
+    item: { id: number; name: string };
+    factor: string | null;
+    unit: string;
+    factor_unit: string;
+    grams_per_piece: string | null;
+    metres_per_box: string | null;
+    note: string | null;
+    set_by: string | null;
+    set_at: string | null;
+}
+
+/** Every mapping in force — the packing-material master, kind-then-spec ordered. */
+export async function listPackingMaterialMappings(): Promise<PackingMaterialMappingRow[]> {
+    const { data } = await api.get<{ data: PackingMaterialMappingRow[] }>(
+        '/production/packing-material-mappings',
+    );
+    return data.data;
+}
+
+export interface PackingMaterialMappingPayload {
+    spec_kind: string;
+    spec_value: string;
+    item_id: number;
+    grams_per_piece?: string | number | null;
+    metres_per_box?: string | number | null;
+    note?: string | null;
+}
+
+/**
+ * Enter or correct the mapping for one (kind, spec). The backend upserts —
+ * a correction REPLACES the answer in force rather than stacking a second
+ * row — and the floor's prefill reads the table live, so the change reaches
+ * every future batch (and every voucher not yet posted) with no deploy.
+ */
+export async function savePackingMaterialMapping(
+    payload: PackingMaterialMappingPayload,
+): Promise<PackingMaterialMappingRow> {
+    const { data } = await api.post<{ data: PackingMaterialMappingRow }>(
+        '/production/packing-material-mappings',
+        payload,
+    );
+    return data.data;
+}
+
+/** Withdraw a mapping — the floor's line goes back to "choose the material". */
+export async function withdrawPackingMaterialMapping(id: number): Promise<void> {
+    await api.delete(`/production/packing-material-mappings/${id}`);
+}

@@ -263,6 +263,41 @@ class PackingMaterialMappingTest extends TestCase
         $this->assertSame(1, PackingMaterialMapping::query()->count());
     }
 
+    public function test_a_correction_made_on_the_master_reaches_the_next_batch_preview(): void
+    {
+        // The complaint the Packing Materials screen exists for (10-Aug): a
+        // spec pointing at the wrong Tally item was visible on every voucher
+        // and correctable on none — the completion drawer's picker applies to
+        // ONE batch and saves nothing. The promise behind the screen is that
+        // a correction saved on the master reaches the NEXT batch by itself:
+        // same endpoint the screen calls, then the preview re-read, no deploy
+        // and nothing else touched.
+        $this->actingAsProduction();
+        $this->standard($this->bottle, ['carton' => '170ML']);
+
+        // Mapped wrong first — the 200 Ml box against a 170ML spec.
+        $this->postJson('/api/v1/production/packing-material-mappings', [
+            'spec_kind' => 'carton', 'spec_value' => '170ML',
+            'item_id' => $this->catalogue['200 Ml Round Master Box']->id,
+        ])->assertOk();
+
+        $preview = fn () => collect(
+            $this->getJson("/api/v1/production/shift-production-entries/preview?item_id={$this->bottle->id}")
+                ->assertOk()
+                ->json('data.suggested_packing'),
+        )->firstWhere('kind', 'carton');
+
+        $this->assertSame('200 Ml Round Master Box', $preview()['item']['name']);
+
+        // Corrected through the same endpoint the configuration screen calls.
+        $this->postJson('/api/v1/production/packing-material-mappings', [
+            'spec_kind' => 'carton', 'spec_value' => '170ML',
+            'item_id' => $this->catalogue['170 Ml Master Box']->id,
+        ])->assertOk();
+
+        $this->assertSame('170 Ml Master Box', $preview()['item']['name']);
+    }
+
     public function test_withdrawing_a_mapping_returns_the_floor_to_no_prefill_and_can_be_re_answered(): void
     {
         $this->actingAsProduction();
