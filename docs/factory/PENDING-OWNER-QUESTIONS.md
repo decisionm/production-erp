@@ -27,6 +27,8 @@ branch for the highest id before minting, or re-mint at merge time (this
 happened again with DEC-20260807-001.., three branches deep, 07-Aug).
 DEC-20260807-014 is the granularity-flip execution record on main;
 PR #148's colliding -014 was re-minted as -015 at merge, per this rule.
+Q29-Q31 are claimed by open PR #155 (finance-pull discovery); Q32 by the
+report-down backdate PR (#159). New questions continue from Q33.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 
@@ -370,3 +372,17 @@ visible, that is a real Finance-module build to scope — bills against
 POs/GRNs, due dates, payment recording — not a dashboard cell. **Blocks:**
 nothing — the dashboard stays receivables-only until answered. *Open
 since 2026-08-09.*
+
+## Q32 · ASB-8's mould capability contradicts the 07-Aug paper — which is wrong?
+
+The Start Batch panel (from the machine-capability records) says moulds of
+6 or more cavities run only on Machine 10 — not on Machine 8. The 07-Aug
+paper report runs 450ML RIB A on ASB-8 at 7 cavities, machine and cavity
+count both stated on the sheet. Either ASB-8's capability record is too
+narrow or the mould/cavity data behind the 450ML RIB A standard is wrong —
+the two cannot both be true. For the standards-corrections pass. The
+surfaced note is advisory (the batch records the mismatch, it does not
+block), so nothing is stuck — but every ASB-8 450ML run until this is
+answered carries a warning that may be crying wolf. **Blocks:** trusting
+the capability note on ASB-8 450ML runs; the machine-capability row's
+correction. *Open since 2026-08-10.*
