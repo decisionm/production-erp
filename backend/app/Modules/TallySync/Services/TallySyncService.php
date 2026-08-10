@@ -899,6 +899,20 @@ class TallySyncService
             ]);
         }
 
+        // A dismissed voucher is dead by a human's explicit say-so — "will
+        // never be sent to Tally" is the promise the Dismiss confirmation
+        // made, and a Retry that could quietly resurrect it would turn that
+        // promise into a race between two buttons. It is not failed any
+        // more, so nothing on the dashboard offers Retry for it; this guard
+        // is for stale pages and other API clients.
+        if ($entry->status === TallySyncStatus::Dismissed) {
+            throw ValidationException::withMessages([
+                'entry' => "{$entry->voucherNumber()} was dismissed — it is never to be sent to Tally. "
+                    .'If it genuinely should post after all, that is a new decision: raise it with the owner '
+                    .'rather than re-queueing a voucher someone deliberately wrote off.',
+            ]);
+        }
+
         // REGENERATE, DON'T REPLAY. A failed voucher usually failed because
         // a mapping was wrong — the product had no Tally identity, a store
         // was unmapped — and Accounts has since FIXED the mapping. Replaying
@@ -935,6 +949,72 @@ class TallySyncService
             'tally_voucher_type' => is_string($payload['voucher_type'] ?? null)
                 ? $payload['voucher_type']
                 : $entry->tally_voucher_type,
+        ]);
+
+        return $entry;
+    }
+
+    /**
+     * Write a dead voucher off: it will NEVER be sent to Tally.
+     *
+     * DISMISS, NOT DELETE — nothing on this queue is ever erased. The row
+     * keeps its payload, its error and its attempt count, and the act itself
+     * lands in the resolution_log, so "what was this and why did nobody post
+     * it" stays answerable years later. What changes is the status: a
+     * dismissed voucher is invisible to pending() (the agent can never
+     * collect it) and refused by retry() (no button can resurrect it).
+     *
+     * Exists because "leave it failed forever" stopped being safe: a failed
+     * demo voucher is one stray Resync away from posting into the live books
+     * the moment the factory's Tally is open on the right company. Failed
+     * was never a terminal state — this is.
+     *
+     * Only a FAILED voucher can be dismissed. A pending one is on its way to
+     * the agent — the honest move there is to let the agent report first,
+     * not to change a voucher's fate while it may already be posting. And a
+     * voucher that ever reached Tally (synced_at set) is refused outright,
+     * same as retry(): the books already hold it, and a "dismissed" label
+     * over a posted voucher would be a lie the accountant acts on.
+     *
+     * @throws ValidationException
+     */
+    public function dismiss(TallySyncEntry $entry, ?int $userId = null): TallySyncEntry
+    {
+        if ($entry->isInTally()) {
+            $synced = $entry->synced_at?->format('d M Y H:i');
+
+            throw ValidationException::withMessages([
+                'entry' => "This voucher is already in Tally as {$entry->voucherNumber()}"
+                    .($synced !== null ? " (synced {$synced})" : '')
+                    .' — check Tally before anything else. Dismissing it here would hide a voucher that is really in the books.',
+            ]);
+        }
+
+        if ($entry->status !== TallySyncStatus::Failed) {
+            throw ValidationException::withMessages([
+                'entry' => "Only a failed voucher can be dismissed — {$entry->voucherNumber()} is {$entry->status->value}. "
+                    .'A voucher the agent may still be posting cannot be written off mid-flight; wait for its result first.',
+            ]);
+        }
+
+        // The act goes on the record in the same shape retry() writes, so
+        // one log tells the whole story in order: failed, retried, failed
+        // again, dismissed. error_message deliberately stays on the row —
+        // dismissal is not a repair, and the reason it failed is part of
+        // why it was written off.
+        $payload = $entry->payload;
+        $log = $payload['resolution_log'] ?? [];
+        $log[] = [
+            'at' => now()->toIso8601String(),
+            'by' => $userId,
+            'previous_error' => $entry->error_message,
+            'note' => 'Dismissed — will never be sent to Tally.',
+        ];
+        $payload['resolution_log'] = $log;
+
+        $entry->update([
+            'status' => TallySyncStatus::Dismissed,
+            'payload' => $payload,
         ]);
 
         return $entry;

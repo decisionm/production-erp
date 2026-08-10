@@ -39,7 +39,7 @@ class TallySyncStatus extends Command
             ->groupBy('status')
             ->pluck('n', 'status');
 
-        $this->table(['status', 'count'], collect(['pending', 'failed', 'synced'])
+        $this->table(['status', 'count'], collect(['pending', 'failed', 'synced', 'dismissed'])
             ->map(fn (string $status) => [$status, (string) ($counts[$status] ?? 0)])
             ->all());
 

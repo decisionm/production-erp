@@ -44,6 +44,18 @@ class TallySyncController extends Controller
     }
 
     /**
+     * Write a dead voucher off — it will never be sent to Tally. 422s
+     * (from the service) unless the voucher is failed-and-never-synced:
+     * the dashboard only offers Dismiss on failed rows, but a stale page
+     * or another API client can still ask, and a "dismissed" label over a
+     * voucher that is pending or already in the books would be a lie.
+     */
+    public function dismiss(TallySyncEntry $tallySyncEntry): TallySyncEntryResource
+    {
+        return TallySyncEntryResource::make($this->sync->dismiss($tallySyncEntry, request()->user()?->id));
+    }
+
+    /**
      * The accountant's "Release now" on a held shift voucher
      * (DEC-20260807-011) — skips the rest of the shift-end/idle wait and
      * lets the agent collect on its next poll. 422s (from the service)
