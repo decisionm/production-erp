@@ -2,6 +2,7 @@
 
 namespace App\Modules\TallySync\Http\Resources;
 
+use App\Modules\TallySync\Models\Enums\TallySyncStatus;
 use App\Modules\TallySync\Services\ShiftVoucherReleaseGate;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -72,6 +73,14 @@ class TallySyncEntryResource extends JsonResource
      */
     private function fixSuggestion(): ?array
     {
+        // A dismissed voucher keeps its error as history, but "go fix the
+        // mapping, then retry" is advice for a voucher that should still
+        // post — on one written off for good it would send someone to
+        // repair a thing nobody wants repaired.
+        if ($this->status === TallySyncStatus::Dismissed) {
+            return null;
+        }
+
         $error = $this->error_message;
         if ($error === null) {
             return null;

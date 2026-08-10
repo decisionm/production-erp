@@ -93,6 +93,12 @@ const allNavItems: NavGroup[] = [
             // Material scan into the common resin input.
             { key: '/production/approve-production', label: 'Approve Production' },
             { key: '/production/live-monitor', label: 'Live Monitor' },
+            // The INTERNAL carton trace (DEC-20260810-001): its own module
+            // key, so this entry appears only for logins holding
+            // carton-trace.view — Owner (Administrator), Plant Manager,
+            // Accounts. A supervisor's menu never shows it; the server 403s
+            // the URL for them regardless.
+            { key: '/production/carton-trace', label: 'Carton Trace', module: 'carton-trace' },
             // ONE configuration destination, not two. Product Standards and
             // Machine Setup were separate menu entries, and nothing in either
             // name told a supervisor which one owned the setting they were

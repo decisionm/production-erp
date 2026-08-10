@@ -28,7 +28,9 @@ happened again with DEC-20260807-001.., three branches deep, 07-Aug).
 DEC-20260807-014 is the granularity-flip execution record on main;
 PR #148's colliding -014 was re-minted as -015 at merge, per this rule.
 Q29-Q31 are claimed by open PR #155 (finance-pull discovery); Q32 by the
-report-down backdate PR. New questions continue from Q33.
+report-down backdate PR (#159). New questions continue from Q33.
+DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
+#160's colliding record re-minted as -002 at merge, per this rule.
 
 ---
 

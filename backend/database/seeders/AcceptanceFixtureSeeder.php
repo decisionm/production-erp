@@ -227,7 +227,16 @@ class AcceptanceFixtureSeeder extends Seeder
                 'password' => Hash::make(self::PASSWORD),
                 'is_active' => true,
             ]);
-            $user->syncPermissions($permissions);
+            // The supervisor desk NEVER holds the internal carton trace
+            // (DEC-20260810-001: Owner/PM/Accounts only). Filtered here so
+            // the local fixture states the same truth as the live grants —
+            // a supervisor login that could open the rate tier locally
+            // would make every manual walkthrough of the gate a false pass.
+            $user->syncPermissions(
+                $role === null
+                    ? $permissions->reject(fn (Permission $permission) => str_starts_with($permission->name, 'carton-trace.'))
+                    : $permissions,
+            );
             if ($role !== null) {
                 $user->assignRole(Role::findOrCreate($role, 'web'));
             }

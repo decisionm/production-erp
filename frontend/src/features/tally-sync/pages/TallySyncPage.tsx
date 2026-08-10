@@ -2,27 +2,38 @@ import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Modal, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { Link } from 'react-router-dom';
-import { listAllTallySyncEntries, releaseTallySyncEntry, retryTallySyncEntry } from '@/features/tally-sync/api';
+import {
+    dismissTallySyncEntry,
+    listAllTallySyncEntries,
+    releaseTallySyncEntry,
+    retryTallySyncEntry,
+} from '@/features/tally-sync/api';
 import type { TallySyncEntry, TallySyncStatus } from '@/features/tally-sync/types';
 
 const statusColor: Record<TallySyncStatus, string> = {
     pending: 'default',
     synced: 'green',
     failed: 'red',
+    // Neutral on purpose: a dismissed voucher is resolved history, not a
+    // problem — red would drag eyes back to a row nobody needs to act on.
+    dismissed: 'default',
 };
 
 const statusLabel: Record<TallySyncStatus, string> = {
     pending: 'Waiting for agent',
     synced: 'In Tally',
     failed: 'FAILED',
+    dismissed: 'Dismissed — never sent',
 };
 
 /**
  * Failed first, always. Everything else on this page — the count in the red
  * strip, what "Resync all failed" picks up — reads the same order, so a
  * rejection can never be pushed below the fold by a day of successful posts.
+ * Dismissed sinks BELOW synced: a written-off voucher is the one kind of row
+ * on this page that nobody will ever act on.
  */
-const statusRank: Record<TallySyncStatus, number> = { failed: 0, pending: 1, synced: 2 };
+const statusRank: Record<TallySyncStatus, number> = { failed: 0, pending: 1, synced: 2, dismissed: 3 };
 
 /** One stock line of a production voucher, as the payload carries it. */
 type VoucherStockLine = { item: string; quantity: string; godown?: string | null };
@@ -126,6 +137,7 @@ export default function TallySyncPage() {
     const [outcomes, setOutcomes] = useState<Record<number, ResyncOutcome>>({});
     const [retryingId, setRetryingId] = useState<number | null>(null);
     const [releasingId, setReleasingId] = useState<number | null>(null);
+    const [dismissingId, setDismissingId] = useState<number | null>(null);
     const [resyncingAll, setResyncingAll] = useState(false);
     const [report, setReport] = useState<{ id: number; voucher: string; ok: boolean; message: string }[] | null>(null);
     const [viewing, setViewing] = useState<TallySyncEntry | null>(null);
@@ -149,7 +161,7 @@ export default function TallySyncPage() {
     const total = data?.total ?? 0;
     const truncated = total > entries.length;
 
-    const busy = retryingId !== null || releasingId !== null || resyncingAll;
+    const busy = retryingId !== null || releasingId !== null || dismissingId !== null || resyncingAll;
 
     /**
      * The all-clear, worded to cover exactly what was actually looked at.
@@ -197,6 +209,43 @@ export default function TallySyncPage() {
             setOutcomes((prev) => ({ ...prev, [entry.id]: { ok: false, message: resyncMessage(error) } }));
         } finally {
             setReleasingId(null);
+            await queryClient.invalidateQueries({ queryKey: ['tally-sync', 'entries'] });
+        }
+    }
+
+    /**
+     * Write a failed voucher off for good. Behind a confirm because it is
+     * the one action on this page that is meant to be final: "never sent to
+     * Tally" is a promise the backend then enforces (a dismissed voucher is
+     * invisible to the agent and refused by Resync), so the click deserves
+     * a plain-words pause rather than a silent state change.
+     */
+    function confirmDismiss(entry: TallySyncEntry) {
+        Modal.confirm({
+            title: `Dismiss ${voucherNumber(entry)}?`,
+            content:
+                'Are you sure? This voucher will NEVER be sent to Tally. It stays in this list as history, '
+                + 'but the agent can never collect it and Resync will refuse it. Use this for dead vouchers '
+                + '(demo data, duplicates) that must not reach the books.',
+            okText: 'Dismiss — never send',
+            okButtonProps: { danger: true },
+            cancelText: 'Keep it',
+            onOk: () => dismissOne(entry),
+        });
+    }
+
+    async function dismissOne(entry: TallySyncEntry) {
+        setDismissingId(entry.id);
+        try {
+            await dismissTallySyncEntry(entry.id);
+            setOutcomes((prev) => ({
+                ...prev,
+                [entry.id]: { ok: true, message: 'Dismissed — this voucher will never be sent to Tally.' },
+            }));
+        } catch (error) {
+            setOutcomes((prev) => ({ ...prev, [entry.id]: { ok: false, message: resyncMessage(error) } }));
+        } finally {
+            setDismissingId(null);
             await queryClient.invalidateQueries({ queryKey: ['tally-sync', 'entries'] });
         }
     }
@@ -512,6 +561,18 @@ export default function TallySyncPage() {
                                         >
                                             Resync
                                         </Button>
+                                    )}
+                                    {row.status === 'failed' && (
+                                        <Tooltip title="Write this voucher off — it will never be sent to Tally. For dead vouchers (demo data) that must not reach the books.">
+                                            <Button
+                                                size="small"
+                                                loading={dismissingId === row.id}
+                                                disabled={busy && dismissingId !== row.id}
+                                                onClick={() => confirmDismiss(row)}
+                                            >
+                                                Dismiss
+                                            </Button>
+                                        </Tooltip>
                                     )}
                                 </Space>
                             );

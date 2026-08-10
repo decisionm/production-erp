@@ -267,6 +267,7 @@ Route::prefix('v1')->group(function () {
             Route::middleware('module:tally-sync')->group(function () {
                 Route::get('entries', [TallySyncController::class, 'index']);
                 Route::post('entries/{tally_sync_entry}/retry', [TallySyncController::class, 'retry']);
+                Route::post('entries/{tally_sync_entry}/dismiss', [TallySyncController::class, 'dismiss']);
                 Route::post('entries/{tally_sync_entry}/release', [TallySyncController::class, 'release']);
 
                 Route::get('agent-tokens', [TallySyncAgentTokenController::class, 'index']);
@@ -644,6 +645,25 @@ Route::prefix('v1')->group(function () {
          */
         Route::prefix('production')->middleware('module:machine-master')->group(function () {
             Route::apiResource('work-centers', WorkCenterController::class)->only(['store', 'update']);
+        });
+
+        /*
+         * THE INTERNAL CARTON TRACE TIER (DEC-20260810-001). The same scan,
+         * a deeper answer: completion datetime, shift, day-bin lot
+         * attribution (GRN reference, inward date, rate) and the batch's
+         * costing rate — Owner, Plant Manager and Accounts logins only,
+         * never Supervisor, never the public lookup above.
+         *
+         * A SIBLING of the production group, same URL prefix, different
+         * permission — the machine-master pattern exactly, and for the same
+         * reason group middleware accumulates: nested inside
+         * module:production this route would demand production.view AND
+         * carton-trace.view, quietly coupling the internal tier to a module
+         * grant the decision never mentions. carton-trace.view alone is the
+         * gate, and PermissionSeeder hands it to exactly the named roles.
+         */
+        Route::prefix('production')->middleware('module:carton-trace')->group(function () {
+            Route::get('cartons/{cartonNo}/trace', [FinishedCartonController::class, 'trace']);
         });
 
         Route::prefix('maintenance')->middleware('module:maintenance')->group(function () {

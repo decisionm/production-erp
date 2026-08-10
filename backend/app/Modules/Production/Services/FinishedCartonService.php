@@ -2,9 +2,14 @@
 
 namespace App\Modules\Production\Services;
 
+use App\Modules\Inventory\Models\MaterialLot;
+use App\Modules\Production\Models\DayBinMovement;
 use App\Modules\Production\Models\Enums\BatchStatus;
+use App\Modules\Production\Models\Enums\DayBinMovementType;
 use App\Modules\Production\Models\FinishedCarton;
+use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -24,6 +29,25 @@ use Illuminate\Validation\ValidationException;
  */
 class FinishedCartonService
 {
+    /**
+     * The one sentence the day-bin attribution must never be shown without
+     * (DEC-20260810-001, and FC-01 behind it). It states the CALCULATED
+     * claim — the common day bin held loads from these lots during that
+     * production date and shift — and refuses the physical one: no bag and
+     * no lot ever belongs to a batch. Same discipline, same reason, as
+     * BagCostAllocationService::ALLOCATION_SENTENCE.
+     */
+    public const ATTRIBUTION_SENTENCE = 'The common day bin held loads from these lots during this production date and shift — a calculated attribution, costed at the resin pool\'s weighted average, never physical bag-to-batch identity';
+
+    public function __construct(
+        // The batch's costing rate for the internal tier — called, never
+        // reimplemented; its weighted-average arithmetic lives in one place.
+        private readonly BagCostAllocationService $costs,
+        // The lot-rate seam (FC-06: rates surface ONLY on the internal
+        // tier). Production's one door to Inventory's rate contract.
+        private readonly BagLotRateResolver $rates,
+    ) {}
+
     public function generateFor(ShiftProductionEntry $entry, ?int $userId): Collection
     {
         if ($entry->batch_status !== BatchStatus::Completed) {
@@ -123,5 +147,181 @@ class FinishedCartonService
         }
 
         return $carton;
+    }
+
+    /**
+     * THE INTERNAL TIER behind a carton scan (DEC-20260810-001): completion
+     * datetime, shift, day-bin lot attribution and the batch's costing rate.
+     * Served only through the carton-trace permission gate — Owner, Plant
+     * Manager and Accounts logins, an owner-worded widening of FC-06's rate
+     * scope for exactly this surface and no other. Nothing here may leak
+     * into the public lookup above, the label read, or a log line.
+     *
+     * @return array{
+     *     carton: FinishedCarton,
+     *     completion: array{completed_at: ?string, completed_on: ?string, shift: ?string},
+     *     day_bin_attribution: array<string, mixed>,
+     *     costing: array<string, mixed>,
+     * }
+     */
+    public function internalTrace(string $cartonNo): array
+    {
+        $carton = $this->lookup($cartonNo);
+        $entry = $carton->entry;
+
+        $completedAt = $entry->batchCompletedAt();
+
+        return [
+            'carton' => $carton,
+            'completion' => [
+                'completed_at' => $completedAt?->toIso8601String(),
+                // The factory's own calendar day for that instant — the app
+                // clock is UTC and a bare date would misfile every batch
+                // completed before 05:30 IST onto the previous day.
+                'completed_on' => $completedAt
+                    ?->setTimezone(config('tally-sync.factory_timezone'))
+                    ->toDateString(),
+                'shift' => $this->shiftFor($entry)?->name,
+            ],
+            'day_bin_attribution' => $this->dayBinAttribution($entry),
+            // withDetail: the pool rates behind the totals. This gate is the
+            // rate-bearing tier by the owner's word; everywhere else keeps
+            // the finance.view gate ShiftProductionEntryResource applies.
+            'costing' => $this->costs->summary($entry, withDetail: true),
+        ];
+    }
+
+    /**
+     * WHICH LOTS THE COMMON DAY BIN WAS LOADED FROM during this batch's
+     * production date and shift — the CALCULATED attribution, and only that
+     * (FC-01: a resin bag belongs to no machine and no batch, so this never
+     * claims which lot a batch burnt; it reports what the shared bin was
+     * fed while the batch's shift ran, priced per lot for provenance while
+     * the batch itself is costed at the pool's weighted average).
+     *
+     * The window is the shift's own wall-clock span on the entry's
+     * production date, read in the factory timezone (never a UTC calendar
+     * day): [start_time, end_time), end-exclusive so a load stamped at the
+     * exact handover instant belongs to the incoming shift. An overnight
+     * shift ends on the following calendar day — same convention as
+     * Shift::productionDateFor and ShiftVoucherReleaseGate.
+     *
+     * Loads recorded without a bag (the ledger permits them) cannot name a
+     * lot; their kilograms are reported under unattributed_loaded_kg rather
+     * than dropped — kg with no identity are still kg the bin was fed.
+     *
+     * @return array<string, mixed>
+     */
+    private function dayBinAttribution(ShiftProductionEntry $entry): array
+    {
+        $base = [
+            'basis' => self::ATTRIBUTION_SENTENCE,
+            'reason' => null,
+            'window' => null,
+            'lots' => [],
+            'unattributed_loaded_kg' => '0.0000',
+        ];
+
+        $shift = $this->shiftFor($entry);
+        $date = $entry->production_date?->toDateString();
+
+        if ($shift === null || $date === null) {
+            return [
+                ...$base,
+                'reason' => 'this batch no longer resolves a shift and production date, so the day-bin window cannot be reconstructed',
+            ];
+        }
+
+        $timezone = config('tally-sync.factory_timezone');
+        $from = CarbonImmutable::parse("{$date} {$shift->start_time}", $timezone);
+        $until = CarbonImmutable::parse("{$date} {$shift->end_time}", $timezone);
+        if ($shift->start_time > $shift->end_time) {
+            $until = $until->addDay();
+        }
+
+        $loads = DayBinMovement::query()
+            ->where('type', DayBinMovementType::Load->value)
+            ->where('recorded_at', '>=', $from->utc())
+            ->where('recorded_at', '<', $until->utc())
+            ->with([
+                'item' => fn ($relation) => $relation->withTrashed(),
+                // Read-only cross-module relations (the documented
+                // DayBinMovement/MaterialLot precedent) — lot and GRN
+                // writes stay behind Inventory and Procurement.
+                'materialBag.lot.grn',
+                'materialBag.lot.costVersions',
+            ])
+            ->orderBy('recorded_at')
+            ->get();
+
+        $byLot = [];
+        $unattributed = '0.0000';
+
+        foreach ($loads as $load) {
+            $lot = $load->materialBag?->lot;
+
+            if ($lot === null) {
+                $unattributed = bcadd($unattributed, (string) $load->quantity_kg, 4);
+
+                continue;
+            }
+
+            $byLot[$lot->id] ??= [
+                'lot' => $lot,
+                'material' => $load->item?->name,
+                'loaded_kg' => '0.0000',
+            ];
+            $byLot[$lot->id]['loaded_kg'] = bcadd($byLot[$lot->id]['loaded_kg'], (string) $load->quantity_kg, 4);
+        }
+
+        return [
+            ...$base,
+            'window' => [
+                'production_date' => $date,
+                'shift' => $shift->name,
+                'timezone' => $timezone,
+                'from' => $from->toIso8601String(),
+                'until' => $until->toIso8601String(),
+            ],
+            'lots' => array_values(array_map(
+                fn (array $row) => $this->lotAttribution($row['lot'], $row['material'], $row['loaded_kg']),
+                $byLot,
+            )),
+            'unattributed_loaded_kg' => $unattributed,
+        ];
+    }
+
+    /**
+     * One lot's provenance line: identity, GRN reference, inward date and
+     * the lot's own rate (with its source, so a reader knows whether an
+     * invoice has revised it since receipt). The rate appears HERE and on
+     * no other carton surface — FC-06, widened for this tier only.
+     *
+     * @return array<string, mixed>
+     */
+    private function lotAttribution(MaterialLot $lot, ?string $material, string $loadedKg): array
+    {
+        [$rate, $rateSource] = $this->rates->rateFor($lot);
+
+        return [
+            'material' => $material,
+            'supplier_lot_no' => $lot->supplier_lot_no,
+            'grn_reference' => $lot->grn?->reference,
+            'inward_date' => $lot->received_date?->toDateString(),
+            'rate_per_kg' => $rate,
+            'rate_source' => $rateSource,
+            'loaded_kg' => $loadedKg,
+        ];
+    }
+
+    /**
+     * The entry's shift, surviving a later soft delete: a retired shift
+     * master must not erase a batch's trace, so the trashed row is read
+     * when the live relation comes back empty.
+     */
+    private function shiftFor(ShiftProductionEntry $entry): ?Shift
+    {
+        return $entry->shift
+            ?? ($entry->shift_id !== null ? Shift::withTrashed()->find($entry->shift_id) : null);
     }
 }

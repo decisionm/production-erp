@@ -656,12 +656,13 @@ class TallySyncService
                     // no single entry. Members hang off tally_sync_entry_id.
                     'syncable_type' => (new Shift)->getMorphClass(),
                     'syncable_id' => $entry->shift_id,
-                    // The agent dispatches builders on this STRING, and the
-                    // builder registered as 'Manufacturing Journal' is the one
-                    // that emits the validated Stock Journal XML (its file
-                    // says so) — 'Stock Journal' as a label has no builder and
-                    // fails on the factory PC (entries #33/#34, 07-Aug demo).
-                    'tally_voucher_type' => 'Manufacturing Journal',
+                    // The voucher's own honest label (DEC-20260807-010). The
+                    // agent dispatches builders on this STRING: agents >= 0.3.5
+                    // carry a 'Stock Journal' builder; older agents fail it
+                    // with "No XML builder" (entries #33/#34, 07-Aug), which is
+                    // why this label flips ONLY after the factory agent is
+                    // confirmed >= 0.3.5 — merging early recreates that outage.
+                    'tally_voucher_type' => 'Stock Journal',
                     'payload' => $this->shiftVoucherPayload($joining, $number, $entry),
                     'status' => TallySyncStatus::Pending,
                     'attempts' => 0,
@@ -756,14 +757,12 @@ class TallySyncService
         $batches = $members->pluck('batch_number')->filter()->values();
 
         return [
-            // 'Manufacturing Journal' is the agent's dispatch key for the
-            // builder that posts a plain Stock Journal (see the enqueue-side
-            // comment); batch_number/godown complete that builder's payload
-            // contract. The voucher-level godown covers the produced lines —
-            // the builder reads per-line godowns for consumption only — and
-            // every member's completion books into the same FG store role,
-            // so the first member's warehouse speaks for all of them.
-            'voucher_type' => 'Manufacturing Journal',
+            // The honest label (see the enqueue-side comment on agent
+            // sequencing). batch_number/godown stay: the 0.3.5 Stock Journal
+            // builder uses the voucher-level godown as the fallback for any
+            // line without its own, and keeping the contract identical means
+            // a voucher regenerated across the flip changes only this label.
+            'voucher_type' => 'Stock Journal',
             'voucher_date' => $entry->production_date->toDateString(),
             'voucher_number' => $voucherNumber,
             'batch_number' => null,
@@ -900,6 +899,20 @@ class TallySyncService
             ]);
         }
 
+        // A dismissed voucher is dead by a human's explicit say-so — "will
+        // never be sent to Tally" is the promise the Dismiss confirmation
+        // made, and a Retry that could quietly resurrect it would turn that
+        // promise into a race between two buttons. It is not failed any
+        // more, so nothing on the dashboard offers Retry for it; this guard
+        // is for stale pages and other API clients.
+        if ($entry->status === TallySyncStatus::Dismissed) {
+            throw ValidationException::withMessages([
+                'entry' => "{$entry->voucherNumber()} was dismissed — it is never to be sent to Tally. "
+                    .'If it genuinely should post after all, that is a new decision: raise it with the owner '
+                    .'rather than re-queueing a voucher someone deliberately wrote off.',
+            ]);
+        }
+
         // REGENERATE, DON'T REPLAY. A failed voucher usually failed because
         // a mapping was wrong — the product had no Tally identity, a store
         // was unmapped — and Accounts has since FIXED the mapping. Replaying
@@ -936,6 +949,72 @@ class TallySyncService
             'tally_voucher_type' => is_string($payload['voucher_type'] ?? null)
                 ? $payload['voucher_type']
                 : $entry->tally_voucher_type,
+        ]);
+
+        return $entry;
+    }
+
+    /**
+     * Write a dead voucher off: it will NEVER be sent to Tally.
+     *
+     * DISMISS, NOT DELETE — nothing on this queue is ever erased. The row
+     * keeps its payload, its error and its attempt count, and the act itself
+     * lands in the resolution_log, so "what was this and why did nobody post
+     * it" stays answerable years later. What changes is the status: a
+     * dismissed voucher is invisible to pending() (the agent can never
+     * collect it) and refused by retry() (no button can resurrect it).
+     *
+     * Exists because "leave it failed forever" stopped being safe: a failed
+     * demo voucher is one stray Resync away from posting into the live books
+     * the moment the factory's Tally is open on the right company. Failed
+     * was never a terminal state — this is.
+     *
+     * Only a FAILED voucher can be dismissed. A pending one is on its way to
+     * the agent — the honest move there is to let the agent report first,
+     * not to change a voucher's fate while it may already be posting. And a
+     * voucher that ever reached Tally (synced_at set) is refused outright,
+     * same as retry(): the books already hold it, and a "dismissed" label
+     * over a posted voucher would be a lie the accountant acts on.
+     *
+     * @throws ValidationException
+     */
+    public function dismiss(TallySyncEntry $entry, ?int $userId = null): TallySyncEntry
+    {
+        if ($entry->isInTally()) {
+            $synced = $entry->synced_at?->format('d M Y H:i');
+
+            throw ValidationException::withMessages([
+                'entry' => "This voucher is already in Tally as {$entry->voucherNumber()}"
+                    .($synced !== null ? " (synced {$synced})" : '')
+                    .' — check Tally before anything else. Dismissing it here would hide a voucher that is really in the books.',
+            ]);
+        }
+
+        if ($entry->status !== TallySyncStatus::Failed) {
+            throw ValidationException::withMessages([
+                'entry' => "Only a failed voucher can be dismissed — {$entry->voucherNumber()} is {$entry->status->value}. "
+                    .'A voucher the agent may still be posting cannot be written off mid-flight; wait for its result first.',
+            ]);
+        }
+
+        // The act goes on the record in the same shape retry() writes, so
+        // one log tells the whole story in order: failed, retried, failed
+        // again, dismissed. error_message deliberately stays on the row —
+        // dismissal is not a repair, and the reason it failed is part of
+        // why it was written off.
+        $payload = $entry->payload;
+        $log = $payload['resolution_log'] ?? [];
+        $log[] = [
+            'at' => now()->toIso8601String(),
+            'by' => $userId,
+            'previous_error' => $entry->error_message,
+            'note' => 'Dismissed — will never be sent to Tally.',
+        ];
+        $payload['resolution_log'] = $log;
+
+        $entry->update([
+            'status' => TallySyncStatus::Dismissed,
+            'payload' => $payload,
         ]);
 
         return $entry;

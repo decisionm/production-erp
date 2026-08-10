@@ -3321,8 +3321,15 @@ export default function ShiftProductionEntryPage() {
         // Pouch standard has no per-run correction field — always the master's.
         const nosPerPouch = completingEntry.item.nos_per_pouch ?? null;
         const expected = expectedOutput(ct, cavities, hours, nosPerBox, nosPerPouch, settings?.packing_rounding);
-        const goodKg = nominalWeight && quantityProduced ? (quantityProduced * nominalWeight) / 1000 : null;
-        const rejProdKg = nominalWeight && quantityScrap ? (quantityScrap * nominalWeight) / 1000 : null;
+        // The grams these rows compute with are the grams the batch will POST
+        // with — the supervisor's corrected box first, then the snapshot/master
+        // norm; the same chain as effectiveResinGrams below. The panel once
+        // showed Production at the stale norm while the total honoured the
+        // correction (12.9 vs 12.0 on the '- 840' bottle, 10-Aug), and rows
+        // that disagree with their own sum cost the floor's trust in all of it.
+        const panelGrams = resinGramsWatch ?? nominalWeight ?? resinSuggestion.grams ?? null;
+        const goodKg = panelGrams && quantityProduced ? (quantityProduced * panelGrams) / 1000 : null;
+        const rejProdKg = panelGrams && quantityScrap ? (quantityScrap * panelGrams) / 1000 : null;
         const qcKg = qcRejectionWatch ?? null;
         const rejDiffKg = rejProdKg !== null && qcKg !== null ? rejProdKg - qcKg : null;
         const lumpsKg = lumpsKgLive;
@@ -3372,10 +3379,12 @@ export default function ShiftProductionEntryPage() {
             expected && expected.pieces > 0 && actualPieces !== null
                 ? Math.round((actualPieces / expected.pieces) * 1000) / 10
                 : null;
-        return { ct, cavities, hours, grossHours, downtimeMinutes, nosPerBox, nosPerPouch, expected, goodKg, rejProdKg, qcKg, rejDiffKg, lumpsKg, issuedKg, actualBoxes, actualPouches, actualPieces, efficiencyPct };
+        return { ct, cavities, hours, grossHours, downtimeMinutes, nosPerBox, nosPerPouch, expected, panelGrams, goodKg, rejProdKg, qcKg, rejDiffKg, lumpsKg, issuedKg, actualBoxes, actualPouches, actualPieces, efficiencyPct };
     }, [
         completingEntry,
         nominalWeight,
+        resinGramsWatch,
+        resinSuggestion,
         quantityProduced,
         quantityScrap,
         goodBoxesWatch,
@@ -8137,14 +8146,14 @@ export default function ShiftProductionEntryPage() {
                                 <ResultRow
                                     label="Production"
                                     value={`${fmtNum(results.goodKg)} kg`}
-                                    formula={`${quantityProduced} pcs × ${fmtNum(nominalWeight)} g ÷ 1000`}
+                                    formula={`${quantityProduced} pcs × ${fmtNum(results.panelGrams)} g ÷ 1000`}
                                 />
                             )}
                             {results.rejProdKg !== null && (
                                 <ResultRow
                                     label="Rejection (production)"
                                     value={`${fmtNum(results.rejProdKg)} kg`}
-                                    formula={`${quantityScrap} pcs × ${fmtNum(nominalWeight)} g ÷ 1000`}
+                                    formula={`${quantityScrap} pcs × ${fmtNum(results.panelGrams)} g ÷ 1000`}
                                 />
                             )}
                             {results.qcKg !== null && (

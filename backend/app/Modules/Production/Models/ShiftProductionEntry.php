@@ -9,6 +9,8 @@ use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
 use App\Modules\TallySync\Models\TallySyncEntry;
+use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -214,6 +216,48 @@ class ShiftProductionEntry extends Model
     public function materialConsumptions(): HasMany
     {
         return $this->hasMany(ShiftMaterialConsumption::class);
+    }
+
+    /**
+     * WHEN THIS BATCH'S STANDING COMPLETION WAS RECORDED — derived, because
+     * no column stamps it: every other lifecycle stage has its *_at
+     * (quality_checked_at, approved_at, …) but completeBatch writes none.
+     *
+     * The derivation is evidence, not guesswork: the consumption rows are
+     * created inside completeBatch's own transaction, and an amendment
+     * DELETES them before the corrected completion writes new ones
+     * (reverseCompletionEffects) — so the standing rows' newest created_at
+     * IS the write instant of the completion currently in force. After an
+     * amendment this therefore moves to the re-completion's instant, which
+     * is consistent with everything else about corrections here: the
+     * standing figures are always the latest calculation and only that.
+     *
+     * Null when the batch is not completed, or when a completion carried no
+     * material lines at all — a missing instant is reported missing, never
+     * approximated from updated_at (which every later approval rewrites).
+     *
+     * Memoized per model instance: the label read renders one batch's whole
+     * carton set off a single shared entry object, and the answer must not
+     * cost a query per box.
+     */
+    private bool $batchCompletedAtResolved = false;
+
+    private ?CarbonInterface $batchCompletedAtValue = null;
+
+    public function batchCompletedAt(): ?CarbonInterface
+    {
+        if (! $this->batchCompletedAtResolved) {
+            $this->batchCompletedAtResolved = true;
+
+            if ($this->batch_status === BatchStatus::Completed) {
+                $newest = $this->materialConsumptions()->max('created_at');
+                $this->batchCompletedAtValue = $newest !== null
+                    ? CarbonImmutable::parse($newest, 'UTC')
+                    : null;
+            }
+        }
+
+        return $this->batchCompletedAtValue;
     }
 
     /** The batch's packed cartons, each with a permanent scannable identity. */
