@@ -63,6 +63,12 @@ export async function retryTallySyncEntry(id: number): Promise<TallySyncEntry> {
     return data.data;
 }
 
+/** Write a dead voucher off — it will never be sent to Tally. 422 unless it is failed and never synced. */
+export async function dismissTallySyncEntry(id: number): Promise<TallySyncEntry> {
+    const { data } = await api.post<{ data: TallySyncEntry }>(`/tally-sync/entries/${id}/dismiss`);
+    return data.data;
+}
+
 /** The accountant's "Release now" on a held shift voucher (DEC-20260807-011). */
 export async function releaseTallySyncEntry(id: number): Promise<TallySyncEntry> {
     const { data } = await api.post<{ data: TallySyncEntry }>(`/tally-sync/entries/${id}/release`);

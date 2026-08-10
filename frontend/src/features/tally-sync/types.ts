@@ -1,4 +1,4 @@
-export type TallySyncStatus = 'pending' | 'synced' | 'failed';
+export type TallySyncStatus = 'pending' | 'synced' | 'failed' | 'dismissed';
 
 export interface TallySyncEntry {
     id: number;
@@ -32,8 +32,12 @@ export interface TallySyncEntry {
         releasable_at: string;
     } | null;
     created_at: string;
-    /** Repair history: each retry after a failure records the previous error. */
-    resolution_log?: { at: string; by: number | null; previous_error: string; note: string }[];
+    /**
+     * The voucher's whole story after a failure, in order: each retry
+     * records the previous error and the regeneration; a dismissal records
+     * the write-off ("will never be sent to Tally").
+     */
+    resolution_log?: { at: string; by: number | null; previous_error?: string | null; note: string }[];
     /** The exact place a recognised Tally refusal is fixed; null for unknown errors. */
     fix?: { sentence: string; path: string } | null;
 }
