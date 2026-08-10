@@ -28,7 +28,8 @@ happened again with DEC-20260807-001.., three branches deep, 07-Aug).
 DEC-20260807-014 is the granularity-flip execution record on main;
 PR #148's colliding -014 was re-minted as -015 at merge, per this rule.
 Q29-Q31 are claimed by open PR #155 (finance-pull discovery); Q32 by the
-report-down backdate PR (#159). New questions continue from Q33.
+report-down backdate PR (#159). Q33 is claimed by the packaging-Tally-identity
+branch (DEC-20260810-003). New questions continue from Q34.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 
@@ -386,3 +387,18 @@ block), so nothing is stuck — but every ASB-8 450ML run until this is
 answered carries a warning that may be crying wolf. **Blocks:** trusting
 the capability note on ASB-8 450ML runs; the machine-capability row's
 correction. *Open since 2026-08-10.*
+
+## Q33 · 200ML RA — the paper packs 490/box but the Tally item name says “520 Nos”
+
+The 07-Aug paper states 98/tray × 5 trays = 490/box for 200ML RA, and per
+DEC-20260810-003 a 490/box tray packaging variant now exists with its Tally
+identity deliberately UNSET. But the Tally catalogue's candidate item is
+named “B.200 Ml Round Pet Bottle Amber 18gms - 520 Nos” — a box count the
+paper contradicts. Either the item name is stale (Tally renames when the
+factory changes the pack), or a separate 490 item exists/should exist, or
+the paper's 490 is itself wrong. Only the owner can say which Tally item the
+490-tray packing posts as — he sets it himself in the packaging-identity
+edit UI once answered; nothing is guessed meanwhile (the variant falls back
+to the product's identity, labelled as such). **Blocks:** the 490-tray
+variant posting under its own name; nothing else — batches record normally.
+*Open since 2026-08-10.*
