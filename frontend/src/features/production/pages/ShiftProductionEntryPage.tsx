@@ -1137,6 +1137,7 @@ type CompleteBatchFormValues = z.infer<typeof completeBatchSchema>;
 const reportDownSchema = z.object({
     nature_of_problem: z.string().min(1, 'Describe the problem'),
     backdate: z.boolean().optional(),
+    date: z.string().optional(),
     time: z.string().optional(),
 });
 type ReportDownFormValues = z.infer<typeof reportDownSchema>;
@@ -1248,10 +1249,17 @@ function BackdateField({
     // moment (when a breakdown was reported, when it was fixed, ...), so
     // they omit this and get a single unlabeled time field as before.
     rangeEndFieldName,
+    // The 07-Aug paper taught this gap: "already happened" could reach any
+    // TIME but only today's DATE, so a breakdown from an earlier day's
+    // paper was unenterable. Modals whose API takes production_date pass a
+    // field name here and get a date picker (blank = today) beside the
+    // time; the others stay time-only.
+    dateFieldName,
 }: {
     control: any;
     backdateEnabled: boolean;
     rangeEndFieldName?: string;
+    dateFieldName?: string;
 }) {
     return (
         <Form.Item style={{ marginBottom: backdateEnabled ? 8 : 0 }}>
@@ -1266,6 +1274,22 @@ function BackdateField({
             />
             {backdateEnabled && (
                 <Space style={{ marginTop: 8, width: '100%' }}>
+                    {dateFieldName && (
+                        <Controller
+                            name={dateFieldName}
+                            control={control}
+                            render={({ field }) => (
+                                <DatePicker
+                                    placeholder="Date (today)"
+                                    // A breakdown cannot be reported for a day
+                                    // that has not happened.
+                                    disabledDate={(d) => d.isAfter(dayjs(), 'day')}
+                                    value={field.value ? dayjs(field.value) : null}
+                                    onChange={(_, dateString) => field.onChange((Array.isArray(dateString) ? dateString[0] : dateString) || undefined)}
+                                />
+                            )}
+                        />
+                    )}
                     <Controller
                         name="time"
                         control={control}
@@ -4502,11 +4526,19 @@ export default function ShiftProductionEntryPage() {
     const reportDownMutation = useMutation({
         mutationFn: (values: ReportDownFormValues) => {
             if (!reportingDownMachine || !effectiveShiftId) throw new Error('Missing machine or shift');
+            // A backdated report may name an earlier production date (the
+            // 07-Aug paper's "given drying" rows arrived days late); the
+            // picked date rides both the ledger date and the timestamp, so
+            // the two can never disagree. Blank date = today, as before.
+            const backdatedDate = values.backdate ? values.date : undefined;
             return openDowntimeLog({
                 nature_of_problem: values.nature_of_problem,
                 work_center_id: reportingDownMachine.id,
                 shift_id: effectiveShiftId,
-                from_time: values.backdate && values.time ? combineWithToday(today, values.time) : undefined,
+                production_date: backdatedDate,
+                from_time: values.backdate && values.time
+                    ? combineWithToday(backdatedDate ?? today, values.time)
+                    : undefined,
             });
         },
         onSuccess: () => {
@@ -8190,7 +8222,7 @@ export default function ShiftProductionEntryPage() {
                             render={({ field }) => <Input {...field} size="large" placeholder="e.g. Heater fault" autoFocus />}
                         />
                     </Form.Item>
-                    <BackdateField control={reportDownForm.control} backdateEnabled={!!reportDownBackdate} />
+                    <BackdateField control={reportDownForm.control} backdateEnabled={!!reportDownBackdate} dateFieldName="date" />
                 </Form>
             </Modal>
 
