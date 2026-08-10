@@ -1883,6 +1883,13 @@ export interface StandardPackaging {
     trays_per_box: number | null;
     nos_per_box: number | null;
     is_default: boolean;
+    /**
+     * Whether the row can actually run a batch: pieces per box plus its
+     * mode's inner count, both stated. A half-stated workbook row (item
+     * 423's "120/pouch, boxes not stated") is display data — the picker
+     * disables it, and the server refuses to resolve it either way.
+     */
+    is_complete: boolean;
 }
 
 /**

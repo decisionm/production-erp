@@ -208,6 +208,10 @@ class BatchPreviewController extends Controller
                         'nos_per_pouch' => $p->nos_per_pouch, 'pouches_per_box' => $p->pouches_per_box,
                         'nos_per_tray' => $p->nos_per_tray, 'trays_per_box' => $p->trays_per_box,
                         'nos_per_box' => $p->nos_per_box, 'is_default' => $p->is_default,
+                        // A half-stated workbook row is shown but not
+                        // runnable — the picker disables it, and the
+                        // resolver above refuses it either way.
+                        'is_complete' => $p->isComplete(),
                     ])->values(),
                 ])->values(),
                 'packaging' => $packaging === null ? null : [
@@ -223,13 +227,25 @@ class BatchPreviewController extends Controller
                 // one startBatch records against the batch. Without it the
                 // preview would warn off the mould's figure and disagree with
                 // the batch it is previewing.
-                'warnings' => $this->standards->warningsFor(
-                    $standard,
-                    $packaging,
-                    $item->id,
-                    $workCenter?->id,
-                    $data['active_cavities'] ?? $configuration?->default_cavities ?? $standard?->cavities,
-                ),
+                'warnings' => [
+                    ...$this->standards->warningsFor(
+                        $standard,
+                        $packaging,
+                        $item->id,
+                        $workCenter?->id,
+                        $data['active_cavities'] ?? $configuration?->default_cavities ?? $standard?->cavities,
+                    ),
+                    // A duplicate approved machine setting also applying to
+                    // this run: the resolver's pick is deterministic, but a
+                    // pick nobody was told about is still a silent choice —
+                    // this names it (and its cure) on the screen that shows
+                    // the figures it decided.
+                    ...array_filter([
+                        $workCenter !== null
+                            ? $this->configurations->overlapWarningFor($workCenter->id, $item->id)
+                            : null,
+                    ]),
+                ],
             ],
         ]);
     }

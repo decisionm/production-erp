@@ -77,6 +77,7 @@ import {
     readStockShortfalls,
 } from '@/features/production/types';
 import { currentShift, justEndedShift, productionDateFor } from '@/features/production/shiftClock';
+import { cavityPrefill } from '@/features/production/startBatchCavities';
 import { roundPer, useProductionSettings } from '@/features/production/packing';
 import { itemLabel } from '@/lib/itemLabel';
 import {
@@ -1935,10 +1936,16 @@ export default function ShiftProductionEntryPage() {
     // choice made for one product is meaningless for the next.
     const [selectedStandardId, setSelectedStandardId] = useState<number | undefined>();
     const [selectedPackagingId, setSelectedPackagingId] = useState<number | undefined>();
+    // Which standard the cavity prefill below has already written for — one
+    // write per standard, so a supervisor's manual edit is never overwritten
+    // by the preview refetch that edit itself triggers. Cleared with the
+    // selections: a new product prefills afresh.
+    const prefilledStandardRef = useRef<number | null>(null);
     useEffect(() => {
         if (pendingStartBatchResumeRef.current?.item_id === startItemId) return;
         setSelectedStandardId(undefined);
         setSelectedPackagingId(undefined);
+        prefilledStandardRef.current = null;
     }, [startItemId]);
 
     const startWarehouseId = startForm.watch('warehouse_id');
@@ -2007,24 +2014,34 @@ export default function ShiftProductionEntryPage() {
     // Imported factory standards live on production_standards, while the
     // legacy item-master cavity may be empty. Once the server resolves the
     // exact standard for this run, use that cavity as the editable default.
-    // Primitive dependencies keep a supervisor's later manual edit intact;
-    // the effect reruns only when the product/standard itself changes.
-    const resolvedStartCavities =
-        batchPreview?.standard?.cavities ?? startItem?.standard_cavities ?? undefined;
+    //
+    // The decision itself lives in startBatchCavities.ts because it sits
+    // inside a feedback cycle: active_cavities is part of the batch-preview
+    // queryKey, so writing it here refetches the very preview this effect
+    // reads. The extracted rules — never write from an in-flight preview,
+    // and one write per resolved standard (the ref below) — are what keep
+    // that cycle at a fixed point. Their absence was the item-423 white
+    // screen (React #185): standard and item master disagreed on cavities,
+    // and each write flipped the preview between cached-loaded and
+    // in-flight, alternating the two figures forever.
     useEffect(() => {
-        if (!startingMachine || !startItemId || resolvedStartCavities === undefined) return;
+        if (!startingMachine || !startItemId) return;
         if (pendingStartBatchResumeRef.current?.item_id === startItemId) return;
-        if (selectedStandardId && batchPreview?.standard?.id !== selectedStandardId) return;
 
-        startForm.setValue('active_cavities', resolvedStartCavities);
-    }, [
-        batchPreview?.standard?.id,
-        resolvedStartCavities,
-        selectedStandardId,
-        startForm,
-        startItemId,
-        startingMachine,
-    ]);
+        const write = cavityPrefill({
+            previewLoaded: batchPreview !== undefined,
+            previewStandard: batchPreview?.standard
+                ? { id: batchPreview.standard.id, cavities: batchPreview.standard.cavities }
+                : null,
+            selectedStandardId: selectedStandardId ?? null,
+            itemStandardCavities: startItem?.standard_cavities ?? null,
+            lastAppliedStandardId: prefilledStandardRef.current,
+        });
+        if (write === null) return;
+
+        prefilledStandardRef.current = write.standardId;
+        startForm.setValue('active_cavities', write.value);
+    }, [batchPreview, selectedStandardId, startForm, startItem, startItemId, startingMachine]);
 
     // Restore a Start Batch draft after the supervisor creates/cancels a BOM.
     // Query parameters are only a transport: every id is checked against the
@@ -2168,6 +2185,12 @@ export default function ShiftProductionEntryPage() {
                     'The previously selected packaging option is no longer available; select it again.';
             }
         }
+
+        // The draft's cavities are the supervisor's reviewed figures. Marking
+        // the restored standard as already-prefilled stops the cavity-prefill
+        // effect from overwriting them when the next preview lands.
+        prefilledStandardRef.current =
+            restoredStandard?.id ?? pendingStartBatchResume.standard_id ?? batchPreview.standard?.id ?? null;
 
         setPendingStartBatchResume(null);
         pendingStartBatchResumeRef.current = null;
@@ -5692,7 +5715,15 @@ export default function ShiftProductionEntryPage() {
                                     optionType="button"
                                     buttonStyle="solid"
                                     size="large"
-                                    options={chosen.packagings.map((p) => ({ value: p.id, label: p.label }))}
+                                    // A half-stated workbook row is shown, not offered:
+                                    // the server refuses to resolve it, so a pickable
+                                    // button here would be a choice that silently
+                                    // doesn't take.
+                                    options={chosen.packagings.map((p) => ({
+                                        value: p.id,
+                                        label: p.is_complete ? p.label : `${p.label} — incomplete in workbook`,
+                                        disabled: !p.is_complete,
+                                    }))}
                                 />
                             </Form.Item>
                         );

@@ -77,6 +77,16 @@ class ProductionStandardResolver
      * The packaging option for a run: the one chosen, else the default, else
      * the only one. Null when the standard offers several and none is
      * marked default — the caller must ask.
+     *
+     * Only COMPLETE rows resolve — see
+     * ProductionStandardPackaging::isComplete(). A half-stated workbook row
+     * (item 423's "120 per pouch, boxes not stated") used to be adopted just
+     * for being the only row, handing the run a pouch figure with no carton
+     * behind it. Returning null instead degrades exactly like the
+     * cross-item standard id above: the estimation falls back to the item
+     * master's packing, and warningsFor() says so in so many words. An
+     * EXPLICITLY chosen incomplete id gets the same null — a stale client
+     * must not do what the picker no longer offers.
      */
     public function resolvePackaging(?ProductionStandard $standard, ?int $packagingId = null): ?ProductionStandardPackaging
     {
@@ -84,15 +94,19 @@ class ProductionStandardResolver
             return null;
         }
 
+        $complete = $standard->packagings->filter(
+            fn (ProductionStandardPackaging $packaging) => $packaging->isComplete(),
+        );
+
         if ($packagingId !== null) {
-            return $standard->packagings->firstWhere('id', $packagingId);
+            return $complete->firstWhere('id', $packagingId);
         }
 
-        if ($standard->packagings->count() === 1) {
-            return $standard->packagings->first();
+        if ($complete->count() === 1) {
+            return $complete->first();
         }
 
-        return $standard->packagings->firstWhere('is_default', true);
+        return $complete->firstWhere('is_default', true);
     }
 
     /**
@@ -138,8 +152,22 @@ class ProductionStandardResolver
             $warnings[] = ['code' => 'standard_unresolved', 'message' => (string) $standard->unresolved_reason];
         }
 
-        if ($packaging === null && $standard->packagings->count() > 1) {
-            $warnings[] = ['code' => 'packaging_choice_required', 'message' => 'This product can be packed more than one way — choose pouch or tray.'];
+        if ($packaging === null && $standard->packagings->isNotEmpty()) {
+            $complete = $standard->packagings->filter(
+                fn (ProductionStandardPackaging $row) => $row->isComplete(),
+            );
+
+            if ($complete->isEmpty()) {
+                // The workbook row exists but cannot run a batch. Say which
+                // figures the run is actually using — the fix is in the
+                // workbook (Import tab), not on this screen.
+                $warnings[] = [
+                    'code' => 'packaging_incomplete',
+                    'message' => 'The workbook packing row for this product is incomplete (pieces per box missing) — this run uses the item master\'s packing instead. Correct it in the workbook and re-import.',
+                ];
+            } elseif ($complete->count() > 1) {
+                $warnings[] = ['code' => 'packaging_choice_required', 'message' => 'This product can be packed more than one way — choose pouch or tray.'];
+            }
         }
 
         if ($standard->unit_weight_grams === null) {

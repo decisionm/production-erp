@@ -7,6 +7,7 @@ use App\Modules\Production\Models\Enums\ConfigurationStatus;
 use App\Modules\Production\Models\ProductionConfiguration;
 use App\Modules\Production\Models\WorkCenter;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -88,6 +89,28 @@ class ProductionConfigurationService
     {
         $date = $on ?? now()->toDateString();
 
+        return $this->applicableQuery($workCenterId, $itemId, $moldId, $colour, $date)->first();
+    }
+
+    /**
+     * EVERY approved configuration that applies to the intended run, in
+     * resolution order — resolve() above is ->first() of this list. Public
+     * so the batch preview can see when the deterministic pick had rivals:
+     * a run that silently used one of two applicable settings is the same
+     * defect the #62/#63 tiebreak fixed, minus the nondeterminism.
+     *
+     * @return Collection<int, ProductionConfiguration>
+     */
+    public function applicableFor(int $workCenterId, int $itemId, ?int $moldId = null, ?string $colour = null, ?string $on = null): Collection
+    {
+        $date = $on ?? now()->toDateString();
+
+        return $this->applicableQuery($workCenterId, $itemId, $moldId, $colour, $date)->get();
+    }
+
+    /** @return Builder<ProductionConfiguration> */
+    private function applicableQuery(int $workCenterId, int $itemId, ?int $moldId, ?string $colour, string $date)
+    {
         return ProductionConfiguration::query()
             ->with(['item', 'mold', 'bom.lines.component'])
             ->where('work_center_id', $workCenterId)
@@ -120,8 +143,54 @@ class ProductionConfigurationService
             // approved_at first because that is the revision's own date;
             // id last so the ordering is total and can never tie again.
             ->orderByDesc('approved_at')
-            ->orderByDesc('id')
-            ->first();
+            ->orderByDesc('id');
+    }
+
+    /**
+     * A "you should know" for the batch preview: the resolved configuration
+     * had a true DUPLICATE — another approved row of the SAME specificity
+     * (same mould and colour qualification) that also applies today — so the
+     * winner was picked by the tiebreak, not by anyone's decision.
+     *
+     * Deliberately silent about a general row losing to a qualified one:
+     * that is the designed override (an Amber setting beating the general
+     * setting is the feature working), and warning on it would fire on
+     * every legitimately qualified run — wallpaper, which is how the one
+     * warning that matters stops being read.
+     *
+     * @return ?array{code: string, message: string}
+     */
+    public function overlapWarningFor(int $workCenterId, int $itemId, ?int $moldId = null, ?string $colour = null, ?string $on = null): ?array
+    {
+        $applicable = $this->applicableFor($workCenterId, $itemId, $moldId, $colour, $on);
+        $winner = $applicable->first();
+
+        if ($winner === null) {
+            return null;
+        }
+
+        $rivals = $applicable->filter(
+            fn (ProductionConfiguration $row) => $row->id !== $winner->id
+                && $row->mold_id === $winner->mold_id
+                && $row->colour === $winner->colour,
+        );
+
+        if ($rivals->isEmpty()) {
+            return null;
+        }
+
+        $ids = $rivals->map(fn (ProductionConfiguration $row) => "#{$row->id}")->implode(', ');
+        $figuresDiffer = $rivals->contains(
+            fn (ProductionConfiguration $row) => $row->default_cavities !== $winner->default_cavities
+                || (string) $row->default_cycle_time !== (string) $winner->default_cycle_time,
+        );
+
+        return [
+            'code' => 'configuration_overlap',
+            'message' => $figuresDiffer
+                ? "Two approved machine settings both apply to this product here, with different figures — the newest (#{$winner->id}: {$winner->default_cavities} cavities, CT {$winner->default_cycle_time}) is in use. Retire the duplicate ({$ids}) so the run is measured against one agreed standard."
+                : "Duplicate approved machine settings both apply to this product here ({$ids}) — the newest (#{$winner->id}) is in use. Retire the duplicates.",
+        ];
     }
 
     /**
