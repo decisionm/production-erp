@@ -21,6 +21,7 @@ import {
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { listAllWarehouses } from '@/features/inventory/api';
+import PackingMaterialsTab from '@/features/production/components/PackingMaterialsTab';
 import ProductStandardsPage from '@/features/production/pages/ProductStandardsPage';
 import { hasManageAccess } from '@/features/auth/permissions';
 import { useAuthStore } from '@/features/auth/store';
@@ -66,7 +67,7 @@ import type { DowntimeReason, ImportResult, WorkCenter } from '@/features/produc
  * missing?"). `machines` is still addressable by name, which is what the
  * retired /production/work-centers URL redirects to.
  */
-const TAB_KEYS = ['products', 'machines', 'downtime', 'settings', 'import'] as const;
+const TAB_KEYS = ['products', 'machines', 'packing', 'downtime', 'settings', 'import'] as const;
 type TabKey = (typeof TAB_KEYS)[number];
 const DEFAULT_TAB: TabKey = 'products';
 
@@ -101,6 +102,12 @@ export default function ProductionConfigurationPage() {
                 items={[
                     { key: 'products', label: 'Product Standards', children: <ProductStandardsPage embedded /> },
                     { key: 'machines', label: 'Machines & Capabilities', children: <MachinesTab /> },
+                    // The packing-material master's own screen. Until it
+                    // existed the only control over "which Tally item is this
+                    // spec" was the completion drawer's per-batch picker,
+                    // which saves nothing — a wrong mapping was visible on
+                    // every voucher and correctable on none.
+                    { key: 'packing', label: 'Packing Materials', children: <PackingMaterialsTab /> },
                     { key: 'downtime', label: 'Downtime Reasons', children: <DowntimeReasonsTab /> },
                     { key: 'settings', label: 'Factory Rules', children: <SettingsTab /> },
                     { key: 'import', label: 'Import from Workbook', children: <ImportTab /> },
