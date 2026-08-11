@@ -145,11 +145,20 @@ jobs:
       #
       # Uses the OLD code still on the server — deliberately no --render, so
       # this cannot depend on a view that only arrives with the rsync below.
+      # --retry is the Retry-After the closed app sends back. It must exceed a
+      # WHOLE server-side deploy (composer + dump + migrate + seeders + four
+      # cache rebuilds ~ 90s on 11-Aug, and a slow one is longer), or a client
+      # honouring it retries into an app that is still closed. 300 is loose on
+      # purpose — nothing is harmed by a client waiting slightly too long.
+      #
+      # `id` so the explainer below can tell "closed, then something failed"
+      # from "never closed at all" — those need opposite instructions.
       - name: Enter maintenance mode
+        id: maintenance
         run: |
           ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "cd '${{ secrets.DEPLOY_PATH }}/backend' && /opt/alt/php84/usr/bin/php artisan down --retry=60"
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && /opt/alt/php84/usr/bin/php artisan down --retry=300"
 
       # NOTE ON --exclude='storage/': it is LOAD-BEARING for the maintenance
       # window above. `artisan down` writes storage/framework/down and
@@ -181,7 +190,11 @@ jobs:
       # The app is DOWN at this point and stays down on purpose. Say so loudly:
       # the previous failure mode was a green-looking server quietly serving a
       # half-migrated instance, and a 503 nobody explains is its own incident.
-      - name: Explain a deploy that stopped with the app closed
-        if: failure()
+      - name: Explain a deploy that stopped after the gate
+        if: failure() && steps.maintenance.outcome != 'skipped'
         run: |
-          echo "::error::The app is in MAINTENANCE MODE and has been left that way deliberately — it is serving 503, not broken writes. The code was synced but the server-side step did not finish, so the schema may not match it. DO NOT bring it up blind. Read the failing step above: if 'artisan migrate' failed, the pre-migration backup was already taken and is named in the log (../backups/erp-db-*.sql). Fix the cause, re-run this workflow (it is idempotent and will take a fresh backup), and the deploy will bring the app back up itself. Only if you must reopen without migrating: cd <DEPLOY_PATH>/backend && php artisan up — that reopens the app on code whose schema has NOT been migrated, which is exactly the state this step exists to prevent."
+          if [ "${{ steps.maintenance.outcome }}" = "success" ]; then
+            echo "::error::The app is in MAINTENANCE MODE and has been left that way deliberately — it is serving 503, not broken writes. The code was synced but the server-side step did not finish, so the schema may not match it. DO NOT bring it up blind. Read the failing step above: if 'artisan migrate' failed, the pre-migration backup was already taken and is named in the log (../backups/erp-db-*.sql). Fix the cause, re-run this workflow (it is idempotent and will take a fresh backup), and the deploy will bring the app back up itself. Only if you must reopen without migrating: cd <DEPLOY_PATH>/backend && php artisan up — that reopens the app on code whose schema has NOT been migrated, which is exactly the state this step exists to prevent."
+          else
+            echo "::error::The deploy stopped AT the maintenance step, so the app was never closed: it is still UP and serving the PREVIOUS release, and nothing was copied to the server. This is the safe direction — it fails before the rsync rather than half-deploying. Usual causes: the PHP binary path in that step is wrong for this host (it is pinned to /opt/alt/php84/usr/bin/php and a host PHP upgrade can move it), SSH answered but the app cannot boot, or .env is unreadable. Fix the cause and re-run; no 'artisan up' is needed because no 'artisan down' ever ran."
+          fi
