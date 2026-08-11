@@ -128,6 +128,35 @@ jobs:
           fi
           printf '%s\n' "$keys" >> ~/.ssh/known_hosts
 
+      # --- Close the app BEFORE the code changes underneath it ---------------
+      #
+      # The window this closes is real and was paid for on 11-Aug-2026: the
+      # rsync below succeeded, `artisan migrate` then died on a transient DB
+      # refusal, and live sat on NEW CODE with the OLD SCHEMA. Reads degraded
+      # silently (Eloquent returns null for a column that is not there) while
+      # every write touching a new column would have thrown — completing a
+      # batch, saving a packing option. Nothing rolled back on its own.
+      #
+      # So the app goes down before the first byte moves and comes back up
+      # only after migrations have actually succeeded (the `artisan up` at the
+      # end of scripts/deploy.sh, which `set -e` skips on any failure). A
+      # deploy that breaks now leaves a 503, not a half-migrated instance
+      # serving broken writes to the floor.
+      #
+      # Uses the OLD code still on the server — deliberately no --render, so
+      # this cannot depend on a view that only arrives with the rsync below.
+      - name: Enter maintenance mode
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && /opt/alt/php84/usr/bin/php artisan down --retry=60"
+
+      # NOTE ON --exclude='storage/': it is LOAD-BEARING for the maintenance
+      # window above. `artisan down` writes storage/framework/down and
+      # storage/framework/maintenance.php, so excluding storage/ is what keeps
+      # the app closed ACROSS this --delete rsync. Removing that exclusion
+      # would reopen the app mid-deploy, on new code and an unmigrated schema.
+      # Do not "tidy" it away.
       - name: Rsync backend to server
         run: |
           rsync -az --delete \
@@ -148,3 +177,11 @@ jobs:
           ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
             "cd '${{ secrets.DEPLOY_PATH }}/backend' && bash scripts/deploy.sh"
+
+      # The app is DOWN at this point and stays down on purpose. Say so loudly:
+      # the previous failure mode was a green-looking server quietly serving a
+      # half-migrated instance, and a 503 nobody explains is its own incident.
+      - name: Explain a deploy that stopped with the app closed
+        if: failure()
+        run: |
+          echo "::error::The app is in MAINTENANCE MODE and has been left that way deliberately — it is serving 503, not broken writes. The code was synced but the server-side step did not finish, so the schema may not match it. DO NOT bring it up blind. Read the failing step above: if 'artisan migrate' failed, the pre-migration backup was already taken and is named in the log (../backups/erp-db-*.sql). Fix the cause, re-run this workflow (it is idempotent and will take a fresh backup), and the deploy will bring the app back up itself. Only if you must reopen without migrating: cd <DEPLOY_PATH>/backend && php artisan up — that reopens the app on code whose schema has NOT been migrated, which is exactly the state this step exists to prevent."

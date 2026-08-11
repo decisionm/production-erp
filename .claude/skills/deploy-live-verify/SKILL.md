@@ -36,8 +36,42 @@ the sequence is what keeps a bad deploy from reaching a running shift.
 protection banning the runner IP. It fails BEFORE touching anything.
 Wait several minutes, re-run. Never "fix" it by weakening the check.
 
+**It is a ban, not a flake, and retrying inside the window EXTENDS it.**
+Every SSH-using workflow shares the ban: deploy, read-server-log,
+tally-sync-status, every master-data workflow. Paid for on 11-Aug-2026
+twice in one night — a deploy re-run ~2 minutes after the first attempt,
+then read-server-log fired ~3 minutes after the deploy's own SSH session.
+Both were banned; the cost was ~20 minutes with live in a bad state.
+
+Rules that follow:
+- After ANY workflow that opens SSH, wait **~10 minutes** before opening
+  another — including a retry of the one that just failed, and including
+  the read-only ones.
+- Measure the cooldown from the last SSH ATTEMPT, successful or not, not
+  from when you noticed. Convert the timestamps properly: run logs are UTC,
+  the factory clock is IST (+05:30). Mis-converting is how the second ban
+  happened.
+- A green deploy still counts as an SSH session. Do not chase it
+  immediately with a log read.
+
+## Deploying is a window, not an instant
+
+The workflow closes the app (`artisan down`) BEFORE the rsync and reopens it
+(`artisan up`, last line of `scripts/deploy.sh`) only after migrations
+succeed. If a deploy fails, **the app is left DOWN on purpose** — read the
+failure, fix, re-run (idempotent, takes a fresh backup). Do not `artisan up`
+by hand to "restore service": that reopens the floor onto code whose schema
+never migrated, which is the exact incident the window exists to prevent
+(11-Aug-2026: rsync succeeded, migrate died on a transient DB refusal, live
+served new code on the old schema — reads degraded silently, writes would
+have thrown).
+
 ## Never
 
 - Deploy or run write=true with failing tests or an unread dry run.
 - Chain live workflow writes back-to-back without cooldown (that is what
   triggers the SSH ban).
+- Re-trigger a live workflow inside the brute-force window.
+- Treat a green CI run as a green deploy — they are different workflows.
+  Check the run named "Deploy to Hostinger", and check the migrate step's
+  own output, not just the tick.
