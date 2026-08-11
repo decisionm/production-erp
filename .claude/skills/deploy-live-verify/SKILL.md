@@ -66,6 +66,48 @@ never migrated, which is the exact incident the window exists to prevent
 served new code on the old schema — reads degraded silently, writes would
 have thrown).
 
+**Know what the window costs before you use it.** Because `deploy.sh` runs
+under `set -euo pipefail` and `artisan up` is its last line, EVERY failure
+after the app closes leaves it closed — not just a failed migration.
+`composer install` hitting a packagist flake, `view:cache` tripping on a
+Blade error in an unrelated template, `config:cache`, `route:cache`, the
+`sed -i` .env write: all of them now end with the floor at 503. That is the
+deliberate trade (a 503 beats broken writes), but it means a deploy is an
+operational act, not a background one — do not start one you are not present
+to finish.
+
+### Reopening when SSH is banned — the recovery that needs no SSH
+
+`artisan up` does exactly two things: delete `storage/framework/down` and
+`storage/framework/maintenance.php`. **Deleting those two files in hPanel's
+file manager is equivalent, and needs no SSH at all.**
+
+This matters because the two failures compose badly: if the IP ban trips
+after the app is closed, the runner cannot reconnect AND re-running is what
+extends the ban. Without this, the factory is offline for the ban window
+plus the cooldown; with it, two minutes.
+
+Use it ONLY when the rsync did not land — i.e. the schema was never touched.
+Reopening after a partial deploy puts the floor on code whose migrations
+never ran. The workflow's failure annotation tells you which case you are in.
+
+### One known consequence of the 503 window, not yet fixed
+
+During the window every route returns 503, including the Tally agent's.
+The agent is safe against the obvious hazards — a failed poll just aborts
+the cycle, and it journals `posted` BEFORE acknowledging, so there is no
+double-post and no false FAILED. But if Tally *rejects* an entry while the
+window is open, the agent's report of that rejection is swallowed by the
+503: the entry stays `pending` with `delivered_at` set, and every later
+cycle refuses it, logged once and silent thereafter. It never reaches the
+dashboard's failed list, so nobody knows to retry it.
+
+Adding the agent routes to the maintenance `$except` list would be the WRONG
+fix — `/ack` and `/fail` write to a possibly-unmigrated schema, which is the
+whole point of the window. The fix belongs in the agent. Until then: after
+any deploy whose window overlapped a sync cycle, check the queue for a
+pending entry with `delivered_at` set and no progress.
+
 ## Never
 
 - Deploy or run write=true with failing tests or an unread dry run.

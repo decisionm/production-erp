@@ -128,6 +128,26 @@ jobs:
           fi
           printf '%s\n' "$keys" >> ~/.ssh/known_hosts
 
+          # --- SSH connection multiplexing: THREE authenticated sessions -> ONE ---
+          #
+          # This host runs brute-force protection that bans the runner IP for
+          # rapid consecutive SSH sessions (see the deploy-live-verify skill:
+          # two bans in one night on 11-Aug-2026). The deploy authenticates
+          # three times — maintenance, rsync, deploy.sh — and adding the
+          # maintenance step made that risk MATERIAL rather than merely untidy:
+          # a ban tripping AFTER the app is closed but BEFORE the rsync would
+          # strand the factory at 503, with the runner unable to reconnect and
+          # the sanctioned recovery (re-run) being the very thing that extends
+          # the ban.
+          #
+          # ControlMaster makes the first connection carry the other two over
+          # the same TCP session, so the deploy authenticates ONCE — fewer
+          # connections than before this window existed. Every ssh/rsync below
+          # must pass $SSH_MUX or it opens its own session and the guarantee is
+          # gone.
+          mkdir -p ~/.ssh/cm
+          echo "SSH_MUX=-o ControlMaster=auto -o ControlPath=$HOME/.ssh/cm/%r@%h:%p -o ControlPersist=600" >> "$GITHUB_ENV"
+
       # --- Close the app BEFORE the code changes underneath it ---------------
       #
       # The window this closes is real and was paid for on 11-Aug-2026: the
@@ -143,8 +163,16 @@ jobs:
       # deploy that breaks now leaves a 503, not a half-migrated instance
       # serving broken writes to the floor.
       #
-      # Uses the OLD code still on the server — deliberately no --render, so
-      # this cannot depend on a view that only arrives with the rsync below.
+      # Uses the OLD code still on the server. `--render` pre-renders the 503 at
+      # down time and bakes the HTML into storage/framework/down, so
+      # maintenance.php serves it with ZERO framework boot — which matters
+      # because `composer install --no-dev` is actively rewriting vendor/ during
+      # the window, and a 503 that needs a full boot out of a half-rewritten
+      # tree returns a PHP fatal 500 instead. `|| ...` falls back to a plain
+      # `down` for the one deploy where the view is not on the server yet.
+      # Note the limit: maintenance.php short-circuits HTML only, so JSON
+      # clients (the SPA's API calls, the Tally agent) boot either way.
+      #
       # --retry is the Retry-After the closed app sends back. It must exceed a
       # WHOLE server-side deploy (composer + dump + migrate + seeders + four
       # cache rebuilds ~ 90s on 11-Aug, and a slow one is longer), or a client
@@ -156,9 +184,9 @@ jobs:
       - name: Enter maintenance mode
         id: maintenance
         run: |
-          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+          ssh $SSH_MUX -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "cd '${{ secrets.DEPLOY_PATH }}/backend' && /opt/alt/php84/usr/bin/php artisan down --retry=300"
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && { /opt/alt/php84/usr/bin/php artisan down --render=errors::503 --retry=300 || /opt/alt/php84/usr/bin/php artisan down --retry=300; }"
 
       # NOTE ON --exclude='storage/': it is LOAD-BEARING for the maintenance
       # window above. `artisan down` writes storage/framework/down and
@@ -169,7 +197,7 @@ jobs:
       - name: Rsync backend to server
         run: |
           rsync -az --delete \
-            -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }}" \
+            -e "ssh $SSH_MUX -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }}" \
             --exclude='.env' \
             --exclude='.git/' \
             --exclude='vendor/' \
@@ -183,18 +211,31 @@ jobs:
 
       - name: Run server-side deploy tasks
         run: |
-          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+          ssh $SSH_MUX -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
             "cd '${{ secrets.DEPLOY_PATH }}/backend' && bash scripts/deploy.sh"
 
       # The app is DOWN at this point and stays down on purpose. Say so loudly:
       # the previous failure mode was a green-looking server quietly serving a
       # half-migrated instance, and a 503 nobody explains is its own incident.
-      - name: Explain a deploy that stopped after the gate
-        if: failure() && steps.maintenance.outcome != 'skipped'
+      # Keyed on `== 'success'` rather than `!= 'skipped'`: a step skipped
+      # because an EARLIER step failed may report 'skipped' or empty depending
+      # on the runner, and `!= 'skipped'` fires on empty — stacking a false
+      # "stopped at the maintenance step" annotation on top of the correct one
+      # from "Explain a failed gate". `cancelled()` is included because
+      # failure() excludes it: an operator cancelling a deploy that looks hung
+      # would otherwise close the app and be told nothing at all.
+      - name: Explain a deploy that stopped with the app closed
+        if: (failure() || cancelled()) && steps.maintenance.outcome == 'success'
         run: |
-          if [ "${{ steps.maintenance.outcome }}" = "success" ]; then
-            echo "::error::The app is in MAINTENANCE MODE and has been left that way deliberately — it is serving 503, not broken writes. The code was synced but the server-side step did not finish, so the schema may not match it. DO NOT bring it up blind. Read the failing step above: if 'artisan migrate' failed, the pre-migration backup was already taken and is named in the log (../backups/erp-db-*.sql). Fix the cause, re-run this workflow (it is idempotent and will take a fresh backup), and the deploy will bring the app back up itself. Only if you must reopen without migrating: cd <DEPLOY_PATH>/backend && php artisan up — that reopens the app on code whose schema has NOT been migrated, which is exactly the state this step exists to prevent."
-          else
-            echo "::error::The deploy stopped AT the maintenance step, so the app was never closed: it is still UP and serving the PREVIOUS release, and nothing was copied to the server. This is the safe direction — it fails before the rsync rather than half-deploying. Usual causes: the PHP binary path in that step is wrong for this host (it is pinned to /opt/alt/php84/usr/bin/php and a host PHP upgrade can move it), SSH answered but the app cannot boot, or .env is unreadable. Fix the cause and re-run; no 'artisan up' is needed because no 'artisan down' ever ran."
-          fi
+          echo "::error::The app is in MAINTENANCE MODE and has been left that way deliberately — it is serving 503, not broken writes. The code may or may not have synced, so the schema may not match it. DO NOT bring it up blind. Read the failing step above: if 'artisan migrate' failed, the pre-migration backup was already taken and is named in the log (../backups/erp-db-*.sql). Fix the cause, re-run this workflow (it is idempotent and takes a fresh backup), and the deploy brings the app back up itself. IF SSH IS BANNED and you cannot re-run: the app can be reopened WITHOUT SSH by deleting storage/framework/down and storage/framework/maintenance.php in hPanel's file manager — that is exactly what 'artisan up' does. Only do that if the rsync did NOT land, i.e. the schema was never touched; reopening after a partial deploy puts the floor on code whose migrations never ran, which is the state this window exists to prevent."
+
+      # Separate message for the opposite state. It deliberately does NOT claim
+      # the app is up: a PREVIOUS failed deploy may have left it closed, and
+      # this run cannot observe that. Asserting "still UP and serving" here was
+      # wrong — on the documented fix-and-re-run path it is the likeliest way
+      # for an operator to be told the floor is fine while it serves 503.
+      - name: Explain a deploy that stopped before the app was closed
+        if: (failure() || cancelled()) && steps.maintenance.outcome == 'failure'
+        run: |
+          echo "::error::This run stopped AT the maintenance step, so THIS run never closed the app and never copied anything to the server — it failed in the safe direction, before the rsync. Do not assume the floor is serving, though: if an EARLIER deploy left the app closed it is STILL closed. Check for storage/framework/down on the server before concluding anything. Usual causes for this step failing: the PHP binary path is pinned to /opt/alt/php84/usr/bin/php and a host PHP upgrade can move it (see issue #167); or the app cannot boot — a half-installed vendor/ or a stale bootstrap/cache from a previous failed deploy will do it, in which case the app IS still down from that earlier run."
