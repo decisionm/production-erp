@@ -16,6 +16,8 @@ use App\Modules\Production\Services\ShiftProductionEntryService;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Services\TallySyncService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
@@ -371,5 +373,38 @@ class PackagingTallyIdentityTest extends TestCase
         $this->assertCount(1, $rows);
         $this->assertSame(490, (int) $rows->first()->nos_per_box);
         $this->assertNull($rows->first()->item_id);
+    }
+
+    public function test_the_490_tray_migration_says_so_when_it_matches_nothing(): void
+    {
+        // The 11-Aug-2026 lesson: on live this migration matched no standard
+        // and returned quietly, so a green deploy hid the fact that the
+        // variant was never created. A no-op must NAME the key it looked for.
+        DB::table('production_standards')
+            ->where('id', $this->standard->id)
+            ->update(['source_product_name' => 'SOMETHING ELSE']);
+
+        Log::shouldReceive('info')->zeroOrMoreTimes();
+        Log::shouldReceive('warning')
+            ->once()
+            ->withArgs(fn (string $message) => str_contains($message, '200ML RA')
+                && str_contains($message, 'NO-OP')
+                && str_contains($message, '490'));
+
+        $migration = require base_path('database/migrations/2026_08_10_191000_add_200ml_ra_490_tray_packaging.php');
+        $migration->up();
+    }
+
+    public function test_the_490_tray_migration_reports_what_it_created(): void
+    {
+        $this->trayPacking->delete();
+
+        Log::shouldReceive('warning')->never();
+        Log::shouldReceive('info')
+            ->atLeast()->once()
+            ->withArgs(fn (string $message) => str_contains($message, '200ml_ra_490_tray_packaging'));
+
+        $migration = require base_path('database/migrations/2026_08_10_191000_add_200ml_ra_490_tray_packaging.php');
+        $migration->up();
     }
 }
