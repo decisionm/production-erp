@@ -1753,6 +1753,16 @@ export default function ApproveProductionPage() {
                             <Descriptions.Item label="Date">{detailRow.production_date}</Descriptions.Item>
                             <Descriptions.Item label="Shift">{detailRow.shift?.name ?? '—'}</Descriptions.Item>
                             <Descriptions.Item label="Batch Number">{detailRow.batch_number ?? '—'}</Descriptions.Item>
+                            {/* Only when the run's packaging carries its OWN
+                                Tally identity (DEC-20260810-003): the item the
+                                voucher and stock actually post under, which on
+                                such a batch is NOT the product row above — a
+                                before-you-sign fact. */}
+                            {(detailRow as { finished_item?: { name?: string } | null }).finished_item?.name && (
+                                <Descriptions.Item label="Posts to Tally as">
+                                    {(detailRow as { finished_item?: { name?: string } | null }).finished_item?.name}
+                                </Descriptions.Item>
+                            )}
                             <Descriptions.Item label="Produced">
                                 {detailRow.quantity_produced} Nos{detailRow.quantity_produced_kg ? ` (${detailRow.quantity_produced_kg} Kg)` : ''}
                             </Descriptions.Item>

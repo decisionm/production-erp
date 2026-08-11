@@ -34,6 +34,7 @@ import {
 } from '@/features/production/startBatchResume';
 import type { ProductConfigurationFiguresPayload } from '@/features/production/api';
 import {
+    addStandardPackaging,
     approveProductionConfiguration,
     attachStandardItem,
     copyProductionConfiguration,
@@ -48,7 +49,9 @@ import {
     machineLabel,
     PRODUCT_STANDARDS_PAGE_SIZES,
     saveProductConfigurationFigures,
+    type StandardPackagingPayload,
     updateProductionConfiguration,
+    updateStandardPackaging,
 } from '@/features/production/api';
 import { useProductionSettings } from '@/features/production/packing';
 import type {
@@ -57,6 +60,7 @@ import type {
     ProductStandardGapKey,
     ProductStandardsView,
     ProductStandardsWorkspaceRow,
+    StandardPackaging,
     StandardPackagingMode,
     StandardSpecColumn,
     StandardSpecProvenance,
@@ -953,6 +957,13 @@ function AttachItemModal({ standard, onClose }: { standard: ProductStandardsWork
     const queryClient = useQueryClient();
     const [selected, setSelected] = useState<number | null>(null);
 
+    // An already-attached standard makes this a RE-POINT (DEC-20260810-003:
+    // the identity is editable configuration) — a confirmed act with its own
+    // wording, because it changes whose figures every FUTURE run uses.
+    // History is safe either way: completed batches froze the identity they
+    // posted under, and posted vouchers are never rewritten.
+    const reattaching = standard.item != null;
+
     const candidates = useQuery({
         queryKey: ['production', 'standards', 'item-candidates', standard.id],
         queryFn: () => listStandardItemCandidates(standard.id),
@@ -974,7 +985,7 @@ function AttachItemModal({ standard, onClose }: { standard: ProductStandardsWork
     );
 
     const attach = useMutation({
-        mutationFn: (itemId: number) => attachStandardItem(standard.id, itemId),
+        mutationFn: (itemId: number) => attachStandardItem(standard.id, itemId, reattaching),
         onSuccess: () => {
             // The whole standards prefix, not this page+view: the other views'
             // caches and the summary chips are wrong the moment a row gains
@@ -988,10 +999,10 @@ function AttachItemModal({ standard, onClose }: { standard: ProductStandardsWork
     return (
         <Modal
             open
-            title="Attach a Tally item"
+            title={reattaching ? 'Change the Tally identity' : 'Attach a Tally item'}
             onCancel={onClose}
-            okText="Attach this item"
-            okButtonProps={{ disabled: selected === null }}
+            okText={reattaching ? 'Change the identity' : 'Attach this item'}
+            okButtonProps={{ disabled: selected === null, ...(reattaching ? { danger: true } : {}) }}
             confirmLoading={attach.isPending}
             onOk={() => selected !== null && attach.mutate(selected)}
             width={620}
@@ -1000,6 +1011,16 @@ function AttachItemModal({ standard, onClose }: { standard: ProductStandardsWork
                 The workbook calls this product <b>{standard.source_product_name}</b>
                 {standard.source_reference ? ` (SL ${standard.source_reference})` : ''}. Which Tally item is that?
             </Typography.Paragraph>
+
+            {reattaching && (
+                <Alert
+                    type="warning"
+                    showIcon
+                    style={{ marginBottom: 12 }}
+                    message={`Currently attached to "${standard.item?.name ?? ''}"`}
+                    description="Changing it re-points every FUTURE run of this product at the new item. Completed batches and vouchers already posted keep the identity they recorded — history is never rewritten. The change is noted on the standard with your name."
+                />
+            )}
 
             <Alert
                 type="warning"
@@ -1437,6 +1458,10 @@ function ProductConfigurationDrawer({
     onFix: (row: ProductStandardsWorkspaceRow, field: FigureField) => void;
     onAttach: (row: ProductStandardsWorkspaceRow) => void;
 }) {
+    // Packing-option editing (DEC-20260810-003): `'new'` = the add flow, a
+    // packaging = correcting that one (counts and/or its Tally identity).
+    const [editingPackaging, setEditingPackaging] = useState<StandardPackaging | 'new' | null>(null);
+
     /**
      * The drawer reads its OWN copy of the product, because a save can move
      * the row out of the view behind it — and a drawer that then went on
@@ -1554,16 +1579,50 @@ function ProductConfigurationDrawer({
                     The workbook records no packing mode for this product.
                 </Typography.Text>
             ) : (
-                <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                <Space direction="vertical" size={6} style={{ width: '100%' }}>
                     {row.packagings.map((p) => (
-                        <Typography.Text key={p.id} style={numeric}>
-                            {PACKING_MODE_LABEL[p.mode]} — <b>{p.nos_per_box ?? '—'}</b> pieces per box
-                            {p.mode === 'pouch' && p.nos_per_pouch ? ` (${p.nos_per_pouch}/pouch × ${p.pouches_per_box ?? '—'})` : ''}
-                            {p.mode === 'tray' && p.nos_per_tray ? ` (${p.nos_per_tray}/tray × ${p.trays_per_box ?? '—'})` : ''}
-                            {p.id === row.resolved_packaging_id ? ' · used by a run' : ''}
-                        </Typography.Text>
+                        <div key={p.id}>
+                            <Typography.Text style={numeric}>
+                                {PACKING_MODE_LABEL[p.mode]} — <b>{p.nos_per_box ?? '—'}</b> pieces per box
+                                {p.mode === 'pouch' && p.nos_per_pouch ? ` (${p.nos_per_pouch}/pouch × ${p.pouches_per_box ?? '—'})` : ''}
+                                {p.mode === 'tray' && p.nos_per_tray ? ` (${p.nos_per_tray}/tray × ${p.trays_per_box ?? '—'})` : ''}
+                                {p.id === row.resolved_packaging_id ? ' · used by a run' : ''}
+                            </Typography.Text>
+                            {/* Which Tally item THIS packing posts as
+                                (DEC-20260810-003). The fallback is stated in
+                                so many words, with the edit right beside it —
+                                an unknown identity is a question on screen,
+                                never a guess. */}
+                            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
+                                {p.tally_item?.name
+                                    ? <>Posts to Tally as <b>{p.tally_item.name}</b></>
+                                    : <>Posts to Tally as the product's own item (no identity of its own yet)</>}
+                                {' '}
+                                <Button
+                                    type="link"
+                                    size="small"
+                                    style={{ padding: 0, height: 'auto' }}
+                                    onClick={() => setEditingPackaging(p)}
+                                >
+                                    {p.tally_item?.name ? 'Change' : 'Set the Tally identity'}
+                                </Button>
+                            </Typography.Text>
+                        </div>
                     ))}
                 </Space>
+            )}
+            <div style={{ marginTop: 8 }}>
+                <Button size="small" onClick={() => setEditingPackaging('new')}>
+                    Add a packing option
+                </Button>
+            </div>
+            {editingPackaging !== null && (
+                <PackagingEditModal
+                    standardId={row.id}
+                    productItemName={item?.name ?? null}
+                    packaging={editingPackaging === 'new' ? null : editingPackaging}
+                    onClose={() => setEditingPackaging(null)}
+                />
             )}
             <div style={{ marginTop: 4 }}>
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -1646,6 +1705,17 @@ function ProductConfigurationDrawer({
                         ) : (
                             <Tag color="orange">not in Tally</Tag>
                         )}
+                        {/* Editable identity (DEC-20260810-003) — the modal
+                            asks for confirmation and the backend records the
+                            re-point with a name and date. */}
+                        <Button
+                            type="link"
+                            size="small"
+                            style={{ padding: 0, height: 'auto' }}
+                            onClick={() => onAttach(row)}
+                        >
+                            Change
+                        </Button>
                     </Space>
                     {attachmentNote(row) !== null && (
                         <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
@@ -2350,5 +2420,188 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
                 />
             )}
         </>
+    );
+}
+
+// ---------------------------------------------------------------------------
+
+/**
+ * Add or correct ONE packing option of a product — counts and its own Tally
+ * identity (DEC-20260810-003).
+ *
+ * The identity select is the whole point of the modal existing: which Tally
+ * item a tray-packed box posts as was not editable anywhere, and the floor's
+ * complaint arrived as "the tally configuration is wrong and there is no
+ * option to change it". Leaving the identity blank is a real answer — the
+ * packing posts as the product's own item, and the drawer says so in words —
+ * so the select allows clear and the extra text states the fallback.
+ */
+function PackagingEditModal({
+    standardId,
+    productItemName,
+    packaging,
+    onClose,
+}: {
+    standardId: number;
+    productItemName: string | null;
+    packaging: StandardPackaging | null;
+    onClose: () => void;
+}) {
+    const queryClient = useQueryClient();
+    const [form] = Form.useForm<{
+        mode: StandardPackagingMode;
+        nos_per_pouch?: number | null;
+        pouches_per_box?: number | null;
+        nos_per_tray?: number | null;
+        trays_per_box?: number | null;
+        nos_per_box?: number | null;
+        item_id?: number | null;
+    }>();
+    const modeWatch = Form.useWatch('mode', form) ?? packaging?.mode ?? 'tray';
+
+    const items = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems, staleTime: 5 * 60 * 1000 });
+    const itemOptions = useMemo(
+        () =>
+            (items.data?.data ?? [])
+                .filter((i) => i.is_active)
+                .map((i) => ({ value: i.id, label: itemLabel(i) })),
+        [items.data],
+    );
+
+    const save = useMutation({
+        mutationFn: (payload: StandardPackagingPayload) =>
+            packaging === null
+                ? addStandardPackaging(standardId, payload)
+                : updateStandardPackaging(standardId, packaging.id, payload),
+        onSuccess: () => {
+            // The workspace rows, the Start Batch preview and the completion
+            // drawer all read the packagings — every cache is wrong the
+            // moment a count or an identity changes.
+            queryClient.invalidateQueries({ queryKey: ['production', 'standards'] });
+            queryClient.invalidateQueries({ queryKey: ['production', 'batch-preview'] });
+            onClose();
+        },
+        onError: (error: any) => showSaveError(error, 'Could not save this packing option'),
+    });
+
+    const submit = (v: {
+        mode: StandardPackagingMode;
+        nos_per_pouch?: number | null;
+        pouches_per_box?: number | null;
+        nos_per_tray?: number | null;
+        trays_per_box?: number | null;
+        nos_per_box?: number | null;
+        item_id?: number | null;
+    }) => {
+        save.mutate({
+            mode: v.mode,
+            nos_per_pouch: v.mode === 'pouch' ? (v.nos_per_pouch ?? null) : undefined,
+            pouches_per_box: v.mode === 'pouch' ? (v.pouches_per_box ?? null) : undefined,
+            nos_per_tray: v.mode === 'tray' ? (v.nos_per_tray ?? null) : undefined,
+            trays_per_box: v.mode === 'tray' ? (v.trays_per_box ?? null) : undefined,
+            nos_per_box: v.mode === 'direct_box' ? (v.nos_per_box ?? null) : undefined,
+            // Always sent, null included: clearing the identity IS an answer
+            // ("back to the product's item"), and an omitted key would leave
+            // the old value standing behind the person's back.
+            item_id: v.item_id ?? null,
+        });
+    };
+
+    return (
+        <Modal
+            open
+            title={packaging === null ? 'Add a packing option' : `Packing — ${PACKING_MODE_LABEL[packaging.mode]}`}
+            onCancel={onClose}
+            okText={packaging === null ? 'Add packing option' : 'Save'}
+            confirmLoading={save.isPending}
+            onOk={() => form.submit()}
+            maskClosable={false}
+            destroyOnHidden
+            width={560}
+        >
+            <Form
+                form={form}
+                layout="vertical"
+                onFinish={submit}
+                requiredMark={false}
+                initialValues={
+                    packaging === null
+                        ? { mode: 'tray' }
+                        : {
+                              mode: packaging.mode,
+                              nos_per_pouch: packaging.nos_per_pouch,
+                              pouches_per_box: packaging.pouches_per_box,
+                              nos_per_tray: packaging.nos_per_tray,
+                              trays_per_box: packaging.trays_per_box,
+                              nos_per_box: packaging.nos_per_box,
+                              item_id: packaging.tally_item?.id ?? null,
+                          }
+                }
+            >
+                <Form.Item name="mode" label="Packing mode" rules={[{ required: true }]}>
+                    <Select
+                        disabled={packaging !== null}
+                        options={[
+                            { value: 'tray', label: 'Tray + Box' },
+                            { value: 'pouch', label: 'Pouch + Box' },
+                            { value: 'direct_box', label: 'Direct Box' },
+                        ]}
+                    />
+                </Form.Item>
+
+                {modeWatch === 'pouch' && (
+                    <Row gutter={12}>
+                        <Col span={12}>
+                            <Form.Item name="nos_per_pouch" label="Bottles per pouch">
+                                <InputNumber min={1} precision={0} style={{ width: '100%' }} />
+                            </Form.Item>
+                        </Col>
+                        <Col span={12}>
+                            <Form.Item name="pouches_per_box" label="Pouches per box">
+                                <InputNumber min={1} precision={0} style={{ width: '100%' }} />
+                            </Form.Item>
+                        </Col>
+                    </Row>
+                )}
+                {modeWatch === 'tray' && (
+                    <Row gutter={12}>
+                        <Col span={12}>
+                            <Form.Item name="nos_per_tray" label="Bottles per tray">
+                                <InputNumber min={1} precision={0} style={{ width: '100%' }} />
+                            </Form.Item>
+                        </Col>
+                        <Col span={12}>
+                            <Form.Item name="trays_per_box" label="Trays per box">
+                                <InputNumber min={1} precision={0} style={{ width: '100%' }} />
+                            </Form.Item>
+                        </Col>
+                    </Row>
+                )}
+                {modeWatch === 'direct_box' && (
+                    <Form.Item name="nos_per_box" label="Bottles per box">
+                        <InputNumber min={1} precision={0} style={{ width: '100%' }} />
+                    </Form.Item>
+                )}
+
+                <Form.Item
+                    name="item_id"
+                    label="Tally identity of this packing"
+                    extra={
+                        productItemName
+                            ? `Leave blank to post as the product's own item (${productItemName}). Fill both counts of the mode, or the option is refused.`
+                            : 'Leave blank to post as the product’s own item. Fill both counts of the mode, or the option is refused.'
+                    }
+                >
+                    <Select
+                        allowClear
+                        showSearch
+                        loading={items.isFetching}
+                        optionFilterProp="label"
+                        placeholder="Search the Tally catalogue…"
+                        options={itemOptions}
+                    />
+                </Form.Item>
+            </Form>
+        </Modal>
     );
 }

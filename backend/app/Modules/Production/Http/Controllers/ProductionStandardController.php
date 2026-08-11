@@ -158,7 +158,10 @@ class ProductionStandardController extends Controller
     }
 
     /**
-     * Attach a Tally item to a standard that has none.
+     * Attach a Tally item to a standard — or, as an explicit confirmed
+     * correction, re-point one that is already attached (DEC-20260810-003:
+     * the identity is editable configuration; future runs only, history and
+     * posted vouchers untouched).
      *
      * No detach counterpart, deliberately. Detaching would leave a row the
      * importer then treats as unmatched, and its orphan-adoption rule would
@@ -173,6 +176,7 @@ class ProductionStandardController extends Controller
             $standard,
             (int) $request->validated()['item_id'],
             $request->user(),
+            (bool) ($request->validated()['confirm_reattach'] ?? false),
         );
 
         return response()->json(['data' => $standard]);

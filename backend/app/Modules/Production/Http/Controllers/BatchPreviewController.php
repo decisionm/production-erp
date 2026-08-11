@@ -212,6 +212,14 @@ class BatchPreviewController extends Controller
                         // runnable — the picker disables it, and the
                         // resolver above refuses it either way.
                         'is_complete' => $p->isComplete(),
+                        // The packing's own Tally identity (DEC-20260810-003),
+                        // so the picker can say WHICH Tally item this choice
+                        // posts as — null means "the product's own item", and
+                        // the screen says so rather than guessing.
+                        'tally_item' => $p->item_id === null ? null : [
+                            'id' => (int) $p->item_id,
+                            'name' => (string) $p->tallyItem?->name,
+                        ],
                     ])->values(),
                 ])->values(),
                 'packaging' => $packaging === null ? null : [

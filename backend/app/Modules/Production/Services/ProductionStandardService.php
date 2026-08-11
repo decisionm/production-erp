@@ -42,12 +42,19 @@ class ProductionStandardService
      * the same item — which do you want?"), so it is refused by name rather
      * than allowed to surface as a database error nobody can act on.
      */
-    public function attachItem(ProductionStandard $standard, int $itemId, ?User $actor): ProductionStandard
+    public function attachItem(ProductionStandard $standard, int $itemId, ?User $actor, bool $confirmReattach = false): ProductionStandard
     {
-        if ($standard->item_id !== null) {
+        // Re-pointing an attached standard is allowed ONLY as an explicit,
+        // confirmed correction (DEC-20260810-003: the Tally identity is
+        // editable configuration). The confirmation is not ceremony — the
+        // change alters whose figures every FUTURE run of this product uses,
+        // and the refusal below names exactly that so a stray click cannot do
+        // it. History stays honest either way: completed batches froze the
+        // identity they posted under, and posted vouchers are never rewritten.
+        if ($standard->item_id !== null && ! $confirmReattach) {
             throw ValidationException::withMessages([
                 'item_id' => sprintf(
-                    'This standard is already attached to "%s". Re-pointing a standard at a different item would change whose figures every run of that product uses — create a standard for the other item instead.',
+                    'This standard is already attached to "%s". Changing it re-points every FUTURE run of this product — confirm the change to proceed (already-posted vouchers and completed batches keep the identity they recorded).',
                     (string) ($standard->item?->name ?? 'another item'),
                 ),
             ]);
@@ -91,15 +98,28 @@ class ProductionStandardService
             ]);
         }
 
+        // Provenance names a CHANGE as a change: "re-pointed from X" is a
+        // different fact than a first attachment, and the person auditing a
+        // voucher months later needs to see which one happened.
+        $previous = $standard->item_id === null ? null : (string) $standard->item?->name;
+
         $standard->item_id = $item->id;
         $standard->item_attached_by = $actor?->id;
         $standard->item_attached_at = now();
-        $standard->notes = $this->appendNote($standard->notes, sprintf(
-            'Tally item "%s" attached in the app on %s by %s.',
-            (string) $item->name,
-            now()->toDateString(),
-            $actor?->name ?? 'an unidentified user',
-        ));
+        $standard->notes = $this->appendNote($standard->notes, $previous === null
+            ? sprintf(
+                'Tally item "%s" attached in the app on %s by %s.',
+                (string) $item->name,
+                now()->toDateString(),
+                $actor?->name ?? 'an unidentified user',
+            )
+            : sprintf(
+                'Tally identity re-pointed from "%s" to "%s" in the app on %s by %s (confirmed change; future runs only).',
+                $previous,
+                (string) $item->name,
+                now()->toDateString(),
+                $actor?->name ?? 'an unidentified user',
+            ));
         $standard->save();
 
         return $standard->fresh(['item', 'packagings']);

@@ -1884,6 +1884,14 @@ export interface StandardPackaging {
     nos_per_box: number | null;
     is_default: boolean;
     /**
+     * The packing's OWN Tally identity (DEC-20260810-003): the item this
+     * packing's production posts as. Null/absent = no identity of its own —
+     * the run uses the product's item and the screen must say so ("using
+     * product identity"), never guess. Optional because older payload shapes
+     * (and the workspace's toArray) may omit or nest it differently.
+     */
+    tally_item?: { id: number; name: string } | null;
+    /**
      * Whether the row can actually run a batch: pieces per box plus its
      * mode's inner count, both stated. A half-stated workbook row (item
      * 423's "120/pouch, boxes not stated") is display data — the picker

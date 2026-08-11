@@ -5748,6 +5748,7 @@ export default function ShiftProductionEntryPage() {
                         const chosen = (batchPreview?.variants ?? []).find((v) => v.id === selectedStandardId)
                             ?? (batchPreview?.variants?.length === 1 ? batchPreview.variants[0] : undefined);
                         if (!chosen || chosen.packagings.length < 2) return null;
+                        const picked = chosen.packagings.find((p) => p.id === selectedPackagingId);
                         return (
                             <Form.Item label="How is it packed?">
                                 <Radio.Group
@@ -5766,6 +5767,17 @@ export default function ShiftProductionEntryPage() {
                                         disabled: !p.is_complete,
                                     }))}
                                 />
+                                {/* The choice's consequence, said where it is
+                                    made (DEC-20260810-003): which Tally item
+                                    this packing posts as. Only shown when a
+                                    packing carries its OWN identity — the
+                                    ordinary case posts as the product and
+                                    saying so on every batch would be noise. */}
+                                {picked?.tally_item?.name && (
+                                    <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                                        Packed this way, production posts to Tally as <b>{picked.tally_item.name}</b>.
+                                    </Typography.Text>
+                                )}
                             </Form.Item>
                         );
                     })()}

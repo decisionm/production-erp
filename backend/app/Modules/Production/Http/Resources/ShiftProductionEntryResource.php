@@ -64,6 +64,15 @@ class ShiftProductionEntryResource extends JsonResource
             'production_standard_id' => $this->production_standard_id,
             'production_configuration_id' => $this->production_configuration_id,
             'packaging_mode' => $this->packaging_mode,
+            // The Tally identity this batch's finished goods post as
+            // (DEC-20260810-003) — frozen at completion when the selected
+            // packaging carries its own item; null means the product's item,
+            // which every consumer already shows. The View modal and results
+            // print THIS name beside the product when the two differ.
+            'finished_item' => $this->finished_item_id === null ? null : [
+                'id' => (int) $this->finished_item_id,
+                'name' => (string) $this->finishedItem?->name,
+            ],
             // WHICH COLOUR THIS RUN ACTUALLY MADE — read back out of the
             // snapshot startBatch froze it into, so a later item-master edit
             // can never restate it.

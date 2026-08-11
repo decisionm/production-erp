@@ -34,7 +34,7 @@ class ProductionStandardResolver
     public function variantsFor(int $itemId): Collection
     {
         return ProductionStandard::query()
-            ->with('packagings')
+            ->with('packagings.tallyItem')
             ->where('item_id', $itemId)
             // Unresolved variants stay visible — a supervisor may know which
             // of two cycle times applies to the machine in front of them,
@@ -62,7 +62,7 @@ class ProductionStandardResolver
             // from another bottle's numbers. Returning null instead degrades
             // correctly to the "choose a standard" warning.
             return ProductionStandard::query()
-                ->with('packagings')
+                ->with('packagings.tallyItem')
                 ->where('item_id', $itemId)
                 ->find($standardId);
         }

@@ -108,7 +108,12 @@ class FinishedCartonService
             foreach ($rows as $row) {
                 $entry->cartons()->create([
                     ...$row,
-                    'item_id' => $entry->item_id,
+                    // The RESOLVED identity (DEC-20260810-003) — the label and
+                    // the trace must name the same Tally item the voucher
+                    // posts. Generation is completion-gated (the guard above),
+                    // so finished_item_id is already frozen by the time any
+                    // carton exists; pre-feature batches resolve to item_id.
+                    'item_id' => $entry->effectiveItemId(),
                     'status' => FinishedCarton::STATUS_IN_STOCK,
                     'created_by' => $userId,
                 ]);

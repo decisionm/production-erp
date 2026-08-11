@@ -43,6 +43,11 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
     // unexplained "+1" cells.
     'target_boxes_override', 'target_override_reason', 'target_override_by',
     'production_standard_id', 'production_standard_packaging_id', 'packaging_mode',
+    // The Tally identity RESOLVED from the selected packaging at completion
+    // (DEC-20260810-003), frozen so a later packaging edit cannot rewrite
+    // what a completed batch claims it produced. Null = the product's own
+    // item — the pre-feature behaviour, byte for byte.
+    'finished_item_id',
 ])]
 class ShiftProductionEntry extends Model
 {
@@ -130,6 +135,48 @@ class ShiftProductionEntry extends Model
     public function item(): BelongsTo
     {
         return $this->belongsTo(Item::class);
+    }
+
+    /**
+     * The Tally identity frozen at completion, when the selected packaging
+     * carries one of its own (DEC-20260810-003). Null on every batch that
+     * predates the feature and on every packaging without an identity.
+     */
+    public function finishedItem(): BelongsTo
+    {
+        return $this->belongsTo(Item::class, 'finished_item_id');
+    }
+
+    /** The packaging option this run froze at Start (or via its shift page row). */
+    public function standardPackaging(): BelongsTo
+    {
+        return $this->belongsTo(ProductionStandardPackaging::class, 'production_standard_packaging_id');
+    }
+
+    /**
+     * The item this batch's FINISHED GOODS move as — stock receipt, Tally
+     * voucher, labels, trace. THE one resolution point: everything that
+     * posts or prints the produced item goes through here, so "selection
+     * drives the name everywhere" cannot be true on one surface and false
+     * on another.
+     */
+    public function effectiveItemId(): int
+    {
+        return (int) ($this->finished_item_id ?? $this->item_id);
+    }
+
+    /** The resolved item row — finishedItem when frozen, else the product. */
+    public function effectiveItem(): ?Item
+    {
+        if ($this->finished_item_id !== null) {
+            $this->loadMissing('finishedItem');
+
+            return $this->finishedItem;
+        }
+
+        $this->loadMissing('item');
+
+        return $this->item;
     }
 
     public function warehouse(): BelongsTo
