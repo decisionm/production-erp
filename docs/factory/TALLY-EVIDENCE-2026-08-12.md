@@ -50,10 +50,36 @@ The Receipts export carries **395 `BILLALLOCATIONS` blocks**:
 against bill references of the form `473/26-27`, `510/26-27`, `2185/25-26`.
 
 **This answers the "is bill-wise detail on?" half of Q30.** Per-invoice
-outstanding and ageing are therefore achievable rather than speculative, so
-Phase 2 of the finance pull is viable. *(Q30 lives on the unmerged PR #155
-branch, not on main, so it cannot be marked resolved here — it closes on that
-branch, citing `tally-receipts-20260812`.)*
+outstanding and ageing are achievable rather than speculative, so Phase 2 of the
+finance pull is viable. *(Q30 lives on the unmerged PR #155 branch, not on main,
+so it cannot be marked resolved here — it closes on that branch, citing
+`tally-receipts-20260812`.)*
+
+#### Four qualifications a Phase 2 build must not discover late
+
+Parsed from the file rather than assumed:
+
+1. **The export is JULY ONLY.** Every one of the 145 receipts falls in
+   2026-07-01..2026-07-31, while the Statistics screen counts **553** receipts
+   for 1-Apr to 10-Aug. So this file is roughly a quarter of the period, and
+   **no ageing computed from it alone would be complete.** The scope line on the
+   export ("1-Apr-26 to 10-Aug-26") describes the session, not this file.
+2. **An allocation carries its own `<AMOUNT>`.** The `BILLALLOCATIONS.LIST`
+   children are `NAME`, `BILLTYPE`, `AMOUNT` (plus TDS and interest lists), so a
+   receipt split across bills is recoverable per bill — which is exactly what
+   per-invoice ageing needs. 204 of the 395 allocation blocks carry an amount.
+3. **10 of 145 receipts carry NO bill allocation at all.** Those cannot be aged
+   against an invoice by any means; a Phase 2 surface must show them as
+   unallocated rather than silently dropping them or spreading them.
+4. **Bill references are not one format.** 167 look like `473/26-27`
+   (number/financial-year); 69 are bare numbers such as `647`, `420`, `421`.
+   Any matcher keyed on the FY-style pattern alone would miss more than a
+   quarter of them.
+
+Also worth noting for whoever builds the customer view: the 145 receipts come
+from **78 distinct paying parties**, and not all of them are customers — one of
+the most frequent is a bank CC account. A "top payers" list built naively from
+receipt parties would put a bank among the customers.
 
 ## C · Tally is not a source for the staff list
 
