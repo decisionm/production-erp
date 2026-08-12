@@ -55,32 +55,52 @@ jobs:
           fi
           printf '%s\n' "$keys" >> ~/.ssh/known_hosts
 
+      # Inputs cross into shell ONLY via env: — a `${{ }}` expression pasted
+      # into a run: body is substituted as text before bash parses it, which
+      # is the workflow-injection shape. `write` is declared boolean, but
+      # whether GitHub enforces the type for API-dispatched runs is not
+      # something this repo can verify, and this is the workflow that deletes
+      # people. So it is treated as untrusted text and compared, never
+      # interpolated into a command.
       - name: Report what is about to run
+        env:
+          WRITE_RAW: ${{ inputs.write }}
         run: |
-          if [ "${{ inputs.write }}" = "true" ]; then
+          set -euo pipefail
+          if [ "$WRITE_RAW" = "true" ]; then
             echo "::warning::SOFT-DELETING demo employees from the live database. Any fixture referenced by real work, or matching only partially, is left alone and named in the output."
           else
             echo "Dry run — nothing will be written."
           fi
 
       - name: Run the cleanup
+        env:
+          WRITE_RAW: ${{ inputs.write }}
         run: |
+          set -euo pipefail
           set -o pipefail
-          FLAGS=""
-          [ "${{ inputs.write }}" = "true" ] && FLAGS="--write"
+
+          # The remote command is built from literals only. The input decides
+          # WHICH literal, and never contributes text to the command.
+          REMOTE="cd '${{ secrets.DEPLOY_PATH }}/backend' && /opt/alt/php84/usr/bin/php artisan hrms:remove-demo-employees"
+          if [ "$WRITE_RAW" = "true" ]; then
+            REMOTE="$REMOTE --write"
+          fi
 
           ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "cd '${{ secrets.DEPLOY_PATH }}/backend' && /opt/alt/php84/usr/bin/php artisan hrms:remove-demo-employees $FLAGS" \
+            "$REMOTE" \
             2>&1 | tee cleanup-output.txt
 
       - name: Summarise
         if: always()
+        env:
+          WRITE_RAW: ${{ inputs.write }}
         run: |
           {
             echo "### Remove demo employees"
             echo
-            echo "write: \`${{ inputs.write }}\`"
+            echo "write: \`${WRITE_RAW}\`"
             echo
             echo '```'
             cat cleanup-output.txt 2>/dev/null || echo "(no output captured)"
