@@ -8,8 +8,17 @@ import type {
     SalesOrder,
 } from './types';
 
-export async function listCustomers(): Promise<Paginated<Customer>> {
-    const { data } = await api.get<Paginated<Customer>>('/sales/customers');
+/**
+ * The server paginates this at 20 by default. The page used to send no page
+ * param and render with pagination disabled, so it silently showed the first
+ * 20 customers and nothing indicated there were more — harmless while the
+ * list was a handful of demo rows, actively misleading once the ledger import
+ * puts hundreds of real customers behind it.
+ */
+export async function listCustomers(page = 1, perPage = 50): Promise<Paginated<Customer>> {
+    const { data } = await api.get<Paginated<Customer>>('/sales/customers', {
+        params: { page, per_page: perPage },
+    });
     return data;
 }
 

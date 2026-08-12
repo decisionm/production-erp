@@ -388,17 +388,79 @@ answered carries a warning that may be crying wolf. **Blocks:** trusting
 the capability note on ASB-8 450ML runs; the machine-capability row's
 correction. *Open since 2026-08-10.*
 
-## Q33 · 200ML RA — the paper packs 490/box but the Tally item name says “520 Nos”
+## Q33 · 200ML RA — which live standard is it, and which Tally item is the 490 box?
 
-The 07-Aug paper states 98/tray × 5 trays = 490/box for 200ML RA, and per
-DEC-20260810-003 a 490/box tray packaging variant now exists with its Tally
-identity deliberately UNSET. But the Tally catalogue's candidate item is
-named “B.200 Ml Round Pet Bottle Amber 18gms - 520 Nos” — a box count the
-paper contradicts. Either the item name is stale (Tally renames when the
-factory changes the pack), or a separate 490 item exists/should exist, or
-the paper's 490 is itself wrong. Only the owner can say which Tally item the
-490-tray packing posts as — he sets it himself in the packaging-identity
-edit UI once answered; nothing is guessed meanwhile (the variant falls back
-to the product's identity, labelled as such). **Blocks:** the 490-tray
-variant posting under its own name; nothing else — batches record normally.
-*Open since 2026-08-10.*
+The 07-Aug paper states 98/tray × 5 trays = 490/box for 200ML RA. The Tally
+catalogue's candidate item is named “B.200 Ml Round Pet Bottle Amber 18gms -
+520 Nos” — a box count the paper contradicts. Either the item name is stale
+(Tally renames when the factory changes the pack), or a separate 490 item
+exists/should exist, or the paper's 490 is itself wrong.
+
+**Corrected 2026-08-11.** An earlier version of this entry said a 490/box
+variant “now exists” because DEC-20260810-003's data migration created one.
+It did not. On live that migration matched nothing and did nothing:
+
+- there is **no standard named `200ML RA`** on live — the 200ML family is
+  BRUTE / DOME / KOREAN / ROUND (read twice on live 11-Aug ~22:52 IST:
+  `/production/standards`, 79 rows; `/standards/coverage`, 80 rows);
+- the migration therefore applied as a no-op (6.20ms, deploy run
+  31517927025 attempt 3).
+
+**But the 490 packing already exists, under ROUND, and predates all of this.**
+Five `200ML ROUND` standards carry `tray 98/tray × 5 = 490/box`, every one
+with its Tally identity **NULL** (unset, not guessed):
+
+| standard | packaging | created | default? |
+|---|---|---|---|
+| 48 | 64 | 2026-07-31 | no |
+| 62 | 82 | 2026-07-31 | no |
+| 63 | 84 | 2026-07-31 | no |
+| 100 | 124 | 2026-08-03 | **yes** |
+| 101 | 125 | 2026-08-03 | **yes** |
+
+So the paper's packing is already configured — just under a different
+product name than the paper uses.
+
+**The question for the owner:** *is the paper's “200ML RA” the `200ML ROUND`
+standard — and if so, which of its Tally items is the 490-box one?* If the
+answer is yes, nothing needs creating: the 490 row is already there and the
+identity is set directly in the packaging-identity edit UI.
+
+Evidence supporting the ROUND reading — **verified, in-repo or read on live:**
+- The candidate Tally item is “B.200 Ml **Round** Pet Bottle **Amber** 18gms
+  - 520 Nos”. Round + Amber is the natural expansion of “RA”.
+- Live's 200ML family contains no other Amber-round candidate.
+- The exact 98 × 5 = 490 spec already sits on 200ML ROUND (table above).
+
+Also in the repo, and cutting the other way on machine attribution:
+- DEC-20260807-002 records a mold-change log entry `200 rectangle A 20g →
+  200 RA 20g` on **ASB-7** (05-Aug A sheet) — the only “200 RA” attestation
+  in the repo, and it is on ASB-7.
+
+**Relayed via the owner 2026-08-11, artifact NOT yet in this repo** — recorded
+as relay, not promoted to evidence, and not to be acted on until sourced
+(AGENTS.md: a factory claim needs an artifact):
+- that the 07-Aug paper rows are ASB-6 “200 ML RA” and ASB-7 “200 ML BA”
+  (`ASB-6` and `200 ML BA` return zero hits repo-wide, and note the tension
+  with DEC-20260807-002 above, which puts 200 RA on ASB-7 — different sheet
+  and date, so not a contradiction, but not corroboration either);
+- that a 10-Aug comparison matched ASB-7's “BA” to “B.200 Ml Brute
+  Amber-18gms”, making BA = Brute Amber and RA not-Brute (`Brute Amber`:
+  zero hits);
+- that the owner answered on 10-Aug that ASB-6 runs the CT-16.50 product
+  “Amber 18gms-520 Nos” in the machine-setting answers — DEC-20260810-002 is
+  that record and covers only 60ML Liquor Clear on ASB-2 and B.100 Ml Round
+  Pet Bottle Clear-12.9gms on ASB-1; no ASB-6, and `CT-16.50` returns zero
+  hits.
+
+If the paper or workbook backs those three, the source belongs in
+`docs/factory/sources/` and this entry should cite it.
+
+**Do NOT re-key the migration to a guessed product name.** Once the owner
+names the standard, the identity is set by a person in the edit UI, on the
+record — not by a migration matching a string. Re-keying it to `200ML ROUND`
+would also create a SECOND 490 spec beside the five that already exist.
+
+**Blocks:** the 490-tray packing posting under its own Tally name; nothing
+else — batches record normally against the product's identity, labelled as
+such. *Open since 2026-08-10; evidence corrected and extended 2026-08-11.*

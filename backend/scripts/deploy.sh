@@ -206,4 +206,18 @@ $PHP artisan config:cache
 $PHP artisan route:cache
 $PHP artisan view:cache
 
+# --- Reopen the app --------------------------------------------------------
+#
+# The workflow closed it (`artisan down`) BEFORE the rsync, so the floor never
+# meets code whose migrations have not run. This is the ONLY place it reopens,
+# and it is the last line for a reason: `set -e` means any failure above —
+# composer, the backup gate, migrate, a seeder, a cache rebuild — exits before
+# this runs and the app STAYS DOWN. A 503 the operator must clear beats an
+# instance quietly serving writes against a schema that never arrived
+# (11-Aug-2026: rsync succeeded, migrate died, nothing rolled back).
+#
+# Idempotent: `up` on an app that is already up is a no-op, so re-running
+# deploy.sh by hand is still safe.
+$PHP artisan up
+
 echo "==> Deploy complete"

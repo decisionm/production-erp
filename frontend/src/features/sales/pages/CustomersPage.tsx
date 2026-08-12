@@ -27,7 +27,16 @@ export default function CustomersPage() {
     const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['sales', 'customers'], queryFn: listCustomers });
+    // Server-side paging. The list is about to hold the factory's real
+    // customer master (hundreds of ledger-derived rows), not a handful of
+    // demo ones, so the page number is part of the query key.
+    const [page, setPage] = useState(1);
+    const [perPage, setPerPage] = useState(50);
+
+    const { data, isLoading } = useQuery({
+        queryKey: ['sales', 'customers', page, perPage],
+        queryFn: () => listCustomers(page, perPage),
+    });
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['sales', 'customers'] });
 
@@ -80,7 +89,20 @@ export default function CustomersPage() {
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                pagination={{
+                    current: page,
+                    pageSize: perPage,
+                    // The server's count, not the page's length — otherwise
+                    // the pager would claim the list ends at the first screen.
+                    total: data?.meta?.total ?? data?.data?.length ?? 0,
+                    showSizeChanger: true,
+                    pageSizeOptions: [20, 50, 100, 200],
+                    showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} customers`,
+                    onChange: (nextPage, nextSize) => {
+                        setPage(nextPage);
+                        setPerPage(nextSize);
+                    },
+                }}
                 columns={[
                     { title: 'Code', dataIndex: 'code' },
                     { title: 'Name', dataIndex: 'name' },
