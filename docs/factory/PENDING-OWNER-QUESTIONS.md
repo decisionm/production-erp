@@ -31,7 +31,8 @@ Q29-Q31 are claimed by open PR #155 (finance-pull discovery); Q32 by the
 report-down backdate PR (#159). Q33 is claimed by the packaging-Tally-identity
 branch (DEC-20260810-003). Q34-Q37 are claimed by the 12-Aug overnight
 run (DEC-20260812-001 HRMS/payroll adoption, DEC-20260812-002 PO raised in
-the ERP). New questions continue from Q38.
+the ERP). Q38-Q40 are claimed by the 12-Aug Tally
+evidence set. New questions continue from Q41.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 
@@ -522,3 +523,44 @@ manufacturer's channels, not a SWAASHPET fact), and whether "which orders
 came from quotations" needs to be answerable, which would require a real
 quotation_id column rather than today's free-text note. **Blocks:** adopting
 CRM; nothing else. *Open since 2026-08-12.*
+
+## Q38 · May the raw Tally exports be committed to the repo?
+
+The 12-Aug Tally export set (Day Book 107 POs, PO pending register, 145
+Receipts, Statistics screen) is the evidence several questions have waited for.
+It is registered in `sources/manifest.json` with sha256 pins and copied durably
+outside the repo — but NOT committed, because the files carry purchase RATES
+and private Tally contents, and AGENTS.md forbids putting those in
+documentation (FC-06). That leaves them in exactly the status the dose-sheet
+photos have held since 06-Aug (Q13): pinned, described, and still one disk
+failure from the silent loss that destroyed the 30-Jul `Transactions.xml`.
+The repo is private, which may make committing them fine — but that is the
+owner's call and an agent must not make it. **Blocks:** nothing technical; the
+findings are recorded and citable either way. What it blocks is the evidence
+being as safe as the repo is. *Open since 2026-08-12.*
+
+## Q39 · How is the purchase ledger chosen, per line?
+
+The Day Book shows FOUR purchase ledgers in use — Local Purchase Taxable @ 18%
+(99 lines), Interstate Purchase Taxable (58), Local Purchase Taxable @ 5% (30),
+Interstate Purchase Taxable 5% (12) — with CGST+SGST on local vouchers, IGST on
+interstate, and a Rounding Off line on 52. The ERP's Tally Settings screen
+offers a SINGLE Purchase mapping, which cannot express this. The obvious
+reading is that local-versus-interstate comes from the vendor's state against
+the company's, and the rate from the item's GST rate — but "obvious" is how a
+wrong assumption reaches live, and the ERP's compliance module holds GST rates
+that may or may not be the ones Tally uses. Also needed: is the Rounding Off
+ledger always that name, and is it produced by Tally or entered? **Blocks:** the
+per-rate purchase ledger mapping, and therefore any ERP-raised purchase voucher.
+*Open since 2026-08-12.*
+
+## Q40 · On a dual-unit line, which unit is authoritative?
+
+28 of 382 purchase-order lines carry two units — trays and covers are bought by
+weight and counted in pieces. The ERP's line holds ONE quantity and shows no
+unit at all. Before dual units can be held honestly the factory must say which
+side governs: what the supplier is paid on, what the receipt is matched against,
+and what reaches stock. A conversion factor per item would also have to come
+from the factory and never be derived. **Blocks:** dual-unit support; does NOT
+block making the single unit visible, which is proceeding. *Open since
+2026-08-12.*

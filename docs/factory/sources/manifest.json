@@ -108,6 +108,56 @@
     "type": "workbook",
     "verified_at": "2026-08-06"
   },
+  "tally-daybook-po-20260812": {
+    "name": "Tally Day Book export — Purchase Order vouchers, part 1 of 2",
+    "notes": "Owner export from the LIVE Tally (SWAASHPET POLYMERS PVT LTD Testing), 1-Apr-26 to 10-Aug-26, taken 12-Aug-2026. Held OUTSIDE the repo and sha256-pinned rather than committed: these carry purchase RATES and private Tally contents, which AGENTS.md forbids putting in documentation (FC-06). Owner permission to commit is a pending question, handled the same way as the dose-sheet photos. A durable copy exists at the path with SHA256SUMS.txt beside it; flip status to present and move the file in the day the owner says the repo is the right home. THIS IS THE EVIDENCE Q31 WAITED FOR. DayBook_1.xml holds 15 vouchers and DayBook_2.xml 92; 15+92=107, verified by count. Settles that POs are genuinely raised in Tally today.",
+    "path": "~/Documents/factory-evidence/tally-2026-08-12/DayBook_1.xml",
+    "scope": "15 Purchase Order vouchers",
+    "sha256": "18aee2a886ec74cbd33711e63f6ccf8c5bba8f3790f2dfe127ad5ce8bdcc852d",
+    "status": "external",
+    "type": "tally-journal",
+    "verified_at": "2026-08-12"
+  },
+  "tally-daybook-po-20260812-part2": {
+    "name": "Tally Day Book export — Purchase Order vouchers, part 2 of 2",
+    "notes": "Owner export from the LIVE Tally (SWAASHPET POLYMERS PVT LTD Testing), 1-Apr-26 to 10-Aug-26, taken 12-Aug-2026. Held OUTSIDE the repo and sha256-pinned rather than committed: these carry purchase RATES and private Tally contents, which AGENTS.md forbids putting in documentation (FC-06). Owner permission to commit is a pending question, handled the same way as the dose-sheet photos. A durable copy exists at the path with SHA256SUMS.txt beside it; flip status to present and move the file in the day the owner says the repo is the right home. THIS IS THE EVIDENCE Q31 WAITED FOR. Carries the four purchase ledgers and the CGST/SGST vs IGST split.",
+    "path": "~/Documents/factory-evidence/tally-2026-08-12/DayBook_2.xml",
+    "scope": "92 Purchase Order vouchers with ledgers, GST, payment terms, per-line ORDERNO",
+    "sha256": "7a411e5f43ddd162215e07c45f7e8a1d8fb885f04441284ec5052b256f631598",
+    "status": "external",
+    "type": "tally-journal",
+    "verified_at": "2026-08-12"
+  },
+  "tally-po-pending-register-20260812": {
+    "name": "Tally Purchase Order pending register — 183 open lines, 42 items",
+    "notes": "Owner export from the LIVE Tally (SWAASHPET POLYMERS PVT LTD Testing), 1-Apr-26 to 10-Aug-26, taken 12-Aug-2026. Held OUTSIDE the repo and sha256-pinned rather than committed: these carry purchase RATES and private Tally contents, which AGENTS.md forbids putting in documentation (FC-06). Owner permission to commit is a pending question, handled the same way as the dose-sheet photos. A durable copy exists at the path with SHA256SUMS.txt beside it; flip status to present and move the file in the day the owner says the repo is the right home. THIS IS THE EVIDENCE Q31 WAITED FOR. A REPORT, not vouchers: it contains zero <VOUCHER> elements, which is why a voucher count on it reads 0.",
+    "path": "~/Documents/factory-evidence/tally-2026-08-12/Purchase Orders.xml",
+    "scope": "183 open purchase-order lines across 42 stock items",
+    "sha256": "aa4cd8e084daa0d060648416e7ad940be7c308c6479f8e8ad3368628143f20d2",
+    "status": "external",
+    "type": "tally-journal",
+    "verified_at": "2026-08-12"
+  },
+  "tally-receipts-20260812": {
+    "name": "Tally Receipts export — 145 receipts with bill-wise allocations",
+    "notes": "Owner export from the LIVE Tally (SWAASHPET POLYMERS PVT LTD Testing), 1-Apr-26 to 10-Aug-26, taken 12-Aug-2026. Held OUTSIDE the repo and sha256-pinned rather than committed: these carry purchase RATES and private Tally contents, which AGENTS.md forbids putting in documentation (FC-06). Owner permission to commit is a pending question, handled the same way as the dose-sheet photos. A durable copy exists at the path with SHA256SUMS.txt beside it; flip status to present and move the file in the day the owner says the repo is the right home. THIS IS THE EVIDENCE Q31 WAITED FOR. ANSWERS Q30b: 395 BILLALLOCATIONS blocks carrying BILLTYPE 'Agst Ref' (176) and 'New Ref' (28), against bill references such as 473/26-27. Bill-wise detail is ON, so per-invoice outstanding and ageing are achievable rather than speculative.",
+    "path": "~/Documents/factory-evidence/tally-2026-08-12/Recepits.xml",
+    "scope": "145 Receipt vouchers; 176 Agst Ref + 28 New Ref allocations",
+    "sha256": "6d37355a8244f59d9db258f6f9b02993e7c8aa29595fa35d8b7d4b29d243f1af",
+    "status": "external",
+    "type": "tally-journal",
+    "verified_at": "2026-08-12"
+  },
+  "tally-statistics-20260812": {
+    "name": "Tally Statistics screen — voucher and master counts",
+    "notes": "Screenshot of the live Tally Statistics screen, 1-Apr-26 to 10-Aug-26, taken 12-Aug-2026. Counts only, no rates, but held with the rest of the 12-Aug set for provenance. Payment 925, Receipt 553, Journal 418, Purchase 351, Purchase Order 92 (1 cancelled), Contra 60, Credit Note 17, Debit Note 5; total 3,811. Masters: 1,742 ledgers, 624 stock items, 83 groups, 27 voucher types, 6 units, 5 employee groups and 3 EMPLOYEES — which is why Tally is not a source for the factory's staff list.",
+    "path": "~/Documents/factory-evidence/tally-2026-08-12/statistics-screen.jpeg",
+    "scope": "voucher-type and master counts for the period",
+    "sha256": "6f3ad33b9ad8134a4a68ade61a1b677e90332eeea56660f8fe3b5c5aa0c2da48",
+    "status": "external",
+    "type": "tally-journal",
+    "verified_at": "2026-08-12"
+  },
   "tally-transactions-xml": {
     "name": "Transactions.xml — 38 real Stock Journals, SWAASHPET 26-27, exported 30 Jul",
     "notes": "Read on 05 Aug (UTF-16). Ground truth for FC-02/03/04 and the resin/masterbatch decisions. DELETED from Downloads since — ask the factory to re-share, then commit under docs/factory/sources/. Findings preserved in decision records and PR bodies only.",
