@@ -21,6 +21,29 @@ the sequence is what keeps a bad deploy from reaching a running shift.
    ProductionConfigurationDefaults. Anything else on live is a manual
    workflow, never a deploy side effect.
 
+## After the deploy — verify from evidence, not the green tick
+
+A green run means the workflow finished, not that the schema landed. Check,
+in this order:
+
+1. **The migrate step's own output**, naming every migration that ran. A
+   migration recorded as `DONE` is the evidence; the tick is not.
+2. **The site loads**, and the screens the change touched actually render.
+3. **The Tally Sync queue: no NEW failures**, and no entry stuck.
+   **Specifically — after any deploy whose maintenance window overlapped a
+   sync cycle, look for an entry that is `pending` with `delivered_at` SET
+   and no progress.** That is the signature of a Tally rejection whose report
+   was swallowed by the window's 503 (issue #168): the agent refuses it
+   forever, silently, and it NEVER appears in the failed list. It will not
+   find you — you have to look for it.
+4. **The server log**, for errors newer than the deploy.
+5. **Anything already-posted stays byte-identical.** A deploy must not
+   rewrite history; compare a stored voucher payload before and after when
+   the change touched voucher building.
+
+Wait ~10 minutes after the deploy's own SSH session before running any
+read-only workflow to check these — see the ban rule below.
+
 ## Live master-data changes (the important half)
 
 1. Every change is a manual GitHub workflow wrapping an artisan command.
