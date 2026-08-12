@@ -1,5 +1,3 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -19,10 +17,21 @@ import { describe, expect, it } from 'vitest';
  * the app plus the warehouse, vendor, employee and scrap-reason pickers.
  *
  * So this is a lint, not a unit test: it reads the source and fails if any
- * page feeds a `useQuery` from a known paged list function. The four pages
+ * page feeds a `useQuery` from a known paged list function. The pages
  * exempted below render that list as their OWN paginated table, which is what
  * the paged function is for.
+ *
+ * Sources are read through Vite's `import.meta.glob` rather than node:fs on
+ * purpose — this file is type-checked by the app's tsconfig, which has no
+ * Node types, and a lint that breaks the build it is meant to protect is
+ * worse than no lint.
  */
+
+const SOURCES = import.meta.glob('../features/**/*.{ts,tsx}', {
+    eager: true,
+    query: '?raw',
+    import: 'default',
+}) as Record<string, string>;
 
 /** Paged list functions that must never feed a picker. */
 const PAGED_LIST_FUNCTIONS = [
@@ -35,65 +44,64 @@ const PAGED_LIST_FUNCTIONS = [
 
 /**
  * The pages that legitimately call a paged function: each renders that list as
- * its own table with its own pagination. Anything NOT on this list calling one
- * of the functions above is a picker reading 20 rows of a much longer list.
+ * its own table with its own pagination. Anything NOT here calling one of the
+ * functions above is a picker reading 20 rows of a much longer list.
  */
 const TABLE_PAGES = [
-    'features/inventory/pages/WarehousesPage.tsx',
-    'features/inventory/pages/ItemsPage.tsx',
-    'features/procurement/pages/VendorsPage.tsx',
-    'features/hrms/pages/EmployeesPage.tsx',
-    'features/production/pages/ScrapReasonsPage.tsx',
+    'inventory/pages/WarehousesPage.tsx',
+    'inventory/pages/ItemsPage.tsx',
+    'procurement/pages/VendorsPage.tsx',
+    'hrms/pages/EmployeesPage.tsx',
+    'production/pages/ScrapReasonsPage.tsx',
 ];
 
-function sourceFiles(dir: string): string[] {
-    return readdirSync(dir).flatMap((entry) => {
-        const full = join(dir, entry);
-        if (statSync(full).isDirectory()) return sourceFiles(full);
-        return full.endsWith('.tsx') || full.endsWith('.ts') ? [full] : [];
-    });
-}
+/** The api modules DEFINE these functions; they do not consume them. */
+const isConsumer = (path: string) => !path.endsWith('/api.ts');
 
 describe('pickers read the full list', () => {
-    const files = sourceFiles(join(__dirname, '..')).filter(
-        // The api modules DEFINE these functions; they do not consume them.
-        (f) => !f.endsWith('/api.ts') && !f.endsWith('.test.ts'),
-    );
+    it('finds the source files it is meant to be linting', () => {
+        // Guards the lint itself: a glob that silently matches nothing would
+        // make every assertion below pass while checking exactly zero files.
+        expect(Object.keys(SOURCES).length).toBeGreaterThan(50);
+    });
 
     it.each(PAGED_LIST_FUNCTIONS)('no page feeds a useQuery from %s', (fn) => {
-        const offenders = files.filter((file) => {
-            if (TABLE_PAGES.some((allowed) => file.replace(/\\/g, '/').endsWith(allowed))) {
-                return false;
-            }
+        // `queryFn: listItems` — the exact shape that caused the bug. A thunk
+        // passing explicit paging is a deliberate act and not what this guards.
+        const pattern = new RegExp(`queryFn:\\s*${fn}\\b`);
 
-            // `queryFn: listItems` — the exact shape that caused the bug. A
-            // thunk passing explicit paging (`() => listItems(2)`) is a
-            // deliberate act and not what this guards.
-            return new RegExp(`queryFn:\\s*${fn}\\b`).test(readFileSync(file, 'utf8'));
-        });
+        const offenders = Object.entries(SOURCES)
+            .filter(([path]) => isConsumer(path))
+            .filter(([path]) => !TABLE_PAGES.some((allowed) => path.endsWith(allowed)))
+            .filter(([, source]) => pattern.test(source))
+            .map(([path]) => path.replace('../', 'src/'));
 
         expect(
-            offenders.map((f) => f.replace(/\\/g, '/').replace(/.*\/src\//, 'src/')),
+            offenders,
             `${fn}() returns the default first page. A picker fed from it silently omits rows — `
                 + `use the listAll… variant with its own '…all' query key.`,
         ).toEqual([]);
     });
 
-    it('the full-list variants exist for every paged function a picker might reach for', () => {
-        const api = {
-            listItems: 'features/inventory/api.ts',
-            listWarehouses: 'features/inventory/api.ts',
-            listVendors: 'features/procurement/api.ts',
-            listEmployees: 'features/hrms/api.ts',
-            listScrapReasons: 'features/production/api.ts',
+    it('a full-list variant exists for every paged function a picker might reach for', () => {
+        const modules: Record<string, string> = {
+            listItems: '../features/inventory/api.ts',
+            listWarehouses: '../features/inventory/api.ts',
+            listVendors: '../features/procurement/api.ts',
+            listEmployees: '../features/hrms/api.ts',
+            listScrapReasons: '../features/production/api.ts',
         };
 
-        for (const [fn, module] of Object.entries(api)) {
-            const source = readFileSync(join(__dirname, '..', module), 'utf8');
+        for (const [fn, module] of Object.entries(modules)) {
             const full = fn.replace('list', 'listAll');
-            expect(source, `${full} must exist so a picker has something correct to call`).toContain(
-                `export async function ${full}(`,
-            );
+            expect(
+                SOURCES[module],
+                `${module} should have been read by the glob`,
+            ).toBeDefined();
+            expect(
+                SOURCES[module],
+                `${full} must exist so a picker has something correct to call`,
+            ).toContain(`export async function ${full}(`);
         }
     });
 });
