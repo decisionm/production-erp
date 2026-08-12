@@ -44,7 +44,14 @@ export default function OpportunitiesPage() {
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['crm', 'opportunities'], queryFn: listOpportunities });
-    const { data: customers } = useQuery({ queryKey: ['sales', 'customers'], queryFn: listCustomers });
+    const { data: customers } = useQuery({
+        queryKey: ['sales', 'customers', 'picker'],
+        // Explicit thunk: passing listCustomers directly would hand
+        // TanStack's query context in as the page number. A picker
+        // wants breadth, so it asks for the server's clamp (200)
+        // rather than the 20-row default this used to get.
+        queryFn: () => listCustomers(1, 200),
+    });
     const customerOptions = customers?.data.map((c) => ({ value: c.id, label: `${c.code} — ${c.name}` })) ?? [];
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<OpportunityFormValues>({
