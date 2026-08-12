@@ -431,3 +431,207 @@ invoice rate through the UI today.** Note it deliberately changes nothing else
    screen or a Tally path. Everything from the bill onward happens in Tally by
    hand, and the Receipt Note the ERP sends carries no purchase value, no GST and
    no order reference Tally can clear against.
+
+---
+
+# Addendum — multi-delivery, short close, and where a PO is raised
+
+*Prepared 2026-08-12, code-only, on `main`. Nothing read from or written to
+the live system. Added after the owner described his real flow: a tonnage PO
+with delivery schedules, several arrivals against the same PO reference,
+remaining tracked per line, auto-close when full.*
+
+## 1. Remaining per line — the visibility is WEAK
+
+**The purchase-order screen never renders a remaining figure anywhere.** A
+purchase person cannot answer "how much is still to come" at a glance; they
+can answer it one order at a time, by opening a drawer and subtracting in
+their head.
+
+- The PO **list** (`PurchaseOrdersPage.tsx:193-233`) shows ID, Status,
+  Source, Vendor, Order Date, **line count**, Actions. No quantity column, no
+  received column, no remaining column — the list carries no numbers at all.
+- The **drawer** (`:367-431`) shows a lines table with Item, **Quantity**,
+  **Received**, Unit Price, Amount. That is the closest the screen comes:
+  the user subtracts. For a 1-tonne order after two arrivals it shows `1000`
+  and `800`; it does not show `200`.
+
+**The server already computes remaining and the screen throws it away.**
+`PurchaseOrderLineResource` serves `quantity_received` (`:18`) *and* the full
+delivery-window array with a server-computed `remaining` per window
+(`:22-29`, arithmetic in `PurchaseOrderSchedule.php:32-35`).
+`PurchaseOrderService::paginate` eager-loads `lines.schedules` (`:17`), so it
+is in every list response, and the frontend type declares it
+(`procurement/types.ts:44`). **`PurchaseOrdersPage.tsx` never references
+`line.schedules`** — not in the table, not in the drawer. The delivery
+schedule the owner entered when raising the PO becomes invisible the moment
+it is saved.
+
+Remaining is visible in exactly one place: **inside the New Goods Receipt
+modal**, and only once you have started creating a receipt — the quantity
+input is prefilled with `quantity − quantity_received`
+(`GoodsReceiptsPage.tsx:329-335`) and each window shows `open {remaining}`
+(`:144-145`). So reading "how much is still to come" means opening the
+receipt form, selecting the PO, reading the prefill, and abandoning the form.
+
+**Two things compound it.**
+
+- **The dashboard does not help.** `DashboardService::incomingStock()`
+  (`:123-139`) returns id, vendor, expected_date, status and up to three item
+  *names* — no quantities. The procurement tile is a bare count of open POs.
+- **Only the newest 20 orders are reachable.** The PO table sets
+  `pagination={false}` (`:192`) over a query with no `per_page` (`:116-119`),
+  and the endpoint defaults to 20. No pager, no status filter, no sort. The
+  same applies to the order picker inside the GRN form (`:258`, `:265-268`) —
+  **a still-open PO that has fallen past the newest 20 cannot be selected for
+  its next arrival.**
+
+**Verdict: weak.** The number the owner named as important exists in the
+database, is computed correctly, is transmitted to the browser, and is
+rendered on no screen a purchase person would look at.
+
+## 2. The multi-delivery walk — 400 / 400 / 200 against 1000 kg
+
+Status machine: `GoodsReceiptService::recomputeOrderStatus()` (`:497-516`),
+called once per receipt at `:221`. The PO row is locked for the whole
+transaction (`:94-97`), so concurrent arrivals serialise.
+
+| | PO status after | `quantity_received` | remaining | what the user sees |
+|---|---|---|---|---|
+| PO raised (Tally mirror) | `Sent` (`PurchaseOrderService.php:104-106`) | 0 | 1000 | Quantity 1000, Received 0 |
+| Arrival 1 · 400 kg | **`PartiallyReceived`** (`:509-514`) | 400 | 600 | 1000 / 400 |
+| Arrival 2 · 400 kg | **`PartiallyReceived`** | 800 | 200 | 1000 / 800 |
+| Arrival 3 · 200 kg | **`Closed`** (`:503-506`) | 1000 | 0 | 1000 / 1000 |
+
+What closes it (`:499-506`): every **line** must satisfy
+`bccomp(quantity_received, quantity, 4) >= 0`. Closure is driven by lines
+only — **delivery schedules play no part** (`allocateSchedules` `:264-320`
+moves window figures but never touches PO status). Once `Closed` the PO fails
+the receive guard (`:99-101`) and no fourth arrival is possible.
+
+**"Auto-close when full" is CONFIRMED** — no manual step, no approval; the
+third GRN closes the order as a side effect of posting.
+
+Two caveats for the owner:
+- **The transition is untested.** A repo-wide grep for
+  `PurchaseOrderStatus::Closed` returns exactly one hit — the write itself.
+  No test asserts a PO ever reaches `Closed`.
+- **Status only ever moves forward.** Nothing un-receives.
+
+### A second hard stop inside the multi-delivery flow
+
+The clean 400/400/200 case works **only because the three windows sum exactly
+to the line.** When they do not, the screen cannot post the arrival at all.
+
+The payload builder always includes the allocations key
+(`GoodsReceiptsPage.tsx:392-397`), and that array is **empty** in two
+reachable situations:
+
+1. **The PO line has no delivery windows at all** — `proposeAllocations`
+   returns `undefined` when `schedules.length === 0` (`:30-31`). Schedules are
+   optional when raising a PO (`StorePurchaseOrderRequest.php:30`,
+   `'sometimes'`), so a tonnage PO recorded without a schedule lands here.
+2. **Windows are fully allocated but the line still has quantity remaining** —
+   every `take` computes to 0 and the `> 0` filter drops every row. This is
+   legal to create: the service rejects schedules promising *more* than the
+   line (`PurchaseOrderService.php:95-99`), but under-promising passes.
+
+An empty array is then rejected by `StoreGoodsReceiptRequest.php:42` —
+`['sometimes', 'array', 'min:1']` — with HTTP 422. Verified empirically
+against the framework's validator: an empty array satisfies `sometimes` (the
+key is present) and fails `min:1`.
+
+This contradicts the service's own documented intent
+(`GoodsReceiptService.php:258-262`): *"A remainder beyond every schedule is
+allowed … and simply carries no allocation row."* **That fallback is
+unreachable from the UI** — the request is refused one layer earlier, and no
+test covers it.
+
+**Net: the 1-tonne PO with 400/400/200 windows receives cleanly and
+auto-closes. The same PO recorded WITHOUT delivery windows cannot be received
+from the screen at all.**
+
+## 3. Closed short — 950 of 1000, nothing more coming
+
+**There is no way to close, cancel or complete that PO. It sits
+`PartiallyReceived` permanently.**
+
+| Path | Status |
+|---|---|
+| Service method (close/cancel/complete) | **Does not exist** — `PurchaseOrderService.php:14-126` has only `paginate`, `upcoming`, `openCount`, `create`, `send` |
+| Controller action | **Does not exist** — `PurchaseOrderController.php:13-37` has `index`, `store`, `send` |
+| Route | **Does not exist** — `routes/api.php:191-192`, `->only(['index','store'])` + `send` |
+| UI button | **Does not exist** — row actions are View and (draft only) Send |
+
+The audit's earlier claim about `Cancelled` **holds, verified
+independently**: it is declared (`PurchaseOrderStatus.php:11`) and never
+written by any service, controller, seeder, command, test or migration. The
+only status writes are `Draft`, `Sent`, `PartiallyReceived`, `Closed`.
+
+**What the dead PO costs, indefinitely.** `PartiallyReceived` is an *open*
+status everywhere: it stays in `upcoming()` (dashboard "stock coming in"), in
+`openCount()` (inflating the open-PO tile forever), and in the GRN form's
+`receivableOrders` — permanently offering an order that will never receive
+anything. There is no workaround: over-receipt is hard-blocked with no
+tolerance, so a phantom 50 kg cannot force the auto-close. **The only way to
+close a short-shipped PO today is a direct database update.**
+
+## 4. `tally_order_no` and `source` — and the two-books question
+
+Both columns come from `2026_08_02_200001_add_po_schedules_and_arrival_flow.php:22-30`:
+`source` is `string(10)` **NOT NULL default `'erp'`** (`:27`);
+`tally_order_no` is `string(64)` nullable (`:28`).
+
+**Writes:** `PurchaseOrderService::create()` `:68-69` is the **only** writer
+in the codebase. Validation is `StorePurchaseOrderRequest.php:28-29`
+(`in:erp,tally`, `required_if:source,tally`). UI entry is the "Mirrored from
+Tally" switch (`PurchaseOrdersPage.tsx:293-313`); an unchecked switch sends
+neither key, so the row falls to the DB default. No seeder and no command
+writes either column, and **there is no PO update path at all**, so neither
+can ever be corrected through the API once written.
+
+**Reads:** the API resource; `source === 'tally'` making the order born
+`Sent`; the Source column tag; and `tally_order_no` into the Receipt Note
+queue payload (`TallySyncService.php:137`). `PurchaseOrder::isTallyMirror()`
+has **no production caller** — its only call site is a test assertion.
+
+**Does `tally_order_no` reach any voucher? No.** The agent's
+`ReceiptNotePayload` interface (`receiptNote.ts:4-14`) does not declare it,
+`buildReceiptNoteXml` (`:24-42`) does not emit it, and a repo-wide grep for
+`tally_order_no` returns **zero hits anywhere under `tally-sync-agent/`**. It
+is stored, echoed to the screen, placed in the queue payload, and **dropped
+at the XML boundary** — so the arrival still cannot clear the right
+outstanding order allocation in Tally.
+
+### Were POs ever meant to arrive FROM Tally? **No.**
+
+**There is no inbound path that creates a `PurchaseOrder` from Tally data.**
+
+- `SyncMastersRequest.php:21-53` accepts exactly `company`, `item_groups`,
+  `godowns`, `ledger_groups`, `ledgers`, `items`. **No purchase-order
+  section.**
+- `MasterSyncService.php` — zero occurrences of "purchase" or "order".
+- `tally-sync-agent/src/tally/masters.ts` exports readers for item groups,
+  godowns, ledger groups, ledgers, items and companies. **No order reader.**
+- A grep for "purchase"/"order" across `tally-sync-agent/src/` returns **one**
+  hit: a prose comment.
+- `backend/app/Modules/TallySync/` contains **zero** references to
+  `PurchaseOrder`.
+- The agent's charter states the rule: *"agent-initiated and
+  one-directional … Never build a path where the cloud reaches into Tally."*
+
+**What the code assumes today:** the PO is raised **in Tally by a human**,
+then **re-typed into the ERP by a human** — vendor, item, quantity, price,
+every delivery window, plus the order number as free text with `max:64` as
+its only validation.
+
+**So the two-books risk is not hypothetical — it is the current design.**
+Every mirror row is an unreconciled manual copy. Nothing imports it, nothing
+verifies it against Tally, nothing detects divergence afterwards, and because
+no PO update path exists, nothing can correct it in place when the Tally
+order is amended. The screen says *"corrected in Tally, never edited here"*,
+which in practice means the ERP copy silently goes stale and the only remedy
+is a second PO row.
+
+This is the evidence behind DEC-20260812-002 (purchase orders raised in the
+ERP from now on): the mirror was never a sync, and one book is the fix.
