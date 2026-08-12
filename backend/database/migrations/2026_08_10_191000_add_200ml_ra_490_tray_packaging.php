@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * The 490/box tray packing of 200ML RA — DEC-20260810-003, item 4.
@@ -20,17 +21,51 @@ use Illuminate\Support\Facades\DB;
  */
 return new class extends Migration
 {
+    /** Names this migration in the log, so a line is traceable to this file. */
+    private const LABEL = '200ml_ra_490_tray_packaging';
+
+    /** The key this migration matches on — defined ONCE, logged verbatim. */
+    private const PRODUCT_NAME = '200ML RA';
+
     public function up(): void
     {
         $standards = DB::table('production_standards')
             ->whereNull('deleted_at')
-            ->whereRaw("UPPER(TRIM(source_product_name)) = '200ML RA'")
+            ->whereRaw('UPPER(TRIM(source_product_name)) = ?', [self::PRODUCT_NAME])
             ->get(['id']);
 
-        // ABSENCE IS A NO-OP: no standard, nothing to configure, no error.
+        // ABSENCE IS A NO-OP — but never a SILENT one.
+        //
+        // This migration ran on live on 11-Aug-2026 and did nothing, because
+        // no standard is named '200ML RA': the live 200ML family is BRUTE /
+        // DOME / KOREAN / ROUND. It reported that as success, and only a
+        // hand-check of the database showed the 490 variant had not been
+        // created. A data migration keyed on a NAME must say the name it
+        // looked for and how many rows it matched, or "green" means nothing.
         if ($standards->isEmpty()) {
+            Log::warning(sprintf(
+                '%s: NO-OP — no production_standards row matched %s, so the '
+                .'98/tray x 5 = 490/box variant was NOT created. If this factory '
+                .'packs 490/box under another product name, add that packing on '
+                .'the standard in Production Configuration ("Add a packing option") '
+                .'— by a person, on the record. Do NOT re-key this migration to a '
+                .'guessed name.',
+                self::LABEL,
+                self::PRODUCT_NAME,
+            ));
+
             return;
         }
+
+        Log::info(sprintf(
+            '%s: %d standard(s) matched %s.',
+            self::LABEL,
+            $standards->count(),
+            self::PRODUCT_NAME,
+        ));
+
+        $created = 0;
+        $skipped = 0;
 
         foreach ($standards as $standard) {
             $exists = DB::table('production_standard_packagings')
@@ -41,6 +76,8 @@ return new class extends Migration
                 ->exists();
 
             if ($exists) {
+                $skipped++;
+
                 continue;
             }
 
@@ -58,7 +95,19 @@ return new class extends Migration
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
+
+            $created++;
         }
+
+        // What it actually did, in numbers — "ran successfully" is not a
+        // result. A replay reads 0 created / N already present, which is the
+        // idempotent case, not a failure.
+        Log::info(sprintf(
+            '%s: %d variant(s) created, %d already present.',
+            self::LABEL,
+            $created,
+            $skipped,
+        ));
     }
 
     public function down(): void
