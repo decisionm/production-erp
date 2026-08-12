@@ -1,0 +1,88 @@
+name: Remove demo employees
+
+# Soft-deletes the seven demo-seeder employees (EMP-001..EMP-007) from the
+# live database, ON THE SERVER, over the same SSH key the deploy uses.
+#
+# Why this exists: BottleManufacturingDemoSeeder creates seven fabricated
+# people. It is not in the deploy's seeder list and never has been — but a
+# commented-'optional' line in DEPLOY.md's one-time server bootstrap offered
+# it, and a read of the live instance on 2026-08-12 found all seven present.
+# They are fake staff sitting in a real factory's HRMS.
+#
+# WHY IT IS NOT A MIGRATION. Deleting people is not a schema change and must
+# not happen as a side effect of a deploy. A person runs this, reads which
+# rows it would touch, and only then runs it again with write=true.
+#
+# WHAT IT REFUSES TO DO. A row must match employee_code AND name AND
+# date_of_joining before it is even a candidate — these fixtures carry no
+# synthetic marker, and EMP-001 is a perfectly plausible code for a real first
+# employee. Anything matching only partially is reported and left alone.
+# Anything referenced by real work (a batch it operated or signed, a work
+# order, a CAPA, attendance, leave, payroll) is left alone and reported. It
+# soft-deletes and NEVER force-deletes, because a hard delete would cascade
+# real rows away and blank the signatory on real production records.
+#
+# Manual only — never on push. Defaults to a DRY RUN.
+
+on:
+  workflow_dispatch:
+    inputs:
+      write:
+        description: 'Actually write. Leave false for a dry run that changes nothing.'
+        type: boolean
+        default: false
+
+concurrency:
+  group: remove-demo-employees
+  cancel-in-progress: false
+
+jobs:
+  remove:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Same diagnostics as the deploy workflow: ssh-keyscan can exit 0
+          # having collected nothing, so check the output rather than the code.
+          keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Check hPanel → Advanced → SSH Access (it can be off or IP-restricted) and whether brute-force protection has banned the runner. Wait several minutes before re-running — retrying inside the ban window extends it."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      - name: Report what is about to run
+        run: |
+          if [ "${{ inputs.write }}" = "true" ]; then
+            echo "::warning::SOFT-DELETING demo employees from the live database. Any fixture referenced by real work, or matching only partially, is left alone and named in the output."
+          else
+            echo "Dry run — nothing will be written."
+          fi
+
+      - name: Run the cleanup
+        run: |
+          set -o pipefail
+          FLAGS=""
+          [ "${{ inputs.write }}" = "true" ] && FLAGS="--write"
+
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && /opt/alt/php84/usr/bin/php artisan hrms:remove-demo-employees $FLAGS" \
+            2>&1 | tee cleanup-output.txt
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Remove demo employees"
+            echo
+            echo "write: \`${{ inputs.write }}\`"
+            echo
+            echo '```'
+            cat cleanup-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

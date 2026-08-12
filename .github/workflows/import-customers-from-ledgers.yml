@@ -1,0 +1,95 @@
+name: Import customers from Tally ledgers
+
+# Creates Sales customers from the Tally ledgers already pulled into the live
+# database, ON THE SERVER, over the same SSH key the deploy uses.
+#
+# Why this is a manual act and not a sync: the customer list is the factory's
+# own commercial record. A background job that quietly invented hundreds of
+# customers — or silently changed one — is the kind of thing nobody notices
+# until an invoice goes to the wrong party. So a person runs it, reads the
+# plan, and only then runs it again with write=true.
+#
+# SELECTION IS AN EXPLICIT ALLOW-LIST OF GROUP NAMES. Leave `groups` empty for
+# a census: the command prints every Tally group in the data with its ledger
+# count and writes nothing. Choose from that list. Membership is NEVER
+# inferred by walking the group tree — the owner confirmed the BUSINESS
+# meaning of the regional groups, not Tally's structure, and turning an
+# unverified parent link into hundreds of customers is exactly the mistake
+# this avoids.
+#
+# Manual only — never on push. Defaults to a DRY RUN.
+
+on:
+  workflow_dispatch:
+    inputs:
+      groups:
+        description: 'Comma-separated Tally group names to import, e.g. "Sundry Debtors,Chennai,Kerala". Leave EMPTY to just list every group and its size.'
+        type: string
+        default: ''
+      write:
+        description: 'Actually write. Leave false for a dry run that changes nothing.'
+        type: boolean
+        default: false
+
+concurrency:
+  group: import-customers-from-ledgers
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Same diagnostics as the deploy workflow: ssh-keyscan can exit 0
+          # having collected nothing, so check the output rather than the code.
+          keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Check hPanel → Advanced → SSH Access (it can be off or IP-restricted) and whether brute-force protection has banned the runner. Wait several minutes before re-running — retrying inside the ban window extends it."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      - name: Report what is about to run
+        run: |
+          if [ -z "${{ inputs.groups }}" ]; then
+            echo "No groups given — listing every Tally group in the data. Nothing will be written."
+          elif [ "${{ inputs.write }}" = "true" ]; then
+            echo "::warning::WRITING customers to the live database from groups: ${{ inputs.groups }}"
+            echo "::warning::Existing customers are never updated or deleted. A ledger whose name is already taken is SKIPPED and reported, not merged."
+          else
+            echo "Dry run for groups: ${{ inputs.groups }} — nothing will be written."
+          fi
+
+      - name: Run the import
+        run: |
+          set -o pipefail
+          FLAGS=""
+          # Quoted: group names contain spaces, and an unquoted expansion would
+          # silently split "Sundry Debtors" into two groups that match nothing.
+          if [ -n "${{ inputs.groups }}" ]; then
+            FLAGS="--groups=\"${{ inputs.groups }}\""
+          fi
+          [ "${{ inputs.write }}" = "true" ] && FLAGS="$FLAGS --write"
+
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && /opt/alt/php84/usr/bin/php artisan sales:import-customers-from-ledgers $FLAGS" \
+            2>&1 | tee import-output.txt
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Customer import from Tally ledgers"
+            echo
+            echo "groups: \`${{ inputs.groups }}\` · write: \`${{ inputs.write }}\`"
+            echo
+            echo '```'
+            cat import-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
