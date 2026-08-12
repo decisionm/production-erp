@@ -185,7 +185,14 @@ the office queued" button.
 
 ## 3 · Group-parent measurement — a ladder, cheapest first
 
-DEC-20260809-002 preserved the nuance deliberately: the owner confirmed the
+The 09-Aug owner-confirmed ledger-groups record preserved the nuance
+deliberately. **Its decision id is not written here on purpose:** that record
+is not on `main` — it lands with PR #155 — and an id cited in a doc on `main`
+must resolve to a record on `main`, or a reader goes looking and finds nothing.
+The knowledge validator enforces exactly that, and it is right to; this plan
+broke it once by citing the id, which is how the rule earned its place here.
+
+What the record says: the owner confirmed the
 **business** meaning, *"not Tally's group tree — whether they technically nest
 under Sundry Debtors stays unverified until the first pull reads the group
 parents."*
