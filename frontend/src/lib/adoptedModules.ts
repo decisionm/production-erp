@@ -65,4 +65,23 @@ export const ADOPTED_MODULES = new Set([
     // all this list is judging.
     'maintenance',
     'compliance',
+    // HRMS and Payroll — adopted by DEC-20260812-001 (superseding
+    // DEC-20260809-001, which hid them). Hiding HRMS never protected anything:
+    // Employee is what shift_production_entries.operator_id,
+    // supervisor_signed_by and ShiftSummary.supervisor point at, so the Start
+    // Batch operator dropdown has been offering those people to the floor all
+    // along. The seven seeded employees are KEPT, not deleted — the factory
+    // edits them into real people, which fixes the dropdown at the same time
+    // and preserves every existing link from real production records.
+    'hrms',
+    'payroll',
+    // CRM — adopted for DEMONSTRATION at the owner's request, and the one
+    // entry on this list not justified by a row count: Leads, Opportunities
+    // and Quotations hold nothing until the factory records its first real
+    // enquiry (Q37). Its enums are already the standard sales pipeline, so
+    // nothing needed seeding. NOTE: DEC-20260812-001 as recorded says CRM
+    // stays hidden — this line is the owner's later instruction of the same
+    // day and supersedes that clause in practice; the record needs a
+    // superseding DEC to say so on paper.
+    'crm',
 ]);
