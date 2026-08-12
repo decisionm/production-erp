@@ -49,8 +49,16 @@ class ImportCustomersFromLedgers extends Command
      */
     private const CODE_PREFIX = 'TL-';
 
+    /**
+     * The census label for ledgers with no group. It is NOT a group name, and
+     * must never be selectable: passing it matched nothing while passing the
+     * unknown-group check, so the command printed IMPORTED having imported
+     * nothing — the exact silent no-op the check exists to prevent.
+     */
+    private const NO_GROUP = '(no group)';
+
     protected $signature = 'sales:import-customers-from-ledgers
-        {--groups= : Comma-separated Tally group names to import, e.g. "Sundry Debtors,Chennai". Required to write. Omit for a census of every group in the data.}
+        {--groups=* : Tally group name to import. Repeatable, and also accepts a comma-separated list. Required to write. Omit for a census of every group in the data.}
         {--write : Actually write (default is a dry run)}';
 
     protected $description = 'Create Sales customers from pulled Tally ledgers, selected by an explicit allow-list of group names';
@@ -61,7 +69,10 @@ class ImportCustomersFromLedgers extends Command
         // see every group that exists and how big it is, including the ones
         // they are about to leave out.
         $census = Ledger::query()
-            ->selectRaw('COALESCE(tally_group_name, "(no group)") as grp, COUNT(*) as n')
+            // Single-quoted: a double-quoted literal is only a string while
+            // MySQL is not in ANSI_QUOTES mode, where it would instead be read
+            // as an identifier and the query would fail.
+            ->selectRaw('COALESCE(tally_group_name, ?) as grp, COUNT(*) as n', [self::NO_GROUP])
             ->groupBy('grp')
             ->orderByDesc('n')
             ->pluck('n', 'grp');
@@ -82,9 +93,21 @@ class ImportCustomersFromLedgers extends Command
         $this->line('  total ledgers: '.$census->sum());
         $this->newLine();
 
-        $groups = collect(explode(',', (string) $this->option('groups')))
+        // Repeatable option, and each value may itself be a comma-separated
+        // list. A value that matches a census group EXACTLY is taken whole —
+        // otherwise a Tally group whose own name contains a comma
+        // ("Debtors, Chennai") could never be selected by any input, and the
+        // refusal below would name two groups the operator can see in the
+        // table above.
+        $groups = collect((array) $this->option('groups'))
+            ->flatMap(function (string $value) use ($census) {
+                $value = trim($value);
+
+                return $census->has($value) ? [$value] : explode(',', $value);
+            })
             ->map(fn (string $g) => trim($g))
             ->filter()
+            ->unique()
             ->values();
 
         if ($groups->isEmpty()) {
@@ -95,6 +118,17 @@ class ImportCustomersFromLedgers extends Command
             $this->line('  parent group — see this command\'s docblock for why.');
 
             return self::SUCCESS;
+        }
+
+        // The census sentinel is a label, not a group. Selecting it would pass
+        // the unknown-group check and then match nothing, reporting IMPORTED
+        // over a silent no-op.
+        if ($groups->contains(self::NO_GROUP)) {
+            $this->error(sprintf('"%s" is a label for ledgers that have no group, not a group you can import.', self::NO_GROUP));
+            $this->line('  Those ledgers cannot be attributed to anything, so importing them would create');
+            $this->line('  customers on no authority at all. Give them a group in Tally first.');
+
+            return self::FAILURE;
         }
 
         $unknown = $groups->reject(fn (string $g) => $census->has($g));
@@ -118,9 +152,10 @@ class ImportCustomersFromLedgers extends Command
         $created = 0;
         $existing = 0;
         $nameClashes = [];
+        $codeClashes = [];
         $blankNames = [];
 
-        $apply = function () use ($ledgers, $customers, &$created, &$existing, &$nameClashes, &$blankNames) {
+        $apply = function () use ($ledgers, $customers, &$created, &$existing, &$nameClashes, &$codeClashes, &$blankNames) {
             foreach ($ledgers as $ledger) {
                 $name = trim((string) $ledger->name);
 
@@ -136,8 +171,19 @@ class ImportCustomersFromLedgers extends Command
 
                 // withTrashed: a customer someone soft-deleted stays deleted.
                 // Re-creating it here would silently undo a person's decision.
-                if (Customer::withTrashed()->where('code', $code)->exists()) {
-                    $existing++;
+                $sameCode = Customer::withTrashed()->where('code', $code)->first();
+
+                if ($sameCode !== null) {
+                    // Same code AND same name is this import's own earlier run.
+                    // Same code but a DIFFERENT name is a collision with a row
+                    // somebody else made, and counting it as "already imported"
+                    // asserted something false while dropping the ledger
+                    // without ever naming it.
+                    if (trim((string) $sameCode->name) === $name) {
+                        $existing++;
+                    } else {
+                        $codeClashes[] = sprintf('%s (ledger #%d) — code %s already belongs to "%s"', $name, $ledger->id, $code, $sameCode->name);
+                    }
 
                     continue;
                 }
@@ -192,6 +238,7 @@ class ImportCustomersFromLedgers extends Command
             [$this->option('write') ? 'customers created' : 'customers that would be created', $created],
             ['already imported (same code) — untouched', $existing],
             ['name already used by another customer — SKIPPED for review', count($nameClashes)],
+            ['code already used by another customer — SKIPPED for review', count($codeClashes)],
             ['ledgers with a blank name — SKIPPED', count($blankNames)],
         ]);
 
@@ -199,6 +246,9 @@ class ImportCustomersFromLedgers extends Command
         // person still owes, named specifically enough to act on.
         foreach ($nameClashes as $line) {
             $this->warn('  name clash, not imported: '.$line);
+        }
+        foreach ($codeClashes as $line) {
+            $this->warn('  code clash, not imported: '.$line);
         }
         foreach ($blankNames as $line) {
             $this->warn('  blank name, not imported: '.$line);

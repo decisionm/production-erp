@@ -70,7 +70,12 @@ class RemoveDemoEmployees extends Command
     private const REFERENCES = [
         ['table' => 'shift_production_entries', 'column' => 'operator_id', 'what' => 'ran a batch'],
         ['table' => 'shift_production_entries', 'column' => 'supervisor_signed_by', 'what' => 'signed a batch as supervisor'],
-        ['table' => 'shift_production_entries', 'column' => 'plant_manager_signed_by', 'what' => 'signed a batch as plant manager'],
+        // NOT plant_manager_signed_by: migration 2026_07_25_000001 dropped and
+        // re-added that column constrained('users'), so it holds a USER id.
+        // Checking it here compared an employee id against a user id — and
+        // both sequences start at 1, so it reported a demo employee as
+        // "signed a batch as plant manager" on the strength of an unrelated
+        // user's signature. Eleven columns reference employees, not twelve.
         ['table' => 'shift_summaries', 'column' => 'supervisor_id', 'what' => 'is a shift summary supervisor'],
         ['table' => 'maintenance_work_orders', 'column' => 'assigned_to', 'what' => 'is assigned a work order'],
         ['table' => 'capas', 'column' => 'owner', 'what' => 'owns a CAPA'],
@@ -93,12 +98,24 @@ class RemoveDemoEmployees extends Command
         $referenced = [];
         $partial = [];
         $absent = [];
+        $alreadyRemoved = [];
+        $candidates = [];
 
         foreach (self::FIXTURES as $fixture) {
-            $byCode = Employee::query()->where('employee_code', $fixture['code'])->first();
+            // withTrashed so a fixture this command already removed reports as
+            // "already removed" rather than "not present" — those mean very
+            // different things when someone is checking whether the cleanup
+            // ran, and a soft-deleted row is still a row.
+            $byCode = Employee::withTrashed()->where('employee_code', $fixture['code'])->first();
 
             if ($byCode === null) {
                 $absent[] = $fixture['code'];
+
+                continue;
+            }
+
+            if ($byCode->trashed()) {
+                $alreadyRemoved[] = $fixture['code'];
 
                 continue;
             }
@@ -118,21 +135,46 @@ class RemoveDemoEmployees extends Command
                 continue;
             }
 
-            $refs = $this->referencesTo($byCode->id);
+            $candidates[] = ['employee' => $byCode, 'fixture' => $fixture];
+        }
+
+        // TWO PASSES, and the second one needs the first to be complete.
+        //
+        // The demo seeder wires the fixtures to EACH OTHER: EMP-002 and -003
+        // report to EMP-001, EMP-004 and -005 to EMP-002. Checked one at a
+        // time, EMP-001 is "referenced by" EMP-002 — so it was reported as
+        // referenced by real records and left in the live HRMS forever, on
+        // the strength of a reference the same demo seeder created. Worse,
+        // soft-deleting a subordinate does not clear its manager_id, so the
+        // count never fell and a second run behaved identically to the first.
+        //
+        // A reference from another row that is ITSELF being removed is not a
+        // reason to keep anything. Only references from outside the candidate
+        // set count.
+        $candidateIds = array_map(fn (array $c) => (int) $c['employee']->id, $candidates);
+
+        foreach ($candidates as $candidate) {
+            $refs = $this->referencesTo((int) $candidate['employee']->id, $candidateIds);
 
             if ($refs !== []) {
-                $referenced[] = sprintf('%s (%s) — %s', $fixture['code'], $fixture['name'], implode('; ', $refs));
+                $referenced[] = sprintf(
+                    '%s (%s) — %s',
+                    $candidate['fixture']['code'],
+                    $candidate['fixture']['name'],
+                    implode('; ', $refs),
+                );
 
                 continue;
             }
 
-            $removable[] = $byCode;
+            $removable[] = $candidate['employee'];
         }
 
         $this->info('Demo employees — plan');
         $this->table(['count', 'value'], [
             ['fixtures looked for', count(self::FIXTURES)],
             ['not present (nothing to do)', count($absent)],
+            ['already removed by a previous run', count($alreadyRemoved)],
             [$this->option('write') ? 'removed' : 'would be removed', count($removable)],
             ['LEFT ALONE — referenced by real records', count($referenced)],
             ['LEFT ALONE — partial match, assumption is wrong', count($partial)],
@@ -181,19 +223,32 @@ class RemoveDemoEmployees extends Command
      *
      * @return list<string>
      */
-    private function referencesTo(int $employeeId): array
+    private function referencesTo(int $employeeId, array $candidateIds = []): array
     {
         $found = [];
+        $schema = DB::getSchemaBuilder();
 
         foreach (self::REFERENCES as $ref) {
-            if (! DB::getSchemaBuilder()->hasTable($ref['table'])) {
-                continue;
-            }
-            if (! DB::getSchemaBuilder()->hasColumn($ref['table'], $ref['column'])) {
+            if (! $schema->hasTable($ref['table']) || ! $schema->hasColumn($ref['table'], $ref['column'])) {
                 continue;
             }
 
-            $count = DB::table($ref['table'])->where($ref['column'], $employeeId)->count();
+            $query = DB::table($ref['table'])->where($ref['column'], $employeeId);
+
+            // A row somebody already deleted is not a live reference. Without
+            // this, removing one fixture permanently pinned another.
+            if ($schema->hasColumn($ref['table'], 'deleted_at')) {
+                $query->whereNull('deleted_at');
+            }
+
+            // A reference from a row that is itself on the removal list is not
+            // a reason to keep anything — that is the demo seeder pointing at
+            // itself, not the factory's real work.
+            if ($ref['table'] === 'employees' && $candidateIds !== []) {
+                $query->whereNotIn('id', $candidateIds);
+            }
+
+            $count = $query->count();
 
             if ($count > 0) {
                 $found[] = sprintf('%s (%d in %s.%s)', $ref['what'], $count, $ref['table'], $ref['column']);

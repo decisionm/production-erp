@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\User;
 use App\Modules\HRMS\Models\Employee;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\Warehouse;
@@ -120,17 +121,55 @@ class RemoveDemoEmployeesTest extends TestCase
 
     public function test_a_manager_link_between_fixtures_does_not_block_removal(): void
     {
-        // EMP-001 manages the others in the seeder. That is a reference
-        // BETWEEN fixtures, not from real work — but the command is
-        // deliberately conservative and reports it rather than reasoning
-        // about which references "count". Asserting the actual behaviour so a
-        // future change to it is a deliberate one.
+        // The seeder wires the fixtures to EACH OTHER (EMP-002 and -003 report
+        // to EMP-001, EMP-004 and -005 to EMP-002). Checked one at a time,
+        // EMP-001 looked "referenced by real records" and survived forever —
+        // on the strength of a reference the same demo seeder created. And
+        // because soft-deleting a subordinate does not clear its manager_id,
+        // the count never fell, so a second run behaved exactly like the
+        // first. This asserts the whole set goes in ONE run.
         $this->allSeven();
         $manager = Employee::where('employee_code', 'EMP-001')->firstOrFail();
+        $second = Employee::where('employee_code', 'EMP-002')->firstOrFail();
         Employee::where('employee_code', 'EMP-002')->update(['manager_id' => $manager->id]);
+        Employee::where('employee_code', 'EMP-003')->update(['manager_id' => $manager->id]);
+        Employee::where('employee_code', 'EMP-004')->update(['manager_id' => $second->id]);
 
         $this->artisan('hrms:remove-demo-employees --write')->assertSuccessful();
 
-        $this->assertNotNull(Employee::where('employee_code', 'EMP-001')->first());
+        $this->assertSame(0, Employee::count(), 'the fixtures reference each other; none of that is real work');
+        $this->assertSame(7, Employee::withTrashed()->count());
+    }
+
+    public function test_a_signature_by_a_use_r_is_not_mistaken_for_an_employee_reference(): void
+    {
+        // shift_production_entries.plant_manager_signed_by was re-pointed at
+        // USERS by migration 2026_07_25_000001. It was on the reference list
+        // as though it pointed at employees, so an unrelated user's signature
+        // made a demo employee look referenced — and user ids and employee ids
+        // both start at 1, so they collide readily on a small instance.
+        $this->allSeven();
+        $pmUser = User::factory()->create();
+
+        $shift = Shift::create(['name' => 'Morning', 'start_time' => '06:00', 'end_time' => '14:00']);
+        $machine = WorkCenter::create(['code' => 'MC-01', 'name' => 'Machine 1']);
+        $item = Item::create(['sku' => 'X-1', 'name' => 'Bottle', 'uom' => 'NOS', 'is_active' => true]);
+        $warehouse = Warehouse::create(['code' => 'WH-1', 'name' => 'FG']);
+
+        ShiftProductionEntry::create([
+            'shift_id' => $shift->id,
+            'work_center_id' => $machine->id,
+            'item_id' => $item->id,
+            'warehouse_id' => $warehouse->id,
+            'production_date' => '2026-08-01',
+            'batch_number' => '20260801-M01-002',
+            'batch_status' => BatchStatus::InProgress,
+            'quantity_scrap' => '0',
+            'plant_manager_signed_by' => $pmUser->id,
+        ]);
+
+        $this->artisan('hrms:remove-demo-employees --write')->assertSuccessful();
+
+        $this->assertSame(0, Employee::count(), 'a USER signature must not pin an employee');
     }
 }

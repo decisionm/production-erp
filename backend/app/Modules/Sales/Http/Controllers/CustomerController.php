@@ -24,7 +24,10 @@ class CustomerController extends Controller
      */
     public function index(Request $request): AnonymousResourceCollection
     {
-        $perPage = max(1, min(200, (int) $request->query('per_page', 20)));
+        // is_numeric first: (int) 'abc' is 0, which the clamp turned into ONE
+        // row per page rather than falling back to the documented default.
+        $raw = $request->query('per_page');
+        $perPage = is_numeric($raw) ? max(1, min(200, (int) $raw)) : 20;
 
         return CustomerResource::collection($this->customers->paginate($perPage));
     }
