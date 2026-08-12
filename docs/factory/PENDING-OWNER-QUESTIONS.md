@@ -541,18 +541,28 @@ being as safe as the repo is. *Open since 2026-08-12.*
 
 ## Q39 · How is the purchase ledger chosen, per line?
 
-The Day Book shows FOUR purchase ledgers in use — Local Purchase Taxable @ 18%
-(99 lines), Interstate Purchase Taxable (58), Local Purchase Taxable @ 5% (30),
-Interstate Purchase Taxable 5% (12) — with CGST+SGST on local vouchers, IGST on
-interstate, and a Rounding Off line on 52. The ERP's Tally Settings screen
-offers a SINGLE Purchase mapping, which cannot express this. The obvious
-reading is that local-versus-interstate comes from the vendor's state against
-the company's, and the rate from the item's GST rate — but "obvious" is how a
-wrong assumption reaches live, and the ERP's compliance module holds GST rates
-that may or may not be the ones Tally uses. Also needed: is the Rounding Off
-ledger always that name, and is it produced by Tally or entered? **Blocks:** the
-per-rate purchase ledger mapping, and therefore any ERP-raised purchase voucher.
-*Open since 2026-08-12.*
+HALF OF THIS IS NOW MEASURED AND NEEDS NO ANSWER. Parsing the 92 Day Book
+vouchers: 90 of 92 conform to `Local ledger <=> party state is Puducherry <=>
+CGST+SGST` and `Interstate <=> any other state <=> IGST`. The company's state is
+Puducherry and local-versus-interstate follows from the party's state. (The two
+exceptions: voucher 57, Auro Packaging, carries a LOCAL ledger on a Tamil Nadu
+party with IGST — a mis-keyed ledger, and an ERP enforcing the rule would refuse
+to reproduce it; voucher 72 is the cancelled one.)
+
+WHAT REMAINS UNANSWERED IS THE RATE, and the obvious rule is measurably WRONG:
+9 of 43 items appear under BOTH 5% and 18%, and 3 of 20 vendors use both, so the
+rate is a property of neither. What the data does show is that 5% appears only
+in April, May and June 2026 — July and August are 18% only. That is consistent
+with a GST rate change effective around July, but it is an inference, and it
+could equally be a reclassification or earlier mis-keying since corrected.
+
+So, for the accountant: **why did 5% stop after June?** And is the rate to be
+taken from the invoice date, the item, the vendor, or somewhere else entirely?
+Also still needed: is the Rounding Off ledger always that name, and is it
+produced by Tally or entered by hand? **Blocks:** the per-rate purchase ledger
+mapping, and therefore any ERP-raised purchase voucher. Whatever the answer, the
+ERP must NOT hold one GST rate per item — the rate that applied in April is not
+the one that applies now. *Open since 2026-08-12.*
 
 ## Q40 · On a dual-unit line, which unit is authoritative?
 

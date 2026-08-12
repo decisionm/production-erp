@@ -98,13 +98,52 @@ tax_ledger[ cgst | sgst | igst ]               ->  Tally ledger name
 rounding_ledger                                ->  Tally ledger name
 ```
 
-**How the correct ledger is chosen per line is NOT guessed here.** The evidence
-shows the split is by local-vs-interstate AND by rate; the obvious reading is
-that local-vs-interstate comes from comparing the vendor's state to the
-company's, and the rate comes from the item's GST rate. But "obvious" is how a
-wrong assumption reaches live, and the ERP's own compliance module already holds
-GST rates that may or may not be the ones Tally uses. **This goes to the owner
-as a question with the evidence attached.**
+#### The local/interstate half is MEASURED, not assumed
+
+Parsed from the 92 vouchers (the files are **UTF-16 LE** — that matters for any
+reader built against them):
+
+| purchase ledger | tax on the same voucher | party state |
+|---|---|---|
+| Local Purchase Taxable @ 18% (47) | CGST+SGST | Puducherry |
+| Local Purchase Taxable @ 5% (8) | CGST+SGST | Puducherry |
+| Interstate Purchase Taxable (31) | IGST | Tamil Nadu, Maharashtra, Rajasthan, Gujarat |
+| Interstate Purchase Taxable 5% (4) | IGST | Tamil Nadu |
+
+**90 of 92 conform** to `Local ⇔ party state is Puducherry ⇔ CGST+SGST` and
+`Interstate ⇔ any other state ⇔ IGST`. So the company's own state is
+**Puducherry**, and local-versus-interstate is decided by the party's state
+against it. That half needs no guess.
+
+The two that do not conform:
+
+- **Voucher 57, Auro Packaging** — ledger `Local Purchase Taxable @ 5%` on a
+  **Tamil Nadu** party carrying **IGST**. The tax is right for an interstate
+  purchase; the ledger is not. A mis-keyed ledger in Tally. Worth knowing
+  because **an ERP enforcing the rule would refuse to reproduce this voucher** —
+  correctly, but the owner should hear it now rather than discover it later.
+- **Voucher 72** — no purchase ledger, no party, no tax. Consistent with the
+  Statistics screen's "92 (1 cancelled)".
+
+#### The RATE half is NOT determined by the item — the obvious rule is wrong
+
+This is precisely why it was not guessed. Measured:
+
+- **9 of 43 items appear under BOTH 5% and 18%** — 200 Ml Brute Tray,
+  100/170/200 Ml Master Box, 60 Ml Tray, 100 Ml Tray among them. The same item
+  is bought at both rates, so the rate is not a property of the item.
+- **3 of 20 vendors use both rates**, so it is not the vendor either.
+- **5% appears only in 2026-04, -05 and -06. July and August are 18% only.**
+
+The time pattern is the strong one and is consistent with a GST rate change
+effective around July 2026 — **but that is an inference, recorded as one.** It
+could equally be a reclassification, or earlier mis-keying since corrected. Only
+the accountant can say, and Q39 asks.
+
+**What follows for the build either way: the ERP must NOT hold one GST rate per
+item.** Whatever the cause, the rate that applied in April is not the rate that
+applies now, so a per-item constant would silently misprice either history or
+the present.
 
 ### 2 · Dual units are real
 
