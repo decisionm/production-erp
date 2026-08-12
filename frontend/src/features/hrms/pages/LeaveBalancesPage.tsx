@@ -4,7 +4,7 @@ import { Button, Form, InputNumber, Modal, Select, Space, Table, Typography } fr
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { allocateLeaveBalance, listEmployees, listLeaveBalances, listLeaveTypes } from '@/features/hrms/api';
+import { allocateLeaveBalance, listAllEmployees, listLeaveBalances, listLeaveTypes } from '@/features/hrms/api';
 import type { LeaveBalance } from '@/features/hrms/types';
 
 const currentYear = new Date().getFullYear();
@@ -22,7 +22,7 @@ export default function LeaveBalancesPage() {
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['hrms', 'leave-balances'], queryFn: listLeaveBalances });
-    const { data: employees } = useQuery({ queryKey: ['hrms', 'employees'], queryFn: listEmployees });
+    const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: listAllEmployees });
     const { data: leaveTypes } = useQuery({ queryKey: ['hrms', 'leave-types'], queryFn: listLeaveTypes });
 
     const employeeOptions = employees?.data.map((e) => ({ value: e.id, label: `${e.employee_code} — ${e.name}` })) ?? [];

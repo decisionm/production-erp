@@ -14,7 +14,7 @@ import {
     sendQuotation,
 } from '@/features/crm/api';
 import type { Quotation, QuotationStatus } from '@/features/crm/types';
-import { listItems } from '@/features/inventory/api';
+import { listAllItems } from '@/features/inventory/api';
 
 const quotationSchema = z.object({
     opportunity_id: z.number({ error: 'Opportunity is required' }),
@@ -52,7 +52,7 @@ export default function QuotationsPage() {
 
     const { data, isLoading } = useQuery({ queryKey: ['crm', 'quotations'], queryFn: listQuotations });
     const { data: opportunities } = useQuery({ queryKey: ['crm', 'opportunities'], queryFn: listOpportunities });
-    const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
+    const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
 
     const opportunityOptions =
         opportunities?.data.map((o) => ({ value: o.id, label: `${o.name} — ${o.customer.name}` })) ?? [];

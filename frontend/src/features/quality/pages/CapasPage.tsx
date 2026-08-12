@@ -4,7 +4,7 @@ import { Button, DatePicker, Form, Input, Modal, Select, Space, Switch, Table, T
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { listEmployees } from '@/features/hrms/api';
+import { listAllEmployees } from '@/features/hrms/api';
 import { closeCapa, createCapa, listCapas, listNonConformanceReports, startCapa, updateCapa } from '@/features/quality/api';
 import type { Capa, CapaStatus } from '@/features/quality/types';
 
@@ -39,7 +39,7 @@ export default function CapasPage() {
 
     const { data, isLoading } = useQuery({ queryKey: ['quality', 'capas'], queryFn: listCapas });
     const { data: ncrs } = useQuery({ queryKey: ['quality', 'ncrs'], queryFn: listNonConformanceReports });
-    const { data: employees } = useQuery({ queryKey: ['hrms', 'employees'], queryFn: listEmployees });
+    const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: listAllEmployees });
 
     const ncrOptions = ncrs?.data.map((n) => ({ value: n.id, label: `NCR #${n.id} — ${n.description.slice(0, 40)}` })) ?? [];
     const employeeOptions = employees?.data.map((e) => ({ value: e.id, label: `${e.employee_code} — ${e.name}` })) ?? [];

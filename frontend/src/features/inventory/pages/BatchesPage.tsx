@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import BarcodeDisplay from '@/components/barcode/BarcodeDisplay';
-import { createBatch, getBatchLedger, listBatches, listItems } from '@/features/inventory/api';
+import { createBatch, getBatchLedger, listBatches, listAllItems } from '@/features/inventory/api';
 import type { Batch, BatchLedger } from '@/features/inventory/types';
 import { itemLabel } from '@/lib/itemLabel';
 
@@ -26,7 +26,7 @@ export default function BatchesPage() {
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['inventory', 'batches'], queryFn: () => listBatches() });
-    const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
+    const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
     const itemOptions = items?.data.filter((i) => i.tracking_type === 'batch').map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<BatchFormValues>({

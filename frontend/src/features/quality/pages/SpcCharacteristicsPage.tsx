@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
-import { listItems } from '@/features/inventory/api';
+import { listAllItems } from '@/features/inventory/api';
 import { createSpcCharacteristic, listSpcCharacteristics } from '@/features/quality/api';
 import type { SpcCharacteristic } from '@/features/quality/types';
 
@@ -25,7 +25,7 @@ export default function SpcCharacteristicsPage() {
     const navigate = useNavigate();
 
     const { data, isLoading } = useQuery({ queryKey: ['quality', 'spc-characteristics'], queryFn: () => listSpcCharacteristics() });
-    const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
+    const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
     const itemOptions = items?.data.map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<CharacteristicFormValues>({

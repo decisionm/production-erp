@@ -4,7 +4,7 @@ import { Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Mod
 import { useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { listItems } from '@/features/inventory/api';
+import { listAllItems } from '@/features/inventory/api';
 import {
     approvePurchaseRequisition,
     createPurchaseRequisition,
@@ -44,7 +44,7 @@ export default function PurchaseRequisitionsPage() {
         queryKey: ['procurement', 'purchase-requisitions'],
         queryFn: listPurchaseRequisitions,
     });
-    const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
+    const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
     const itemOptions = items?.data.map((item) => ({ value: item.id, label: itemLabel(item) })) ?? [];
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<RequisitionFormValues>({

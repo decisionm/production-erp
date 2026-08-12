@@ -4,7 +4,7 @@ import { Button, DatePicker, Descriptions, Drawer, Form, InputNumber, Modal, Sel
 import { useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { listEmployees } from '@/features/hrms/api';
+import { listAllEmployees } from '@/features/hrms/api';
 import { createSalaryStructure, listSalaryComponents, listSalaryStructures } from '@/features/payroll/api';
 import type { SalaryStructure } from '@/features/payroll/types';
 
@@ -26,7 +26,7 @@ export default function SalaryStructuresPage() {
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['payroll', 'salary-structures'], queryFn: () => listSalaryStructures() });
-    const { data: employees } = useQuery({ queryKey: ['hrms', 'employees'], queryFn: listEmployees });
+    const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: listAllEmployees });
     const { data: components } = useQuery({ queryKey: ['payroll', 'salary-components'], queryFn: listSalaryComponents });
 
     const employeeOptions = employees?.data.map((e) => ({ value: e.id, label: `${e.employee_code} — ${e.name}` })) ?? [];

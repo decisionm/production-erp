@@ -4,7 +4,7 @@ import { Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Mod
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { listItems } from '@/features/inventory/api';
+import { listAllItems } from '@/features/inventory/api';
 import {
     closeNonConformanceReport,
     createNonConformanceReport,
@@ -44,7 +44,7 @@ export default function NonConformanceReportsPage() {
 
     const { data, isLoading } = useQuery({ queryKey: ['quality', 'ncrs'], queryFn: listNonConformanceReports });
     const { data: inspections } = useQuery({ queryKey: ['quality', 'incoming-inspections'], queryFn: listIncomingInspections });
-    const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
+    const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
 
     const inspectionOptions =
         inspections?.data.map((i) => ({ value: i.id, label: `Inspection #${i.id} — ${i.item.sku} (${i.result})` })) ?? [];

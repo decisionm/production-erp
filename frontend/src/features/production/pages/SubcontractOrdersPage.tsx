@@ -4,8 +4,8 @@ import { Button, Descriptions, Drawer, Form, InputNumber, Modal, Select, Space, 
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { listItems, listWarehouses } from '@/features/inventory/api';
-import { listVendors } from '@/features/procurement/api';
+import { listAllItems, listAllWarehouses } from '@/features/inventory/api';
+import { listAllVendors } from '@/features/procurement/api';
 import {
     createSubcontractOrder,
     listSubcontractOrders,
@@ -42,9 +42,9 @@ export default function SubcontractOrdersPage() {
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['production', 'subcontract-orders'], queryFn: listSubcontractOrders });
-    const { data: vendors } = useQuery({ queryKey: ['procurement', 'vendors'], queryFn: listVendors });
-    const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
-    const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses'], queryFn: listWarehouses });
+    const { data: vendors } = useQuery({ queryKey: ['procurement', 'vendors', 'all'], queryFn: listAllVendors });
+    const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
+    const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses', 'all'], queryFn: listAllWarehouses });
 
     const vendorOptions = vendors?.data.map((v) => ({ value: v.id, label: `${v.code} — ${v.name}` })) ?? [];
     const itemOptions = items?.data.map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];

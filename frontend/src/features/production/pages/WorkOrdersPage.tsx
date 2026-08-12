@@ -4,8 +4,8 @@ import { Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Mod
 import { useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { listItems, listWarehouses } from '@/features/inventory/api';
-import { completeWorkOrder, createWorkOrder, listScrapReasons, listWorkOrders, releaseWorkOrder } from '@/features/production/api';
+import { listAllItems, listAllWarehouses } from '@/features/inventory/api';
+import { completeWorkOrder, createWorkOrder, listAllScrapReasons, listWorkOrders, releaseWorkOrder } from '@/features/production/api';
 import type { WorkOrder, WorkOrderStatus } from '@/features/production/types';
 import { itemLabel } from '@/lib/itemLabel';
 
@@ -43,9 +43,9 @@ export default function WorkOrdersPage() {
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['production', 'work-orders'], queryFn: listWorkOrders });
-    const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
-    const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses'], queryFn: listWarehouses });
-    const { data: scrapReasons } = useQuery({ queryKey: ['production', 'scrap-reasons'], queryFn: listScrapReasons });
+    const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
+    const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses', 'all'], queryFn: listAllWarehouses });
+    const { data: scrapReasons } = useQuery({ queryKey: ['production', 'scrap-reasons', 'all'], queryFn: listAllScrapReasons });
 
     const itemOptions = items?.data.map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
     const warehouseOptions = warehouses?.data.map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })) ?? [];

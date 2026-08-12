@@ -5,7 +5,7 @@ import dayjs from 'dayjs';
 import { useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { listItems } from '@/features/inventory/api';
+import { listAllItems } from '@/features/inventory/api';
 import {
     confirmSalesOrder,
     createSalesOrder,
@@ -467,7 +467,7 @@ export default function SalesOrdersPage() {
         // rather than the 20-row default this used to get.
         queryFn: () => listCustomers(1, 200),
     });
-    const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
+    const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
 
     const customerOptions = customers?.data.map((c) => ({ value: c.id, label: `${c.code} — ${c.name}` })) ?? [];
     const itemOptions = items?.data.map((item) => ({ value: item.id, label: `${item.sku} — ${item.name}` })) ?? [];

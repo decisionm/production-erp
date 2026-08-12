@@ -5,8 +5,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { type Control, Controller, useFieldArray, useForm } from 'react-hook-form';
 import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
-import { listItems } from '@/features/inventory/api';
-import { createPurchaseOrder, listPurchaseOrders, listVendors, sendPurchaseOrder } from '@/features/procurement/api';
+import { listAllItems } from '@/features/inventory/api';
+import { createPurchaseOrder, listPurchaseOrders, listAllVendors, sendPurchaseOrder } from '@/features/procurement/api';
 import type { PurchaseOrder, PurchaseOrderStatus } from '@/features/procurement/types';
 import { itemLabel } from '@/lib/itemLabel';
 
@@ -117,8 +117,8 @@ export default function PurchaseOrdersPage() {
         queryKey: ['procurement', 'purchase-orders', focusOrderId !== null ? 'all' : 'first-page'],
         queryFn: () => listPurchaseOrders(focusOrderId !== null ? { per_page: 1000 } : undefined),
     });
-    const { data: vendors } = useQuery({ queryKey: ['procurement', 'vendors'], queryFn: listVendors });
-    const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
+    const { data: vendors } = useQuery({ queryKey: ['procurement', 'vendors', 'all'], queryFn: listAllVendors });
+    const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
 
     const vendorOptions = vendors?.data.map((v) => ({ value: v.id, label: `${v.code} — ${v.name}` })) ?? [];
     const itemOptions = items?.data.map((item) => ({ value: item.id, label: itemLabel(item) })) ?? [];

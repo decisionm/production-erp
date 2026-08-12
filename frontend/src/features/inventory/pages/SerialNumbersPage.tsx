@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import BarcodeDisplay from '@/components/barcode/BarcodeDisplay';
-import { createSerialNumber, getSerialNumberHistory, listItems, listSerialNumbers } from '@/features/inventory/api';
+import { createSerialNumber, getSerialNumberHistory, listAllItems, listSerialNumbers } from '@/features/inventory/api';
 import type { SerialNumber, SerialNumberStatus } from '@/features/inventory/types';
 import { itemLabel } from '@/lib/itemLabel';
 
@@ -31,7 +31,7 @@ export default function SerialNumbersPage() {
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['inventory', 'serial-numbers'], queryFn: () => listSerialNumbers() });
-    const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
+    const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
     const itemOptions = items?.data.filter((i) => i.tracking_type === 'serial').map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<SerialFormValues>({

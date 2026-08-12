@@ -8,11 +8,11 @@ import { z } from 'zod';
 import BarcodeScanInput from '@/components/barcode/BarcodeScanInput';
 import {
     listBatches,
-    listItems,
+    listAllItems,
     listSerialNumbers,
     listStockBalances,
     listStockMovements,
-    listWarehouses,
+    listAllWarehouses,
     recordIssue,
     recordReceipt,
     recordTransfer,
@@ -77,8 +77,8 @@ export default function StockPage() {
             listStockMovements({ item_id: historyRow!.item.id, warehouse_id: historyRow!.warehouse.id, per_page: 200 }),
         enabled: historyRow !== null,
     });
-    const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
-    const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses'], queryFn: listWarehouses });
+    const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
+    const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses', 'all'], queryFn: listAllWarehouses });
     const { data: batches } = useQuery({ queryKey: ['inventory', 'batches'], queryFn: () => listBatches() });
     const { data: serialNumbers } = useQuery({ queryKey: ['inventory', 'serial-numbers'], queryFn: () => listSerialNumbers() });
 

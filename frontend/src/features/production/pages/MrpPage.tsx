@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Button, Form, InputNumber, Modal, Select, Space, Table, Typography } from 'antd';
 import { useState } from 'react';
-import { listItems } from '@/features/inventory/api';
+import { listAllItems } from '@/features/inventory/api';
 import { getMrpNetRequirements } from '@/features/production/api';
 import type { MrpNetRequirement } from '@/features/production/types';
 import { itemLabel } from '@/lib/itemLabel';
@@ -11,7 +11,7 @@ export default function MrpPage() {
     const [quantity, setQuantity] = useState<number | undefined>();
     const [results, setResults] = useState<MrpNetRequirement[] | null>(null);
 
-    const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
+    const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
     const itemOptions = items?.data.map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
 
     const mutation = useMutation({

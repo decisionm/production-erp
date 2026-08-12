@@ -12,6 +12,19 @@ export async function listVendors(): Promise<Paginated<Vendor>> {
     return data;
 }
 
+/**
+ * Full reference list for a picker (all rows, not the default first page).
+ *
+ * A picker fed from the paged list silently offers only the newest 20 — the
+ * vendor a buyer needs is simply absent, with nothing on screen saying so.
+ * That is how the resin PO could not be raised on 12-Aug: the ITEM picker had
+ * the same defect, and every picker in the app shared it.
+ */
+export async function listAllVendors(): Promise<Paginated<Vendor>> {
+    const { data } = await api.get<Paginated<Vendor>>('/procurement/vendors', { params: { per_page: 1000 } });
+    return data;
+}
+
 export interface CreateVendorPayload {
     code: string;
     name: string;

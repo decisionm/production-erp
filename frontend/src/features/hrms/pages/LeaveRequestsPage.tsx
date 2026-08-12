@@ -7,7 +7,7 @@ import { z } from 'zod';
 import {
     approveLeaveRequest,
     createLeaveRequest,
-    listEmployees,
+    listAllEmployees,
     listLeaveRequests,
     listLeaveTypes,
     rejectLeaveRequest,
@@ -36,7 +36,7 @@ export default function LeaveRequestsPage() {
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['hrms', 'leave-requests'], queryFn: listLeaveRequests });
-    const { data: employees } = useQuery({ queryKey: ['hrms', 'employees'], queryFn: listEmployees });
+    const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: listAllEmployees });
     const { data: leaveTypes } = useQuery({ queryKey: ['hrms', 'leave-types'], queryFn: listLeaveTypes });
 
     const employeeOptions = employees?.data.map((e) => ({ value: e.id, label: `${e.employee_code} — ${e.name}` })) ?? [];

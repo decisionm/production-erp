@@ -4,7 +4,7 @@ import { Button, Descriptions, Drawer, Form, InputNumber, Modal, Select, Space, 
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { listItems, listWarehouses } from '@/features/inventory/api';
+import { listAllItems, listAllWarehouses } from '@/features/inventory/api';
 import {
     completeReworkOrder,
     createReworkOrder,
@@ -44,8 +44,8 @@ export default function ReworkOrdersPage() {
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['production', 'rework-orders'], queryFn: listReworkOrders });
-    const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
-    const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses'], queryFn: listWarehouses });
+    const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
+    const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses', 'all'], queryFn: listAllWarehouses });
     const { data: workOrders } = useQuery({ queryKey: ['production', 'work-orders'], queryFn: listWorkOrders });
     const { data: boms } = useQuery({ queryKey: ['production', 'boms'], queryFn: () => listBoms() });
 

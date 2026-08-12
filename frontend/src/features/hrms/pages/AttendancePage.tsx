@@ -4,7 +4,7 @@ import { Button, DatePicker, Form, Input, Modal, Select, Space, Table, Tag, Typo
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { listAttendance, listEmployees, markAttendance } from '@/features/hrms/api';
+import { listAttendance, listAllEmployees, markAttendance } from '@/features/hrms/api';
 import type { Attendance, AttendanceStatus } from '@/features/hrms/types';
 
 const attendanceSchema = z.object({
@@ -34,7 +34,7 @@ export default function AttendancePage() {
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['hrms', 'attendance'], queryFn: listAttendance });
-    const { data: employees } = useQuery({ queryKey: ['hrms', 'employees'], queryFn: listEmployees });
+    const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: listAllEmployees });
     const employeeOptions = employees?.data.map((e) => ({ value: e.id, label: `${e.employee_code} — ${e.name}` })) ?? [];
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<AttendanceFormValues>({

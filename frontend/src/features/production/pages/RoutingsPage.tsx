@@ -4,7 +4,7 @@ import { Button, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, 
 import { useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { listItems } from '@/features/inventory/api';
+import { listAllItems } from '@/features/inventory/api';
 import { createRouting, listRoutings, listWorkCenters } from '@/features/production/api';
 import type { Routing } from '@/features/production/types';
 import { itemLabel } from '@/lib/itemLabel';
@@ -29,7 +29,7 @@ export default function RoutingsPage() {
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['production', 'routings'], queryFn: () => listRoutings() });
-    const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
+    const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
     // A routing step is production setup — a retired machine must not be
     // selectable for one.
     const { data: workCenters } = useQuery({

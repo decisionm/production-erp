@@ -8,7 +8,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import BarcodeScanInput from '@/components/barcode/BarcodeScanInput';
 import MaterialBagLabels from '@/features/inventory/components/MaterialBagLabels';
-import { listWarehouses } from '@/features/inventory/api';
+import { listAllWarehouses } from '@/features/inventory/api';
 import { createGoodsReceipt, listGoodsReceipts, listPurchaseOrders } from '@/features/procurement/api';
 import type { GoodsReceiptNote, PurchaseOrderSchedule } from '@/features/procurement/types';
 import { useProductionSettings } from '@/features/production/packing';
@@ -256,7 +256,7 @@ export default function GoodsReceiptsPage() {
         queryFn: () => listGoodsReceipts(isDeepLinked ? { per_page: 1000 } : undefined),
     });
     const { data: orders } = useQuery({ queryKey: ['procurement', 'purchase-orders'], queryFn: () => listPurchaseOrders() });
-    const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses'], queryFn: listWarehouses });
+    const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses', 'all'], queryFn: listAllWarehouses });
     // Phase 6 lot/bag intake renders only when the backend flag is on — with
     // it off (or an older backend) this page is exactly the pre-traceability UI.
     const settings = useProductionSettings();

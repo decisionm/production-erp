@@ -5,8 +5,8 @@ import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import BarcodeScanInput from '@/components/barcode/BarcodeScanInput';
-import { listEmployees } from '@/features/hrms/api';
-import { listItems, listWarehouses } from '@/features/inventory/api';
+import { listAllEmployees } from '@/features/hrms/api';
+import { listAllItems, listAllWarehouses } from '@/features/inventory/api';
 import {
     addMaintenanceWorkOrderPart,
     cancelMaintenanceWorkOrder,
@@ -59,9 +59,9 @@ export default function WorkOrdersPage() {
 
     const { data, isLoading } = useQuery({ queryKey: ['maintenance', 'work-orders'], queryFn: () => listMaintenanceWorkOrders() });
     const { data: assets } = useQuery({ queryKey: ['maintenance', 'assets'], queryFn: listAssets });
-    const { data: employees } = useQuery({ queryKey: ['hrms', 'employees'], queryFn: listEmployees });
-    const { data: items } = useQuery({ queryKey: ['inventory', 'items'], queryFn: listItems });
-    const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses'], queryFn: listWarehouses });
+    const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: listAllEmployees });
+    const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
+    const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses', 'all'], queryFn: listAllWarehouses });
 
     const assetOptions = assets?.data.map((a) => ({ value: a.id, label: `${a.code} — ${a.name}` })) ?? [];
     const employeeOptions = employees?.data.map((e) => ({ value: e.id, label: `${e.employee_code} — ${e.name}` })) ?? [];

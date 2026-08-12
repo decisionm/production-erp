@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import BarcodeScanInput from '@/components/barcode/BarcodeScanInput';
-import { listWarehouses } from '@/features/inventory/api';
+import { listAllWarehouses } from '@/features/inventory/api';
 import { lookupCarton } from '@/features/production/api';
 import type { FinishedCarton } from '@/features/production/types';
 import { createDelivery, listDeliveries, listSalesOrders } from '@/features/sales/api';
@@ -38,7 +38,7 @@ export default function DeliveriesPage() {
 
     const { data, isLoading } = useQuery({ queryKey: ['sales', 'deliveries'], queryFn: listDeliveries });
     const { data: orders } = useQuery({ queryKey: ['sales', 'sales-orders'], queryFn: listSalesOrders });
-    const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses'], queryFn: listWarehouses });
+    const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses', 'all'], queryFn: listAllWarehouses });
 
     const deliverableOrders = useMemo(
         () => orders?.data.filter((o) => o.status === 'confirmed' || o.status === 'partially_delivered') ?? [],
