@@ -29,7 +29,9 @@ DEC-20260807-014 is the granularity-flip execution record on main;
 PR #148's colliding -014 was re-minted as -015 at merge, per this rule.
 Q29-Q31 are claimed by open PR #155 (finance-pull discovery); Q32 by the
 report-down backdate PR (#159). Q33 is claimed by the packaging-Tally-identity
-branch (DEC-20260810-003). New questions continue from Q34.
+branch (DEC-20260810-003). Q34-Q37 are claimed by the 12-Aug overnight
+run (DEC-20260812-001 HRMS/payroll adoption, DEC-20260812-002 PO raised in
+the ERP). New questions continue from Q38.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 
@@ -464,3 +466,59 @@ would also create a SECOND 490 spec beside the five that already exist.
 **Blocks:** the 490-tray packing posting under its own Tally name; nothing
 else — batches record normally against the product's identity, labelled as
 such. *Open since 2026-08-10; evidence corrected and extended 2026-08-11.*
+
+## Q34 · HRMS/payroll policy — the seeded defaults are conventions, not the factory's rules
+
+DEC-20260812-001 seeds leave types, salary components, a simple monthly
+structure and current-year leave balances using ordinary Indian factory
+standards (CL 12, SL 12, EL/PL 15; Basic + HRA + allowances, PF and ESI as
+deductions), explicitly as a STARTING POINT, every row marked as a default
+nobody has confirmed. None of the following is answered by those defaults:
+which leave types the factory actually gives; days per year for each;
+whether unused leave carries forward and with what cap; whether staff are
+paid monthly, daily-wage or piece-rate (or a mix by role); the overtime
+rate; whether PF and ESI apply and to whom; the payroll period and payday;
+and whether payroll should ever post to Tally at all. **Blocks:** nothing
+today — the screens work on the defaults and every figure is labelled
+unconfirmed. What it blocks is TRUSTING any payroll number.
+*Open since 2026-08-12.*
+
+## Q35 · Purchase orders move to the ERP — five things only the owner and accountant can settle
+
+DEC-20260812-002 moves PO raising from Tally into the ERP. Nothing changes
+until these are answered, and each one breaks the "one book" promise if
+guessed: (a) the CUTOVER DATE — from which day do POs stop being raised in
+Tally; (b) OPEN POs ALREADY IN TALLY — do they finish there or move to the
+ERP, the half-received ones being the awkward case; (c) whose PO NUMBER is
+authoritative, the ERP's or Tally's — if both number independently the two
+books disagree on day one; (d) does the accountant want an ORDER voucher in
+Tally at all, or only the receipt and the bill — many accountants never use
+order vouchers, and if so the build is unnecessary and must not be written;
+(e) does a Tally Purchase Order voucher need the Purchase ledger mapped
+(currently unmapped) or only the vendor ledger. **Blocks:** the
+enqueuePurchaseOrder build — (d) blocks whether it is written at all.
+*Open since 2026-08-12.*
+
+## Q36 · Which half-hour of the working day is Tally quietest?
+
+For the accountant. The resumed finance pull (DEC pending on PR #155's
+design) executes ONE deliberate, human-triggered read inside a quiet window,
+because the 8-Aug-2026 corruption came from a read. The window cannot be
+chosen by an agent or inferred from code — it is a fact about how the office
+works. **Blocks:** scheduling the first real customer-outstanding pull; the
+build and review can proceed without it. *Open since 2026-08-12.*
+
+## Q37 · Will the factory record enquiries and quotations at all?
+
+CRM stays hidden (DEC-20260812-001) until the factory records its first real
+enquiry, because opening Leads, Opportunities and Quotations empty is exactly
+the 05-Aug complaint the adoption rule exists to prevent. The module is fully
+built and its enums already match the standard sales pipeline — nothing needs
+seeding. What is unrecorded, in either direction, is whether this factory
+will use it. Related and equally unanswered: what the factory's real enquiry
+SOURCES are (the proposed suggestion list — referral, existing customer,
+phone enquiry, trade enquiry, exhibition, website — is a guess at a small
+manufacturer's channels, not a SWAASHPET fact), and whether "which orders
+came from quotations" needs to be answerable, which would require a real
+quotation_id column rather than today's free-text note. **Blocks:** adopting
+CRM; nothing else. *Open since 2026-08-12.*
