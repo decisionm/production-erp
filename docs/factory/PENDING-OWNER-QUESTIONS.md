@@ -32,8 +32,8 @@ report-down backdate PR (#159). Q33 is claimed by the packaging-Tally-identity
 branch (DEC-20260810-003). Q34-Q37 are claimed by the 12-Aug overnight
 run (DEC-20260812-001 HRMS/payroll adoption, DEC-20260812-002 PO raised in
 the ERP). Q38-Q41 are claimed by the 12-Aug Tally
-evidence set and the purchase/tax configuration design. New questions continue
-from Q42.
+evidence set and the purchase/tax configuration design. Q42 is claimed by the SKU scheme
+design. New questions continue from Q43.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 
@@ -608,3 +608,27 @@ document's date) proceeds regardless and is already agreed. What the answer
 changes is urgency, and whether this must be closed BEFORE the ERP could ever
 become the invoicing system — which is itself an open owner decision.
 *Open since 2026-08-13.*
+
+## Q42 · What is the SKU FOR?
+
+644 of 655 items carry a SKU that is a copy of the item NAME — the Tally masters
+pull filled it that way. The team wants real SKUs, and the format follows the
+purpose rather than the other way round, so the purpose has to be stated first.
+
+The catalogue already carries FOUR identities: `sku`, `tally_stock_item_guid`,
+`hsn_sac_code`, and the carton/bag barcodes (`LOT{id}-B{seq}`,
+`{batch}-C{nn}`). A fifth without a stated job is one more thing to keep in
+sync. Which is it:
+
+- an INTERNAL reference — short, human-typable, stable, collisions matter more
+  than readability;
+- a BARCODE — must be scannable and unique, and should agree with the existing
+  carton/bag scheme rather than compete with it;
+- CUSTOMER-FACING — it would appear on invoices and delivery notes, making it a
+  commercial decision rather than a technical one;
+- TALLY MATCHING — already solved by the GUID, which 644 of 655 items carry, so
+  a SKU built for this would duplicate an identity that already works.
+
+**Blocks:** proposing any SKU format, and therefore the bulk assignment. Does
+NOT block the HSN fetch, which should land first either way so nobody re-keys
+codes Tally already holds. *Open since 2026-08-13.*
