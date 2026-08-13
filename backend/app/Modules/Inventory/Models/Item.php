@@ -9,13 +9,14 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 #[Fillable([
     'sku', 'name', 'description', 'uom', 'hsn_sac_code', 'reorder_level',
     'nominal_weight_grams', 'nos_per_tray', 'trays_per_box', 'nos_per_box',
     'nos_per_pouch', 'pouches_per_box',
     'colour', 'standard_cycle_time', 'standard_cavities',
-    'tracking_type', 'is_active',
+    'tracking_type', 'is_active', 'is_local_fixture',
     'tally_stock_item_guid', 'tally_company', 'tally_alter_id', 'tally_synced_at', 'item_group_id',
 ])]
 class Item extends Model
@@ -66,10 +67,43 @@ class Item extends Model
      * A local-only fixture: it exists in this database and nowhere in Tally.
      * Its missing Tally GUID is intentional, not a gap in the masters — so
      * readiness must not report it as one, and no voucher may ever name it.
+     *
+     * THE COLUMN DECIDES, NOT THE SKU. This used to be
+     * `str_starts_with($sku, 'LOCAL-')`, which put a posting gate on a
+     * free-text field. With the SKU becoming owner-managed data across 644
+     * items, a typo there could silently stop a real product posting, or start
+     * a fixture posting a name Tally cannot accept — neither loudly.
+     *
+     * The prefix survives as a belt-and-braces fallback for a row written
+     * before the column existed. EITHER signal marks the item a fixture —
+     * deliberately the conservative direction, because the cost of the two
+     * mistakes is not symmetric in the way that matters here: refusing to post
+     * leaves a batch fully recorded with a skip logged, while posting a
+     * fixture sends Tally a name it cannot accept and leaves the accountant a
+     * failed voucher to unpick.
+     *
+     * A disagreement between the two is not resolved silently — it is logged
+     * loudly, because it means either a fixture was created without the flag
+     * or somebody typed a SKU that looks like one, and both want a person.
      */
     public function isLocalFixture(): bool
     {
-        return str_starts_with((string) $this->sku, self::LOCAL_FIXTURE_SKU_PREFIX);
+        $flagged = (bool) $this->is_local_fixture;
+        $looksLikeOne = str_starts_with((string) $this->sku, self::LOCAL_FIXTURE_SKU_PREFIX);
+
+        if ($flagged !== $looksLikeOne) {
+            Log::warning('Item local-fixture flag disagrees with its SKU — treated as a fixture either way.', [
+                'item_id' => $this->id,
+                'sku' => $this->sku,
+                'is_local_fixture' => $flagged,
+                'sku_suggests_fixture' => $looksLikeOne,
+                'meaning' => $flagged
+                    ? 'flagged a fixture but the SKU does not say so — check the SKU was not renamed off the prefix'
+                    : 'SKU looks like a fixture but the flag is not set — check whether this item should post to Tally',
+            ]);
+        }
+
+        return $flagged || $looksLikeOne;
     }
 
     protected function casts(): array
@@ -89,6 +123,7 @@ class Item extends Model
             'standard_cavities' => 'integer',
             'tracking_type' => ItemTrackingType::class,
             'is_active' => 'boolean',
+            'is_local_fixture' => 'boolean',
             'tally_alter_id' => 'integer',
             'tally_synced_at' => 'datetime',
         ];

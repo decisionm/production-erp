@@ -67,12 +67,29 @@ labels become `MB-100 — 100 Ml Master Box` — across pickers, tables and draw
 simultaneously. That is the function working as designed; it is still a
 whole-app visual change and the floor should be told rather than surprised.
 
-**(e) Already-printed labels stop matching.** Carton labels
-(`cartonLabel.ts:34-36`) and material bag labels
-(`MaterialBagLabels.tsx:83-88`) both PRINT the SKU. Cartons and bags already
-labelled carry the old, name-derived text; anything printed after carries the
-new SKU. For stock still on the floor the two will not agree, and the delivery
-scan in (c) reads the new one.
+**(e) Already-printed labels go stale — but they do NOT stop scanning.**
+Measured on live: **317 printed cartons, all 317 undispatched**, and **zero
+material lots** (so no printed bag labels exist at all).
+
+The exposure is smaller than it looks, and the reason is worth stating
+precisely: **a carton is resolved by its carton number, not by SKU.** The
+dispatch scan calls `lookupCarton(code)` → `GET /cartons/{cartonNo}`, and the
+carton barcode is `{batch}-C{nn}`, which a SKU change does not touch. The SKU
+appears on the label only as human-readable text (`cartonLabel.ts:34-36`,
+`${sku} — ${name}`) and inside one error message.
+
+So **none of the 317 would fail to scan.** What goes stale is the printed
+first line: an old label reads the old name-derived SKU while every screen
+shows the new one. Cartons are reprintable from the Approve drawer, so this is
+a legibility problem with a remedy, not a dispatch problem.
+
+The one SKU-matching path — `handleLineScan` (`DeliveriesPage.tsx:97`) — is a
+manual convenience for typing an item code against a sales order, not the
+carton route. After a change it matches the NEW sku, so someone reading an old
+label and typing it gets *"No line on this sales order matches"* — a clear
+refusal, never a silent wrong match.
+
+**No transition period is needed for scanning.** A reprint fixes legibility.
 
 ---
 
