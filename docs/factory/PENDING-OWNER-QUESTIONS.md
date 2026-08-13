@@ -609,7 +609,7 @@ changes is urgency, and whether this must be closed BEFORE the ERP could ever
 become the invoicing system — which is itself an open owner decision.
 *Open since 2026-08-13.*
 
-## Q42 · What is the SKU FOR?
+## Q42 · What is the SKU FOR? — RESOLVED
 
 644 of 655 items carry a SKU that is a copy of the item NAME — the Tally masters
 pull filled it that way. The team wants real SKUs, and the format follows the
@@ -629,6 +629,12 @@ sync. Which is it:
 - TALLY MATCHING — already solved by the GUID, which 644 of 655 items carry, so
   a SKU built for this would duplicate an identity that already works.
 
-**Blocks:** proposing any SKU format, and therefore the bulk assignment. Does
-NOT block the HSN fetch, which should land first either way so nobody re-keys
-codes Tally already holds. *Open since 2026-08-13.*
+**RESOLVED 2026-08-13 by the owner: INTERNAL MAPPING AND EASIER LOOKUP.** Not
+customer-facing, not a barcode, not a Tally key (the GUID already solves that).
+The driver is a real complaint from 11-Aug — a product could not be found in a
+picker because "B.450ML" carries dots and spaces that break search — so the
+format is chosen for prefix search. Proposed shape recorded in
+`docs/SKU-SCHEME-DESIGN.md` for the owner to confirm against the file:
+TYPE-SIZE-SHAPE-COLOUR-WEIGHT, uppercase, hyphens only, three-digit zero-padded
+size, weight without a decimal point. Hard rule: no generated SKU may begin with
+LOCAL-, asserted in a test rather than a comment. Was open since 2026-08-13.

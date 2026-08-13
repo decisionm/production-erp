@@ -42,8 +42,15 @@ decides **whether a voucher posts at all** (`TallySyncService.php:193`,
 - move a fixture off that prefix and it **starts posting a name Tally cannot
   accept**.
 
-Any bulk assignment must refuse the `LOCAL-` prefix outright, and must leave the
-existing `LOCAL-` items alone.
+**FIXED, and before any SKU work — see commit `5950681`.** `items` now carries
+an `is_local_fixture` column, backfilled once from the prefix with the affected
+rows named in the log. `isLocalFixture()` reads the column and keeps the prefix
+as a belt-and-braces fallback; **either** signal marks a fixture, deliberately
+the conservative direction, and a disagreement is logged loudly rather than
+resolved silently. A test asserts that renaming a fixture off the prefix does
+not start it posting — the exact typo the gate was exposed to.
+
+Bulk assignment must still refuse the `LOCAL-` prefix outright.
 
 **(b) An item is resolved BY SKU from config.** `scrapItem()`
 (`TallySyncService.php:496-506`) looks up
@@ -132,22 +139,35 @@ Its shape follows the two commands written this week:
 
 ## 3 · What is the SKU FOR? — the question that must precede a format
 
-**No format is proposed here, deliberately.** The catalogue already carries four
-identities: `sku`, `tally_stock_item_guid`, `hsn_sac_code`, and the carton/bag
-barcodes minted at `LOT{id}-B{seq}` and `{batch}-C{nn}`. A fifth identity
-without a stated purpose is another thing to keep in sync, and the format
-follows the purpose rather than the other way round:
+**ANSWERED by the owner (Q42): internal mapping and easier lookup.** Not
+customer-facing, not a barcode, and not a Tally key — the GUID already solves
+that, so a SKU built for it would duplicate a working identity.
 
-- **internal reference** — short, human-typable, stable; collisions matter more
-  than readability;
-- **barcode** — must be scannable and unique, and would want to agree with the
-  existing carton/bag scheme rather than compete with it;
-- **customer-facing** — appears on invoices and delivery notes, so it is a
-  commercial decision, not a technical one;
-- **Tally matching** — **already solved by the GUID**, and a SKU built for this
-  purpose would duplicate an identity that already works.
+The purpose comes from a real complaint: on 11-Aug the owner could not find a
+product in a picker because `B.450ML` carries dots and spaces that break
+search. So the format is chosen for **prefix search**, and a search for
+`BTL-450-RIB` should return that whole family.
 
-This is filed as **Q42**.
+**Proposed format — for the owner to confirm against this file, not in the
+abstract:**
+
+```
+TYPE-SIZE-SHAPE-COLOUR-WEIGHT     uppercase · hyphens only · no dots · no spaces
+
+TYPE    BTL bottle · TCN container · BOX master box · TRY tray · POU pouch
+        COV cover  · TAP tape      · RSN resin      · MB  masterbatch
+SIZE    always three digits, zero-padded (090, 200, 450) so sorting is correct
+WEIGHT  no decimal point — 8.5g -> 085, 34g -> 34
+
+BTL-450-RIB-AMB-34 · BTL-090-RIB-CLR-085 · TCN-200-STD-CLR
+BOX-200-RND · RSN-RELPET · MB-AMBER
+```
+
+**HARD RULE: no generated SKU may ever begin with `LOCAL-`**, regardless of
+what the fixture-column change did to that prefix's meaning. This is asserted
+in a test (`LocalFixtureFlagTest::test_no_generated_sku_may_ever_begin_with_the_fixture_prefix`)
+against every shape the format can produce — not left in a comment — and the
+generator must assert it too when it is written.
 
 ---
 
