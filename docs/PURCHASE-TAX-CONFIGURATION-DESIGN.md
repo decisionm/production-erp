@@ -94,13 +94,30 @@ worse one, and worse than either option offered.**
   to date"*. So every GSTR-1 recomputes every historical invoice at whatever
   rate is in `gst_rates` right now.
 
-**And this is live today, before any dating work.** `gst-rates` exposes an
+**The mechanism is live today, before any dating work.** `gst-rates` exposes an
 `update` route, so editing one `rate_percent` silently changes the computed tax
-of every invoice ever issued, and the next GSTR-1 with it. Not a display
-inconsistency: a filed return.
+of every invoice ever issued, and the next GSTR-1 with it.
 
-That raises the priority of steps 2 and 3 above the purchase work, and it is
-why they proceed regardless of Q39.
+#### But the IMPACT is not established, and must not be overstated
+
+Whether that mechanism is a wrong statutory filing depends on something the code
+cannot answer: **does anyone file from this report?** Both readings, plainly:
+
+- **Latent defect (what the evidence currently supports).** Live holds
+  **one** invoice — issued, 22-Jul-2026 — against Tally's 553 receipts. And the
+  owner-confirmed record on the unmerged PR #155 branch states that **all real
+  sales are invoiced directly in Tally** and the ERP Sales module is
+  demo-scale. On that reading the ERP's GSTR-1 is a report over demo data that
+  nobody submits, and nothing has been mis-filed.
+- **Wrong statutory return.** If anything is ever filed from the ERP, the same
+  mechanism produces a return computed at today's rates over historical
+  invoices.
+
+**The mechanism is not softened by this and the impact is not escalated past
+it.** The question is Q41. Either way the defect must be closed **before** the
+ERP could ever become the invoicing system — itself an open owner decision — so
+steps 2 and 3 proceed regardless, and ahead of the purchase work because they
+are small and unblock everything downstream.
 
 ## 3 · Extension: the purchase ledger matrix
 
@@ -212,9 +229,33 @@ is Q39.
    fuzzy join to get wrong: the GUID join exists, on almost every row, and
    `LedgerSyncService`-style GUID matching is already the house pattern.
 
-   So the work is: add the HSN field to `exportItems`' fetch list, carry it in
-   the masters payload, validate it, and store it on the item. One field, along
-   a LIGHT request path that has run safely for months.
+   So the code change is: add the HSN field to `exportItems`' fetch list, carry
+   it in the masters payload, validate it, and store it on the item. One field,
+   along a LIGHT request path that has run safely for months.
+
+   **"One field" describes the diff and MISLEADS about the delivery.** It has an
+   operational tail, and calling it one line invites someone to schedule it as
+   an afternoon:
+
+   - `exportItems` lives in the **agent**, not the server. `main` carries agent
+     **0.2.0**; the newest branch is **0.3.5**. HSN would ship in **0.3.6** —
+     the same bump the finance pull needs — which means a published release
+     **installed on the factory PC**, not a deploy.
+   - **A masters pull is a TALLY READ.** Since 0.3.4 nothing reads Tally
+     automatically. It is triggered by a person from the tray
+     (`Pull Masters from Tally` → `runMastersSync`), so somebody at the factory
+     has to run it before a single HSN arrives.
+   - It therefore sits under the **same discipline as any other read**: the
+     quiet window, the single Tally gate, and the probe-before-heavy contract.
+     Masters is a LIGHT request class and the cheapest read available — but it
+     is still a read, and it is not exempt.
+
+   Realistic shape: a small diff, a released agent version, an install, and one
+   operator-triggered pull inside a quiet window.
+
+   **Normalise the HSN format BEFORE any rate row exists** — `4819.10.10` and
+   `48191010` are the same code, and once a rate row is keyed on one spelling
+   the other becomes a second, silently unmatched code.
 
    **AND TALLY'S HSN CODES SETTLE Q39.** Parsed from the Day Book: 141 HSN tags,
    10 distinct, under `GSTHSNNAME`. They split exactly along the disputed line —

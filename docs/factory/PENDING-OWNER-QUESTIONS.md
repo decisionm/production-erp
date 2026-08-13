@@ -31,8 +31,9 @@ Q29-Q31 are claimed by open PR #155 (finance-pull discovery); Q32 by the
 report-down backdate PR (#159). Q33 is claimed by the packaging-Tally-identity
 branch (DEC-20260810-003). Q34-Q37 are claimed by the 12-Aug overnight
 run (DEC-20260812-001 HRMS/payroll adoption, DEC-20260812-002 PO raised in
-the ERP). Q38-Q40 are claimed by the 12-Aug Tally
-evidence set. New questions continue from Q41.
+the ERP). Q38-Q41 are claimed by the 12-Aug Tally
+evidence set and the purchase/tax configuration design. New questions continue
+from Q42.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 
@@ -583,3 +584,27 @@ and what reaches stock. A conversion factor per item would also have to come
 from the factory and never be derived. **Blocks:** dual-unit support; does NOT
 block making the single unit visible, which is proceeding. *Open since
 2026-08-12.*
+
+## Q41 · Is GST filed from Tally or from the ERP?
+
+This scopes a real defect rather than deciding whether to fix it. The ERP's
+GSTR-1 report (`GstReportService::gstr1()`) recomputes EVERY issued invoice's
+tax from the current `gst_rates` row on every call — its own docblock says it
+is not period-filtered and "covers all issued invoices to date". Since
+`gst-rates` exposes an update route, editing one rate silently restates the
+computed tax of every invoice ever issued. The mechanism is established from
+the code and is not in doubt.
+
+What is in doubt is the impact, and it turns entirely on this question. Live
+holds **one** invoice (issued, 22-Jul-2026) against Tally's 553 receipts, and
+the owner-confirmed record on the unmerged PR #155 branch states that ALL real
+sales are invoiced directly in Tally and the ERP Sales module is demo-scale. On
+that reading the ERP's GSTR-1 is a report over demo data that nobody submits,
+and this is a latent defect. If anything is ever filed from the ERP, the same
+mechanism is a wrong statutory return.
+
+**Blocks:** nothing today — the fix (effective-dated rates, resolved as at the
+document's date) proceeds regardless and is already agreed. What the answer
+changes is urgency, and whether this must be closed BEFORE the ERP could ever
+become the invoicing system — which is itself an open owner decision.
+*Open since 2026-08-13.*
