@@ -556,6 +556,15 @@ in April, May and June 2026 — July and August are 18% only. That is consistent
 with a GST rate change effective around July, but it is an inference, and it
 could equally be a reclassification or earlier mis-keying since corrected.
 
+**Tally already holds the codes that answer this.** The Day Book carries HSN
+per stock item (`GSTHSNNAME`): paper and paperboard — 4819.10.10, 48191010,
+4808 — against plastics — 39232100, 39233090, 39076190, 39012000. The items
+that appear at BOTH rates are exactly the paper ones (200 Ml Brute Tray, 500ML
+IFF Tray, the 170/100/30/15ml Master Boxes). That is the published rate change
+visible in the factory's own data. It does not close this question — the
+accountant still confirms, and the July cut-off still needs explaining — but the
+answer can now be given from codes rather than memory.
+
 So, for the accountant: **why did 5% stop after June?** And is the rate to be
 taken from the invoice date, the item, the vendor, or somewhere else entirely?
 Also still needed: is the Rounding Off ledger always that name, and is it

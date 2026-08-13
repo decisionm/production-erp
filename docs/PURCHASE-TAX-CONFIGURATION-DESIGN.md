@@ -74,9 +74,33 @@ fresh stays correct — it just has to be fresh *as at the invoice's date*, not
 as at today. The docblock must be rewritten to say so, or the next reader
 restores the bug on purpose.
 
-**This is not confined to purchases.** The same service serves Sales invoices,
-so effective-dating fixes a live mispricing risk on the sales side too, and the
-same test should cover both.
+### Severity, established from the code rather than asserted
+
+The reviewer asked which of two meanings "computed fresh" has. **It is the
+worse one, and worse than either option offered.**
+
+- **The invoice stores NO tax at all.** `invoices` holds `sales_order_id`,
+  `customer_id`, `status`, `invoice_date`, `due_date`, `notes`, `created_by` —
+  and nothing else. `invoice_lines` holds only quantity and `unit_price`. There
+  is no tax column anywhere, so tax is **100% derived, every time**.
+- **It is not a Tally restatement.** `TallySyncService` never calls the
+  breakdown; the sales voucher emits no GST ledger entries at all today. So a
+  historical invoice re-synced later would not carry today's rate into Tally,
+  because it carries no tax into Tally in the first place.
+- **It is a STATUTORY RETURN.** The breakdown's two consumers are a display
+  endpoint (`GET /invoices/{invoice}/gst-breakdown`) and
+  **`GstReportService::gstr1()`** — GSTR-1. And that service is explicitly
+  **not period-filtered**: its own docblock says it *"covers all issued invoices
+  to date"*. So every GSTR-1 recomputes every historical invoice at whatever
+  rate is in `gst_rates` right now.
+
+**And this is live today, before any dating work.** `gst-rates` exposes an
+`update` route, so editing one `rate_percent` silently changes the computed tax
+of every invoice ever issued, and the next GSTR-1 with it. Not a display
+inconsistency: a filed return.
+
+That raises the priority of steps 2 and 3 above the purchase work, and it is
+why they proceed regardless of Q39.
 
 ## 3 · Extension: the purchase ledger matrix
 
@@ -170,10 +194,45 @@ is Q39.
    behaviour and means the failure is loud — but it means the container being
    ready does not make the ERP able to compute tax.
 
-   Populating HSN per item is a factory data task, not a build, and it is
-   **also** the thing that would settle Q39 from the other end: if paper and
-   cardboard packaging really is 5% while plastic stays 18%, the HSN on each
-   item is exactly what distinguishes them.
+   **But it is NOT data entry — it is a one-line fetch change.** Checked, in
+   the three parts the reviewer asked for:
+
+   **(a) Does the masters pull fetch HSN? No.** `exportItems`
+   (`tally-sync-agent/src/tally/masters.ts:154-161`) requests exactly
+   `'Name, Parent, BaseUnits, GUID, AlterID'`. HSN is simply not asked for.
+
+   **(b) Is it stored unused anywhere? No.** Zero `hsn` references in the agent,
+   in `SyncMastersRequest`, or in the item sync path. It is not fetched, not
+   transmitted, not dropped on the floor — it was never in the pipeline.
+
+   **(c) How much would a mapping cover? It is already done — 98.3%.**
+   **644 of 655 live items already carry `tally_stock_item_guid`**, and **all
+   644 of them lack an HSN**. The 11 that have an HSN are precisely the 11 that
+   are *not* Tally-mapped. There is no name-matching exercise to do and no
+   fuzzy join to get wrong: the GUID join exists, on almost every row, and
+   `LedgerSyncService`-style GUID matching is already the house pattern.
+
+   So the work is: add the HSN field to `exportItems`' fetch list, carry it in
+   the masters payload, validate it, and store it on the item. One field, along
+   a LIGHT request path that has run safely for months.
+
+   **AND TALLY'S HSN CODES SETTLE Q39.** Parsed from the Day Book: 141 HSN tags,
+   10 distinct, under `GSTHSNNAME`. They split exactly along the disputed line —
+   `4819.10.10`, `48191010`, `4808` (paper and paperboard cartons and boxes)
+   against `39232100`, `39233090`, `39076190`, `39012000` (plastics), plus
+   `3204.17.90` (colorants). And the items carrying a **paper** HSN — 200 Ml
+   Brute Tray, 500ML IFF Tray, and the 170/100/30/15ml Master Boxes — are the
+   very ones measured earlier as appearing at **both** 5% and 18%.
+
+   That is the published rate change made visible in the factory's own data:
+   paper and cardboard packaging moving, plastics not. It does not settle Q39 by
+   itself — the accountant still confirms, and the July cut-off still needs
+   explaining — but the accountant now has the codes to answer from rather than
+   a memory.
+
+   One wrinkle to handle when storing: **the same HSN appears in two formats**,
+   `4819.10.10` and `48191010`. Normalise on store, or two spellings of one code
+   become two rate rows.
 2. Migration: effective-date `gst_rates` (+ the resolution helper and tests).
 3. `GstComputationService` resolves as-at a date; docblock corrected; tests
    pinning that an April document keeps April's rate.
