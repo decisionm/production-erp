@@ -96,8 +96,11 @@ build on CI  →  REVIEW GATE  →  manual publish dispatch  →  storage + upda
 5. **Verify before anyone downloads.** Open Tally Sync → Settings on the
    live ERP and read the "Latest version: X · built DATE" line under the
    download button — it must show the version just published. The
-   site-visit steps (install-over, settings survival, first chunked stock
-   read) live in `tally-sync-agent/SITE-CHECKLIST.md`.
+   site-visit steps (install-over, settings survival, and confirming normal
+   voucher sync) live in `tally-sync-agent/SITE-CHECKLIST.md`. From v0.3.3
+   the Stock Summary read trigger is REMOVED and from v0.3.4 the agent makes
+   no automatic reads from Tally at all — so verification never involves
+   reading from Tally, and nothing in this ritual asks anyone to.
 
 ## Pipeline internals
 

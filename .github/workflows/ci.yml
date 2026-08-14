@@ -78,8 +78,14 @@ jobs:
           cache: npm
           cache-dependency-path: tally-sync-agent/package-lock.json
 
-      - name: Typecheck
+      # One step: `npm test` runs the preflight (refuses an empty test glob),
+      # then `npm run build` — which is `tsc -p tsconfig.json`, so compilation
+      # IS the typecheck — then the voucher-builder contract against the
+      # compiled dist, the artifact that actually ships. A separate
+      # `tsc --noEmit` would compile the same sources a second time for the
+      # same answer. node:test only; no new dependency, no Tally contact.
+      - name: Compile and test agent
         working-directory: tally-sync-agent
         run: |
           npm ci
-          npx tsc --noEmit
+          npm test
