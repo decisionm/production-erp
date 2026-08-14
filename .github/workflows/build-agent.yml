@@ -1,29 +1,51 @@
 name: Build Tally Sync Agent
 
-# Builds the Windows installer for the local Tally Sync Agent and publishes it
-# to the ERP server's public storage, where the Tally Settings page links to it
-# as a download. Runs ONLY when the agent's own code changes (path filter) — not
-# on every push — plus a manual "Run workflow" for on-demand rebuilds.
+# Builds the Windows installer for the local Tally Sync Agent, and — as a
+# SEPARATE, DELIBERATE act — publishes it to the ERP server's public storage,
+# where the Tally Settings page links to it as a download.
+#
+# THE TWO PATHS, and the difference matters:
+#   * A push to main (or any run of this workflow that is not a publishing
+#     dispatch) BUILDS A CANDIDATE ARTIFACT ONLY. It uploads the installer for
+#     review and stops. Merging does NOT reach the factory.
+#   * Publishing happens only when a human runs "Run workflow" ON MAIN with
+#     publish=true, after the candidate has been reviewed. Publishing updates
+#     the auto-update feed, so the running factory agent self-updates to that
+#     build within hours — publishing IS deploying to the factory floor.
+#
+# Runs ONLY when the agent's own code (or this workflow) changes — not on
+# every push.
 
 on:
   push:
     branches: [main]
     paths:
       - 'tally-sync-agent/**'
+      # This workflow governs what reaches the factory, so a change to it must
+      # itself be built and reviewed rather than landing unexercised.
+      - '.github/workflows/build-agent.yml'
   workflow_dispatch:
     inputs:
       publish:
         description: >-
-          Publish to the ERP's live storage AND the auto-update feed (the
-          running factory agent will self-update to this build within hours).
-          Leave false to only build the installer as a downloadable artifact —
-          e.g. for a pre-merge build from a branch.
+          DANGER — PUBLISHING IS DEPLOYING TO THE FACTORY. Setting this true
+          uploads to the ERP's live storage AND the auto-update feed, and the
+          running factory agent will self-update to this build within hours
+          with no further human step. Only ever set true ON MAIN, and only
+          after the candidate artifact has been reviewed. Leave false to build
+          the installer as a downloadable artifact for review or hand-install.
+          A dispatch from any branch other than main CANNOT publish even with
+          this set true.
         type: boolean
         default: false
 
 concurrency:
   group: build-agent
-  cancel-in-progress: true
+  # NEVER cancel a run in progress. This job packages and can upload an
+  # installer to live storage; a newer run cancelling one mid-publish is how a
+  # half-written feed or a truncated installer reaches the factory. Queue
+  # behind it instead — a slower pipeline is the correct trade here.
+  cancel-in-progress: false
 
 jobs:
   # Electron NSIS installers are built natively on Windows.
@@ -41,6 +63,23 @@ jobs:
       - name: Install deps
         working-directory: tally-sync-agent
         run: npm ci
+
+      # GATE THE PACKAGING, not just the merge. Everything below runs BEFORE
+      # package:win, so a failing contract or a vulnerable toolchain produces
+      # no installer at all — there is nothing to review, and nothing that
+      # could later be published by mistake.
+      - name: Voucher + release contract tests
+        working-directory: tally-sync-agent
+        run: npm test
+
+      # Deliberately NOT --omit=dev: electron-builder and its tree are what
+      # BUILD the installer that auto-updates the factory PC, so a compromised
+      # packaging dependency is a supply-chain path to the floor even though
+      # it never ships inside the artifact. The runtime-only audit would pass
+      # while that risk sat unexamined.
+      - name: Audit build + runtime dependencies
+        working-directory: tally-sync-agent
+        run: npm audit --audit-level=high
 
       - name: Build Windows installer
         working-directory: tally-sync-agent
@@ -73,19 +112,81 @@ jobs:
 
   # Publish over SSH from Ubuntu (reuses the deploy key + proven SSH tooling).
   # Publishing is the moment this build reaches the live factory: latest.yml
-  # on the feed makes the running agent self-update. Pushes to main always
-  # publish (that code is reviewed); a manual dispatch publishes only when
-  # explicitly asked to, so a branch build can exist for review/hand-install
-  # without deploying itself.
+  # on the feed makes the running agent self-update within hours.
+  #
+  # ALL THREE CONDITIONS ARE REQUIRED, and each blocks a real mistake:
+  #   event_name == 'workflow_dispatch'  a push can never publish. Merging to
+  #                                      main builds a candidate for review and
+  #                                      stops there.
+  #   inputs.publish == true             a human ticked the box, tested against
+  #                                      true EXPLICITLY rather than for
+  #                                      truthiness. (This input exists only on
+  #                                      workflow_dispatch; on a push it is
+  #                                      null, so the event guard is
+  #                                      load-bearing rather than decorative.)
+  #   github.ref == 'refs/heads/main'    a dispatch from a feature branch
+  #                                      cannot publish even with publish=true.
+  #                                      Only reviewed, merged code reaches the
+  #                                      factory.
   publish:
-    if: github.event_name == 'push' || inputs.publish
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      && inputs.publish == true
+      && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     steps:
+      # The checker runs from the repo, so check out THE SAME SHA this run is
+      # publishing — not a moving branch tip.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
       - uses: actions/download-artifact@v4
         with:
           name: agent-installer
           path: out
+
+      # Read-only fetch of the metadata the factory is currently being served.
+      #
+      # THIS READ MUST NOT BE STALE. The whole gate turns on comparing against
+      # what is live RIGHT NOW; a cached copy from before the previous publish
+      # would report an older version and wave through a republish or even a
+      # rollback — the exact failures the gate exists to stop. So the request
+      # is made uncacheable three ways: no-cache request headers for
+      # well-behaved caches, and a per-run cache-buster query for the ones that
+      # ignore headers. The buster is derived from the run id, the attempt and
+      # the commit, so no two runs — including re-runs of the same commit —
+      # can share a cache entry.
+      #
+      # --fail so an HTTP error is an error rather than an HTML error page
+      # saved as JSON; bounded retries and timeouts so a hung request cannot
+      # stall the run indefinitely. If this cannot be read, the next step
+      # blocks the publish — never assume a first publish.
+      - name: Fetch currently published metadata
+        env:
+          FEED_URL: https://erpdemo.amrtech.in/storage/agent/tally-sync-agent-latest.json
+        run: |
+          CACHE_BUSTER="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(echo "${GITHUB_SHA}" | cut -c1-7)"
+          curl --fail --show-error --silent \
+               --header 'Cache-Control: no-cache, no-store, max-age=0' \
+               --header 'Pragma: no-cache' \
+               --retry 3 --retry-delay 2 --retry-connrefused \
+               --connect-timeout 10 --max-time 30 \
+               -o published.json \
+               "${FEED_URL}?cachebust=${CACHE_BUSTER}"
+          echo "fetched published metadata:"; cat published.json
+
+      # THE GATE. Runs BEFORE any SSH key is written and before anything is
+      # uploaded: an equal or lower version, a filename disagreeing with its
+      # own version, or an artifact built from a different commit than this
+      # run all stop the publish here, with nothing touched.
+      - name: Assert this candidate advances on what is published
+        run: |
+          node tally-sync-agent/scripts/assert-version-advance.js \
+            --candidate out/tally-sync-agent-latest.json \
+            --published published.json \
+            --commit "$(echo "${GITHUB_SHA}" | cut -c1-7)"
 
       - name: Set up SSH
         run: |

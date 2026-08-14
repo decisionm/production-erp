@@ -65,7 +65,7 @@ The tray agent on the factory PC deploys on its own track — a web deploy
 never updates it, and its release is deliberately NOT automatic end to end.
 
 ```
-build on CI  →  REVIEW GATE  →  manual publish dispatch  →  storage + update feed  →  verify on the Settings page
+build on CI  →  REVIEW GATE  →  merge (candidate artifact only)  →  manual publish dispatch ON MAIN  →  storage + update feed  →  verify on the Settings page
 ```
 
 1. **Build on CI.** Push the agent change to a branch, open the PR, then run
@@ -82,18 +82,24 @@ build on CI  →  REVIEW GATE  →  manual publish dispatch  →  storage + upda
    reviewed-looking-but-never-live-tested stock read crashed the factory's
    live Tally. Nobody proceeds past this step until the diff has passed
    review (the usual builder → Cursor → Codex → owner chain).
-3. **Manual publish dispatch.** After the review passes, run the same
-   workflow with **`publish: true`** (or merge to `main`, whose push always
-   publishes — that code is reviewed by definition). The publish job uploads
+3. **Merging builds a candidate — it does NOT publish.** A push to `main`
+   runs this workflow and uploads the installer as a review artifact, then
+   stops. Nothing reaches the factory on merge.
+4. **Manual publish dispatch, on main.** After the review passes, run the
+   workflow **on `main`** with **`publish: true`**. That rebuilds and then
+   publishes. All three conditions are enforced in the workflow — manual
+   dispatch, `publish: true`, and `refs/heads/main` — so a push cannot
+   publish and a dispatch from a feature branch cannot publish even with
+   `publish: true` set. The publish job uploads
    the installer, `latest.yml` (the electron-updater feed) and
    `tally-sync-agent-latest.json` atomically into
    `backend/storage/app/public/agent/` on the live box. It touches only that
    directory — never the app, never the database.
-4. **Pick-up is automatic from here.** The Tally Sync → Settings page's
+5. **Pick-up is automatic from here.** The Tally Sync → Settings page's
    download button serves the new version immediately, and the running
    agent self-updates from `latest.yml` within ~6 hours (or on its next
    restart).
-5. **Verify before anyone downloads.** Open Tally Sync → Settings on the
+6. **Verify before anyone downloads.** Open Tally Sync → Settings on the
    live ERP and read the "Latest version: X · built DATE" line under the
    download button — it must show the version just published. The
    site-visit steps (install-over, settings survival, and confirming normal

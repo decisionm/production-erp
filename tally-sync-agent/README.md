@@ -63,7 +63,9 @@ This is the honest gap — none of the following can be verified without a live 
 
 ## Known dependency notes
 
-`npm audit` will show a handful of high/critical advisories in `electron-builder`'s own dependency chain (`tar`/`cacache`/`node-gyp`, used only for packaging, never shipped in the built app). Electron itself is current and clean. Not fixed here since forcing `electron-builder` to a version that hasn't been verified to still produce a working Windows NSIS installer is a worse risk than the advisories themselves for build-time-only tooling — revisit if `npm audit` still flags it when you're actually preparing a real release.
+**This paragraph previously said the `electron-builder` advisories were left unfixed. On candidate 0.3.6 they are fixed.** `electron-builder` is pinned EXACTLY to `26.15.3` (no caret — the tool that builds the factory installer must not drift without review), which cleared the packaging-chain advisories; one remaining transitive patch took the rest. As of this candidate both `npm audit` and `npm audit --omit=dev` report **0 vulnerabilities**, so the runtime closure and the build/packaging toolchain are clean together. Electron itself is current.
+
+**What that does NOT establish.** These are dependency-resolution and audit facts only. `npm run package:win` has not been run for this candidate — it requires Windows — so the NSIS installer, `latest.yml`, the `.blockmap` and the `tally-sync-agent-setup-<version>.exe` filename remain **unverified by execution** on `electron-builder` 26. Nothing here claims this candidate has been packaged, published, installed, or deployed. Confirming the artifact needs a non-publishing Windows CI run; publishing is a separate, deliberate manual dispatch (see the release ritual in the repo root's `DEPLOY.md`).
 
 ## Security reminders (from the master plan §5 — don't skip these)
 
