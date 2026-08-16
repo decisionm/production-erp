@@ -48,7 +48,14 @@ fi
 
 # grep -c prints 0 AND exits 1 on zero matches — `|| echo 0` was appending a
 # second line and printing "0\n0" (reviewed 06 Aug).
-open_q=$(grep -c '^## Q' docs/factory/PENDING-OWNER-QUESTIONS.md 2>/dev/null || true)
+#
+# Count OPEN questions, not headings. A heading ending "— RESOLVED" is closed;
+# "— PARTLY RESOLVED" and "— NARROWED" are NOT — the remaining half is still
+# owed, and Q18/Q24/Q30 are exactly that. Counting every "## Q" reported 42
+# when 30 were open, which overstates the backlog at the one moment a session
+# is deciding what to work on (reviewed 16 Aug).
+open_q=$(grep '^## Q' docs/factory/PENDING-OWNER-QUESTIONS.md 2>/dev/null \
+  | grep -vc '— RESOLVED$' || true)
 echo "open owner questions: ${open_q:-0}  → docs/factory/PENDING-OWNER-QUESTIONS.md"
 
 exit "$vexit"
