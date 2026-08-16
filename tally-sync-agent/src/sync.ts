@@ -2,6 +2,7 @@ import axios from 'axios';
 import { acknowledge, fetchPending, reportFailure, type TallySyncEntry } from './cloudApi';
 import { getConfig, isConfigured } from './config';
 import logger from './logger';
+import { decideAction } from './postDecision';
 import * as journal from './postJournal';
 import { postVoucherXml, type TallyImportResult } from './tally/client';
 import { buildVoucherXml } from './tally/voucherBuilders';
@@ -39,61 +40,7 @@ const ACK_BACKOFF_MS = 2000;
 
 type SyncOutcome = 'synced' | 'failed' | 'skipped';
 
-export type SyncAction =
-    | { kind: 'post' }
-    | { kind: 'ack-only'; record: journal.PostRecord }
-    | { kind: 'refuse'; reason: string };
-
-/**
- * What to do with one queued entry — the whole double-post guard, as a pure
- * function of what the cloud sent us and what this machine remembers doing.
- *
- * Four cases:
- *
- *   1. Tally confirmed the import → only the acknowledgement is outstanding.
- *      Ack it; never rebuild the voucher. This one beats everything else,
- *      including a cleared stamp: Tally having said "created" is a harder
- *      fact than any judgement made from the dashboard.
- *   2. We sent it and never heard back, OR the cloud has handed it to an
- *      agent before and we have no memory of it (a reinstall, a wiped
- *      profile, a second agent) → we cannot tell "never posted" from
- *      "posted, answer lost". Refuse both ways: posting risks a duplicate in
- *      the live books, acking risks marking a voucher synced that Tally
- *      never received.
- *   3. Either of those, but the entry arrives with delivered_at cleared →
- *      somebody hit Retry on the dashboard, which is a person saying "I have
- *      looked in Tally and this voucher is not there". That is the only
- *      thing that can resolve an ambiguity this agent cannot, and it is why
- *      Retry nulls the stamp. Post it. (A stale "unverified" note needs no
- *      cleanup: the post overwrites it, and a clean rejection takes the
- *      entry out of the pending queue, where prune() drops it.)
- *   4. Fresh entry, first delivery → post it.
- */
-export function decideAction(entry: TallySyncEntry, remembered: journal.PostRecord | undefined): SyncAction {
-    if (remembered?.outcome === 'posted') {
-        return { kind: 'ack-only', record: remembered };
-    }
-
-    // A cleared stamp is a human's re-authorisation and outranks this
-    // agent's "I don't know" — without this, one timed-out post (or one
-    // mistyped tallyHost, which times out for every voucher in the queue)
-    // strands entries until someone deletes post-journal.json by hand.
-    if (entry.delivered_at === null) {
-        return { kind: 'post' };
-    }
-
-    if (remembered?.outcome === 'unverified') {
-        return {
-            kind: 'refuse',
-            reason: `this agent sent the voucher to Tally at ${remembered.at} and never got an answer, so it may already be in the books`,
-        };
-    }
-
-    return {
-        kind: 'refuse',
-        reason: `the cloud already handed this voucher to an agent at ${entry.delivered_at} and this agent has no record of what happened to it`,
-    };
-}
+export { decideAction, type SyncAction } from './postDecision';
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -146,16 +93,39 @@ function isInconclusivePostError(err: unknown): boolean {
         && (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT');
 }
 
-/** Report a failure to the cloud, never letting the report's own failure escape. */
-async function report(entryId: number, message: string): Promise<void> {
+/**
+ * Report a failure to the cloud, never letting the report's own failure
+ * escape. Returns whether the cloud actually heard it — the caller keeps the
+ * journal record when it did not, so a later cycle can say it again.
+ */
+async function report(entryId: number, message: string): Promise<boolean> {
     // Report back to the cloud queue too, not just the local log — a
     // network blip talking to Tally shouldn't silently strand the entry
     // in "pending" forever with no visibility from the retry dashboard.
-    await reportFailure(entryId, message).catch((reportErr) => {
+    try {
+        await reportFailure(entryId, message);
+
+        return true;
+    } catch (reportErr) {
         logger.error(`Also failed to report failure for entry #${entryId} to the cloud`, {
             message: reportErr instanceof Error ? reportErr.message : String(reportErr),
         });
-    });
+
+        return false;
+    }
+}
+
+/**
+ * Write the rejection down BEFORE telling the cloud, then tell it. Same shape
+ * as the posted path journalling before the ack, and for the same reason: the
+ * second call can fail, and the local note is the only thing that survives it.
+ */
+async function reportRejection(entry: TallySyncEntry, message: string): Promise<void> {
+    journal.record(entry.id, 'rejected', voucherNumberOf(entry), message);
+
+    if (await report(entry.id, message)) {
+        journal.forget(entry.id);
+    }
 }
 
 async function syncOne(entry: TallySyncEntry): Promise<SyncOutcome> {
@@ -178,6 +148,25 @@ async function syncOne(entry: TallySyncEntry): Promise<SyncOutcome> {
 
     // We're acting on it again, so a future refusal is news worth logging.
     refusalsLogged.delete(entry.id);
+
+    if (action.kind === 'report-only') {
+        const message = action.record.message
+            ?? 'Tally rejected this voucher; the agent could not reach the cloud at the time to say so.';
+
+        if (await report(entry.id, message)) {
+            journal.forget(entry.id);
+            logger.info(`Reported entry #${entry.id} as failed — Tally had rejected it at ${action.record.at}`);
+
+            return 'failed';
+        }
+
+        logger.error(
+            `Entry #${entry.id} was REJECTED by Tally at ${action.record.at} and the cloud still cannot be told. `
+            + 'Nothing was created in the books. It stays queued and will be reported on a later poll.',
+        );
+
+        return 'skipped';
+    }
 
     if (action.kind === 'ack-only') {
         if (await acknowledgeWithRetry(entry.id)) {
@@ -219,7 +208,7 @@ async function syncOne(entry: TallySyncEntry): Promise<SyncOutcome> {
         }
 
         logger.error(`Failed to sync entry #${entry.id}`, { message });
-        await report(entry.id, message);
+        await reportRejection(entry, message);
 
         return 'failed';
     }
@@ -227,7 +216,7 @@ async function syncOne(entry: TallySyncEntry): Promise<SyncOutcome> {
     if (!posted.success) {
         // Tally answered and said no — nothing was created, so this is a
         // clean failure the dashboard can offer a Retry for.
-        await report(entry.id, posted.message);
+        await reportRejection(entry, posted.message);
         logger.warn(`Tally rejected entry #${entry.id}`, {
             message: posted.message,
             rawResponse: posted.rawResponse.slice(0, 2000),

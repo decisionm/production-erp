@@ -19,7 +19,7 @@ const AGENT_ROOT = path.resolve(__dirname, '..');
 const TESTS_DIR = path.join(AGENT_ROOT, 'tests');
 
 /** Files the suite must not lose. Named, so a rename fails rather than passes. */
-const REQUIRED = ['stockJournal.test.js', 'releaseContract.test.js', 'versionAdvance.test.js'];
+const REQUIRED = ['stockJournal.test.js', 'releaseContract.test.js', 'versionAdvance.test.js', 'postDecision.test.js'];
 
 function fail(message) {
     console.error(`\n  npm test preflight FAILED\n\n  ${message}\n`);
