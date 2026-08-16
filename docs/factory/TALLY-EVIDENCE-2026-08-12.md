@@ -51,8 +51,9 @@ against bill references of the form `473/26-27`, `510/26-27`, `2185/25-26`.
 
 **This answers the "is bill-wise detail on?" half of Q30.** Per-invoice
 outstanding and ageing are achievable rather than speculative, so Phase 2 of the
-finance pull is viable. *(Q30 lives on the unmerged PR #155 branch, not on main,
-so it cannot be marked resolved here — it closes on that branch, citing
+finance pull is viable. *(Q30 reached main with PR #155 on 16-Aug. Its
+bill-wise half is still OPEN for the accountant — DEC-20260809-003 closed only
+the sales-in-Tally half — and can now be answered on main, citing
 `tally-receipts-20260812`.)*
 
 #### Four qualifications a Phase 2 build must not discover late

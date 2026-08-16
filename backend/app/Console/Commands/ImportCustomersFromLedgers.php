@@ -30,9 +30,10 @@ use Illuminate\Support\Facades\DB;
  * count so the naming is an informed act.
  *
  * NOTE ON AUTHORITY: the record that says these regional groups are all
- * customers (DEC-20260809-002) is owner-confirmed but sits on an UNMERGED
- * branch (PR #155). Nothing here hardcodes a group list, precisely so this
- * command does not depend on, or pre-empt, a record that is not yet in force.
+ * customers (DEC-20260809-002) is owner-confirmed and in force on main, since
+ * PR #155 merged on 16-Aug. Nothing here hardcodes a group list even so — the
+ * caller still names them — so this command reads the record as authority
+ * without encoding its list.
  *
  * WHAT IT NEVER DOES: it never updates or deletes an existing customer, and
  * it never invents a field. A Tally ledger carries a name and a group — no
