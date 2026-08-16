@@ -54,6 +54,54 @@ export interface TallySyncEvent {
     backfilled: boolean;
 }
 
+/**
+ * The entry as a person would say it (backend EntryPresenter::summary):
+ * one headline — "<what it is + document> · <party | shift | batch> ·
+ * <business date> · <counts> · <status>", segments the payload cannot fill
+ * left out — and the lines beneath it. Quantities and counts ONLY: this is
+ * not behind the finance gate, so it never carries a rate, an amount or a
+ * total (FC-06).
+ */
+export interface EntrySummary {
+    headline: string;
+    lines: string[];
+}
+
+/**
+ * One row of an entry's timeline (EntryPresenter::timeline): the events
+ * merged with the entry's own timestamps where no event stands for them,
+ * oldest first, one shape for every type. `source` says what produced the
+ * row — 'event' was observed as it happened; 'backfill' is the migration's
+ * reconstruction from the columns; 'timestamp' is a column read now with
+ * no event behind it. `backfilled` is true for both reconstructions.
+ */
+export interface TimelineItem {
+    at: string | null;
+    event: string;
+    actor_type: 'user' | 'agent' | 'system' | null;
+    actor_label: string | null;
+    detail: string | null;
+    source: 'event' | 'backfill' | 'timestamp';
+    backfilled: boolean;
+}
+
+/**
+ * Honesty flags (EntryPresenter::flags). A key is PRESENT only when raised
+ * and always carries `note` (the sentence to show) plus the facts behind
+ * it — so `flags.unvalidated_builder` is truthy exactly when the banner is
+ * due. Never carries a price.
+ */
+export interface EntryFlags {
+    /** The agent's Sales builder says, in its own docblock, that it is unvalidated and emits no GST lines (DEC-20260809-003). */
+    unvalidated_builder?: { note: string; builder: string; decision: string };
+    /** A Receipt Note carrying tally_order_no / order_due_dates that receiptNote.ts does not emit. */
+    order_reference_not_emitted?: { note: string; builder: string; tally_order_no: string | null; order_due_dates: number };
+    /** The ERP's label ("Manufacturing Journal") is not the voucher type Tally receives ("Stock Journal"). */
+    label_differs_from_wire?: { note: string; erp_label: string; wire_voucher_type: string | null };
+    /** The release gate is holding this shift voucher right now — same verdict as `hold`. */
+    held?: { note: string; phase: 'collecting' | 'quiet-period'; releasable_at: string };
+}
+
 export interface TallySyncEntry {
     id: number;
     syncable_type: string;
@@ -108,6 +156,12 @@ export interface TallySyncEntry {
     resolution_log?: { at: string; by: number | null; previous_error?: string | null; note: string }[];
     /** The exact place a recognised Tally refusal is fixed; null for unknown errors. */
     fix?: { sentence: string; path: string } | null;
+    /** The human summary — only on GET /tally-sync/entries/{id}, never on the list (same gate as `history`). */
+    summary?: EntrySummary;
+    /** Events + timestamps merged — only on GET /tally-sync/entries/{id}, never on the list (same gate as `history`). */
+    timeline?: TimelineItem[];
+    /** Honesty flags — on EVERY response, list included (a page's Sales rows need the unvalidated banner). */
+    flags?: EntryFlags;
     /** The entry's event history — only on GET /tally-sync/entries/{id}, never on the list. */
     history?: TallySyncEvent[];
 }
