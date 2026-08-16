@@ -294,7 +294,7 @@ Deferred items:
 Owner-gated items:  Q43 (duplicate master names: block or warn) — the ERP fails
                     closed until answered; audit-fixtures output on live → owner
                     decides what to do with any found.
-PR:                 (recorded below on open)
+PR:                 #182 (base: feat/phase-2-sync-control-center-foundation → #181 → #180 → #179)
 Deployment state:   not deployed; stack #179 → #180 → #181 → this PR awaits the merge chain
 Next phase:         3.5 — Sales and Sales Order visibility (first-class)
 ```
