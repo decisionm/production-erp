@@ -64,3 +64,26 @@ Procurement-only vs rate fields · local-fixture sweep (both holes, both directi
 
 ### Still open (from the baseline list)
 `OverReceiptException` · `OverDeliveryException` · `DeliveryService` decrement · carton-scan guards · `InvoiceService` / invoice→Tally · CRM · Finance · `ShiftSummaryService::report()` · frontend `tally-sync` · second same-mode packaging · `stock_balances == Σ stock_movements` — Phases 5 and 7 per MASTER-PLAN.
+
+## Phase 2 (feat/phase-2-sync-control-center-foundation, gate closed 2026-08-17)
+
+| Suite | Result | Evidence |
+|---|---|---|
+| Pint (whole tree) | PASS | clean |
+| Backend PHPUnit | PASS | **1,097 / 6,503** (Phase 1 close 1,034 / 5,740; +63: SyncEventHistoryTest 17 · SyncEventBackfillTest 4 · TransactionClassifierTest 11 · SyncQueryFiltersTest 16 · SyncSummaryTest 6+ · SyncEntryShowTest 4 · SyncPayloadRateVisibilityTest 5) |
+| Frontend vitest | PASS | 25 → **45** (`filters.test.ts` 20) |
+| Typecheck · build | PASS | clean · built |
+| Agent (node:test) | PASS | 69/69 — untouched |
+| Factory-knowledge | PASS | sound |
+| MySQL 8 (reviewer, docker) | PASS for Phase 2 suites | 6 pre-existing tests fail on JSON key order (`assertSame` on payload arrays) — **Phase 7: MySQL CI leg + `assertEqualsCanonicalizing`** |
+| Red-before / green-after | PROVEN | per workstream and per fix (F1 payload gate 3/5 red; F7 transaction 2 red; F2 flag; F3 clauses; C factory-tz; D wire suffix) |
+| Sonnet independent QA | PASS → fix loop → **PASS** | see PHASE-LOG |
+| Adversarial review | Opus FAIL → all fixed; Fable PASS + MySQL run | 2 P1 · 6 P2 · P3s closed |
+| Browser proof | PARTIAL | page renders (filter row, counts line, Category column, three-clause honesty line); Ant `Select`/`Input.Search` interaction not driven by the harness → filters proven at API layer with exact ids |
+| API proof | PASS | summary/list/show/filters + FC-06 four-caller matrix on the local dev API |
+
+### Coverage gaps closed this phase
+Sync-payload rate visibility (four caller kinds incl. the real agent) · event history for every mutation + inbound contact · backfill idempotency + rollback isolation · classification of every ERP-built type + census mapping · every list filter incl. `held` via the real gate and JSON-null on MySQL · factory-tz business date · show-vs-list history · pending()/retry() transactional atomicity · agent-vs-user actor typing · frontend query-param serialisation.
+
+### Still open (from the baseline list)
+`OverReceiptException` · `OverDeliveryException` · `DeliveryService` decrement · carton-scan guards · `InvoiceService` / invoice→Tally · CRM · Finance · `ShiftSummaryService::report()` · second same-mode packaging · `stock_balances == Σ stock_movements` — Phases 5 and 7. **New:** MySQL CI leg (Phase 7).
