@@ -3,7 +3,7 @@
 namespace App\Modules\TallySync\Services;
 
 use App\Modules\Finance\Models\JournalEntry;
-use App\Modules\Inventory\Models\Item;
+use App\Modules\Inventory\Services\ScrapItemResolver;
 use App\Modules\Inventory\Services\TallyGodownResolver;
 use App\Modules\Procurement\Models\GoodsReceiptNote;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
@@ -43,6 +43,10 @@ class TallySyncService
         private readonly TallyGodownResolver $godowns,
         private readonly PackingVoucherLines $packing,
         private readonly ShiftVoucherReleaseGate $releaseGate,
+        // The ONE scrap-item lookup, shared with the quality gate's scrap
+        // receipt so the voucher and the ERP's own stock can never name
+        // different scrap items.
+        private readonly ScrapItemResolver $scrapItems,
     ) {}
 
     public function enqueueSalesInvoice(Invoice $invoice): TallySyncEntry
@@ -191,9 +195,15 @@ class TallySyncService
         // what to do with. The batch itself is real and stays fully
         // recorded; only the posting is declined, and loudly, in the log.
         if ($this->isLocalFixtureEntry($entry)) {
+            // Names BOTH items: the decision is taken on the resolved
+            // identity (effective_item_sku), and the base product is kept
+            // beside it so a reader can tell "the product is a fixture" from
+            // "the product is real but its packaging identity is one".
             logger()->info('Tally voucher skipped: local-only fixture product.', [
                 'shift_production_entry_id' => $entry->id,
                 'item_sku' => $entry->item?->sku,
+                'finished_item_id' => $entry->finished_item_id,
+                'effective_item_sku' => $entry->effectiveItem()?->sku,
             ]);
 
             return null;
@@ -207,17 +217,54 @@ class TallySyncService
     }
 
     /**
-     * Whether this entry's produced item is a local-only fixture. Used both
-     * as the top-level guard and inside the shift-granularity sweep, so a
-     * real item's approval can never drag a fixture's quantities into a
-     * shared voucher through the back door.
+     * Whether this entry's produced item is a local-only fixture. Used as
+     * the top-level guard, inside the shift-granularity sweep, and by both
+     * payload rebuilds, so a real item's approval can never drag a
+     * fixture's quantities into a shared voucher through the back door —
+     * and a fixture already stamped onto one cannot keep riding it.
+     *
+     * A thin delegate: the predicate itself lives ONCE, on the entry
+     * (ShiftProductionEntry::isLocalFixtureIdentity), where the approval
+     * gate that exempts fixtures reads the same answer.
      */
     private function isLocalFixtureEntry(ShiftProductionEntry $entry): bool
     {
-        // Judged on the item the voucher will actually NAME — the resolved
-        // identity, not the base product. A real product resolving to a
-        // local-fixture identity would post a name Tally cannot accept.
-        return $entry->effectiveItem()?->isLocalFixture() ?? false;
+        return $entry->isLocalFixtureIdentity();
+    }
+
+    /**
+     * The members whose lines a shift voucher CARRIES: everything stamped
+     * onto it (tally_sync_entry_id) minus any local-only fixture, judged by
+     * the same predicate that decides what may join.
+     *
+     * The predicate used to govern only the join. A fixture that had already
+     * been stamped onto a voucher — under the older sweep that tested only
+     * the base item's SKU prefix — was replayed unfiltered by every later
+     * merge and every retry, so the voucher kept failing on a name Tally
+     * does not have, for as long as anyone kept pressing Retry. Membership
+     * itself is left exactly as stamped (un-stamping would be rewriting the
+     * authoritative tracker from a read path); only the payload lines
+     * change, and the exclusion is logged so the row is explicable.
+     *
+     * @param  Collection<int, ShiftProductionEntry>  $members
+     * @return Collection<int, ShiftProductionEntry>
+     */
+    private function postableMembers(Collection $members, TallySyncEntry $voucher, string $rebuild): Collection
+    {
+        [$fixtures, $postable] = $members->partition(
+            fn (ShiftProductionEntry $member) => $this->isLocalFixtureEntry($member),
+        );
+
+        if ($fixtures->isNotEmpty()) {
+            logger()->info('Shift voucher rebuilt without local-only fixture members.', [
+                'tally_sync_entry_id' => $voucher->id,
+                'rebuild' => $rebuild,
+                'excluded_entry_ids' => $fixtures->pluck('id')->all(),
+                'reason' => 'each excluded member resolves to a local-only fixture item that exists in no Tally company; its lines are left off the payload, its membership stamp is left as it was',
+            ]);
+        }
+
+        return $postable->values();
     }
 
     /**
@@ -451,7 +498,7 @@ class TallySyncService
      */
     private function producedScrapLine(ShiftProductionEntry $entry): ?array
     {
-        $item = $this->scrapItem();
+        $item = $this->scrapItems->resolve();
 
         if ($item === null) {
             return null;
@@ -484,28 +531,6 @@ class TallySyncService
     }
 
     /**
-     * The exact Tally stock item scrap posts against, or null when the factory
-     * has not named one.
-     *
-     * By SKU first, then by exact name — the same two-step the ERP's own scrap
-     * receipt uses, so one setting drives both and they cannot name different
-     * items. Never a pattern match: "Pet Scrap", "PET Scrap - Amber",
-     * "PET Scrap - Lumps" and "Pet Bottles Scrap" all exist in this factory's
-     * masters, and a near-miss books real weight against the wrong one.
-     */
-    private function scrapItem(): ?Item
-    {
-        $configured = config('production.scrap.rejected_item_sku');
-
-        if ($configured === null || $configured === '') {
-            return null;
-        }
-
-        return Item::query()->where('sku', $configured)->first()
-            ?? Item::query()->where('name', $configured)->first();
-    }
-
-    /**
      * @return array{kind: string, item: ?string, quantity: string, unit: string, reason: string}|null
      */
     private function withheldScrapLine(ShiftProductionEntry $entry): ?array
@@ -513,7 +538,9 @@ class TallySyncService
         // Nothing to withhold once the scrap line actually posts — the figure is
         // on the voucher, and a "held back" note beside a posted line would be
         // simply untrue.
-        if ($this->scrapItem() !== null) {
+        $missReason = $this->scrapItems->missReason();
+
+        if ($missReason === null) {
             return null;
         }
 
@@ -555,11 +582,51 @@ class TallySyncService
             // different populations and are stated, not added, in the reason.
             'quantity' => $kg,
             'unit' => 'kg',
-            'reason' => 'This batch recorded '.implode(', ', $counted).'. No scrap line is posted to Tally because '
-                .'the factory discards rejects and lumps (owner ruling, 05-Aug) — discarded material is not stock '
-                .'anyone owns. The resin they used is already on the consumption line above; only the bottle is '
-                .'thrown away, not the material that went into it.',
+            'reason' => 'This batch recorded '.implode(', ', $counted).'. '
+                .$this->scrapWithheldBecause($missReason).' '.$this->scrapItemMissNote($missReason),
         ];
+    }
+
+    /**
+     * WHY the scrap line is held back — the lead sentence, branched on which
+     * of the two silences this is, because they are different claims. Not
+     * naming a scrap item is the factory's standing choice, so that lead
+     * states the owner's ruling. Naming one that cannot be found is a
+     * misconfiguration, and a lead that still cited the ruling would be
+     * dressing a typo up as a decision — the very contradiction the note
+     * appended after it exists to call out.
+     */
+    private function scrapWithheldBecause(string $missReason): string
+    {
+        if ($missReason === ScrapItemResolver::NOT_NAMED) {
+            return 'No scrap line is posted to Tally because the factory discards rejects and lumps '
+                .'(owner ruling, 05-Aug) — discarded material is not stock anyone owns. The resin they used is '
+                .'already on the consumption line above; only the bottle is thrown away, not the material that '
+                .'went into it.';
+        }
+
+        return 'No scrap line is posted to Tally because the scrap item named in configuration could not be '
+            .'found among the stock items, so the figure is held back rather than booked against a guess.';
+    }
+
+    /**
+     * Which of the two silences this is — said out loud, because they call
+     * for different people. "Not named" is the factory's standing choice
+     * and needs nobody; "named but not found" is a misconfiguration (a typo,
+     * a renamed SKU, a retired master) that withholds every scrap line while
+     * reading exactly like that choice.
+     */
+    private function scrapItemMissNote(string $missReason): string
+    {
+        if ($missReason === ScrapItemResolver::NOT_NAMED) {
+            return 'Scrap item: not named in configuration (production.scrap.rejected_item_sku is blank).';
+        }
+
+        return sprintf(
+            'Scrap item: the configured \'%s\' matches no stock item by SKU or exact name — '
+            .'check production.scrap.rejected_item_sku; this is a misconfiguration, not a decision.',
+            (string) $this->scrapItems->configuredName(),
+        );
     }
 
     /**
@@ -606,24 +673,49 @@ class TallySyncService
                     'status',
                     [TallySyncStatus::Pending->value, TallySyncStatus::Synced->value],
                 ))
+                ->with(['item', 'finishedItem'])
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get()
                 // Local-only fixtures never join a voucher. Without this the
                 // top-level guard would be bypassed sideways: a REAL item's
                 // approval sweeps its approved shift-mates, and a fixture
                 // sitting in the same shift would have its quantities posted
                 // to Tally under someone else's approval.
                 //
-                // Written as "doesn't have a LOCAL item" rather than "has a
-                // non-LOCAL item" because Item soft-deletes: an entry whose
-                // product was retired after the run has NO visible item row,
-                // and the positive form would silently drop its quantities
-                // from the voucher. Absence of a LOCAL match is the correct
-                // test — it includes exactly what the old code included.
-                ->whereDoesntHave('item', fn ($query) => $query->where(
-                    'sku', 'like', Item::LOCAL_FIXTURE_SKU_PREFIX.'%',
-                ))
-                ->orderBy('id')
-                ->lockForUpdate()
-                ->get();
+                // Judged in PHP by THE SAME predicate as the top-level guard,
+                // not by a second one written in SQL. The SQL form this
+                // replaced tested only the base item's SKU prefix, and so
+                // disagreed with isLocalFixtureEntry() twice over: a real
+                // product whose packaging identity (finished_item_id) is a
+                // fixture slipped in, and so would a column-flagged fixture
+                // whose SKU no longer starts LOCAL-. One predicate cannot
+                // drift from itself.
+                //
+                // Item soft-deletes, and this keeps the guarantee the SQL form
+                // had: an entry whose product was retired after the run has
+                // NO visible item row, effectiveItem() is null, and the
+                // predicate says "not a fixture" — its quantities stay on the
+                // voucher rather than silently dropping off it.
+                ->reject(function (ShiftProductionEntry $member) use ($entry): bool {
+                    if (! $this->isLocalFixtureEntry($member)) {
+                        return false;
+                    }
+
+                    // Not silent: the row stays approved and unvouchered,
+                    // and the log is where a reader learns why the sweep
+                    // left it there.
+                    logger()->info('Shift sweep left a local-only fixture entry unvouchered.', [
+                        'shift_production_entry_id' => $member->id,
+                        'triggered_by_entry_id' => $entry->id,
+                        'item_sku' => $member->item?->sku,
+                        'finished_item_id' => $member->finished_item_id,
+                        'effective_item_sku' => $member->effectiveItem()?->sku,
+                    ]);
+
+                    return true;
+                })
+                ->values();
 
             if ($joining->isEmpty()) {
                 // A concurrent approval already claimed this entry.
@@ -689,10 +781,17 @@ class TallySyncService
 
             // Rebuild the payload from ALL members (pre-existing + just
             // joined) — recomputing the sums beats patching incrementally.
-            $members = ShiftProductionEntry::query()
-                ->where('tally_sync_entry_id', $voucher->id)
-                ->orderBy('id')
-                ->get();
+            // Filtered through the same fixture predicate that governed the
+            // join above: a fixture stamped on under the old sweep must not
+            // be replayed onto the payload on every later merge.
+            $members = $this->postableMembers(
+                ShiftProductionEntry::query()
+                    ->where('tally_sync_entry_id', $voucher->id)
+                    ->orderBy('id')
+                    ->get(),
+                $voucher,
+                'merge',
+            );
             $voucher->update([
                 'payload' => $this->shiftVoucherPayload($members, $voucher->payload['voucher_number'], $entry),
                 // Every merge re-arms the release gate's quiet period: the
@@ -1103,18 +1202,30 @@ class TallySyncService
     /**
      * A shift voucher rebuilt from its member entries — the rows whose
      * tally_sync_entry_id names this voucher, which is the authoritative
-     * membership tracker. The voucher number is kept from the frozen
-     * payload: it is the voucher's identity, not derived state.
+     * membership tracker — minus any local-only fixture among them (see
+     * postableMembers): a retry exists to pick up a mapping fix, and a
+     * fixture line is the one thing no mapping fix can ever make postable.
+     * The voucher number is kept from the frozen payload: it is the
+     * voucher's identity, not derived state.
      */
     private function rebuildShiftVoucherPayload(TallySyncEntry $voucher): ?array
     {
-        $members = ShiftProductionEntry::query()
-            ->where('tally_sync_entry_id', $voucher->id)
-            ->get();
+        $members = $this->postableMembers(
+            ShiftProductionEntry::query()
+                ->where('tally_sync_entry_id', $voucher->id)
+                ->orderBy('id')
+                ->get(),
+            $voucher,
+            'retry',
+        );
 
         $first = $members->first();
         $number = $voucher->payload['voucher_number'] ?? null;
 
+        // No postable member at all — every stamped row is a fixture, or
+        // there are none. Nothing honest can be built, so the frozen payload
+        // stands (and keeps failing, which is the truthful outcome for a
+        // voucher a human should dismiss); the log above already names why.
         if ($first === null || ! is_string($number)) {
             return null;
         }
