@@ -126,7 +126,7 @@ screens.
 
 ```
 Phase:    3 — every real transaction type (MASTER-PLAN P3-01..05)
-Status:   (filled at gate close)
+Status:   PASS WITH DEFERRED ITEMS
 Branch:   feat/phase-3-sync-every-transaction-type (stacked on Phase 2 PR #181 → #180 → #179)
 Dates:    2026-08-17
 
@@ -192,14 +192,60 @@ Files/modules:
 
 Migrations:       none
 Tests before:     1,097 / 6,503 (backend) · 45 (frontend)
-Tests after:      1,177 / 7,732 (backend, +80) · 64 (frontend, +19)
+Tests after:      1,193 / 7,914 (backend, +96) · 69 (frontend, +24)
                   agent untouched 69/69 · pint/typecheck/build clean · knowledge sound
 
-Sonnet first gate:   (at close)
-Findings:            (at close)
-Fixes:               (at close)
-Sonnet final gate:   (at close)
-Independent review:  (at close)
+Sonnet first gate:   PASS (workstreams integrated; no P0/P1) — then adversarial
+                     review opened two P1s, so the gate was re-run after each fix
+                     round rather than treated as final.
+Findings:
+  P1  Ambiguous mapping arm weakened the fail-closed preview: the resolver's
+      STATE_AMBIGUOUS `break;` let a voucher naming a duplicated item/godown
+      reach the pre-approval verdict without the "no identity" refusal the old
+      `->first()` path gave (implementer framed it as "no new gate"; accepted
+      too quickly — recorded as a lesson). Fixed: ambiguous arms fail closed
+      (no-identity problem when no candidate carries a GUID + an ambiguity
+      blocker; UOM and packing-store checks walk ALL candidates); the
+      block-vs-warn policy itself is the owner's → Q43.
+  P1  FC-06 second half. Every earlier FC-06 gate reasoned about MONEY only;
+      supplier IDENTITY (party ledger, GSTIN) rode Receipt Note headline,
+      mappings.party, payload.party_ledger/party_gstin, root `party` and the
+      list `q=` search for a tally-sync-only reader. Fixed with ONE predicate:
+      AgentIdentity::mayReadPurchaseDetails() ∧ TallyTransactionCategory::
+      partyIsSupplier() → withheld state on mappings, headline without the
+      party, payload keys stripped, root party null, q= excludes supplier-party
+      categories from the party_ledger LIKE (SyncQueryFiltersTest had been
+      PINNING the oracle — corrected to expect []).
+  P1  (re-gate #1) Tally's own rejection text carries the supplier ("Ledger
+      does not exist : <vendor>") — leaked via error_message, resolution_log
+      .previous_error (root AND the copy inside payload), timeline detail,
+      history[].details. Fixed across TallySyncEntryResource / EntryPresenter
+      / TallySyncEventResource with an `error_withheld` note; PerTypeLifecycle
+      TestCase now states the rule per type instead of asserting error_message
+      readable for all.
+  P1  (re-gate #2) my frontend commit rendering error_withheld exposed a new
+      contradiction: the "Fixed after N failed attempts" banner was judged on
+      `!error_message` — now null on a still-FAILED withheld voucher → green
+      "Fixed" beside "withheld (FC-06)". Fixed: predicate lifted to drawer.ts
+      showsFixedAfterFailures() gated on status first, used by both the row
+      and the drawer, pinned by four vitest cases (5224cfc).
+  P2  ambiguity note wording overclaimed ("Tally would match ONE") → softened
+      to "this ERP cannot check"; identity notes say "linked once", not "Tally
+      still has it".
+  P3  fixSuggestion() has no arm for "Ledger does not exist" (observation, not
+      a defect — the failure still lands in the drawer verbatim for readers
+      with standing).
+Fixes:               all P1/P2 above closed on the branch (commits 8f1a16f …
+                     2985e00, 5224cfc); red-before/green-after per fix.
+Sonnet final gate:   re-gate #1 FAIL (rejection-text leak) → re-gate #2 FAIL
+                     (banner) → **re-gate #3 PASS** — no findings; banner truth
+                     table pinned; no other surface infers health from a null
+                     error (statusColor/holdCopy/timelineItems/button state
+                     checked); status emitted unchanged when withholding;
+                     1,193/7,914 · 69 · agent diff empty · knowledge exit 0.
+Independent review:  Opus (rules/honesty/FC-06) FAIL → both P1s fixed;
+                     Fable (correctness/tests) NOT READY → ambiguous arm fixed
+                     + q= oracle closed → satisfied by re-gate #3.
 
 API proof:
   Show #3 (Accounts, dev DB): keys flags/history/mapping_summary/mappings/
@@ -232,9 +278,12 @@ Security proof:
   (per-type tests). Audit command proven read-only.
 
 Deferred items:
-  • unvalidated_builder flag raised only for sales_invoice; receiptNote.ts,
-    deliveryNote.ts, journalEntry.ts carry the same "NOT YET VALIDATED"
-    docblock — data-only extension, decide at gate.
+  • unvalidated_builder now covers all four builders that carry the "NOT YET
+    VALIDATED" docblock (salesInvoice.ts:19, receiptNote.ts:17,
+    deliveryNote.ts:17, journalEntry.ts:13) — validation of those XML shapes
+    against real Tally is Phase 4/6 evidence work, not a flag change.
+  • fixSuggestion() "Ledger does not exist" arm (P3) — add when the first
+    real-failure text is on file; not invented from a guess.
   • Delivery has no replay key (raw re-fired DeliveryDispatched → second row)
     → Phase 3.5 P3.5-03 (the delivery/SO model work).
   • `ambiguous` surfaces but does not block approval — a new approval gate on
@@ -242,8 +291,10 @@ Deferred items:
   • needs_review status: still deferred (Phase 2 reasoning stands; no
     real-failure evidence yet).
 
-Owner-gated items:  none new (audit-fixtures output on live → owner decides)
-PR:                 (at close)
+Owner-gated items:  Q43 (duplicate master names: block or warn) — the ERP fails
+                    closed until answered; audit-fixtures output on live → owner
+                    decides what to do with any found.
+PR:                 (recorded below on open)
 Deployment state:   not deployed; stack #179 → #180 → #181 → this PR awaits the merge chain
 Next phase:         3.5 — Sales and Sales Order visibility (first-class)
 ```
