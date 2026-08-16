@@ -17,20 +17,30 @@ import logger from './logger';
  * agent restarting — a Windows reboot, an auto-update, the operator quitting
  * from the tray — is one of the likelier ways to lose an ack mid-flight.
  *
- * Two states, and the difference matters:
+ * Three states, and the differences matter:
  *   posted     — Tally confirmed the import. The voucher is in the books;
  *                all that is left is to tell the cloud. Safe to ack.
  *   unverified — we sent the voucher and never got an answer (the request
  *                timed out). It may or may not be in the books. NOT safe to
  *                ack, NOT safe to re-post: a human has to look in Tally.
+ *   rejected   — Tally answered and said no, so NOTHING was created. The
+ *                cloud needs to hear that so the entry reaches the dashboard's
+ *                failed list. Written down because the report itself can fail:
+ *                during a deploy's maintenance window every cloud route
+ *                answers 503, and without this record the next cycle sees only
+ *                a delivered_at stamp it cannot explain and refuses the entry
+ *                forever, invisibly (issue #168). `message` is kept so the
+ *                retry reports the same reason Tally actually gave.
  */
-export type PostOutcome = 'posted' | 'unverified';
+export type PostOutcome = 'posted' | 'unverified' | 'rejected';
 
 export interface PostRecord {
     entryId: number;
     outcome: PostOutcome;
     voucherNumber: string | null;
     at: string;
+    /** Only set for `rejected` — what Tally said, so it can be re-reported verbatim. */
+    message?: string;
 }
 
 interface JournalShape {
@@ -61,9 +71,14 @@ export function lookup(entryId: number): PostRecord | undefined {
  * post and the ack, this file is the only thing that stops the next cycle
  * from posting the same voucher again.
  */
-export function record(entryId: number, outcome: PostOutcome, voucherNumber: string | null): void {
+export function record(
+    entryId: number,
+    outcome: PostOutcome,
+    voucherNumber: string | null,
+    message?: string,
+): void {
     const records = all().filter((existing) => existing.entryId !== entryId);
-    records.push({ entryId, outcome, voucherNumber, at: new Date().toISOString() });
+    records.push({ entryId, outcome, voucherNumber, at: new Date().toISOString(), ...(message === undefined ? {} : { message }) });
     save(records);
 }
 
