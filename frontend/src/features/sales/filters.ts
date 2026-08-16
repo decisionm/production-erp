@@ -210,7 +210,8 @@ export function documentPath(kind: SalesDocumentKind, id: number): string {
 
 /**
  * A document reference in any of the spellings the server's `q` accepts —
- * "SO-12", "so 12", "so12", "DN-5", "INV-3" — read back to its kind and id.
+ * "SO-12", "so 12", "SO#12", "so12", "DN-5", "INV-3" — read back to its kind
+ * and id.
  * A bare number is that page's own document only when the caller says which
  * page it is on; from nowhere it is nothing. Anything else is null: no
  * guessing at what "PO-4" or "SO-0" might have meant.
@@ -223,7 +224,10 @@ export function parseDocumentRef(
     const text = value.trim();
     if (text === '') return null;
 
-    const match = /^([A-Za-z]+)?[\s-]*(\d+)$/.exec(text);
+    // Same grammar as the server's SalesDocumentQuery::documentId(): a
+    // separator (space, dash, hash) is a separator only AFTER a prefix, so
+    // "SO#12" is order 12 but a bare "-12" or "#12" is nothing.
+    const match = /^(?:([A-Za-z]+)[\s\-#]*)?(\d+)$/.exec(text);
     if (!match) return null;
 
     const [, prefix, digits] = match;

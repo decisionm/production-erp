@@ -109,3 +109,25 @@ Mapping state per line without a conflict table (identity/name_only/unmapped/fix
 
 ### Still open (from the baseline list)
 `OverReceiptException` · `InvoiceService` / invoice→Tally · CRM · Finance · `ShiftSummaryService::report()` · second same-mode packaging · `stock_balances == Σ stock_movements` — Phases 5 and 7. **Closed here:** `OverDeliveryException` · `DeliveryService` decrement · carton-scan guards. **New:** Delivery replay key (Phase 3.5) · MySQL CI leg (Phase 7).
+
+## Phase 3.5 (feat/phase-3.5-sales-visibility, gate closed 2026-08-17)
+
+| Suite | Result | Evidence |
+|---|---|---|
+| Pint (whole tree) | PASS | clean |
+| Backend PHPUnit | PASS | **1,243 / 9,060** (Phase 3 close 1,193 / 7,914; +50: SalesSearchFilterTest 14 · SalesDocumentShowTest 8 · TallySyncLinkServiceTest 7 · SalesOrderCancelTest 8 · SalesTraceChainTest 2 · TallyMirrorHonestyTest 4 · GenericEnqueueReplayTest 7) |
+| Frontend vitest | PASS | 69 → **105** (`sales/filters.test.ts` 21 · `sales/drawer.test.ts` 15) |
+| Typecheck · build | PASS | clean · built |
+| Agent (node:test) | PASS | 69/69 — untouched (`git diff … -- tally-sync-agent/` empty) |
+| Factory-knowledge | PASS | exit 0 (Q44 added; preamble → Q45) |
+| Red-before / green-after | PROVEN | GenericEnqueueReplayTest 7/7 red at baseline (two rows minted); WS-A endpoint tests 23 red → green; fix loop: N+1 DB::listen test, documentId "-1", paginator links red on the pre-fix tree |
+| Sonnet independent QA | PASS (2 P3) → fix loop → **re-gate PASS_WITH_DEFERRED** (3 P3 doc/test gaps, fixed) | see PHASE-LOG |
+| Adversarial review | Opus PASS_WITH_DEFERRED · Fable PASS_WITH_DEFERRED (no P1) | 2 P2 · 8 P3 — P2s fixed, P3s fixed or recorded |
+| Browser proof | PASS (with harness notes) | mirror panel, filter bar, ?open=SO-1 drawer chain, ?entry=4 deep link, invoices/deliveries columns; a 403 no longer reads as "no matches" |
+| API proof | PASS | tally-mirror strings; list filters, q spellings, 422s; show + trace + TallyLink keys; 404 |
+
+### Coverage gaps closed this phase
+Server-side sales filters incl. factory-day range and LIKE escaping · document-number grammar (accept AND reject set) · show/trace shapes and the seven-key TallyLink (no rate/vendor/payload/error) · carton-scan → delivery → SO → Tally chain through a REAL agent ack · SO cancel lifecycle + no side effects + permission · tally-mirror honesty (exact strings, pure read) · generic enqueue replay for all four types (+ dismissed re-issue) · orders-list query count · frontend URL round-trip, drawer helpers, honest empty text.
+
+### Still open (from the baseline list)
+`OverReceiptException` · CRM · Finance · `ShiftSummaryService::report()` · second same-mode packaging · `stock_balances == Σ stock_movements` — Phases 5 and 7. **Closed here:** `InvoiceService` / invoice→Tally (issue → Sales entry; replay). **Still:** MySQL CI leg (Phase 7).

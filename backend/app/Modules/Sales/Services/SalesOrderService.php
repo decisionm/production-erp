@@ -35,8 +35,9 @@ class SalesOrderService
         $this->applyFilters($query, $filters);
         $this->query->applySort($query, $filters['sort'] ?? null, ['order_date', 'expected_date']);
 
-        // withQueryString(): the paginator's own links carry the validated
-        // filters, so an API client walking links.next stays on the same query.
+        // withQueryString(): the paginator's own links carry the request's
+        // query string (as typed — unknown keys are reflected too, harmlessly),
+        // so an API client walking links.next stays on the same query.
         return $query->paginate($perPage)->withQueryString();
     }
 

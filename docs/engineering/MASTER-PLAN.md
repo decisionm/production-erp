@@ -19,7 +19,7 @@ PHASE 0   Discovery + audit                    ← THIS DOCUMENT · DONE
 PHASE 1   Live-safety fixes                    PASS WITH DEFERRED · PR #180 · awaiting merge chain
 PHASE 2   Sync Control Center — foundation     PASS WITH DEFERRED · PR #181 (stacked on #180)
 PHASE 3   Sync Control Center — every type     PASS WITH DEFERRED · PR #182 (stacked on #181) · Q43 fail-closed
-PHASE 3.5 Sales visibility (first-class)       Sales stays Tally-originated (DEC-20260809-003)
+PHASE 3.5 Sales visibility (first-class)       PASS WITH DEFERRED · PR (stacked on #182) · Q44 · Sales stays Tally-originated
 PHASE 4   Agent XML/response snapshot          FC-06 review gate
 PHASE 4.5 Download / Export Center             CEC slot BLOCKED until a sample exists
 PHASE 5   Ledger + packaging schema            D1 has a decision behind it
@@ -116,6 +116,14 @@ Q36 gates any deliberate read). So "everything visible" is built in two layers:
 **Exit:** a user can find any ERP sales document by any of its identifiers, follow it
 to its Tally entry, and the page never implies Tally-side sales are present when
 they are not.
+
+*Outcome 2026-08-17:* P3.5-01/02/04/05/06 delivered; P3.5-03: `SalesOrderStatus::Cancelled`
+WIRED (`POST sales-orders/{id}/cancel`, draft/confirmed with nothing delivered and no
+invoice, row-locked), `InvoiceStatus::Paid` deliberately LEFT UNWIRED — receipts live in
+Tally (DEC-20260809-003) and the pages say the ERP never marks an invoice paid; P3.5-07
+→ Phase 4.5. Also closed the Phase 3 "Delivery has no replay key" gap (generic
+`enqueue()` idempotent per document + voucher type). Lifecycle rules stated as engineering
+defaults → **Q44**.
 
 ### Phase 4 — Agent-side sanitized XML + response snapshot
 

@@ -298,3 +298,170 @@ PR:                 #182 (base: feat/phase-2-sync-control-center-foundation → 
 Deployment state:   not deployed; stack #179 → #180 → #181 → this PR awaits the merge chain
 Next phase:         3.5 — Sales and Sales Order visibility (first-class)
 ```
+
+## PHASE 3.5 — Sales and Sales Order visibility (first-class)
+
+```
+Phase:    3.5 — Sales visibility (MASTER-PLAN P3.5-01..06; P3.5-07 downloads → Phase 4.5)
+Status:   PASS WITH DEFERRED ITEMS
+Branch:   feat/phase-3.5-sales-visibility (stacked on Phase 3 PR #182 → #181 → #180 → #179)
+Dates:    2026-08-17
+
+Goal:
+  Make every ERP-originated Sales / Sales Order / Delivery / Invoice VISIBLE,
+  SEARCHABLE, FILTERABLE and TRACEABLE — server-side — and make the pages SAY
+  what is not there: real sales are invoiced in Tally (DEC-20260809-003), no
+  Tally read exists, so Tally-side vouchers are NOT mirrored. The ERP does not
+  become the sales system of record. Nothing that reaches Tally changes.
+
+What changed:
+  • Server-side filters on sales-orders / deliveries / invoices (FormRequest
+    per list): customer, status, date range (order_date/invoice_date as plain
+    dates; delivered_date as a factory-day range through the factory
+    timezone), item, sales_order_id, `q` (document number in any spelling —
+    "SO-12", "so 12", "SO#12", "12"; delivery reference; customer name/code;
+    never notes), sort (allowlist, 422 otherwise), per_page 1..100 (422 outside).
+    Paginator links carry the validated filters.
+  • show endpoints per document with `trace`: SO → deliveries (with the
+    cartons that physically left: carton_no, pieces, batch) → invoices → for
+    each, ONE Tally link {entry_id, voucher_type, status, voucher_number,
+    synced_at, flags, link "/tally-sync?entry=ID"} — no payload, no rate, no
+    party, no error text — produced by TallySync's new TallySyncLinkService,
+    the only cross-module hop; cartons via Production's FinishedCartonService.
+  • POST sales-orders/{id}/cancel: draft or confirmed with nothing delivered
+    and no invoice (draft included) → cancelled, under a row lock in one
+    transaction; a cancelled order refuses confirm/delivery/invoice; no stock,
+    no Tally side effect. InvoiceStatus::Paid deliberately NOT wired — the
+    ERP never marks an invoice paid; receipts live in Tally — said on screen.
+  • GET sales/tally-mirror — the honesty statement in the SERVER's words
+    (mirrored:false · DEC-20260809-003 · headline/body · Sales XML builder
+    unvalidated, no GST · payments not recorded here); the frontend panel on
+    the Sales Orders and Invoices pages renders those sentences, never its own.
+  • Frontend: filter bars in the URL, server pagination, Number/Tally/Cartons/
+    Docs columns, one document drawer for the three kinds walking SO → lines →
+    deliveries+cartons → invoices → Tally (status tag + unvalidated-builder tag
+    + deep link), Cancel where the server says can_cancel; the Tally Sync page
+    honours ?entry=ID. Empty text is a function of the query's STATE (error →
+    the server's sentence + status; pending → "Reading …"; only an answered
+    query speaks of filters) — found in the browser proof as a login without
+    Sales access, where a 403 had rendered as "No sales orders match these
+    filters."
+  • TallySyncService::enqueue() (the generic path: Sales, Journal, Receipt
+    Note, Delivery Note, batch-mode production) is IDEMPOTENT per (document,
+    voucher type): a re-fired DeliveryDispatched or a re-saved issued invoice
+    returns the live entry — the "Delivery has no replay key" gap named in
+    Phase 3 is closed. Dismissed does not count (the write-off road stays open).
+
+Files/modules:
+  Sales (SalesDocumentQuery, SalesDocumentTraceService, TallyMirrorStatement
+  Service, List*Request ×3, controllers/resources, SalesOrder/Delivery/Invoice
+  models) · TallySync (TallySyncLinkService, TallySyncService::enqueue) ·
+  Production (FinishedCartonService::forDeliveries/countForDeliveries) ·
+  routes/api.php (sales group) · frontend sales (filters.ts, drawer.ts,
+  SalesFilterBar, SalesDocumentDrawer, TallyMirrorPanel, useSalesListParams,
+  three pages), tally-sync/pages/TallySyncPage.tsx (?entry= only) · tests:
+  SalesSearchFilterTest, SalesDocumentShowTest, TallySyncLinkServiceTest,
+  SalesOrderCancelTest, SalesTraceChainTest, TallyMirrorHonestyTest,
+  GenericEnqueueReplayTest, filters.test.ts, drawer.test.ts
+
+Migrations:       none
+Tests before:     1,193 / 7,914 (backend) · 69 (frontend)
+Tests after:      1,243 / 9,060 (backend, +50) · 105 (frontend, +36)
+                  agent untouched 69/69 · pint/typecheck/build clean · knowledge sound
+
+Sonnet first gate:   PASS (2 P3: q="-1" leniency; stale payload on the idempotent
+                     return is contract-mandated and pinned)
+Findings (adversarial: Opus rules/honesty PASS_WITH_DEFERRED · Fable correctness
+PASS_WITH_DEFERRED; no P1):
+  P2  N+1 on the orders list — withSum yields SQL NULL for an un-invoiced order
+      and `?? null` read it as "not loaded" → one SUM per row (20 extra queries
+      a page on this factory, where real invoices live in Tally). Fixed
+      (array_key_exists; NULL → '0.0000'); DB::listen test, red-before proven.
+  P2  "Delivered / Invoiced" counted DRAFT invoices and said so nowhere. Fixed:
+      caption on the column header (Tooltip) and the drawer's Quantities line;
+      arithmetic unchanged; the question itself → Q44.
+  P3  documentId() read "-1"/"#1" as id 1 → separator only after the prefix;
+      "SO#12" still a spelling; tested (red-before proven).
+  P3  cancel() read-then-write without a lock → transaction + lockForUpdate.
+  P3  paginator links dropped the filters → withQueryString; tested.
+  P3  LIKE escaping and the exact factory-day boundary instant untested → tests.
+  P3  (deferred) TallySyncLinkService ranks newest-live first — for LEGACY
+      duplicate rows a synced older entry could sit behind a newer pending one;
+      the guard makes new duplicates impossible; leave as contract-defined.
+  P3  (deferred) the idempotent enqueue() returns a stale payload if the
+      document is edited after queueing — retry() regenerates; a "queued
+      payload predates the document" flag is a future TallyLink field.
+  P3  (recorded) a sales.view login now reads carton/batch numbers on a
+      delivery trace (no lot/GRN/rate/supplier — DEC-20260810-001 and FC-06
+      intact) — a permission widening the contract sanctioned; named in Q44.
+  P3  (deferred) cancel/confirm record no actor/reason → with Q44's answer.
+  P3  (recorded) MySQL provenance: the suite runs on sqlite; the constructs
+      (lower() like ? escape '!', whereDate, orderByRaw is-null, groupBy
+      aggregate) are portable by reading, not by a MySQL run → Phase 7 leg.
+Fixes:               7250255 (empty-text honesty), cb0198c (fix loop) — all
+                     P2/P3 above except the four marked deferred/recorded.
+Sonnet final gate:   re-gate PASS_WITH_DEFERRED (all seven fixes verified: N+1 test
+                     non-vacuous, caption, documentId, cancel lock, links, tests,
+                     Q44) — three P3s (frontend parseDocumentRef grammar parity
+                     + comment; withQueryString comment overclaim; links pinned
+                     on one list only) fixed on the branch after the re-gate,
+                     suites re-run green: 1,243 / 9,060 · 105 vitest.
+Independent review:  Opus PASS_WITH_DEFERRED · Fable PASS_WITH_DEFERRED →
+                     P2s fixed, P3s fixed or recorded above.
+
+API proof (dev API as Administrator, 127.0.0.1:8000):
+  GET sales/tally-mirror → exact contract strings, mirrored:false, decision
+  DEC-20260809-003. sales-orders?per_page=5 → 2 rows with document_number,
+  totals, counts, can_cancel; q=SO-1 / "so 1" / 1 → [1]; 12abc → [];
+  status=confirmed&sort=-order_date → [(2, 2026-08-08)]; sort=notes /
+  per_page=0 / status=bogus → 422; unknown=x → 200. sales-orders/1 → keys
+  incl. trace{deliveries[DN-1: tally pending, voucher DN-1, link
+  /tally-sync?entry=4, flags[unvalidated_builder]], invoices[INV-1 issued,
+  tally null — HONEST: the dev seed's invoice has no Sales entry]}.
+  deliveries → sales_order{SO-1}, customer, carton_count 0, tally pending;
+  invoices/99999 → 404.
+
+Browser proof (Chrome MCP, vite dev, as Administrator):
+  Sales Orders page: the mirror panel with the server's four sentences and the
+  DEC tag; filter bar; Number/Status/Customer/Delivered-Invoiced/Docs columns
+  (screenshot-1786922940002-9.jpg). ?open=SO-1 opens the drawer: header,
+  Quantities, Lines, Deliveries → DN-1 with "Waiting for agent" +
+  "unvalidated builder" tags and "Delivery Note DN-1 · Open in Tally Sync",
+  "No cartons scanned — quantities were typed."; Invoices → INV-1 issued, Tally
+  "—"; Cost & margin section intact (screenshot-1786923035241-10.jpg).
+  /tally-sync?entry=4 opens "DN-1 — as it goes to Tally" with the
+  unvalidated-builder banner (screenshot-1786923071939-12.jpg). Invoices page
+  carries the panel and a Tally column; Deliveries page shows SO / Cartons /
+  Tally columns with the tags and deep link (DOM-read). As a login WITHOUT
+  Sales access the lists had read "No sales orders match these filters." over
+  a 403 — fixed in 7250255 and re-proven by vitest.
+  Harness notes: a hidden tab pauses TanStack retries (focusManager) — the
+  paused state now reads "Reading …", never nothing; the drawer's mask covers
+  the row's View button, so a click there closes it (not a defect).
+
+Data/transaction proof:
+  Nothing that reaches Tally changed (payload builders, voucher_number,
+  pending() hand-out, release gate untouched). No migration. No stock change
+  (cancel proven: zero StockMovement, zero TallySyncEntry/Event). No Tally read.
+
+Security proof:
+  Every sales list/show/cancel behind module:sales (sales.view read /
+  sales.manage write; 403 without); TallyLink is exactly seven keys — no
+  payload/rate/party/error text; no 'unit_cost'/'vendor' anywhere in the three
+  show pages (SalesTraceChainTest); tally-mirror is a pure read (DB::listen).
+
+Deferred items:
+  • TallySyncLinkService ranking for legacy duplicate rows (synced older vs
+    pending newer) — leave until such a row exists on live.
+  • "queued payload predates the document" flag on TallyLink — future.
+  • Cancel/confirm actor + reason — with Q44's answer.
+  • Deliveries list still prints delivered_date as the raw ISO instant
+    (pre-existing) — with Phase 4.5's date presentation sweep.
+  • MySQL CI leg (Phase 7).
+
+Owner-gated items:  Q44 (ERP sales-document lifecycle rules stated as
+                    engineering defaults; carton/batch read for sales.view).
+PR:                 (recorded on open)
+Deployment state:   not deployed; stack #179 → #180 → #181 → #182 → this PR
+Next phase:         4 — Agent-side sanitized XML + response snapshot
+```

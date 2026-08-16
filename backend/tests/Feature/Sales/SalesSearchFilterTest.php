@@ -191,6 +191,17 @@ class SalesSearchFilterTest extends TestCase
         $this->assertStringContainsString('customer_id='.$this->aqua->id, $next);
         $this->assertStringContainsString('q=aqua', $next);
         $this->assertStringContainsString('page=2', $next);
+
+        // The same for the other two lists — one paginator mechanism, but the
+        // call is per service, so each is pinned.
+        for ($i = 0; $i < 2; $i++) {
+            $this->delivery($this->orders['blue_completed'], '2026-08-09 09:00:00', "TRUCK-X{$i}", [$this->bottle]);
+            $this->invoice($this->orders['blue_completed'], InvoiceStatus::Draft, '2026-08-09', [$this->bottle]);
+        }
+        $deliveries = $this->list('deliveries', ['per_page' => 1, 'customer_id' => $this->blue->id]);
+        $this->assertStringContainsString('customer_id='.$this->blue->id, (string) $deliveries->json('links.next'));
+        $invoices = $this->list('invoices', ['per_page' => 1, 'customer_id' => $this->blue->id]);
+        $this->assertStringContainsString('customer_id='.$this->blue->id, (string) $invoices->json('links.next'));
     }
 
     public function test_sales_orders_sort_defaults_to_newest_first_and_honours_the_documented_columns(): void

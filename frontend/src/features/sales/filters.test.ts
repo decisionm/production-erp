@@ -223,6 +223,13 @@ describe('parseDocumentRef', () => {
         expect(parseDocumentRef('12')).toBeNull();
     });
 
+    it('reads a separator only after a prefix — the same grammar as the server', () => {
+        expect(parseDocumentRef('SO#12')).toEqual({ kind: 'sales_order', id: 12 });
+        expect(parseDocumentRef('-12', 'sales_order')).toBeNull();
+        expect(parseDocumentRef('#12', 'sales_order')).toBeNull();
+        expect(parseDocumentRef('12abc', 'sales_order')).toBeNull();
+    });
+
     it('is null for anything else — no guess', () => {
         expect(parseDocumentRef(null)).toBeNull();
         expect(parseDocumentRef(undefined)).toBeNull();
