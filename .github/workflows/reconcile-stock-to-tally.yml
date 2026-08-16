@@ -46,20 +46,46 @@ jobs:
           fi
           printf '%s\n' "$keys" >> ~/.ssh/known_hosts
 
+      # Inputs cross into shell ONLY via env. A `${{ }}` expression pasted into
+      # script text is substituted as TEXT before bash parses the line, so the
+      # value becomes code; env makes it data.
       - name: Report what is about to run
+        env:
+          WRITE_RAW: ${{ inputs.write }}
         run: |
-          if [ "${{ inputs.write }}" = "true" ]; then
+          if [ "$WRITE_RAW" = "true" ]; then
             echo "::warning::MATCHING live stock balances to Tally. Movements are written to the stock ledger."
           else
             echo "Dry run — nothing will be written."
           fi
 
       - name: Run it
+        env:
+          WRITE_RAW: ${{ inputs.write }}
+          SNAPSHOT_RAW: ${{ inputs.snapshot }}
         run: |
           set -o pipefail
+
+          # A snapshot id is an identifier, so the allow-list is tight. It was
+          # also the only free-text value here reaching ssh UNQUOTED, which is
+          # why it is both validated and quoted below. Refuse rather than
+          # strip: a truncated id would reconcile against the wrong snapshot.
+          if [ -n "$SNAPSHOT_RAW" ]; then
+            case "$SNAPSHOT_RAW" in
+              -*)
+                echo "::error::snapshot may not start with '-' — it would be read as a flag."
+                exit 1
+                ;;
+            esac
+            if [ "$(printf '%s' "$SNAPSHOT_RAW" | tr -cd 'A-Za-z0-9._-')" != "$SNAPSHOT_RAW" ]; then
+              echo "::error::snapshot must be letters, digits and . _ - only. Refusing rather than guessing what was meant."
+              exit 1
+            fi
+          fi
+
           FLAGS=""
-          [ -n "${{ inputs.snapshot }}" ] && FLAGS="$FLAGS --snapshot=${{ inputs.snapshot }}"
-          [ "${{ inputs.write }}" = "true" ] && FLAGS="$FLAGS --write"
+          [ -n "$SNAPSHOT_RAW" ] && FLAGS="$FLAGS --snapshot='$SNAPSHOT_RAW'"
+          [ "$WRITE_RAW" = "true" ] && FLAGS="$FLAGS --write"
 
           ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
@@ -68,11 +94,14 @@ jobs:
 
       - name: Summarise
         if: always()
+        env:
+          WRITE_RAW: ${{ inputs.write }}
+          SNAPSHOT_RAW: ${{ inputs.snapshot }}
         run: |
           {
             echo '### Match stock to Tally'
             echo ''
-            echo "write: \`${{ inputs.write }}\`  ·  snapshot: \`${{ inputs.snapshot || 'latest' }}\`"
+            echo "write: \`$WRITE_RAW\`  ·  snapshot: \`${SNAPSHOT_RAW:-latest}\`"
             echo ''
             echo '```'
             tail -c 60000 output.txt 2>/dev/null || echo '(no output captured)'

@@ -55,21 +55,56 @@ jobs:
           fi
           printf '%s\n' "$keys" >> ~/.ssh/known_hosts
 
+      # Inputs cross into shell ONLY via env. A `${{ }}` expression pasted into
+      # script text is substituted as TEXT before bash parses the line, so the
+      # value becomes code; env makes it data. Mirrors dedupe-configurations.yml.
       - name: Report what is about to run
+        env:
+          WRITE_RAW: ${{ inputs.write }}
         run: |
-          if [ "${{ inputs.write }}" = "true" ]; then
+          if [ "$WRITE_RAW" = "true" ]; then
             echo "::warning::WRITING the masterbatch colour map on the live database."
           else
             echo "Dry run — nothing will be written."
           fi
 
       - name: Run it
+        env:
+          WRITE_RAW: ${{ inputs.write }}
+          COLOUR_RAW: ${{ inputs.colour }}
+          ITEM_RAW: ${{ inputs.item }}
+          FORGET_RAW: ${{ inputs.forget }}
         run: |
           set -o pipefail
-          FLAGS="--colour='${{ inputs.colour }}'"
-          [ -n "${{ inputs.item }}" ] && FLAGS="$FLAGS --item='${{ inputs.item }}'"
-          [ -n "${{ inputs.forget }}" ] && FLAGS="$FLAGS --forget='${{ inputs.forget }}'"
-          [ "${{ inputs.write }}" = "true" ] && FLAGS="$FLAGS --write"
+
+          # These values are single-quoted into a command string the REMOTE
+          # shell re-parses, so a quote character would break out of that
+          # quoting. Validate with a positive allow-list, and REFUSE rather
+          # than strip: a silently altered colour name maps the wrong
+          # masterbatch on the live database, which is worse than a failed
+          # run. Spaces, dots and hyphens stay legal — real Tally item names
+          # carry all three ("B.450 Ml Round Pet Bottle Amber 18gms - 520 Nos").
+          assert_safe() {
+            if [ -z "$2" ]; then return 0; fi
+            case "$2" in
+              -*)
+                echo "::error::$1 may not start with '-' — it would be read as a flag."
+                exit 1
+                ;;
+            esac
+            if [ "$(printf '%s' "$2" | tr -cd 'A-Za-z0-9 ._,()/-')" != "$2" ]; then
+              echo "::error::$1 contains a character outside the allow-list (letters, digits, space and . _ , ( ) / -). Refusing rather than guessing what was meant."
+              exit 1
+            fi
+          }
+          assert_safe colour "$COLOUR_RAW"
+          assert_safe item   "$ITEM_RAW"
+          assert_safe forget "$FORGET_RAW"
+
+          FLAGS="--colour='$COLOUR_RAW'"
+          [ -n "$ITEM_RAW" ] && FLAGS="$FLAGS --item='$ITEM_RAW'"
+          [ -n "$FORGET_RAW" ] && FLAGS="$FLAGS --forget='$FORGET_RAW'"
+          [ "$WRITE_RAW" = "true" ] && FLAGS="$FLAGS --write"
 
           ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
@@ -78,11 +113,15 @@ jobs:
 
       - name: Summarise
         if: always()
+        env:
+          WRITE_RAW: ${{ inputs.write }}
+          COLOUR_RAW: ${{ inputs.colour }}
+          ITEM_RAW: ${{ inputs.item }}
         run: |
           {
             echo '### Map a colour to its masterbatch'
             echo ''
-            echo "write: \`${{ inputs.write }}\`  ·  colour: \`${{ inputs.colour }}\`  ·  item: \`${{ inputs.item }}\`"
+            echo "write: \`$WRITE_RAW\`  ·  colour: \`$COLOUR_RAW\`  ·  item: \`$ITEM_RAW\`"
             echo ''
             echo '```'
             tail -c 60000 output.txt 2>/dev/null || echo '(no output captured)'

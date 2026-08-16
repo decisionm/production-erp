@@ -36,6 +36,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Inputs cross into shell ONLY via env. A `${{ }}` expression pasted
+      # into script text is substituted as TEXT before bash parses the line,
+      # so the value becomes code; env makes it data.
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
@@ -49,20 +52,27 @@ jobs:
           printf '%s\n' "$keys" >> ~/.ssh/known_hosts
 
       - name: Report what is about to run
+        env:
+          ONLY_PRODUCTS_RAW: ${{ inputs.only_products }}
+          WRITE_RAW: ${{ inputs.write }}
         run: |
-          if [ "${{ inputs.write }}" = "true" ]; then
-            echo "::warning::WRITING item colours to the live database (only_products=${{ inputs.only_products }})."
+          if [ "$WRITE_RAW" = "true" ]; then
+            echo "::warning::WRITING item colours to the live database (only_products=$ONLY_PRODUCTS_RAW)."
           else
             echo "Dry run — nothing will be written."
           fi
 
       - name: Run it
+        env:
+          ONLY_MASTERBATCH_RAW: ${{ inputs.only_masterbatch }}
+          ONLY_PRODUCTS_RAW: ${{ inputs.only_products }}
+          WRITE_RAW: ${{ inputs.write }}
         run: |
           set -o pipefail
           FLAGS=""
-          [ "${{ inputs.write }}" = "true" ] && FLAGS="$FLAGS --write"
-          [ "${{ inputs.only_products }}" = "true" ] && FLAGS="$FLAGS --only-products"
-          [ "${{ inputs.only_masterbatch }}" = "true" ] && FLAGS="$FLAGS --only-masterbatch"
+          [ "$WRITE_RAW" = "true" ] && FLAGS="$FLAGS --write"
+          [ "$ONLY_PRODUCTS_RAW" = "true" ] && FLAGS="$FLAGS --only-products"
+          [ "$ONLY_MASTERBATCH_RAW" = "true" ] && FLAGS="$FLAGS --only-masterbatch"
 
           ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
@@ -71,11 +81,14 @@ jobs:
 
       - name: Summarise
         if: always()
+        env:
+          ONLY_PRODUCTS_RAW: ${{ inputs.only_products }}
+          WRITE_RAW: ${{ inputs.write }}
         run: |
           {
             echo "### Derive item colours"
             echo
-            echo "write: \`${{ inputs.write }}\` · only_products: \`${{ inputs.only_products }}\`"
+            echo "write: \`$WRITE_RAW\` · only_products: \`$ONLY_PRODUCTS_RAW\`"
             echo
             echo '```'
             cat output.txt 2>/dev/null || echo "(no output captured)"
