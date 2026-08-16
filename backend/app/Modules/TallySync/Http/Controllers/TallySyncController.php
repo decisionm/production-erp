@@ -3,9 +3,12 @@
 namespace App\Modules\TallySync\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\TallySync\Http\Requests\ListTallySyncEntriesRequest;
 use App\Modules\TallySync\Http\Resources\TallySyncEntryResource;
 use App\Modules\TallySync\Models\TallySyncEntry;
+use App\Modules\TallySync\Services\TallySyncQueryService;
 use App\Modules\TallySync\Services\TallySyncService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
@@ -13,12 +16,24 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
  * The admin dashboard view — staff browsing the SPA, ordinary session auth.
  * The agent-facing endpoints live in TallySyncAgentController instead,
  * gated by token abilities rather than just auth:sanctum.
+ *
+ * Reads go through TallySyncQueryService, writes through TallySyncService —
+ * the split TALLY-SYNC-CHAIN.md §3 draws so the read model can grow
+ * filters without a single line of the posting path moving.
  */
 class TallySyncController extends Controller
 {
-    public function __construct(private readonly TallySyncService $sync) {}
+    public function __construct(
+        private readonly TallySyncService $sync,
+        private readonly TallySyncQueryService $queries,
+    ) {}
 
     /**
+     * The queue, filtered by whatever the request validated
+     * (ListTallySyncEntriesRequest) — status, category, voucher type,
+     * business-date range, free text, shift, machine, held, direction —
+     * in the same newest-first order as always unless `sort=status_rank`.
+     *
      * `per_page` (the shared Controller::perPage clamp) so the dashboard can
      * pull the whole queue in one request instead of the newest 20. It has to
      * be able to: a failed voucher is only unmissable if the page can see
@@ -26,9 +41,33 @@ class TallySyncController extends Controller
      * than the last 20 entries — which, on a busy day, is where a Tally
      * rejection from yesterday morning quietly lives.
      */
-    public function index(Request $request): AnonymousResourceCollection
+    public function index(ListTallySyncEntriesRequest $request): AnonymousResourceCollection
     {
-        return TallySyncEntryResource::collection($this->sync->paginate($this->perPage($request)));
+        return TallySyncEntryResource::collection(
+            $this->queries->paginate($request->validated(), $this->perPage($request)),
+        );
+    }
+
+    /**
+     * One voucher with its full history — the same resource the list
+     * returns, plus `history` (its tally_sync_events, oldest first). The
+     * relation is loaded HERE and nowhere else, which is what keeps
+     * `history` off the list.
+     */
+    public function show(TallySyncEntry $tallySyncEntry): TallySyncEntryResource
+    {
+        return TallySyncEntryResource::make($tallySyncEntry->load('events'));
+    }
+
+    /**
+     * The Control Center's header: today's (factory-day) and all-time
+     * counts, one count per catalogue category, and when the agent and Tally
+     * were last heard from. Takes the list's filters so the counts can
+     * follow the page.
+     */
+    public function summary(ListTallySyncEntriesRequest $request): JsonResponse
+    {
+        return response()->json(['data' => $this->queries->summary($request->validated())]);
     }
 
     /**

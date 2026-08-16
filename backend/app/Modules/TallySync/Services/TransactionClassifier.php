@@ -36,9 +36,13 @@ use App\Modules\TallySync\Models\TallySyncEntry;
 class TransactionClassifier
 {
     /**
-     * The category, from tally_voucher_type + syncable_type. Both must
-     * agree with one row of the table; a label with the wrong morph, or a
-     * morph with the wrong label, is Unknown.
+     * THE CLASSIFICATION TABLE, ONCE: each ERP-built category and the exact
+     * (tally_voucher_type, syncable_type) pairs that classify to it.
+     * classify() reads it row by row, and the query side
+     * (TallySyncQueryService) turns the same pairs into WHERE clauses — so
+     * "filter by category" can never disagree with the category the resource
+     * shows on the row, and adding an enqueue path is one new row here, not
+     * two tables to keep in step.
      *
      * The two production labels are told apart by the MORPH, not the label:
      * a Shift-morph voucher is a shift voucher and a ShiftProductionEntry-
@@ -49,27 +53,56 @@ class TransactionClassifier
      * some synced under that label before the flip back; only the morph
      * ever said what they were. Compared with the same
      * (new Model)->getMorphClass() pattern ShiftVoucherReleaseGate uses.
+     *
+     * Only categories the ERP BUILDS have rows. A planned or Tally-only
+     * category (and Unknown, the fallback) has none: nothing enqueues one,
+     * so no pair can name one.
+     *
+     * @return array<string, list<array{0: string, 1: string}>> category value => [[tally_voucher_type, syncable_type], ...]
+     */
+    public function pairs(): array
+    {
+        $shift = (new Shift)->getMorphClass();
+        $batch = (new ShiftProductionEntry)->getMorphClass();
+
+        return [
+            TallyTransactionCategory::ProductionStockJournalShift->value => [['Stock Journal', $shift], ['Manufacturing Journal', $shift]],
+            TallyTransactionCategory::ProductionStockJournalBatch->value => [['Stock Journal', $batch], ['Manufacturing Journal', $batch]],
+            TallyTransactionCategory::SalesInvoice->value => [['Sales', (new Invoice)->getMorphClass()]],
+            TallyTransactionCategory::DeliveryNote->value => [['Delivery Note', (new Delivery)->getMorphClass()]],
+            TallyTransactionCategory::ReceiptNote->value => [['Receipt Note', (new GoodsReceiptNote)->getMorphClass()]],
+            TallyTransactionCategory::Journal->value => [['Journal', (new JournalEntry)->getMorphClass()]],
+        ];
+    }
+
+    /**
+     * The pairs that classify to ONE category — empty for anything the ERP
+     * does not build (planned, Tally-only, Unknown), which is exactly what
+     * lets a filter on such a key match nothing rather than guess.
+     *
+     * @return list<array{0: string, 1: string}>
+     */
+    public function pairsFor(TallyTransactionCategory $category): array
+    {
+        return $this->pairs()[$category->value] ?? [];
+    }
+
+    /**
+     * The category, from tally_voucher_type + syncable_type. Both must
+     * agree with one pair of the table above; a label with the wrong morph,
+     * or a morph with the wrong label, is Unknown — never a best guess.
      */
     public function classify(TallySyncEntry $entry): TallyTransactionCategory
     {
-        $label = $entry->tally_voucher_type;
-        $morph = $entry->syncable_type;
+        $pair = [$entry->tally_voucher_type, $entry->syncable_type];
 
-        if (in_array($label, ['Stock Journal', 'Manufacturing Journal'], true)) {
-            return match ($morph) {
-                (new Shift)->getMorphClass() => TallyTransactionCategory::ProductionStockJournalShift,
-                (new ShiftProductionEntry)->getMorphClass() => TallyTransactionCategory::ProductionStockJournalBatch,
-                default => TallyTransactionCategory::Unknown,
-            };
+        foreach ($this->pairs() as $key => $pairs) {
+            if (in_array($pair, $pairs, true)) {
+                return TallyTransactionCategory::from($key);
+            }
         }
 
-        return match (true) {
-            $label === 'Sales' && $morph === (new Invoice)->getMorphClass() => TallyTransactionCategory::SalesInvoice,
-            $label === 'Delivery Note' && $morph === (new Delivery)->getMorphClass() => TallyTransactionCategory::DeliveryNote,
-            $label === 'Receipt Note' && $morph === (new GoodsReceiptNote)->getMorphClass() => TallyTransactionCategory::ReceiptNote,
-            $label === 'Journal' && $morph === (new JournalEntry)->getMorphClass() => TallyTransactionCategory::Journal,
-            default => TallyTransactionCategory::Unknown,
-        };
+        return TallyTransactionCategory::Unknown;
     }
 
     /** The voucher's business date (payload voucher_date, "Y-m-d"), not the row's created_at. */

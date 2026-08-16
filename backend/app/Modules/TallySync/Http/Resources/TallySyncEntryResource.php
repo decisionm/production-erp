@@ -63,6 +63,13 @@ class TallySyncEntryResource extends JsonResource
             // was fixed, it went through" stays readable afterwards.
             'resolution_log' => $this->payload['resolution_log'] ?? [],
             'fix' => $this->fixSuggestion(),
+            // The append-only history (tally_sync_events), oldest first —
+            // ONLY when the caller loaded it, which is the show endpoint and
+            // nothing else. The list stays as light as it was: a page of 200
+            // vouchers must not drag 200 timelines with it, and every other
+            // response of this resource (retry, dismiss, release, pending)
+            // keeps its exact prior shape.
+            'history' => TallySyncEventResource::collection($this->whenLoaded('events')),
         ];
     }
 

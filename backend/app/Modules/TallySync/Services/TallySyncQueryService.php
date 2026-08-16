@@ -1,0 +1,476 @@
+<?php
+
+namespace App\Modules\TallySync\Services;
+
+use App\Modules\Production\Models\Shift;
+use App\Modules\Production\Models\ShiftProductionEntry;
+use App\Modules\TallySync\Models\Enums\TallySyncEventKind;
+use App\Modules\TallySync\Models\Enums\TallySyncStatus;
+use App\Modules\TallySync\Models\Enums\TallyTransactionCategory;
+use App\Modules\TallySync\Models\TallySyncEntry;
+use App\Modules\TallySync\Models\TallySyncEvent;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
+
+/**
+ * The read side of the sync queue (TALLY-SYNC-CHAIN.md §3 "A query
+ * service"): server-side filters over tally_sync_entries, and the summary
+ * the Control Center's header reads. Reads only — nothing here changes an
+ * entry, a payload, a status, or Tally. TallySyncService keeps every write.
+ *
+ * Every filter reads columns the entry already has plus its payload. There
+ * are deliberately NO denormalised payload columns (business_date,
+ * document_number): the queue grows ~3–10 rows a day, so a JSON-path WHERE
+ * is cheap for years, and copying a payload fact into a column is a second
+ * place for it to drift. If volume ever makes this slow, the answer is a
+ * functional/virtual INDEX on the JSON path — not a copy (TALLY-SYNC-CHAIN.md
+ * §3 "Does not").
+ *
+ * The category filter is built from TransactionClassifier::pairsFor(), the
+ * ONE classification table, so a category filter can never disagree with
+ * the category the resource shows on a row. The `held` filter evaluates the
+ * REAL release gate in PHP over the small candidate set — a second, SQL
+ * rendering of the gate's rules is a second gate to keep honest, and the
+ * live one already reads shifts.end_time and the factory timezone.
+ */
+class TallySyncQueryService
+{
+    /** Optional server-side sort: failed → pending → synced → dismissed, newest first within each. */
+    public const SORT_STATUS_RANK = 'status_rank';
+
+    /**
+     * The order the Tally Sync page has always read the queue in (its
+     * client-side sort, TallySyncPage.tsx statusRank): a rejection is never
+     * pushed below the fold by a day of successful posts, and a written-off
+     * voucher — the one row nobody will act on — sinks to the bottom.
+     */
+    private const STATUS_RANK = [
+        TallySyncStatus::Failed->value => 0,
+        TallySyncStatus::Pending->value => 1,
+        TallySyncStatus::Synced->value => 2,
+        TallySyncStatus::Dismissed->value => 3,
+    ];
+
+    /**
+     * The status keys the summary counts, in the order they are reported.
+     *
+     * @var list<string>
+     */
+    private const COUNTED_STATUSES = ['synced', 'pending', 'failed', 'dismissed'];
+
+    public function __construct(
+        private readonly TransactionClassifier $classifier,
+        private readonly ShiftVoucherReleaseGate $releaseGate,
+    ) {}
+
+    /**
+     * The list, filtered. Default order is unchanged from the queue's first
+     * day (newest id first); `sort=status_rank` is opt-in so a future page
+     * can drop its client-side sort without today's page changing under it.
+     *
+     * @param  array<string, mixed>  $filters  the validated ListTallySyncEntriesRequest input
+     */
+    public function paginate(array $filters, int $perPage = 20): LengthAwarePaginator
+    {
+        $query = $this->apply(TallySyncEntry::query(), $filters);
+
+        if (($filters['sort'] ?? null) === self::SORT_STATUS_RANK) {
+            // Bound, not interpolated, even though the values are our own
+            // enum's: the habit is what keeps the next CASE safe.
+            $bindings = [];
+            $case = 'case status';
+            foreach (self::STATUS_RANK as $status => $rank) {
+                $case .= ' when ? then '.(int) $rank;
+                $bindings[] = $status;
+            }
+            $case .= ' else '.count(self::STATUS_RANK).' end';
+
+            $query->orderByRaw($case, $bindings);
+        }
+
+        return $query->orderByDesc('id')->paginate($perPage);
+    }
+
+    /**
+     * The header of the Control Center: today's and all-time counts, one
+     * count (or an honest null) per catalogue category, and the last time
+     * anything was heard from the agent or Tally.
+     *
+     * The COUNTS follow the same filters as the list, so a page filtered to
+     * Receipt Notes reads Receipt Note counts. The LIVENESS fields (agent
+     * contact, last synced, last masters pull) are global on purpose: "when
+     * did we last hear from the factory PC" is not a question a list filter
+     * should be able to change the answer to.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array{
+     *     today: array{date: string, total: int, synced: int, pending: int, failed: int, dismissed: int, held: int},
+     *     all_time: array{total: int, synced: int, pending: int, failed: int, dismissed: int, held: int},
+     *     by_category: list<array{key: string, label: string, source: string, wire_voucher_type: ?string, count: ?int}>,
+     *     agent: array{last_contact_at: ?string, last_contact_event: ?string, last_contact_label: ?string},
+     *     last_synced_at: ?string,
+     *     last_masters_pull_at: ?string,
+     * }
+     */
+    public function summary(array $filters): array
+    {
+        // "Today" is the FACTORY's day, judged against the voucher's
+        // BUSINESS date (payload->voucher_date), never against created_at:
+        // the app clock is UTC, and a voucher dated yesterday that is
+        // enqueued after midnight IST — the C shift's voucher, approved at
+        // 00:30 — is yesterday's business, whichever UTC date the row was
+        // written on. now() is localised through the one configured factory
+        // timezone (CLAUDE.md: never compare the app clock against a
+        // wall-clock string un-localised).
+        $today = now()->setTimezone(config('tally-sync.factory_timezone'))->toDateString();
+
+        // The gate is evaluated ONCE per summary and the ids reused for both
+        // windows and for the held filter, if the request carries one.
+        $heldIds = $this->heldIds();
+
+        $filtered = fn (): Builder => $this->apply(TallySyncEntry::query(), $filters, $heldIds);
+
+        return [
+            'today' => ['date' => $today] + $this->counts(
+                $filtered()->where('payload->voucher_date', $today),
+                $heldIds,
+            ),
+            'all_time' => $this->counts($filtered(), $heldIds),
+            'by_category' => $this->countsByCategory($filtered),
+            'agent' => $this->lastAgentContact(),
+            'last_synced_at' => TallySyncEntry::query()
+                ->whereNotNull('synced_at')
+                ->orderByDesc('synced_at')
+                ->value('synced_at')
+                ?->toIso8601String(),
+            'last_masters_pull_at' => TallySyncEvent::query()
+                ->where('event', TallySyncEventKind::MastersReceived->value)
+                ->orderByDesc('occurred_at')
+                ->value('occurred_at')
+                ?->toIso8601String(),
+        ];
+    }
+
+    // ---- filters ----------------------------------------------------------
+
+    /**
+     * Every filter of ListTallySyncEntriesRequest, applied to $query.
+     *
+     * @param  array<string, mixed>  $filters
+     * @param  list<int>|null  $heldIds  the gate's verdict, when the caller already has it
+     */
+    private function apply(Builder $query, array $filters, ?array $heldIds = null): Builder
+    {
+        if (! empty($filters['status'])) {
+            $query->whereIn('status', array_values($filters['status']));
+        }
+
+        if (! empty($filters['category'])) {
+            $this->applyCategory($query, array_values($filters['category']));
+        }
+
+        if (! empty($filters['voucher_type'])) {
+            $query->whereIn('tally_voucher_type', array_values($filters['voucher_type']));
+        }
+
+        // Business-date range on the payload's voucher_date, inclusive at
+        // both ends. "Y-m-d" strings compare correctly as strings on both
+        // drivers, and the JSON path syntax compiles on MySQL
+        // (json_unquote(json_extract(...))) and SQLite (json_extract(...))
+        // alike. See the class docblock for why this is not a column.
+        if (! empty($filters['from'])) {
+            $query->where('payload->voucher_date', '>=', $filters['from']);
+        }
+        if (! empty($filters['to'])) {
+            $query->where('payload->voucher_date', '<=', $filters['to']);
+        }
+
+        if (isset($filters['q']) && trim((string) $filters['q']) !== '') {
+            $this->applySearch($query, trim((string) $filters['q']));
+        }
+
+        if (! empty($filters['shift_id'])) {
+            $this->applyShift($query, (int) $filters['shift_id']);
+        }
+
+        if (! empty($filters['work_center_id'])) {
+            $this->applyWorkCenter($query, (int) $filters['work_center_id']);
+        }
+
+        if (array_key_exists('held', $filters) && $filters['held'] !== null) {
+            $held = filter_var($filters['held'], FILTER_VALIDATE_BOOLEAN);
+            $ids = $heldIds ?? $this->heldIds();
+            $held ? $query->whereIn('id', $ids) : $query->whereNotIn('id', $ids);
+        }
+
+        // Every row of tally_sync_entries is ERP→Tally by construction
+        // (TALLY-SYNC-CHAIN.md §1 "Direction"): the Tally→ERP flows — a
+        // masters pull, a company binding — never create an entry; they are
+        // recorded on tally_sync_events with direction tally_to_erp. So
+        // erp_to_tally is a no-op here and tally_to_erp honestly matches
+        // nothing, rather than pretending an inbound entry list exists.
+        if (($filters['direction'] ?? null) === TallySyncEvent::DIRECTION_TALLY_TO_ERP) {
+            $this->matchNothing($query);
+        }
+
+        return $query;
+    }
+
+    /**
+     * Category → the (tally_voucher_type, syncable_type) pairs of the ONE
+     * classification table, OR'd. A key with no pairs — Tally-only, planned
+     * — matches nothing: the ERP builds no such entry, and an empty list is
+     * the true answer. `unknown` is the complement: rows that classify to no
+     * ERP-built category, exactly the rows the resource labels Unknown.
+     *
+     * @param  list<string>  $keys
+     */
+    private function applyCategory(Builder $query, array $keys): void
+    {
+        $pairs = [];
+        $includeUnknown = false;
+
+        foreach ($keys as $key) {
+            $category = TallyTransactionCategory::from($key);
+            if ($category === TallyTransactionCategory::Unknown) {
+                $includeUnknown = true;
+
+                continue;
+            }
+            $pairs = [...$pairs, ...$this->classifier->pairsFor($category)];
+        }
+
+        if ($pairs === [] && ! $includeUnknown) {
+            $this->matchNothing($query);
+
+            return;
+        }
+
+        $query->where(function (Builder $outer) use ($pairs, $includeUnknown) {
+            $this->wherePairs($outer, $pairs);
+
+            if ($includeUnknown) {
+                $outer->orWhereNot(fn (Builder $known) => $this->wherePairs(
+                    $known,
+                    array_merge(...array_values($this->classifier->pairs())),
+                ));
+            }
+        });
+    }
+
+    /**
+     * (label = ? AND morph = ?) OR (label = ? AND morph = ?) ... — an
+     * empty list adds nothing, so the caller decides what "no pairs" means.
+     *
+     * @param  list<array{0: string, 1: string}>  $pairs
+     */
+    private function wherePairs(Builder $query, array $pairs): void
+    {
+        foreach ($pairs as [$label, $morph]) {
+            $query->orWhere(fn (Builder $pair) => $pair
+                ->where('tally_voucher_type', $label)
+                ->where('syncable_type', $morph));
+        }
+    }
+
+    /**
+     * Free text over the three payload keys staff actually search by —
+     * voucher_number ("SPE-12", "SJ-20260723-S1", "GRN-7"), party_ledger
+     * (the customer/vendor name) and batch_number. Case-insensitive
+     * contains-LIKE, and nothing cleverer: no tokenising, no fuzziness, no
+     * reaching into narration. Typing exactly what is on the voucher finds
+     * it, typing its prefix finds it, and a search that finds nothing found
+     * nothing.
+     *
+     * LOWER() on both sides on purpose: on MySQL a value pulled out of a
+     * JSON column carries the binary collation, so a bare LIKE there is
+     * case-sensitive even though the same LIKE on a varchar is not.
+     * $grammar->wrap() compiles the JSON path per driver, so the raw SQL is
+     * driver-neutral; the ESCAPE character is '!' rather than '\' because
+     * a backslash literal is spelled differently in MySQL and SQLite and
+     * '!' is spelled the same in both.
+     */
+    private function applySearch(Builder $query, string $term): void
+    {
+        $needle = '%'.$this->escapeLike(mb_strtolower($term)).'%';
+        $grammar = $query->getQuery()->getGrammar();
+
+        $query->where(function (Builder $any) use ($needle, $grammar) {
+            foreach (['payload->voucher_number', 'payload->party_ledger', 'payload->batch_number'] as $path) {
+                $any->orWhereRaw('lower('.$grammar->wrap($path).") like ? escape '!'", [$needle]);
+            }
+        });
+    }
+
+    /**
+     * Entries of one shift: a shift voucher whose syncable IS the Shift, a
+     * batch voucher whose entry ran on it, or a shift voucher any of whose
+     * members (shift_production_entries.tally_sync_entry_id — the
+     * authoritative membership, TallySyncService::shiftVoucherPayload) ran
+     * on it. Sub-selects, not joins, so the paginator's count stays a count
+     * of entries.
+     */
+    private function applyShift(Builder $query, int $shiftId): void
+    {
+        $query->where(function (Builder $any) use ($shiftId) {
+            $any->where(fn (Builder $voucher) => $voucher
+                ->where('syncable_type', (new Shift)->getMorphClass())
+                ->where('syncable_id', $shiftId));
+
+            $any->orWhere(fn (Builder $batch) => $batch
+                ->where('syncable_type', (new ShiftProductionEntry)->getMorphClass())
+                ->whereIn('syncable_id', ShiftProductionEntry::query()->select('id')->where('shift_id', $shiftId)));
+
+            $any->orWhereIn('id', $this->memberVoucherIds()->where('shift_id', $shiftId));
+        });
+    }
+
+    /**
+     * Entries of one machine: a batch voucher whose entry ran on it, or a
+     * shift voucher any of whose members did. A shift voucher itself names
+     * no machine (FC-01 in spirit: the voucher belongs to the shift), so
+     * only its members can answer.
+     */
+    private function applyWorkCenter(Builder $query, int $workCenterId): void
+    {
+        $query->where(function (Builder $any) use ($workCenterId) {
+            $any->where(fn (Builder $batch) => $batch
+                ->where('syncable_type', (new ShiftProductionEntry)->getMorphClass())
+                ->whereIn('syncable_id', ShiftProductionEntry::query()->select('id')->where('work_center_id', $workCenterId)));
+
+            $any->orWhereIn('id', $this->memberVoucherIds()->where('work_center_id', $workCenterId));
+        });
+    }
+
+    /** The voucher ids named by any member entry — narrowed further by the caller. */
+    private function memberVoucherIds(): Builder
+    {
+        return ShiftProductionEntry::query()
+            ->select('tally_sync_entry_id')
+            ->whereNotNull('tally_sync_entry_id');
+    }
+
+    /**
+     * The ids the release gate withholds RIGHT NOW — the real
+     * ShiftVoucherReleaseGate::withholds(), run in PHP over the only rows it
+     * can ever hold: pending Shift-morph vouchers not yet delivered and not
+     * manually released. That set is a handful at any moment (one voucher
+     * per running shift), so evaluating it in PHP and whereIn-ing the ids
+     * costs nothing and keeps exactly one definition of "held".
+     *
+     * @return list<int>
+     */
+    private function heldIds(): array
+    {
+        return TallySyncEntry::query()
+            ->where('status', TallySyncStatus::Pending)
+            ->whereNull('delivered_at')
+            ->whereNull('released_at')
+            ->where('syncable_type', (new Shift)->getMorphClass())
+            ->orderBy('id')
+            ->get()
+            ->filter(fn (TallySyncEntry $entry) => $this->releaseGate->withholds($entry))
+            ->pluck('id')
+            ->all();
+    }
+
+    /** A WHERE that no row satisfies — the honest result for a question the table cannot have a row for. */
+    private function matchNothing(Builder $query): void
+    {
+        $query->whereRaw('0 = 1');
+    }
+
+    /** `%` and `_` in the typed term are characters, not wildcards ('!' is the ESCAPE character above). */
+    private function escapeLike(string $term): string
+    {
+        return str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $term);
+    }
+
+    // ---- summary ------------------------------------------------------------
+
+    /**
+     * total + one count per status + held, over whatever $query already
+     * selects. One grouped query for the statuses, one for held.
+     *
+     * @param  list<int>  $heldIds
+     * @return array{total: int, synced: int, pending: int, failed: int, dismissed: int, held: int}
+     */
+    private function counts(Builder $query, array $heldIds): array
+    {
+        $byStatus = (clone $query)
+            ->toBase()
+            ->selectRaw('status, count(*) as aggregate')
+            ->groupBy('status')
+            ->pluck('aggregate', 'status');
+
+        $counts = ['total' => (int) $byStatus->sum()];
+        foreach (self::COUNTED_STATUSES as $status) {
+            $counts[$status] = (int) ($byStatus[$status] ?? 0);
+        }
+
+        $counts['held'] = $heldIds === [] ? 0 : (clone $query)->whereIn('id', $heldIds)->count();
+
+        return $counts;
+    }
+
+    /**
+     * The FULL catalogue, one row per category in its stable order, with a
+     * measured count on every ERP-built row (and on Unknown, whose rows are
+     * just as real) — and NULL, never 0, on a planned or Tally-only row.
+     * Nothing was measured there because nothing was mirrored; a zero would
+     * read as "measured, none", which is a claim about the accountant's
+     * books this ERP cannot make without reading Tally.
+     *
+     * @param  callable(): Builder  $filtered  a fresh filtered query per call
+     * @return list<array{key: string, label: string, source: string, wire_voucher_type: ?string, count: ?int}>
+     */
+    private function countsByCategory(callable $filtered): array
+    {
+        $rows = [];
+
+        foreach (TallyTransactionCategory::cases() as $category) {
+            $described = $category->describe();
+            $measurable = $category->source() === 'erp' || $category === TallyTransactionCategory::Unknown;
+
+            $count = null;
+            if ($measurable) {
+                $query = $filtered();
+                $this->applyCategory($query, [$category->value]);
+                $count = $query->count();
+            }
+
+            $rows[] = [
+                'key' => $described['key'],
+                'label' => $described['label'],
+                'source' => $described['source'],
+                'wire_voucher_type' => $described['wire_voucher_type'],
+                'count' => $count,
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * The last thing the agent said, of any kind — a poll that delivered, an
+     * ack, a failure report, a masters push — from tally_sync_events rows
+     * whose actor is an agent token. This is the "is the factory PC alive"
+     * light; nulls when no agent has ever spoken to this instance.
+     *
+     * @return array{last_contact_at: ?string, last_contact_event: ?string, last_contact_label: ?string}
+     */
+    private function lastAgentContact(): array
+    {
+        $last = TallySyncEvent::query()
+            ->where('actor_type', TallySyncEvent::ACTOR_AGENT)
+            ->orderByDesc('occurred_at')
+            ->orderByDesc('id')
+            ->first(['occurred_at', 'event', 'actor_label']);
+
+        return [
+            'last_contact_at' => $last?->occurred_at?->toIso8601String(),
+            'last_contact_event' => $last?->event,
+            'last_contact_label' => $last?->actor_label,
+        ];
+    }
+}
