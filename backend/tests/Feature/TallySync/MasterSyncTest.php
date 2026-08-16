@@ -110,6 +110,33 @@ class MasterSyncTest extends TestCase
         $this->assertSame(1, Item::whereNotNull('tally_stock_item_guid')->count());
     }
 
+    /**
+     * The escape hatch the items.name guard (UpdateItemRequest) depends on: a
+     * Tally-side rename must still land through the masters pull, matched on
+     * GUID, without minting a second row. This path is what makes the guard
+     * safe to have — if it ever broke, a rename in Tally would orphan the ERP
+     * name and every voucher for that item would start failing. It used to be
+     * covered by ItemSyncTest through the retired /tally-sync/items route.
+     */
+    public function test_a_tally_side_rename_lands_on_re_pull_without_a_duplicate(): void
+    {
+        $this->actAsAgent();
+
+        $this->postJson('/api/v1/tally-sync/masters', [
+            'item_groups' => [['guid' => 'g-1', 'name' => 'Raw Material', 'parent' => 'Primary']],
+            'items' => [['guid' => 'i-1', 'name' => 'PET Resin', 'base_unit' => 'Kg', 'parent' => 'Raw Material']],
+        ])->assertOk();
+
+        $this->postJson('/api/v1/tally-sync/masters', [
+            'item_groups' => [['guid' => 'g-1', 'name' => 'Raw Material', 'parent' => 'Primary']],
+            'items' => [['guid' => 'i-1', 'name' => 'Relpet G5801M', 'base_unit' => 'Kg', 'parent' => 'Raw Material']],
+        ])->assertOk()->assertJsonPath('data.items.updated', 1);
+
+        $this->assertSame(1, Item::where('tally_stock_item_guid', 'i-1')->count());
+        $this->assertSame('Relpet G5801M', Item::where('tally_stock_item_guid', 'i-1')->value('name'));
+        $this->assertNull(Item::where('name', 'PET Resin')->first(), 'the old name must not linger as a second row');
+    }
+
     public function test_it_forbids_a_token_without_the_masters_ability(): void
     {
         $this->actAsAgent(['tally-sync:poll']);

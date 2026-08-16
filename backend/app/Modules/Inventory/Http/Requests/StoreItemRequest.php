@@ -2,8 +2,10 @@
 
 namespace App\Modules\Inventory\Http\Requests;
 
+use App\Modules\Inventory\Models\Item;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class StoreItemRequest extends FormRequest
 {
@@ -33,5 +35,22 @@ class StoreItemRequest extends FormRequest
             'tracking_type' => ['nullable', Rule::in(['none', 'batch', 'serial'])],
             'is_active' => ['boolean'],
         ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            // Item::isLocalFixture() treats a "LOCAL-" SKU as a fixture on the
+            // prefix alone, so a real item created with one would never post
+            // to Tally. This endpoint cannot flag a fixture (is_local_fixture
+            // is not accepted here — the product-master importer fabricates
+            // those), so any item it creates is a real one: refuse the prefix.
+            if (str_starts_with((string) $this->input('sku'), Item::LOCAL_FIXTURE_SKU_PREFIX)) {
+                $validator->errors()->add(
+                    'sku',
+                    'A SKU beginning "'.Item::LOCAL_FIXTURE_SKU_PREFIX.'" marks a local fixture that never posts to Tally — a real item cannot carry that prefix.',
+                );
+            }
+        });
     }
 }
