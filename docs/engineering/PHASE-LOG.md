@@ -117,3 +117,5 @@ screens.
 | Owner decisions required | None |
 | PR | see the Phase 2 PR line appended below |
 | Next phase | Phase 3 — Sync Control Center: every real transaction type (detail drawer per type over the normalized chain, human-readable summary, timeline from events, mapping-state surfacing, per-type tests) |
+
+**Phase 2 PR:** #181 (`feat/phase-2-sync-control-center-foundation` → stacked on #180 → #179). Eight commits. **Deployment state:** not deployed — the stack #179 → #180 → #181 awaits the repository merge chain (Cursor → Codex → owner). Nothing pushed to `main`.
