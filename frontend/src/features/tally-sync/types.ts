@@ -202,6 +202,13 @@ export interface TallySyncEntry {
     status: TallySyncStatus;
     attempts: number;
     error_message: string | null;
+    /**
+     * Present ONLY when Tally's rejection text is withheld from this reader:
+     * on a supplier-party voucher, Tally's own words can name the vendor
+     * (FC-06, second half), so a reader without standing gets error_message
+     * null and this note instead. Never present for finance or the agent.
+     */
+    error_withheld?: string;
     synced_at: string | null;
     /**
      * When the agent last collected this voucher (TallySyncEntryResource has

@@ -642,6 +642,10 @@ export default function TallySyncPage() {
                                                 </div>
                                             )}
                                         </>
+                                    ) : row.error_withheld ? (
+                                        // Withheld, not absent — the row DID fail; a bare "—" here
+                                        // would read as "no error" (FC-06, second half).
+                                        <Typography.Text type="warning">{row.error_withheld}</Typography.Text>
                                     ) : (
                                         <Typography.Text type="secondary">—</Typography.Text>
                                     )}

@@ -448,6 +448,8 @@ function EntryBody({
                                             </div>
                                         )}
                                     </>
+                                ) : entry.error_withheld ? (
+                                    <Typography.Text type="warning">{entry.error_withheld}</Typography.Text>
                                 ) : (
                                     <Typography.Text type="secondary">—</Typography.Text>
                                 )}
