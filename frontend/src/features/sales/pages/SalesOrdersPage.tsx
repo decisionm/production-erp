@@ -30,6 +30,7 @@ import { salesRateSourceLabel } from '@/features/sales/types';
 import { useSalesListParams } from '@/features/sales/useSalesListParams';
 import { formatDate } from '@/lib/datetime';
 import { itemLabel } from '@/lib/itemLabel';
+import { listEmptyText } from '@/features/sales/drawer';
 
 const orderSchema = z.object({
     customer_id: z.number({ error: 'Customer is required' }),
@@ -467,7 +468,7 @@ export default function SalesOrdersPage() {
     const { filters, setFilters, setPage, target, openTarget, closeTarget } = useSalesListParams('sales_order');
     const filtersActive = hasActiveFilters('sales_order', filters);
 
-    const { data, isLoading } = useQuery({
+    const { data, isLoading, isPending, isError, error } = useQuery({
         queryKey: ['sales', 'sales-orders', 'list', filters],
         queryFn: () => listSalesOrders(filters),
         placeholderData: (previous) => previous,
@@ -522,11 +523,7 @@ export default function SalesOrdersPage() {
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                locale={{
-                    emptyText: filtersActive
-                        ? 'No sales orders match these filters.'
-                        : 'No ERP-originated sales orders yet.',
-                }}
+                locale={{ emptyText: listEmptyText({ isPending, isError, error }, 'sales_order', filtersActive) }}
                 pagination={
                     data?.meta
                         ? {

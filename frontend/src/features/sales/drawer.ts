@@ -98,3 +98,43 @@ export function unwrapShowResponse<T extends object>(body: { data: T; trace?: un
 export function unwrapMirrorResponse(body: TallyMirror | { data: TallyMirror }): TallyMirror {
     return 'data' in body && !('mirrored' in body) ? body.data : (body as TallyMirror);
 }
+
+/**
+ * What an EMPTY table says, judged on the query's state — never on the row
+ * count alone. A list that could not be read (a 403 for a login without
+ * Sales access, a 500) has NO rows, and before this the table wrote "No sales
+ * orders match these filters." over that hole: a permission error read as an
+ * empty result, on the one page whose job is to say honestly what is and is
+ * not here. `pending` covers TanStack's paused retry too (a hidden tab), so
+ * the reader sees "still reading" rather than a verdict.
+ */
+export function listEmptyText(
+    state: { isPending: boolean; isError: boolean; error?: unknown },
+    kind: SalesDocumentKind,
+    filtersActive: boolean,
+): string {
+    const noun = kind === 'sales_order' ? 'sales orders' : kind === 'delivery' ? 'deliveries' : 'invoices';
+
+    if (state.isError) {
+        return `Could not read ${noun}: ${errorSentence(state.error)}`;
+    }
+
+    if (state.isPending) {
+        return `Reading ${noun}…`;
+    }
+
+    return filtersActive ? `No ${noun} match these filters.` : `No ERP-originated ${noun} yet.`;
+}
+
+/** The server's own sentence when it sent one; the transport's otherwise. */
+export function errorSentence(error: unknown): string {
+    const anyErr = error as { response?: { status?: number; data?: { message?: string } }; message?: string } | undefined;
+    const serverMessage = anyErr?.response?.data?.message;
+    const status = anyErr?.response?.status;
+
+    if (serverMessage) {
+        return status ? `${serverMessage} (${status})` : serverMessage;
+    }
+
+    return anyErr?.message ?? 'unknown error';
+}

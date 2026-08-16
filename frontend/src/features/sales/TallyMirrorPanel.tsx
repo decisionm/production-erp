@@ -28,8 +28,15 @@ export default function TallyMirrorPanel() {
         staleTime: 5 * 60 * 1000,
     });
 
+    // Still reading (a slow network, or TanStack pausing a retry while the
+    // tab is hidden): say so, quietly. Rendering nothing here would put a
+    // bare table on the page — the exact silence this panel exists to end.
     if (isPending) {
-        return null;
+        return (
+            <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 16, fontSize: 12 }}>
+                Reading what this page mirrors from Tally…
+            </Typography.Text>
+        );
     }
 
     if (isError || !data) {

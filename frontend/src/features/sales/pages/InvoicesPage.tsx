@@ -11,6 +11,7 @@ import SalesFilterBar from '@/features/sales/SalesFilterBar';
 import TallyMirrorPanel from '@/features/sales/TallyMirrorPanel';
 import type { Invoice, InvoiceStatus } from '@/features/sales/types';
 import { useSalesListParams } from '@/features/sales/useSalesListParams';
+import { listEmptyText } from '@/features/sales/drawer';
 
 const invoiceSchema = z.object({
     sales_order_id: z.number({ error: 'Sales order is required' }),
@@ -45,7 +46,7 @@ export default function InvoicesPage() {
     const { filters, setFilters, setPage, target, openTarget, closeTarget } = useSalesListParams('invoice');
     const filtersActive = hasActiveFilters('invoice', filters);
 
-    const { data, isLoading } = useQuery({
+    const { data, isLoading, isPending, isError, error } = useQuery({
         queryKey: ['sales', 'invoices', 'list', filters],
         queryFn: () => listInvoices(filters),
         placeholderData: (previous) => previous,
@@ -125,7 +126,7 @@ export default function InvoicesPage() {
                 loading={isLoading}
                 dataSource={data?.data}
                 locale={{
-                    emptyText: filtersActive ? 'No invoices match these filters.' : 'No ERP-originated invoices yet.',
+                    emptyText: listEmptyText({ isPending, isError, error }, 'invoice', filtersActive),
                 }}
                 pagination={
                     data?.meta

@@ -14,6 +14,7 @@ import SalesDocumentDrawer, { TallyLinkCell } from '@/features/sales/SalesDocume
 import SalesFilterBar from '@/features/sales/SalesFilterBar';
 import type { Delivery } from '@/features/sales/types';
 import { useSalesListParams } from '@/features/sales/useSalesListParams';
+import { listEmptyText } from '@/features/sales/drawer';
 
 const deliverySchema = z.object({
     sales_order_id: z.number({ error: 'Sales order is required' }),
@@ -44,7 +45,7 @@ export default function DeliveriesPage() {
     const { filters, setFilters, setPage, target, openTarget, closeTarget } = useSalesListParams('delivery');
     const filtersActive = hasActiveFilters('delivery', filters);
 
-    const { data, isLoading } = useQuery({
+    const { data, isLoading, isPending, isError, error } = useQuery({
         queryKey: ['sales', 'deliveries', 'list', filters],
         queryFn: () => listDeliveries(filters),
         placeholderData: (previous) => previous,
@@ -174,7 +175,7 @@ export default function DeliveriesPage() {
                 loading={isLoading}
                 dataSource={data?.data}
                 locale={{
-                    emptyText: filtersActive ? 'No deliveries match these filters.' : 'No ERP-originated deliveries yet.',
+                    emptyText: listEmptyText({ isPending, isError, error }, 'delivery', filtersActive),
                 }}
                 pagination={
                     data?.meta

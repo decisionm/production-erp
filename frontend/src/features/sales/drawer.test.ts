@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     cartonSummary,
     documentTitle,
+    listEmptyText,
     tallyLinkTag,
     unvalidatedBuilderTag,
     unwrapMirrorResponse,
@@ -127,5 +128,24 @@ describe('unwrapMirrorResponse', () => {
     it('accepts the object bare or wrapped in `data`', () => {
         expect(unwrapMirrorResponse(mirror)).toEqual(mirror);
         expect(unwrapMirrorResponse({ data: mirror })).toEqual(mirror);
+    });
+});
+
+describe('listEmptyText', () => {
+    it('never reads an unreadable list as an empty result', () => {
+        const err = { response: { status: 403, data: { message: "You don't have permission to access this feature." } } };
+        expect(listEmptyText({ isPending: false, isError: true, error: err }, 'sales_order', true))
+            .toBe("Could not read sales orders: You don't have permission to access this feature. (403)");
+        expect(listEmptyText({ isPending: false, isError: true, error: new Error('Network Error') }, 'invoice', false))
+            .toBe('Could not read invoices: Network Error');
+    });
+
+    it('says it is still reading while nothing has arrived (incl. a paused retry)', () => {
+        expect(listEmptyText({ isPending: true, isError: false }, 'delivery', true)).toBe('Reading deliveries…');
+    });
+
+    it('only speaks of filters once the server has actually answered', () => {
+        expect(listEmptyText({ isPending: false, isError: false }, 'sales_order', true)).toBe('No sales orders match these filters.');
+        expect(listEmptyText({ isPending: false, isError: false }, 'sales_order', false)).toBe('No ERP-originated sales orders yet.');
     });
 });
