@@ -38,9 +38,9 @@ class TallySyncController extends Controller
      * re-queueing a voucher Tally has accepted posts it into the live books
      * twice.
      */
-    public function retry(TallySyncEntry $tallySyncEntry): TallySyncEntryResource
+    public function retry(Request $request, TallySyncEntry $tallySyncEntry): TallySyncEntryResource
     {
-        return TallySyncEntryResource::make($this->sync->retry($tallySyncEntry, request()->user()?->id));
+        return TallySyncEntryResource::make($this->sync->retry($tallySyncEntry, $request->user()?->id, $request->user()));
     }
 
     /**
@@ -50,9 +50,9 @@ class TallySyncController extends Controller
      * or another API client can still ask, and a "dismissed" label over a
      * voucher that is pending or already in the books would be a lie.
      */
-    public function dismiss(TallySyncEntry $tallySyncEntry): TallySyncEntryResource
+    public function dismiss(Request $request, TallySyncEntry $tallySyncEntry): TallySyncEntryResource
     {
-        return TallySyncEntryResource::make($this->sync->dismiss($tallySyncEntry, request()->user()?->id));
+        return TallySyncEntryResource::make($this->sync->dismiss($tallySyncEntry, $request->user()?->id, $request->user()));
     }
 
     /**
@@ -62,8 +62,8 @@ class TallySyncController extends Controller
      * when the voucher is not actually being held, so a stale page gets
      * told what happened instead of a no-op dressed as success.
      */
-    public function release(TallySyncEntry $tallySyncEntry): TallySyncEntryResource
+    public function release(Request $request, TallySyncEntry $tallySyncEntry): TallySyncEntryResource
     {
-        return TallySyncEntryResource::make($this->sync->releaseNow($tallySyncEntry, request()->user()?->id));
+        return TallySyncEntryResource::make($this->sync->releaseNow($tallySyncEntry, $request->user()?->id, $request->user()));
     }
 }

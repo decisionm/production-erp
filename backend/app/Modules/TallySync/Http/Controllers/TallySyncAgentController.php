@@ -10,10 +10,13 @@ use App\Modules\TallySync\Http\Requests\StockSummaryPreviewRequest;
 use App\Modules\TallySync\Http\Requests\SyncCompaniesRequest;
 use App\Modules\TallySync\Http\Requests\SyncMastersRequest;
 use App\Modules\TallySync\Http\Resources\TallySyncEntryResource;
+use App\Modules\TallySync\Models\Enums\TallySyncEventKind;
 use App\Modules\TallySync\Models\TallyStockSnapshot;
 use App\Modules\TallySync\Models\TallySyncEntry;
+use App\Modules\TallySync\Models\TallySyncEvent;
 use App\Modules\TallySync\Services\MasterSyncService;
 use App\Modules\TallySync\Services\StockSummaryPreviewService;
+use App\Modules\TallySync\Services\TallySyncEventRecorder;
 use App\Modules\TallySync\Services\TallySyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -32,13 +35,25 @@ use Illuminate\Support\Facades\Log;
  */
 class TallySyncAgentController extends Controller
 {
-    public function __construct(private readonly TallySyncService $sync) {}
+    /**
+     * $events is the durable twin of agentLog(): the file keeps its
+     * per-call line, and the same event lands in tally_sync_events where it
+     * is queryable and joinable. Voucher-side events (delivered, synced,
+     * failed) are recorded by the SERVICE, which is why the request user is
+     * passed through below and not recorded here a second time; only the
+     * Tally→ERP flows that create no entry are recorded from this class.
+     */
+    public function __construct(
+        private readonly TallySyncService $sync,
+        private readonly TallySyncEventRecorder $events,
+    ) {}
 
     public function pending(Request $request): AnonymousResourceCollection
     {
         abort_unless($request->user()?->tokenCan('tally-sync:poll'), 403, 'Token missing the tally-sync:poll ability.');
 
-        $entries = $this->sync->pending();
+        // The polling agent is the actor on each 'pending.delivered' row.
+        $entries = $this->sync->pending($request->user());
 
         // Polls run every ~90s; only log the interesting ones (non-empty),
         // or the file becomes wall-to-wall no-ops.
@@ -62,7 +77,7 @@ class TallySyncAgentController extends Controller
             'voucher_number' => $tallySyncEntry->payload['voucher_number'] ?? null,
         ]);
 
-        return TallySyncEntryResource::make($this->sync->markSynced($tallySyncEntry));
+        return TallySyncEntryResource::make($this->sync->markSynced($tallySyncEntry, $request->user()));
     }
 
     public function fail(FailTallySyncEntryRequest $request, TallySyncEntry $tallySyncEntry): TallySyncEntryResource
@@ -76,7 +91,7 @@ class TallySyncAgentController extends Controller
         // Retry button on a voucher that is in the books), and the agent
         // trace has to say that plainly rather than record a failure that
         // never happened.
-        $result = $this->sync->markFailed($tallySyncEntry, $error);
+        $result = $this->sync->markFailed($tallySyncEntry, $error, $request->user());
 
         $this->agentLog($request, $result->isInTally() ? 'voucher.failure_refused' : 'voucher.failed', [
             'entry_id' => $tallySyncEntry->id,
@@ -115,11 +130,27 @@ class TallySyncAgentController extends Controller
             $settings->set(TallySettingsController::KEY_COMPANY, $incoming);
 
             $this->agentLog($request, 'company.bound', ['company' => $incoming]);
+            $this->events->record(
+                TallySyncEventKind::CompanyBound,
+                null,
+                ['company' => $incoming],
+                TallySyncEvent::DIRECTION_TALLY_TO_ERP,
+                $request->user(),
+            );
         }
 
         $summary = $masterSync->sync($data, $incoming);
 
         $this->agentLog($request, 'masters.received', ['company' => $incoming] + $summary);
+        // The first database record of an inbound pull ever: counts and the
+        // company, no master rows (those are on their own tables).
+        $this->events->record(
+            TallySyncEventKind::MastersReceived,
+            null,
+            ['company' => $incoming] + $summary,
+            TallySyncEvent::DIRECTION_TALLY_TO_ERP,
+            $request->user(),
+        );
 
         return response()->json([
             'data' => $summary,
@@ -187,6 +218,19 @@ class TallySyncAgentController extends Controller
             'company' => $incoming,
             'as_of' => $data['as_of'],
         ] + $result['totals']);
+        // Counts only — never the item lines or their rates, which live on
+        // the snapshot behind its own permission (FC-06).
+        $this->events->record(
+            TallySyncEventKind::StockSummaryPreviewed,
+            null,
+            [
+                'snapshot_id' => $snapshot->id,
+                'company' => $incoming,
+                'as_of' => $data['as_of'],
+            ] + $result['totals'],
+            TallySyncEvent::DIRECTION_TALLY_TO_ERP,
+            $request->user(),
+        );
 
         return response()->json([
             'data' => [
@@ -233,6 +277,13 @@ class TallySyncAgentController extends Controller
         $settings->set(TallySettingsController::KEY_COMPANIES, $companies);
 
         $this->agentLog($request, 'companies.received', ['companies' => $companies]);
+        $this->events->record(
+            TallySyncEventKind::CompaniesReceived,
+            null,
+            ['companies' => $companies],
+            TallySyncEvent::DIRECTION_TALLY_TO_ERP,
+            $request->user(),
+        );
 
         return response()->json(['data' => ['companies' => $companies]]);
     }

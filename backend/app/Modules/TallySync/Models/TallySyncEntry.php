@@ -5,6 +5,7 @@ namespace App\Modules\TallySync\Models;
 use App\Modules\TallySync\Models\Enums\TallySyncStatus;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 
 #[Fillable([
@@ -48,5 +49,15 @@ class TallySyncEntry extends Model
     public function syncable(): MorphTo
     {
         return $this->morphTo();
+    }
+
+    /**
+     * What happened to this voucher, in the order it happened — the
+     * append-only history (tally_sync_events) that survives every retry
+     * overwriting error_message and delivered_at on this row.
+     */
+    public function events(): HasMany
+    {
+        return $this->hasMany(TallySyncEvent::class, 'tally_sync_entry_id')->orderBy('id');
     }
 }
