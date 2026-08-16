@@ -403,6 +403,13 @@ class BatchVoucherShapeTest extends TestCase
 
     public function test_no_scrap_output_line_reaches_the_voucher_and_the_preview_says_why(): void
     {
+        // The factory's standing choice — no scrap item named — so the reason
+        // below states the owner's ruling. (Left to the packaged default,
+        // 'Pet Scrap', this fixture names an item it never creates, which is
+        // the misconfiguration case and reads differently on purpose —
+        // ScrapItemResolverTest pins that wording.)
+        config(['production.scrap.rejected_item_sku' => null]);
+
         // 120 pieces rejected on the machine, 200 more rejected at the quality
         // check, 4.5 kg of lumps swept off the floor.
         $entry = $this->completedEntry(['quantity_scrap' => '120']);

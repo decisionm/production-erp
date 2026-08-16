@@ -5,6 +5,7 @@ namespace App\Modules\Production\Services;
 use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\Warehouse;
+use App\Modules\Inventory\Services\ScrapItemResolver;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Production\Events\ShiftProductionEntryApproved;
 use App\Modules\Production\Exceptions\MachineBusyException;
@@ -65,6 +66,10 @@ class ShiftProductionEntryService
         // boundary note. Nothing in this service's stock handling changes
         // because of it.
         private readonly BagCostAllocationService $bagCosts,
+        // The ONE scrap-item lookup, shared with the Tally voucher's scrap
+        // line so the ERP's own scrap receipt and the voucher can never name
+        // different scrap items.
+        private readonly ScrapItemResolver $scrapItems,
     ) {}
 
     public function paginate(int $perPage = 20, ?ShiftProductionEntryStatus $status = null, bool $includeCancelled = false): LengthAwarePaginator
@@ -1673,10 +1678,20 @@ class ShiftProductionEntryService
                 // Mass out of FG equals mass into scrap, both derived from
                 // the one frozen unit weight, so the pair can never create
                 // stock on net.
-                $scrapItem = $this->resolveScrapItem();
+                $scrapItem = $this->scrapItems->resolve();
 
                 if ($scrapItem === null) {
-                    $scrapNote = 'Scrap receipt skipped: no scrap item is configured (production.scrap.rejected_item_sku). The rejection is recorded and the bottles are out of finished goods; the scrap weight is not yet on any item.';
+                    // Two silences, told apart on the entry: "not named" is
+                    // the factory's standing choice and needs nobody, while
+                    // "named but not found" is a misconfiguration (a typo, a
+                    // renamed SKU, a retired master) that reads exactly like
+                    // that choice unless it is said out loud.
+                    $scrapNote = $this->scrapItems->missReason() === ScrapItemResolver::NOT_NAMED
+                        ? 'Scrap receipt skipped: no scrap item is named in configuration (production.scrap.rejected_item_sku is blank). The rejection is recorded and the bottles are out of finished goods; the scrap weight is not yet on any item.'
+                        : sprintf(
+                            'Scrap receipt skipped: the configured scrap item \'%s\' matches no stock item by SKU or exact name — check production.scrap.rejected_item_sku; this is a misconfiguration, not a decision. The rejection is recorded and the bottles are out of finished goods; the scrap weight is not yet on any item.',
+                            (string) $this->scrapItems->configuredName(),
+                        );
                 } elseif ($rejectedKg === null) {
                     $scrapNote = 'Scrap receipt skipped: this run resolved no unit weight, so the rejected pieces cannot be converted to a scrap weight. The rejection is recorded and the bottles are out of finished goods.';
                 } else {
@@ -2115,36 +2130,6 @@ class ShiftProductionEntryService
     }
 
     /**
-     * The one scrap item quality rejections are received against, or null.
-     *
-     * There is deliberately no fallback and no guessing. This ERP has no
-     * scrap-item master and no colour → scrap-item mapping (the only
-     * colour-driven resolver it has picks MASTERBATCH, and its own docblock
-     * notes that a coloured non-masterbatch item — "an amber scrap, say" —
-     * lands in the ambiguous pool rather than resolving). Picking "the item
-     * whose name looks like scrap" would book real weight against a master
-     * chosen by string matching, and the factory would discover it as a Tally
-     * rejection days later. Null is the honest answer, and the caller records
-     * the rejection and says so on the entry.
-     *
-     * SKU first, then exact name — a factory that mirrors Tally's "Pet Scrap"
-     * as a plain item without a code can still name it. Soft-deleted items are
-     * excluded by the model's global scope: a retired master must not silently
-     * start receiving stock again.
-     */
-    private function resolveScrapItem(): ?Item
-    {
-        $configured = trim((string) (config('production.scrap.rejected_item_sku') ?? ''));
-
-        if ($configured === '') {
-            return null;
-        }
-
-        return Item::query()->where('sku', $configured)->first()
-            ?? Item::query()->where('name', $configured)->first();
-    }
-
-    /**
      * The quality check as the approval screen needs to read it: the counts,
      * who certified them, and — the part that matters when the figures are
      * questioned — the BASIS on which a piece count became a weight.
@@ -2292,16 +2277,19 @@ class ShiftProductionEntryService
         // through to advance(), which reports the real problem (the
         // transition) rather than a voucher complaint about an entry that was
         // never eligible. A LOCAL- fixture is exempt because no voucher is
-        // ever built for it (TallySyncService::isLocalFixtureEntry) — there
-        // is no posting for a posting gate to protect, and refusing would
-        // strand a real batch.
+        // ever built for it — there is no posting for a posting gate to
+        // protect, and refusing would strand a real batch. Judged by THE
+        // SAME predicate the Tally enqueue guard uses
+        // (ShiftProductionEntry::isLocalFixtureIdentity — the resolved
+        // identity, never the base product), so the gate cannot exempt a
+        // batch the guard would still refuse, or the reverse.
         if ((bool) config('production.approvals.require_postable_voucher', false)) {
             $awaiting = ShiftProductionEntry::query()
                 ->whereKey($entry->id)
                 ->where('status', ShiftProductionEntryStatus::PmApproved->value)
                 ->first();
 
-            if ($awaiting !== null && ! ($awaiting->item?->isLocalFixture() ?? false)) {
+            if ($awaiting !== null && ! $awaiting->isLocalFixtureIdentity()) {
                 $preview = $this->voucherPreview->forShiftProductionEntry($awaiting);
 
                 if (! ($preview['postable'] ?? false)) {
