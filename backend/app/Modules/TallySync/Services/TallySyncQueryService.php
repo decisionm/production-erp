@@ -92,22 +92,42 @@ class TallySyncQueryService
     }
 
     /**
+     * One entry with its history loaded — the ONLY place `events` is
+     * eager-loaded, which is what keeps `history` off the list and off every
+     * other response of the resource (TallySyncEntryResource whenLoaded).
+     */
+    public function show(TallySyncEntry $entry): TallySyncEntry
+    {
+        return $entry->load('events');
+    }
+
+    /**
      * The header of the Control Center: today's and all-time counts, one
      * count (or an honest null) per catalogue category, and the last time
      * anything was heard from the agent or Tally.
      *
      * The COUNTS follow the same filters as the list, so a page filtered to
      * Receipt Notes reads Receipt Note counts. The LIVENESS fields (agent
-     * contact, last synced, last masters pull) are global on purpose: "when
+     * action, last synced, last masters pull) are global on purpose: "when
      * did we last hear from the factory PC" is not a question a list filter
      * should be able to change the answer to.
+     *
+     * `held_now` is the third kind: a STATE, not a window. today.held is
+     * bucketed inside today's business date, so every night, while the
+     * night shift's voucher — dated YESTERDAY — is actively held by the
+     * gate, today.held reads 0 and the header said "0 held" over a voucher
+     * it was holding. held_now is the gate's verdict right now over the
+     * request's non-date filters (status, category, shift, …): a
+     * business-date range is a question about a day, and "how many are
+     * held at this moment" is not.
      *
      * @param  array<string, mixed>  $filters
      * @return array{
      *     today: array{date: string, total: int, synced: int, pending: int, failed: int, dismissed: int, held: int},
      *     all_time: array{total: int, synced: int, pending: int, failed: int, dismissed: int, held: int},
-     *     by_category: list<array{key: string, label: string, source: string, wire_voucher_type: ?string, count: ?int}>,
-     *     agent: array{last_contact_at: ?string, last_contact_event: ?string, last_contact_label: ?string},
+     *     held_now: int,
+     *     by_category: list<array{key: string, label: string, source: string, erp_build: string, wire_voucher_type: ?string, count: ?int}>,
+     *     agent: array{last_action_at: ?string, last_action_event: ?string, last_action_label: ?string},
      *     last_synced_at: ?string,
      *     last_masters_pull_at: ?string,
      * }
@@ -130,14 +150,22 @@ class TallySyncQueryService
 
         $filtered = fn (): Builder => $this->apply(TallySyncEntry::query(), $filters, $heldIds);
 
+        // held_now: the same filters minus the business-date range (see the
+        // docblock) — a held voucher is held whatever day it is dated.
+        $undated = array_diff_key($filters, ['from' => true, 'to' => true]);
+        $heldNow = $heldIds === []
+            ? 0
+            : $this->apply(TallySyncEntry::query(), $undated, $heldIds)->whereIn('id', $heldIds)->count();
+
         return [
             'today' => ['date' => $today] + $this->counts(
                 $filtered()->where('payload->voucher_date', $today),
                 $heldIds,
             ),
             'all_time' => $this->counts($filtered(), $heldIds),
+            'held_now' => $heldNow,
             'by_category' => $this->countsByCategory($filtered),
-            'agent' => $this->lastAgentContact(),
+            'agent' => $this->lastAgentAction(),
             'last_synced_at' => TallySyncEntry::query()
                 ->whereNotNull('synced_at')
                 ->orderByDesc('synced_at')
@@ -178,11 +206,23 @@ class TallySyncQueryService
         // drivers, and the JSON path syntax compiles on MySQL
         // (json_unquote(json_extract(...))) and SQLite (json_extract(...))
         // alike. See the class docblock for why this is not a column.
+        //
+        // The whereNotNull on the same path is NOT redundant, and the two
+        // drivers are why: SQLite's json_extract returns SQL NULL for a JSON
+        // null, so a `voucher_date: null` payload simply fails the
+        // comparison — but MySQL's json_unquote(json_extract(...)) turns a
+        // JSON null into the four-character STRING 'null', and 'null' >=
+        // '2026-08-01' is TRUE as strings, so an entry whose builder wrote a
+        // null date would satisfy every `from`. Laravel compiles a JSON-path
+        // whereNotNull JSON-null-aware on MySQL (json_type(...) != 'NULL'),
+        // which is what makes the guard hold on both.
         if (! empty($filters['from'])) {
-            $query->where('payload->voucher_date', '>=', $filters['from']);
+            $query->whereNotNull('payload->voucher_date')
+                ->where('payload->voucher_date', '>=', $filters['from']);
         }
         if (! empty($filters['to'])) {
-            $query->where('payload->voucher_date', '<=', $filters['to']);
+            $query->whereNotNull('payload->voucher_date')
+                ->where('payload->voucher_date', '<=', $filters['to']);
         }
 
         if (isset($filters['q']) && trim((string) $filters['q']) !== '') {
@@ -289,6 +329,14 @@ class TallySyncQueryService
      * driver-neutral; the ESCAPE character is '!' rather than '\' because
      * a backslash literal is spelled differently in MySQL and SQLite and
      * '!' is spelled the same in both.
+     *
+     * Each LIKE is guarded by a whereNotNull on ITS OWN path, and again the
+     * drivers diverge on a JSON null: SQLite's json_extract yields SQL NULL
+     * (LIKE is NULL, no match) but MySQL's json_unquote(json_extract(...))
+     * yields the STRING 'null' — and every shift voucher writes
+     * `batch_number: null` (shiftVoucherPayload), so on MySQL q=ul (or
+     * q=null) would match every shift voucher in the queue. The guard
+     * compiles JSON-null-aware on MySQL and is a no-op on SQLite.
      */
     private function applySearch(Builder $query, string $term): void
     {
@@ -297,7 +345,9 @@ class TallySyncQueryService
 
         $query->where(function (Builder $any) use ($needle, $grammar) {
             foreach (['payload->voucher_number', 'payload->party_ledger', 'payload->batch_number'] as $path) {
-                $any->orWhereRaw('lower('.$grammar->wrap($path).") like ? escape '!'", [$needle]);
+                $any->orWhere(fn (Builder $present) => $present
+                    ->whereNotNull($path)
+                    ->whereRaw('lower('.$grammar->wrap($path).") like ? escape '!'", [$needle]));
             }
         });
     }
@@ -416,13 +466,17 @@ class TallySyncQueryService
     /**
      * The FULL catalogue, one row per category in its stable order, with a
      * measured count on every ERP-built row (and on Unknown, whose rows are
-     * just as real) — and NULL, never 0, on a planned or Tally-only row.
+     * just as real) — and NULL, never 0, on a Tally-only or absent row.
      * Nothing was measured there because nothing was mirrored; a zero would
      * read as "measured, none", which is a claim about the accountant's
-     * books this ERP cannot make without reading Tally.
+     * books this ERP cannot make without reading Tally. Purchase Order
+     * (source 'tally', erp_build 'planned') is null for the same reason,
+     * and Sales Order (source 'absent') is null because there is nothing in
+     * the books to have measured at all — the census figures themselves are
+     * evidence, not a count this ERP took.
      *
      * @param  callable(): Builder  $filtered  a fresh filtered query per call
-     * @return list<array{key: string, label: string, source: string, wire_voucher_type: ?string, count: ?int}>
+     * @return list<array{key: string, label: string, source: string, erp_build: string, wire_voucher_type: ?string, count: ?int}>
      */
     private function countsByCategory(callable $filtered): array
     {
@@ -443,6 +497,7 @@ class TallySyncQueryService
                 'key' => $described['key'],
                 'label' => $described['label'],
                 'source' => $described['source'],
+                'erp_build' => $described['erp_build'],
                 'wire_voucher_type' => $described['wire_voucher_type'],
                 'count' => $count,
             ];
@@ -452,25 +507,55 @@ class TallySyncQueryService
     }
 
     /**
-     * The last thing the agent said, of any kind — a poll that delivered, an
-     * ack, a failure report, a masters push — from tally_sync_events rows
-     * whose actor is an agent token. This is the "is the factory PC alive"
-     * light; nulls when no agent has ever spoken to this instance.
+     * The event kinds only the agent originates — the ones
+     * TallySyncAgentController's endpoints record. Any other kind on a row
+     * whose actor happens to be an agent token (there is none today, but a
+     * future path could pass the agent through) would not be the agent
+     * ACTING on the sync, so the light reads only these.
      *
-     * @return array{last_contact_at: ?string, last_contact_event: ?string, last_contact_label: ?string}
+     * @var list<TallySyncEventKind>
      */
-    private function lastAgentContact(): array
+    private const AGENT_ACTION_EVENTS = [
+        TallySyncEventKind::PendingDelivered,
+        TallySyncEventKind::VoucherSynced,
+        TallySyncEventKind::VoucherFailed,
+        TallySyncEventKind::VoucherFailureRefused,
+        TallySyncEventKind::MastersReceived,
+        TallySyncEventKind::CompaniesReceived,
+        TallySyncEventKind::CompanyBound,
+        TallySyncEventKind::StockSummaryPreviewed,
+    ];
+
+    /**
+     * The last thing the agent DID — a poll that delivered a voucher, an
+     * ack, a failure report, a masters push — from tally_sync_events rows
+     * of an agent-originated kind whose actor is the agent (AgentIdentity:
+     * a real token carrying the agent's abilities; a person driving the
+     * same endpoints with a session or a plain token is recorded as a user
+     * and never lights this). Nulls when no agent has ever acted here.
+     *
+     * Named ACTION, not contact, on purpose: a heartbeat poll that finds
+     * nothing to deliver records no event (pending() writes
+     * pending.delivered only when a stamp lands), so the agent can be alive
+     * and polling every 90 s while this stands still. What it answers is
+     * "when did the factory PC last do something to the sync", not "when
+     * was it last heard from" — the page label says the same.
+     *
+     * @return array{last_action_at: ?string, last_action_event: ?string, last_action_label: ?string}
+     */
+    private function lastAgentAction(): array
     {
         $last = TallySyncEvent::query()
             ->where('actor_type', TallySyncEvent::ACTOR_AGENT)
+            ->whereIn('event', array_map(fn (TallySyncEventKind $kind) => $kind->value, self::AGENT_ACTION_EVENTS))
             ->orderByDesc('occurred_at')
             ->orderByDesc('id')
             ->first(['occurred_at', 'event', 'actor_label']);
 
         return [
-            'last_contact_at' => $last?->occurred_at?->toIso8601String(),
-            'last_contact_event' => $last?->event,
-            'last_contact_label' => $last?->actor_label,
+            'last_action_at' => $last?->occurred_at?->toIso8601String(),
+            'last_action_event' => $last?->event,
+            'last_action_label' => $last?->actor_label,
         ];
     }
 }

@@ -77,23 +77,36 @@ Backfill: one migration seeds best-effort events from existing timestamps
 `released_at`→`released`, current failed/dismissed state), each stamped
 `details.backfilled = true` so nobody reads a reconstruction as an observation.
 
+**`tally_sync_events` is on the posting path**: every enqueue, `pending()`
+delivery, ack, fail, retry, dismiss and release writes it as part of the same
+service call — the shift-voucher enqueue/merge, `pending()` and `retry()` inside
+their own transactions, the rest immediately after the state change
+(`TallySyncService` constructor docblock says which is which) — so a failing
+event insert stops the mutation. The table cannot be dropped, renamed or made
+read-only without touching posting.
+
 **Classification, derived not stored** — `TallyTransactionCategory` enum +
 `TransactionClassifier::classify(entry)` from `tally_voucher_type` +
 `syncable_type`, exposed on the resource as `category {key, label,
 wire_voucher_type, source_module, direction}`. The catalogue also names the
-categories that **exist in Tally but not in the ERP** — Purchase, Payment,
-Receipt, Contra, Credit/Debit Note (Statistics evidence, TALLY-EVIDENCE §A),
-Sales Order (no such voucher type in the books), and Purchase Order (planned,
-Phase 6) — as `source: tally | planned`, count `null`, so the Control Center can
-show them **honestly as "lives in Tally, not mirrored"** without a read.
+categories that **exist in Tally but not in the ERP** — Purchase, Purchase
+Order (92 in the census; the ERP-originated version is planned, Phase 6),
+Payment, Receipt, Contra, Credit/Debit Note (Statistics evidence,
+TALLY-EVIDENCE §A) — as `source: tally`, and Sales Order (no such voucher type
+in the books, DEC-20260809-003) as `source: absent`, all with count `null`, so
+the Control Center can show them **honestly as "lives in Tally, not mirrored"**
+without a read. A second axis, `erp_build: built | planned | none`, says what
+the ERP has built for a category, so "in the books" and "the ERP will build it"
+can both be true of Purchase Order without one word carrying both.
 
 **A query service** (`TallySyncQueryService`) over `tally_sync_entries` with
 server-side filters — status, category, wire voucher type, business date range
 (`payload->voucher_date`, JSON path, both drivers), document/voucher number, party,
 item, shift, machine (via members), `held` (gate evaluated on the small pending
 Shift set, then `whereIn`), direction — plus a `summary` (today's counts in the
-factory timezone; per-category counts; catalogue; last agent contact from
-events).
+factory timezone; `held_now`, the gate's verdict at this moment regardless of
+business date; per-category counts; catalogue; last agent ACTION from events —
+a heartbeat poll that delivers nothing records no event).
 
 **Endpoints, same route group:** `GET /tally-sync/entries` (filters added),
 `GET /tally-sync/entries/{id}` (new — full resource + `history` = events),
@@ -115,3 +128,23 @@ events).
   gate, or to the agent. No Tally read of any kind.
 - **No UI redesign** — the existing page gets the filter bar and header counts
   wired to the new endpoints; the detail drawer and per-type views are Phase 3.
+
+## 4 · Two invariants a later reader must not break
+
+**Lock order between the poll and the shift merge (no deadlock possible).**
+`TallySyncService::pending()` runs read → stamp → record inside ONE transaction and
+locks only `tally_sync_entries` rows (id ascending). `enqueueShiftVoucher()` locks
+`shift_production_entries` FIRST and then at most one `tally_sync_entries` row (the
+merge target, `whereNull delivered_at`). Because `pending()` never touches
+`shift_production_entries`, no lock cycle can be constructed — only bounded,
+one-directional waiting. Do not add a `shift_production_entries` lock to `pending()`
+or a second `tally_sync_entries` lock ahead of the member lock in the merge without
+re-doing this analysis.
+
+**`tally_sync_events.details` is not finance-gated — so nothing may write a rate
+into it.** All twelve `record()` call sites today write counts, ids, voucher
+numbers, error messages and flags; none writes `rate`, `amount`, `total_amount`,
+`unit_cost` or `average_cost`. That is a rule, not an accident: the events history
+is readable by anyone with `tally-sync.view`, and FC-06 applies to it. A recording
+site that needs a money figure must gate the resource, not put it in `details`.
+

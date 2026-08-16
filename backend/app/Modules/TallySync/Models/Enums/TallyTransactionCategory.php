@@ -15,8 +15,18 @@ namespace App\Modules\TallySync\Models\Enums;
  * a count of null: nothing was measured, nothing was mirrored, and a zero
  * would claim otherwise.
  *
+ * TWO AXES, kept apart on purpose. source() says where the transaction
+ * LIVES today — 'erp' (the ERP builds it and posts it), 'tally' (it exists
+ * in the accountant's books and the ERP does not mirror it), 'absent' (no
+ * such voucher type exists in the books at all), 'unknown'. erpBuild()
+ * says what the ERP has BUILT for it — 'built', 'planned', 'none'. They
+ * were one field once ("planned") and that overloaded them: a Purchase
+ * Order is in the books 92 times AND its ERP-originated version is planned,
+ * and one word cannot say both.
+ *
  * Case order IS the catalogue order and is stable: ERP-built first, then
- * planned, then Tally-only, then unknown. catalogue() iterates cases().
+ * Tally-only in the census's order, then absent, then unknown. catalogue()
+ * iterates cases().
  *
  * Every wire voucher type below is the exact <VOUCHERTYPENAME> the agent
  * emits (tally-sync-agent/src/tally/voucherBuilders/*.ts) or, for the
@@ -51,33 +61,47 @@ enum TallyTransactionCategory: string
     /** enqueueGoodsReceiptNote(): GoodsReceiptNote → Tally 'Receipt Note'. */
     case ReceiptNote = 'receipt_note';
 
-    /** enqueueJournalEntry(): JournalEntry → Tally 'Journal'. */
-    case Journal = 'journal';
-
-    // ── Planned (source 'planned') ───────────────────────────────────────
-
     /**
-     * DEC-20260812-002: purchase orders are raised in the ERP and sent to
-     * Tally as a Purchase Order voucher — Phase 6, NOT BUILT. There is no
-     * enqueuePurchaseOrder() and no entry can classify here today; the
-     * case exists so the catalogue can show the row as planned. Its count
-     * is null, never 0: zero would read as "measured, none".
+     * enqueueJournalEntry(): JournalEntry → Tally 'Journal'. Journal is BOTH
+     * in the 12-Aug census (418) AND ERP-built: the accountant keys Journals
+     * in Tally and the ERP posts its own. Source stays 'erp' and the query
+     * side counts ONLY the ERP-posted ones (tally_sync_entries rows) — the
+     * 418 are the accountant's and are never counted here. There is
+     * deliberately no second, Tally-only Journal case: one category, one
+     * key, and the count says what it measures.
      */
-    case PurchaseOrder = 'purchase_order';
+    case Journal = 'journal';
 
     // ── Lives in Tally only (source 'tally', direction none) — the
     //    accountant's transactions the ERP does not mirror, from the 12-Aug
-    //    Statistics census (TALLY-EVIDENCE-2026-08-12 §A): Purchase 351,
-    //    Payment 925, Receipt 553, Contra 60, Credit Note 17, Debit Note 5.
-    //    (Journal 418 in the same census is the Tally-side count of a
-    //    category the ERP DOES build; it is not repeated here.) ───────────
+    //    Statistics census (TALLY-EVIDENCE-2026-08-12 §A, 1-Apr-26 to
+    //    10-Aug-26): Purchase 351, Purchase Order 92, Payment 925,
+    //    Receipt 553, Contra 60, Credit Note 17, Debit Note 5. (Journal 418
+    //    in the same census is the Tally-side count of a category the ERP
+    //    DOES build; see the Journal case.) Counts here are the query
+    //    side's null, never these figures: the census is evidence of what
+    //    exists, not a live measurement. ───────────────────────────────────
 
     case Purchase = 'purchase';
+
+    /**
+     * Purchase Orders EXIST in the books — 92 in the census — keyed by the
+     * accountant, so the row lives in Tally like its neighbours. What is
+     * planned is the ERP-ORIGINATED version: DEC-20260812-002 has purchase
+     * orders raised in the ERP and sent to Tally as a Purchase Order
+     * voucher — Phase 6, NOT BUILT. There is no enqueuePurchaseOrder() and
+     * no entry can classify here today. erpBuild() carries the plan;
+     * source() does not, so the two facts stop sharing one word.
+     */
+    case PurchaseOrder = 'purchase_order';
+
     case Payment = 'payment';
     case Receipt = 'receipt';
     case Contra = 'contra';
     case CreditNote = 'credit_note';
     case DebitNote = 'debit_note';
+
+    // ── Absent (source 'absent', direction none) ─────────────────────────
 
     /**
      * NO Sales Order voucher type exists in the books at all — the 12-Aug
@@ -85,8 +109,11 @@ enum TallyTransactionCategory: string
      * Tally (invoiced there; the ERP Sales module is demo-scale), so the
      * sales flow lives in Tally and the ERP's own sales_orders table is not
      * a Tally flow. Kept in the catalogue so the Control Center can say
-     * exactly that rather than leave a gap. wireVoucherType() is null: no
-     * agent builder emits one and no such voucher type is in the books.
+     * exactly that rather than leave a gap — and NOT as source 'tally',
+     * which would list it under "lives in Tally, not mirrored" beside
+     * voucher types that are actually in the books. wireVoucherType() is
+     * null: no agent builder emits one and no such voucher type is in the
+     * books.
      */
     case SalesOrder = 'sales_order';
 
@@ -103,14 +130,14 @@ enum TallyTransactionCategory: string
             self::DeliveryNote => 'Sales — Delivery Note',
             self::ReceiptNote => 'Procurement — Receipt Note',
             self::Journal => 'Finance — Journal',
-            self::PurchaseOrder => 'Procurement — Purchase Order (planned, Phase 6)',
             self::Purchase => 'Purchase (lives in Tally)',
+            self::PurchaseOrder => 'Purchase Order (lives in Tally; ERP-originated version planned, Phase 6)',
             self::Payment => 'Payment (lives in Tally)',
             self::Receipt => 'Receipt (lives in Tally)',
             self::Contra => 'Contra (lives in Tally)',
             self::CreditNote => 'Credit Note (lives in Tally)',
             self::DebitNote => 'Debit Note (lives in Tally)',
-            self::SalesOrder => 'Sales Order (no such voucher type in the books; sales are invoiced in Tally)',
+            self::SalesOrder => 'Sales Order (no such voucher type in the books; sales are invoiced there — DEC-20260809-003)',
             self::Unknown => 'Unknown',
         };
     }
@@ -130,8 +157,8 @@ enum TallyTransactionCategory: string
             self::DeliveryNote => 'Delivery Note',
             self::ReceiptNote => 'Receipt Note',
             self::Journal => 'Journal',
-            self::PurchaseOrder => 'Purchase Order',
             self::Purchase => 'Purchase',
+            self::PurchaseOrder => 'Purchase Order',
             self::Payment => 'Payment',
             self::Receipt => 'Receipt',
             self::Contra => 'Contra',
@@ -141,7 +168,15 @@ enum TallyTransactionCategory: string
         };
     }
 
-    /** @return 'erp'|'planned'|'tally'|'unknown' */
+    /**
+     * Where the transaction LIVES today. 'erp': the ERP builds and posts it.
+     * 'tally': it is in the accountant's books (the 12-Aug census) and the
+     * ERP does not mirror it — Purchase Order included, whatever is planned
+     * for it. 'absent': no such voucher type is in the books at all.
+     * What the ERP has built or plans to build is erpBuild(), not this.
+     *
+     * @return 'erp'|'tally'|'absent'|'unknown'
+     */
     public function source(): string
     {
         return match ($this) {
@@ -151,22 +186,49 @@ enum TallyTransactionCategory: string
             self::DeliveryNote,
             self::ReceiptNote,
             self::Journal => 'erp',
-            self::PurchaseOrder => 'planned',
             self::Purchase,
+            self::PurchaseOrder,
             self::Payment,
             self::Receipt,
             self::Contra,
             self::CreditNote,
-            self::DebitNote,
-            self::SalesOrder => 'tally',
+            self::DebitNote => 'tally',
+            self::SalesOrder => 'absent',
             self::Unknown => 'unknown',
+        };
+    }
+
+    /**
+     * What the ERP has built for this category: 'built' for the six
+     * categories with an enqueue path in TallySyncService; 'planned' for
+     * the Purchase Order voucher (DEC-20260812-002, Phase 6 — no
+     * enqueuePurchaseOrder() exists yet); 'none' for everything else. This
+     * is the axis that used to ride on source() as "planned" — separated
+     * so "lives in Tally" and "the ERP will build it" can both be true of
+     * one row without contradiction.
+     *
+     * @return 'built'|'planned'|'none'
+     */
+    public function erpBuild(): string
+    {
+        return match ($this) {
+            self::ProductionStockJournalShift,
+            self::ProductionStockJournalBatch,
+            self::SalesInvoice,
+            self::DeliveryNote,
+            self::ReceiptNote,
+            self::Journal => 'built',
+            self::PurchaseOrder => 'planned',
+            default => 'none',
         };
     }
 
     /**
      * Which way the transaction moves. 'none' means the ERP never carries
      * it — nothing is mirrored either way, so no tally_sync_entries row can
-     * ever be of this category (its count is null on the query side).
+     * ever be of this category (its count is null on the query side). That
+     * includes Purchase Order today: the ERP-originated version is planned,
+     * not built, and a plan moves nothing.
      *
      * Unknown is 'erp_to_tally' and that is not a guess: the classifier
      * only ever produces Unknown for a row of tally_sync_entries, and every
@@ -181,14 +243,15 @@ enum TallyTransactionCategory: string
     public function direction(): string
     {
         return match ($this->source()) {
-            'erp', 'planned', 'unknown' => 'erp_to_tally',
-            'tally' => 'none',
+            'erp', 'unknown' => 'erp_to_tally',
+            'tally', 'absent' => 'none',
         };
     }
 
     /**
-     * The ERP module that originates the transaction — null for anything
-     * the ERP does not originate (Tally-only rows; SalesOrder too, since the
+     * The ERP module that originates the transaction — or, for the planned
+     * Purchase Order voucher, will originate it — and null for anything the
+     * ERP does not originate (Tally-only rows; SalesOrder too, since the
      * ERP's sales_orders table is not a Tally flow) and for Unknown.
      */
     public function sourceModule(): ?string
@@ -218,7 +281,7 @@ enum TallyTransactionCategory: string
      * so a client reads a category the same way whether it came off an
      * entry or off the catalogue.
      *
-     * @return array{key: string, label: string, wire_voucher_type: ?string, source: string, direction: string, source_module: ?string, erp_label_differs_from_wire: bool}
+     * @return array{key: string, label: string, wire_voucher_type: ?string, source: string, erp_build: string, direction: string, source_module: ?string, erp_label_differs_from_wire: bool}
      */
     public function describe(): array
     {
@@ -227,6 +290,7 @@ enum TallyTransactionCategory: string
             'label' => $this->label(),
             'wire_voucher_type' => $this->wireVoucherType(),
             'source' => $this->source(),
+            'erp_build' => $this->erpBuild(),
             'direction' => $this->direction(),
             'source_module' => $this->sourceModule(),
             'erp_label_differs_from_wire' => $this->erpLabelDiffersFromWire(),
@@ -235,11 +299,11 @@ enum TallyTransactionCategory: string
 
     /**
      * Every category, once, in the stable order the cases are declared in
-     * (erp → planned → tally → unknown). Counts are NOT here: they belong to
+     * (erp → tally → absent → unknown). Counts are NOT here: they belong to
      * the query side, which is the only place that can measure them, and a
      * catalogue that carried a 0 for a Tally-only row would be lying.
      *
-     * @return list<array{key: string, label: string, wire_voucher_type: ?string, source: string, direction: string, source_module: ?string, erp_label_differs_from_wire: bool}>
+     * @return list<array{key: string, label: string, wire_voucher_type: ?string, source: string, erp_build: string, direction: string, source_module: ?string, erp_label_differs_from_wire: bool}>
      */
     public static function catalogue(): array
     {

@@ -133,6 +133,32 @@ export function categoryLabel(
 }
 
 /**
+ * The category dropdown's options: only the categories that can have an
+ * entry — the ones the ERP builds, plus `unknown`, a real, measured bucket
+ * (rows the classifier could not place) that was unreachable from the
+ * filter bar while the dropdown read `source === 'erp'` alone. A Tally-only
+ * or absent row can never match an entry, so offering it would be a filter
+ * that always returns nothing. Order is the server's catalogue order.
+ */
+export function categoryFilterOptions(
+    rows: readonly TallySyncCategoryCount[] | null | undefined,
+): { value: string; label: string }[] {
+    return (rows ?? [])
+        .filter((row) => row.source === 'erp' || row.key === 'unknown')
+        .map((row) => ({ value: row.key, label: categoryLabel(row) }));
+}
+
+/**
+ * How many rows the classifier could not place — the `unknown` catalogue
+ * count, which is measured like the ERP rows' (never null). 0 when the
+ * catalogue has not loaded or carries no such row, so a header can render
+ * nothing rather than "unclassified: ?".
+ */
+export function unclassifiedCount(rows: readonly TallySyncCategoryCount[] | null | undefined): number {
+    return rows?.find((row) => row.key === 'unknown')?.count ?? 0;
+}
+
+/**
  * The short name of a catalogue row: its wire voucher type when it has one,
  * else the label with any parenthetical explanation cut off ("Sales Order
  * (no such voucher type …)" → "Sales Order").
@@ -141,37 +167,59 @@ function catalogueName(row: Pick<TallySyncCategoryCount, 'label' | 'wire_voucher
     return row.wire_voucher_type ?? row.label.replace(/\s*\(.*$/, '').trim();
 }
 
+/** The decision id the server wrote into a label ("… DEC-20260809-003)"), if any — never typed here. */
+function decisionIn(label: string): string | undefined {
+    return /DEC-\d{8}-\d{3}/.exec(label)?.[0];
+}
+
 /**
- * The one-line honesty note under the table: which of the accountant's
- * transactions this page does NOT mirror, named — never a zero count, never
- * an empty table implying absence.
+ * The honesty note under the table, one clause per line: which of the
+ * accountant's transactions this page does NOT mirror, named — never a zero
+ * count, never an empty table implying absence.
  *
- *   "Lives in Tally, not mirrored: Purchase · Payment · … · Sales Order
- *    — Purchase Order: planned (Phase 6)"
+ *   "Lives in Tally, not mirrored: Purchase · Purchase Order · Payment · … · Debit Note"
+ *   "Purchase Order: ERP-originated version planned (Phase 6)"
+ *   "Sales Order: no such voucher type in Tally — sales are invoiced there (DEC-20260809-003)"
  *
- * Built from the summary's catalogue rows with source 'tally' / 'planned',
- * in the order the server lists them (its case order is the catalogue
- * order). The phase on a planned row is read out of the server's own label
- * ("… (planned, Phase 6)"), not typed here — a plan is a factory fact and
- * this file does not invent those. Empty string when the catalogue has no
- * such rows (or has not loaded), so the caller renders nothing rather than
- * a heading with no names under it.
+ * Built from the summary's catalogue rows on the server's TWO axes: source
+ * 'tally' rows are the first clause, in the order the server lists them
+ * (its case order is the catalogue order); erp_build 'planned' rows are the
+ * second — a Purchase Order is BOTH in the books and planned, and both are
+ * said; source 'absent' rows are the third. The phase on a planned row and
+ * the decision on an absent row are read out of the server's own label,
+ * not typed here — a plan and a decision are factory facts and this file
+ * does not invent those. Empty when the catalogue has no such rows (or has
+ * not loaded), so the caller renders nothing rather than a heading with no
+ * names under it.
  */
-export function catalogueNote(rows: readonly TallySyncCategoryCount[] | null | undefined): string {
-    if (!rows || rows.length === 0) return '';
+export function catalogueNote(rows: readonly TallySyncCategoryCount[] | null | undefined): string[] {
+    if (!rows || rows.length === 0) return [];
 
     const inTally = rows.filter((row) => row.source === 'tally').map(catalogueName);
     const planned = rows
-        .filter((row) => row.source === 'planned')
+        .filter((row) => row.erp_build === 'planned')
         .map((row) => {
             const phase = /Phase\s+\d+/i.exec(row.label)?.[0];
 
-            return `${catalogueName(row)}: planned${phase ? ` (${phase})` : ''}`;
+            return `${catalogueName(row)}: ERP-originated version planned${phase ? ` (${phase})` : ''}`;
+        });
+    const absent = rows
+        .filter((row) => row.source === 'absent')
+        .map((row) => {
+            // The label's parenthetical is "<what>; <why> — DEC-…": the why
+            // is the server's words, repeated here minus the decision id,
+            // which goes in brackets at the end.
+            const parenthetical = /\(([^)]*)\)/.exec(row.label)?.[1] ?? '';
+            const decision = decisionIn(parenthetical);
+            const reason = parenthetical.split(';')[1]?.replace(/[\s—–-]*DEC-\d{8}-\d{3}/, '').trim();
+
+            return `${catalogueName(row)}: no such voucher type in Tally`
+                + `${reason ? ` — ${reason}` : ''}${decision ? ` (${decision})` : ''}`;
         });
 
-    const parts: string[] = [];
-    if (inTally.length > 0) parts.push(`Lives in Tally, not mirrored: ${inTally.join(' · ')}`);
-    if (planned.length > 0) parts.push(planned.join(' · '));
+    const clauses: string[] = [];
+    if (inTally.length > 0) clauses.push(`Lives in Tally, not mirrored: ${inTally.join(' · ')}`);
+    clauses.push(...planned, ...absent);
 
-    return parts.join(' — ');
+    return clauses;
 }

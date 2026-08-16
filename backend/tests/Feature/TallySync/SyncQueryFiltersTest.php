@@ -269,6 +269,44 @@ class SyncQueryFiltersTest extends TestCase
         $this->assertIds([], 'q=Aurobindoo');
     }
 
+    /**
+     * A JSON null in the payload is NOT a value to match. The shift voucher
+     * writes `batch_number: null` on every payload (shiftVoucherPayload), and
+     * an entry can carry `voucher_date: null` when its source had no date.
+     * On SQLite json_extract() yields SQL NULL for those and nothing matches
+     * by accident; on MySQL json_unquote(json_extract()) yields the STRING
+     * 'null' — so q=ul would find every shift voucher and any `from` would
+     * accept a dateless entry. The query guards each JSON-path predicate
+     * with a whereNotNull on the same path (JSON-null-aware on MySQL); this
+     * pins the contract on the driver the suite runs on, and the guard is
+     * what carries it to the live one.
+     */
+    public function test_a_json_null_in_the_payload_never_matches_q_or_a_date_range(): void
+    {
+        $dateless = TallySyncEntry::create([
+            'syncable_type' => 'shift_production_entry', 'syncable_id' => 999,
+            'tally_voucher_type' => 'Manufacturing Journal',
+            'payload' => ['voucher_number' => 'SPE-999', 'voucher_date' => null, 'batch_number' => null, 'party_ledger' => null],
+            'status' => 'pending', 'attempts' => 0,
+        ]);
+        $this->assertNull($this->entries['shift']->payload['batch_number'], 'The shift voucher carries a null batch_number');
+
+        // Neither 'null' nor its substrings find a null.
+        foreach (['null', 'ul', 'NULL'] as $term) {
+            $found = $this->ids("q={$term}");
+            $this->assertNotContains($this->entries['shift']->id, $found, "q={$term} matched the shift voucher's null batch_number");
+            $this->assertNotContains($dateless->id, $found, "q={$term} matched a null");
+        }
+        $this->assertSame([], $this->ids('q=null'));
+
+        // A null business date is outside every range.
+        foreach (['from=2000-01-01', 'to=2099-12-31', 'from=2000-01-01&to=2099-12-31'] as $range) {
+            $this->assertNotContains($dateless->id, $this->ids($range), "?{$range} accepted a null voucher_date");
+        }
+        // And the real dates still answer as before with the extra row present.
+        $this->assertIds(['grn', 'dn3', 'je'], 'from=2026-08-02&to=2026-08-04');
+    }
+
     // ---- shift_id ---------------------------------------------------------
 
     public function test_shift_id_reaches_batch_vouchers_and_shift_vouchers_alike(): void

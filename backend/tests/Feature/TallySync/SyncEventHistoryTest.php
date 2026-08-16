@@ -17,9 +17,11 @@ use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Models\TallySyncEvent;
 use App\Modules\TallySync\Services\TallySyncEventRecorder;
 use App\Modules\TallySync\Services\TallySyncService;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\PersonalAccessToken;
 use LogicException;
+use RuntimeException;
 use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
 
@@ -193,6 +195,92 @@ class SyncEventHistoryTest extends TestCase
         $this->assertSame(2, TallySyncEvent::query()->where('event', 'pending.delivered')->count());
     }
 
+    /**
+     * The stamp and the history commit together, or neither does. Before
+     * pending() ran in one transaction an insert error 500'd the poll AFTER
+     * delivered_at had landed: the agent never got the response, and on its
+     * next poll every one of those vouchers arrived already stamped — which
+     * its guard reads as "handed to an agent it has no record of" and
+     * refuses until a human retries each one by hand.
+     */
+    public function test_a_poll_whose_history_insert_fails_leaves_nothing_stamped_and_the_next_poll_delivers_cleanly(): void
+    {
+        [, $plainToken] = $this->agent('factory-pc');
+        $first = $this->voucher(['payload' => ['voucher_number' => 'SPE-1']]);
+        $second = $this->voucher(['payload' => ['voucher_number' => 'SPE-2']]);
+
+        // A recorder that cannot write — the events table unreachable, a
+        // constraint, a full disk — for the FIRST poll only. One instance,
+        // switched rather than rebound: the router memoises the controller
+        // (and so the service and its recorder) across requests in a test.
+        $recorder = new class extends TallySyncEventRecorder
+        {
+            public bool $failing = true;
+
+            public function record(TallySyncEventKind $event, ?TallySyncEntry $entry, array $details = [], string $direction = TallySyncEvent::DIRECTION_ERP_TO_TALLY, ?Authenticatable $actor = null): TallySyncEvent
+            {
+                if ($this->failing) {
+                    throw new RuntimeException('tally_sync_events: write failed');
+                }
+
+                return parent::record($event, $entry, $details, $direction, $actor);
+            }
+        };
+        $this->app->instance(TallySyncEventRecorder::class, $recorder);
+
+        $this->withToken($plainToken)->getJson('/api/v1/tally-sync/pending')->assertStatus(500);
+
+        // Rolled back as one: no stamp, no row.
+        $this->assertNull($first->fresh()->delivered_at, 'The stamp must roll back with the failed insert');
+        $this->assertNull($second->fresh()->delivered_at);
+        $this->assertSame(0, TallySyncEvent::query()->count());
+
+        // The recorder writes again: the next poll is a FIRST delivery —
+        // delivered_at null on the wire (the agent's idempotency line), then
+        // stamped, with one pending.delivered per entry.
+        $recorder->failing = false;
+
+        $delivered = $this->withToken($plainToken)->getJson('/api/v1/tally-sync/pending')->assertOk()->json('data');
+        $this->assertSame([$first->id, $second->id], array_column($delivered, 'id'));
+        $this->assertSame([null, null], array_column($delivered, 'delivered_at'), 'A first delivery, as the agent must see it');
+        $this->assertNotNull($first->fresh()->delivered_at);
+        $this->assertNotNull($second->fresh()->delivered_at);
+        $this->assertSame(
+            [$first->id, $second->id],
+            TallySyncEvent::query()->where('event', 'pending.delivered')->orderBy('id')->pluck('tally_sync_entry_id')->all(),
+        );
+    }
+
+    /** retry() is one transaction too: a re-queue whose history cannot be written is not a re-queue. */
+    public function test_a_retry_whose_history_insert_fails_rolls_the_re_queue_back(): void
+    {
+        $failed = $this->voucher(['status' => TallySyncStatus::Failed, 'error_message' => 'Godown does not exist', 'attempts' => 1, 'delivered_at' => now()]);
+        $deliveredAt = $failed->delivered_at;
+
+        $throwing = new class extends TallySyncEventRecorder
+        {
+            public function record(TallySyncEventKind $event, ?TallySyncEntry $entry, array $details = [], string $direction = TallySyncEvent::DIRECTION_ERP_TO_TALLY, ?Authenticatable $actor = null): TallySyncEvent
+            {
+                throw new RuntimeException('tally_sync_events: write failed');
+            }
+        };
+        $sync = $this->app->make(TallySyncService::class, ['events' => $throwing]);
+
+        try {
+            $sync->retry($failed, null, $this->staff());
+            $this->fail('retry() must surface the failed write');
+        } catch (RuntimeException $e) {
+            $this->assertSame('tally_sync_events: write failed', $e->getMessage());
+        }
+
+        $fresh = $failed->fresh();
+        $this->assertSame(TallySyncStatus::Failed, $fresh->status, 'The re-queue rolled back with its history');
+        $this->assertSame('Godown does not exist', $fresh->error_message);
+        $this->assertEquals($deliveredAt, $fresh->delivered_at, 'delivered_at was not nulled — the agent is not re-armed');
+        $this->assertSame([], $fresh->payload['resolution_log'] ?? []);
+        $this->assertSame(0, TallySyncEvent::query()->count());
+    }
+
     // ---- (c) ack ---------------------------------------------------------
 
     public function test_an_ack_records_voucher_synced_with_the_agent_as_actor(): void
@@ -328,6 +416,29 @@ class SyncEventHistoryTest extends TestCase
 
         $this->assertSame("Could not set 'SVCurrentCompany'", $dead->events()->where('event', 'voucher.dismissed')->sole()->details['previous_error']);
         $this->assertSame($held->voucherNumber(), $held->events()->where('event', 'voucher.released')->sole()->details['voucher_number']);
+    }
+
+    /**
+     * A personal access token WITHOUT the agent's abilities is a person with
+     * a token (CLAUDE.md #3 supports exactly that client), not the factory
+     * PC — recorded as the user they are, whatever the token is called. The
+     * token's CLASS alone used to type them "agent", which lit the Control
+     * Center's agent light from a laptop.
+     */
+    public function test_a_personal_access_token_without_the_agent_abilities_is_recorded_as_the_user_not_the_agent(): void
+    {
+        $accountant = $this->staff('Priya Accounts');
+        $laptop = $accountant->createToken('factory-pc-lookalike', [])->plainTextToken;
+
+        $failed = $this->voucher(['status' => TallySyncStatus::Failed, 'error_message' => 'Godown does not exist', 'attempts' => 1, 'delivered_at' => now()]);
+        $this->withToken($laptop)->postJson("/api/v1/tally-sync/entries/{$failed->id}/retry")->assertOk();
+
+        $retried = $failed->events()->where('event', 'voucher.retried')->sole();
+        $this->assertSame('user', $retried->actor_type);
+        $this->assertSame($accountant->id, $retried->actor_id);
+        // The person's name, never the token's.
+        $this->assertSame('Priya Accounts', $retried->actor_label);
+        $this->assertSame(0, TallySyncEvent::query()->where('actor_type', 'agent')->count());
     }
 
     // ---- (h) shift mode: enqueued once, merged once ----------------------

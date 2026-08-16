@@ -10,7 +10,13 @@ import {
     releaseTallySyncEntry,
     retryTallySyncEntry,
 } from '@/features/tally-sync/api';
-import { catalogueNote, categoryLabel, hasActiveFilters } from '@/features/tally-sync/filters';
+import {
+    catalogueNote,
+    categoryFilterOptions,
+    categoryLabel,
+    hasActiveFilters,
+    unclassifiedCount,
+} from '@/features/tally-sync/filters';
 import type { TallySyncEntry, TallySyncEntryFilters, TallySyncStatus } from '@/features/tally-sync/types';
 
 const statusColor: Record<TallySyncStatus, string> = {
@@ -200,7 +206,7 @@ export default function TallySyncPage() {
         [summary, rowsSpeakForAll, entries],
     );
     const lastCollected = useMemo(
-        () => summary?.agent.last_contact_at
+        () => summary?.agent.last_action_at
             ?? (rowsSpeakForAll ? latest(entries.map((entry) => entry.delivered_at)) : null),
         [summary, rowsSpeakForAll, entries],
     );
@@ -214,14 +220,24 @@ export default function TallySyncPage() {
     // Failed vouchers the filter bar is hiding. The summary counts every
     // failed entry; the rows only the matching ones — the difference is what
     // a green "no failed vouchers" over a filtered table would be lying about.
-    const failedElsewhere = filtersActive && summary
+    // Only computed when the page holds every matching row: on a truncated
+    // page `failed.length` is a floor, so the subtraction would count rows
+    // the page simply did not fetch as "outside these filters" — the
+    // truncation copy above already says the page is not looking at them.
+    const failedElsewhere = filtersActive && summary && !truncated
         ? Math.max(0, summary.all_time.failed - failed.length)
         : 0;
 
     // The names the table can never contain — the accountant's transactions
-    // that live only in Tally, plus what is planned. Empty until the summary
-    // answers; never a zero, never a row.
+    // that live only in Tally, what is planned, what does not exist in the
+    // books at all. Empty until the summary answers; never a zero, never a
+    // row.
     const notMirrored = catalogueNote(summary?.by_category);
+
+    // Rows the classifier could not place — a real row, measured, that no
+    // category filter reaches unless `unknown` is offered. Zero is the
+    // ordinary case and says nothing; anything else is said out loud.
+    const unclassified = unclassifiedCount(summary?.by_category);
 
     const busy = retryingId !== null || releasingId !== null || dismissingId !== null || resyncingAll;
 
@@ -238,11 +254,11 @@ export default function TallySyncPage() {
     const allClear = filtersActive
         ? entries.length === 0
             ? 'No vouchers match these filters.'
-            : `No failed vouchers among the ${entries.length}${truncated ? ' most recent' : ''} matching these filters.`
+            : `No failed vouchers among the ${entries.length}${truncated ? ' held here' : ''} matching these filters.`
         : entries.length === 0
             ? 'No vouchers queued yet — nothing has been sent to Tally so far.'
             : truncated
-                ? `No failed vouchers among the ${entries.length} most recent`
+                ? `No failed vouchers among the ${entries.length} held here`
                 : 'No failed vouchers — everything the ERP has sent, Tally has taken.';
 
     async function resyncOne(entry: TallySyncEntry) {
@@ -415,9 +431,9 @@ export default function TallySyncPage() {
                             </span>
                             {truncated && (
                                 <span>
-                                    Showing the most recent {entries.length} of {total}
-                                    {filtersActive ? ' matching' : ''} vouchers — there may be older
-                                    failures than the ones counted here.
+                                    Holding {entries.length} of {total}
+                                    {filtersActive ? ' matching' : ''} vouchers (all failed and pending first) —
+                                    the rest were not fetched.
                                 </span>
                             )}
                             {failedElsewhere > 0 && (
@@ -450,8 +466,9 @@ export default function TallySyncPage() {
                                 tick vouch for vouchers nobody looked at. */}
                             {truncated && (
                                 <div>
-                                    This page is holding the most recent {entries.length} of {total}
-                                    {filtersActive ? ' matching' : ''} vouchers — older ones have not been checked.
+                                    This page is holding {entries.length} of {total}
+                                    {filtersActive ? ' matching' : ''} vouchers (all failed and pending first) —
+                                    the rest were not fetched.
                                 </div>
                             )}
                             {failedElsewhere > 0 && (
@@ -488,7 +505,18 @@ export default function TallySyncPage() {
                         <Typography.Text type={summary.today.failed > 0 ? 'danger' : 'secondary'} strong>
                             {summary.today.failed} failed
                         </Typography.Text>
-                        {' · '}<strong>{summary.today.held}</strong> held
+                        {/* held_now, not today.held: the night shift's voucher is
+                            dated yesterday and held until 06:00 — a state, not a
+                            window, and "0 held" over it every night was a lie. */}
+                        {' · '}<strong>{summary.held_now}</strong> held now
+                        {unclassified > 0 && (
+                            <>
+                                {' · '}
+                                <Typography.Text type="warning" strong>
+                                    {unclassified} unclassified
+                                </Typography.Text>
+                            </>
+                        )}
                         <br />
                     </span>
                 ) : summaryError ? (
@@ -508,10 +536,13 @@ export default function TallySyncPage() {
                     <>
                         Last voucher accepted by Tally: <strong>{instant(lastSynced)}</strong>
                         {' · '}
-                        {summary?.agent.last_contact_at ? 'Agent last contact' : 'Agent last collected work'}:{' '}
+                        {/* "Action", not "contact": a heartbeat poll that finds
+                            nothing to deliver records no event, so an idle agent
+                            can be alive and polling while this stands still. */}
+                        {summary?.agent.last_action_at ? 'Agent last action' : 'Agent last collected work'}:{' '}
                         <strong>{instant(lastCollected)}</strong>
-                        {summary?.agent.last_contact_label && (
-                            <Typography.Text type="secondary"> ({summary.agent.last_contact_label})</Typography.Text>
+                        {summary?.agent.last_action_label && (
+                            <Typography.Text type="secondary"> ({summary.agent.last_action_label})</Typography.Text>
                         )}
                     </>
                 )}
@@ -536,12 +567,9 @@ export default function TallySyncPage() {
                     optionFilterProp="label"
                     placeholder="Any category"
                     style={{ minWidth: 260 }}
-                    // Only the categories the ERP builds: a Tally-only row
-                    // can never match an entry, so offering it here would
-                    // be a filter that always returns nothing.
-                    options={(summary?.by_category ?? [])
-                        .filter((row) => row.source === 'erp')
-                        .map((row) => ({ value: row.key, label: categoryLabel(row) }))}
+                    // Only the categories that can have an entry — the ones
+                    // the ERP builds, plus `unknown` (see categoryFilterOptions).
+                    options={categoryFilterOptions(summary?.by_category)}
                     value={filters.category ?? []}
                     onChange={(value) => setFilter('category', value.length > 0 ? value : undefined)}
                 />
@@ -780,9 +808,14 @@ export default function TallySyncPage() {
                 the accountant's own transactions — never counted here, never
                 mirrored, and an empty table above must not imply they do not
                 exist. Text only; a zero would claim a measurement. */}
-            {notMirrored && (
+            {notMirrored.length > 0 && (
                 <Typography.Paragraph type="secondary" style={{ marginTop: 12 }}>
-                    {notMirrored}
+                    {notMirrored.map((clause, index) => (
+                        <span key={clause}>
+                            {index > 0 && <br />}
+                            {clause}
+                        </span>
+                    ))}
                 </Typography.Paragraph>
             )}
 

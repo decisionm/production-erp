@@ -148,6 +148,13 @@ class SyncSummaryTest extends TestCase
             // The night voucher: the REAL gate says the shift is collecting.
             'held' => 1,
         ], $summary['all_time']);
+
+        // THE NIGHT-SHIFT CASE: today.held is 0 (the held voucher is dated
+        // yesterday) while the gate is holding it RIGHT NOW. held_now is
+        // the state, not the window — the header must say "1 held now"
+        // over this queue, never "0 held".
+        $this->assertSame(0, $summary['today']['held']);
+        $this->assertSame(1, $summary['held_now']);
     }
 
     public function test_by_category_names_the_whole_catalogue_once_with_measured_counts_or_null(): void
@@ -163,7 +170,7 @@ class SyncSummaryTest extends TestCase
             $rows->pluck('key')->all(),
         );
         foreach ($rows as $row) {
-            $this->assertSame(['key', 'label', 'source', 'wire_voucher_type', 'count'], array_keys($row), $row['key']);
+            $this->assertSame(['key', 'label', 'source', 'erp_build', 'wire_voucher_type', 'count'], array_keys($row), $row['key']);
         }
 
         $counts = $rows->pluck('count', 'key');
@@ -178,18 +185,35 @@ class SyncSummaryTest extends TestCase
         // Rows the table cannot place are real rows too — measured (none here).
         $this->assertSame(0, $counts['unknown']);
 
-        // Planned and Tally-only: NULL, never 0. Nothing was measured
+        // Tally-only and absent: NULL, never 0. Nothing was measured
         // because nothing is mirrored; a zero would claim the books were read.
-        foreach (['purchase_order', 'purchase', 'payment', 'receipt', 'contra', 'credit_note', 'debit_note', 'sales_order'] as $key) {
+        foreach (['purchase', 'purchase_order', 'payment', 'receipt', 'contra', 'credit_note', 'debit_note', 'sales_order'] as $key) {
             $this->assertNull($counts[$key], $key);
             $this->assertArrayHasKey($key, $counts->all(), $key);
         }
 
-        // Label, source and wire type ride along from the catalogue.
+        // Label, source, erp_build and wire type ride along from the catalogue.
         $purchase = $rows->firstWhere('key', 'purchase');
         $this->assertSame('tally', $purchase['source']);
+        $this->assertSame('none', $purchase['erp_build']);
         $this->assertSame('Purchase', $purchase['wire_voucher_type']);
         $this->assertSame('Purchase (lives in Tally)', $purchase['label']);
+
+        // Purchase Order: in the books (source tally) AND the ERP version is
+        // planned (erp_build) — two axes, one row, still an honest null.
+        $purchaseOrder = $rows->firstWhere('key', 'purchase_order');
+        $this->assertSame('tally', $purchaseOrder['source']);
+        $this->assertSame('planned', $purchaseOrder['erp_build']);
+        $this->assertNull($purchaseOrder['count']);
+
+        // Sales Order: no such voucher type in the books at all — absent,
+        // and null because there was nothing to measure, not because
+        // nothing was mirrored.
+        $salesOrder = $rows->firstWhere('key', 'sales_order');
+        $this->assertSame('absent', $salesOrder['source']);
+        $this->assertSame('none', $salesOrder['erp_build']);
+        $this->assertNull($salesOrder['wire_voucher_type']);
+        $this->assertNull($salesOrder['count']);
     }
 
     public function test_nothing_heard_yet_reads_as_nulls_not_epoch_zero(): void
@@ -198,12 +222,12 @@ class SyncSummaryTest extends TestCase
         $this->actAsStaff();
 
         $quiet = $this->summary();
-        $this->assertSame(['last_contact_at' => null, 'last_contact_event' => null, 'last_contact_label' => null], $quiet['agent']);
+        $this->assertSame(['last_action_at' => null, 'last_action_event' => null, 'last_action_label' => null], $quiet['agent']);
         $this->assertNull($quiet['last_synced_at']);
         $this->assertNull($quiet['last_masters_pull_at']);
     }
 
-    public function test_agent_contact_last_synced_and_last_masters_pull_come_from_the_history(): void
+    public function test_agent_action_last_synced_and_last_masters_pull_come_from_the_history(): void
     {
         $this->buildQueue();
 
@@ -217,19 +241,30 @@ class SyncSummaryTest extends TestCase
             'godowns' => [['guid' => 'gd-main', 'name' => 'Main Store']],
         ])->assertOk();
 
-        // … then an ack of the invoice at 01:10 IST: the last agent contact.
+        // … then an ack of the invoice at 01:10 IST: the last agent action.
         Carbon::setTestNow($ackAt = Carbon::parse('2026-08-16 19:40:00', 'UTC'));
         $this->entries['inv']->update(['delivered_at' => now()]);
         $this->withToken($token)->postJson("/api/v1/tally-sync/entries/{$this->entries['inv']->id}/ack")->assertOk();
+
+        // A person acting LATER with a personal access token that lacks the
+        // agent's abilities is a USER on the record — a laptop is not the
+        // factory PC, and it does not move the light. (The sanctum guard
+        // caches the resolved user across requests in one test; forgotten
+        // so the second token is actually resolved.)
+        Carbon::setTestNow(Carbon::parse('2026-08-16 19:50:00', 'UTC'));
+        $this->app['auth']->forgetGuards();
+        $laptop = $this->staffUser()->createToken('laptop', [])->plainTextToken;
+        $this->withToken($laptop)->postJson("/api/v1/tally-sync/entries/{$this->entries['je']->id}/dismiss")->assertOk();
+        $this->assertSame('user', $this->entries['je']->events()->where('event', 'voucher.dismissed')->sole()->actor_type);
 
         $this->actAsStaff();
         $summary = $this->summary();
 
         $this->assertSame([
-            'last_contact_at' => $ackAt->toIso8601String(),
-            'last_contact_event' => 'voucher.synced',
+            'last_action_at' => $ackAt->toIso8601String(),
+            'last_action_event' => 'voucher.synced',
             // The installation, by its token's NAME — never the token.
-            'last_contact_label' => 'factory-pc',
+            'last_action_label' => 'factory-pc',
         ], $summary['agent']);
         $this->assertStringNotContainsString($token, json_encode($summary));
         $this->assertSame($ackAt->toIso8601String(), $summary['last_synced_at']);
@@ -253,6 +288,7 @@ class SyncSummaryTest extends TestCase
         Carbon::setTestNow(Carbon::parse('2026-08-17 00:50:00', 'UTC'));
         $released = $this->summary();
         $this->assertSame(0, $released['all_time']['held']);
+        $this->assertSame(0, $released['held_now']);
         $this->assertSame(3, $released['all_time']['pending'], 'Released is still pending — held is a sub-state, not a status');
     }
 
@@ -265,6 +301,10 @@ class SyncSummaryTest extends TestCase
         $today = $this->summary('from=2026-08-17&to=2026-08-17');
         $this->assertSame(3, $today['all_time']['total']);
         $this->assertSame(0, $today['all_time']['held']);
+        // held_now ignores the business-date range — the night voucher,
+        // dated yesterday, is held at this moment whichever day is asked
+        // about — but follows every other filter (below).
+        $this->assertSame(1, $today['held_now']);
         $this->assertSame(0, collect($today['by_category'])->firstWhere('key', 'production_stock_journal_shift')['count']);
         $this->assertSame(1, collect($today['by_category'])->firstWhere('key', 'sales_invoice')['count']);
         // Tally-only stays null under any filter — a filter measures nothing there either.
@@ -275,6 +315,7 @@ class SyncSummaryTest extends TestCase
         $this->assertSame(1, $failed['all_time']['total']);
         $this->assertSame(1, $failed['today']['total']);
         $this->assertSame(1, $failed['today']['failed']);
+        $this->assertSame(0, $failed['held_now'], 'A held voucher is pending, not failed');
         $this->assertSame(1, collect($failed['by_category'])->firstWhere('key', 'journal')['count']);
 
         // A category the ERP does not build: honest zeros for the counts, no
@@ -299,10 +340,18 @@ class SyncSummaryTest extends TestCase
 
     private function actAsStaff(): void
     {
+        Sanctum::actingAs($this->staffUser());
+    }
+
+    private function staffUser(): User
+    {
         $user = User::factory()->create(['is_active' => true]);
-        Permission::findOrCreate('tally-sync.view', 'web');
-        $user->givePermissionTo('tally-sync.view');
-        Sanctum::actingAs($user);
+        foreach (['tally-sync.view', 'tally-sync.manage'] as $permission) {
+            Permission::findOrCreate($permission, 'web');
+            $user->givePermissionTo($permission);
+        }
+
+        return $user;
     }
 
     /**

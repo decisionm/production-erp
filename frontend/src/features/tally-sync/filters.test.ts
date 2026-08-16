@@ -1,6 +1,13 @@
 import axios from 'axios';
 import { describe, expect, it } from 'vitest';
-import { buildEntryQuery, catalogueNote, categoryLabel, hasActiveFilters } from './filters';
+import {
+    buildEntryQuery,
+    catalogueNote,
+    categoryFilterOptions,
+    categoryLabel,
+    hasActiveFilters,
+    unclassifiedCount,
+} from './filters';
 import type { TallySyncCategoryCount, TallyTransactionCategory } from './types';
 
 /**
@@ -20,6 +27,7 @@ const category = (over: Partial<TallyTransactionCategory> = {}): TallyTransactio
     label: 'Sales — Invoice',
     wire_voucher_type: 'Sales',
     source: 'erp',
+    erp_build: 'built',
     direction: 'erp_to_tally',
     source_module: 'sales',
     erp_label_differs_from_wire: false,
@@ -144,30 +152,38 @@ describe('categoryLabel', () => {
 
 describe('catalogueNote', () => {
     // The backend catalogue, in its case order, with the counts the summary
-    // attaches: numbers for ERP rows, null (never 0) for the rest.
+    // attaches: numbers for ERP rows, null (never 0) for the rest. Two axes
+    // per row: where it lives (source) and what the ERP built (erp_build).
     const catalogue: TallySyncCategoryCount[] = [
-        { key: 'production_stock_journal_shift', label: 'Production — Stock Journal (per shift)', wire_voucher_type: 'Stock Journal', source: 'erp', count: 12 },
-        { key: 'sales_invoice', label: 'Sales — Invoice', wire_voucher_type: 'Sales', source: 'erp', count: 0 },
-        { key: 'purchase_order', label: 'Procurement — Purchase Order (planned, Phase 6)', wire_voucher_type: 'Purchase Order', source: 'planned', count: null },
-        { key: 'purchase', label: 'Purchase (lives in Tally)', wire_voucher_type: 'Purchase', source: 'tally', count: null },
-        { key: 'payment', label: 'Payment (lives in Tally)', wire_voucher_type: 'Payment', source: 'tally', count: null },
-        { key: 'receipt', label: 'Receipt (lives in Tally)', wire_voucher_type: 'Receipt', source: 'tally', count: null },
-        { key: 'contra', label: 'Contra (lives in Tally)', wire_voucher_type: 'Contra', source: 'tally', count: null },
-        { key: 'credit_note', label: 'Credit Note (lives in Tally)', wire_voucher_type: 'Credit Note', source: 'tally', count: null },
-        { key: 'debit_note', label: 'Debit Note (lives in Tally)', wire_voucher_type: 'Debit Note', source: 'tally', count: null },
-        { key: 'sales_order', label: 'Sales Order (no such voucher type in the books; sales are invoiced in Tally)', wire_voucher_type: null, source: 'tally', count: null },
-        { key: 'unknown', label: 'Unknown', wire_voucher_type: null, source: 'unknown', count: 0 },
+        { key: 'production_stock_journal_shift', label: 'Production — Stock Journal (per shift)', wire_voucher_type: 'Stock Journal', source: 'erp', erp_build: 'built', count: 12 },
+        { key: 'sales_invoice', label: 'Sales — Invoice', wire_voucher_type: 'Sales', source: 'erp', erp_build: 'built', count: 0 },
+        { key: 'purchase', label: 'Purchase (lives in Tally)', wire_voucher_type: 'Purchase', source: 'tally', erp_build: 'none', count: null },
+        { key: 'purchase_order', label: 'Purchase Order (lives in Tally; ERP-originated version planned, Phase 6)', wire_voucher_type: 'Purchase Order', source: 'tally', erp_build: 'planned', count: null },
+        { key: 'payment', label: 'Payment (lives in Tally)', wire_voucher_type: 'Payment', source: 'tally', erp_build: 'none', count: null },
+        { key: 'receipt', label: 'Receipt (lives in Tally)', wire_voucher_type: 'Receipt', source: 'tally', erp_build: 'none', count: null },
+        { key: 'contra', label: 'Contra (lives in Tally)', wire_voucher_type: 'Contra', source: 'tally', erp_build: 'none', count: null },
+        { key: 'credit_note', label: 'Credit Note (lives in Tally)', wire_voucher_type: 'Credit Note', source: 'tally', erp_build: 'none', count: null },
+        { key: 'debit_note', label: 'Debit Note (lives in Tally)', wire_voucher_type: 'Debit Note', source: 'tally', erp_build: 'none', count: null },
+        { key: 'sales_order', label: 'Sales Order (no such voucher type in the books; sales are invoiced there — DEC-20260809-003)', wire_voucher_type: null, source: 'absent', erp_build: 'none', count: null },
+        { key: 'unknown', label: 'Unknown', wire_voucher_type: null, source: 'unknown', erp_build: 'none', count: 0 },
     ];
 
-    it('names every Tally-only row and the planned row, in catalogue order, with no counts', () => {
-        expect(catalogueNote(catalogue)).toBe(
-            'Lives in Tally, not mirrored: Purchase · Payment · Receipt · Contra · Credit Note · Debit Note · Sales Order'
-            + ' — Purchase Order: planned (Phase 6)',
-        );
+    it('says three things: what lives in Tally (Purchase Order among them), what is planned, what is absent', () => {
+        expect(catalogueNote(catalogue)).toEqual([
+            'Lives in Tally, not mirrored: Purchase · Purchase Order · Payment · Receipt · Contra · Credit Note · Debit Note',
+            'Purchase Order: ERP-originated version planned (Phase 6)',
+            'Sales Order: no such voucher type in Tally — sales are invoiced there (DEC-20260809-003)',
+        ]);
     });
 
-    it('leaves ERP-built and unknown rows out — those are the table, not the note', () => {
-        const note = catalogueNote(catalogue);
+    it('never lists Sales Order as living in Tally — no such voucher type is in the books', () => {
+        const [inTally] = catalogueNote(catalogue);
+
+        expect(inTally).not.toContain('Sales Order');
+    });
+
+    it('leaves ERP-built and unknown rows out, and never renders a zero — those are the table, not the note', () => {
+        const note = catalogueNote(catalogue).join('\n');
 
         expect(note).not.toContain('Invoice');
         expect(note).not.toContain('per shift');
@@ -176,14 +192,36 @@ describe('catalogueNote', () => {
     });
 
     it('is empty when there is nothing to say (no catalogue yet, or only ERP rows)', () => {
-        expect(catalogueNote(undefined)).toBe('');
-        expect(catalogueNote([])).toBe('');
-        expect(catalogueNote(catalogue.filter((row) => row.source === 'erp'))).toBe('');
+        expect(catalogueNote(undefined)).toEqual([]);
+        expect(catalogueNote([])).toEqual([]);
+        expect(catalogueNote(catalogue.filter((row) => row.source === 'erp'))).toEqual([]);
     });
 
-    it('does not invent a phase when the planned label carries none', () => {
+    it('offers only categories an entry can have — the ERP rows AND unknown, never Tally-only or absent', () => {
+        expect(categoryFilterOptions(catalogue).map((option) => option.value)).toEqual([
+            'production_stock_journal_shift',
+            'sales_invoice',
+            'unknown',
+        ]);
+        expect(categoryFilterOptions(catalogue).at(-1)).toEqual({ value: 'unknown', label: 'Unknown' });
+        expect(categoryFilterOptions(undefined)).toEqual([]);
+    });
+
+    it('reads the unclassified count off the unknown row, and 0 when there is none yet', () => {
+        expect(unclassifiedCount(catalogue)).toBe(0);
+        expect(unclassifiedCount(catalogue.map((row) => (row.key === 'unknown' ? { ...row, count: 2 } : row)))).toBe(2);
+        expect(unclassifiedCount(undefined)).toBe(0);
+        expect(unclassifiedCount(catalogue.filter((row) => row.key !== 'unknown'))).toBe(0);
+    });
+
+    it('does not invent a phase or a decision when the label carries none', () => {
         expect(catalogueNote([
-            { key: 'purchase_order', label: 'Procurement — Purchase Order', wire_voucher_type: 'Purchase Order', source: 'planned', count: null },
-        ])).toBe('Purchase Order: planned');
+            { key: 'purchase_order', label: 'Purchase Order (lives in Tally)', wire_voucher_type: 'Purchase Order', source: 'tally', erp_build: 'planned', count: null },
+            { key: 'sales_order', label: 'Sales Order (no such voucher type in the books)', wire_voucher_type: null, source: 'absent', erp_build: 'none', count: null },
+        ])).toEqual([
+            'Lives in Tally, not mirrored: Purchase Order',
+            'Purchase Order: ERP-originated version planned',
+            'Sales Order: no such voucher type in Tally',
+        ]);
     });
 });

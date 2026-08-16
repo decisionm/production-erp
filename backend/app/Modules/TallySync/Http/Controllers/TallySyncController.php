@@ -51,12 +51,12 @@ class TallySyncController extends Controller
     /**
      * One voucher with its full history — the same resource the list
      * returns, plus `history` (its tally_sync_events, oldest first). The
-     * relation is loaded HERE and nowhere else, which is what keeps
-     * `history` off the list.
+     * relation is loaded by the query service's show() and nowhere else,
+     * which is what keeps `history` off the list.
      */
     public function show(TallySyncEntry $tallySyncEntry): TallySyncEntryResource
     {
-        return TallySyncEntryResource::make($tallySyncEntry->load('events'));
+        return TallySyncEntryResource::make($this->queries->show($tallySyncEntry));
     }
 
     /**

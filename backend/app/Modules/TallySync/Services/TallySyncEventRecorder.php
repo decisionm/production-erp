@@ -8,7 +8,6 @@ use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Models\TallySyncEvent;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Str;
-use Laravel\Sanctum\PersonalAccessToken;
 
 /**
  * The only writer of tally_sync_events.
@@ -59,15 +58,20 @@ class TallySyncEventRecorder
     /**
      * Who did this, in the three shapes the table knows.
      *
-     * The sync AGENT authenticates with a Sanctum personal access token, and
-     * an installation is known by that token's NAME (one token per site by
-     * convention — the same identity agentLog() writes to the file). A
-     * staff member browsing the SPA carries Sanctum's TransientToken
-     * instead — not a token anyone issued and not a PersonalAccessToken —
-     * so they are recorded as the user they are. A token that carries no
-     * name identifies no installation, and falls back to the user too.
-     * Nobody at all is the system: an enqueue fired by a domain event, a
-     * backfill.
+     * The sync AGENT authenticates with a Sanctum personal access token
+     * carrying the agent's abilities (AgentIdentity: tally-sync:poll or
+     * tally-sync:report), and an installation is known by that token's NAME
+     * (one token per site by convention — the same identity agentLog()
+     * writes to the file). A staff member browsing the SPA carries
+     * Sanctum's TransientToken instead — not a token anyone issued and not
+     * a PersonalAccessToken — so they are recorded as the user they are.
+     * So is a person driving the API with a personal access token that
+     * LACKS the agent's abilities (CLAUDE.md #3 supports exactly that
+     * client): the token's CLASS alone used to type them "agent", which
+     * would light the Control Center's "Agent last action" from a laptop.
+     * A token that carries no name identifies no installation, and falls
+     * back to the user too. Nobody at all is the system: an enqueue fired
+     * by a domain event, a backfill.
      *
      * The label is the token's name or the user's name. Never the token.
      *
@@ -79,9 +83,9 @@ class TallySyncEventRecorder
             return [TallySyncEvent::ACTOR_SYSTEM, null, null];
         }
 
-        $token = $actor instanceof User ? $actor->currentAccessToken() : null;
+        $token = AgentIdentity::token($actor);
 
-        if ($token instanceof PersonalAccessToken && is_string($token->name) && $token->name !== '') {
+        if ($token !== null && is_string($token->name) && $token->name !== '') {
             return [TallySyncEvent::ACTOR_AGENT, $actor->getAuthIdentifier(), Str::limit($token->name, 120, '')];
         }
 

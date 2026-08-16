@@ -7,22 +7,28 @@ export type TallySyncStatus = 'pending' | 'synced' | 'failed' | 'dismissed';
  * back on every entry AND on every row of the summary's catalogue, so one
  * reader serves both.
  *
- * `source` is the honesty axis: 'erp' rows are built here and can have
- * entries; 'tally' rows live only in the accountant's books (Purchase,
- * Payment, Receipt, Contra, Credit/Debit Note, Sales Order) and can NEVER
- * have an entry — the page names them as "lives in Tally, not mirrored"
- * rather than showing a zero it never measured; 'planned' is Purchase
- * Order (Phase 6, not built). `erp_label_differs_from_wire` is true only
- * where the ERP's label is not the voucher type Tally receives — today the
- * per-batch production voucher, labelled "Manufacturing Journal" here but
- * posted as a Stock Journal.
+ * Two honesty axes, kept apart. `source` is where the transaction LIVES:
+ * 'erp' rows are built here and can have entries; 'tally' rows live in
+ * the accountant's books (Purchase, Purchase Order, Payment, Receipt,
+ * Contra, Credit/Debit Note) and can NEVER have an entry — the page names
+ * them as "lives in Tally, not mirrored" rather than showing a zero it
+ * never measured; 'absent' is Sales Order — no such voucher type exists in
+ * the books at all. `erp_build` is what the ERP has BUILT for it: 'built'
+ * for the six ERP categories, 'planned' for the ERP-originated Purchase
+ * Order (Phase 6), 'none' otherwise — so a Purchase Order can be in the
+ * books AND planned without one word having to say both.
+ * `erp_label_differs_from_wire` is true only where the ERP's label is not
+ * the voucher type Tally receives — today the per-batch production
+ * voucher, labelled "Manufacturing Journal" here but posted as a Stock
+ * Journal.
  */
 export interface TallyTransactionCategory {
     key: string;
     label: string;
     /** The exact <VOUCHERTYPENAME> on the wire; null when nothing emits one. */
     wire_voucher_type: string | null;
-    source: 'erp' | 'planned' | 'tally' | 'unknown';
+    source: 'erp' | 'tally' | 'absent' | 'unknown';
+    erp_build: 'built' | 'planned' | 'none';
     direction: 'erp_to_tally' | 'tally_to_erp' | 'none';
     source_module: string | null;
     erp_label_differs_from_wire: boolean;
@@ -39,7 +45,8 @@ export interface TallySyncEvent {
     direction: 'erp_to_tally' | 'tally_to_erp' | 'none';
     occurred_at: string | null;
     actor: {
-        type: 'user' | 'agent' | 'system' | string;
+        /** The three shapes the table knows (TallySyncEvent::ACTOR_*): a person, the agent by its token name, or nobody. */
+        type: 'user' | 'agent' | 'system';
         id: number | null;
         label: string | null;
     };
@@ -143,13 +150,14 @@ export interface TallySyncCounts {
 
 /**
  * A catalogue row with its measured count. `count` is null — not 0 — for
- * every 'tally' / 'planned' row: nothing was measured because nothing is
+ * every 'tally' / 'absent' row: nothing was measured because nothing is
  * mirrored, and a zero would claim "measured, none".
  */
 export interface TallySyncCategoryCount extends Partial<TallyTransactionCategory> {
     key: string;
     label: string;
     source: TallyTransactionCategory['source'];
+    erp_build: TallyTransactionCategory['erp_build'];
     wire_voucher_type: string | null;
     count: number | null;
 }
@@ -158,12 +166,24 @@ export interface TallySyncCategoryCount extends Partial<TallyTransactionCategory
 export interface TallySyncSummary {
     today: TallySyncCounts & { date: string };
     all_time: TallySyncCounts;
+    /**
+     * How many vouchers the release gate is holding RIGHT NOW, over the
+     * request's non-date filters. A state, not a window: `today.held` is
+     * bucketed inside today's business date, so the night shift's voucher —
+     * dated yesterday, held until 06:00 — is 0 there while it is 1 here.
+     */
+    held_now: number;
     by_category: TallySyncCategoryCount[];
-    /** Last time any agent touched the API, from the events table — null if never. */
+    /**
+     * The last thing the agent DID (a delivery, an ack, a failure report, a
+     * masters push), from the events table — null if never. An ACTION, not
+     * a contact: a heartbeat poll that finds nothing records no event, so
+     * an idle agent can be alive while this stands still.
+     */
     agent: {
-        last_contact_at: string | null;
-        last_contact_event: string | null;
-        last_contact_label: string | null;
+        last_action_at: string | null;
+        last_action_event: string | null;
+        last_action_label: string | null;
     };
     last_synced_at: string | null;
     last_masters_pull_at: string | null;
