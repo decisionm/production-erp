@@ -256,9 +256,14 @@ class SyncQueryFiltersTest extends TestCase
         $this->assertIds(['dn3', 'dn4'], 'q=dn-');
         $this->assertIds(['shift'], 'q=sj-2026');
         $this->assertIds(['batch'], 'q=SPE-'.$this->entries['batch']->syncable_id);
-        // Party name, a word from the middle, lower case.
+        // Party name, a word from the middle, lower case — a CUSTOMER, which
+        // is not FC-06, so it matches for this tally-sync-only reader.
         $this->assertIds(['dn3', 'inv', 'dn4'], 'q=aurobindo');
-        $this->assertIds(['grn'], 'q=reliance');
+        // A VENDOR is FC-06's second half (who supplied it — Owner/Accounts
+        // only): for this reader the search box is not an oracle on
+        // Receipt Notes, so the vendor's name finds nothing here. Finance
+        // finds it — SupplierIdentityVisibilityTest pins both halves.
+        $this->assertIds([], 'q=reliance');
         // Batch number (batch-mode vouchers carry it in the payload).
         $this->assertIds(['batch'], 'q=L1-M-20260722');
         // A LIKE wildcard typed by hand is a character, not a wildcard.

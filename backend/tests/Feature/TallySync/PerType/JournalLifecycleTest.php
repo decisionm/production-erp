@@ -133,8 +133,16 @@ class JournalLifecycleTest extends PerTypeLifecycleTestCase
         $this->assertNull($row['party']);
         $this->assertNull($row['item_summary']);
         $this->assertSame('journal', $row['category']['key']);
-        // A ledger line carries debit/credit, not rate/amount — the rate gate
-        // leaves the lines exactly as built for a viewer without finance.*.
-        $this->assertSame($entry->payload['lines'], $row['payload']['lines']);
+        // A ledger line carries debit/credit — money on the same resource
+        // as a Receipt Note's rate/amount, and gated by the same one rule
+        // (FC-06): a viewer without finance.* sees the ledger and the memo,
+        // never the figures — keys OMITTED, not nulled.
+        $this->assertSame(
+            [['ledger' => '1100 - Bank', 'memo' => 'to bank'], ['ledger' => '4000 - Sales', 'memo' => 'from sales']],
+            $row['payload']['lines'],
+        );
+        // The agent builds the voucher from them, so it receives them whole.
+        $agentRow = collect($this->asAgent()->getJson('/api/v1/tally-sync/pending')->assertOk()->json('data'))->firstWhere('id', $entry->id);
+        $this->assertSame($entry->payload['lines'], $agentRow['payload']['lines']);
     }
 }

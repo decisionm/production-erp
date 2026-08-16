@@ -11,6 +11,34 @@ use App\Modules\TallySync\Services\TransactionClassifier;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
+/**
+ * FC-06 ON THIS RESOURCE — BOTH HALVES. "Purchase rates and supplier details
+ * are Owner/Accounts only. Floor and sales logins never see what a material
+ * cost or who supplied it." ONE predicate decides who may
+ * (AgentIdentity::mayReadPurchaseDetails: finance.view / finance.manage, or
+ * the sync agent by its real token), judged ONCE per row and applied to
+ * every surface this resource emits, so no reader can be told two things:
+ *
+ *   RATES (every category — the keys are the same on the same resource)
+ *     payload.lines[].rate / amount / debit / credit, payload.total_amount
+ *       → OMITTED for a reader who may not (LINE_RATE_KEYS / TOTAL_RATE_KEYS)
+ *     summary / timeline / flags / mappings
+ *       → never carry money for ANY reader (EntryPresenter, EntryMappingSurface)
+ *
+ *   SUPPLIER IDENTITY (categories whose partyIsSupplier() — Receipt Note today)
+ *     root `party`                → null for a reader who may not (list and show alike)
+ *     payload.party_ledger / party_gstin
+ *                                 → OMITTED for a reader who may not (SUPPLIER_IDENTITY_KEYS)
+ *     summary.headline            → the party segment left out (EntryPresenter::summary)
+ *     mappings.party              → {name: null, state: 'withheld', note} (EntryMappingSurface)
+ *     A CUSTOMER on a Sales invoice / Delivery Note is not FC-06 and always reads.
+ *
+ * The AGENT is inside the predicate on purpose: it must receive the whole
+ * payload to build the voucher Tally is sent (receiptNote.ts writes
+ * PARTYLEDGERNAME, RATE, AMOUNT from it), so /pending hands it every key,
+ * byte-identical to what was stored (SyncPayloadRateVisibilityTest,
+ * SupplierIdentityVisibilityTest).
+ */
 class TallySyncEntryResource extends JsonResource
 {
     /**
@@ -21,32 +49,43 @@ class TallySyncEntryResource extends JsonResource
      * selling prices, not FC-06 — but they are the SAME keys on the SAME
      * resource, and one resource whose `rate` is secret on one row and open
      * on the next is a gate nobody can reason about, so they are gated
-     * alike. Production payloads (produced[] / consumed[]) carry quantities
-     * only and are untouched.
+     * alike. A Journal's `debit` / `credit` are money on the same resource
+     * too and ride the same rule for the same reason — one resource, one
+     * rule; the summary reads their SIDE and never their figure. Production
+     * payloads (produced[] / consumed[]) carry quantities only and are
+     * untouched.
      */
-    private const LINE_RATE_KEYS = ['rate', 'amount'];
+    private const LINE_RATE_KEYS = ['rate', 'amount', 'debit', 'credit'];
 
     private const TOTAL_RATE_KEYS = ['total_amount'];
+
+    /**
+     * The payload keys that name the supplier on a supplier-party voucher
+     * (TallyTransactionCategory::partyIsSupplier) — the vendor's name and
+     * GSTIN, as enqueueGoodsReceiptNote() writes them. FC-06's second half;
+     * OMITTED, like the rates, for a reader who may not. Left in place on
+     * every other category (a customer is not FC-06).
+     */
+    private const SUPPLIER_IDENTITY_KEYS = ['party_ledger', 'party_gstin'];
 
     public function toArray(Request $request): array
     {
         // Derived on read from the columns and payload already on the row —
         // no query, no Tally (TALLY-SYNC-CHAIN.md §3 "Classification").
         $classifier = app(TransactionClassifier::class);
+        $category = $classifier->classify($this->resource);
 
-        // Who may read the payload's rates: finance (the MaterialLotResource
-        // gate — the permission the Owner and Accounts hold and the store
-        // does not) or the sync AGENT, which has to receive the whole payload
-        // to build the voucher Tally is sent (receiptNote.ts reads line.rate
-        // and total_amount). The agent is recognised by its real token and
-        // its abilities (AgentIdentity), never by tokenCan() alone: a staff
-        // session's transient token answers can() TRUE for everything, and
-        // Phase 2's filters would otherwise make this list a purchase-rate
-        // archive searchable by vendor and date for anyone with
-        // tally-sync.view. Everyone else gets the payload with the rate
-        // keys OMITTED, not nulled — a null rate would read as "cost nothing".
-        $showsRates = ($request->user()?->hasAnyPermission(['finance.view', 'finance.manage']) ?? false)
-            || AgentIdentity::isAgent($request->user());
+        // THE ONE FC-06 VERDICT for this row and this reader (class docblock)
+        // — finance, or the sync agent by its real token (AgentIdentity, never
+        // tokenCan() alone: a staff session's transient token answers can()
+        // TRUE for everything, and Phase 2's filters would otherwise make
+        // this list a purchase-rate archive searchable by vendor and date
+        // for anyone with tally-sync.view). Everyone else gets the payload
+        // with the rate keys — and on a supplier-party voucher the supplier
+        // keys — OMITTED, not nulled: a null rate would read as "cost
+        // nothing", a null party as "no party".
+        $mayReadPurchaseDetails = AgentIdentity::mayReadPurchaseDetails($request->user());
+        $withholdsSupplier = $category->partyIsSupplier() && ! $mayReadPurchaseDetails;
 
         return [
             'id' => $this->id,
@@ -59,18 +98,22 @@ class TallySyncEntryResource extends JsonResource
             // (erp_label_differs_from_wire) where the ERP's label is not the
             // voucher type Tally receives. Same shape as
             // TallyTransactionCategory::catalogue() rows.
-            'category' => $classifier->classify($this->resource)->describe(),
+            'category' => $category->describe(),
             // The voucher's own facts, lifted out of the payload so a list
             // can show and filter them without every client re-parsing the
             // raw payload: business_date is voucher_date, document_number is
             // voucher_number, party is the customer/vendor (null for
-            // production and journal), item_summary is {first, count} over
-            // the distinct item names the voucher moves.
+            // production and journal — and null for the VENDOR on a
+            // supplier-party voucher when this reader may not see who
+            // supplied it, FC-06), item_summary is {first, count} over the
+            // distinct item names the voucher moves.
             'business_date' => $classifier->businessDate($this->resource),
             'document_number' => $classifier->documentNumber($this->resource),
-            'party' => $classifier->party($this->resource),
+            'party' => $withholdsSupplier ? null : $classifier->party($this->resource),
             'item_summary' => $classifier->itemSummary($this->resource),
-            'payload' => $showsRates ? $this->payload : $this->payloadWithoutRates($this->payload),
+            'payload' => $mayReadPurchaseDetails
+                ? $this->payload
+                : $this->payloadWithoutPurchaseDetails($this->payload, $withholdsSupplier),
             'status' => $this->status->value,
             'attempts' => $this->attempts,
             'error_message' => $this->error_message,
@@ -104,18 +147,24 @@ class TallySyncEntryResource extends JsonResource
             // were. `flags` (unvalidated builder, order reference not emitted,
             // label differs from wire, held) is on EVERY response: it costs no
             // query and the list's Sales rows need the unvalidated banner.
-            // None of the three is finance-gated, and none may carry a rate,
-            // an amount or a total (FC-06) — quantities and counts only; the
-            // presenter's docblock is the rule, EntryPresenterTest the proof.
-            'summary' => $this->when($this->relationLoaded('events'), fn () => app(EntryPresenter::class)->summary($this->resource)),
+            // None of the three carries a rate, an amount or a total for ANY
+            // reader (FC-06) — quantities and counts only; the presenter's
+            // docblock is the rule, EntryPresenterTest the proof. The summary
+            // takes this row's FC-06 verdict for the supplier segment.
+            'summary' => $this->when($this->relationLoaded('events'), fn () => app(EntryPresenter::class)->summary($this->resource, $mayReadPurchaseDetails)),
             'timeline' => $this->when($this->relationLoaded('events'), fn () => app(EntryPresenter::class)->timeline($this->resource)),
-            'flags' => app(EntryPresenter::class)->flags($this->resource),
+            // Cast to an object so the wire shape is stable: an empty PHP
+            // array serialises as `[]` and a non-empty one as `{}`, and a
+            // client typed to `Record<string, …>` should never meet a list.
+            'flags' => (object) app(EntryPresenter::class)->flags($this->resource),
             // The append-only history (tally_sync_events), oldest first —
             // ONLY when the caller loaded it, which is the show endpoint and
             // nothing else. The list stays as light as it was: a page of 200
-            // vouchers must not drag 200 timelines with it, and every other
+            // vouchers must not drag 200 timelines with it. Every other
             // response of this resource (retry, dismiss, release, pending)
-            // keeps its exact prior shape.
+            // keeps its prior shape PLUS `flags` (Phase 3) — the agent's
+            // /pending included; it does no strict parse of the row and
+            // reads only what it always read (TALLY-SYNC-CHAIN.md §3).
             'history' => TallySyncEventResource::collection($this->whenLoaded('events')),
             // `mappings` + `mapping_summary` — for every NAME this voucher
             // hands Tally (each line's item and godown, the ledgers, the
@@ -126,24 +175,29 @@ class TallySyncEntryResource extends JsonResource
             // the SAME gate as `history` (the show endpoint is the only
             // caller that loads `events`), so the list and every action
             // response stay exactly as they were, and one computation feeds
-            // both keys. Carries names, ids, GUIDs, states and notes only —
-            // never a rate (FC-06 holds for a tally-sync.view reader).
-            $this->mergeWhen($this->relationLoaded('events'), fn () => app(EntryMappingSurface::class)->for($this->resource)),
+            // both keys. Carries names, ids, GUIDs, states, counts and notes
+            // only — never a rate — and takes this row's FC-06 verdict for
+            // the party row (withheld for a reader who may not see the vendor).
+            $this->mergeWhen($this->relationLoaded('events'), fn () => app(EntryMappingSurface::class)->for($this->resource, $mayReadPurchaseDetails)),
         ];
     }
 
     /**
-     * The payload as a reader without finance sees it: every rate-carrying
-     * key removed — `rate` and `amount` off each of lines[], `total_amount`
-     * off the top — and nothing else touched. Keys are unset, never set to
+     * The payload as a reader who may not read purchase details sees it:
+     * every rate-carrying key removed — `rate`, `amount`, `debit`, `credit`
+     * off each of lines[], `total_amount` off the top — and, on a
+     * supplier-party voucher, the supplier's `party_ledger` and
+     * `party_gstin` too; nothing else touched. Keys are unset, never set to
      * null (see the class note on LINE_RATE_KEYS). Anything that is not
      * the shape the builders write (a payload with no lines, a line that is
      * not an array) passes through as it is.
      *
      * @param  array<string, mixed>|null  $payload
+     * @param  bool  $withholdsSupplier  the row's category names a supplier as
+     *                                   its party AND this reader may not see it
      * @return array<string, mixed>|null
      */
-    private function payloadWithoutRates(?array $payload): ?array
+    private function payloadWithoutPurchaseDetails(?array $payload, bool $withholdsSupplier): ?array
     {
         if ($payload === null) {
             return null;
@@ -151,6 +205,12 @@ class TallySyncEntryResource extends JsonResource
 
         foreach (self::TOTAL_RATE_KEYS as $key) {
             unset($payload[$key]);
+        }
+
+        if ($withholdsSupplier) {
+            foreach (self::SUPPLIER_IDENTITY_KEYS as $key) {
+                unset($payload[$key]);
+            }
         }
 
         if (is_array($payload['lines'] ?? null)) {

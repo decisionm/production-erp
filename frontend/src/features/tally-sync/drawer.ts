@@ -104,29 +104,39 @@ export interface MappingBadge {
 }
 
 /**
- * The count the backend wrote at the head of an ambiguous note — "3 items
- * in this ERP share the name …", "2 warehouses in this ERP share …" — read
- * back out of it. The count is the server's (it counted the rows); nothing
- * here counts anything.
+ * How many rows share an ambiguous name, and what to call them. The COUNT
+ * is the server's structured `shared_count` (LineMappingResolver counted
+ * the rows); the regex over the note's head — "3 items in this ERP share
+ * the name …", "2 warehouses in this ERP share …" — is kept only as the
+ * FALLBACK for a row that carries no `shared_count`, and to read the noun.
+ * Nothing here counts anything.
  */
-function sharedNameCount(note: string | null | undefined): { count: number; noun: string } | null {
+function sharedNameCount(note: string | null | undefined, sharedCount?: number | null): { count: number; noun: string } | null {
     const match = /^(\d+)\s+([a-z]+)\b/i.exec(note ?? '');
+
+    if (typeof sharedCount === 'number') {
+        return { count: sharedCount, noun: match?.[2] ?? 'rows' };
+    }
 
     return match ? { count: Number(match[1]), noun: match[2] } : null;
 }
 
 /**
  * How ONE name resolved, as a Tag: one colour and one wording per state
- * (LineMappingResolver's six), the backend's note riding as the tooltip.
- * The colours grade the CLAIM the ERP can make, not a verdict on Tally:
- * green is a GUID (the strongest claim without reading Tally), gold is
- * "posts if a master so named exists there — this ERP cannot know", red is
- * "will not post" (nothing by that name; or a local fixture, which never
- * posts whatever it carries), orange is "more than one row shares this
- * name — Tally would match one; the ERP cannot say which", grey is "nothing
- * to map". An unknown state is passed through as grey text, never thrown on.
+ * (LineMappingResolver's six, plus the surface's `withheld`), the backend's
+ * note riding as the tooltip. The colours grade the CLAIM the ERP can make,
+ * not a verdict on Tally: green is a GUID (the strongest claim without
+ * reading Tally — and its note still says "posts if that master still
+ * carries this name; the ERP cannot know"), gold is "posts if a master so
+ * named exists there — this ERP cannot know", red is "will not post"
+ * (nothing by that name; or a local fixture, which never posts whatever it
+ * carries), orange is "more than one row shares this name — Tally would
+ * match one; the ERP cannot say which", grey is "nothing to map" or
+ * "withheld (FC-06)" — the vendor row of a Receipt Note for a reader who
+ * may not see who supplied it. An unknown state is passed through as grey
+ * text, never thrown on.
  */
-export function mappingBadge(state: string, note?: string | null): MappingBadge {
+export function mappingBadge(state: string, note?: string | null, sharedCount?: number | null): MappingBadge {
     const title = note ?? null;
 
     switch (state) {
@@ -141,13 +151,17 @@ export function mappingBadge(state: string, note?: string | null): MappingBadge 
         case 'ambiguous': {
             // The count is the backend's own (it counted the rows sharing
             // the name); repeated here, never rounded to "mapped" or "missing".
-            const shared = sharedNameCount(note);
+            const shared = sharedNameCount(note, sharedCount);
             const head = shared ? `${shared.count} ${shared.noun} share this name` : 'ambiguous';
 
             return { color: 'orange', text: `${head} — Tally would match one; the ERP cannot say which`, title };
         }
         case 'none':
             return { color: 'default', text: 'none', title };
+        case 'withheld':
+            // FC-06's second half: the row is kept and says why it is empty —
+            // a blank would read as "no party", which is a different claim.
+            return { color: 'default', text: 'withheld (FC-06)', title };
         default:
             return { color: 'default', text: state, title };
     }

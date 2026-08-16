@@ -38,6 +38,7 @@ describe('mappingBadge', () => {
             'ambiguous',
             '3 items in this ERP share the name "500ml PET Bottle" (1 with a Tally GUID, 0 local fixtures). '
                 + 'Tally would match one of them by name; this ERP cannot say which.',
+            3,
         );
         expect(items.color).toBe('orange');
         expect(items.text).toBe('3 items share this name — Tally would match one; the ERP cannot say which');
@@ -45,18 +46,43 @@ describe('mappingBadge', () => {
         const godowns = mappingBadge(
             'ambiguous',
             '2 warehouses in this ERP share the name "Store". Tally would match one godown by name; this ERP cannot say which.',
+            2,
         );
         expect(godowns.text).toBe('2 warehouses share this name — Tally would match one; the ERP cannot say which');
     });
 
-    it('still says ambiguous when the note carries no count', () => {
+    it('takes the count from the structured shared_count, not the note, when both are present', () => {
+        // The server's number wins over anything the prose happens to say —
+        // the note is a sentence, shared_count is the count.
+        const badge = mappingBadge('ambiguous', '3 items in this ERP share the name "x". Tally would match one of them by name; this ERP cannot say which.', 4);
+        expect(badge.text).toBe('4 items share this name — Tally would match one; the ERP cannot say which');
+        // With a count and no note at all, the noun is generic.
+        expect(mappingBadge('ambiguous', null, 2).text).toBe('2 rows share this name — Tally would match one; the ERP cannot say which');
+    });
+
+    it('falls back to the note when no shared_count is sent, and still says ambiguous when neither carries a count', () => {
+        expect(mappingBadge('ambiguous', '2 warehouses in this ERP share the name "Store".').text)
+            .toBe('2 warehouses share this name — Tally would match one; the ERP cannot say which');
         expect(mappingBadge('ambiguous', null).text).toBe('ambiguous — Tally would match one; the ERP cannot say which');
+        expect(mappingBadge('ambiguous', null, null).text).toBe('ambiguous — Tally would match one; the ERP cannot say which');
         expect(mappingBadge('ambiguous').color).toBe('orange');
     });
 
-    it('carries the backend note as the tooltip and never invents one for identity', () => {
+    it('says withheld (FC-06) for a supplier row this reader may not see, with the server note as the tooltip', () => {
+        const badge = mappingBadge('withheld', 'The supplier on this voucher is withheld: supplier identity is Owner/Accounts only (FC-06).');
+        expect(badge).toEqual({
+            color: 'default',
+            text: 'withheld (FC-06)',
+            title: 'The supplier on this voucher is withheld: supplier identity is Owner/Accounts only (FC-06).',
+        });
+    });
+
+    it('carries the backend note as the tooltip and never invents one', () => {
         expect(mappingBadge('identity', '"Day Bin" is an internal location; its lines post under its Tally-known ancestor "RM Store".').title)
             .toContain('Tally-known ancestor');
+        // Every identity now carries a note from the server ("recorded when
+        // masters were last pulled … this ERP cannot know that"); a row
+        // without one still gets no invented tooltip.
         expect(mappingBadge('identity').title).toBeNull();
         expect(mappingBadge('name_only', 'x is carried as a name only').title).toBe('x is carried as a name only');
     });

@@ -20,15 +20,29 @@ use Throwable;
  * (TALLY-SYNC-CHAIN.md §3 "Classification, derived not stored"). MASTER-PLAN
  * P3-02 (summary) and P3-03 (timeline).
  *
- * WHAT THIS CLASS NEVER PUTS IN A SENTENCE: a rate, a line amount, a bill
- * total, a debit or a credit figure. The summary and the timeline are read
- * by anyone holding tally-sync.view — they are NOT behind the finance gate
- * TallySyncEntryResource puts on the payload — so FC-06 applies to every
- * string built here: quantities and counts only, never money. The payload
- * keys read for that are the quantity/name keys of TransactionClassifier's
- * builder table (item, quantity, godown, ledger, shift, batch_number,
- * entry_ids); `rate`, `amount`, `total_amount`, `debit`, `credit` are
- * consulted for nothing but the SIDE of a journal line, and never printed.
+ * FC-06 HAS TWO HALVES and this class is judged against both. "Purchase
+ * rates and supplier details are Owner/Accounts only. Floor and sales logins
+ * never see what a material cost or who supplied it."
+ *
+ *   - RATES: what this class NEVER puts in a sentence — a rate, a line
+ *     amount, a bill total, a debit or a credit figure. The summary and the
+ *     timeline are read by anyone holding tally-sync.view — they are NOT
+ *     behind the finance gate TallySyncEntryResource puts on the payload —
+ *     so every string built here is quantities and counts only, never
+ *     money, for EVERY reader. The payload keys read for that are the
+ *     quantity/name keys of TransactionClassifier's builder table (item,
+ *     quantity, godown, ledger, shift, batch_number, entry_ids); `rate`,
+ *     `amount`, `total_amount`, `debit`, `credit` are consulted for nothing
+ *     but the SIDE of a journal line, and never printed.
+ *   - SUPPLIER IDENTITY: the party segment of the headline names the
+ *     counter-party. On a Receipt Note (any category whose
+ *     partyIsSupplier()) that is the VENDOR, so summary() takes the
+ *     resource's one verdict (AgentIdentity::mayReadPurchaseDetails — the
+ *     SAME predicate that gates the payload's rates) and LEAVES THE SEGMENT
+ *     OUT for a reader who may not. A customer on a Sales invoice or a
+ *     Delivery Note is not FC-06 and always reads. This class does not
+ *     look at the request itself: the resource judges once and passes the
+ *     boolean, so summary and payload can never disagree about one reader.
  *
  * Nothing here queries Tally, the syncable, or any other module. The one
  * relation touched is the entry's own events (loaded by the show endpoint;
@@ -39,12 +53,22 @@ use Throwable;
 class EntryPresenter
 {
     /**
-     * Where the sales builder's own warning lives — quoted below, verbatim,
-     * so the flag says what the code says and not a paraphrase of it.
+     * Where each agent builder's own warning lives — quoted below, verbatim,
+     * so the flag says what the code says and not a paraphrase of it. All
+     * four non-production builders open with the SAME line ("BEST-EFFORT
+     * TEMPLATE — NOT YET VALIDATED AGAINST A REAL TALLY INSTANCE"; read them,
+     * they are not edited from here); the production builders do not.
      */
     private const SALES_BUILDER = 'tally-sync-agent/src/tally/voucherBuilders/salesInvoice.ts';
 
     private const RECEIPT_NOTE_BUILDER = 'tally-sync-agent/src/tally/voucherBuilders/receiptNote.ts';
+
+    private const DELIVERY_NOTE_BUILDER = 'tally-sync-agent/src/tally/voucherBuilders/deliveryNote.ts';
+
+    private const JOURNAL_BUILDER = 'tally-sync-agent/src/tally/voucherBuilders/journalEntry.ts';
+
+    /** The line every one of the four carries, verbatim (salesInvoice.ts:19, receiptNote.ts:17, deliveryNote.ts:16, journalEntry.ts:13). */
+    private const UNVALIDATED_LINE = 'BEST-EFFORT TEMPLATE — NOT YET VALIDATED AGAINST A REAL TALLY INSTANCE';
 
     /**
      * The entry columns that stand in for an event when no event exists —
@@ -83,11 +107,19 @@ class EntryPresenter
      *   <what it is + document number> · <party | shift | batch> · <business date> · <counts> · <status>
      *
      * A segment the payload cannot fill is left out, never invented (a
-     * journal has no party; an unclassified entry has no counts).
+     * journal has no party; an unclassified entry has no counts) — and so
+     * is the party segment of a supplier-party voucher for a reader who may
+     * not read purchase details (FC-06, class docblock).
      *
+     * @param  bool  $mayReadPurchaseDetails  the resource's ONE verdict
+     *                                        (AgentIdentity::mayReadPurchaseDetails).
+     *                                        Defaults to false — fail-closed:
+     *                                        a caller that forgets to say
+     *                                        withholds the vendor rather
+     *                                        than leaking it.
      * @return array{headline: string, lines: list<string>}
      */
-    public function summary(TallySyncEntry $entry): array
+    public function summary(TallySyncEntry $entry, bool $mayReadPurchaseDetails = false): array
     {
         $category = $this->classifier->classify($entry);
         $payload = is_array($entry->payload) ? $entry->payload : [];
@@ -97,7 +129,9 @@ class EntryPresenter
         $who = match ($category) {
             TallyTransactionCategory::ProductionStockJournalShift => $this->prefixed('Shift ', $this->string($payload, 'shift')),
             TallyTransactionCategory::ProductionStockJournalBatch => $this->prefixed('batch ', $this->string($payload, 'batch_number')),
-            default => $this->classifier->party($entry),
+            // The vendor on a Receipt Note is FC-06's "who supplied it":
+            // left out (not blanked, not replaced) unless the reader may.
+            default => $category->partyIsSupplier() && ! $mayReadPurchaseDetails ? null : $this->classifier->party($entry),
         };
         if ($who !== null) {
             $segments[] = $who;
@@ -423,6 +457,7 @@ class EntryPresenter
      * shares the syncable the resource's `hold` already loaded.
      *
      *   unvalidated_builder          the agent's builder for this category says, in its own docblock, that it is unvalidated
+     *                                (all four non-production builders do; Sales additionally names the GST gap and DEC-20260809-003)
      *   order_reference_not_emitted  a Receipt Note carrying tally_order_no / order_due_dates the agent's builder does not emit
      *   label_differs_from_wire      the ERP's label is not the voucher type Tally receives
      *   held                         the release gate is holding this shift voucher right now
@@ -435,17 +470,43 @@ class EntryPresenter
         $payload = is_array($entry->payload) ? $entry->payload : [];
         $flags = [];
 
-        // salesInvoice.ts:19-32, quoted — its own words, not ours. Sales
-        // stays Tally-originated (DEC-20260809-003), so this is a warning
-        // against use, not an invitation to fix and post.
-        if ($category === TallyTransactionCategory::SalesInvoice) {
-            $flags['unvalidated_builder'] = [
-                'note' => 'The agent\'s Sales voucher builder is, in its own words, a "BEST-EFFORT TEMPLATE — NOT YET VALIDATED '
-                    .'AGAINST A REAL TALLY INSTANCE" that "doesn\'t yet emit GST tax ledger entries (CGST/SGST/IGST)". '
-                    .'Real sales are invoiced in Tally (DEC-20260809-003); do not post real invoices from the ERP while that decision stands.',
+        // Each builder's own words, not ours — the four non-production
+        // builders all open with the same unvalidated line, so all four
+        // categories carry the flag, each naming its own file. Sales
+        // additionally quotes its GST gap (salesInvoice.ts:28-32) and the
+        // decision that keeps real sales in Tally (DEC-20260809-003): a
+        // warning against use, not an invitation to fix and post. The
+        // production builders (manufacturingJournal.ts / stockJournal.ts)
+        // carry no such line and are not flagged.
+        $unvalidated = match ($category) {
+            TallyTransactionCategory::SalesInvoice => [
+                'note' => 'The agent\'s Sales voucher builder is, in its own words, a "'.self::UNVALIDATED_LINE.'" that '
+                    .'"doesn\'t yet emit GST tax ledger entries (CGST/SGST/IGST)". Real sales are invoiced in Tally '
+                    .'(DEC-20260809-003); do not post real invoices from the ERP while that decision stands.',
                 'builder' => self::SALES_BUILDER,
                 'decision' => 'DEC-20260809-003',
-            ];
+            ],
+            TallyTransactionCategory::ReceiptNote => [
+                'note' => 'The agent\'s Receipt Note voucher builder is, in its own words, a "'.self::UNVALIDATED_LINE.'" — '
+                    .'"Reverse-engineer against a real export before trusting it": ISDEEMEDPOSITIVE / batch / godown tag '
+                    .'names vary by Tally version.',
+                'builder' => self::RECEIPT_NOTE_BUILDER,
+            ],
+            TallyTransactionCategory::DeliveryNote => [
+                'note' => 'The agent\'s Delivery Note voucher builder is, in its own words, a "'.self::UNVALIDATED_LINE.'" — '
+                    .'"Validate the tag structure against a real export".',
+                'builder' => self::DELIVERY_NOTE_BUILDER,
+            ],
+            TallyTransactionCategory::Journal => [
+                'note' => 'The agent\'s Journal voucher builder is, in its own words, a "'.self::UNVALIDATED_LINE.'" — '
+                    .'"more likely to be close to correct as-is, but still confirm against a real export before trusting it '
+                    .'in production".',
+                'builder' => self::JOURNAL_BUILDER,
+            ],
+            default => null,
+        };
+        if ($unvalidated !== null) {
+            $flags['unvalidated_builder'] = $unvalidated;
         }
 
         // TallySyncService::enqueueGoodsReceiptNote() rides tally_order_no /

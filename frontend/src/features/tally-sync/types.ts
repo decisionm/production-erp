@@ -92,8 +92,13 @@ export interface TimelineItem {
  * due. Never carries a price.
  */
 export interface EntryFlags {
-    /** The agent's Sales builder says, in its own docblock, that it is unvalidated and emits no GST lines (DEC-20260809-003). */
-    unvalidated_builder?: { note: string; builder: string; decision: string };
+    /**
+     * The agent's builder for this category says, in its own docblock, that it is a
+     * "BEST-EFFORT TEMPLATE — NOT YET VALIDATED AGAINST A REAL TALLY INSTANCE" — all
+     * four non-production builders do; Sales additionally names its GST gap and the
+     * decision that keeps real sales in Tally (`decision`, DEC-20260809-003).
+     */
+    unvalidated_builder?: { note: string; builder: string; decision?: string };
     /** A Receipt Note carrying tally_order_no / order_due_dates that receiptNote.ts does not emit. */
     order_reference_not_emitted?: { note: string; builder: string; tally_order_no: string | null; order_due_dates: number };
     /** The ERP's label ("Manufacturing Journal") is not the voucher type Tally receives ("Stock Journal"). */
@@ -109,20 +114,25 @@ export interface EntryFlags {
  * Derived on every read, stored nowhere: a name unmapped yesterday and
  * mapped today reads as mapped today.
  *
- *   identity   a row carrying a Tally GUID (or, for a ledger role, a configured mapping)
+ *   identity   a row carrying a Tally GUID (or, for a ledger role, a configured mapping) — and its note still
+ *              says the GUID was recorded at the last masters pull and Tally matches by name; the ERP cannot know
  *   name_only  a row exists by that name but carries no GUID — Tally matches by name and the ERP cannot know if a master so named exists there
  *   unmapped   no row by that name at all
  *   fixture    a LOCAL- rehearsal product — never postable whatever it carries
- *   ambiguous  more than one row shares the name — Tally would match one; the ERP cannot say which (the count is in `note`)
+ *   ambiguous  more than one row shares the name — Tally would match one; the ERP cannot say which (the count is `shared_count`, and in `note`)
  *   none       the line carries no name for that dimension (a Sales line has no godown; a Journal line has no item)
+ *   withheld   NOT a resolver state: the party row of a supplier-party voucher (a Receipt Note) for a reader who may
+ *              not see who supplied it (FC-06) — the name is null and the note says why (EntryMappingSurface)
  */
-export type MappingState = 'identity' | 'name_only' | 'unmapped' | 'fixture' | 'ambiguous' | 'none';
+export type MappingState = 'identity' | 'name_only' | 'unmapped' | 'fixture' | 'ambiguous' | 'none' | 'withheld';
 
 export interface ItemMapping {
     name: string | null;
     state: MappingState;
     item_id: number | null;
     tally_stock_item_guid: string | null;
+    /** How many ERP rows share the name — set on `ambiguous` only, null otherwise; the server counted, nothing here parses. */
+    shared_count: number | null;
     note: string | null;
 }
 
@@ -134,6 +144,8 @@ export interface GodownMapping {
     tally_guid: string | null;
     /** How an identity was reached: the warehouse's own GUID, a Tally-linked ancestor, or the sole linked godown. */
     resolved_via: 'self' | 'ancestor' | 'sole_linked' | null;
+    /** How many ERP rows share the name — set on `ambiguous` only, null otherwise. */
+    shared_count: number | null;
     note: string | null;
 }
 
@@ -159,8 +171,8 @@ export interface EntryMappings {
     sales_ledger: LedgerMapping | null;
 }
 
-/** How many names landed in each counted state (`none` is not a mapping outcome, so it is not counted). */
-export type MappingSummary = Record<Exclude<MappingState, 'none'>, number>;
+/** How many names landed in each counted state (`none` is not a mapping outcome and `withheld` was not shown, so neither is counted). */
+export type MappingSummary = Record<Exclude<MappingState, 'none' | 'withheld'>, number>;
 
 export interface TallySyncEntry {
     id: number;
@@ -177,7 +189,12 @@ export interface TallySyncEntry {
     business_date: string | null;
     /** The number staff search for in Tally (payload voucher_number). */
     document_number: string | null;
-    /** Customer/vendor ledger; null for production and journal vouchers, which carry none. */
+    /**
+     * Customer/vendor ledger; null for production and journal vouchers, which
+     * carry none — and null for the VENDOR on a Receipt Note when this reader
+     * may not see who supplied it (FC-06; the show endpoint's mappings.party
+     * then says `withheld`).
+     */
     party: string | null;
     /** First item name + how many DISTINCT items the voucher moves; null when it names none. */
     item_summary: { first: string; count: number } | null;

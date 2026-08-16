@@ -30,7 +30,12 @@ use Illuminate\Database\Eloquent\Collection;
  *
  *   identity   — the name resolved to a row that carries a Tally GUID (or,
  *                for a ledger role, to a configured mapping). The strongest
- *                claim this ERP can make without reading Tally.
+ *                claim this ERP can make without reading Tally — and still
+ *                not "confirmed present in Tally": the GUID was recorded
+ *                when masters were last pulled, and Tally matches the
+ *                voucher by NAME, so the line posts if that master still
+ *                carries this name. The identity note says exactly that,
+ *                so a green badge is never read as a Tally-side fact.
  *   name_only  — a row exists by that name but carries no Tally GUID and
  *                aliases to nothing Tally-known. Tally matches by name, so
  *                the line posts IF a master so named exists there — and this
@@ -45,16 +50,27 @@ use Illuminate\Database\Eloquent\Collection;
  *                2026_07_18_155120/155121), so this can happen; Tally would
  *                still match exactly one by name, and this ERP cannot say
  *                which — so it says that, with the counts, and picks none.
- *                Detected by count; no table needed.
+ *                Detected by count; no table needed. The count rides the
+ *                state as `shared_count` (null in every other state) so a
+ *                reader never has to parse it back out of the note; the
+ *                candidate rows themselves are itemCandidates(), for the
+ *                caller that must judge the whole set (the preview reads
+ *                uom and packing kind from ALL of them, fail-closed).
  *   none       — the line carries no name for that dimension (a Sales line
  *                has no godown; a Journal line has no item).
  *
- * WHAT THIS CLASS NEVER DOES: match fuzzily (exact name, case as stored,
- * nothing cleverer), query Tally, or reach into the syncable model to fill a
- * gap. And it is cheap on purpose — one query per DISTINCT name, memoised
- * for the instance's lifetime (one request / one preview) — because the
- * show endpoint calls it once per line of the voucher and a shift voucher
- * names the same resin and the same godown on most of its lines.
+ * WHAT THIS CLASS NEVER DOES: match fuzzily (one `where name = ?` — equality
+ * exactly as the database compares it, and nothing cleverer here: MySQL's
+ * utf8mb4_unicode_ci folds case and trailing spaces, SQLite does not, and
+ * this class neither adds to nor subtracts from that), query Tally, or reach
+ * into the syncable model to fill a gap. And it is cheap on purpose — one
+ * query per DISTINCT name, memoised for the instance's lifetime (one request
+ * / one preview) — because the show endpoint calls it once per line of the
+ * voucher and a shift voucher names the same resin and the same godown on
+ * most of its lines. There is deliberately NO bulk whereIn pre-warm: the memo
+ * is keyed by the name as asked, and regrouping a whereIn's rows under the
+ * asked names would mean re-implementing the database's collation in PHP —
+ * the one thing above this class refuses to do.
  */
 class LineMappingResolver
 {
@@ -102,7 +118,7 @@ class LineMappingResolver
     /** @var array<string, Collection<int, Item>> the item rows sharing a name, once per name */
     private array $itemRows = [];
 
-    /** @var array<string, array{state: string, warehouse_id: ?int, tally_guid: ?string, resolved_via: ?string, note: ?string}> */
+    /** @var array<string, array{state: string, warehouse_id: ?int, tally_guid: ?string, resolved_via: ?string, shared_count: ?int, note: ?string}> */
     private array $godownStates = [];
 
     /** @var array<string, ?string> role value => the mapped Tally ledger name (null = unmapped), once per role */
@@ -118,7 +134,7 @@ class LineMappingResolver
     /**
      * The mapping state of one stock-item name.
      *
-     * @return array{state: string, item_id: ?int, tally_stock_item_guid: ?string, note: ?string}
+     * @return array{state: string, item_id: ?int, tally_stock_item_guid: ?string, shared_count: ?int, note: ?string}
      */
     public function item(?string $name): array
     {
@@ -138,6 +154,7 @@ class LineMappingResolver
 
             return $this->itemState(
                 self::STATE_AMBIGUOUS,
+                sharedCount: $rows->count(),
                 note: "{$rows->count()} items in this ERP share the name \"{$name}\" ({$withGuid} with a Tally GUID, "
                     ."{$fixtures} local fixtures). Tally would match one of them by name; this ERP cannot say which.",
             );
@@ -159,7 +176,16 @@ class LineMappingResolver
         }
 
         if ($item->tally_stock_item_guid !== null) {
-            return $this->itemState(self::STATE_IDENTITY, $item);
+            // Said even here: the GUID is what THIS ERP recorded at the last
+            // masters pull, not a reading of Tally now — the voucher will
+            // still be matched by name.
+            return $this->itemState(
+                self::STATE_IDENTITY,
+                $item,
+                note: "\"{$name}\" is linked to Tally stock item {$item->tally_stock_item_guid}, recorded when masters were "
+                    .'last pulled; Tally matches by name, so this line posts if that master still carries this name — '
+                    .'this ERP cannot know that.',
+            );
         }
 
         return $this->itemState(
@@ -187,6 +213,25 @@ class LineMappingResolver
         return $rows->count() === 1 ? $rows->first() : null;
     }
 
+    /**
+     * EVERY item row a name resolves to — empty for none, one for the
+     * usual case, several when the name is ambiguous. For the caller that
+     * must not let "no single row" turn into "no row": the preview reads
+     * uom and packing kind from the whole set so an ambiguous packing
+     * material still trips the packing-store blocker. Same memoised lookup
+     * as item() / itemRow(); no second query.
+     *
+     * @return Collection<int, Item>
+     */
+    public function itemCandidates(?string $name): Collection
+    {
+        if ($name === null || $name === '') {
+            return new Collection;
+        }
+
+        return $this->itemRowsNamed($name);
+    }
+
     /** @return Collection<int, Item> */
     private function itemRowsNamed(string $name): Collection
     {
@@ -199,14 +244,17 @@ class LineMappingResolver
     }
 
     /**
-     * @return array{state: string, item_id: ?int, tally_stock_item_guid: ?string, note: ?string}
+     * @return array{state: string, item_id: ?int, tally_stock_item_guid: ?string, shared_count: ?int, note: ?string}
      */
-    private function itemState(string $state, ?Item $item = null, ?string $note = null): array
+    private function itemState(string $state, ?Item $item = null, ?string $note = null, ?int $sharedCount = null): array
     {
         return [
             'state' => $state,
             'item_id' => $item?->id,
             'tally_stock_item_guid' => $item?->tally_stock_item_guid,
+            // How many rows share the name — only ever set on `ambiguous`,
+            // structured so no reader parses it back out of the note.
+            'shared_count' => $sharedCount,
             'note' => $note,
         ];
     }
@@ -221,7 +269,7 @@ class LineMappingResolver
      * godown in a one-godown system — and `resolved_via` says which rule
      * carried it there.
      *
-     * @return array{state: string, warehouse_id: ?int, tally_guid: ?string, resolved_via: ?string, note: ?string}
+     * @return array{state: string, warehouse_id: ?int, tally_guid: ?string, resolved_via: ?string, shared_count: ?int, note: ?string}
      */
     public function godown(?string $name): array
     {
@@ -233,7 +281,7 @@ class LineMappingResolver
     }
 
     /**
-     * @return array{state: string, warehouse_id: ?int, tally_guid: ?string, resolved_via: ?string, note: ?string}
+     * @return array{state: string, warehouse_id: ?int, tally_guid: ?string, resolved_via: ?string, shared_count: ?int, note: ?string}
      */
     private function resolveGodown(string $name): array
     {
@@ -246,6 +294,7 @@ class LineMappingResolver
         if ($rows->count() > 1) {
             return $this->godownState(
                 self::STATE_AMBIGUOUS,
+                sharedCount: $rows->count(),
                 note: "{$rows->count()} warehouses in this ERP share the name \"{$name}\". Tally would match one godown "
                     .'by name; this ERP cannot say which.',
             );
@@ -265,8 +314,14 @@ class LineMappingResolver
             );
         }
 
+        // The identity caveat, in every identity note: the GUID is what
+        // this ERP recorded at the last masters pull, and Tally matches the
+        // voucher's godown by NAME — so even a green godown "posts if".
+        $recorded = "is linked to Tally godown {$resolved->tally_guid}, recorded when masters were last pulled; Tally "
+            .'matches by name, so this line posts if that godown still carries this name — this ERP cannot know that.';
+
         if ($resolved->is($warehouse)) {
-            return $this->godownState(self::STATE_IDENTITY, $warehouse, $resolved, self::VIA_SELF);
+            return $this->godownState(self::STATE_IDENTITY, $warehouse, $resolved, self::VIA_SELF, note: "\"{$name}\" {$recorded}");
         }
 
         $via = $this->isAncestor($resolved, $warehouse) ? self::VIA_ANCESTOR : self::VIA_SOLE_LINKED;
@@ -276,9 +331,10 @@ class LineMappingResolver
             $warehouse,
             $resolved,
             $via,
-            $via === self::VIA_ANCESTOR
+            note: ($via === self::VIA_ANCESTOR
                 ? "\"{$name}\" is an internal location; its lines post under its Tally-known ancestor \"{$resolved->name}\"."
-                : "\"{$name}\" is an internal location; its lines post under the sole Tally-linked godown \"{$resolved->name}\".",
+                : "\"{$name}\" is an internal location; its lines post under the sole Tally-linked godown \"{$resolved->name}\".")
+                ." \"{$resolved->name}\" {$recorded}",
         );
     }
 
@@ -305,7 +361,7 @@ class LineMappingResolver
     }
 
     /**
-     * @return array{state: string, warehouse_id: ?int, tally_guid: ?string, resolved_via: ?string, note: ?string}
+     * @return array{state: string, warehouse_id: ?int, tally_guid: ?string, resolved_via: ?string, shared_count: ?int, note: ?string}
      */
     private function godownState(
         string $state,
@@ -313,6 +369,7 @@ class LineMappingResolver
         ?Warehouse $resolved = null,
         ?string $via = null,
         ?string $note = null,
+        ?int $sharedCount = null,
     ): array {
         return [
             'state' => $state,
@@ -321,6 +378,8 @@ class LineMappingResolver
             // warehouse's own under rule 1 and its stand-in's otherwise.
             'tally_guid' => $resolved?->tally_guid,
             'resolved_via' => $via,
+            // Set on `ambiguous` only — see itemState().
+            'shared_count' => $sharedCount,
             'note' => $note,
         ];
     }
@@ -372,10 +431,14 @@ class LineMappingResolver
 
         return [
             'state' => self::STATE_IDENTITY,
+            // The same caveat every identity carries: a mapping is a name
+            // this ERP holds, not a reading of Tally's chart of accounts.
             'note' => "The \"{$role->label()}\" role is mapped to Tally ledger \"{$mapped}\" (Settings → Ledger Mappings)."
                 .($queuedName !== null && $queuedName !== $mapped
                     ? " The queued voucher still names \"{$queuedName}\"; a regenerated payload would carry \"{$mapped}\"."
-                    : ''),
+                    : '')
+                .' The mapping is a name this ERP holds; Tally matches by name, so this line posts if a ledger so named '
+                .'exists there — this ERP cannot know that.',
         ];
     }
 

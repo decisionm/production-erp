@@ -149,8 +149,11 @@ class GodownAliasingTest extends TestCase
 
         $preview = app(VoucherPreviewService::class)->forShiftProductionEntry($entry);
         $this->assertFalse($preview['postable']);
+        // The preview's sentence is in the resolver's register — what is
+        // recorded here and what follows — not a claim about Tally's answer.
         $this->assertContains(
-            'Godown "Loose Bin" does not exist in Tally.',
+            'Godown "Loose Bin": no Tally identity is recorded here and it aliases to no Tally-known godown, so this '
+            .'line will be refused unless a godown of exactly this name exists there — this ERP cannot check.',
             collect($preview['lines'])->pluck('problems')->flatten()->all(),
         );
     }

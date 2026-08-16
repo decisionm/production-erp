@@ -44,7 +44,7 @@ class TallySyncController extends Controller
     public function index(ListTallySyncEntriesRequest $request): AnonymousResourceCollection
     {
         return TallySyncEntryResource::collection(
-            $this->queries->paginate($request->validated(), $this->perPage($request)),
+            $this->queries->paginate($request->validated(), $this->perPage($request), $request->user()),
         );
     }
 
@@ -67,7 +67,7 @@ class TallySyncController extends Controller
      */
     public function summary(ListTallySyncEntriesRequest $request): JsonResponse
     {
-        return response()->json(['data' => $this->queries->summary($request->validated())]);
+        return response()->json(['data' => $this->queries->summary($request->validated(), $request->user())]);
     }
 
     /**

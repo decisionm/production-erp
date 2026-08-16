@@ -7,6 +7,7 @@ use App\Modules\Production\Models\ProductionStandardPackaging;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use Illuminate\Console\Command;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
 /**
@@ -40,6 +41,22 @@ use Illuminate\Support\Collection;
  * making that call in a maintenance window. Mirrors roles:show — safe
  * against the live database at any hour, and its test pins that the
  * database is byte-identical before and after.
+ *
+ * TRASHED FIXTURES ARE INCLUDED, in all three sections. A fixture that was
+ * soft-deleted after it reached a packaging, an entry or a payload is still
+ * a name Tally has never had, and the row that points at it still points
+ * at it — so (a) and (b) load their item relations withTrashed and judge
+ * the row with the same model predicates the live paths use, and (c)
+ * matches names from the withTrashed fixture list. Note the one place this
+ * report deliberately sees MORE than the posting guard: the guard reads a
+ * vouchered entry whose fixture identity has since been soft-deleted as
+ * "not a fixture" (LocalFixtureSweepTest — a retired product must not be
+ * dropped from a voucher), and would sweep it; this report lists it, which
+ * is exactly what a person should be shown.
+ *
+ * Cheap on a live database: (a) and (b) narrow to candidate rows in SQL
+ * (whereHas on the fixture signals — the column OR the SKU prefix, trashed
+ * included) and iterate them lazily; only the matches are held.
  */
 class AuditLocalFixtures extends Command
 {
@@ -51,14 +68,9 @@ class AuditLocalFixtures extends Command
 
     public function handle(): int
     {
-        // Trashed items INCLUDED on purpose: a fixture that was later
-        // soft-deleted is still a name Tally has never had, and a voucher
-        // that names it still cannot post. The predicate itself is the
-        // model's, once — the SQL below only narrows the candidates.
-        $fixtures = Item::withTrashed()
-            ->where(fn ($query) => $query
-                ->where('is_local_fixture', true)
-                ->orWhere('sku', 'like', Item::LOCAL_FIXTURE_SKU_PREFIX.'%'))
+        // Trashed items INCLUDED on purpose (class docblock). The predicate
+        // itself is the model's, once — the SQL only narrows the candidates.
+        $fixtures = $this->fixtureRows(Item::query())
             ->orderBy('id')
             ->get()
             ->filter(fn (Item $item) => $item->isLocalFixture())
@@ -138,8 +150,29 @@ class AuditLocalFixtures extends Command
     }
 
     /**
+     * The SQL narrowing for "might be a fixture" — the column OR the SKU
+     * prefix, trashed rows included — applied to an Item query or to a
+     * relation subquery. A superset by design (Item::isLocalFixture() is
+     * the predicate; this only decides which rows are worth asking).
+     *
+     * @template TBuilder of Builder
+     *
+     * @param  TBuilder  $query
+     * @return TBuilder
+     */
+    private function fixtureRows(Builder $query): Builder
+    {
+        return $query
+            ->withTrashed()
+            ->where(fn (Builder $signals) => $signals
+                ->where('is_local_fixture', true)
+                ->orWhere('sku', 'like', Item::LOCAL_FIXTURE_SKU_PREFIX.'%'));
+    }
+
+    /**
      * (a): judged on the packaging's OWN item relation, so "resolves to a
      * fixture" means exactly what the run's freeze would resolve to.
+     * Candidates narrowed in SQL, iterated lazily, matches held.
      *
      * @return Collection<int, ProductionStandardPackaging>
      */
@@ -147,18 +180,25 @@ class AuditLocalFixtures extends Command
     {
         return ProductionStandardPackaging::query()
             ->whereNotNull('item_id')
-            ->with(['tallyItem', 'standard'])
+            ->whereHas('tallyItem', fn (Builder $item) => $this->fixtureRows($item))
+            ->with(['tallyItem' => fn ($item) => $item->withTrashed(), 'standard'])
             ->orderBy('id')
-            ->get()
+            ->lazy()
             ->filter(fn (ProductionStandardPackaging $packaging) => $packaging->tallyItem?->isLocalFixture() ?? false)
+            ->collect()
             ->values();
     }
 
     /**
      * (b): THE ONE PREDICATE (ShiftProductionEntry::isLocalFixtureIdentity)
-     * — the same answer the enqueue guard, the sweep and the rebuilds give,
-     * so this list can never name an entry those would have posted, or miss
-     * one they would refuse.
+     * — the same answer the enqueue guard, the sweep and the rebuilds give
+     * over live rows, so this list can never name an entry those would have
+     * posted, or miss one they would refuse — with the one documented
+     * difference (class docblock): the item relations are loaded
+     * withTrashed here, so an identity that is a since-deleted fixture is
+     * still reported. Candidates narrowed in SQL on EITHER identity column
+     * (a superset — the predicate then picks the EFFECTIVE one), iterated
+     * lazily, matches held.
      *
      * @return Collection<int, ShiftProductionEntry>
      */
@@ -166,10 +206,14 @@ class AuditLocalFixtures extends Command
     {
         return ShiftProductionEntry::query()
             ->whereNotNull('tally_sync_entry_id')
-            ->with(['item', 'finishedItem'])
+            ->where(fn (Builder $either) => $either
+                ->whereHas('finishedItem', fn (Builder $item) => $this->fixtureRows($item))
+                ->orWhereHas('item', fn (Builder $item) => $this->fixtureRows($item)))
+            ->with(['item' => fn ($item) => $item->withTrashed(), 'finishedItem' => fn ($item) => $item->withTrashed()])
             ->orderBy('id')
-            ->get()
+            ->lazy()
             ->filter(fn (ShiftProductionEntry $entry) => $entry->isLocalFixtureIdentity())
+            ->collect()
             ->values();
     }
 

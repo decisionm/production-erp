@@ -78,7 +78,9 @@ class EntryPresenterTest extends TestCase
         $this->assertSame('96.5000', $grn->payload['lines'][0]['rate'], 'The fixture carries the rate the summary must not');
         $this->assertSame('19300.0000', $grn->payload['total_amount']);
 
-        $summary = app(EntryPresenter::class)->summary($grn);
+        // For a reader who may see purchase details (finance / the agent —
+        // the resource's one FC-06 verdict, passed in): the vendor is named.
+        $summary = app(EntryPresenter::class)->summary($grn, mayReadPurchaseDetails: true);
 
         $this->assertSame(['headline', 'lines'], array_keys($summary));
         $this->assertSame(
@@ -91,6 +93,14 @@ class EntryPresenterTest extends TestCase
         $text = json_encode($summary);
         $this->assertStringNotContainsString('96.5', $text);
         $this->assertStringNotContainsString('19300', $text);
+
+        // FC-06, second half: for everyone else the vendor segment is left
+        // out of the headline (not blanked) — and that is the DEFAULT, so a
+        // caller that forgets to say withholds rather than leaks.
+        foreach ([app(EntryPresenter::class)->summary($grn, mayReadPurchaseDetails: false), app(EntryPresenter::class)->summary($grn)] as $withheld) {
+            $this->assertSame('Receipt Note GRN-7 · 04-Aug-2026 · 1 item × 200 · waiting for agent', $withheld['headline']);
+            $this->assertStringNotContainsString('Reliance', json_encode($withheld));
+        }
     }
 
     public function test_a_shift_stock_journal_summary_counts_batches_and_both_sides(): void
@@ -168,6 +178,8 @@ class EntryPresenterTest extends TestCase
     {
         $entry = $this->enqueueDelivery();
 
+        // A CUSTOMER is not FC-06: named for every reader, purchase-detail
+        // verdict or not (the default is the withholding one).
         $summary = app(EntryPresenter::class)->summary($entry);
 
         $this->assertSame(
@@ -296,25 +308,49 @@ class EntryPresenterTest extends TestCase
 
     // ---- flags -----------------------------------------------------------------
 
-    public function test_a_sales_invoice_is_flagged_as_an_unvalidated_builder_quoting_the_builder(): void
+    public function test_every_unvalidated_builder_is_flagged_quoting_its_own_line_and_sales_names_the_gst_gap(): void
     {
-        $entry = $this->enqueueSalesInvoice();
+        $presenter = app(EntryPresenter::class);
+        $unvalidated = 'BEST-EFFORT TEMPLATE — NOT YET VALIDATED AGAINST A REAL TALLY INSTANCE';
 
-        $flags = app(EntryPresenter::class)->flags($entry);
+        // Sales: the shared line, PLUS its GST gap (salesInvoice.ts:28-32)
+        // and the decision that keeps real sales in Tally.
+        $sales = $presenter->flags($this->enqueueSalesInvoice())['unvalidated_builder'];
+        $this->assertStringContainsString($unvalidated, $sales['note']);
+        $this->assertStringContainsString("doesn't yet emit GST tax ledger entries (CGST/SGST/IGST)", $sales['note']);
+        $this->assertStringContainsString('DEC-20260809-003', $sales['note']);
+        $this->assertSame('tally-sync-agent/src/tally/voucherBuilders/salesInvoice.ts', $sales['builder']);
+        $this->assertSame('DEC-20260809-003', $sales['decision']);
 
-        $this->assertArrayHasKey('unvalidated_builder', $flags);
-        $note = $flags['unvalidated_builder']['note'];
-        // The builder's own words (salesInvoice.ts:19-32), not a paraphrase.
-        $this->assertStringContainsString('BEST-EFFORT TEMPLATE — NOT YET VALIDATED AGAINST A REAL TALLY INSTANCE', $note);
-        $this->assertStringContainsString("doesn't yet emit GST tax ledger entries (CGST/SGST/IGST)", $note);
-        $this->assertStringContainsString('DEC-20260809-003', $note);
-        $this->assertSame('tally-sync-agent/src/tally/voucherBuilders/salesInvoice.ts', $flags['unvalidated_builder']['builder']);
+        // Receipt Note (receiptNote.ts:17), Delivery Note (deliveryNote.ts:16)
+        // and Journal (journalEntry.ts:13) carry the SAME line — each flag
+        // quotes it and names its own builder; none borrows the Sales GST
+        // note or the Sales decision.
+        $receipt = $presenter->flags($this->enqueueGoodsReceipt())['unvalidated_builder'];
+        $this->assertStringContainsString($unvalidated, $receipt['note']);
+        $this->assertStringContainsString('Reverse-engineer against a real export before trusting it', $receipt['note']);
+        $this->assertSame('tally-sync-agent/src/tally/voucherBuilders/receiptNote.ts', $receipt['builder']);
+        $this->assertArrayNotHasKey('decision', $receipt);
+        $this->assertStringNotContainsString('GST', $receipt['note']);
 
-        // Not raised on the other categories.
-        $this->assertArrayNotHasKey('unvalidated_builder', app(EntryPresenter::class)->flags($this->enqueueGoodsReceipt()));
-        $this->assertArrayNotHasKey('unvalidated_builder', app(EntryPresenter::class)->flags(
-            app(TallySyncService::class)->enqueueJournalEntry($this->journal()),
-        ));
+        $delivery = $presenter->flags($this->enqueueDelivery())['unvalidated_builder'];
+        $this->assertStringContainsString($unvalidated, $delivery['note']);
+        $this->assertStringContainsString('Validate the tag structure against a real export', $delivery['note']);
+        $this->assertSame('tally-sync-agent/src/tally/voucherBuilders/deliveryNote.ts', $delivery['builder']);
+        $this->assertArrayNotHasKey('decision', $delivery);
+
+        $journal = $presenter->flags(app(TallySyncService::class)->enqueueJournalEntry($this->journal()))['unvalidated_builder'];
+        $this->assertStringContainsString($unvalidated, $journal['note']);
+        $this->assertStringContainsString('still confirm against a real export before trusting it in production', $journal['note']);
+        $this->assertSame('tally-sync-agent/src/tally/voucherBuilders/journalEntry.ts', $journal['builder']);
+        $this->assertArrayNotHasKey('decision', $journal);
+
+        // The production builders carry no such line: not raised.
+        config(['tally-sync.voucher_granularity' => 'batch']);
+        $this->assertArrayNotHasKey('unvalidated_builder', $presenter->flags($this->approveBatchProduction()));
+        TallySyncEntry::query()->where('tally_voucher_type', 'Manufacturing Journal')->delete();
+        config(['tally-sync.voucher_granularity' => 'shift']);
+        $this->assertArrayNotHasKey('unvalidated_builder', $presenter->flags($this->approveShiftProduction()));
     }
 
     public function test_a_receipt_note_carrying_an_order_reference_is_flagged_because_the_agent_does_not_emit_it(): void
@@ -429,6 +465,28 @@ class EntryPresenterTest extends TestCase
         $this->assertArrayNotHasKey('summary', $retried);
         $this->assertArrayNotHasKey('timeline', $retried);
         $this->assertArrayHasKey('flags', $retried);
+    }
+
+    public function test_flags_serialise_as_an_object_on_the_wire_even_when_none_is_raised(): void
+    {
+        // A shift voucher past its gate raises no flag at all; a Sales
+        // invoice raises one. PHP would encode the empty array as `[]` and
+        // the other as `{}` — two shapes for one key — so the resource casts
+        // to an object and a client typed Record<string, …> never meets a list.
+        config(['tally-sync.voucher_granularity' => 'shift']);
+        $shift = $this->approveShiftProduction();
+        $this->assertSame([], app(EntryPresenter::class)->flags($shift), 'precondition: nothing raised');
+        $invoice = $this->enqueueSalesInvoice();
+
+        $this->actAsStaff(['tally-sync.view']);
+
+        $list = $this->getJson('/api/v1/tally-sync/entries')->assertOk()->getContent();
+        $this->assertStringContainsString('"flags":{}', $list);
+        $this->assertStringNotContainsString('"flags":[]', $list);
+        $this->assertStringContainsString('"flags":{"unvalidated_builder":', $list);
+
+        $this->assertStringContainsString('"flags":{}', $this->getJson("/api/v1/tally-sync/entries/{$shift->id}")->assertOk()->getContent());
+        $this->assertStringContainsString('"flags":{"unvalidated_builder":', $this->getJson("/api/v1/tally-sync/entries/{$invoice->id}")->assertOk()->getContent());
     }
 
     // ---- helpers ------------------------------------------------------------

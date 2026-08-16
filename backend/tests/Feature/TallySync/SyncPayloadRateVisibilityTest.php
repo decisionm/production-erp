@@ -46,11 +46,12 @@ class SyncPayloadRateVisibilityTest extends TestCase
 
     /**
      * Every key name that carries a price anywhere in this codebase's
-     * payloads: the sync payload's own (rate, amount, total_amount) plus
-     * the procurement names (unit_price, unit_cost) so a builder that ever
-     * copies one of those onto a payload trips this walk too.
+     * payloads: the sync payload's own (rate, amount, total_amount; a
+     * Journal's debit, credit) plus the procurement names (unit_price,
+     * unit_cost) so a builder that ever copies one of those onto a payload
+     * trips this walk too.
      */
-    private const RATE_KEYS = ['rate', 'amount', 'total_amount', 'unit_price', 'unit_cost'];
+    private const RATE_KEYS = ['rate', 'amount', 'total_amount', 'debit', 'credit', 'unit_price', 'unit_cost'];
 
     /** The abilities AgentTokenService::issueToken() puts on every agent token (its private ABILITIES). */
     private const AGENT_ABILITIES = ['tally-sync:poll', 'tally-sync:report', 'tally-sync:masters'];
@@ -76,11 +77,12 @@ class SyncPayloadRateVisibilityTest extends TestCase
         $this->assertArrayNotHasKey('amount', $row['payload']['lines'][0]);
         $this->assertArrayNotHasKey('total_amount', $row['payload']);
 
-        // Everything that is not a price is untouched — the voucher is still
-        // readable as a voucher.
+        // Everything that is not a price — and not the supplier (FC-06's
+        // second half; SupplierIdentityVisibilityTest) — is untouched: the
+        // voucher is still readable as a voucher.
         $this->assertSame('GRN-7', $row['payload']['voucher_number']);
-        $this->assertSame('Reliance Industries', $row['payload']['party_ledger']);
-        $this->assertSame('27AAACR1234A1Z5', $row['payload']['party_gstin'], 'A GSTIN is an identity, not a rate');
+        $this->assertArrayNotHasKey('party_ledger', $row['payload'], 'the vendor is who supplied it — withheld');
+        $this->assertArrayNotHasKey('party_gstin', $row['payload'], 'the vendor\'s GSTIN identifies the supplier — withheld');
         $this->assertSame('PET Resin', $row['payload']['lines'][0]['item']);
         $this->assertSame('100.0000', $row['payload']['lines'][0]['quantity']);
         $this->assertSame('GRN-7', $row['document_number']);

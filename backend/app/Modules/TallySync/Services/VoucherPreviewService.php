@@ -2,6 +2,7 @@
 
 namespace App\Modules\TallySync\Services;
 
+use App\Modules\Inventory\Models\Item;
 use App\Modules\Production\Models\ShiftProductionEntry;
 
 /**
@@ -12,7 +13,9 @@ use App\Modules\Production\Models\ShiftProductionEntry;
  * on stock-item and godown NAMES, not ids), so a name Tally does not know
  * fails the whole voucher — and today that failure surfaces hours after the
  * shift, in the Failed tab, to someone who wasn't there. The preview resolves
- * every name up front and says which ones Tally will reject.
+ * every name up front and says which ones this ERP cannot vouch for — in the
+ * shared resolver's register (what is recorded here, and what follows from
+ * Tally matching by name), never as a claim about what Tally will answer.
  *
  * The payload itself comes from TallySyncService::buildBatchVoucherPayload()
  * — the same method the real post uses, so the preview cannot drift from
@@ -33,12 +36,15 @@ class VoucherPreviewService
 {
     public function __construct(
         private readonly TallySyncService $sync,
-        // THE resolver of names → mapping state, shared with the Control
+        // THE resolver of names → mapping STATE, shared with the Control
         // Center's show endpoint (EntryMappingSurface): the preview's
-        // blockers below are derived from ITS verdicts, so what the preview
-        // refuses before approval and what the sync page later says about
-        // the same name can never disagree. It judges godowns through the
-        // same TallyGodownResolver the payload builder used.
+        // blockers below are derived from ITS verdicts, so the preview and
+        // the sync page can never disagree about the STATE of a name. The
+        // SENTENCES are each surface's own — the preview's name a thing a
+        // person can go and fix; the show endpoint's describe — both kept in
+        // the resolver's register ("this ERP cannot know/check"), neither
+        // asserting what Tally will say. It judges godowns through the same
+        // TallyGodownResolver the payload builder used.
         private readonly LineMappingResolver $mappings,
         private readonly PackingVoucherLines $packing,
     ) {}
@@ -152,7 +158,8 @@ class VoucherPreviewService
 
     /**
      * Resolve one line's item and godown against the masters, reporting the
-     * exact reason Tally would refuse it.
+     * exact reason this ERP cannot vouch for it — each one a thing a person
+     * can go and fix.
      *
      * Items are matched by NAME because that is what the voucher carries and
      * what Tally matches on — an item that exists in the ERP under a
@@ -170,11 +177,21 @@ class VoucherPreviewService
         $problems = [];
 
         // The state, from the one shared resolver; the sentences below are
-        // this preview's own and unchanged — each names a thing a person can
-        // go and fix. The single matched row (null unless exactly one) is
-        // what the line's uom and packing kind are read from.
+        // this preview's own — each names a thing a person can go and fix.
+        // The line's uom and packing kind are read from EVERY row the name
+        // resolves to (one in the usual case; several when the name is
+        // ambiguous; none when unmapped) — never from "the" row, because
+        // for an ambiguous name there is no such row and reading none would
+        // silently switch the packing-store blocker off (the Phase 3 gate
+        // finding, F1).
         $itemState = $this->mappings->item($itemName);
-        $item = $this->mappings->itemRow($itemName);
+        $candidates = $this->mappings->itemCandidates($itemName);
+
+        // The one no-identity sentence, in the resolver's register: what
+        // this ERP has recorded (nothing), and what follows from Tally
+        // matching by name — never a claim about what Tally will answer.
+        $noIdentity = "\"{$itemName}\": no Tally identity is recorded here, so this line will be refused unless a "
+            .'stock item of exactly this name exists there — this ERP cannot check.';
 
         switch ($itemState['state']) {
             case LineMappingResolver::STATE_NONE:
@@ -184,7 +201,7 @@ class VoucherPreviewService
                 $problems[] = "No item named \"{$itemName}\" exists.";
                 break;
             case LineMappingResolver::STATE_NAME_ONLY:
-                $problems[] = "\"{$itemName}\" has no Tally identity — Tally will answer \"Stock Item does not exist\".";
+                $problems[] = $noIdentity;
                 break;
             case LineMappingResolver::STATE_FIXTURE:
                 // The one case where "create it in Tally" is the wrong advice:
@@ -194,18 +211,38 @@ class VoucherPreviewService
                 // and on its own for the contradictory fixture that carries a
                 // GUID — the posting paths refuse either.
                 if ($itemState['tally_stock_item_guid'] === null) {
-                    $problems[] = "\"{$itemName}\" has no Tally identity — Tally will answer \"Stock Item does not exist\".";
+                    $problems[] = $noIdentity;
                 }
                 $problems[] = "\"{$itemName}\" is a local rehearsal product, not a real one — run the batch against "
                     .'the real product instead of creating this one in Tally.';
                 break;
             case LineMappingResolver::STATE_AMBIGUOUS:
-                // Several ERP items share this name; Tally would still match
-                // ONE by name, so it is not a blocker here — the show
-                // endpoint's mapping state says "ambiguous" so it is seen.
-                // Turning it into a refusal would be a new approval gate on
-                // live data, which is the owner's call, not this preview's.
+                // Several ERP items share this name. Tally would match ONE by
+                // name and this ERP cannot say which — so, FAIL-CLOSED and
+                // order-independent: (a) when NO candidate carries a GUID the
+                // line has no Tally identity at all and says so, exactly as
+                // it did before the shared resolver (which then read the
+                // first row by name); (b) in EVERY ambiguous case the
+                // ambiguity itself blocks. Whether a duplicate name should
+                // only WARN is the owner's call (PENDING-OWNER-QUESTIONS Q43);
+                // until answered this preview blocks — the owner's standing
+                // rule is that posting stays unavailable while the preview
+                // is not clean.
+                if ($candidates->every(fn (Item $candidate) => $candidate->tally_stock_item_guid === null)) {
+                    $problems[] = $noIdentity;
+                }
+                $problems[] = "{$candidates->count()} items in this ERP share the name \"{$itemName}\" — Tally would match one "
+                    .'and this ERP cannot say which; give them distinct names before posting.';
                 break;
+        }
+
+        // The unit, from the candidate set: the one unit they all carry, or
+        // null — and said — when same-named rows disagree. Nothing invented.
+        $units = $candidates->map(fn (Item $candidate) => $candidate->uom)->unique()->values();
+        $uom = $units->count() === 1 ? $units->first() : null;
+        if ($units->count() > 1) {
+            $problems[] = "The {$candidates->count()} items sharing the name \"{$itemName}\" carry different units ("
+                .$units->map(fn ($unit) => $unit ?? '?')->implode(', ').'), so no unit is shown for this line.';
         }
 
         // Godown, judged by the SAME resolver the payload builder used: a
@@ -223,7 +260,17 @@ class VoucherPreviewService
                 $problems[] = "No warehouse named \"{$godownName}\" exists.";
                 break;
             case LineMappingResolver::STATE_NAME_ONLY:
-                $problems[] = "Godown \"{$godownName}\" does not exist in Tally.";
+                // Same register as the item sentence: what is recorded here
+                // and what follows — not what Tally will say.
+                $problems[] = "Godown \"{$godownName}\": no Tally identity is recorded here and it aliases to no Tally-known "
+                    .'godown, so this line will be refused unless a godown of exactly this name exists there — this ERP '
+                    .'cannot check.';
+                break;
+            case LineMappingResolver::STATE_AMBIGUOUS:
+                // Mirrors the item arm: two same-named warehouses, Tally
+                // would match one, this ERP cannot say which — blocks (Q43).
+                $problems[] = "{$godownState['shared_count']} warehouses in this ERP share the name \"{$godownName}\" — Tally "
+                    .'would match one and this ERP cannot say which; give them distinct names before posting.';
                 break;
         }
 
@@ -231,7 +278,12 @@ class VoucherPreviewService
             $problems[] = 'Quantity is zero or missing.';
         }
 
-        if ($packingStoreMissing && $item !== null && $this->packing->kindFor($item->id) !== null) {
+        // Judged over EVERY candidate: if ANY row by this name is a packing
+        // material the blocker fires — an ambiguous name must not be the
+        // way a carton slips out of the resin store.
+        $isPacking = $candidates->contains(fn (Item $candidate) => $this->packing->kindFor($candidate->id) !== null);
+
+        if ($packingStoreMissing && $isPacking) {
             // The owner's split: "packing materials from the Packing Material
             // Store". With no store named this line would come out of whichever
             // warehouse the material was issued from — usually the resin store —
@@ -245,7 +297,7 @@ class VoucherPreviewService
             'side' => $side,
             'item' => $itemName,
             'quantity' => $quantity,
-            'uom' => $item?->uom,
+            'uom' => $uom,
             'godown' => $godownName,
             'problems' => array_values($problems),
         ];

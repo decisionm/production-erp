@@ -189,6 +189,34 @@ class AuditLocalFixturesCommandTest extends TestCase
             ->assertSuccessful();
     }
 
+    public function test_a_fixture_soft_deleted_after_it_reached_a_packaging_and_a_vouchered_entry_is_still_listed(): void
+    {
+        // The row still points at the fixture; the fixture is still a name
+        // Tally never had. (a) and (b) load their item relations withTrashed
+        // for exactly this — the report sees what the posting guard, which
+        // reads live rows only, would not (class docblock).
+        $standard = $this->standard('200ML RA');
+        $packaging = $standard->packagings()->create(['mode' => 'direct_box', 'nos_per_box' => 300, 'item_id' => $this->flaggedFixture->id]);
+        $holeB = $this->voucher('Stock Journal', [
+            'voucher_number' => 'SJ-20260723-S1',
+            'produced' => [['item' => $this->flaggedFixture->name, 'quantity' => '1000.0000']],
+        ]);
+        $vouchered = $this->entry(['batch_number' => 'B-HOLE-B', 'finished_item_id' => $this->flaggedFixture->id, 'tally_sync_entry_id' => $holeB->id]);
+        // A real, live identity beside them — a candidate the SQL narrowing
+        // must not pull and the predicate must not list.
+        $this->entry(['batch_number' => 'B-REAL', 'finished_item_id' => $this->bottle->id, 'tally_sync_entry_id' => $holeB->id]);
+
+        $this->flaggedFixture->delete();
+
+        $this->artisan('tally-sync:audit-fixtures')
+            ->expectsOutputToContain(sprintf('item #%d BTL-FLAGGED "Flagged Fixture Bottle"  (deleted)', $this->flaggedFixture->id))
+            ->expectsOutputToContain(sprintf('packaging #%d  standard #%d "200ML RA"  direct_box  item #%d BTL-FLAGGED "Flagged Fixture Bottle"', $packaging->id, $standard->id, $this->flaggedFixture->id))
+            ->expectsOutputToContain(sprintf('entry #%d  batch B-HOLE-B  2026-07-23  effective item #%d BTL-FLAGGED  voucher #%d SJ-20260723-S1 status=failed', $vouchered->id, $this->flaggedFixture->id, $holeB->id))
+            ->doesntExpectOutputToContain('B-REAL')
+            ->expectsOutputToContain('VERDICT: 1 packagings, 1 vouchered entries, 1 vouchers name a fixture')
+            ->assertSuccessful();
+    }
+
     public function test_a_clean_database_says_clean(): void
     {
         // Real identities, real vouchers, and fixtures that reached none of

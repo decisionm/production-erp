@@ -277,7 +277,22 @@ function EntryBody({
                     { key: 'module', label: 'Module', children: entry.category?.source_module ?? '—' },
                     { key: 'document', label: 'Document', children: entry.document_number ?? voucherNumber(entry) },
                     { key: 'date', label: 'Business date', children: entry.business_date ?? '—' },
-                    { key: 'party', label: 'Party', children: entry.party ?? <Typography.Text type="secondary">—</Typography.Text> },
+                    {
+                        key: 'party',
+                        label: 'Party',
+                        // FC-06: on a Receipt Note the party is the vendor, and
+                        // for a reader who may not see who supplied it the show
+                        // endpoint says so (mappings.party.state = 'withheld')
+                        // — rendered as such, not as a blank that would read
+                        // "no party".
+                        children: entry.mappings?.party?.state === 'withheld' ? (
+                            <Tooltip title={entry.mappings.party.note ?? undefined}>
+                                <Typography.Text type="secondary">withheld (FC-06)</Typography.Text>
+                            </Tooltip>
+                        ) : (
+                            entry.party ?? <Typography.Text type="secondary">—</Typography.Text>
+                        ),
+                    },
                     {
                         key: 'syncable',
                         label: 'Source record',
@@ -549,10 +564,10 @@ function MappingsSection({ mappings, summary }: { mappings: EntryMappings; summa
                                 <MappedName
                                     name={line.item.name}
                                     badge={{
-                                        ...mappingBadge(line.item.state, line.item.note),
+                                        ...mappingBadge(line.item.state, line.item.note, line.item.shared_count),
                                         // An identity with no note still has a
                                         // fact worth a hover: the GUID Tally will match.
-                                        title: mappingBadge(line.item.state, line.item.note).title
+                                        title: mappingBadge(line.item.state, line.item.note, line.item.shared_count).title
                                             ?? (line.item.tally_stock_item_guid ? `Tally GUID ${line.item.tally_stock_item_guid}` : null),
                                     }}
                                 />
@@ -564,8 +579,8 @@ function MappingsSection({ mappings, summary }: { mappings: EntryMappings; summa
                                 <MappedName
                                     name={line.godown.name}
                                     badge={{
-                                        ...mappingBadge(line.godown.state, line.godown.note),
-                                        title: mappingBadge(line.godown.state, line.godown.note).title
+                                        ...mappingBadge(line.godown.state, line.godown.note, line.godown.shared_count),
+                                        title: mappingBadge(line.godown.state, line.godown.note, line.godown.shared_count).title
                                             ?? (line.godown.tally_guid ? `Tally GUID ${line.godown.tally_guid}` : null),
                                     }}
                                 />

@@ -18,16 +18,23 @@ use Tests\TestCase;
  * answer is pinned here, one fixture per state, and each fixture is the
  * live condition it stands for:
  *
- *   identity   a row carrying a Tally GUID (or a configured role mapping)
+ *   identity   a row carrying a Tally GUID (or a configured role mapping) —
+ *              and its note still says "posts IF that master still carries
+ *              this name; this ERP cannot know that": a GUID recorded at the
+ *              last masters pull is not a reading of Tally now
  *   name_only  a row without a GUID — Tally matches by name; the ERP cannot know
  *   unmapped   no row by that name
  *   fixture    a LOCAL- rehearsal product — never postable
- *   ambiguous  two rows share the name (items.name has no unique index)
+ *   ambiguous  two rows share the name (items.name has no unique index) —
+ *              with the count structured as `shared_count`, not only in the note
  *   none       the line carries no name for that dimension
  *
- * Also pinned: it is exact-name, never fuzzy; it never reads Tally; and it
- * costs one query per DISTINCT name — the show endpoint asks it once per
- * line, and a shift voucher names the same resin on most of its lines.
+ * Also pinned: it is one `where name = ?` (equality as the database compares
+ * it — never a prefix, never a longer name; case and trailing-space folding
+ * are the collation's business, not this class's, so neither is asserted
+ * here); it never reads Tally; and it costs one query per DISTINCT name —
+ * the show endpoint asks it once per line, and a shift voucher names the
+ * same resin on most of its lines.
  */
 class LineMappingResolverTest extends TestCase
 {
@@ -40,13 +47,24 @@ class LineMappingResolverTest extends TestCase
 
     // ---- items ---------------------------------------------------------------
 
-    public function test_an_item_carrying_a_tally_guid_resolves_by_identity(): void
+    public function test_an_item_carrying_a_tally_guid_resolves_by_identity_and_still_says_the_erp_cannot_know(): void
     {
         $item = Item::create(['sku' => 'RES-1', 'name' => 'PET Resin', 'uom' => 'Kgs', 'tally_stock_item_guid' => 'itm-resin']);
 
+        $state = $this->resolver()->item('PET Resin');
+
+        $this->assertSame(['state', 'item_id', 'tally_stock_item_guid', 'shared_count', 'note'], array_keys($state));
+        $this->assertSame('identity', $state['state']);
+        $this->assertSame($item->id, $state['item_id']);
+        $this->assertSame('itm-resin', $state['tally_stock_item_guid']);
+        $this->assertNull($state['shared_count']);
+        // Green is the strongest claim the ERP can make — and it is still
+        // not "confirmed present in Tally". The note says what the GUID is
+        // (a record from the last pull) and what Tally actually matches on.
         $this->assertSame(
-            ['state' => 'identity', 'item_id' => $item->id, 'tally_stock_item_guid' => 'itm-resin', 'note' => null],
-            $this->resolver()->item('PET Resin'),
+            '"PET Resin" is linked to Tally stock item itm-resin, recorded when masters were last pulled; Tally matches '
+            .'by name, so this line posts if that master still carries this name — this ERP cannot know that.',
+            $state['note'],
         );
     }
 
@@ -67,9 +85,12 @@ class LineMappingResolverTest extends TestCase
     {
         Item::create(['sku' => 'RES-1', 'name' => 'PET Resin', 'uom' => 'Kgs', 'tally_stock_item_guid' => 'itm-resin']);
 
-        // A prefix, a different case, trailing space — none of them is the
-        // name, so none of them resolves. Exact or nothing.
-        foreach (['PET', 'pet resin', 'PET Resin ', 'PET Resin (Virgin Grade)'] as $near) {
+        // A prefix and a longer name — neither is the name under ANY
+        // collation, so neither resolves. Case ('pet resin') and trailing
+        // space ('PET Resin ') are deliberately NOT asserted: MySQL's
+        // utf8mb4_unicode_ci equates both and SQLite equates neither, and
+        // this class adds nothing to what the database compares.
+        foreach (['PET', 'PET Resin (Virgin Grade)'] as $near) {
             $state = $this->resolver()->item($near);
             $this->assertSame('unmapped', $state['state'], "\"{$near}\" must not resolve to \"PET Resin\"");
             $this->assertNull($state['item_id']);
@@ -109,12 +130,19 @@ class LineMappingResolverTest extends TestCase
         $this->assertSame('ambiguous', $state['state']);
         $this->assertNull($state['item_id']);
         $this->assertNull($state['tally_stock_item_guid']);
+        // The count is structured, not only prose — a reader never has to
+        // parse it back out of the note.
+        $this->assertSame(2, $state['shared_count']);
         $this->assertStringContainsString('2 items in this ERP share the name "500ml PET Bottle"', $state['note']);
         $this->assertStringContainsString('1 with a Tally GUID', $state['note']);
         $this->assertStringContainsString('cannot say which', $state['note']);
 
-        // The row accessor the preview reads picks nothing either.
+        // The single-row accessor picks nothing; the candidate set — what
+        // the preview judges uom and packing kind over — carries both.
         $this->assertNull($this->resolver()->itemRow('500ml PET Bottle'));
+        $this->assertSame(['BTL-A', 'BTL-B'], $this->resolver()->itemCandidates('500ml PET Bottle')->pluck('sku')->sort()->values()->all());
+        $this->assertCount(0, $this->resolver()->itemCandidates('Nothing By This Name'));
+        $this->assertCount(0, $this->resolver()->itemCandidates(null));
     }
 
     public function test_a_line_with_no_item_name_is_none(): void
@@ -136,13 +164,22 @@ class LineMappingResolverTest extends TestCase
 
     // ---- godowns -------------------------------------------------------------
 
-    public function test_a_warehouse_with_its_own_tally_guid_is_identity_via_self(): void
+    public function test_a_warehouse_with_its_own_tally_guid_is_identity_via_self_and_still_says_the_erp_cannot_know(): void
     {
         $godown = Warehouse::create(['code' => 'GDN', 'name' => 'SWAASHPET POLYMERS PVT LTD', 'is_active' => true, 'tally_guid' => 'gd-company']);
 
+        $state = $this->resolver()->godown('SWAASHPET POLYMERS PVT LTD');
+
+        $this->assertSame(['state', 'warehouse_id', 'tally_guid', 'resolved_via', 'shared_count', 'note'], array_keys($state));
+        $this->assertSame('identity', $state['state']);
+        $this->assertSame($godown->id, $state['warehouse_id']);
+        $this->assertSame('gd-company', $state['tally_guid']);
+        $this->assertSame('self', $state['resolved_via']);
+        $this->assertNull($state['shared_count']);
         $this->assertSame(
-            ['state' => 'identity', 'warehouse_id' => $godown->id, 'tally_guid' => 'gd-company', 'resolved_via' => 'self', 'note' => null],
-            $this->resolver()->godown('SWAASHPET POLYMERS PVT LTD'),
+            '"SWAASHPET POLYMERS PVT LTD" is linked to Tally godown gd-company, recorded when masters were last pulled; '
+            .'Tally matches by name, so this line posts if that godown still carries this name — this ERP cannot know that.',
+            $state['note'],
         );
     }
 
@@ -162,6 +199,10 @@ class LineMappingResolverTest extends TestCase
         $this->assertSame('gd-company', $state['tally_guid'], 'the GUID is the parent\'s — what Tally will match');
         $this->assertSame('ancestor', $state['resolved_via']);
         $this->assertStringContainsString('under its Tally-known ancestor "SWAASHPET POLYMERS PVT LTD"', $state['note']);
+        // And the aliased identity carries the same caveat as a direct one,
+        // about the godown Tally will actually be handed.
+        $this->assertStringContainsString('"SWAASHPET POLYMERS PVT LTD" is linked to Tally godown gd-company, recorded when masters were last pulled', $state['note']);
+        $this->assertStringContainsString('this ERP cannot know that', $state['note']);
     }
 
     public function test_an_unparented_bin_in_a_one_godown_system_is_identity_via_the_sole_linked_godown(): void
@@ -175,6 +216,8 @@ class LineMappingResolverTest extends TestCase
         $this->assertSame($loose->id, $state['warehouse_id']);
         $this->assertSame('gd-company', $state['tally_guid']);
         $this->assertSame('sole_linked', $state['resolved_via']);
+        $this->assertStringContainsString('under the sole Tally-linked godown "SWAASHPET POLYMERS PVT LTD"', $state['note']);
+        $this->assertStringContainsString('this ERP cannot know that', $state['note']);
     }
 
     public function test_an_unlinked_unparented_warehouse_in_a_multi_godown_system_is_name_only(): void
@@ -218,6 +261,7 @@ class LineMappingResolverTest extends TestCase
         $this->assertSame('ambiguous', $state['state']);
         $this->assertNull($state['warehouse_id']);
         $this->assertNull($state['tally_guid']);
+        $this->assertSame(2, $state['shared_count']);
         $this->assertStringContainsString('2 warehouses in this ERP share the name "Store"', $state['note']);
     }
 
@@ -233,6 +277,10 @@ class LineMappingResolverTest extends TestCase
         $configured = $this->resolver()->ledgerRole(TallyLedgerRole::Sales);
         $this->assertSame('identity', $configured['state']);
         $this->assertStringContainsString('mapped to Tally ledger "Sales A/c"', $configured['note']);
+        // A configured role is an identity this ERP holds — and the note
+        // still says Tally matches by name and the ERP cannot know.
+        $this->assertStringContainsString('The mapping is a name this ERP holds', $configured['note']);
+        $this->assertStringContainsString('this ERP cannot know that', $configured['note']);
 
         // The convenience dispatcher reads a role value as the role.
         $this->assertSame('identity', $this->resolver()->ledger('sales')['state']);

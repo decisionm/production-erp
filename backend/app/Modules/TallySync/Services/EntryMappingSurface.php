@@ -12,9 +12,13 @@ use App\Modules\TallySync\Models\TallySyncEntry;
  * payload will hand Tally — its item and its godown — and for the ledgers
  * the voucher names (a Journal's lines, the party, the Sales ledger),
  * whether this ERP resolved that name by identity, by name only, or not at
- * all. Every verdict comes from LineMappingResolver, the same resolver the
+ * all. Every STATE comes from LineMappingResolver, the same resolver the
  * pre-approval preview uses, so the preview and the show endpoint cannot
- * disagree about a name.
+ * disagree about the STATE of a name; each surface's SENTENCES are its own
+ * (this one carries the resolver's descriptive notes verbatim; the preview
+ * writes blockers a person can act on), and both stay in the resolver's
+ * register — what is recorded here, and what follows from Tally matching by
+ * name — never a claim about what Tally will answer.
  *
  * WHICH KEYS ARE WALKED is decided by the entry's category
  * (TransactionClassifier::classify) — the one classification table — so
@@ -31,14 +35,35 @@ use App\Modules\TallySync\Models\TallySyncEntry;
  * line) lands in the voucher-level godown, and so is judged against it —
  * the same reading VoucherPreviewService makes.
  *
- * FC-06: this block carries names, ids, GUIDs, states and notes and NOTHING
- * that could be a price. It is read by anyone with tally-sync.view, on the
- * same resource whose payload rates are finance-gated; a rate reaching this
- * block would undo that gate, so the walk copies no line key but `item`,
- * `godown` and `ledger`.
+ * FC-06 HAS TWO HALVES ("Purchase rates and supplier details are
+ * Owner/Accounts only. Floor and sales logins never see what a material
+ * cost or who supplied it"), and this block is judged against both:
+ *
+ *   - RATES: the block carries names, ids, GUIDs, states, counts and notes
+ *     and NOTHING that could be a price, for EVERY reader. It is read by
+ *     anyone with tally-sync.view, on the same resource whose payload rates
+ *     are finance-gated; a rate reaching this block would undo that gate,
+ *     so the walk copies no line key but `item`, `godown` and `ledger`.
+ *   - SUPPLIER IDENTITY: the `party` row names the counter-party. On a
+ *     Receipt Note (any category whose partyIsSupplier()) that is the
+ *     VENDOR, so for a reader who may not read purchase details — the
+ *     resource's ONE verdict, AgentIdentity::mayReadPurchaseDetails, the
+ *     same predicate that gates the rates — the row is emitted as
+ *     {name: null, state: 'withheld', note: why} rather than dropped, so
+ *     the drawer can say why the row is empty. `withheld` is not a resolver
+ *     state and is not counted in `mapping_summary` (the summary counts
+ *     what the block shows). A customer on a Sales invoice or a Delivery
+ *     Note is not FC-06 and always reads.
  */
 class EntryMappingSurface
 {
+    /**
+     * The party row's state for a reader who may not see the supplier — a
+     * surface state, not a resolver one: nothing was resolved, the name
+     * was withheld before resolution.
+     */
+    public const STATE_WITHHELD = 'withheld';
+
     public function __construct(
         private readonly TransactionClassifier $classifier,
         private readonly LineMappingResolver $resolver,
@@ -48,8 +73,14 @@ class EntryMappingSurface
      * Both blocks the resource exposes, computed in one pass over the
      * payload: `mappings` (the per-name states) and `mapping_summary` (how
      * many names landed in each counted state — `none` is not counted,
-     * nothing was there to map).
+     * nothing was there to map; nor is `withheld`, nothing was shown).
      *
+     * @param  bool  $mayReadPurchaseDetails  the resource's ONE verdict
+     *                                        (AgentIdentity::mayReadPurchaseDetails).
+     *                                        Defaults to false — fail-closed:
+     *                                        a caller that forgets to say
+     *                                        withholds the vendor rather
+     *                                        than leaking it.
      * @return array{
      *     mappings: array{
      *         lines: list<array{side: string, item: array<string, mixed>, godown: array<string, mixed>}>,
@@ -60,10 +91,11 @@ class EntryMappingSurface
      *     mapping_summary: array<string, int>,
      * }
      */
-    public function for(TallySyncEntry $entry): array
+    public function for(TallySyncEntry $entry, bool $mayReadPurchaseDetails = false): array
     {
         $payload = is_array($entry->payload) ? $entry->payload : [];
-        $shape = $this->shape($this->classifier->classify($entry), $payload);
+        $category = $this->classifier->classify($entry);
+        $shape = $this->shape($category, $payload);
 
         $lines = [];
         foreach ($shape['stock'] as $section) {
@@ -90,7 +122,16 @@ class EntryMappingSurface
         }
 
         $party = null;
-        if ($shape['party']) {
+        if ($shape['party'] && $category->partyIsSupplier() && ! $mayReadPurchaseDetails) {
+            // FC-06's second half: the vendor is not this reader's to see.
+            // The row is kept, emptied and explained — a blank row would
+            // read as "no party", which is a different (and false) claim.
+            $party = [
+                'name' => null,
+                'state' => self::STATE_WITHHELD,
+                'note' => 'The supplier on this voucher is withheld: supplier identity is Owner/Accounts only (FC-06).',
+            ];
+        } elseif ($shape['party']) {
             $partyName = $this->name($payload['party_ledger'] ?? null);
             $party = ['name' => $partyName] + $this->resolver->ledgerName($partyName);
         }

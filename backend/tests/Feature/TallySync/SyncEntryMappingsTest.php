@@ -53,7 +53,7 @@ class SyncEntryMappingsTest extends TestCase
     use RefreshDatabase;
 
     /** SyncPayloadRateVisibilityTest's walk keys — the same walk, so the two suites cannot disagree on what a rate is. */
-    private const RATE_KEYS = ['rate', 'amount', 'total_amount', 'unit_price', 'unit_cost'];
+    private const RATE_KEYS = ['rate', 'amount', 'total_amount', 'debit', 'credit', 'unit_price', 'unit_cost'];
 
     private const COMPANY_GODOWN = 'SWAASHPET POLYMERS PVT LTD';
 
@@ -75,7 +75,10 @@ class SyncEntryMappingsTest extends TestCase
         Warehouse::create(['code' => 'RM', 'name' => 'RM Store', 'is_active' => true, 'tally_guid' => 'gd-rm']);
 
         $grn = $this->enqueueGoodsReceipt();
-        $this->actAsStaff(['tally-sync.view']);
+        // Finance: the vendor row is FC-06's "who supplied it" and reads only
+        // for a reader who may see purchase details (the withheld shape for
+        // everyone else is pinned below and in SupplierIdentityVisibilityTest).
+        $this->actAsStaff(['tally-sync.view', 'finance.view']);
 
         $data = $this->getJson("/api/v1/tally-sync/entries/{$grn->id}")->assertOk()->json('data');
 
@@ -310,13 +313,25 @@ class SyncEntryMappingsTest extends TestCase
 
         $this->assertSame('identity', $shown['data']['mappings']['lines'][0]['item']['state'], 'the mapping state is visible to a non-finance reader');
         $this->assertSame([], $this->rateKeyPaths($shown), 'show leaked a rate key');
+        // FC-06's second half: the party row of a Receipt Note is the vendor
+        // — kept, emptied and explained for this reader, never the name.
+        $this->assertSame(
+            ['name' => null, 'state' => 'withheld', 'note' => 'The supplier on this voucher is withheld: supplier identity is Owner/Accounts only (FC-06).'],
+            $shown['data']['mappings']['party'],
+        );
 
-        // And a finance reader gets the same mapping block — the gate is on
-        // the payload's rates, not on the mapping state.
+        // And a finance reader gets the same LINE states — the gate is on
+        // the rates and the supplier, not on how a name resolved — plus the
+        // vendor row itself.
         $this->actAsStaff(['tally-sync.view', 'finance.view']);
         $finance = $this->getJson("/api/v1/tally-sync/entries/{$grn->id}")->assertOk()->json('data');
-        $this->assertSame($shown['data']['mappings'], $finance['mappings']);
-        $this->assertSame($shown['data']['mapping_summary'], $finance['mapping_summary']);
+        $this->assertSame($shown['data']['mappings']['lines'], $finance['mappings']['lines']);
+        $this->assertSame('Reliance Industries', $finance['mappings']['party']['name']);
+        $this->assertSame('name_only', $finance['mappings']['party']['state']);
+        // The summary counts what each reader is shown: `withheld` is not a
+        // counted state, so the vendor's name_only appears for finance only.
+        $this->assertSame(0, $shown['data']['mapping_summary']['name_only']);
+        $this->assertSame(1, $finance['mapping_summary']['name_only']);
     }
 
     // ---- helpers ------------------------------------------------------------

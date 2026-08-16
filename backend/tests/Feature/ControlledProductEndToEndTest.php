@@ -300,9 +300,14 @@ class ControlledProductEndToEndTest extends TestCase
 
         $problems = collect($preview->json('data.lines'))->pluck('problems')->flatten()->all();
         $this->assertContains(
-            '"PET Resin (Virgin Grade)" has no Tally identity — Tally will answer "Stock Item does not exist".',
+            '"PET Resin (Virgin Grade)": no Tally identity is recorded here, so this line will be refused unless a stock '
+            .'item of exactly this name exists there — this ERP cannot check.',
             $problems,
         );
-        $this->assertContains('Godown "Raw Material Store" does not exist in Tally.', $problems);
+        $this->assertContains(
+            'Godown "Raw Material Store": no Tally identity is recorded here and it aliases to no Tally-known godown, so '
+            .'this line will be refused unless a godown of exactly this name exists there — this ERP cannot check.',
+            $problems,
+        );
     }
 }
