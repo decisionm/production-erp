@@ -9,6 +9,13 @@ class MaintenanceWorkOrderResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        // parts_cost is Σ(quantity × unit_cost) and quantity is served per
+        // part, so on a one-part order parts_cost / quantity IS the purchase
+        // rate. Same gate as MaintenanceWorkOrderPartResource (see
+        // MaterialLotResource's class note, FC-06): finance eyes only, keys
+        // absent not null. labor_cost is not a purchase rate and stays.
+        $showsCost = $request->user()?->hasAnyPermission(['finance.view', 'finance.manage']) ?? false;
+
         return [
             'id' => $this->id,
             'asset' => AssetResource::make($this->whenLoaded('asset')),
@@ -24,8 +31,10 @@ class MaintenanceWorkOrderResource extends JsonResource
                 fn () => ['id' => $this->assignee->id, 'name' => $this->assignee->name],
             ),
             'labor_cost' => $this->labor_cost,
-            'parts_cost' => $this->parts_cost,
-            'total_cost' => $this->total_cost,
+            ...($showsCost ? [
+                'parts_cost' => $this->parts_cost,
+                'total_cost' => $this->total_cost,
+            ] : []),
             'parts' => MaintenanceWorkOrderPartResource::collection($this->whenLoaded('parts')),
             'created_at' => $this->created_at?->toIso8601String(),
         ];

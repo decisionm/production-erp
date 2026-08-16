@@ -32,7 +32,12 @@ export interface MaintenanceWorkOrderPart {
     item: Item;
     warehouse: Warehouse;
     quantity: string;
-    unit_cost: string;
+    /**
+     * The purchase rate the part was drawn from stock at — served only to
+     * finance.view/manage eyes (FC-06); the key is ABSENT, never null, for
+     * everyone else. Presence is the server's ruling.
+     */
+    unit_cost?: string;
 }
 
 export interface MaintenanceWorkOrder {
@@ -47,8 +52,11 @@ export interface MaintenanceWorkOrder {
     completed_at: string | null;
     assignee?: { id: number; name: string };
     labor_cost: string;
-    parts_cost: string;
-    total_cost: string;
+    // Absent (not null) unless the caller holds finance.view/manage —
+    // parts_cost / quantity would hand a maintenance login the purchase
+    // rate (FC-06). labor_cost is always present.
+    parts_cost?: string;
+    total_cost?: string;
     parts: MaintenanceWorkOrderPart[];
     created_at: string;
 }

@@ -11,6 +11,7 @@ use App\Modules\Production\Services\BagCostAllocationService;
 use App\Modules\Production\Services\ShiftProductionEntryService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Arr;
 
 class ShiftProductionEntryResource extends JsonResource
 {
@@ -22,6 +23,14 @@ class ShiftProductionEntryResource extends JsonResource
         // double the query count of the busiest read in the module — a
         // 20-row approval page is the normal case, not the worst one.
         $materialCost = app(ShiftProductionEntryService::class)->materialCost($this->resource);
+
+        // ONE GATE FOR EVERY RATE ON THIS PAYLOAD. Per-material purchase
+        // rates are Owner/Accounts data (FC-06); the module-coarse
+        // finance.view/manage pair is the permission they already hold and
+        // the floor does not — the MaterialLotResource rule, applied to both
+        // cost blocks below from a single evaluation so they can never
+        // disagree about who a rate is for.
+        $showsRates = (bool) $request->user()?->canAny(['finance.view', 'finance.manage']);
 
         return [
             'id' => $this->id,
@@ -195,7 +204,18 @@ class ShiftProductionEntryResource extends JsonResource
             // unit cost its own issue movement recorded, plus a total that
             // is null (never a partial figure) when any line is unpriced.
             // Null until the batch completes, like variance/metrics above.
-            'material_cost' => $materialCost,
+            //
+            // THE PER-LINE RATES ARE FINANCE'S (FC-06), same stance as
+            // batch_cost below: the total and the consumption lines (which
+            // material, which store, how many kg) are for everyone on the
+            // floor; each line's `unit_cost` — and its `cost`, which is that
+            // rate one division away — are passed only for finance.view/
+            // manage and are ABSENT, not null, for anyone else. Absent
+            // matters here for the reason MaterialLotResource's class note
+            // gives: a null unit cost is a real answer on this payload ("this
+            // issue was unpriced"), so nulling it for a production login
+            // would be telling them the resin cost nothing.
+            'material_cost' => $showsRates ? $materialCost : $this->withoutLineRates($materialCost),
             // WHAT THIS BATCH COST, from the bags its resin actually came
             // out of — resin priced off the machine's scanned load layers at
             // each bag's own purchase rate, everything else priced exactly
@@ -221,7 +241,7 @@ class ShiftProductionEntryResource extends JsonResource
             // claim — see BagCostAllocationService.
             'batch_cost' => app(BagCostAllocationService::class)->summary(
                 $this->resource,
-                withDetail: (bool) $request->user()?->canAny(['finance.view', 'finance.manage']),
+                withDetail: $showsRates,
                 materialCost: $materialCost,
             ),
             'sync_error' => $this->when(
@@ -247,6 +267,30 @@ class ShiftProductionEntryResource extends JsonResource
             'helper_name' => $this->helper_name,
             'notes' => $this->notes,
             'created_at' => $this->created_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * `material_cost` as the floor sees it: every line minus its `unit_cost`
+     * and `cost` keys (removed, never nulled), the aggregate `total_cost`
+     * kept. Shaping only — the full array is still what batch_cost is
+     * priced from, so this must never be fed back into the service.
+     *
+     * @param  array{lines: list<array<string, mixed>>, total_cost: ?string}|null  $materialCost
+     * @return array{lines: list<array<string, mixed>>, total_cost: ?string}|null
+     */
+    private function withoutLineRates(?array $materialCost): ?array
+    {
+        if ($materialCost === null) {
+            return null;
+        }
+
+        return [
+            ...$materialCost,
+            'lines' => array_map(
+                fn (array $line) => Arr::except($line, ['unit_cost', 'cost']),
+                $materialCost['lines'],
+            ),
         ];
     }
 }

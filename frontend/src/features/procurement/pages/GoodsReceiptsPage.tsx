@@ -7,10 +7,12 @@ import { Controller, useFieldArray, useForm, useWatch, type Control, type FieldP
 import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import BarcodeScanInput from '@/components/barcode/BarcodeScanInput';
+import { hasModuleAccess } from '@/features/auth/permissions';
+import { useAuthStore } from '@/features/auth/store';
 import MaterialBagLabels from '@/features/inventory/components/MaterialBagLabels';
 import { listAllWarehouses } from '@/features/inventory/api';
 import { createGoodsReceipt, listGoodsReceipts, listPurchaseOrders } from '@/features/procurement/api';
-import type { GoodsReceiptNote, PurchaseOrderSchedule } from '@/features/procurement/types';
+import type { GoodsReceiptNote, GoodsReceiptNoteLine, PurchaseOrderSchedule } from '@/features/procurement/types';
 import { useProductionSettings } from '@/features/production/packing';
 import { formatDateTime } from '@/lib/datetime';
 import { itemLabel } from '@/lib/itemLabel';
@@ -62,7 +64,10 @@ const receiptSchema = z.object({
                 item_label: z.string(),
                 item_uom: z.string(),
                 quantity: z.number().gt(0, 'Quantity must be greater than 0'),
-                unit_cost: z.number().min(0),
+                // Absent (not sent) when the PO rate is not visible to this
+                // user — the server then defaults it from the PO line and
+                // records that provenance itself.
+                unit_cost: z.number().min(0).optional(),
                 // The editable allocation preview against the PO line's
                 // delivery windows. Prefilled oldest-due-first from the
                 // typed quantity; the server validates the sum exactly.
@@ -104,7 +109,10 @@ function newReceiptKey(): string {
  * the per-line breakdown stays in the View drawer.
  */
 function unitPriceSummary(receipt: GoodsReceiptNote): string {
-    const prices = [...new Set(receipt.lines.map((line) => line.unit_cost))];
+    // unit_cost is absent (not null) on every line for a non-finance user.
+    const prices = [...new Set(receipt.lines.map((line) => line.unit_cost))].filter(
+        (price): price is string => price !== undefined,
+    );
 
     return prices.length > 0 ? prices.join(', ') : '—';
 }
@@ -240,6 +248,8 @@ export default function GoodsReceiptsPage() {
     const [receiptKey, setReceiptKey] = useState(newReceiptKey);
     const [serverErrors, setServerErrors] = useState<string[]>([]);
     const queryClient = useQueryClient();
+    const user = useAuthStore((s) => s.user);
+    const financeAccess = hasModuleAccess(user, 'finance');
 
     // Deep links into this page: ?grn=7 from the material-lot register (that
     // one receipt), ?po=3 from an item's movement history (every receipt on
@@ -270,6 +280,16 @@ export default function GoodsReceiptsPage() {
     const warehouseOptions = warehouses?.data.map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })) ?? [];
 
     const receipts = data?.data ?? [];
+    /**
+     * DOES THIS REGISTER CARRY RATES AT ALL — the server's answer, honoured
+     * locally (the MaterialLotsPage precedent). unit_cost is OMITTED by
+     * GoodsReceiptNoteLineResource for anyone without finance access, so its
+     * presence is the ruling that arrived with the data; the permission check
+     * alongside can only make it stricter. When false the rate columns do not
+     * exist — no '—' column advertising a number it will not show.
+     */
+    const showsRates =
+        financeAccess && receipts.some((receipt) => receipt.lines.some((line) => line.unit_cost !== undefined));
     const visibleReceipts = useMemo(
         () =>
             receipts.filter(
@@ -303,6 +323,12 @@ export default function GoodsReceiptsPage() {
     const { fields, replace } = useFieldArray({ control, name: 'lines' });
     const selectedOrderId = watch('purchase_order_id');
     const selectedOrder = receivableOrders.find((o) => o.id === selectedOrderId);
+    // Same rule for the form: the Unit Cost input exists only when the PO
+    // rate it would override is on the order for this user. Without it there
+    // is nothing to see or override — the server defaults the receipt line
+    // from the PO price and stamps that provenance itself.
+    const showsOrderRates =
+        financeAccess && (selectedOrder?.lines.some((line) => line.unit_price !== undefined) ?? false);
 
     const handleLineScan = (code: string) => {
         const trimmed = code.trim().toLowerCase();
@@ -333,7 +359,9 @@ export default function GoodsReceiptsPage() {
                 item_label: itemLabel(line.item),
                 item_uom: line.item.uom,
                 quantity: Number(line.quantity) - Number(line.quantity_received),
-                unit_cost: Number(line.unit_price),
+                // Prefilled from the PO price only when this user can see it;
+                // otherwise left undefined and never sent (see the schema).
+                unit_cost: financeAccess && line.unit_price !== undefined ? Number(line.unit_price) : undefined,
                 // Oldest-due-first proposal over the line's open delivery
                 // windows — shown editable; the receiver may move quantity
                 // between windows before submitting.
@@ -385,7 +413,9 @@ export default function GoodsReceiptsPage() {
                 lines: values.lines.map((l) => ({
                     purchase_order_line_id: l.purchase_order_line_id,
                     quantity: l.quantity,
-                    unit_cost: l.unit_cost,
+                    // Not sent at all when the PO rate was not visible here —
+                    // the server defaults it from the PO line, never the client.
+                    ...(l.unit_cost !== undefined ? { unit_cost: l.unit_cost } : {}),
                     // Send the edited preview only when windows exist; rows
                     // moved to zero are dropped (a zero allocation is not an
                     // allocation). The server re-validates the exact sum.
@@ -495,7 +525,7 @@ export default function GoodsReceiptsPage() {
                     },
                     { title: 'Warehouse', render: (_, row) => `${row.warehouse.code} — ${row.warehouse.name}` },
                     { title: 'Received', render: (_, row) => formatDateTime(row.received_date) },
-                    { title: 'Unit Price', render: (_, row) => unitPriceSummary(row) },
+                    ...(showsRates ? [{ title: 'Unit Price', render: (_: unknown, row: GoodsReceiptNote) => unitPriceSummary(row) }] : []),
                     { title: 'Reference', dataIndex: 'reference' },
                     { title: 'Lines', render: (_, row) => row.lines.length },
                     {
@@ -628,11 +658,13 @@ export default function GoodsReceiptsPage() {
                                     control={control}
                                     render={({ field }) => <InputNumber {...field} min={0} placeholder="Quantity" />}
                                 />
-                                <Controller
-                                    name={`lines.${index}.unit_cost`}
-                                    control={control}
-                                    render={({ field }) => <InputNumber {...field} min={0} placeholder="Unit Cost" />}
-                                />
+                                {showsOrderRates && (
+                                    <Controller
+                                        name={`lines.${index}.unit_cost`}
+                                        control={control}
+                                        render={({ field }) => <InputNumber {...field} min={0} placeholder="Unit Cost" />}
+                                    />
+                                )}
                             </Space>
                             <LineAllocationsEditor control={control} lineIndex={index} />
                             {/* Phase 6: per-line supplier lots & bags — the GRN
@@ -683,7 +715,9 @@ export default function GoodsReceiptsPage() {
                             columns={[
                                 { title: 'Item', render: (_, line) => itemLabel(line.item) },
                                 { title: 'Quantity', dataIndex: 'quantity' },
-                                { title: 'Unit Cost', dataIndex: 'unit_cost' },
+                                ...(showsRates
+                                    ? [{ title: 'Unit Cost', render: (_: unknown, line: GoodsReceiptNoteLine) => line.unit_cost ?? '—' }]
+                                    : []),
                             ]}
                         />
                     </>

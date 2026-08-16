@@ -2268,7 +2268,12 @@ export interface FactoryDayBinMaterial {
     item_id: number;
     /** 4dp decimal string. The item's own `uom` says what the unit is. */
     quantity_kg: string;
-    average_cost: string;
+    /**
+     * The wrapped StockBalance's weighted-average purchase rate — served only
+     * to finance.view/manage eyes (FC-06); the key is ABSENT, never null, for
+     * everyone else. Presence is the server's ruling.
+     */
+    average_cost?: string;
 }
 
 /**

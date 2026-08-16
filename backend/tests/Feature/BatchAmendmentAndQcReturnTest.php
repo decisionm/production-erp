@@ -393,9 +393,18 @@ class BatchAmendmentAndQcReturnTest extends TestCase
 
         // And the consumption is priced off THIS completion's issue, not off
         // one of the two superseded ones still carrying the same reference in
-        // the append-only ledger: 126 kg of resin at ₹50.
-        $this->assertAmount('50.0000', $corrected->json('data.material_cost.lines.0.unit_cost'));
+        // the append-only ledger: 126 kg of resin at ₹50. The supervisor sees
+        // the total; the per-line rate is finance's (FC-06 —
+        // StockRateVisibilityTest), so it is read back as the accountant.
         $this->assertAmount('6300.0000', $corrected->json('data.material_cost.total_cost'));
+        $this->assertArrayNotHasKey('unit_cost', $corrected->json('data.material_cost.lines.0'));
+
+        $this->actAs(['production.view', 'finance.view']);
+        $asFinance = $this->getJson('/api/v1/production/shift-production-entries')->assertOk()
+            ->json('data');
+        $row = collect($asFinance)->firstWhere('id', $entryId);
+        $this->assertAmount('50.0000', $row['material_cost']['lines'][0]['unit_cost']);
+        $this->assertAmount('6300.0000', $row['material_cost']['total_cost']);
     }
 
     public function test_whoever_amends_becomes_the_one_who_cannot_certify_the_count(): void

@@ -5,9 +5,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { type Control, Controller, useFieldArray, useForm } from 'react-hook-form';
 import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
+import { hasModuleAccess } from '@/features/auth/permissions';
+import { useAuthStore } from '@/features/auth/store';
 import { listAllItems } from '@/features/inventory/api';
 import { createPurchaseOrder, listPurchaseOrders, listAllVendors, sendPurchaseOrder } from '@/features/procurement/api';
-import type { PurchaseOrder, PurchaseOrderStatus } from '@/features/procurement/types';
+import type { PurchaseOrder, PurchaseOrderLine, PurchaseOrderStatus } from '@/features/procurement/types';
 import { itemLabel } from '@/lib/itemLabel';
 
 const orderSchema = z.object({
@@ -101,10 +103,17 @@ const statusColor: Record<PurchaseOrderStatus, string> = {
     cancelled: 'red',
 };
 
+/** quantity × unit_price, or '—' when the rate is not on the line at all. */
+function lineAmount(line: PurchaseOrderLine): string {
+    if (line.unit_price === undefined) return '—';
+    return (Number(line.quantity) * Number(line.unit_price)).toFixed(2);
+}
+
 export default function PurchaseOrdersPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [detailOrder, setDetailOrder] = useState<PurchaseOrder | null>(null);
     const queryClient = useQueryClient();
+    const user = useAuthStore((s) => s.user);
 
     // ?po=7 — a goods receipt (or a receipt's stock movement) linking back to
     // the order it was received against. Without it the page is unchanged.
@@ -152,6 +161,19 @@ export default function PurchaseOrdersPage() {
     }, [focusOrderId, orders]);
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['procurement', 'purchase-orders'] });
+
+    /**
+     * DOES THIS ORDER CARRY RATES AT ALL — the server's answer, honoured
+     * locally (the MaterialLotsPage precedent). unit_price is OMITTED by
+     * PurchaseOrderLineResource for anyone without finance access, so its
+     * presence is the ruling that arrived with the data; the permission
+     * check alongside can only make it stricter. When false, the Unit Price
+     * and Amount columns and the total row do not exist — no '—' column
+     * advertising a number it will not show, and no NaN total.
+     */
+    const showsRates =
+        hasModuleAccess(user, 'finance') &&
+        (detailOrder?.lines.some((line) => line.unit_price !== undefined) ?? false);
 
     const createMutation = useMutation({
         mutationFn: createPurchaseOrder,
@@ -403,28 +425,39 @@ export default function PurchaseOrdersPage() {
                                 { title: 'Item', render: (_, line) => itemLabel(line.item) },
                                 { title: 'Quantity', dataIndex: 'quantity' },
                                 { title: 'Received', dataIndex: 'quantity_received' },
-                                { title: 'Unit Price', dataIndex: 'unit_price' },
-                                {
-                                    title: 'Amount',
-                                    render: (_, line) => (Number(line.quantity) * Number(line.unit_price)).toFixed(2),
-                                },
+                                ...(showsRates
+                                    ? [
+                                          { title: 'Unit Price', render: (_: unknown, line: PurchaseOrderLine) => line.unit_price ?? '—' },
+                                          { title: 'Amount', render: (_: unknown, line: PurchaseOrderLine) => lineAmount(line) },
+                                      ]
+                                    : []),
                             ]}
-                            summary={(lines) => {
-                                const total = lines.reduce(
-                                    (sum, line) => sum + Number(line.quantity) * Number(line.unit_price),
-                                    0,
-                                );
-                                return (
-                                    <Table.Summary.Row>
-                                        <Table.Summary.Cell index={0} colSpan={4}>
-                                            <strong>Total</strong>
-                                        </Table.Summary.Cell>
-                                        <Table.Summary.Cell index={1}>
-                                            <strong>{total.toFixed(2)}</strong>
-                                        </Table.Summary.Cell>
-                                    </Table.Summary.Row>
-                                );
-                            }}
+                            summary={
+                                showsRates
+                                    ? (lines) => {
+                                          // A line without a rate contributes
+                                          // nothing rather than poisoning the
+                                          // total with NaN.
+                                          const total = lines.reduce(
+                                              (sum, line) =>
+                                                  line.unit_price === undefined
+                                                      ? sum
+                                                      : sum + Number(line.quantity) * Number(line.unit_price),
+                                              0,
+                                          );
+                                          return (
+                                              <Table.Summary.Row>
+                                                  <Table.Summary.Cell index={0} colSpan={4}>
+                                                      <strong>Total</strong>
+                                                  </Table.Summary.Cell>
+                                                  <Table.Summary.Cell index={1}>
+                                                      <strong>{total.toFixed(2)}</strong>
+                                                  </Table.Summary.Cell>
+                                              </Table.Summary.Row>
+                                          );
+                                      }
+                                    : undefined
+                            }
                         />
                     </>
                 )}

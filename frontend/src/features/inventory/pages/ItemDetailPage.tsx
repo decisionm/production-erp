@@ -2,6 +2,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Descriptions, Table, Tabs, Tag, Typography } from 'antd';
 import { useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { hasModuleAccess } from '@/features/auth/permissions';
+import { useAuthStore } from '@/features/auth/store';
 import { getItem, listStockBalances, listStockMovements } from '@/features/inventory/api';
 import type { ItemTrackingType, StockMovement } from '@/features/inventory/types';
 import { formatDateTime } from '@/lib/datetime';
@@ -54,7 +56,9 @@ function ReferenceCell({ reference }: { reference: string | null }) {
     return <>{reference}</>;
 }
 
-const movementColumns = [
+// The Unit Cost column exists only when `showsUnitCost` — see the page body
+// for the rule (finance access AND the key actually present on the rows).
+const movementColumns = (showsUnitCost: boolean) => [
     {
         title: 'Date',
         dataIndex: 'movement_date',
@@ -67,7 +71,7 @@ const movementColumns = [
     },
     { title: 'Warehouse', render: (_: unknown, row: StockMovement) => row.warehouse.code },
     { title: 'Quantity', dataIndex: 'quantity' },
-    { title: 'Unit Cost', dataIndex: 'unit_cost' },
+    ...(showsUnitCost ? [{ title: 'Unit Cost', dataIndex: 'unit_cost' }] : []),
     {
         title: 'Reference',
         dataIndex: 'reference',
@@ -76,7 +80,15 @@ const movementColumns = [
     { title: 'Notes', dataIndex: 'notes', render: (n: string | null) => n ?? '—' },
 ];
 
-function MovementTable({ movements, emptyText }: { movements: StockMovement[]; emptyText: string }) {
+function MovementTable({
+    movements,
+    emptyText,
+    showsUnitCost,
+}: {
+    movements: StockMovement[];
+    emptyText: string;
+    showsUnitCost: boolean;
+}) {
     if (movements.length === 0) {
         return <Typography.Text type="secondary">{emptyText}</Typography.Text>;
     }
@@ -87,7 +99,7 @@ function MovementTable({ movements, emptyText }: { movements: StockMovement[]; e
             pagination={false}
             dataSource={movements}
             scroll={{ x: 'max-content' }}
-            columns={movementColumns}
+            columns={movementColumns(showsUnitCost)}
         />
     );
 }
@@ -96,6 +108,8 @@ export default function ItemDetailPage() {
     const { id } = useParams<{ id: string }>();
     const itemId = Number(id);
     const hasValidId = !Number.isNaN(itemId);
+    const user = useAuthStore((s) => s.user);
+    const financeAccess = hasModuleAccess(user, 'finance');
 
     // Loaded by id. This used to search the first page of the items list, so
     // with 600+ items in the master almost every item reported "not found".
@@ -142,6 +156,18 @@ export default function ItemDetailPage() {
 
     const allMovements = movements?.data ?? [];
 
+    /**
+     * DO THESE ROWS CARRY RATES AT ALL — the server's answer, honoured locally
+     * (the MaterialLotsPage precedent). unit_cost / average_cost are OMITTED
+     * by StockMovementResource / StockBalanceResource for anyone without
+     * finance access (FC-06), so their presence is the ruling that arrived
+     * with the data; the permission check alongside can only make it
+     * stricter. When false the cost columns do not exist — no '—' column
+     * advertising a number it will not show.
+     */
+    const showsUnitCost = financeAccess && allMovements.some((m) => m.unit_cost !== undefined);
+    const showsAverageCost = financeAccess && itemBalances.some((b) => b.average_cost !== undefined);
+
     return (
         <>
             <Typography.Title level={3} style={{ marginBottom: 4 }}>
@@ -178,7 +204,7 @@ export default function ItemDetailPage() {
                     columns={[
                         { title: 'Warehouse', render: (_, row) => `${row.warehouse.code} — ${row.warehouse.name}` },
                         { title: 'Quantity', dataIndex: 'quantity' },
-                        { title: 'Avg. Cost', dataIndex: 'average_cost' },
+                        ...(showsAverageCost ? [{ title: 'Avg. Cost', dataIndex: 'average_cost' }] : []),
                     ]}
                 />
             ) : (
@@ -192,7 +218,7 @@ export default function ItemDetailPage() {
                         key: 'all',
                         label: `All (${allMovements.length})`,
                         children: (
-                            <MovementTable movements={allMovements} emptyText="No transactions recorded for this item yet." />
+                            <MovementTable showsUnitCost={showsUnitCost} movements={allMovements} emptyText="No transactions recorded for this item yet." />
                         ),
                     },
                     {
@@ -200,6 +226,7 @@ export default function ItemDetailPage() {
                         label: `Purchase Orders (${byCategory.procurement.length})`,
                         children: (
                             <MovementTable
+                                showsUnitCost={showsUnitCost}
                                 movements={byCategory.procurement}
                                 emptyText="No goods receipts recorded against this item yet."
                             />
@@ -209,7 +236,7 @@ export default function ItemDetailPage() {
                         key: 'sales',
                         label: `Sales (${byCategory.sales.length})`,
                         children: (
-                            <MovementTable movements={byCategory.sales} emptyText="No deliveries recorded for this item yet." />
+                            <MovementTable showsUnitCost={showsUnitCost} movements={byCategory.sales} emptyText="No deliveries recorded for this item yet." />
                         ),
                     },
                     {
@@ -217,6 +244,7 @@ export default function ItemDetailPage() {
                         label: `Production (${byCategory.production.length})`,
                         children: (
                             <MovementTable
+                                showsUnitCost={showsUnitCost}
                                 movements={byCategory.production}
                                 emptyText="No work orders, subcontract orders, or rework orders for this item yet."
                             />
@@ -227,6 +255,7 @@ export default function ItemDetailPage() {
                         label: `Maintenance (${byCategory.maintenance.length})`,
                         children: (
                             <MovementTable
+                                showsUnitCost={showsUnitCost}
                                 movements={byCategory.maintenance}
                                 emptyText="This item hasn't been consumed as a maintenance spare part yet."
                             />
@@ -237,6 +266,7 @@ export default function ItemDetailPage() {
                         label: `Manual Adjustments (${byCategory.manual.length})`,
                         children: (
                             <MovementTable
+                                showsUnitCost={showsUnitCost}
                                 movements={byCategory.manual}
                                 emptyText="No manual receipts, issues, or transfers recorded for this item yet."
                             />
