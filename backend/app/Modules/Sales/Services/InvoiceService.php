@@ -44,7 +44,7 @@ class InvoiceService
         $this->applyFilters($query, $filters);
         $this->query->applySort($query, $filters['sort'] ?? null, ['invoice_date']);
 
-        $page = $query->paginate($perPage);
+        $page = $query->paginate($perPage)->withQueryString();
         $this->trace->decorateInvoices($page->getCollection());
 
         return $page;

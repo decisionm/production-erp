@@ -138,3 +138,14 @@ export function errorSentence(error: unknown): string {
 
     return anyErr?.message ?? 'unknown error';
 }
+
+/**
+ * What the "invoiced" figure counts. It sums EVERY invoice raised against the
+ * order in the ERP, drafts included — a draft is a document, but it is queued
+ * for Tally only once issued, and on this factory real invoices are raised in
+ * Tally anyway (DEC-20260809-003). Said wherever the number is printed, so a
+ * reader never takes "invoiced 500" for "500 billed and in Tally". Whether a
+ * draft should count at all is an open factory question, not this file's.
+ */
+export const INVOICED_CAPTION =
+    'Invoiced counts every invoice raised against the order in this ERP, drafts included — a draft is queued for Tally only once issued.';

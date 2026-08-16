@@ -3,7 +3,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Descriptions, Drawer, Modal, Skeleton, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import { Link } from 'react-router-dom';
 import { cancelSalesOrder, getDelivery, getInvoice, getSalesOrder } from '@/features/sales/api';
-import { cartonSummary, documentTitle, tallyLinkTag, unvalidatedBuilderTag } from '@/features/sales/drawer';
+import {
+    INVOICED_CAPTION,
+    cartonSummary,
+    documentTitle,
+    tallyLinkTag,
+    unvalidatedBuilderTag,
+} from '@/features/sales/drawer';
 import type {
     Delivery,
     Invoice,
@@ -241,6 +247,9 @@ function SalesOrderBody({ order, onOpen }: { order: SalesOrder; onOpen: (target:
                             ordered {order.totals.ordered_quantity} · delivered {order.totals.delivered_quantity} · invoiced{' '}
                             {order.totals.invoiced_quantity}
                         </span>
+                        <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                            {INVOICED_CAPTION}
+                        </Typography.Text>
                     </Descriptions.Item>
                 )}
             </Descriptions>

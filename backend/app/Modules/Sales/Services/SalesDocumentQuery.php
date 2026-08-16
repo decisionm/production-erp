@@ -27,13 +27,16 @@ class SalesDocumentQuery
 
     /**
      * The id a typed term names, for a document whose numbers read
-     * "{prefix}-{id}": "SO-12", "so 12", "so-12", "SO12" and a bare "12" all
-     * name order 12; anything else (a name, a reference, "SO-") is null.
+     * "{prefix}-{id}": "SO-12", "so 12", "so-12", "SO#12", "SO12" and a bare
+     * "12" all name order 12; anything else (a name, a reference, "SO-",
+     * "-12", "#12") is null — a separator is only a separator after the
+     * prefix, so a bare leading dash or hash is not read as one. The
+     * frontend's parseDocumentRef() keeps the same grammar.
      * Case-insensitive; surrounding whitespace ignored.
      */
     public function documentId(string $term, string $prefix): ?int
     {
-        $pattern = '/^\s*(?:'.preg_quote($prefix, '/').')?[\s\-#]*(\d+)\s*$/i';
+        $pattern = '/^\s*(?:'.preg_quote($prefix, '/').'[\s\-#]*)?(\d+)\s*$/i';
 
         if (preg_match($pattern, $term, $matches) !== 1) {
             return null;

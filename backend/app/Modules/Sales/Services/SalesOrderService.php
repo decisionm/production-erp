@@ -35,7 +35,9 @@ class SalesOrderService
         $this->applyFilters($query, $filters);
         $this->query->applySort($query, $filters['sort'] ?? null, ['order_date', 'expected_date']);
 
-        return $query->paginate($perPage);
+        // withQueryString(): the paginator's own links carry the validated
+        // filters, so an API client walking links.next stays on the same query.
+        return $query->paginate($perPage)->withQueryString();
     }
 
     /**
@@ -133,19 +135,34 @@ class SalesOrderService
      */
     public function cancel(SalesOrder $order): SalesOrder
     {
-        $order->loadMissing('lines');
+        // Judged and written under a row lock, in one transaction: a
+        // dispatch or an invoice committing between a plain read and the
+        // status write would leave a CANCELLED order that has a delivery —
+        // the one state the page promises cannot exist. DeliveryService and
+        // InvoiceService read the order inside their own transactions, so
+        // the lock here is what serialises the two.
+        $cancelled = DB::transaction(function () use ($order) {
+            $fresh = SalesOrder::query()
+                ->whereKey($order->getKey())
+                ->with('lines')
+                ->withCount('invoices')
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        if (! $order->isCancellable()) {
-            throw InvalidStatusTransitionException::make(
-                'sales order',
-                $order->status->value,
-                SalesOrderStatus::Cancelled->value,
-            );
-        }
+            if (! $fresh->isCancellable()) {
+                throw InvalidStatusTransitionException::make(
+                    'sales order',
+                    $fresh->status->value,
+                    SalesOrderStatus::Cancelled->value,
+                );
+            }
 
-        $order->update(['status' => SalesOrderStatus::Cancelled]);
+            $fresh->update(['status' => SalesOrderStatus::Cancelled]);
 
-        return $this->decorate($order);
+            return $fresh;
+        });
+
+        return $this->decorate($cancelled);
     }
 
     // ---- internals --------------------------------------------------------------

@@ -13,6 +13,7 @@ use App\Modules\Sales\Models\Invoice;
 use App\Modules\Sales\Models\SalesOrder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
@@ -121,6 +122,77 @@ class SalesSearchFilterTest extends TestCase
         $this->assertIds([], $this->orders, $this->list('sales-orders', ['q' => 'nobody-by-this-name']));
     }
 
+    public function test_q_reads_a_separator_only_after_the_prefix_never_a_bare_dash_or_hash_as_a_number(): void
+    {
+        $id = $this->orders['aqua_confirmed']->id;
+
+        // "SO#12" is a spelling of the number; "-12" and "#12" are not — a
+        // bare leading dash or hash must not be read as "order 12".
+        $this->assertIds(['aqua_confirmed'], $this->orders, $this->list('sales-orders', ['q' => "SO#{$id}"]), 'SO#id');
+        $this->assertIds([], $this->orders, $this->list('sales-orders', ['q' => "-{$id}"]), '-id');
+        $this->assertIds([], $this->orders, $this->list('sales-orders', ['q' => "#{$id}"]), '#id');
+        $this->assertIds([], $this->orders, $this->list('sales-orders', ['q' => "{$id}abc"]), 'idabc');
+        $this->assertIds([], $this->orders, $this->list('sales-orders', ['q' => '0']), '0');
+    }
+
+    public function test_q_treats_like_wildcards_as_the_characters_typed(): void
+    {
+        // A customer literally named with % and _ — the search must match the
+        // characters, never treat them as wildcards. Deleting the escaping in
+        // SalesDocumentQuery::needle() turns q=%%% into "everything".
+        $pure = Customer::create(['code' => 'C_2', 'name' => '100% Pure']);
+        $this->orders['pure'] = $this->order($pure, SalesOrderStatus::Draft, '2026-08-03', null, [$this->cap]);
+        Customer::create(['code' => 'C12', 'name' => 'Cee Twelve']);
+        $this->orders['c12'] = $this->order(Customer::where('code', 'C12')->firstOrFail(), SalesOrderStatus::Draft, '2026-08-03', null, [$this->cap]);
+
+        $this->assertIds([], $this->orders, $this->list('sales-orders', ['q' => '%%%']), '%%%');
+        $this->assertIds(['pure'], $this->orders, $this->list('sales-orders', ['q' => '100%']), '100%');
+        $this->assertIds(['pure'], $this->orders, $this->list('sales-orders', ['q' => 'C_2']), 'C_2 is not C12');
+        $this->assertIds(['c12'], $this->orders, $this->list('sales-orders', ['q' => 'C12']), 'C12');
+        $this->assertIds([], $this->orders, $this->list('sales-orders', ['q' => 'C_1']), 'C_1 matches nothing');
+    }
+
+    public function test_the_sales_orders_page_costs_a_fixed_number_of_queries_however_many_orders_have_no_invoice(): void
+    {
+        // Twenty un-invoiced orders on one page. withSum() yields SQL NULL for
+        // each of them; the model must read that as zero, not as "not loaded"
+        // and re-run the SUM per row (the N+1 the review measured: 20 extra
+        // queries on a 20-row page).
+        for ($i = 0; $i < 20; $i++) {
+            $this->order($this->blue, SalesOrderStatus::Draft, '2026-08-01', null, [$this->cap]);
+        }
+
+        $sums = [];
+        DB::listen(function ($query) use (&$sums) {
+            if (preg_match('/^select sum\(/i', $query->sql) === 1) {
+                $sums[] = $query->sql;
+            }
+        });
+
+        $response = $this->list('sales-orders', ['per_page' => 20, 'status' => 'draft']);
+
+        $this->assertCount(20, $response->json('data'));
+        $this->assertSame([], $sums, 'no per-row SUM query on the list');
+        foreach ($response->json('data') as $row) {
+            $this->assertSame('0.0000', $row['totals']['invoiced_quantity']);
+        }
+    }
+
+    public function test_the_paginator_links_carry_the_filters(): void
+    {
+        for ($i = 0; $i < 3; $i++) {
+            $this->order($this->aqua, SalesOrderStatus::Draft, '2026-08-01', null, [$this->cap]);
+        }
+
+        $response = $this->list('sales-orders', ['per_page' => 2, 'customer_id' => $this->aqua->id, 'q' => 'aqua']);
+
+        $next = $response->json('links.next');
+        $this->assertNotNull($next);
+        $this->assertStringContainsString('customer_id='.$this->aqua->id, $next);
+        $this->assertStringContainsString('q=aqua', $next);
+        $this->assertStringContainsString('page=2', $next);
+    }
+
     public function test_sales_orders_sort_defaults_to_newest_first_and_honours_the_documented_columns(): void
     {
         $this->assertOrder(['blue_completed', 'aqua_confirmed', 'aqua_draft'], $this->orders, $this->list('sales-orders'));
@@ -183,6 +255,14 @@ class SalesSearchFilterTest extends TestCase
         $this->assertIds(['aqua_late'], $this->deliveries, $this->list('deliveries', ['from' => '2026-08-11', 'to' => '2026-08-11']));
         $this->assertIds(['blue_day'], $this->deliveries, $this->list('deliveries', ['from' => '2026-08-08', 'to' => '2026-08-08']));
         $this->assertIds([], $this->deliveries, $this->list('deliveries', ['from' => '2026-08-09', 'to' => '2026-08-10']));
+
+        // The exact boundary instant: 2026-08-11 18:30:00 UTC IS 12-Aug 00:00
+        // IST — the first instant of the 12th, so `to=2026-08-11` (which ends
+        // at that instant, exclusive) must not include it and `from=2026-08-12`
+        // must. Pins `<` against `<=` on the upper bound.
+        $this->deliveries['midnight'] = $this->delivery($this->orders['blue_completed'], '2026-08-11 18:30:00', 'TRUCK-M', [$this->cap]);
+        $this->assertIds(['aqua_late'], $this->deliveries, $this->list('deliveries', ['from' => '2026-08-11', 'to' => '2026-08-11']), 'to=11th excludes the 12th 00:00 IST');
+        $this->assertIds(['midnight'], $this->deliveries, $this->list('deliveries', ['from' => '2026-08-12', 'to' => '2026-08-12']), 'from=12th includes 00:00 IST');
     }
 
     public function test_deliveries_q_matches_number_reference_and_customer_and_sorts_by_delivered_date(): void

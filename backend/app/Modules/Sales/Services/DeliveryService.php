@@ -49,7 +49,7 @@ class DeliveryService
         $this->applyFilters($query, $filters);
         $this->query->applySort($query, $filters['sort'] ?? null, ['delivered_date']);
 
-        $page = $query->paginate($perPage);
+        $page = $query->paginate($perPage)->withQueryString();
         $this->trace->decorateDeliveries($page->getCollection());
 
         return $page;

@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Collapse, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, Collapse, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
@@ -30,7 +30,7 @@ import { salesRateSourceLabel } from '@/features/sales/types';
 import { useSalesListParams } from '@/features/sales/useSalesListParams';
 import { formatDate } from '@/lib/datetime';
 import { itemLabel } from '@/lib/itemLabel';
-import { listEmptyText } from '@/features/sales/drawer';
+import { INVOICED_CAPTION, listEmptyText } from '@/features/sales/drawer';
 
 const orderSchema = z.object({
     customer_id: z.number({ error: 'Customer is required' }),
@@ -548,7 +548,11 @@ export default function SalesOrdersPage() {
                     { title: 'Order Date', dataIndex: 'order_date' },
                     { title: 'Lines', render: (_, row) => row.lines.length },
                     {
-                        title: 'Delivered / Invoiced',
+                        title: (
+                            <Tooltip title={INVOICED_CAPTION}>
+                                <span>Delivered / Invoiced</span>
+                            </Tooltip>
+                        ),
                         render: (_, row) =>
                             row.totals ? (
                                 <span style={numeric}>

@@ -92,8 +92,15 @@ class SalesOrder extends Model
      */
     public function invoicedQuantity(): string
     {
-        $loaded = $this->getAttributes()['invoiced_quantity'] ?? null;
-        $sum = $loaded ?? $this->invoiceLines()->sum('quantity');
+        // withSum() yields SQL NULL — not 0 — for an order with no invoice
+        // lines, which on this factory is most of them (real sales are
+        // invoiced in Tally). Judged on the KEY being present, not on the
+        // value: `?? null` read that NULL as "not loaded" and re-ran the SUM
+        // once per row on the list — twenty extra queries a page.
+        $attributes = $this->getAttributes();
+        $sum = array_key_exists('invoiced_quantity', $attributes)
+            ? ($attributes['invoiced_quantity'] ?? '0')
+            : $this->invoiceLines()->sum('quantity');
 
         return bcadd((string) ($sum ?? '0'), '0', 4);
     }

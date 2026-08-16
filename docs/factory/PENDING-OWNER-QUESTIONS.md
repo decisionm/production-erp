@@ -34,7 +34,7 @@ run (DEC-20260812-001 HRMS/payroll adoption, DEC-20260812-002 PO raised in
 the ERP). Q38-Q41 are claimed by the 12-Aug Tally
 evidence set and the purchase/tax configuration design. Q42 is claimed by the SKU scheme
 design. Q43 is claimed by the Phase 3 sync fix loop (duplicate master names).
-New questions continue from Q44.
+New questions continue from Q45.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 DEC-20260809-002/-003 landed with PR #155 (the finance-pull discovery
@@ -712,3 +712,28 @@ duplicated has not been counted (count on the live instance, not here); the sync
 page's mapping surface reports such names as `ambiguous` with the count, so a
 duplicate would be visible there. **Blocks:** nothing new; keeps the old preview
 behaviour (block) until answered. *Open since 2026-08-17.*
+
+## Q44 · ERP sales-document lifecycle rules — draft SO invoicing, drafts in "invoiced", cancellation record
+
+Only matters if the ERP's Sales module is ever used for real: real sales are
+invoiced in Tally (DEC-20260809-003), so today these are demo-scale rules. Phase
+3.5 (Sales visibility) made the ERP's sales orders / deliveries / invoices
+searchable and traceable and wired `cancel` on a sales order; in doing so four
+lifecycle rules had to be stated, and each is an ENGINEERING default written in
+the code and said on screen — not a factory decision:
+(a) a DRAFT sales order may be invoiced today (only a CANCELLED one is refused);
+(b) the "invoiced" figure on an order counts every invoice raised in the ERP,
+DRAFTS included, and the screen says so beside the number ("a draft is queued
+for Tally only once issued");
+(c) a sales order can be cancelled only while it is draft or confirmed with
+nothing delivered and no invoice (draft included) — a cancelled order then
+refuses confirm, delivery and invoice;
+(d) a cancellation records neither who cancelled nor why (neither does confirm).
+Also noted: a `sales.view` login can now read the carton numbers and batch
+numbers of dispatched boxes on a delivery's trace (no lot, no GRN, no rate, no
+supplier — DEC-20260810-001 and FC-06 intact); the Production carton endpoints
+would not show that login the same. The questions: should a draft SO be
+invoicable at all; should drafts count as invoiced; is a cancellation reason
+(and actor) wanted; and is the carton/batch read for Sales users acceptable? Any
+of these can be flipped without touching data. **Blocks:** nothing — defaults in
+force are stated in the UI. *Open since 2026-08-17.*
