@@ -3,6 +3,7 @@
 namespace Tests\Feature\TallySync\PerType;
 
 use App\Models\User;
+use App\Modules\TallySync\Models\Enums\TallyTransactionCategory;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Services\AgentTokenService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -236,7 +237,16 @@ abstract class PerTypeLifecycleTestCase extends TestCase
             ->assertJsonPath('data.delivered_at', null)
             ->assertJsonPath('data.attempts', 1)
             ->json('data');
-        $this->assertSame($this->tallyRejection(), $retried['resolution_log'][0]['previous_error']);
+        // The repair story records the error it retried past — readable to
+        // this tally-sync-only manager unless the voucher's party is a
+        // supplier, where Tally's words can name the vendor and the key is
+        // withheld (FC-06, second half); the note and the actor stay.
+        $this->assertSame('Payload regenerated from current mappings and re-queued.', $retried['resolution_log'][0]['note']);
+        if (TallyTransactionCategory::from($this->expectedCategoryKey())->partyIsSupplier()) {
+            $this->assertArrayNotHasKey('previous_error', $retried['resolution_log'][0]);
+        } else {
+            $this->assertSame($this->tallyRejection(), $retried['resolution_log'][0]['previous_error']);
+        }
         $this->assertHistory(
             $id,
             ['voucher.enqueued', 'pending.delivered', 'voucher.failed', 'voucher.retried'],
@@ -312,9 +322,20 @@ abstract class PerTypeLifecycleTestCase extends TestCase
             ->postJson("/api/v1/tally-sync/entries/{$id}/dismiss")
             ->assertOk()
             ->assertJsonPath('data.status', 'dismissed')
-            ->assertJsonPath('data.error_message', $this->tallyRejection())
             ->assertJsonPath('data.fix', null)
             ->json('data');
+        // The error stays on the row — readable to this tally-sync-only
+        // manager for every type EXCEPT a supplier-party voucher, where
+        // Tally's own words can name the vendor (FC-06, second half): there
+        // it is withheld with a note, and finance reads it whole
+        // (SupplierIdentityVisibilityTest).
+        if (TallyTransactionCategory::from($this->expectedCategoryKey())->partyIsSupplier()) {
+            $this->assertNull($dismissed['error_message']);
+            $this->assertStringContainsString('FC-06', $dismissed['error_withheld']);
+        } else {
+            $this->assertSame($this->tallyRejection(), $dismissed['error_message']);
+            $this->assertArrayNotHasKey('error_withheld', $dismissed);
+        }
         $this->assertSame('Dismissed — will never be sent to Tally.', $dismissed['resolution_log'][0]['note']);
         $this->assertHistory(
             $id,

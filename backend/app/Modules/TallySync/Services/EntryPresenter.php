@@ -67,7 +67,7 @@ class EntryPresenter
 
     private const JOURNAL_BUILDER = 'tally-sync-agent/src/tally/voucherBuilders/journalEntry.ts';
 
-    /** The line every one of the four carries, verbatim (salesInvoice.ts:19, receiptNote.ts:17, deliveryNote.ts:16, journalEntry.ts:13). */
+    /** The line every one of the four carries, verbatim (salesInvoice.ts:19, receiptNote.ts:17, deliveryNote.ts:17, journalEntry.ts:13). */
     private const UNVALIDATED_LINE = 'BEST-EFFORT TEMPLATE — NOT YET VALIDATED AGAINST A REAL TALLY INSTANCE';
 
     /**
@@ -345,8 +345,17 @@ class EntryPresenter
      *
      * @return list<array{at: ?string, event: string, actor_type: ?string, actor_label: ?string, detail: ?string, source: 'event'|'backfill'|'timestamp', backfilled: bool}>
      */
-    public function timeline(TallySyncEntry $entry): array
+    /**
+     * @param  bool  $mayReadPurchaseDetails  FC-06 second half: when false and
+     *                                        the voucher's party is a supplier,
+     *                                        Tally's rejection text — which can
+     *                                        name that supplier — is left off
+     *                                        the Failed / Refused / Retried /
+     *                                        Dismissed rows; the events stay.
+     */
+    public function timeline(TallySyncEntry $entry, bool $mayReadPurchaseDetails = false): array
     {
+        $withholdsSupplier = ! $mayReadPurchaseDetails && $this->classifier->classify($entry)->partyIsSupplier();
         /** @var Collection<int, TallySyncEvent> $events */
         $events = $entry->relationLoaded('events') ? $entry->events : $entry->events()->get();
 
@@ -357,7 +366,7 @@ class EntryPresenter
                 'event' => $event->event,
                 'actor_type' => $event->actor_type,
                 'actor_label' => $event->actor_label,
-                'detail' => $this->eventDetail($event),
+                'detail' => $this->eventDetail($event, $withholdsSupplier),
                 'source' => $event->isBackfilled() ? 'backfill' : 'event',
                 'backfilled' => $event->isBackfilled(),
                 // Sort keys, stripped below: the instant, then event ids in
@@ -410,12 +419,15 @@ class EntryPresenter
      * (TALLY-SYNC-CHAIN.md §4), so nothing rendered here can. An event kind
      * this method does not know renders no sentence rather than a guess.
      */
-    private function eventDetail(TallySyncEvent $event): ?string
+    private function eventDetail(TallySyncEvent $event, bool $withholdsSupplier = false): ?string
     {
         $details = is_array($event->details) ? $event->details : [];
         $kind = TallySyncEventKind::tryFrom($event->event);
-        $error = $this->string($details, 'error_message');
-        $previous = $this->string($details, 'previous_error');
+        // Tally's own words can name the supplier (FC-06, second half); for a
+        // reader without standing on a supplier-party voucher they are left
+        // off — the row still says the voucher failed / was retried.
+        $error = $withholdsSupplier ? null : $this->string($details, 'error_message');
+        $previous = $withholdsSupplier ? null : $this->string($details, 'previous_error');
 
         return match ($kind) {
             TallySyncEventKind::VoucherEnqueued => $this->joinSentence([

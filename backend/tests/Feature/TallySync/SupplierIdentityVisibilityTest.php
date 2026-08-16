@@ -235,6 +235,69 @@ class SupplierIdentityVisibilityTest extends TestCase
         $this->getJson('/api/v1/tally-sync/summary?q=Reliance')->assertOk()->assertJsonPath('data.all_time.total', 1);
     }
 
+    /**
+     * Tally's own rejection text is a SECOND road to the supplier's name:
+     * for an unresolvable ledger Tally answers "Ledger does not exist :
+     * <vendor>", the agent forwards it verbatim into error_message, retry
+     * copies it into resolution_log.previous_error, and the timeline quotes
+     * it. Every one of those must be withheld from a reader without standing
+     * on a supplier-party voucher — while the fact that it failed, and the
+     * fix advice (derived from the SHAPE of the error, never echoing it),
+     * stay readable. Finance and the agent see the text whole.
+     */
+    public function test_tallys_own_rejection_text_cannot_carry_the_supplier_to_a_reader_without_standing(): void
+    {
+        $grn = $this->enqueueGoodsReceipt();
+        [$agentUser, $token] = $this->agent('factory-pc');
+
+        // The agent polls, then reports Tally's words — naming the vendor.
+        $this->withToken($token)->getJson('/api/v1/tally-sync/pending')->assertOk();
+        $this->withToken($token)->postJson("/api/v1/tally-sync/entries/{$grn->id}/fail", [
+            'error_message' => 'Ledger does not exist : '.self::VENDOR,
+        ])->assertOk();
+        $this->app['auth']->forgetGuards();
+
+        // A manager retries (resolution_log gains previous_error), then it fails again.
+        $manager = $this->actAsStaff(['tally-sync.view', 'tally-sync.manage']);
+        $this->postJson("/api/v1/tally-sync/entries/{$grn->id}/retry")->assertOk();
+        $this->app['auth']->forgetGuards();
+        $this->withToken($token)->getJson('/api/v1/tally-sync/pending')->assertOk();
+        $this->withToken($token)->postJson("/api/v1/tally-sync/entries/{$grn->id}/fail", [
+            'error_message' => 'Ledger does not exist : '.self::VENDOR,
+        ])->assertOk();
+        $this->app['auth']->forgetGuards();
+
+        // The tally-sync-only reader: nowhere, on list or show — and still
+        // told the voucher failed and how to fix it.
+        Sanctum::actingAs($manager);
+        $listRaw = $this->getJson('/api/v1/tally-sync/entries')->assertOk()->getContent();
+        $showRaw = $this->getJson("/api/v1/tally-sync/entries/{$grn->id}")->assertOk()->getContent();
+        $this->assertStringNotContainsString(self::VENDOR, $listRaw, 'the LIST leaked the vendor through Tally\'s rejection text');
+        $this->assertStringNotContainsString(self::VENDOR, $showRaw, 'the SHOW leaked the vendor through Tally\'s rejection text');
+        $show = json_decode($showRaw, true)['data'];
+        $this->assertSame('failed', $show['status']);
+        $this->assertNull($show['error_message']);
+        $this->assertStringContainsString('FC-06', $show['error_withheld']);
+        $this->assertNotEmpty($show['resolution_log']);
+        foreach ($show['resolution_log'] as $repair) {
+            $this->assertArrayNotHasKey('previous_error', $repair);
+        }
+        $failedRows = array_values(array_filter($show['timeline'], fn ($row) => in_array($row['event'], ['voucher.failed', 'voucher.retried'], true)));
+        $this->assertNotEmpty($failedRows);
+        foreach ($failedRows as $row) {
+            $this->assertStringNotContainsString(self::VENDOR, (string) $row['detail']);
+        }
+        $this->app['auth']->forgetGuards();
+
+        // Finance reads Tally's words whole, and the repair story with them.
+        $this->actAsStaff(['tally-sync.view', 'finance.view']);
+        $finance = $this->getJson("/api/v1/tally-sync/entries/{$grn->id}")->assertOk()->json('data');
+        $this->assertSame('Ledger does not exist : '.self::VENDOR, $finance['error_message']);
+        $this->assertArrayNotHasKey('error_withheld', $finance);
+        $this->assertSame('Ledger does not exist : '.self::VENDOR, $finance['resolution_log'][0]['previous_error']);
+        $this->assertTrue(collect($finance['timeline'])->contains(fn ($row) => str_contains((string) $row['detail'], self::VENDOR)));
+    }
+
     public function test_the_one_predicate_answers_for_finance_and_the_agent_and_for_nobody_else(): void
     {
         $this->assertFalse(AgentIdentity::mayReadPurchaseDetails(null));

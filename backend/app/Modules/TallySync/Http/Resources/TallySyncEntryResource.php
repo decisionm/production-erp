@@ -116,7 +116,18 @@ class TallySyncEntryResource extends JsonResource
                 : $this->payloadWithoutPurchaseDetails($this->payload, $withholdsSupplier),
             'status' => $this->status->value,
             'attempts' => $this->attempts,
-            'error_message' => $this->error_message,
+            // Tally's rejection text arrives verbatim from the agent, and for
+            // an unresolvable ledger Tally routinely NAMES it — "Ledger does
+            // not exist : <vendor>". On a supplier-party voucher that is the
+            // supplier's identity by another road (FC-06, second half), so
+            // for a reader without standing the text is withheld and a
+            // sibling note says why — never a bare null, which would read as
+            // "no error". `fix` stays: it is derived from the SHAPE of the
+            // error, never echoes it.
+            'error_message' => $withholdsSupplier ? null : $this->error_message,
+            ...($withholdsSupplier && $this->error_message !== null ? [
+                'error_withheld' => 'Tally\'s rejection text is withheld on this voucher: it can name the supplier, and supplier identity is Owner/Accounts only (FC-06).',
+            ] : []),
             'synced_at' => $this->synced_at?->toIso8601String(),
             // When this voucher was first handed to the sync agent. The
             // agent's own double-post guard reads it: an entry that arrives
@@ -136,7 +147,7 @@ class TallySyncEntryResource extends JsonResource
             // failure records the previous error and that the payload was
             // regenerated from current mappings, so "it failed, the mapping
             // was fixed, it went through" stays readable afterwards.
-            'resolution_log' => $this->payload['resolution_log'] ?? [],
+            'resolution_log' => $this->resolutionLog($withholdsSupplier),
             'fix' => $this->fixSuggestion(),
             // The entry as a person would say it (EntryPresenter; MASTER-PLAN
             // P3-02/P3-03): `summary` {headline, lines} per category and
@@ -152,7 +163,7 @@ class TallySyncEntryResource extends JsonResource
             // docblock is the rule, EntryPresenterTest the proof. The summary
             // takes this row's FC-06 verdict for the supplier segment.
             'summary' => $this->when($this->relationLoaded('events'), fn () => app(EntryPresenter::class)->summary($this->resource, $mayReadPurchaseDetails)),
-            'timeline' => $this->when($this->relationLoaded('events'), fn () => app(EntryPresenter::class)->timeline($this->resource)),
+            'timeline' => $this->when($this->relationLoaded('events'), fn () => app(EntryPresenter::class)->timeline($this->resource, $mayReadPurchaseDetails)),
             // Cast to an object so the wire shape is stable: an empty PHP
             // array serialises as `[]` and a non-empty one as `{}`, and a
             // client typed to `Record<string, …>` should never meet a list.
@@ -165,7 +176,10 @@ class TallySyncEntryResource extends JsonResource
             // keeps its prior shape PLUS `flags` (Phase 3) — the agent's
             // /pending included; it does no strict parse of the row and
             // reads only what it always read (TALLY-SYNC-CHAIN.md §3).
-            'history' => TallySyncEventResource::collection($this->whenLoaded('events')),
+            'history' => $this->when(
+                $this->relationLoaded('events'),
+                fn () => TallySyncEventResource::collectionWithholding($this->events, $withholdsSupplier),
+            ),
             // `mappings` + `mapping_summary` — for every NAME this voucher
             // hands Tally (each line's item and godown, the ledgers, the
             // party, the Sales ledger), whether the ERP resolved it by
@@ -211,6 +225,18 @@ class TallySyncEntryResource extends JsonResource
             foreach (self::SUPPLIER_IDENTITY_KEYS as $key) {
                 unset($payload[$key]);
             }
+            // The repair story rides INSIDE the payload too (retry() writes
+            // resolution_log there), and each entry's previous_error is
+            // Tally's own words — the same second road to the supplier
+            // that the root `resolution_log` and `error_message` are
+            // withheld on. Strip it here so the payload copy cannot say
+            // what the gated keys will not.
+            if (is_array($payload['resolution_log'] ?? null)) {
+                $payload['resolution_log'] = array_values(array_map(
+                    fn ($repair) => is_array($repair) ? array_diff_key($repair, ['previous_error' => true]) : $repair,
+                    $payload['resolution_log'],
+                ));
+            }
         }
 
         if (is_array($payload['lines'] ?? null)) {
@@ -221,6 +247,31 @@ class TallySyncEntryResource extends JsonResource
         }
 
         return $payload;
+    }
+
+    /**
+     * The repair story off the payload — with each entry's `previous_error`
+     * (Tally's own words, which can name the supplier) removed for a reader
+     * who may not read supplier identity on this voucher. The rest of each
+     * entry (when, by whom, the note) stays: that a retry happened is not
+     * FC-06; what Tally said about the vendor is.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function resolutionLog(bool $withholdsSupplier): array
+    {
+        $log = $this->payload['resolution_log'] ?? [];
+        if (! is_array($log)) {
+            return [];
+        }
+        if (! $withholdsSupplier) {
+            return array_values($log);
+        }
+
+        return array_values(array_map(
+            fn ($entry) => is_array($entry) ? array_diff_key($entry, ['previous_error' => true]) : $entry,
+            $log,
+        ));
     }
 
     /**
