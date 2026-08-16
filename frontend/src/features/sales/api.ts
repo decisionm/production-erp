@@ -1,11 +1,15 @@
 import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
+import { unwrapMirrorResponse, unwrapShowResponse } from './drawer';
+import { buildSalesQuery } from './filters';
 import type {
     Customer,
     Delivery,
     Invoice,
     SalesCostInsight,
+    SalesListFilters,
     SalesOrder,
+    TallyMirror,
 } from './types';
 
 /**
@@ -44,9 +48,50 @@ export async function updateCustomer(id: number, payload: UpdateCustomerPayload)
     return data.data;
 }
 
-export async function listSalesOrders(): Promise<Paginated<SalesOrder>> {
-    const { data } = await api.get<Paginated<SalesOrder>>('/sales/sales-orders');
+/**
+ * One page of orders, server-filtered (GET /sales/sales-orders).
+ *
+ * Declared as an overload pair rather than one signature with an optional
+ * argument: the zero-argument form is what lets the Deliveries / Invoices
+ * pages hand this straight to useQuery as their order-picker queryFn, where
+ * TanStack calls it with its context object as the first argument. That
+ * object is a weak-type mismatch for SalesListFilters at compile time and
+ * would be garbage on the wire at run time — the overload keeps the
+ * type-check honest, and buildSalesQuery()'s allowlist keeps the URL clean.
+ */
+export function listSalesOrders(): Promise<Paginated<SalesOrder>>;
+export function listSalesOrders(filters: SalesListFilters): Promise<Paginated<SalesOrder>>;
+export async function listSalesOrders(filters: SalesListFilters = {}): Promise<Paginated<SalesOrder>> {
+    const { data } = await api.get<Paginated<SalesOrder>>('/sales/sales-orders', {
+        params: buildSalesQuery('sales_order', filters),
+    });
     return data;
+}
+
+/** One order with its trace — deliveries (with cartons) and invoices, each with its Tally state. */
+export async function getSalesOrder(id: number): Promise<SalesOrder> {
+    const { data } = await api.get<{ data: SalesOrder; trace?: SalesOrder['trace'] }>(`/sales/sales-orders/${id}`);
+    return unwrapShowResponse(data) as SalesOrder;
+}
+
+/**
+ * Cancel an order. The server allows it ONLY from draft or confirmed with
+ * nothing delivered and no invoices (422 otherwise — the message is the
+ * answer, show it). Touches no stock, fires no Tally event.
+ */
+export async function cancelSalesOrder(id: number): Promise<SalesOrder> {
+    const { data } = await api.post<{ data: SalesOrder }>(`/sales/sales-orders/${id}/cancel`);
+    return data.data;
+}
+
+/**
+ * WHAT THESE PAGES ARE NOT (GET /sales/tally-mirror): real sales are
+ * invoiced in Tally and nothing Tally-side is mirrored here. The panel
+ * renders the server's sentences — never its own.
+ */
+export async function getTallyMirror(): Promise<TallyMirror> {
+    const { data } = await api.get<TallyMirror | { data: TallyMirror }>('/sales/tally-mirror');
+    return unwrapMirrorResponse(data);
 }
 
 export interface CreateSalesOrderPayload {
@@ -80,9 +125,20 @@ export async function getSalesOrderCostInsight(id: number): Promise<SalesCostIns
     return data.data;
 }
 
-export async function listDeliveries(): Promise<Paginated<Delivery>> {
-    const { data } = await api.get<Paginated<Delivery>>('/sales/deliveries');
+/** One page of deliveries, server-filtered (GET /sales/deliveries). Same overload pair as listSalesOrders, same reason. */
+export function listDeliveries(): Promise<Paginated<Delivery>>;
+export function listDeliveries(filters: SalesListFilters): Promise<Paginated<Delivery>>;
+export async function listDeliveries(filters: SalesListFilters = {}): Promise<Paginated<Delivery>> {
+    const { data } = await api.get<Paginated<Delivery>>('/sales/deliveries', {
+        params: buildSalesQuery('delivery', filters),
+    });
     return data;
+}
+
+/** One delivery with its trace — the order it fulfils, its cartons, its Delivery Note's Tally state. */
+export async function getDelivery(id: number): Promise<Delivery> {
+    const { data } = await api.get<{ data: Delivery; trace?: Delivery['trace'] }>(`/sales/deliveries/${id}`);
+    return unwrapShowResponse(data) as Delivery;
 }
 
 export interface CreateDeliveryPayload {
@@ -106,9 +162,20 @@ export async function createDelivery(payload: CreateDeliveryPayload): Promise<De
     return data.data;
 }
 
-export async function listInvoices(): Promise<Paginated<Invoice>> {
-    const { data } = await api.get<Paginated<Invoice>>('/sales/invoices');
+/** One page of invoices, server-filtered (GET /sales/invoices). Same overload pair as listSalesOrders, same reason. */
+export function listInvoices(): Promise<Paginated<Invoice>>;
+export function listInvoices(filters: SalesListFilters): Promise<Paginated<Invoice>>;
+export async function listInvoices(filters: SalesListFilters = {}): Promise<Paginated<Invoice>> {
+    const { data } = await api.get<Paginated<Invoice>>('/sales/invoices', {
+        params: buildSalesQuery('invoice', filters),
+    });
     return data;
+}
+
+/** One invoice with its trace — the order it bills and its Sales voucher's Tally state. */
+export async function getInvoice(id: number): Promise<Invoice> {
+    const { data } = await api.get<{ data: Invoice; trace?: Invoice['trace'] }>(`/sales/invoices/${id}`);
+    return unwrapShowResponse(data) as Invoice;
 }
 
 export interface CreateInvoicePayload {

@@ -1,4 +1,5 @@
 import type { Item, Warehouse } from '@/features/inventory/types';
+import type { EntryFlags, TallySyncStatus } from '@/features/tally-sync/types';
 
 export interface Customer {
     id: number;
@@ -25,13 +26,47 @@ export interface SalesOrderLine {
 
 export interface SalesOrder {
     id: number;
+    /** "SO-{id}" — the spelling the server searches by and the sync payload uses (see `documentNumber`). */
+    document_number: string;
     status: SalesOrderStatus;
     customer: Customer;
     order_date: string;
     expected_date: string | null;
     notes: string | null;
     lines: SalesOrderLine[];
+    /** Quantities across every line, as decimal strings (4dp) — never parsed for arithmetic here. */
+    totals: SalesOrderTotals;
+    deliveries_count: number;
+    invoices_count: number;
+    /**
+     * Whether Cancel is allowed RIGHT NOW, by the same rule the server
+     * enforces (draft or confirmed, nothing delivered, no invoices). The
+     * button reads this; it never re-derives the rule client-side.
+     */
+    can_cancel: boolean;
     created_at: string;
+    /** The chain below this order — ONLY on GET /sales/sales-orders/{id}, never on the list. */
+    trace?: SalesOrderTrace;
+}
+
+export interface SalesOrderTotals {
+    ordered_quantity: string;
+    delivered_quantity: string;
+    invoiced_quantity: string;
+}
+
+/** The order a delivery or invoice hangs off, as the list carries it. */
+export interface SalesOrderRef {
+    id: number;
+    document_number: string;
+    status: SalesOrderStatus;
+}
+
+/** The party on a delivery / invoice row — a CUSTOMER, never a vendor (FC-06 has nothing to withhold here). */
+export interface CustomerRef {
+    id: number;
+    code: string;
+    name: string;
 }
 
 export interface DeliveryLine {
@@ -43,13 +78,23 @@ export interface DeliveryLine {
 
 export interface Delivery {
     id: number;
+    /** "DN-{id}" — the voucher_number the Delivery Note payload carries. */
+    document_number: string;
     sales_order_id: number;
+    sales_order: SalesOrderRef;
+    customer: CustomerRef;
     warehouse: Warehouse;
     reference: string | null;
     delivered_date: string;
     notes: string | null;
     lines: DeliveryLine[];
+    /** How many scanned cartons left on this delivery — 0 for a typed-quantity delivery. */
+    carton_count: number;
+    /** The Delivery Note's queue entry, or null when none exists (a pre-Phase-2 backfill, say). */
+    tally: TallyLink | null;
     created_at: string;
+    /** ONLY on GET /sales/deliveries/{id}. */
+    trace?: DeliveryTrace;
 }
 
 export type InvoiceStatus = 'draft' | 'issued' | 'paid';
@@ -64,14 +109,161 @@ export interface InvoiceLine {
 
 export interface Invoice {
     id: number;
+    /** "INV-{id}" — the voucher_number the Sales payload carries. */
+    document_number: string;
     status: InvoiceStatus;
     sales_order_id: number;
+    sales_order: SalesOrderRef;
     customer: Customer;
     invoice_date: string;
     due_date: string | null;
     notes: string | null;
     lines: InvoiceLine[];
+    /** The Sales voucher's queue entry — null for a draft (nothing is queued until issue). */
+    tally: TallyLink | null;
     created_at: string;
+    /** ONLY on GET /sales/invoices/{id}. */
+    trace?: InvoiceTrace;
+}
+
+// ------------------------------------------------------------- Tally link --
+
+/**
+ * WHERE A DOCUMENT'S VOUCHER STANDS IN THE SYNC QUEUE — the one hop from Sales
+ * into TallySync (the server's TallySyncLinkService; nothing here reads Tally).
+ *
+ * STATUS + FLAGS + LINK, AND NOTHING ELSE. No payload, no rate, no rejection
+ * text rides on this shape — the Tally Sync page (`link`) is where those live,
+ * behind its own gates. `flags` is the entry's honesty flags verbatim: for a
+ * Sales / Delivery Note voucher `unvalidated_builder` is set, and the note it
+ * carries is the sentence to show (DEC-20260809-003 — Tally is the sales
+ * system of record). null on the document means NO entry exists, which is a
+ * different fact from "pending" and is rendered as a dash, never as a state.
+ */
+export interface TallyLink {
+    entry_id: number;
+    voucher_type: string;
+    status: TallySyncStatus;
+    voucher_number: string | null;
+    synced_at: string | null;
+    flags: EntryFlags;
+    /** "/tally-sync?entry={id}" — the deep link the Tally Sync page honours. */
+    link: string;
+}
+
+// ------------------------------------------------------------------ trace --
+
+/**
+ * One physical box on a delivery — read through Production, never invented
+ * here. `batch_no` rides through the shift production entry; null when the
+ * carton carries no entry (or the batch has no number yet).
+ */
+export interface TraceCarton {
+    carton_no: string;
+    pieces: string;
+    shift_production_entry_id: number | null;
+    batch_no: string | null;
+}
+
+export interface TraceLine {
+    item: { id: number; name: string } | null;
+    quantity: string;
+}
+
+export interface TraceDelivery {
+    id: number;
+    document_number: string;
+    reference: string | null;
+    delivered_date: string | null;
+    warehouse: { id: number; name: string } | null;
+    lines: TraceLine[];
+    cartons: TraceCarton[];
+    tally: TallyLink | null;
+}
+
+export interface TraceInvoice {
+    id: number;
+    document_number: string;
+    status: InvoiceStatus;
+    invoice_date: string | null;
+    lines: (TraceLine & { unit_price: string })[];
+    tally: TallyLink | null;
+}
+
+export interface TraceSalesOrder extends SalesOrderRef {
+    customer: CustomerRef;
+}
+
+/** GET /sales/sales-orders/{id} — the chain below the order, in the order it runs. */
+export interface SalesOrderTrace {
+    deliveries: TraceDelivery[];
+    invoices: TraceInvoice[];
+}
+
+/** GET /sales/deliveries/{id}. `sales_order` is null only if the order row is gone. */
+export interface DeliveryTrace {
+    sales_order: TraceSalesOrder | null;
+    cartons: TraceCarton[];
+    tally: TallyLink | null;
+}
+
+/** GET /sales/invoices/{id}. */
+export interface InvoiceTrace {
+    sales_order: TraceSalesOrder | null;
+    tally: TallyLink | null;
+}
+
+// ----------------------------------------------------------- Tally mirror --
+
+/**
+ * GET /sales/tally-mirror — WHAT THESE PAGES ARE NOT.
+ *
+ * Real sales are invoiced in Tally (DEC-20260809-003); the ERP has no read
+ * path from Tally, so Tally-side Sales / Sales Order vouchers are NOT
+ * mirrored here and the documents on these pages are the ERP-originated
+ * subset only. The server says so in its own words and the panel renders
+ * THOSE words — never a sentence typed on this side, so the copy cannot
+ * drift from the decision it stands on.
+ */
+export interface TallyMirror {
+    mirrored: boolean;
+    /** The decision id the copy stands on ("DEC-20260809-003"). */
+    decision: string;
+    headline: string;
+    body: string;
+    erp_invoice_builder: { validated: boolean; note: string };
+    payments_recorded_here: boolean;
+    payments_note: string;
+}
+
+// ---------------------------------------------------------------- filters --
+
+/** Which of the three ERP-originated documents a list, drawer or reference is about. */
+export type SalesDocumentKind = 'sales_order' | 'delivery' | 'invoice';
+
+/**
+ * The server-side filters the three list endpoints accept — one shape, and
+ * filters.ts's per-document allowlist decides which keys each list may send
+ * (a delivery has no `status`; an order has no `sales_order_id`). Every
+ * field is optional; empties never reach the URL. `from`/`to` are calendar
+ * days (YYYY-MM-DD, inclusive) on the document's own date — order_date,
+ * delivered_date (factory-day boundaries, server-side), invoice_date.
+ * `sort` is a field name, `-` prefixed for descending; the server's default
+ * is newest first.
+ */
+export interface SalesListFilters {
+    customer_id?: number;
+    sales_order_id?: number;
+    status?: string;
+    from?: string;
+    to?: string;
+    /** Any line carrying this item. */
+    item_id?: number;
+    /** Document number in any spelling ("SO-12", "so 12", "12"), delivery reference, customer name or code. Not notes. */
+    q?: string;
+    sort?: string;
+    page?: number;
+    per_page?: number;
 }
 
 // ------------------------------------------------------------ cost & margin --

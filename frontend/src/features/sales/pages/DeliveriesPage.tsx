@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Descriptions, Drawer, Form, Input, InputNumber, message, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Form, Input, InputNumber, message, Modal, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -9,7 +9,11 @@ import { listAllWarehouses } from '@/features/inventory/api';
 import { lookupCarton } from '@/features/production/api';
 import type { FinishedCarton } from '@/features/production/types';
 import { createDelivery, listDeliveries, listSalesOrders } from '@/features/sales/api';
+import { hasActiveFilters } from '@/features/sales/filters';
+import SalesDocumentDrawer, { TallyLinkCell } from '@/features/sales/SalesDocumentDrawer';
+import SalesFilterBar from '@/features/sales/SalesFilterBar';
 import type { Delivery } from '@/features/sales/types';
+import { useSalesListParams } from '@/features/sales/useSalesListParams';
 
 const deliverySchema = z.object({
     sales_order_id: z.number({ error: 'Sales order is required' }),
@@ -29,14 +33,22 @@ type DeliveryFormValues = z.infer<typeof deliverySchema>;
 
 export default function DeliveriesPage() {
     const [modalOpen, setModalOpen] = useState(false);
-    const [detailDelivery, setDetailDelivery] = useState<Delivery | null>(null);
     // DISPATCH BY SCAN: the cartons scanned for this delivery. When any are
     // present the server derives the lines from these physical boxes and the
     // typed quantities above are not sent at all.
     const [scannedCartons, setScannedCartons] = useState<FinishedCarton[]>([]);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['sales', 'deliveries'], queryFn: listDeliveries });
+    // The filters, the page and the open drawer all live in the URL — a
+    // pasted link is the same view. The server does the narrowing.
+    const { filters, setFilters, setPage, target, openTarget, closeTarget } = useSalesListParams('delivery');
+    const filtersActive = hasActiveFilters('delivery', filters);
+
+    const { data, isLoading } = useQuery({
+        queryKey: ['sales', 'deliveries', 'list', filters],
+        queryFn: () => listDeliveries(filters),
+        placeholderData: (previous) => previous,
+    });
     const { data: orders } = useQuery({ queryKey: ['sales', 'sales-orders'], queryFn: listSalesOrders });
     const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses', 'all'], queryFn: listAllWarehouses });
 
@@ -154,23 +166,68 @@ export default function DeliveriesPage() {
                 <Button type="primary" onClick={() => setModalOpen(true)}>New Delivery</Button>
             </Space>
 
+            <SalesFilterBar kind="delivery" filters={filters} onChange={setFilters} />
+
             <Table<Delivery>
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                locale={{
+                    emptyText: filtersActive ? 'No deliveries match these filters.' : 'No ERP-originated deliveries yet.',
+                }}
+                pagination={
+                    data?.meta
+                        ? {
+                              current: data.meta.current_page,
+                              pageSize: data.meta.per_page,
+                              total: data.meta.total,
+                              showSizeChanger: true,
+                              pageSizeOptions: [20, 50, 100],
+                              showTotal: (total) => `${total} deliver${total === 1 ? 'y' : 'ies'}`,
+                              onChange: (page, pageSize) => setPage(page, pageSize),
+                          }
+                        : false
+                }
                 columns={[
-                    { title: 'ID', dataIndex: 'id' },
-                    { title: 'SO', render: (_, row) => `SO #${row.sales_order_id}` },
+                    { title: 'Number', render: (_, row) => <strong>{row.document_number ?? `DN-${row.id}`}</strong> },
+                    {
+                        title: 'SO',
+                        render: (_, row) => (
+                            <Button
+                                type="link"
+                                size="small"
+                                style={{ padding: 0 }}
+                                onClick={() => openTarget({ kind: 'sales_order', id: row.sales_order?.id ?? row.sales_order_id })}
+                            >
+                                {row.sales_order?.document_number ?? `SO-${row.sales_order_id}`}
+                            </Button>
+                        ),
+                    },
+                    { title: 'Customer', render: (_, row) => row.customer?.name ?? '—' },
                     { title: 'Warehouse', render: (_, row) => `${row.warehouse.code} — ${row.warehouse.name}` },
                     { title: 'Delivered', dataIndex: 'delivered_date' },
                     { title: 'Reference', dataIndex: 'reference' },
                     { title: 'Lines', render: (_, row) => row.lines.length },
                     {
+                        // Boxes scanned out on this delivery; 0 means the
+                        // quantities were typed, not that nothing left.
+                        title: 'Cartons',
+                        align: 'right',
+                        render: (_, row) => row.carton_count ?? '—',
+                    },
+                    {
+                        title: (
+                            <Tooltip title="Where this delivery's Delivery Note stands in the Tally sync queue. A dash means no voucher was queued for it.">
+                                <span>Tally</span>
+                            </Tooltip>
+                        ),
+                        render: (_, row) => <TallyLinkCell link={row.tally} compact />,
+                    },
+                    {
                         title: 'Actions',
                         render: (_, row) => (
-                            <Button size="small" onClick={() => setDetailDelivery(row)}>
+                            <Button size="small" onClick={() => openTarget({ kind: 'delivery', id: row.id })}>
                                 View
                             </Button>
                         ),
@@ -318,42 +375,9 @@ export default function DeliveriesPage() {
                 </Form>
             </Modal>
 
-            <Drawer
-                title={`Delivery #${detailDelivery?.id}`}
-                open={detailDelivery !== null}
-                onClose={() => setDetailDelivery(null)}
-                width="min(100vw, 560px)"
-                destroyOnHidden
-            >
-                {detailDelivery && (
-                    <>
-                        <Descriptions column={1} size="small" bordered>
-                            <Descriptions.Item label="Sales Order">SO #{detailDelivery.sales_order_id}</Descriptions.Item>
-                            <Descriptions.Item label="Warehouse">
-                                {detailDelivery.warehouse.code} — {detailDelivery.warehouse.name}
-                            </Descriptions.Item>
-                            <Descriptions.Item label="Delivered Date">{detailDelivery.delivered_date}</Descriptions.Item>
-                            <Descriptions.Item label="Reference">{detailDelivery.reference ?? '—'}</Descriptions.Item>
-                            <Descriptions.Item label="Notes">{detailDelivery.notes ?? '—'}</Descriptions.Item>
-                        </Descriptions>
-
-                        <Typography.Title level={5} style={{ marginTop: 24 }}>
-                            Lines
-                        </Typography.Title>
-                        <Table
-                            rowKey="id"
-                            size="small"
-                            pagination={false}
-                            dataSource={detailDelivery.lines}
-                            scroll={{ x: 'max-content' }}
-                            columns={[
-                                { title: 'Item', render: (_, line) => `${line.item.sku} — ${line.item.name}` },
-                                { title: 'Quantity', dataIndex: 'quantity' },
-                            ]}
-                        />
-                    </>
-                )}
-            </Drawer>
+            {/* The trace drawer: the order it fulfils, lines, the cartons that
+                physically left, and where its Delivery Note stands with Tally. */}
+            <SalesDocumentDrawer target={target} onClose={closeTarget} onOpen={openTarget} />
         </>
     );
 }
