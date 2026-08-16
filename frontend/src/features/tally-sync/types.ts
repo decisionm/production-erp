@@ -102,6 +102,66 @@ export interface EntryFlags {
     held?: { note: string; phase: 'collecting' | 'quiet-period'; releasable_at: string };
 }
 
+/**
+ * How ONE name the voucher hands Tally resolved against the masters as they
+ * stand NOW (backend LineMappingResolver — the same resolver the
+ * pre-approval preview uses, so preview and detail can never disagree).
+ * Derived on every read, stored nowhere: a name unmapped yesterday and
+ * mapped today reads as mapped today.
+ *
+ *   identity   a row carrying a Tally GUID (or, for a ledger role, a configured mapping)
+ *   name_only  a row exists by that name but carries no GUID — Tally matches by name and the ERP cannot know if a master so named exists there
+ *   unmapped   no row by that name at all
+ *   fixture    a LOCAL- rehearsal product — never postable whatever it carries
+ *   ambiguous  more than one row shares the name — Tally would match one; the ERP cannot say which (the count is in `note`)
+ *   none       the line carries no name for that dimension (a Sales line has no godown; a Journal line has no item)
+ */
+export type MappingState = 'identity' | 'name_only' | 'unmapped' | 'fixture' | 'ambiguous' | 'none';
+
+export interface ItemMapping {
+    name: string | null;
+    state: MappingState;
+    item_id: number | null;
+    tally_stock_item_guid: string | null;
+    note: string | null;
+}
+
+export interface GodownMapping {
+    name: string | null;
+    state: MappingState;
+    warehouse_id: number | null;
+    /** The GUID Tally will match — the warehouse's own, or its stand-in's under the aliasing rules. */
+    tally_guid: string | null;
+    /** How an identity was reached: the warehouse's own GUID, a Tally-linked ancestor, or the sole linked godown. */
+    resolved_via: 'self' | 'ancestor' | 'sole_linked' | null;
+    note: string | null;
+}
+
+/** A ledger reference — a Journal line's GL account, the party, or the Sales ledger role. */
+export interface LedgerMapping {
+    name: string | null;
+    state: MappingState;
+    note: string | null;
+}
+
+/**
+ * The mapping state of every NAME on the voucher (backend EntryMappingSurface;
+ * MASTER-PLAN P3-04) — only on GET /tally-sync/entries/{id}. `lines` walks
+ * the stock lines the category's builder writes (`side` says which payload
+ * array); `ledgers` is a Journal's GL lines; `party` / `sales_ledger` are
+ * present only where that category's payload names one. Names, ids, GUIDs,
+ * states and notes only — never a rate (FC-06).
+ */
+export interface EntryMappings {
+    lines: { side: 'produced' | 'consumed' | 'lines' | string; item: ItemMapping; godown: GodownMapping }[];
+    ledgers: LedgerMapping[];
+    party: LedgerMapping | null;
+    sales_ledger: LedgerMapping | null;
+}
+
+/** How many names landed in each counted state (`none` is not a mapping outcome, so it is not counted). */
+export type MappingSummary = Record<Exclude<MappingState, 'none'>, number>;
+
 export interface TallySyncEntry {
     id: number;
     syncable_type: string;
@@ -164,6 +224,10 @@ export interface TallySyncEntry {
     flags?: EntryFlags;
     /** The entry's event history — only on GET /tally-sync/entries/{id}, never on the list. */
     history?: TallySyncEvent[];
+    /** Per-name mapping states — only on GET /tally-sync/entries/{id} (same gate as `history`). */
+    mappings?: EntryMappings;
+    /** Counts per mapping state over every name judged — only on GET /tally-sync/entries/{id}. */
+    mapping_summary?: MappingSummary;
 }
 
 /**
