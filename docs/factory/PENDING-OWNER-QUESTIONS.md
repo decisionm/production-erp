@@ -36,6 +36,9 @@ evidence set and the purchase/tax configuration design. Q42 is claimed by the SK
 design. New questions continue from Q43.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
+DEC-20260809-002/-003 are claimed by open PR #155 (the finance-pull
+discovery answers); a branch minting 09-Aug ids checks for them first,
+and #155 re-mints at merge if main has moved past them.
 
 ---
 
@@ -377,6 +380,54 @@ visible, that is a real Finance-module build to scope — bills against
 POs/GRNs, due dates, payment recording — not a dashboard cell. **Blocks:**
 nothing — the dashboard stays receivables-only until answered. *Open
 since 2026-08-09.*
+
+## Q29 · Are the regional ledger groups all customers under Sundry Debtors? — RESOLVED
+
+The pulled chart of accounts holds 230 ledgers under "Sundry Debtors" plus
+~400 more under region/city groups (Tamil Nadu Region 105, Puducherry
+Region 91, Chennai 76, Villupuram 27, Kerala 17, ... — names read as pharma
+companies and agencies). The pulled list is flat, so whether those groups
+NEST under Sundry Debtors — making them all customers for the Finance
+pull's debtor screens and the CRM outstanding figure — is unconfirmed.
+**Blocks:** the scope of Phase 1's debtor pull
+(docs/TALLY-FINANCE-PULL-DESIGN.md).
+
+**Resolved 2026-08-09 by DEC-20260809-002 — with its nuance intact: the
+owner confirmed the regional groups are ALL customers (the business
+meaning), so Phase 1 treats them as debtors; whether they technically nest
+under Sundry Debtors in Tally's group tree stays unverified until the
+first pull reads group parents.** Was open since 2026-08-09.
+
+## Q30 · Sales directly in Tally, and is bill-wise detail on? — PARTLY RESOLVED
+
+Two halves, both for the accountant. (a) The evidence says invoicing lives
+in Tally (18 category-split Sales ledgers, regional debtors) while the
+ERP's Sales module holds demo-scale data — confirm all real sales are
+booked directly in Tally, and whether e-invoicing is in play. (b) When a
+customer pays, is the receipt knocked off against specific invoices
+(Tally's bill-wise details) or only the running balance? Bill-wise decides
+whether per-customer outstanding can show aging/per-invoice detail
+(Phase 2) or only a closing balance (Phase 1). **Blocks:** Phase 2 of the
+Finance pull design. *Open since 2026-08-09.* **Partially resolved
+2026-08-09 by DEC-20260809-003** — half (a): all real sales ARE invoiced
+directly in Tally, and e-invoicing (IRN/QR) is not in use today. Half (b),
+bill-wise, stays open for the accountant.
+
+## Q31 · Re-share the Transactions export (the 30-Jul file is lost)
+
+`Transactions.xml` (30-Jul, the 38 Stock Journals ground truth) was read
+on 05-Aug and then deleted from Downloads — the manifest carries it as
+MISSING with re-share already owed. A fresh FULL-period export (all
+voucher types, not only stock journals) answers the finance-discovery
+questions — which vouchers the accountant actually enters, what a receipt
+looks like in their books, bill references — with ZERO live Tally reads,
+which matters double under the no-pull rule. Export is an accountant
+action inside Tally (Day Book → Export), not an agent read. On arrival it
+is committed under docs/factory/sources/ so it cannot be lost twice.
+**Blocks:** voucher-type usage counts; Phase 2 receipt design. *Open
+since 2026-08-09.* Status 09-Aug: the owner is mailing the accountant for
+the full Day Book XML export and for Tally's quietest half-hour of the
+working day.
 
 ## Q32 · ASB-8's mould capability contradicts the 07-Aug paper — which is wrong?
 
