@@ -100,8 +100,10 @@ jobs:
           GRANULARITY_RAW: ${{ inputs.granularity }}
           WRITE_RAW: ${{ inputs.write }}
         run: |
-          # Decided in shell, not in a `${{ }}` ternary: no expression result
-          # is pasted into script text, so this line cannot become code either.
+          # Decided in shell rather than by an inline expression ternary, so
+          # no expression RESULT is pasted into script text either. (The
+          # literal expression syntax is deliberately not written here: inside
+          # a run: block it is script, and the runner would try to evaluate it.)
           if [ "$WRITE_RAW" = "true" ]; then MODE=WRITE; else MODE='dry run'; fi
           {
             echo "### Voucher granularity — $MODE ($GRANULARITY_RAW)"
