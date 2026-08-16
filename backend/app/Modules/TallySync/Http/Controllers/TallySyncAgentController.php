@@ -8,12 +8,10 @@ use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\TallySync\Http\Requests\FailTallySyncEntryRequest;
 use App\Modules\TallySync\Http\Requests\StockSummaryPreviewRequest;
 use App\Modules\TallySync\Http\Requests\SyncCompaniesRequest;
-use App\Modules\TallySync\Http\Requests\SyncItemsRequest;
 use App\Modules\TallySync\Http\Requests\SyncMastersRequest;
 use App\Modules\TallySync\Http\Resources\TallySyncEntryResource;
 use App\Modules\TallySync\Models\TallyStockSnapshot;
 use App\Modules\TallySync\Models\TallySyncEntry;
-use App\Modules\TallySync\Services\ItemSyncService;
 use App\Modules\TallySync\Services\MasterSyncService;
 use App\Modules\TallySync\Services\StockSummaryPreviewService;
 use App\Modules\TallySync\Services\TallySyncService;
@@ -88,24 +86,6 @@ class TallySyncAgentController extends Controller
         ]);
 
         return TallySyncEntryResource::make($result);
-    }
-
-    /**
-     * Inbound masters pull: the agent posts the Tally stock-item list here and
-     * we upsert it into the ERP item master (matched on GUID). Idempotent — the
-     * agent re-posts the full list each cycle; re-posting is safe.
-     */
-    public function items(SyncItemsRequest $request, ItemSyncService $itemSync): JsonResponse
-    {
-        abort_unless($request->user()?->tokenCan('tally-sync:items'), 403, 'Token missing the tally-sync:items ability.');
-
-        $summary = $itemSync->sync($request->validated()['items']);
-
-        $this->agentLog($request, 'items.received', $summary);
-
-        return response()->json([
-            'data' => $summary,
-        ]);
     }
 
     /**

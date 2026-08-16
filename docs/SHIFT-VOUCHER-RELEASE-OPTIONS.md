@@ -15,10 +15,12 @@ accountant's habit). Worth settling Q11 and Q17 in the same conversation.
 
 ## What exists today (verified 07-Aug-2026, all references current)
 
-- `backend/config/tally-sync.php:26` — `voucher_granularity`, from env
-  `TALLY_VOUCHER_GRANULARITY`, default `'batch'`: one Stock Journal per
-  approved entry (`SPE-{id}`), i.e. per product per machine. This is the
-  behaviour the owner wants consolidated.
+- `backend/config/tally-sync.php:31` — `voucher_granularity`, from env
+  `TALLY_VOUCHER_GRANULARITY`. At the time of this paper the packaged
+  default was `'batch'`: one Stock Journal per approved entry (`SPE-{id}`),
+  i.e. per product per machine — the behaviour the owner wanted
+  consolidated. (Since the 07-Aug-2026 flip, DEC-20260807-014, the packaged
+  default is `'shift'`; `'batch'` stays selectable via the env.)
 - **Shift mode already exists**:
   `TallySyncService::enqueueShiftVoucher` (`TallySyncService.php:577`)
   aggregates everything a `(production_date, shift)` produced into one

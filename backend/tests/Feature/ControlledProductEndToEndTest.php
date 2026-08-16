@@ -120,6 +120,9 @@ class ControlledProductEndToEndTest extends TestCase
 
     public function test_one_controlled_product_runs_from_preview_to_a_queued_voucher(): void
     {
+        // Batch mode is under test here explicitly; the packaged default is shift.
+        config(['tally-sync.voucher_granularity' => 'batch']);
+
         $this->actAs();
 
         // ---- 1. Preview: ready, with the whole estimation card ----------

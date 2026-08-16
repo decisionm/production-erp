@@ -10,20 +10,25 @@ return [
     | How approved shift production entries become Tally Stock Journal
     | vouchers:
     |
-    |   'batch' (default) — one voucher per approved entry (SPE-{id}),
-    |             the original behaviour, byte-for-byte.
-    |   'shift'           — one aggregated Stock Journal per
+    |   'shift' (default) — one aggregated Stock Journal per
     |             (production_date, shift): entries approved for the same
     |             shift merge into a single pending voucher
     |             (SJ-{Ymd}-S{shift_id}); entries approved after that
     |             voucher has already synced open a follow-up voucher
     |             (-2, -3, ...). Membership is tracked on
     |             shift_production_entries.tally_sync_entry_id so an entry
-    |             appears in exactly one voucher.
+    |             appears in exactly one voucher. This is the factory's
+    |             decided mode (DEC-20260807-010) and what live has run
+    |             since the 07-Aug-2026 flip (DEC-20260807-014) — the
+    |             packaged default says so, so a reader of this file alone
+    |             is not misled about production.
+    |   'batch'           — one voucher per approved entry (SPE-{id}),
+    |             the original per-entry behaviour, retained byte-for-byte
+    |             and still selectable via the env.
     |
     */
 
-    'voucher_granularity' => env('TALLY_VOUCHER_GRANULARITY', 'batch'),
+    'voucher_granularity' => env('TALLY_VOUCHER_GRANULARITY', 'shift'),
 
     /*
     |--------------------------------------------------------------------------

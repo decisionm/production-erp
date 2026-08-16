@@ -25,8 +25,9 @@ use Tests\TestCase;
  * (SJ-{Ymd}-S{shift_id}), consumption summed item+godown-wise and production
  * item-wise; entries approved after that voucher synced open a follow-up
  * (-2). Membership is tracked on shift_production_entries.tally_sync_entry_id
- * so an entry appears in exactly one voucher. The default 'batch' mode stays
- * byte-for-byte the original per-entry Manufacturing Journal.
+ * so an entry appears in exactly one voucher. 'batch' mode (selectable via
+ * the env; no longer the packaged default) stays byte-for-byte the original
+ * per-entry Manufacturing Journal.
  */
 class ShiftVoucherGranularityTest extends TestCase
 {
@@ -252,6 +253,8 @@ class ShiftVoucherGranularityTest extends TestCase
     {
         // Approved under batch mode: owns a per-entry Manufacturing Journal
         // (morph-tracked, tally_sync_entry_id stays null) still Pending.
+        // Batch mode is under test here explicitly; the packaged default is shift.
+        config(['tally-sync.voucher_granularity' => 'batch']);
         $batchEra = $this->approve($this->pendingEntry('5000', [[$this->resin, '250.0000']], 'B-1'));
         $this->assertSame(1, TallySyncEntry::count());
 
@@ -305,12 +308,12 @@ class ShiftVoucherGranularityTest extends TestCase
         $this->assertStringContainsString('Tally company not loaded', $healed->payload['resolution_log'][0]['previous_error']);
     }
 
-    public function test_default_batch_granularity_keeps_the_per_entry_manufacturing_journal(): void
+    public function test_batch_granularity_keeps_the_per_entry_manufacturing_journal(): void
     {
-        // No config override — 'batch' is the default and must stay the
-        // original behaviour: one Manufacturing Journal per entry, no
-        // membership tracking.
-        $this->assertSame('batch', config('tally-sync.voucher_granularity'));
+        // Batch mode is under test here explicitly; the packaged default is
+        // shift (DEC-20260807-010). 'batch' must stay the original behaviour:
+        // one Manufacturing Journal per entry, no membership tracking.
+        config(['tally-sync.voucher_granularity' => 'batch']);
 
         $entry = $this->approve($this->pendingEntry('5000', [[$this->resin, '250.0000']]));
 

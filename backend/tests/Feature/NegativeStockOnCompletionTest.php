@@ -411,6 +411,9 @@ class NegativeStockOnCompletionTest extends TestCase
 
     public function test_the_tally_voucher_carries_the_submitted_consumption_unchanged(): void
     {
+        // Batch mode is under test here explicitly; the packaged default is shift.
+        config(['tally-sync.voucher_granularity' => 'batch']);
+
         $entryId = $this->startBatch();
         $this->complete($entryId)->assertOk();
 

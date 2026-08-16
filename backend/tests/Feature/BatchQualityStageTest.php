@@ -156,6 +156,9 @@ class BatchQualityStageTest extends TestCase
 
     public function test_a_rejection_reduces_production_all_the_way_to_the_voucher(): void
     {
+        // Batch mode is under test here explicitly; the packaged default is shift.
+        config(['tally-sync.voucher_granularity' => 'batch']);
+
         $this->actAs();
         $entryId = $this->completedBatch();
 
@@ -528,6 +531,8 @@ class BatchQualityStageTest extends TestCase
     public function test_with_the_stage_switched_off_the_chain_is_exactly_what_it_was(): void
     {
         config(['production.approvals.quality_stage_enabled' => false]);
+        // Batch mode is under test here explicitly; the packaged default is shift.
+        config(['tally-sync.voucher_granularity' => 'batch']);
 
         $this->actAs();
         $entryId = $this->completedBatch();
