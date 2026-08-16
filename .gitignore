@@ -12,3 +12,8 @@ deployment_files/
 ~$*
 __pycache__/
 *.pyc
+
+# macOS Finder metadata — not project content. Only backend/.gitignore carried
+# a rule, which is how docs/.DS_Store reached main in 6ba89b4 (untracked
+# 16-Aug). The pattern is unanchored so it matches at any depth.
+.DS_Store
