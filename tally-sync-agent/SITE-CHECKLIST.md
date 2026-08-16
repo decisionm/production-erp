@@ -35,6 +35,85 @@ Internal, development-side checklist — deliberately kept **out** of the client
 - [ ] Tally restarted mid-test once: queued voucher survives and syncs after Tally is back
 - [ ] The voucher's XML request/response pair captured from the agent log for the repo's validation records
 
+## Upgrading an existing site (installing over a running agent)
+
+The steps above are the FIRST install. An upgrade is smaller, but two of its
+steps exist because skipping them has already caused trouble once each:
+
+- [ ] **Quit the running tray app first** (right-click tray icon → Quit).
+      Installing while an old build is alive is how two agents once polled the
+      same queue at the same time (the v0.1.5 confusion)
+- [ ] Get the new installer. The normal source is the ERP's own page:
+      **Tally Sync → Settings → "Download Tally Sync Agent (Windows)"** —
+      but that button serves whatever was last PUBLISHED, so first check the
+      "Latest version: X · built DATE" line under it says the version you
+      came to install. If it still shows the old version (a pre-review build
+      is deliberately not published there), carry the installer by USB or a
+      trusted download instead
+- [ ] Run it — same folder, over the old install. SmartScreen warning
+      expected while unsigned ("More info → Run anyway")
+- [ ] **Verify settings survived:** tray icon reappears; open Settings… —
+      cloud URL, agent token, Tally host (`127.0.0.1`), port (`9000`), exact
+      company name, poll interval must all still be filled in. They live in the
+      user profile (`%APPDATA%`), which the installer does not touch. **If
+      anything is blank, STOP and call — do not retype the token from memory**
+      (it is shown only once at creation; a blank here means issuing a new one)
+- [ ] Normal operation intact: vouchers sync as before within a couple of
+      minutes (or "Sync Vouchers Now" runs clean against an empty queue)
+
+## No automatic reads from Tally (v0.3.4+)
+
+Since v0.3.4 the agent NEVER reads from Tally on a timer: the periodic
+masters loop is removed under the factory's post-corruption rule — Tally
+is the single source of record, and nothing polls it unprompted. Reads
+happen only as a deliberate operator act ("Pull Masters from Tally" in
+the tray, or the Settings tests). Voucher posting is unchanged.
+
+## Stock Summary read — REMOVED in v0.3.3
+
+The tray item "Read Stock Summary (preview only)" is gone from v0.3.3.
+Every variant of the read destabilised the live TallyPrime on 07-Aug-2026
+(details below, kept as history), and the factory then reported company
+data corruption. The read pipeline survives in code, trigger-less, until
+a safe read is proven. The checklist below applies only to builds ≤0.3.2
+— on those, the standing instruction is DO NOT CLICK the read item.
+
+## First probed Stock Summary read (v0.3.2 only — item removed in 0.3.3)
+
+Background, so the caution makes sense: on 07 Aug 2026 the one-shot read
+(v0.2.0) crashed the live Tally from ONE click; the group-chunked read
+(v0.3.0) wedged TallyPrime twice on its first chunk; and v0.3.1's heavy
+fetch of a 12-item ungrouped scope hung it a third time even though a
+canary had passed on a named group. Since v0.3.2 EVERY scope is light-
+probed immediately before its own heavy request, the ungrouped scope is
+always read one item at a time (as is any group over the cap), the risky
+scopes run last, and an item whose single-item fetch times out is
+BLACKLISTED on disk — named in the log, skipped by every later run — so
+each attempt either completes or eliminates exactly one culprit. The
+button is disabled while a read runs and the tray narrates every step.
+Treat the first run as a small test:
+
+- [ ] **Quiet window only:** after production hours, no batches posting
+- [ ] Click **Read Stock Summary (preview only)** — ONCE
+- [ ] Watch the tray label: "listing stock items…" → "checking Tally's group
+      scoping (canary…)" → "group 1/N — …" counting up (an oversized group
+      shows "item 45/612" style progress and takes a few minutes — that is
+      normal) → "sending to ERP for preview…" → a final line like
+      "✓ Last stock read: 653 line(s) sent for preview — nothing imported".
+      Tally should stay responsive throughout
+- [ ] If the read stops saying a **canary failed**: nothing heavy was sent,
+      Tally is fine, and no retry will help — tell the developers. That stop
+      is the protection working, not a malfunction
+- [ ] **Abort rule:** if Tally visibly goes sluggish during any scope, stop —
+      click nothing further. **Restart Tally FIRST** (Task Manager → end the
+      TallyPrime task if the window is frozen → reopen → load the company),
+      then click the read once more: it resumes where it stopped instead of
+      starting over. (A second click while it runs does nothing — the button
+      is disabled; that protection is the point)
+- [ ] If the final line warns **"INCOMPLETE COVERAGE"**, the snapshot is still
+      safe (nothing invented, nothing imported) — but tell the developers
+      before anyone trusts it as an opening position
+
 ## Leave-behind rules (tell whoever minds the PC)
 
 1. Keep this PC on and Tally open with the company loaded; if it's off, production sync simply waits — nothing is lost

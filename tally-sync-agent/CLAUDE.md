@@ -29,9 +29,21 @@ bag belongs to no machine and no batch (FC-01, `docs/factory/`).
 
 ## Working here
 
-- Typecheck: `npm run typecheck` (CI runs it as "Tally sync agent typecheck")
-- Package: `npm run package:win` — installed on the factory PC by hand;
-  deploys of the web app do NOT update the agent
+- Typecheck: `npm run typecheck`. CI runs `npm ci && npm test` as "Compile
+  and test agent" — `npm test` builds with `tsc`, so compilation IS the
+  typecheck there
+- Tests: `npm test` — a preflight that refuses an empty test set, then the
+  build, then `node:test` against the compiled `dist/`. No dependencies
+- Package: `npm run package:win` — but real installers come from the
+  *Build Tally Sync Agent* CI workflow (Windows runner), and releasing one
+  follows the RELEASE RITUAL in the repo root's `DEPLOY.md`: build on CI →
+  review gate → **merge, which builds a CANDIDATE ARTIFACT ONLY** → manual
+  publish dispatch **on main** with `publish: true`, which rebuilds and
+  publishes. Merging does NOT publish and does NOT reach the factory; a
+  dispatch from a non-main branch cannot publish even with `publish: true`.
+  Publishing IS deploying — the factory agent auto-updates from the
+  published feed within hours — so never dispatch with `publish: true` for
+  unreviewed code. Deploys of the web app do NOT update the agent
 - Site install steps: `SITE-CHECKLIST.md`
 - Voucher shape questions: the ERP side owns them —
   `backend/app/Modules/TallySync/` and its tests are the contract

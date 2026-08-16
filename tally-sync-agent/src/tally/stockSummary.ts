@@ -1,25 +1,52 @@
 import axios from 'axios';
 import { XMLParser } from 'fast-xml-parser';
+import { withTallyGate } from './gate';
 import { escapeXml } from './voucherBuilders/xmlHelpers';
 import type { TallyTarget } from './masters';
 
 /**
- * Reads a GODOWN-WISE STOCK SUMMARY out of Tally, as at a closing date.
+ * Reads a GODOWN-WISE STOCK SUMMARY out of Tally, as at a closing date — in
+ * requests that are each PROVEN SMALL before they are sent.
  *
- * STRICTLY READ-ONLY. This exports a collection; it never imports, alters or
+ * STRICTLY READ-ONLY. This exports collections; it never imports, alters or
  * writes anything to Tally. The same guarantee the masters export gives.
  *
- * Why it exists: the masters sync carries item and godown NAMES but no
- * quantities, so the ERP has never had an authoritative opening position — it
- * was filled with hand-typed "provisional" figures during rehearsal, and those
- * became indistinguishable from real stock. This is the read that replaces
- * them, straight from the books, per item per godown.
+ * The field history that shaped this file, both incidents on 07 Aug 2026:
+ *  - v0.2.0: ONE full-catalogue request (every StockItem with godown-wise
+ *    closing quantity, rate and value) crashed the live Tally from one click.
+ *  - v0.3.0: chunking by stock group was not enough — the "ungrouped items"
+ *    chunk wedged TallyPrime twice, deterministically, DURING the request.
+ *  - v0.3.1: a run-level canary on the smallest NAMED group passed, and the
+ *    heavy fetch of the ungrouped scope — 12 items by the masters list —
+ *    hung Tally anyway. A canary on one scope proves nothing about another:
+ *    `$$SysName:Primary` inside CHILDOF may fail open where a named group
+ *    filters fine, or one specific item's balances may hang Tally at any
+ *    request size. Probing must be PER SCOPE, and the ungrouped scope gets
+ *    no benefit of the doubt at all.
  *
- * Defensive in the same way masters.ts is, and for the same reason: real client
- * Tally data varies by version and setup. Every field is optional, values are
- * sanitised, and nothing is matched on a name — the item GUID is the identity
- * carried to the server, so the ERP can join on the identifier it already
- * stores rather than guessing from text.
+ * So this file stops assuming and probes everything. Two request weights:
+ *
+ *  LIGHT — Name + GUID only, no balances. The same class of request as the
+ *  masters item list, which this Tally demonstrably serves every hour without
+ *  strain. Light requests are safe even when a scope filter silently fails
+ *  and they return the entire catalogue.
+ *
+ *  HEAVY — closing quantity/rate/value with the godown-wise batch breakdown.
+ *  This is the weight that kills. A heavy request is only ever sent for a
+ *  scope that a light probe has ALREADY proven returns a bounded number of
+ *  items. No probe, no heavy request — that is the contract of this file.
+ *
+ * Scoping mechanisms (CHILDOF for a group's direct children, a TDL name
+ * filter for a single item) are Tally-version-sensitive, which is exactly why
+ * the caller canary-tests each mechanism with a LIGHT request and aborts the
+ * whole run if Tally returns more than the scope should hold. The lethal
+ * request is not merely discouraged — it cannot be emitted, because every
+ * heavy request's scope was measured first.
+ *
+ * Defensive in the same way masters.ts is, and for the same reason: real
+ * client Tally data varies by version and setup. Every field is optional,
+ * values are sanitised, and nothing is matched on a name — the item GUID is
+ * the identity carried to the server.
  */
 
 const parser = new XMLParser({ ignoreAttributes: false, parseTagValue: false, trimValues: true });
@@ -43,6 +70,9 @@ export interface StockSummaryPayload {
     as_of: string;
     lines: StockSummaryLine[];
 }
+
+/** A stock-group scope: a group name, or null for items directly under Tally's root. */
+export type GroupScope = string | null;
 
 function clean(value: unknown): string {
     const raw = String(value ?? '');
@@ -88,8 +118,51 @@ function tallyDate(iso: string): string {
     return iso.replace(/-/g, '').slice(0, 8);
 }
 
-function buildStockSummaryXml(company: string, asOf: string): string {
+/**
+ * Item names carrying a double-quote cannot be placed inside a TDL formula
+ * string safely — escapeXml's &quot; decodes back to a literal quote inside
+ * the formula and breaks it. The caller skips such items out loud instead.
+ */
+export function nameFitsFilter(name: string): boolean {
+    return !name.includes('"');
+}
+
+const LIGHT_FETCH = 'Name, GUID';
+const HEAVY_FETCH =
+    'Name, GUID, BaseUnits, ClosingBalance, ClosingRate, ClosingValue, ' +
+    'BatchAllocations.GodownName, BatchAllocations.ClosingBalance, ' +
+    'BatchAllocations.ClosingRate, BatchAllocations.ClosingValue';
+
+/**
+ * One collection request, narrowed by up to two independent mechanisms:
+ *
+ *  - `group` (a GroupScope): CHILDOF the named group's direct children
+ *    (BELONGSTO No), or of the reserved root for `group === null`. Omitted
+ *    entirely when `group` is `undefined`.
+ *  - `itemName`: a TDL filter formula pinning the collection to one item.
+ *
+ * Per-item requests deliberately pass NO group: the third 07-Aug incident
+ * showed the named-group CHILDOF canary passing while the "ungrouped items"
+ * scope still hung Tally — `$$SysName:Primary` inside CHILDOF is exactly the
+ * kind of expression that can fail open on some builds, so the per-item path
+ * must not depend on it. The name filter narrows from the full catalogue on
+ * its own, and it is canary-tested (light) before first heavy use.
+ */
+function buildRequestXml(
+    company: string,
+    asOf: string,
+    opts: { light: boolean; group?: GroupScope; itemName?: string },
+): string {
     const date = tallyDate(asOf);
+    const childOf = opts.group !== undefined
+        ? `<CHILDOF>${opts.group === null ? '$$SysName:Primary' : escapeXml(opts.group)}</CHILDOF><BELONGSTO>No</BELONGSTO>`
+        : '';
+    const filter = opts.itemName !== undefined
+        ? '<FILTER>AgentStockPick</FILTER>'
+        : '';
+    const filterFormula = opts.itemName !== undefined
+        ? `<SYSTEM TYPE="Formulae" NAME="AgentStockPick">$Name = "${escapeXml(opts.itemName)}"</SYSTEM>`
+        : '';
 
     return (
         '<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>' +
@@ -103,19 +176,32 @@ function buildStockSummaryXml(company: string, asOf: string): string {
         '</STATICVARIABLES>' +
         '<TDL><TDLMESSAGE><COLLECTION NAME="AgentStockSummary" ISMODIFY="No" ISFIXED="No" ' +
         'ISINITIALIZE="No" ISOPTION="No" ISINTERNAL="No"><TYPE>StockItem</TYPE>' +
-        // BatchAllocations is where Tally puts the godown-wise breakdown. The
-        // item-level closing figures are fetched too, so an item held in no
-        // godown still arrives rather than vanishing from the snapshot.
-        '<FETCH>Name, GUID, BaseUnits, ClosingBalance, ClosingRate, ClosingValue, ' +
-        'BatchAllocations.GodownName, BatchAllocations.ClosingBalance, ' +
-        'BatchAllocations.ClosingRate, BatchAllocations.ClosingValue</FETCH>' +
-        '</COLLECTION></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>'
+        childOf +
+        filter +
+        `<FETCH>${opts.light ? LIGHT_FETCH : HEAVY_FETCH}</FETCH>` +
+        '</COLLECTION>' + filterFormula + '</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>'
     );
 }
 
 function asArray(node: unknown): any[] {
     if (node == null) return [];
     return Array.isArray(node) ? node : [node];
+}
+
+async function post(target: TallyTarget, xml: string, timeoutMs: number): Promise<any[]> {
+    const url = `http://${target.host}:${target.port}`;
+
+    const { data } = await withTallyGate(() =>
+        axios.post<string>(url, xml, {
+            headers: { 'Content-Type': 'text/xml' },
+            timeout: timeoutMs,
+            responseType: 'text',
+        }),
+    );
+
+    const parsed = parser.parse(data);
+    const collection = parsed?.ENVELOPE?.BODY?.DATA?.COLLECTION;
+    return asArray(collection ? collection.STOCKITEM : undefined);
 }
 
 /**
@@ -158,29 +244,79 @@ function linesFor(node: any): StockSummaryLine[] {
 }
 
 /**
- * Pull the godown-wise stock summary for one company as at `asOf` (ISO date).
- *
- * @param asOf closing date, e.g. '2026-08-02'
+ * LIGHT probe of a group scope: which item GUIDs does Tally hold directly
+ * under this group? No balances are computed — safe even if the scope filter
+ * silently fails and this returns the world, which is precisely the failure
+ * the caller uses it to detect.
  */
-export async function exportStockSummary(target: TallyTarget, asOf: string): Promise<StockSummaryPayload> {
-    const url = `http://${target.host}:${target.port}`;
-    const xml = buildStockSummaryXml(target.company, asOf);
+export async function probeGroupScope(
+    target: TallyTarget,
+    asOf: string,
+    group: GroupScope,
+): Promise<string[]> {
+    const xml = buildRequestXml(target.company, asOf, { light: true, group });
+    const nodes = await post(target, xml, 60000);
 
-    const { data } = await axios.post<string>(url, xml, {
-        headers: { 'Content-Type': 'text/xml' },
-        // A full stock summary is heavier than a master list; a real catalogue
-        // of several hundred items across godowns has been seen to take a while.
-        timeout: 120000,
-        responseType: 'text',
-    });
+    return nodes.map((n) => textOf(n.GUID)).filter((g) => g !== '');
+}
 
-    const parsed = parser.parse(data);
-    const collection = parsed?.ENVELOPE?.BODY?.DATA?.COLLECTION;
-    const nodes = asArray(collection ? collection.STOCKITEM : undefined);
+/**
+ * LIGHT probe of the item-name filter: which GUIDs match this exact name?
+ * Must return exactly the one expected item for the filter mechanism to be
+ * trusted with a heavy request. No group scoping involved — see
+ * buildRequestXml for why the per-item path avoids CHILDOF entirely.
+ */
+export async function probeItemFilter(
+    target: TallyTarget,
+    asOf: string,
+    itemName: string,
+): Promise<string[]> {
+    const xml = buildRequestXml(target.company, asOf, { light: true, itemName });
+    const nodes = await post(target, xml, 60000);
 
-    return {
-        company: target.company,
-        as_of: asOf,
-        lines: nodes.flatMap(linesFor),
-    };
+    return nodes.map((n) => textOf(n.GUID)).filter((g) => g !== '');
+}
+
+/**
+ * HEAVY read of one PRE-PROBED group scope: the godown-wise closing position
+ * for the items directly under one stock group.
+ *
+ * Callers must have light-probed THIS scope, THIS run, before calling — see
+ * the module comment. ONE attempt, NO automatic retry: a timed-out request
+ * leaves Tally still computing, and firing another while it does is exactly
+ * the stacking that kills it. The operator retries by running the read
+ * again, which resumes where it stopped — after restarting Tally if it was
+ * left wedged.
+ */
+export async function exportGroupScope(
+    target: TallyTarget,
+    asOf: string,
+    group: GroupScope,
+): Promise<StockSummaryLine[]> {
+    const xml = buildRequestXml(target.company, asOf, { light: false, group });
+    // Generous for a scope already proven small. A proven-small request that
+    // still needs longer than this is a Tally that is struggling, and the
+    // right response is to stop, not to wait harder.
+    const nodes = await post(target, xml, 120000);
+
+    return nodes.flatMap(linesFor);
+}
+
+/**
+ * HEAVY read of ONE item by exact name (filter only, no group scoping). The
+ * filter mechanism must have passed its light canary this run. The tighter
+ * timeout is deliberate: a single item's balances should return in seconds,
+ * and a single item that cannot answer inside this window is the poison-item
+ * signature the caller blacklists — waiting 120s just leaves Tally wedged
+ * longer before the same conclusion.
+ */
+export async function exportSingleItem(
+    target: TallyTarget,
+    asOf: string,
+    itemName: string,
+): Promise<StockSummaryLine[]> {
+    const xml = buildRequestXml(target.company, asOf, { light: false, itemName });
+    const nodes = await post(target, xml, 45000);
+
+    return nodes.flatMap(linesFor);
 }

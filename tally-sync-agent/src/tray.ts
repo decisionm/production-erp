@@ -2,7 +2,7 @@ import { Tray, Menu, nativeImage, shell, app } from 'electron';
 import path from 'path';
 import { getStatus, runSyncCycle, setPaused } from './sync';
 import { runMastersSync } from './mastersSync';
-import { runStockSummaryPreview } from './stockSummarySync';
+import { getStockReadStatus } from './stockSummarySync';
 import { getConfig } from './config';
 import { logFilePath } from './logger';
 import { isConfigured } from './config';
@@ -12,6 +12,10 @@ let tray: Tray | null = null;
 function statusLabel(): string {
     const status = getStatus();
     if (!isConfigured()) return '⚠ Not configured — open Settings';
+    // The stock read narrates itself — the operator must see movement, not a
+    // silent "keep on loading" that invites a second click.
+    const stockRead = getStockReadStatus();
+    if (stockRead.running) return `⏳ Reading Stock Summary: ${stockRead.progress ?? 'starting…'}`;
     if (status.running) return 'Syncing…';
     if (status.paused) return '⏸ Paused';
     if (status.lastError) return `⚠ Last attempt failed: ${status.lastError.slice(0, 60)}`;
@@ -44,13 +48,17 @@ function buildMenu(onOpenSettings: () => void): Menu {
             },
         },
         { type: 'separator' },
-        {
-            // READ-ONLY, and the label says so. This reads Tally's closing
-            // position and asks the ERP to report on it; it imports nothing and
-            // cannot change stock on either side.
-            label: 'Read Stock Summary (preview only)',
-            click: () => void runStockSummaryPreview(getConfig().stockSummaryAsOf).then(refresh).catch(refresh),
-        },
+        // The "Read Stock Summary (preview only)" item that lived here is
+        // REMOVED in v0.3.3, not hidden. Every variant of the read crashed or
+        // wedged the live TallyPrime on 07-Aug-2026 (one-shot v0.2.0, chunked
+        // v0.3.0 twice, probed-canary v0.3.1) and the factory then reported
+        // company-data corruption — a force-killed Tally mid-write is the
+        // likely mechanism. The operators must open this menu for the routine
+        // actions above, so a dangerous item beside them WILL eventually be
+        // clicked; policy is not a guard. The whole read pipeline
+        // (stockSummarySync, probes, blacklist) is kept intact for a future
+        // release that re-adds the trigger once a safe read is proven against
+        // the factory's own Tally.
         { label: 'View Logs', click: () => void shell.openPath(logFilePath()) },
         { label: 'Settings…', click: onOpenSettings },
         { type: 'separator' },

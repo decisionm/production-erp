@@ -59,6 +59,55 @@ tar -czf - --exclude='./.env' --exclude='./vendor' --exclude='./storage' \
 
 ---
 
+## Tally Sync Agent releases (the release ritual)
+
+The tray agent on the factory PC deploys on its own track — a web deploy
+never updates it, and its release is deliberately NOT automatic end to end.
+
+```
+build on CI  →  REVIEW GATE  →  merge (candidate artifact only)  →  manual publish dispatch ON MAIN  →  storage + update feed  →  verify on the Settings page
+```
+
+1. **Build on CI.** Push the agent change to a branch, open the PR, then run
+   the *Build Tally Sync Agent* workflow on that branch (**Run workflow**,
+   leave `publish` unticked / false). The installer is built natively on a
+   Windows runner and lands as a downloadable artifact (`agent-installer`,
+   7-day retention) with its sha256 in `tally-sync-agent-latest.json`.
+   Nothing live is touched.
+2. **Review gate.** The build→publish gap is the point, not a missing
+   feature: a build must never reach the factory unreviewed, because the
+   running agent AUTO-UPDATES from the published feed within ~6 hours — so
+   publishing IS deploying to the factory, with no human in between. The
+   gate earned its keep on 07 Aug 2026, when one click of a
+   reviewed-looking-but-never-live-tested stock read crashed the factory's
+   live Tally. Nobody proceeds past this step until the diff has passed
+   review (the usual builder → Cursor → Codex → owner chain).
+3. **Merging builds a candidate — it does NOT publish.** A push to `main`
+   runs this workflow and uploads the installer as a review artifact, then
+   stops. Nothing reaches the factory on merge.
+4. **Manual publish dispatch, on main.** After the review passes, run the
+   workflow **on `main`** with **`publish: true`**. That rebuilds and then
+   publishes. All three conditions are enforced in the workflow — manual
+   dispatch, `publish: true`, and `refs/heads/main` — so a push cannot
+   publish and a dispatch from a feature branch cannot publish even with
+   `publish: true` set. The publish job uploads
+   the installer, `latest.yml` (the electron-updater feed) and
+   `tally-sync-agent-latest.json` atomically into
+   `backend/storage/app/public/agent/` on the live box. It touches only that
+   directory — never the app, never the database.
+5. **Pick-up is automatic from here.** The Tally Sync → Settings page's
+   download button serves the new version immediately, and the running
+   agent self-updates from `latest.yml` within ~6 hours (or on its next
+   restart).
+6. **Verify before anyone downloads.** Open Tally Sync → Settings on the
+   live ERP and read the "Latest version: X · built DATE" line under the
+   download button — it must show the version just published. The
+   site-visit steps (install-over, settings survival, and confirming normal
+   voucher sync) live in `tally-sync-agent/SITE-CHECKLIST.md`. From v0.3.3
+   the Stock Summary read trigger is REMOVED and from v0.3.4 the agent makes
+   no automatic reads from Tally at all — so verification never involves
+   reading from Tally, and nothing in this ritual asks anyone to.
+
 ## Pipeline internals
 
 `deploy.yml` needs 5 GitHub Actions secrets (Settings → Secrets and variables → Actions):

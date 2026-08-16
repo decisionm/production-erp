@@ -1,7 +1,7 @@
 {
   "name": "tally-sync-agent",
   "productName": "Tally Sync Agent",
-  "version": "0.2.0",
+  "version": "0.3.6",
   "description": "Local Windows tray agent \u2014 bridges the ERP's cloud Tally sync queue to a local Tally installation's XML-HTTP gateway. See ../docs/archive/TALLY-SYNC-MASTER-PLAN.md \u00a711 (archived).",
   "private": true,
   "main": "dist/main.js",
@@ -9,7 +9,8 @@
     "dev": "npm run build && electron .",
     "build": "tsc -p tsconfig.json && node scripts/copy-assets.js",
     "package:win": "npm run build && electron-builder --win",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node scripts/check-tests-present.js && npm run build && node --test \"tests/*.test.js\""
   },
   "dependencies": {
     "axios": "^1.7.9",
@@ -21,7 +22,7 @@
   "devDependencies": {
     "@types/node": "^22.10.7",
     "electron": "^43.1.1",
-    "electron-builder": "^25.1.8",
+    "electron-builder": "26.15.3",
     "typescript": "^5.7.3"
   },
   "build": {
