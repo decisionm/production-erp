@@ -41,3 +41,26 @@ Rows are appended per phase; a re-run adds a dated column, never overwrites.
 | Factory-knowledge check | PASS |
 | Everything else | N/A (read-only phase) |
 
+
+## Phase 1 (fix/phase-1-live-safety, gate closed 2026-08-16)
+
+| Suite | Result | Evidence |
+|---|---|---|
+| Pint (whole tree) | PASS | `{"tool":"pint","result":"passed"}` |
+| Backend PHPUnit | PASS | **1,034 passed / 5,740 assertions** (baseline 993 / 5,520; reconciled: −4 deleted with the dead `/items` route, +45 new). Sonnet re-ran twice, identical |
+| Frontend typecheck | PASS | `tsc --noEmit` clean |
+| Frontend vitest | PASS | 4 files / 25 tests |
+| Frontend build | PASS | `vite build` into `backend/public/build` |
+| Agent (node:test) | PASS | 69/69 — agent untouched by this phase (`git diff --stat -- tally-sync-agent` empty) |
+| Factory-knowledge | PASS | `sound` |
+| Red-before / green-after | PROVEN | Fable reviewer, scratch copy: every new test file fails against HEAD code |
+| Sonnet independent QA | PASS (re-gate) | first pass NOT_READY (2 P2 · 2 P3) → all fixed → re-gate PASS, 0 findings |
+| Adversarial review (Opus, rules/accounting) | closed | 1 P1 · 3 P2 · P3s — all fixed or recorded as deferred with reason |
+| Adversarial review (Fable, races/tests) | closed | 1 P2 · P3s — all fixed |
+| Browser proof | PARTIAL | PO drawer + API bytes for procurement-only and Accounts users: PASS. Name guard at API layer: PASS. ItemsPage disabled-name affordance: **NOT TESTED in browser** (modal did not open in the harness after 3 attempts; covered by typecheck) |
+
+### Coverage gaps closed this phase
+Procurement-only vs rate fields · local-fixture sweep (both holes, both directions, both rebuild paths) · Tally-side rename escape hatch (MasterSyncTest) · fixture as packaging identity · scrap resolver misconfiguration distinction · packaged config default pinned on source text.
+
+### Still open (from the baseline list)
+`OverReceiptException` · `OverDeliveryException` · `DeliveryService` decrement · carton-scan guards · `InvoiceService` / invoice→Tally · CRM · Finance · `ShiftSummaryService::report()` · frontend `tally-sync` · second same-mode packaging · `stock_balances == Σ stock_movements` — Phases 5 and 7 per MASTER-PLAN.
