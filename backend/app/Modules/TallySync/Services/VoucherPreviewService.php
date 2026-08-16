@@ -2,9 +2,6 @@
 
 namespace App\Modules\TallySync\Services;
 
-use App\Modules\Inventory\Models\Item;
-use App\Modules\Inventory\Models\Warehouse;
-use App\Modules\Inventory\Services\TallyGodownResolver;
 use App\Modules\Production\Models\ShiftProductionEntry;
 
 /**
@@ -36,7 +33,13 @@ class VoucherPreviewService
 {
     public function __construct(
         private readonly TallySyncService $sync,
-        private readonly TallyGodownResolver $godowns,
+        // THE resolver of names → mapping state, shared with the Control
+        // Center's show endpoint (EntryMappingSurface): the preview's
+        // blockers below are derived from ITS verdicts, so what the preview
+        // refuses before approval and what the sync page later says about
+        // the same name can never disagree. It judges godowns through the
+        // same TallyGodownResolver the payload builder used.
+        private readonly LineMappingResolver $mappings,
         private readonly PackingVoucherLines $packing,
     ) {}
 
@@ -166,40 +169,62 @@ class VoucherPreviewService
     {
         $problems = [];
 
-        $item = $itemName !== null
-            ? Item::query()->where('name', $itemName)->first()
-            : null;
+        // The state, from the one shared resolver; the sentences below are
+        // this preview's own and unchanged — each names a thing a person can
+        // go and fix. The single matched row (null unless exactly one) is
+        // what the line's uom and packing kind are read from.
+        $itemState = $this->mappings->item($itemName);
+        $item = $this->mappings->itemRow($itemName);
 
-        if ($itemName === null) {
-            $problems[] = 'Line has no stock item.';
-        } elseif ($item === null) {
-            $problems[] = "No item named \"{$itemName}\" exists.";
-        } elseif ($item->tally_stock_item_guid === null) {
-            $problems[] = "\"{$itemName}\" has no Tally identity — Tally will answer \"Stock Item does not exist\".";
-
-            if ($item->isLocalFixture()) {
+        switch ($itemState['state']) {
+            case LineMappingResolver::STATE_NONE:
+                $problems[] = 'Line has no stock item.';
+                break;
+            case LineMappingResolver::STATE_UNMAPPED:
+                $problems[] = "No item named \"{$itemName}\" exists.";
+                break;
+            case LineMappingResolver::STATE_NAME_ONLY:
+                $problems[] = "\"{$itemName}\" has no Tally identity — Tally will answer \"Stock Item does not exist\".";
+                break;
+            case LineMappingResolver::STATE_FIXTURE:
                 // The one case where "create it in Tally" is the wrong advice:
                 // a LOCAL- fixture is a rehearsal product that was never meant
-                // to reach the accountant's books at all.
+                // to reach the accountant's books at all. Said with the
+                // no-identity sentence when it has none (the usual fixture),
+                // and on its own for the contradictory fixture that carries a
+                // GUID — the posting paths refuse either.
+                if ($itemState['tally_stock_item_guid'] === null) {
+                    $problems[] = "\"{$itemName}\" has no Tally identity — Tally will answer \"Stock Item does not exist\".";
+                }
                 $problems[] = "\"{$itemName}\" is a local rehearsal product, not a real one — run the batch against "
                     .'the real product instead of creating this one in Tally.';
-            }
+                break;
+            case LineMappingResolver::STATE_AMBIGUOUS:
+                // Several ERP items share this name; Tally would still match
+                // ONE by name, so it is not a blocker here — the show
+                // endpoint's mapping state says "ambiguous" so it is seen.
+                // Turning it into a refusal would be a new approval gate on
+                // live data, which is the owner's call, not this preview's.
+                break;
         }
 
-        if ($godownName === null) {
-            $problems[] = 'Line has no godown.';
-        } else {
-            $godown = Warehouse::query()->where('name', $godownName)->first();
-            if ($godown === null) {
+        // Godown, judged by the SAME resolver the payload builder used: a
+        // warehouse without its own tally_guid is fine when it aliases to a
+        // Tally-known godown (the internal day bin posting under its parent
+        // / the sole company godown) — identity. Only a genuinely
+        // unresolvable godown (name_only) or an unknown name is flagged.
+        $godownState = $this->mappings->godown($godownName);
+
+        switch ($godownState['state']) {
+            case LineMappingResolver::STATE_NONE:
+                $problems[] = 'Line has no godown.';
+                break;
+            case LineMappingResolver::STATE_UNMAPPED:
                 $problems[] = "No warehouse named \"{$godownName}\" exists.";
-            } elseif ($this->godowns->resolve($godown) === null) {
-                // Judged by the SAME resolver the payload builder used: a
-                // warehouse without its own tally_guid is fine when it
-                // aliases to a Tally-known godown (the internal day bin
-                // posting under its parent / the sole company godown).
-                // Only a genuinely unresolvable godown is flagged.
+                break;
+            case LineMappingResolver::STATE_NAME_ONLY:
                 $problems[] = "Godown \"{$godownName}\" does not exist in Tally.";
-            }
+                break;
         }
 
         if ($quantity === null || (float) $quantity <= 0) {

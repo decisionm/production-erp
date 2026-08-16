@@ -4,6 +4,8 @@ namespace App\Modules\TallySync\Http\Resources;
 
 use App\Modules\TallySync\Models\Enums\TallySyncStatus;
 use App\Modules\TallySync\Services\AgentIdentity;
+use App\Modules\TallySync\Services\EntryMappingSurface;
+use App\Modules\TallySync\Services\EntryPresenter;
 use App\Modules\TallySync\Services\ShiftVoucherReleaseGate;
 use App\Modules\TallySync\Services\TransactionClassifier;
 use Illuminate\Http\Request;
@@ -93,6 +95,21 @@ class TallySyncEntryResource extends JsonResource
             // was fixed, it went through" stays readable afterwards.
             'resolution_log' => $this->payload['resolution_log'] ?? [],
             'fix' => $this->fixSuggestion(),
+            // The entry as a person would say it (EntryPresenter; MASTER-PLAN
+            // P3-02/P3-03): `summary` {headline, lines} per category and
+            // `timeline` (events + the entry's own timestamps, de-duplicated,
+            // reconstructions flagged) ride the SAME gate as `history` — the
+            // show endpoint is the only caller that loads `events` — so the
+            // list and every action response stay exactly as light as they
+            // were. `flags` (unvalidated builder, order reference not emitted,
+            // label differs from wire, held) is on EVERY response: it costs no
+            // query and the list's Sales rows need the unvalidated banner.
+            // None of the three is finance-gated, and none may carry a rate,
+            // an amount or a total (FC-06) — quantities and counts only; the
+            // presenter's docblock is the rule, EntryPresenterTest the proof.
+            'summary' => $this->when($this->relationLoaded('events'), fn () => app(EntryPresenter::class)->summary($this->resource)),
+            'timeline' => $this->when($this->relationLoaded('events'), fn () => app(EntryPresenter::class)->timeline($this->resource)),
+            'flags' => app(EntryPresenter::class)->flags($this->resource),
             // The append-only history (tally_sync_events), oldest first —
             // ONLY when the caller loaded it, which is the show endpoint and
             // nothing else. The list stays as light as it was: a page of 200
@@ -100,6 +117,18 @@ class TallySyncEntryResource extends JsonResource
             // response of this resource (retry, dismiss, release, pending)
             // keeps its exact prior shape.
             'history' => TallySyncEventResource::collection($this->whenLoaded('events')),
+            // `mappings` + `mapping_summary` — for every NAME this voucher
+            // hands Tally (each line's item and godown, the ledgers, the
+            // party, the Sales ledger), whether the ERP resolved it by
+            // identity, by name only, or not at all (EntryMappingSurface /
+            // LineMappingResolver; MASTER-PLAN P3-04). Derived at read time
+            // against the masters as they stand — no stored verdict. Rides
+            // the SAME gate as `history` (the show endpoint is the only
+            // caller that loads `events`), so the list and every action
+            // response stay exactly as they were, and one computation feeds
+            // both keys. Carries names, ids, GUIDs, states and notes only —
+            // never a rate (FC-06 holds for a tally-sync.view reader).
+            $this->mergeWhen($this->relationLoaded('events'), fn () => app(EntryMappingSurface::class)->for($this->resource)),
         ];
     }
 
