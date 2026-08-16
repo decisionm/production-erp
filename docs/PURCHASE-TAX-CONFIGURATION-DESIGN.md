@@ -105,9 +105,9 @@ cannot answer: **does anyone file from this report?** Both readings, plainly:
 
 - **Latent defect (what the evidence currently supports).** Live holds
   **one** invoice — issued, 22-Jul-2026 — against Tally's 553 receipts. And the
-  owner-confirmed record on the unmerged PR #155 branch states that **all real
-  sales are invoiced directly in Tally** and the ERP Sales module is
-  demo-scale. On that reading the ERP's GSTR-1 is a report over demo data that
+  owner-confirmed record DEC-20260809-003, on main since PR #155 merged,
+  states that **all real sales are invoiced directly in Tally** and the ERP
+  Sales module is demo-scale. On that reading the ERP's GSTR-1 is a report over demo data that
   nobody submits, and nothing has been mis-filed.
 - **Wrong statutory return.** If anything is ever filed from the ERP, the same
   mechanism produces a return computed at today's rates over historical

@@ -1,8 +1,10 @@
 # Tally Finance Pull — Phase 1 build plan (customer outstanding)
 
 **STATUS: PLAN FOR REVIEW. Nothing here is built. No Tally contact was made in
-producing it.** Prepared 2026-08-12 against `main`, the unmerged agent branch
-`agent/v0.3.5-stock-journal-builder`, and PR #155's design at `bb9509f`.
+producing it.** Prepared 2026-08-12 against `main`, the then-unmerged agent
+branch `agent/v0.3.5-stock-journal-builder` (merged 16-Aug via PR #170; that SHA
+is now the tag `agent-v0.3.5`), and PR #155's design at `bb9509f` (merged
+16-Aug).
 
 Authority: the owner decided on 2026-08-12 that customer outstanding must be
 visible in the ERP, which un-pauses PR #155's design. Customer NAMES came free
@@ -185,12 +187,13 @@ the office queued" button.
 
 ## 3 · Group-parent measurement — a ladder, cheapest first
 
-The 09-Aug owner-confirmed ledger-groups record preserved the nuance
-deliberately. **Its decision id is not written here on purpose:** that record
-is not on `main` — it lands with PR #155 — and an id cited in a doc on `main`
-must resolve to a record on `main`, or a reader goes looking and finds nothing.
-The knowledge validator enforces exactly that, and it is right to; this plan
-broke it once by citing the id, which is how the rule earned its place here.
+The 09-Aug owner-confirmed ledger-groups record is **DEC-20260809-002**, which
+preserved the nuance deliberately. Its id was left out of this plan until
+16-Aug, when PR #155 merged and the record reached `main`: an id cited in a doc
+on `main` must resolve to a record on `main`, or a reader goes looking and finds
+nothing. The knowledge validator enforces exactly that, and it is right to; this
+plan broke it once by citing the id before the record existed, which is how the
+rule earned its place here.
 
 What the record says: the owner confirmed the
 **business** meaning, *"not Tally's group tree — whether they technically nest
@@ -353,18 +356,26 @@ labelled unverified on screen.
 7. **Does the accountant accept 8–20 minutes of Tally occupancy** for the first
    run? Tell them the number beforehand.
 
-### The standing risk that outranks the rest
+### The standing risk that outranks the rest — RESOLVED 16-Aug
 
-**The whole safety inheritance is unmerged.** `main`'s agent is **0.2.0**;
-0.3.1–0.3.5 exist only on unmerged branches. `TallySyncService.php:665-670` says
-the Stock Journal label flips *"ONLY after the factory agent is confirmed
->= 0.3.5"*, implying it is not confirmed.
-
-**If the live agent is 0.2.0, it still carries the Stock Summary tray trigger
-that 0.3.3 removed — the most dangerous button in this system would be on the
-factory desktop right now, and shipping 0.3.6 removes it.** Establish this
-before the first pull. It is arguably the strongest argument for merging the
+**What it was.** The whole safety inheritance was unmerged: `main`'s agent was
+**0.2.0** while 0.3.1–0.3.5 existed only on branches, and
+`TallySyncService.php:665-670` flips the Stock Journal label *"ONLY after the
+factory agent is confirmed >= 0.3.5"*. The concern was that an agent still on
+0.2.0 carries the Stock Summary tray trigger that 0.3.3 removed — the most
+dangerous button in this system. This was the strongest argument for merging the
 agent branches at all.
+
+**What changed.** PR #170 merged on 16-Aug. `main` now carries the agent at
+**0.3.6**, including 0.3.3's removal of that trigger, and the published SHAs for
+0.3.1–0.3.5 are preserved as the tags `agent-v0.3.1`..`agent-v0.3.5`. Merging
+published nothing: the publish job now requires a deliberate `workflow_dispatch`
+on `main` with `publish=true`, which was verified skipped on the merge push.
+
+**What is still open.** The update feed's last published version is **0.3.5**
+(Actions run 31323378733, 09-Aug). Which version the factory desktop is actually
+running is a site check against the Settings page (`SITE-CHECKLIST.md`) — the
+repo cannot answer it, and it should still be established before the first pull.
 
 PR 1 does not depend on any of it. If the agent branches are never merged, PR 1
 is inert and harmless — that is the point of the split.

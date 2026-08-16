@@ -27,7 +27,7 @@ branch for the highest id before minting, or re-mint at merge time (this
 happened again with DEC-20260807-001.., three branches deep, 07-Aug).
 DEC-20260807-014 is the granularity-flip execution record on main;
 PR #148's colliding -014 was re-minted as -015 at merge, per this rule.
-Q29-Q31 are claimed by open PR #155 (finance-pull discovery); Q32 by the
+Q29-Q31 landed with PR #155 (finance-pull discovery, merged 16-Aug); Q32 by the
 report-down backdate PR (#159). Q33 is claimed by the packaging-Tally-identity
 branch (DEC-20260810-003). Q34-Q37 are claimed by the 12-Aug overnight
 run (DEC-20260812-001 HRMS/payroll adoption, DEC-20260812-002 PO raised in
@@ -36,9 +36,8 @@ evidence set and the purchase/tax configuration design. Q42 is claimed by the SK
 design. New questions continue from Q43.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
-DEC-20260809-002/-003 are claimed by open PR #155 (the finance-pull
-discovery answers); a branch minting 09-Aug ids checks for them first,
-and #155 re-mints at merge if main has moved past them.
+DEC-20260809-002/-003 landed with PR #155 (the finance-pull discovery
+answers, merged 16-Aug) and are on main, so 09-Aug ids continue from -004.
 
 ---
 
@@ -554,8 +553,9 @@ enqueuePurchaseOrder build — (d) blocks whether it is written at all.
 
 ## Q36 · Which half-hour of the working day is Tally quietest?
 
-For the accountant. The resumed finance pull (DEC pending on PR #155's
-design) executes ONE deliberate, human-triggered read inside a quiet window,
+For the accountant. The resumed finance pull (its design reached main with
+PR #155 on 16-Aug; the DEC is still pending) executes ONE deliberate,
+human-triggered read inside a quiet window,
 because the 8-Aug-2026 corruption came from a read. The window cannot be
 chosen by an agent or inferred from code — it is a fact about how the office
 works. **Blocks:** scheduling the first real customer-outstanding pull; the
@@ -648,8 +648,9 @@ the code and is not in doubt.
 
 What is in doubt is the impact, and it turns entirely on this question. Live
 holds **one** invoice (issued, 22-Jul-2026) against Tally's 553 receipts, and
-the owner-confirmed record on the unmerged PR #155 branch states that ALL real
-sales are invoiced directly in Tally and the ERP Sales module is demo-scale. On
+the owner-confirmed record DEC-20260809-003, on main since PR #155 merged,
+states that ALL real sales are invoiced directly in Tally and the ERP Sales
+module is demo-scale. On
 that reading the ERP's GSTR-1 is a report over demo data that nobody submits,
 and this is a latent defect. If anything is ever filed from the ERP, the same
 mechanism is a wrong statutory return.
