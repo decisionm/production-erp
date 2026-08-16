@@ -4,6 +4,7 @@ namespace App\Modules\TallySync\Http\Resources;
 
 use App\Modules\TallySync\Models\Enums\TallySyncStatus;
 use App\Modules\TallySync\Services\ShiftVoucherReleaseGate;
+use App\Modules\TallySync\Services\TransactionClassifier;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -11,11 +12,32 @@ class TallySyncEntryResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        // Derived on read from the columns and payload already on the row —
+        // no query, no Tally (TALLY-SYNC-CHAIN.md §3 "Classification").
+        $classifier = app(TransactionClassifier::class);
+
         return [
             'id' => $this->id,
             'syncable_type' => class_basename($this->syncable_type),
             'syncable_id' => $this->syncable_id,
             'tally_voucher_type' => $this->tally_voucher_type,
+            // What this entry IS, as the Control Center groups and filters
+            // it. `tally_voucher_type` above stays the raw label the agent
+            // dispatches on; `category` says what that label means, including
+            // (erp_label_differs_from_wire) where the ERP's label is not the
+            // voucher type Tally receives. Same shape as
+            // TallyTransactionCategory::catalogue() rows.
+            'category' => $classifier->classify($this->resource)->describe(),
+            // The voucher's own facts, lifted out of the payload so a list
+            // can show and filter them without every client re-parsing the
+            // raw payload: business_date is voucher_date, document_number is
+            // voucher_number, party is the customer/vendor (null for
+            // production and journal), item_summary is {first, count} over
+            // the distinct item names the voucher moves.
+            'business_date' => $classifier->businessDate($this->resource),
+            'document_number' => $classifier->documentNumber($this->resource),
+            'party' => $classifier->party($this->resource),
+            'item_summary' => $classifier->itemSummary($this->resource),
             'payload' => $this->payload,
             'status' => $this->status->value,
             'attempts' => $this->attempts,
