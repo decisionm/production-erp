@@ -48,7 +48,22 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+          # The host intermittently answers nothing: 10 of the last 100 runs failed
+          # here, and EVERY one cleared on a re-run of the SAME commit — it is the
+          # host, not the change. Retrying in-workflow removes that manual re-run.
+          # It does NOT weaken the check: if all three attempts come back empty the
+          # step still fails loudly, which is the state that must never deploy.
+          keys=""
+          for attempt in 1 2 3; do
+            keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+            if [ -n "$keys" ]; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "ssh-keyscan attempt ${attempt} returned no host key; retrying in $((attempt * 10))s"
+              sleep "$((attempt * 10))"
+            fi
+          done
           if [ -z "$keys" ]; then
             echo "::error::The host returned no SSH host key. Check hPanel → Advanced → SSH Access, and whether brute-force protection has banned the runner. Re-running often clears a transient failure."
             exit 1

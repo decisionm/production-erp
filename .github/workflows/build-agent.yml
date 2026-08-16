@@ -193,7 +193,28 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          # Was: ssh-keyscan ... >> known_hosts 2>/dev/null — which threw away the
+          # reason on failure AND never checked that a key was actually collected,
+          # so an empty scan surfaced later as a confusing scp error. This is the
+          # PUBLISH path to the factory floor, so it gets the same guarded,
+          # retrying form as every other workflow: the host intermittently answers
+          # nothing and a re-run of the same commit has always cleared it.
+          keys=""
+          for attempt in 1 2 3; do
+            keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+            if [ -n "$keys" ]; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "ssh-keyscan attempt ${attempt} returned no host key; retrying in $((attempt * 10))s"
+              sleep "$((attempt * 10))"
+            fi
+          done
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key after three attempts, so the installer cannot be published. Check hPanel → Advanced → SSH Access and whether brute-force protection has banned the runner."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
 
       - name: Upload installer + update feed to the ERP's public storage
         # ATOMIC publish: the ~90MB scp takes minutes, and the web server

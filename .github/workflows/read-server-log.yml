@@ -55,7 +55,22 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           # ssh-keyscan can exit 0 having collected nothing, so check the
           # output rather than the exit code (same trap as the deploy).
-          keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+          # The host intermittently answers nothing: 10 of the last 100 runs failed
+          # here, and EVERY one cleared on a re-run of the SAME commit — it is the
+          # host, not the change. Retrying in-workflow removes that manual re-run.
+          # It does NOT weaken the check: if all three attempts come back empty the
+          # step still fails loudly, which is the state that must never deploy.
+          keys=""
+          for attempt in 1 2 3; do
+            keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+            if [ -n "$keys" ]; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "ssh-keyscan attempt ${attempt} returned no host key; retrying in $((attempt * 10))s"
+              sleep "$((attempt * 10))"
+            fi
+          done
           if [ -z "$keys" ]; then
             echo "::error::The host returned no SSH host key. Re-running often clears a transient failure; otherwise check hPanel → Advanced → SSH Access and whether brute-force protection has banned the runner."
             exit 1
