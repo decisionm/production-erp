@@ -4,6 +4,7 @@ import {
     holdCopy,
     mappingBadge,
     payloadColumns,
+    showsFixedAfterFailures,
     sourceLink,
     timelineItems,
     voucherStockLines,
@@ -245,5 +246,23 @@ describe('voucherStockLines', () => {
             .toEqual([{ item: 'A', quantity: '1.0000' }]);
         expect(voucherStockLines(entry({ payload: { produced: [{ item: 'A' }] } }), 'produced')).toBeNull();
         expect(voucherStockLines(entry({ payload: { lines: [] } }), 'consumed')).toBeNull();
+    });
+});
+
+describe('showsFixedAfterFailures', () => {
+    it('shows only once the voucher has left the failed state', () => {
+        expect(showsFixedAfterFailures({ status: 'pending', error_message: null, resolution_log: [{}] })).toBe(true);
+        expect(showsFixedAfterFailures({ status: 'synced', error_message: null, resolution_log: [{}] })).toBe(true);
+    });
+
+    it('never reads a withheld error on a still-failed row as "fixed" (FC-06)', () => {
+        // The server nulls error_message for a reader without standing on a
+        // supplier voucher; the row is still failed — no green banner.
+        expect(showsFixedAfterFailures({ status: 'failed', error_message: null, resolution_log: [{}] })).toBe(false);
+    });
+
+    it('is quiet when there was never a repair, or the error is still on the row', () => {
+        expect(showsFixedAfterFailures({ status: 'pending', error_message: null, resolution_log: [] })).toBe(false);
+        expect(showsFixedAfterFailures({ status: 'pending', error_message: 'Stock Item does not exist', resolution_log: [{}] })).toBe(false);
     });
 });

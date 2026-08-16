@@ -18,6 +18,7 @@ import {
     voucherStockLines,
     type MappingBadge,
     type VoucherStockLine,
+    showsFixedAfterFailures,
 } from '@/features/tally-sync/drawer';
 import { categoryLabel } from '@/features/tally-sync/filters';
 import type { EntryMappings, LedgerMapping, MappingSummary, TallySyncEntry } from '@/features/tally-sync/types';
@@ -453,7 +454,7 @@ function EntryBody({
                                 ) : (
                                     <Typography.Text type="secondary">—</Typography.Text>
                                 )}
-                                {(entry.resolution_log?.length ?? 0) > 0 && !entry.error_message && (
+                                {showsFixedAfterFailures(entry) && (
                                     <Typography.Text type="success" style={{ display: 'block', fontSize: 12 }}>
                                         Fixed after {entry.resolution_log!.length} failed attempt{entry.resolution_log!.length > 1 ? 's' : ''} — payload regenerated from current mappings.
                                     </Typography.Text>

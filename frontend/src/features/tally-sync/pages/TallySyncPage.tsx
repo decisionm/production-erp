@@ -17,6 +17,7 @@ import {
     statusColor,
     statusLabel,
     voucherNumber,
+    showsFixedAfterFailures,
 } from '@/features/tally-sync/drawer';
 import EntryDrawer from '@/features/tally-sync/EntryDrawer';
 import {
@@ -649,7 +650,7 @@ export default function TallySyncPage() {
                                     ) : (
                                         <Typography.Text type="secondary">—</Typography.Text>
                                     )}
-                                    {(row.resolution_log?.length ?? 0) > 0 && !row.error_message && (
+                                    {showsFixedAfterFailures(row) && (
                                         <Typography.Text type="success" style={{ display: 'block', fontSize: 12 }}>
                                             Fixed after {row.resolution_log!.length} failed attempt{row.resolution_log!.length > 1 ? 's' : ''} — payload regenerated from current mappings.
                                         </Typography.Text>

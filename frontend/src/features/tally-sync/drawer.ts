@@ -315,3 +315,19 @@ export const mappingStateShort: Record<string, string> = {
     fixture: 'fixture',
     ambiguous: 'ambiguous',
 };
+
+/**
+ * Whether the "Fixed after N failed attempts" line may show. Judged on STATUS,
+ * never on the absence of error text: since Phase 3 the server nulls
+ * error_message for a reader who may not read Tally's rejection text on a
+ * supplier-party voucher (FC-06 — error_withheld says why), so a still-FAILED
+ * row can carry a null error. Reading that null as "fixed" would tell the one
+ * reader who cannot see the error that there is nothing left to do.
+ */
+export function showsFixedAfterFailures(entry: {
+    status: string;
+    error_message: string | null;
+    resolution_log?: unknown[] | null;
+}): boolean {
+    return entry.status !== 'failed' && (entry.resolution_log?.length ?? 0) > 0 && !entry.error_message;
+}
