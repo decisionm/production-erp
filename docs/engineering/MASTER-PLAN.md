@@ -19,7 +19,7 @@ PHASE 0   Discovery + audit                    ← THIS DOCUMENT · DONE
 PHASE 1   Live-safety fixes                    PASS WITH DEFERRED · PR #180 · awaiting merge chain
 PHASE 2   Sync Control Center — foundation     PASS WITH DEFERRED · PR #181 (stacked on #180)
 PHASE 3   Sync Control Center — every type     PASS WITH DEFERRED · PR #182 (stacked on #181) · Q43 fail-closed
-PHASE 3.5 Sales visibility (first-class)       PASS WITH DEFERRED · PR (stacked on #182) · Q44 · Sales stays Tally-originated
+PHASE 3.5 Sales visibility (first-class)       PASS WITH DEFERRED · PR #183 (stacked on #182) · Q44 · Sales stays Tally-originated
 PHASE 4   Agent XML/response snapshot          FC-06 review gate
 PHASE 4.5 Download / Export Center             CEC slot BLOCKED until a sample exists
 PHASE 5   Ledger + packaging schema            D1 has a decision behind it

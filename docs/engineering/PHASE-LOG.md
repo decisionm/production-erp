@@ -461,7 +461,7 @@ Deferred items:
 
 Owner-gated items:  Q44 (ERP sales-document lifecycle rules stated as
                     engineering defaults; carton/batch read for sales.view).
-PR:                 (recorded on open)
-Deployment state:   not deployed; stack #179 → #180 → #181 → #182 → this PR
+PR:                 #183 (base: feat/phase-3-sync-every-transaction-type → #182 → #181 → #180 → #179)
+Deployment state:   not deployed; stack #179 → #180 → #181 → #182 → #183
 Next phase:         4 — Agent-side sanitized XML + response snapshot
 ```
