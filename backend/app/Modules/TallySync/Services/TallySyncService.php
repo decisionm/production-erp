@@ -57,9 +57,10 @@ class TallySyncService
         // retry() (regenerate → update → voucher.rebuilt/voucher.retried).
         // NOT transactional, by design: markSynced()/markFailed()/dismiss()/
         // releaseNow() — one UPDATE then one INSERT, and enqueue() for the
-        // batch/sales/GRN/delivery/journal paths (one INSERT then one
-        // INSERT); a failure between the two there leaves the state change
-        // in place and the event missing, never the reverse.
+        // batch/sales/GRN/delivery/journal paths (one SELECT for a live
+        // entry to return, else one INSERT then one INSERT); a failure
+        // between the two writes there leaves the state change in place and
+        // the event missing, never the reverse.
         private readonly TallySyncEventRecorder $events,
     ) {}
 
@@ -1378,8 +1379,42 @@ class TallySyncService
         return $this->shiftVoucherPayload($members, $number, $first);
     }
 
+    /**
+     * The generic queue path (Sales, Journal, Receipt Note, Delivery Note,
+     * batch-mode production). IDEMPOTENT per (syncable, voucher type) since
+     * Phase 3.5: a live entry — pending, synced or failed — already standing
+     * for this document is returned as-is, and NOTHING is recorded (no new
+     * row, no voucher.enqueued event). Before this, a replayed domain event
+     * (a re-fired DeliveryDispatched, a re-saved issued invoice) queued a
+     * second voucher for the same document, and a Delivery in particular had
+     * no replay key of its own — the "Delivery has no replay key" gap named
+     * in Phase 3.
+     *
+     * A DISMISSED entry does not count: dismissal is the human's write-off,
+     * and a fresh enqueue after it is today the only road by which such a
+     * voucher can be re-issued (DismissedVoucherTest) — that road stays
+     * open. Failed does count: a failed voucher is retried in place, never
+     * doubled beside itself.
+     *
+     * The payload of a returned entry is NOT refreshed here — an entry the
+     * agent may already hold must not change under it (the same reason
+     * enqueueShiftVoucher() only merges into never-delivered vouchers);
+     * retry() is where a payload is regenerated, deliberately.
+     */
     private function enqueue(Model $syncable, string $voucherType, array $payload): TallySyncEntry
     {
+        $existing = TallySyncEntry::query()
+            ->where('syncable_type', $syncable->getMorphClass())
+            ->where('syncable_id', $syncable->getKey())
+            ->where('tally_voucher_type', $voucherType)
+            ->where('status', '!=', TallySyncStatus::Dismissed->value)
+            ->orderByDesc('id')
+            ->first();
+
+        if ($existing !== null) {
+            return $existing;
+        }
+
         $entry = TallySyncEntry::create([
             'syncable_type' => $syncable->getMorphClass(),
             'syncable_id' => $syncable->getKey(),

@@ -17,9 +17,10 @@ use App\Modules\TallySync\Models\TallySyncEntry;
  * /sales/deliveries) → DeliveryDispatched → Tally 'Delivery Note'. Beyond
  * the shared lifecycle, this type's own facts:
  *
- *   - DUPLICATE-REFUSED lives in the ORDER, not on the queue: a Delivery has
- *     no replay key, and TallySyncService::enqueue() itself guards nothing —
- *     what stops the same dispatch booking twice is that the second POST
+ *   - DUPLICATE-REFUSED lives in the ORDER first, and since Phase 3.5 on the
+ *     queue too: TallySyncService::enqueue() returns the live entry for a
+ *     re-fired DeliveryDispatched (GenericEnqueueReplayTest) — but what stops
+ *     the same dispatch booking twice at the source is that the second POST
  *     finds the order fully delivered (Completed) and is refused before any
  *     line, stock issue or event; on the scan path the carton itself refuses
  *     to leave twice (DispatchRefusesQualityRejectedCartonTest);
