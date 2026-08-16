@@ -37,6 +37,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Inputs cross into shell ONLY via env. A `${{ }}` expression pasted
+      # into script text is substituted as TEXT before bash parses the line,
+      # so the value becomes code; env makes it data.
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
@@ -52,18 +55,21 @@ jobs:
           printf '%s\n' "$keys" >> ~/.ssh/known_hosts
 
       - name: Flip (or dry-run)
+        env:
+          GRANULARITY_RAW: ${{ inputs.granularity }}
+          WRITE_RAW: ${{ inputs.write }}
         run: |
           set -o pipefail
           # The keyword → value mapping, a shell case on the RUNNER so the only
           # strings that can reach the server are the two literals below.
-          case "${{ inputs.granularity }}" in
+          case "$GRANULARITY_RAW" in
             batch) VALUE='batch' ;;
             *)     VALUE='shift' ;;
           esac
 
           PHP='/opt/alt/php84/usr/bin/php'
 
-          if [ "${{ inputs.write }}" = "true" ]; then
+          if [ "$WRITE_RAW" = "true" ]; then
             REMOTE="cp .env .env.bak-granularity-flip \
               && if grep -q '^TALLY_VOUCHER_GRANULARITY=' .env; then \
                    sed -i 's/^TALLY_VOUCHER_GRANULARITY=.*/TALLY_VOUCHER_GRANULARITY=$VALUE/' .env; \
@@ -90,9 +96,15 @@ jobs:
 
       - name: Summarise
         if: always()
+        env:
+          GRANULARITY_RAW: ${{ inputs.granularity }}
+          WRITE_RAW: ${{ inputs.write }}
         run: |
+          # Decided in shell, not in a `${{ }}` ternary: no expression result
+          # is pasted into script text, so this line cannot become code either.
+          if [ "$WRITE_RAW" = "true" ]; then MODE=WRITE; else MODE='dry run'; fi
           {
-            echo "### Voucher granularity — ${{ inputs.write == true && 'WRITE' || 'dry run' }} (${{ inputs.granularity }})"
+            echo "### Voucher granularity — $MODE ($GRANULARITY_RAW)"
             echo
             echo '```'
             cat flip-output.txt 2>/dev/null || echo "(no output captured)"

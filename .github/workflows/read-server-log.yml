@@ -62,17 +62,41 @@ jobs:
           fi
           printf '%s\n' "$keys" >> ~/.ssh/known_hosts
 
+      # Inputs cross into shell ONLY via env. A `${{ }}` expression pasted into
+      # script text is substituted as TEXT before bash parses the line — which
+      # is why the old `tr -d` here protected nothing: tr ran on a value that
+      # had already become code.
       - name: Tail the log
+        env:
+          LOG_RAW: ${{ inputs.log }}
+          LINES_RAW: ${{ inputs.lines }}
+          PATTERN_RAW: ${{ inputs.pattern }}
         run: |
           set -o pipefail
-          # Sanitised: lines must be digits, so the value cannot smuggle shell.
-          LINES=$(printf '%s' "${{ inputs.lines }}" | tr -cd '0-9')
-          LINES=${LINES:-250}
 
-          # The pattern is passed to a REMOTE grep as a single-quoted argument;
-          # single quotes in the input are stripped so the quoting cannot be
-          # broken out of.
-          PATTERN=$(printf '%s' "${{ inputs.pattern }}" | tr -d "'\\\\\`\$")
+          # REFUSE rather than strip. A silently altered filter returns results
+          # for a search nobody typed, which during an incident is worse than
+          # an error.
+          if [ -z "$LINES_RAW" ]; then
+            LINES=250
+          elif [ "$(printf '%s' "$LINES_RAW" | tr -cd '0-9')" != "$LINES_RAW" ]; then
+            echo "::error::lines must be digits only; got a value containing something else."
+            exit 1
+          else
+            LINES=$LINES_RAW
+          fi
+
+          # The pattern becomes a single-quoted argument to a REMOTE grep.
+          # Inside single quotes the only character the shell treats specially
+          # is the single quote itself, so refusing it is what makes the
+          # quoting sound. Backslash IS allowed on purpose: the documented use
+          # is searching for a PHP exception class such as
+          # Illuminate\Database\QueryException.
+          PATTERN=$PATTERN_RAW
+          if [ -n "$PATTERN" ] && [ "$(printf '%s' "$PATTERN" | tr -cd 'A-Za-z0-9 ._,:/@#()[]\\+-')" != "$PATTERN" ]; then
+            echo "::error::pattern contains a character outside the allow-list (letters, digits, space and . _ , : / @ # ( ) [ ] \\ + -). Refusing rather than searching for something other than what was typed."
+            exit 1
+          fi
 
           # The keyword → file mapping. Written as a shell case on the RUNNER
           # (not interpolated into the remote command) so the only strings that
@@ -82,7 +106,7 @@ jobs:
           # tally-agent-YYYY-MM-DD.log, not tally-agent.log — the newest
           # matching file is picked on the server, which is also what makes
           # "today's log" the default answer without passing a date.
-          case "${{ inputs.log }}" in
+          case "$LOG_RAW" in
             tally-agent)
               TARGET='"$(ls -1t storage/logs/tally-agent-*.log 2>/dev/null | head -n 1)"'
               ;;
@@ -104,11 +128,15 @@ jobs:
 
       - name: Summarise
         if: always()
+        env:
+          LOG_RAW: ${{ inputs.log }}
+          LINES_RAW: ${{ inputs.lines }}
+          PATTERN_RAW: ${{ inputs.pattern }}
         run: |
           {
-            echo "### Live server log — ${{ inputs.log }}"
+            echo "### Live server log — $LOG_RAW"
             echo
-            echo "log: \`${{ inputs.log }}\` · lines: \`${{ inputs.lines }}\` · pattern: \`${{ inputs.pattern }}\`"
+            echo "log: \`$LOG_RAW\` · lines: \`$LINES_RAW\` · pattern: \`$PATTERN_RAW\`"
             echo
             echo '```'
             cat log-output.txt 2>/dev/null || echo "(no output captured)"

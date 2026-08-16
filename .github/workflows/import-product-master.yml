@@ -43,6 +43,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Inputs cross into shell ONLY via env. A `${{ }}` expression pasted
+      # into script text is substituted as TEXT before bash parses the line,
+      # so the value becomes code; env makes it data.
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
@@ -58,12 +61,17 @@ jobs:
           printf '%s\n' "$keys" >> ~/.ssh/known_hosts
 
       - name: Report what is about to run
+        env:
+          DIAGNOSE_RAW: ${{ inputs.diagnose }}
+          EXACT_ONLY_RAW: ${{ inputs.exact_only }}
+          LOCAL_FIXTURES_RAW: ${{ inputs.local_fixtures }}
+          WRITE_RAW: ${{ inputs.write }}
         run: |
-          if [ "${{ inputs.diagnose }}" = "true" ]; then
+          if [ "$DIAGNOSE_RAW" = "true" ]; then
             echo "Diagnosing name matching — nothing will be written."
-          elif [ "${{ inputs.write }}" = "true" ]; then
-            echo "::warning::WRITING product standards to the live database (exact_only=${{ inputs.exact_only }})."
-            if [ "${{ inputs.local_fixtures }}" = "true" ]; then
+          elif [ "$WRITE_RAW" = "true" ]; then
+            echo "::warning::WRITING product standards to the live database (exact_only=$EXACT_ONLY_RAW)."
+            if [ "$LOCAL_FIXTURES_RAW" = "true" ]; then
               echo "::warning::AND fabricating LOCAL- items for every unmatched product. Demo instances only. The command refuses this when APP_ENV=production."
             fi
           else
@@ -71,20 +79,25 @@ jobs:
           fi
 
       - name: Run the import
+        env:
+          DIAGNOSE_RAW: ${{ inputs.diagnose }}
+          EXACT_ONLY_RAW: ${{ inputs.exact_only }}
+          LOCAL_FIXTURES_RAW: ${{ inputs.local_fixtures }}
+          WRITE_RAW: ${{ inputs.write }}
         run: |
           set -o pipefail
           FLAGS=""
           # diagnose is read-only and self-contained: it must never be combined
           # with --write, so it wins outright rather than adding to the flags.
-          if [ "${{ inputs.diagnose }}" = "true" ]; then
+          if [ "$DIAGNOSE_RAW" = "true" ]; then
             FLAGS="--diagnose"
           else
-            [ "${{ inputs.write }}" = "true" ] && FLAGS="$FLAGS --write"
-            [ "${{ inputs.exact_only }}" = "true" ] && FLAGS="$FLAGS --exact-only"
+            [ "$WRITE_RAW" = "true" ] && FLAGS="$FLAGS --write"
+            [ "$EXACT_ONLY_RAW" = "true" ] && FLAGS="$FLAGS --exact-only"
             # Passed through, never forced. The command's own APP_ENV=production
             # guard is the real protection and is deliberately left intact —
             # this only stops the flag being unreachable on a demo box.
-            [ "${{ inputs.local_fixtures }}" = "true" ] && FLAGS="$FLAGS --local-fixtures"
+            [ "$LOCAL_FIXTURES_RAW" = "true" ] && FLAGS="$FLAGS --local-fixtures"
           fi
 
           ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
@@ -94,11 +107,14 @@ jobs:
 
       - name: Summarise
         if: always()
+        env:
+          EXACT_ONLY_RAW: ${{ inputs.exact_only }}
+          WRITE_RAW: ${{ inputs.write }}
         run: |
           {
             echo "### Product master import"
             echo
-            echo "write: \`${{ inputs.write }}\` · exact_only: \`${{ inputs.exact_only }}\`"
+            echo "write: \`$WRITE_RAW\` · exact_only: \`$EXACT_ONLY_RAW\`"
             echo
             echo '```'
             cat import-output.txt 2>/dev/null || echo "(no output captured)"
