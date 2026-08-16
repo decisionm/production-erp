@@ -88,3 +88,5 @@ screens.
 | Owner decisions required | **None to merge this phase.** Named for the owner (not blocking): whether procurement-only users may *write* a rate at all; whether the importer should set `is_local_fixture=true` on the fixtures it fabricates (today prefix-only) |
 | PR | see the Phase 1 PR line appended below |
 | Next phase | Phase 2 — Sync Control Center foundation (read model over `tally_sync_entries`, server-side filters, server-side CSV, `needs_review`, journal categories, header counts, first frontend tests for tally-sync) |
+
+**Phase 1 PR:** #180 (`fix/phase-1-live-safety` → stacked on #179 `docs/phase-0-engineering-baseline`). Seven commits, one concern each. Retarget to `main` after #179 merges. Merge goes through the repository chain (Cursor review → Codex verification → owner); nothing here is pushed to `main`.
