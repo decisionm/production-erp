@@ -3,6 +3,7 @@
 namespace App\Modules\Procurement\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
+use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Models\MaterialBag;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Inventory\Services\TraceabilityService;
@@ -301,6 +302,7 @@ class GoodsReceiptService
                         movementDate: $data['received_date'] ?? null,
                         notes: $data['notes'] ?? null,
                         createdBy: $createdBy,
+                        purpose: StockMovementPurpose::Receipt,
                     );
 
                     foreach ($lineData['lots'] ?? [] as $lotData) {

@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 #[Fillable([
-    'sku', 'name', 'description', 'uom', 'hsn_sac_code', 'reorder_level',
+    'sku', 'sku_provisional', 'name', 'description', 'uom', 'hsn_sac_code', 'reorder_level',
     'nominal_weight_grams', 'nos_per_tray', 'trays_per_box', 'nos_per_box',
     'nos_per_pouch', 'pouches_per_box',
     'colour', 'standard_cycle_time', 'standard_cavities',
@@ -124,6 +124,10 @@ class Item extends Model
             'tracking_type' => ItemTrackingType::class,
             'is_active' => 'boolean',
             'is_local_fixture' => 'boolean',
+            // "This SKU was seeded from the Tally name, not chosen" — set by
+            // the masters pull's create path, cleared by a manual SKU edit
+            // (ItemService). Provenance only; no SKU format lives here.
+            'sku_provisional' => 'boolean',
             'tally_alter_id' => 'integer',
             'tally_synced_at' => 'datetime',
         ];

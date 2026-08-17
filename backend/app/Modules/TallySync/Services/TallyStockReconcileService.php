@@ -2,6 +2,7 @@
 
 namespace App\Modules\TallySync\Services;
 
+use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Models\StockBalance;
 use App\Modules\Inventory\Models\StockMovement;
 use App\Modules\Inventory\Services\StockMovementService;
@@ -185,6 +186,7 @@ class TallyStockReconcileService
                         movementDate: $locked->as_of->toDateString(),
                         notes: "Matched to Tally: ERP held {$erp}, Tally holds {$tally}.",
                         createdBy: $userId,
+                        purpose: StockMovementPurpose::Reconcile,
                     );
 
                     $received++;
@@ -206,6 +208,7 @@ class TallyStockReconcileService
                     // here would leave the two systems disagreeing at the exact
                     // point somebody asked them to agree.
                     allowNegative: true,
+                    purpose: StockMovementPurpose::Reconcile,
                 );
 
                 $issued++;

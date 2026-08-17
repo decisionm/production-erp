@@ -29,6 +29,11 @@ class BatchEstimationService
     public function __construct(
         private readonly BomService $boms,
         private readonly ProductionCalculationEngine $engine,
+        // THE ONE reader of pack quantities (Phase 5, P5-04) — the same
+        // packaging → item precedence the run will be measured against
+        // after completion, so the preview and the metrics can never quote
+        // two different pack sizes for one run.
+        private readonly PackQuantityResolver $packQuantities,
     ) {}
 
     /**
@@ -38,7 +43,7 @@ class BatchEstimationService
      *     expected_cycles: ?int, expected_pieces: ?int,
      *     expected_kg: ?string, expected_trays: ?int, expected_boxes: ?int,
      *     expected_pouches: ?int, nos_per_tray: ?int, nos_per_box: ?int,
-     *     nos_per_pouch: ?int, expected_materials: list<array{
+     *     nos_per_pouch: ?int, pack_quantity_source: string, expected_materials: list<array{
      *         item_id: int, name: string, uom: ?string, quantity: string, is_mass: bool
      *     }>, recipe_source: ?string,
      * }
@@ -80,6 +85,12 @@ class BatchEstimationService
             $expectedKg = bcdiv(bcmul((string) $pieces, (string) $unitWeight, 4), '1000', 4);
         }
 
+        // Pack counts through the ONE resolver (P5-04): the chosen packaging
+        // row, then the item master — per figure, which is exactly the
+        // `packaging ?? item` this read before, now shared with the metric
+        // reader so the two can never disagree about a run's pack size.
+        $pack = $this->packQuantities->forSelection($packaging, $item);
+
         return [
             'planned_hours' => $hours,
             'standard_cycle_time' => $cycleTime,
@@ -88,18 +99,19 @@ class BatchEstimationService
             'expected_cycles' => $cycles,
             'expected_pieces' => $pieces,
             'expected_kg' => $expectedKg,
-            'nos_per_tray' => $packaging?->nos_per_tray ?? $item->nos_per_tray,
-            'nos_per_box' => $packaging?->nos_per_box ?? $item->nos_per_box,
-            'nos_per_pouch' => $packaging?->nos_per_pouch ?? $item->nos_per_pouch,
+            'nos_per_tray' => $pack->nos_per_tray,
+            'nos_per_box' => $pack->nos_per_box,
+            'nos_per_pouch' => $pack->nos_per_pouch,
+            'pack_quantity_source' => $pack->source,
             'packaging_mode' => $packaging?->mode,
             // Trays and pouches are packing SUGGESTIONS — how many
             // containers you need, so a part-filled one still counts (ceil).
-            'expected_trays' => $this->containers($pieces, $packaging?->nos_per_tray ?? $item->nos_per_tray),
-            'expected_pouches' => $this->containers($pieces, $packaging?->nos_per_pouch ?? $item->nos_per_pouch),
+            'expected_trays' => $this->containers($pieces, $pack->nos_per_tray),
+            'expected_pouches' => $this->containers($pieces, $pack->nos_per_pouch),
             // Boxes are the TARGET the shift is measured against, and the
             // factory's EST BOX column rounds to nearest. Using the packing
             // ceil here would inflate the target and understate efficiency.
-            'expected_boxes' => $this->engine->expectedBoxes($pieces, $packaging?->nos_per_box ?? $item->nos_per_box),
+            'expected_boxes' => $this->engine->expectedBoxes($pieces, $pack->nos_per_box),
             ...$this->expectedMaterials($item, $pieces),
         ];
     }

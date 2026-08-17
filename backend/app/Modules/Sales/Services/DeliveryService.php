@@ -3,6 +3,7 @@
 namespace App\Modules\Sales\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
+use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
 use App\Modules\Production\Models\FinishedCarton;
@@ -170,6 +171,7 @@ class DeliveryService
                     movementDate: $data['delivered_date'] ?? null,
                     notes: $data['notes'] ?? null,
                     createdBy: $createdBy,
+                    purpose: StockMovementPurpose::Dispatch,
                 );
 
                 $soLine->increment('quantity_delivered', $lineData['quantity']);

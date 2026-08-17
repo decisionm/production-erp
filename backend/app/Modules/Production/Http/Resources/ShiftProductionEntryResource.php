@@ -123,6 +123,12 @@ class ShiftProductionEntryResource extends JsonResource
             'calculation_version' => $this->calculation_version,
             'material_consumptions' => ShiftMaterialConsumptionResource::collection($this->whenLoaded('materialConsumptions')),
             'scraps' => ShiftScrapResource::collection($this->whenLoaded('scraps')),
+            // HOW THE BATCH WAS PACKED — the packing_lines the completion
+            // was validated against, stored line for line (Phase 5, §4.16
+            // closed) and replaced by an amendment. Empty for a completion
+            // that typed none, and for every batch completed before the
+            // table existed. Same whenLoaded rule as the lines above.
+            'packing_lines' => ShiftProductionEntryPackingLineResource::collection($this->whenLoaded('packingLines')),
             // Downtime logged against this batch — planned at Start plus
             // the completion-time lines whose minutes net out of running
             // hours in metrics.downtime_minutes_total below.

@@ -12,6 +12,9 @@ class ItemResource extends JsonResource
         return [
             'id' => $this->id,
             'sku' => $this->sku,
+            // True while the SKU is the placeholder the masters pull seeded
+            // from the Tally name; a manual SKU edit clears it (P5-02).
+            'sku_provisional' => (bool) $this->sku_provisional,
             'name' => $this->name,
             'description' => $this->description,
             'uom' => $this->uom,

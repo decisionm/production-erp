@@ -34,6 +34,16 @@ class ItemService
 
     public function update(Item $item, array $data): Item
     {
+        // A person typing a SKU of their own is the moment a name-seeded
+        // placeholder stops being one (Phase 5, P5-02). Judged on CHANGE, not
+        // presence: the Items form echoes the SKU back on every save, and an
+        // edit to the colour must not silently declare the placeholder chosen.
+        // Never client-writable — the request never validates the flag in,
+        // and this is the only place it is cleared.
+        if (array_key_exists('sku', $data) && (string) $data['sku'] !== (string) $item->sku) {
+            $data['sku_provisional'] = false;
+        }
+
         $item->update($data);
 
         return $item;
@@ -82,6 +92,11 @@ class ItemService
 
         $item = $this->create([
             'sku' => $this->uniqueSkuFrom($data['name']),
+            // Seeded, not chosen: the SKU above is the Tally name because the
+            // ERP needs a unique SKU to store the row and has nothing else.
+            // Said on the row so the configuration review can list it until
+            // a person sets a real one (the SKU format itself is the owner's).
+            'sku_provisional' => true,
             'name' => $data['name'],
             'uom' => $data['base_unit'] ?? 'PCS',
             'tally_stock_item_guid' => $data['guid'],

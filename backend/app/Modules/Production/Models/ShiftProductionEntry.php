@@ -387,6 +387,18 @@ class ShiftProductionEntry extends Model
     }
 
     /**
+     * How this batch was packed, line by line — the packing_lines the
+     * completion was validated against, stored in the same transaction
+     * (Phase 5, §4.16 closed) and replaced by an amendment. In the order
+     * typed. Empty for every batch completed without lines, and for every
+     * batch completed before the table existed.
+     */
+    public function packingLines(): HasMany
+    {
+        return $this->hasMany(ShiftProductionEntryPackingLine::class)->orderBy('position');
+    }
+
+    /**
      * Shift continuity (Phase 6): the segment this one continued from. A
      * run crossing the shift boundary completes the outgoing segment and
      * opens a child inheriting batch_number/item/standards/machine — the
