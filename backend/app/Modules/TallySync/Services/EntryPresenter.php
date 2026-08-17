@@ -457,15 +457,15 @@ class EntryPresenter
             TallySyncEventKind::VoucherReleased => 'Released ahead of the gate by a person.',
             // Counts and the hash prefix only — never Tally's text or the XML;
             // those live on the snapshot itself, gated by reader there.
-            TallySyncEventKind::SnapshotStored => $this->joinSentence(array_filter([
-                'The agent uploaded what it sent and what Tally answered',
-                isset($details['attempt']) ? 'attempt '.(int) $details['attempt'] : null,
-                is_string($details['xml_sha256'] ?? null) ? 'sha256 '.substr($details['xml_sha256'], 0, 12) : null,
-                isset($details['xml_bytes']) ? ((int) $details['xml_bytes']).' bytes' : null,
-                array_key_exists('tally_success', $details) && $details['tally_success'] !== null
-                    ? ($details['tally_success'] ? 'Tally accepted' : 'Tally rejected')
-                    : null,
-            ])),
+            TallySyncEventKind::SnapshotStored => 'The agent uploaded what it sent and what Tally answered'
+                .$this->prefixed(' — ', implode(' · ', array_filter([
+                    isset($details['attempt']) ? 'attempt '.(int) $details['attempt'] : null,
+                    is_string($details['xml_sha256'] ?? null) ? 'sha256 '.substr($details['xml_sha256'], 0, 12) : null,
+                    isset($details['xml_bytes']) ? ((int) $details['xml_bytes']).' bytes' : null,
+                    array_key_exists('tally_success', $details) && $details['tally_success'] !== null
+                        ? ($details['tally_success'] ? 'Tally accepted' : 'Tally rejected')
+                        : null,
+                ])) ?: null).'.',
             default => null,
         };
     }
