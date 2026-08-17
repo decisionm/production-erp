@@ -182,6 +182,7 @@ describe('eventLabel', () => {
         expect(eventLabel('pending.delivered')).toBe('Handed to the agent');
         expect(eventLabel('voucher.synced')).toBe('Accepted by Tally');
         expect(eventLabel('voucher.failed')).toBe('Rejected by Tally');
+        expect(eventLabel('snapshot.stored')).toBe('Snapshot uploaded');
         expect(eventLabel('voucher.retried')).toBe('Resynced');
         expect(eventLabel('voucher.dismissed')).toBe('Dismissed');
         expect(eventLabel('voucher.released')).toBe('Released');

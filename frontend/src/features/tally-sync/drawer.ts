@@ -236,6 +236,7 @@ const EVENT_LABELS: Record<string, string> = {
     'voucher.retried': 'Resynced',
     'voucher.dismissed': 'Dismissed',
     'voucher.released': 'Released',
+    'snapshot.stored': 'Snapshot uploaded',
 };
 
 export function eventLabel(event: string): string {

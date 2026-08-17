@@ -710,8 +710,16 @@ function SnapshotPanel({ snapshot }: { snapshot: TallySyncSnapshot }) {
                 {xml.kind === 'xml' && (
                     <pre style={{ margin: 0, maxHeight: 360, overflow: 'auto', fontSize: 12, whiteSpace: 'pre' }}>{pretty}</pre>
                 )}
-                {xml.kind === 'withheld' && <Typography.Text type="warning">{xml.text}</Typography.Text>}
-                {xml.kind === 'none' && <Typography.Text type="secondary">{xml.text}</Typography.Text>}
+                {xml.kind === 'withheld' && (
+                    <Typography.Text type="warning" style={{ display: 'block' }}>
+                        {xml.text}
+                    </Typography.Text>
+                )}
+                {xml.kind === 'none' && (
+                    <Typography.Text type="secondary" style={{ display: 'block' }}>
+                        {xml.text}
+                    </Typography.Text>
+                )}
             </div>
 
             <div>
