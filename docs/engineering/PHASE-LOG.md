@@ -1785,3 +1785,74 @@ PR:                 #192 (base: feat/phase-7.6-configuration-lifecycle → #191 
 Deployment state:   not deployed; stack #179 → … → #191 → #192
 Next phase:         8 — end-to-end acceptance
 ```
+
+## PHASE 8 — End-to-end acceptance
+
+```
+Phase:    8 — the chain, not the modules (MASTER-PLAN rev 3, P8-01..08)
+Status:   NOT READY  (one link NOT TESTED; two links BLOCKED by named owner gates)
+Branch:   feat/phase-8-acceptance (stacked on Phase 7.5 PR #192 → … → #179)
+Dates:    2026-08-17
+
+The verdict, and why it is not a complaint about quality:
+  Every one of the five chains passes. The full backend suite is 1,904 tests /
+  1,903 passed / 1 skipped by design / 17,806 assertions; Pint clean; frontend
+  typecheck, tests and build clean; inventory:check-ledger clean. The phase is
+  NOT READY because ONE link is NOT TESTED, and the rule this programme set
+  says that is enough, full stop.
+
+  D-WIRING — the configuration lifecycle applied to the in-scope masters — is
+  NOT TESTED, because Phase 7.6 deliberately shipped the mechanism and wired no
+  entity. The independent QA confirmed it by inspection: no module declares
+  ManagesConfigurationLifecycle, and the one lifecycle-shaped route in the app
+  bypasses the shared mechanism. Chain D therefore proves the MECHANISM against
+  an existing master through routes that predate 7.6 — and proves nothing about
+  the 35 in-scope masters. That independently confirms both constraints the
+  lead set: 7.6 wired no entity, and a material configuration gap remains.
+
+What the chains proved:
+  A · the operator workflow end to end — configuration answers every Shift
+    Floor question; the standard is frozen at Start under its own
+    calculation_version and that stamp is load-bearing; Completed Today equals
+    the completed batches and excludes running, cancelled and yesterday's;
+    Shift Summary equals Σ completed production with the QC reduction flowing
+    through; the CEC composition is byte-identical to the Shift Summary; the
+    Tally shift voucher contains exactly the approved entries, proved by
+    inclusion AND exclusion; release gate → agent ack → snapshot.
+  B · PO → GRN → lot → movement → balance → consumption, traced backward to
+    every GRN line, FC-06 holding on every link in both halves.
+  B2 · the three states never collapse — proved by MOVEMENT CENSUS rather than
+    a total: the store's outflows are exactly three issue_to_production rows
+    and ZERO consumption rows, so it cannot be charged twice for the same
+    material. Mutation-checked twice. An open issue reads as NO drift.
+  C · sales traced to Tally, the Layer-B honesty statement stated plainly, one
+    export per kind, FC-06 on every file, the CEC slot BLOCKED not produced.
+  D · the mechanism — a referenced master refused with integer counts and its
+    cascade children surviving; an unused one really deleted and its code
+    released; fail-closed verdicts; the schema backstop refusing an incomplete
+    declaration.
+
+Owner-gated, correctly recorded BLOCKED (neither invented, neither bypassed):
+  • A6b — the CEC LAYOUT. The composition is proved equal to the Shift Summary;
+    the format waits on the owner's sample.
+  • B8 — the PO → Tally live write (Q35(d)). Flag off, staging proved, no
+    egress reachable. The first live post is attended, never unattended.
+  Even with D-WIRING closed, the best achievable state is PASS WITH
+  OWNER-GATED ITEMS, not unconditional PRODUCT READY, while these remain.
+
+Honest limits, stated rather than implied:
+  • NO BROWSER PROOF was taken for any chain at any point in this phase. The
+    Chrome extension disconnected early in the programme and never returned.
+    Every PASS is at the transaction-model / API layer.
+  • SQLITE ONLY. No MySQL on the build machine; the CI app-mysql leg (Phase 7)
+    must execute the acceptance files before "green on both drivers" is said.
+  • Chain B2's "Production Receipt" link has no separate document in the ERP —
+    the receipt IS the WIP arrival with a named two-handed handover. Recorded
+    as a PASS with the deviation stated, not as a gap.
+
+What would change the verdict: see docs/engineering/RELEASE-READINESS.md.
+PR:                 stacked on #192 (base: feat/phase-7.5-material-flow)
+Deployment state:   not deployed; stack #179 → … → #192 → this PR
+Next:               wire the Tier-1 masters through the contract, re-walk D
+                    against them, run the chains on MySQL, take the browser walk
+```

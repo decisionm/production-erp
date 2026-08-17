@@ -377,3 +377,21 @@ A store issue is no longer a consumption — three distinct states with a return
 
 ### Still open
 Q54's five questions. The three legacy day-bin writers survive through tests only. Two concurrent reversals on different issues rely on the ledger's own non-negative decrement rather than a shared lock.
+
+## Phase 8 (feat/phase-8-acceptance, acceptance walked 2026-08-17)
+
+| Suite | Result | Evidence |
+|---|---|---|
+| Backend PHPUnit | PASS | **1,904 / 1,903 passed / 1 skipped by design / 17,806 assertions** |
+| The five acceptance chains | 4 chains PASS, 1 link NOT TESTED | OperatorChainTest 5/173 · AccountingChainTest 4/231 · SalesVisibilityChainTest 9/378 · MaterialFlowChainTest 3/214 · ConfigurationLifecycleChainTest 9/122 |
+| Pint · typecheck · vitest · build | PASS | vitest 489 |
+| `inventory:check-ledger` | PASS | clean on a migrated+seeded dev DB |
+| **Independent acceptance QA** | **NOT READY** | one link NOT TESTED (D-WIRING); two BLOCKED by named owner gates (CEC layout, Q35(d) live write) |
+| Browser proof | **NOT DONE — for any chain, at any point** | extension unavailable since early in the programme; every PASS is transaction-model/API layer |
+| MySQL leg on the chains | **NOT RUN** | no MySQL on the build machine; CI's app-mysql job must execute these files |
+
+### The verdict rule, applied
+Any link FAIL or NOT TESTED → NOT READY, full stop. D-WIRING is NOT TESTED because Phase 7.6 shipped the mechanism and wired no entity, so chain D proves the mechanism against an existing master and nothing about the 35 in-scope masters. Even once that closes, the two owner-gated links keep the best achievable state at PASS WITH OWNER-GATED ITEMS.
+
+### Still open
+Wire the Tier-1 masters and re-walk D against them · close the audit's GAP rows (dependency guard 1/22, audit 1/30, delete-unused 4/20) · run the chains on MySQL · take the browser walk · the CEC sample and Q35(d), which only the owner can lift.

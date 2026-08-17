@@ -30,7 +30,7 @@ PHASE 6   Purchase chain + PO→Tally staged      PASS WITH DEFERRED · PR #189 
 PHASE 7   Regression + hardening               INTEGRATED (gate pending) · PR #190 (stacked on #189) · suite green on sqlite AND MySQL 8 · Q49
 PHASE 7.5 Store → Production material flow     PASS (re-gate zero findings) · PR #192 (stacked on #191) · three states never collapse · Q54
 PHASE 7.6 Configuration Lifecycle Contract     Tier 0 PASS WITH DEFERRED · PR #191 (stacked on #190) · mechanism + schema backstop + 11 live flag fixes + audit trail; no entity wired yet
-PHASE 8   END-TO-END ACCEPTANCE: operator workflow, then accounting traceability, purchase chain, sales visibility + downloads
+PHASE 8   END-TO-END ACCEPTANCE                 **NOT READY** · PR (stacked on #192) · 4 chains PASS · D-WIRING NOT TESTED (7.6 wired no entity) · CEC + Q35(d) BLOCKED · no browser proof, SQLite only
 ──────────────────────────────────────────────────────────────────────
 HELD      Sales in ERP · CEC format · reconciliation-by-read · SKU format · Q33 (490/box) · Q35 (PO live write)
 ```
