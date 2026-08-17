@@ -214,9 +214,25 @@ class ConfigurationLifecycle
         });
     }
 
-    /** Take out of service (or, with no flag, soft-delete). Reversible; deletes nothing. */
+    /**
+     * Take out of service (or, with no flag, soft-delete). Reversible; deletes
+     * nothing.
+     *
+     * Enforces its OWN ability first. delete() has always re-checked what the
+     * `can` block promised; archive() and activate() did not, so a caller that
+     * ignored `can.archive` — or a stale button on an already-retired row —
+     * reached the write. The rule is one rule: the server decides, and the
+     * server enforces what it decided.
+     */
     public function archive(Model $model, ?string $reason = null): Model
     {
+        if (! $this->abilities($model, resolveDelete: false)['archive']) {
+            throw new LogicException(sprintf(
+                'This %s is already retired, so there is nothing to archive.',
+                $this->label,
+            ));
+        }
+
         if ($this->hasActiveColumn($model)) {
             $this->activeFlag->markRetired($model);
             $model->save();
@@ -236,9 +252,16 @@ class ConfigurationLifecycle
         ));
     }
 
-    /** Put an archived record back in service. */
+    /** Put an archived record back in service — enforcing its own ability, as archive() does. */
     public function activate(Model $model, ?string $reason = null): Model
     {
+        if (! $this->abilities($model, resolveDelete: false)['activate']) {
+            throw new LogicException(sprintf(
+                'This %s is already active, so there is nothing to reactivate.',
+                $this->label,
+            ));
+        }
+
         $restored = false;
 
         if ($this->isTrashed($model)) {

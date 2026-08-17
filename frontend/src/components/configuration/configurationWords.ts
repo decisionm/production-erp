@@ -296,7 +296,16 @@ export const deleteConfirmBody = (entityLabel: string, recordName: string | null
     `The server checks every dependency first and refuses if anything has ever used it.`;
 
 /** The reversible way out, offered on a refusal. */
-export const ARCHIVE_INSTEAD_LABEL = 'Archive instead';
+/**
+ * The button under a refusal, worded to MATCH the sentence directly above it.
+ *
+ * The server's refusal ends "Deactivate instead." — the lead's own words in the
+ * requirement, and pinned by test. Offering a button labelled "Archive instead"
+ * beneath that sentence asks the reader to work out that two words mean one act.
+ * So the OFFER says Deactivate; the act's name elsewhere in the API and the row
+ * menu is still Archive, and the STATE it produces is still Retired.
+ */
+export const ARCHIVE_INSTEAD_LABEL = 'Deactivate instead';
 
 /**
  * Archive and Reactivate both ASK for a reason, and today nothing stores it:
