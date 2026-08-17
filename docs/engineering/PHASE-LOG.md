@@ -1570,8 +1570,8 @@ Deferred items:
     90-day retention nobody has been asked about, the shift-KPI sub-table
     export kinds, the import updateOrCreate on (standard, mode), and
     FinishedCartonService label precedence.
-PR:                 stacked on #189 (base: feat/phase-6-purchase-chain)
-Deployment state:   not deployed; stack #179 → … → #189 → this PR
+PR:                 #190 (base: feat/phase-6-purchase-chain → #189 → … → #179)
+Deployment state:   not deployed; stack #179 → … → #189 → #190
 Next phase:         7.5 — Store → Production material flow (the lead's
                     business-rule correction of 17-Aug), then 8 acceptance
 ```

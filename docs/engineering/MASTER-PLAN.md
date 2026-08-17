@@ -27,7 +27,7 @@ PHASE 5   Product / SKU configuration          PASS WITH DEFERRED · PR #186 (st
 PHASE 5.5 Shift Floor → Complete → Today       PASS WITH DEFERRED · PR #187 (stacked on #186) · v3 estimation, legacy pinned · Q46
 PHASE 5.7 Shift Summary + CEC infrastructure   PASS WITH DEFERRED · PR #188 (stacked on #187) · report contract + honesty keys · CEC data endpoint + golden harness · format BLOCKED · Q47
 PHASE 6   Purchase chain + PO→Tally staged      PASS WITH DEFERRED · PR #189 (stacked on #188) · lifecycle/show/trace · flag OFF (Q35) · Q48
-PHASE 7   Regression + hardening               INTEGRATED (gate pending) · PR (stacked on #189) · suite green on sqlite AND MySQL 8 · Q49
+PHASE 7   Regression + hardening               INTEGRATED (gate pending) · PR #190 (stacked on #189) · suite green on sqlite AND MySQL 8 · Q49
 PHASE 7.5 Store → Production material flow     NEW (lead, 17-Aug): Material Request → Store Issue → Issued-to-Production → Consumption → Return; Day Bin leaves the target workflow
 PHASE 7.6 Configuration Lifecycle Contract     NEW (lead, 17-Aug): Create·View·Edit·Activate/Deactivate·Safe Delete·Audit, enforced in the BACKEND, across every master
 PHASE 8   END-TO-END ACCEPTANCE: operator workflow, then accounting traceability, purchase chain, sales visibility + downloads
