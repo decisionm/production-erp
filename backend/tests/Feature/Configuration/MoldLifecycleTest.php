@@ -314,7 +314,13 @@ class MoldLifecycleTest extends FloorMasterLifecycleTestCase
         return DB::table('mold_change_logs')->insertGetId([
             'work_center_id' => $machine->id, 'shift_id' => $shift->id, 'production_date' => '2026-08-01',
             'changed_to_item_id' => $item->id, 'changed_to_mold_id' => $mould->id,
-            'changed_from_mold_id' => $mould->id, 'from_time' => '08:00', 'status' => 'open',
+            // A FULL datetime, not '08:00'. The column is dateTime (see
+            // create_mold_change_logs_table), and sqlite stores whatever it is
+            // given while MySQL refuses a bare wall-clock outright —
+            // "Incorrect datetime value: '08:00'". This test therefore passed
+            // on the dev driver and errored on the one live actually runs, and
+            // the MySQL CI leg is precisely what caught it.
+            'changed_from_mold_id' => $mould->id, 'from_time' => '2026-08-01 08:00:00', 'status' => 'open',
             'created_at' => now(), 'updated_at' => now(),
         ]);
     }
