@@ -599,8 +599,8 @@ HALF OF THIS IS NOW MEASURED AND NEEDS NO ANSWER. Parsing the 92 Day Book
 vouchers: 90 of 92 conform to `Local ledger <=> party state is Puducherry <=>
 CGST+SGST` and `Interstate <=> any other state <=> IGST`. The company's state is
 Puducherry and local-versus-interstate follows from the party's state. (The two
-exceptions: voucher 57, Auro Packaging, carries a LOCAL ledger on a Tamil Nadu
-party with IGST — a mis-keyed ledger, and an ERP enforcing the rule would refuse
+exceptions: voucher 57 — one Tamil Nadu party, named in the source export, not
+here (FC-06) — carries a LOCAL ledger with IGST — a mis-keyed ledger, and an ERP enforcing the rule would refuse
 to reproduce it; voucher 72 is the cancelled one.)
 
 WHAT REMAINS UNANSWERED IS THE RATE, and the obvious rule is measurably WRONG:

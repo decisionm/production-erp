@@ -144,8 +144,9 @@ against it. That half needs no guess.
 
 The two that do not conform:
 
-- **Voucher 57, Auro Packaging** — ledger `Local Purchase Taxable @ 5%` on a
-  **Tamil Nadu** party carrying **IGST**. The tax is right for an interstate
+- **Voucher 57** (one Tamil Nadu party — named in the export, not here: FC-06)
+  — ledger `Local Purchase Taxable @ 5%` on a **Tamil Nadu** party carrying
+  **IGST**. The tax is right for an interstate
   purchase; the ledger is not. A mis-keyed ledger in Tally. Worth knowing
   because **an ERP enforcing the rule would refuse to reproduce this voucher** —
   correctly, but the owner should hear it now rather than discover it later.
