@@ -270,7 +270,7 @@ One estimation engine for preview and entry, versioned, legacy pinned · every e
 ### Still open (from the baseline list)
 CRM · Finance — **Still:** MySQL CI leg (**Phase 7, next**). **New (recorded):** the ORDERDUEDATE JD/P read-back at the first attended live post; the machine-stamped `day-bin/load` write door (cleanup against DEC-20260807-006); `match` not yet typed in the frontend procurement types.
 | Backend PHPUnit — **sqlite leg** | PASS | **1,661 / 15,382** (1 skipped by design: CecGoldenTest); Phase 6 close 1,595 / 14,633 |
-| Backend PHPUnit — **MySQL 8 leg** | **PASS** | **1,661 / 15,382**, identical counts, run against a real `mysql:8.0` container as well as the new `app-mysql` CI job — the driver the live factory runs on had never met this suite before |
+| Backend PHPUnit — **MySQL 8 leg** | **PASS** | **1,661 / 15,382** locally against a real `mysql:8.0` container; **and PASS in CI** — the new `app-mysql` job ran green on PR #190 in 5m51s (run 32038255491). Identical counts to the sqlite leg. The driver the live factory runs on had never met this suite before |
 | Frontend vitest | PASS | 368 → **383** |
 | Typecheck · build | PASS | clean · built |
 | Agent | PASS | 122 → **135** (snapshot journal + retry) |

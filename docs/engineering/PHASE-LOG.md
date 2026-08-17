@@ -1538,8 +1538,9 @@ What changed:
 
 Tests:
   Backend 1,595 → 1,661 (1 skipped: the CEC golden) / 15,382 assertions —
-  green on BOTH drivers: sqlite AND a real MySQL 8 (verified locally against
-  a mysql:8.0 container as well as in the new CI job). Frontend vitest 368 →
+  green on BOTH drivers: sqlite AND a real MySQL 8, verified locally against a
+  mysql:8.0 container AND in CI (the new `app-mysql` job ran green on PR #190
+  in 5m51s, run 32038255491 — its first real run). Frontend vitest 368 →
   383. Agent 122 → 135 (snapshot journal + retry: a Tally answer captured
   while the cloud was down is no longer dropped). Knowledge sound.
 
