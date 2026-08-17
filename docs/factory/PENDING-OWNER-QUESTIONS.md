@@ -35,7 +35,7 @@ the ERP). Q38-Q41 are claimed by the 12-Aug Tally
 evidence set and the purchase/tax configuration design. Q42 is claimed by the SKU scheme
 design. Q43 is claimed by the Phase 3 sync fix loop (duplicate master names).
 Q46 is claimed by the Phase 5.5 fix loop (paper-page ingest and the
-estimation version). New questions continue from Q48.
+estimation version). New questions continue from Q49.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 DEC-20260809-002/-003 landed with PR #155 (the finance-pull discovery
@@ -795,3 +795,24 @@ column the sheet's "reject" is, and that is the owner's call, not the
 composer's. **Blocks:** nothing today — the CEC has no format to fill; it
 decides which of the two exposed figures the golden guide maps.
 *Open since 2026-08-17.*
+
+## Q48 · After a purchase order reaches Tally, what should reach Tally when the ERP changes it?
+
+Phase 6 stages an ERP-raised PO as a Tally Purchase Order voucher behind a
+flag that is OFF until Q35(d) is answered (`tally-sync.purchase_orders_enabled`
+— the first live post is attended, never unattended). The ERP lifecycle now
+has three changes a buyer can make AFTER a PO was sent: amend (today refused
+once sent — Draft only), short-close with a reason, cancel with a reason (only
+while nothing was received). Each is an ERP-side record; none of them reaches
+Tally, and each would be a NEW category of Tally write if it did:
+(a) AMEND a sent order — an Alter of the posted voucher, or cancel-and-re-raise,
+or nothing (the vendor holds the amended order on paper only)?
+(b) SHORT-CLOSE — a note only, or should the Tally order be closed/altered so
+its pending register agrees with the ERP?
+(c) CANCEL — cancel the Tally voucher, or nothing?
+The ERP already dismisses its own staged (not yet collected) queue entry when
+an order is cancelled or closed before the agent collected it — that is the
+ERP's queue, not Tally's book. What is asked here is only the Tally side, once
+a voucher exists there. **Blocks:** nothing today — the flag is off; it decides
+what Phase 6's lifecycle must post the day the flag turns on. *Open since
+2026-08-17.*

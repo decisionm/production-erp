@@ -45,8 +45,8 @@ friend for "Receipt Note") and is irrelevant here.
 ## 2. The voucher as Tally exports it — tag tree, cardinalities, kinds
 
 Counts are over the 107 vouchers; "line" = one `ALLINVENTORYENTRIES.LIST`
-(201 in all: 199 on the 105 live vouchers, 2 cancelled vouchers have none);
-"allocation" = one `BATCHALLOCATIONS.LIST` (232).
+(201 in all: 199 on the 105 live vouchers, 1 each on the 2 cancelled — those
+two lines carry no allocation); "allocation" = one `BATCHALLOCATIONS.LIST` (232).
 
 ```
 ENVELOPE › HEADER › TALLYREQUEST
@@ -57,11 +57,11 @@ ENVELOPE › HEADER › TALLYREQUEST
       PARTYGSTIN               15-char GSTIN string            105/107 (absent on the 2 cancelled)
       PLACEOFSUPPLY            a state NAME                    105/107
       VOUCHERTYPENAME          = "Purchase Order"              107/107
-      PARTYNAME                = PARTYLEDGERNAME               107/107
-      PARTYLEDGERNAME          the vendor's ledger name        107/107
+      PARTYNAME                = PARTYLEDGERNAME               105/107 (absent on the 2 cancelled, like PARTYGSTIN)
+      PARTYLEDGERNAME          the vendor's ledger name        105/107 (absent on the 2 cancelled)
       VOUCHERNUMBER            Tally's own numbering           107/107
       REFERENCE                = VOUCHERNUMBER on 102/107      107/107
-      BASICBASEPARTYNAME       = PARTYLEDGERNAME on 106/107    107/107
+      BASICBASEPARTYNAME       present 105/107; = PARTYLEDGERNAME on 104/105
       BASICDUEDATEOFPYMT       free text (" N Days")           92/107
       PERSISTEDVIEW            = "Invoice Voucher View"        107/107
       EFFECTIVEDATE            yyyymmdd                        107/107
@@ -81,7 +81,7 @@ ENVELOPE › HEADER › TALLYREQUEST
           GODOWNNAME           the godown name                 232/232
           BATCHNAME            = "Primary Batch"               232/232
           INDENTNO
-          ORDERNO              = the voucher's VOUCHERNUMBER   221/232
+          ORDERNO              = the voucher's VOUCHERNUMBER   221/232 (per voucher: equal on every allocation on 99/107, distinct on every allocation on 5, mixed on 1, no allocations on the 2 cancelled — the ORDERNO is, in the usual case, the voucher number repeated per line, not an independent line-level order number; Q35(c))
           TRACKINGNUMBER       present, never == ORDERNO       232/232
           AMOUNT               NEGATIVE; = the line's when 1 allocation (194/194), summing to it when several (5/5)
           ACTUALQTY, BILLEDQTY same form as the line
@@ -126,15 +126,19 @@ computes it as an exact decimal-string sum (never a float).
 
 Every allocation carries `JD` (an integer), `P` (`d-Mmm-yy`) and the element
 text (= `P`, 232/232). Measured: `JD == excelSerial(P) − 1` — i.e. **days
-since 1899-12-31** — on **130 of 232 (56%)**, the modal rule; `JD ==
-excelSerial(P)` on 5; the rest scatter, and 13 JD values pair with more than
-one P. They are therefore **not a formatting pair**. Builder rule: derive
-BOTH from the ONE due date the ERP holds — `JD = excelSerial(due) − 1`, `P =
-d-Mmm-yy` (no zero padding, 3-letter Title-case month, 2-digit year), text =
-`P`. **The first owner-gated live post is the check** on this rule; if Tally
-re-derives JD from P (or the reverse) the disagreement in the exports is
-explained and the rule is harmless; if it does not, the first live voucher's
-due dates are read back before a second is sent.
+since 1899-12-31** — on **130 of 232 (56%)**, the modal rule. Of the **102
+that do not**, **97 equal `excelSerial(the voucher's own DATE) − 1`** — the
+ORDER date, not the due date (the second pattern) — and **5 are neither**;
+13 JD values pair with more than one P. They are therefore **not a
+formatting pair**, and the two patterns together read as Tally deriving `JD`
+from a date it holds rather than from `P`. Builder rule (unchanged by the
+second pattern): derive BOTH from the ONE due date the ERP holds — `JD =
+excelSerial(due) − 1`, `P = d-Mmm-yy` (no zero padding, 3-letter Title-case
+month, 2-digit year), text = `P`. **The first owner-gated live post is the
+check** on this rule; if Tally re-derives JD from P (or from the voucher
+date) either pattern in the exports is explained and the rule is harmless; if
+it does not, the first live voucher's due dates are read back before a second
+is sent.
 
 ## 3. What the builder emits — and why each omission is deliberate
 
@@ -154,9 +158,10 @@ due dates are read back before a second is sent.
   LEDGERENTRIES.LIST: LEDGERNAME=party ledger · ISDEEMEDPOSITIVE=No · ISPARTYLEDGER=Yes · AMOUNT(+ sum of lines)
 ```
 
-PARTYNAME and BASICBASEPARTYNAME repeat PARTYLEDGERNAME (107/107 and 106/107
-in the exports). NARRATION is the agent's convention on every builder (no real
-order carries one) and is empty when the PO has no notes.
+PARTYNAME and BASICBASEPARTYNAME repeat PARTYLEDGERNAME (105/105 and 104/105
+of the live vouchers; the 2 cancelled name no party at all). NARRATION is the
+agent's convention on every builder (no real order carries one) and is empty
+when the PO has no notes.
 
 **Why it is safe to post — by TYPE, not by omission (DEC-20260812-002).** A
 Purchase Order is an ORDER voucher: Tally posts it to neither accounts nor
@@ -180,7 +185,7 @@ write.
 | `GUID`, `ALTERID`, `MASTERID`, `VCHKEY`, `REMOTEID`, `VCHSTATUS*`, audit lists | 107/107 | Tally's own bookkeeping — an import must not supply them. |
 | unit suffix on RATE / ACTUALQTY / BILLEDQTY | 199/199 (`/unit`, ` qty unit`) | emitted ONLY when the payload names `unit`; the cloud sends none today (**Q40** — `Item.uom` is Tally's base unit at the last pull but is user-editable and carries no provenance, so the ERP cannot vouch it IS the Tally symbol; and dual-unit lines are unresolved). Bare decimals are the form the live Stock Journals already post with. A unit is never mapped from an ERP UOM by guess. |
 | the dual-unit " = alt qty alt unit" form | 14/199 | Q40 — the ERP's line holds one quantity. |
-| `ACTION="Cancel"` / `ISCANCELLED=Yes` | 2/107 | the ERP never rewrites Tally's book; a cancelled ERP order is cancelled in the ERP (Procurement's `cancel` action) and — because staging happens once, on send — was either never staged or is a queue row the accountant deals with. Alter/Cancel of a posted PO would be a NEW category of Tally write and is an owner question, not built. |
+| `ACTION="Cancel"` / `ISCANCELLED=Yes` | 2/107 | the ERP never rewrites Tally's book; a cancelled (or short-closed) ERP order is cancelled/closed in the ERP (Procurement's `cancel` / `close` actions) and — because staging happens once, on send — was either never staged, or its staged queue row is dealt with by the ERP itself: **still uncollected** (Pending, never handed to the agent) → the ERP dismisses that row and records `tally_staging.state = 'dismissed'` (`cancelled_before_delivery` / `closed_before_delivery`) — that is the ERP's own queue, not Tally's book; **already collected / synced / failed** → the row is left exactly as it is and `tally_staging.after = 'cancelled_after_delivery'` / `'closed_after_delivery'` is recorded on the order — the Tally side is the owner's (Q48). Alter/Cancel of a posted PO would be a NEW category of Tally write and is an owner question, not built. |
 
 ### Names are never invented (DEC-20260812-002 (iii))
 
@@ -220,9 +225,41 @@ lines[] { item, quantity, rate, amount, schedules[] { due_date (ISO), quantity, 
 allocations); a line with no schedule gets ONE allocation for the whole line
 dated the order's `expected_date`, or — when there is no expected date —
 `schedules: []`, and the agent emits one allocation for the whole line with
-NO ORDERDUEDATE rather than a made-up date. Allocation amounts are quantity ×
-rate each, the LAST one the remainder, so they always sum to the line. No
-`unit` (Q40). Figures are plain positive decimals; the signs are the agent's.
+NO ORDERDUEDATE rather than a made-up date. No `unit` (Q40). Figures are plain
+positive decimals; the signs are the agent's.
+
+**The remainder rule — allocations always sum to the line, quantities AND
+amounts.** One allocation per schedule at ITS OWN quantity × rate (4 dp, bc).
+When the schedules promise LESS than the line (an under-scheduled line — the
+ERP refuses schedules beyond the line at create/amend, so Σ ≤ line always),
+the cloud appends ONE remainder allocation: `quantity = line − Σ schedule
+quantities`, `amount = line amount − Σ schedule amounts` (so any rounding
+lands on the remainder), `due_date = the order's expected_date` if there is
+one, else `null` — and the agent emits no ORDERDUEDATE for a null due date,
+exactly as it does for the unscheduled line. When the schedules cover the
+line exactly there is no remainder row and the LAST schedule takes the amount
+remainder (unchanged). The agent applies the same rule as a second lock: a
+payload whose schedules under-cover the line without a remainder row is
+topped up with the same undated remainder before it is built (`withRemainder`
+in `purchaseOrder.ts`), never posted as allocations that do not add up. A
+schedule's own quantity and amount are never inflated to absorb what it did
+not promise. Proved by `PurchaseOrderTallyStagingTest` (100 @ 1 with [60] →
+[60/60, 40/40]; 100 @ 2 with [30, 50] → [30/60, 50/100, 20/40 undated];
+rounding; exact cover and unscheduled unchanged) and `purchaseOrder.test.js`.
+
+**`purchase_orders.tally_staging` — what the order itself says** (written
+only by `PurchaseOrderService::recordTallyStaging`; the TallySync listeners
+call it): `{state, reasons: [{code, detail}], entry_id?, at, after?}` with
+`state` one of `disabled` (flag off — the default), `refused` (named reasons,
+no entry), `enqueued` (`entry_id`), `dismissed` (the staged entry was
+withdrawn by the ERP because the order was cancelled / short-closed BEFORE the
+agent collected it — reasons `cancelled_before_delivery` /
+`closed_before_delivery`, `entry_id` kept). The optional `after` key
+(`cancelled_after_delivery` / `closed_after_delivery`) is stamped when the
+order was cancelled / closed AFTER the agent already collected the entry (or
+it synced / failed): the entry is left untouched, and the Tally side is the
+owner's question (Q48). With the flag off, cancel / close record nothing new
+— the staging stays `disabled`.
 
 **FC-06 on the entry.** `Purchase Order` is a supplier-party category
 (`TallyTransactionCategory::partyIsSupplier`): `TallySyncEntryResource` nulls

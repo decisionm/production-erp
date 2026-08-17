@@ -85,31 +85,51 @@ export interface PurchaseOrderLine {
  *              than guess a Tally name (DEC-20260812-002).
  *   enqueued   one tally_sync_entries row exists (`entry_id`); its status
  *              then rides on `tally` (the TallyLink) like every other voucher.
+ *   dismissed  the order was cancelled or closed in the ERP while its staged
+ *              voucher was still Pending and the agent had NOT collected it:
+ *              the queue entry was dismissed (never sent) and `reasons` says
+ *              which lifecycle action did it — 'cancelled_before_delivery' or
+ *              'closed_before_delivery'. `entry_id` names the dismissed entry.
+ *
+ * `after` (optional, on an otherwise UNCHANGED state): the order was
+ * cancelled or closed in the ERP AFTER the agent had collected the voucher
+ * (delivered / synced / failed) — the entry is left standing because the
+ * Tally side is the owner's to decide (an owner question, recorded by the
+ * integrator). 'cancelled_after_delivery' | 'closed_after_delivery'.
  *
  * null on the order means it was never sent through the staging path — a
  * draft, a Tally mirror (Tally's own order; the ERP never posts it), or a
  * PO sent before Phase 6 landed. The words for each state live in ONE
  * place: purchaseOrders.ts → tallyStateLine().
  */
-export type TallyStagingState = 'disabled' | 'refused' | 'enqueued';
+export type TallyStagingState = 'disabled' | 'refused' | 'enqueued' | 'dismissed';
 
 /**
  * The refusal codes the cloud names. `detail` is the server's own sentence
  * or identity (for item_unmapped: the item id + name); it is printed, never
  * parsed. Unknown codes fall through to their detail (or the code itself) —
  * a reason this build has not been taught is still better than a blank.
+ * 'godown_unresolved' — the lines resolve to no single Tally godown to
+ * allocate to. The two *_before_delivery codes ride ONLY on state
+ * 'dismissed' (see TallyStagingState).
  */
 export type TallyStagingReasonCode =
     | 'purchase_orders_disabled'
     | 'party_unmapped'
     | 'item_unmapped'
     | 'purchase_ledger_unmapped'
-    | 'no_lines';
+    | 'godown_unresolved'
+    | 'no_lines'
+    | 'cancelled_before_delivery'
+    | 'closed_before_delivery';
 
 export interface TallyStagingReason {
     code: TallyStagingReasonCode | string;
     detail?: string | null;
 }
+
+/** See TallyStagingState's `after` — the ERP acted after Tally had received the voucher; the entry stands. */
+export type TallyStagingAfter = 'cancelled_after_delivery' | 'closed_after_delivery';
 
 export interface TallyStaging {
     state: TallyStagingState;
@@ -117,6 +137,8 @@ export interface TallyStaging {
     entry_id?: number | null;
     /** ISO instant the state was recorded. */
     at?: string | null;
+    /** Additive (Phase 6 fix): present only when the lifecycle acted after delivery — the state above is unchanged. */
+    after?: TallyStagingAfter | string | null;
 }
 
 // -------------------------------------------------------- lifecycle (P6-01) --

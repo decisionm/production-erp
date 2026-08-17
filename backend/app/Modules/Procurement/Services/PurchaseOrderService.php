@@ -3,6 +3,8 @@
 namespace App\Modules\Procurement\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
+use App\Modules\Procurement\Events\PurchaseOrderCancelled;
+use App\Modules\Procurement\Events\PurchaseOrderClosed;
 use App\Modules\Procurement\Events\PurchaseOrderSent;
 use App\Modules\Procurement\Exceptions\PurchaseOrderLifecycleException;
 use App\Modules\Procurement\Models\Enums\PurchaseOrderStatus;
@@ -36,11 +38,15 @@ use InvalidArgumentException;
  * same predicate under a row lock, so a button and its refusal cannot
  * disagree.
  *
- * TALLY: send() announces PurchaseOrderSent AFTER commit and knows nothing
- * else about Tally. TallySync's listener answers by calling
+ * TALLY: send() announces PurchaseOrderSent, close() PurchaseOrderClosed
+ * and cancel() PurchaseOrderCancelled — all AFTER commit — and this module
+ * knows nothing else about Tally. TallySync's listeners answer by calling
  * recordTallyStaging() — the ONLY writer of purchase_orders.tally_staging
  * — with disabled (the flag is off; owner gate Q35) / refused (reasons) /
- * enqueued (entry_id). The `tally` link on every row is TallySyncLinkService's
+ * enqueued (entry_id) / dismissed (a staged voucher the agent had not
+ * collected, withdrawn because the order was cancelled or closed), or with
+ * the unchanged staging plus an `after` note when the agent already holds
+ * it. The `tally` link on every row is TallySyncLinkService's
  * (status + flags + link, never the payload).
  */
 class PurchaseOrderService
@@ -54,8 +60,12 @@ class PurchaseOrderService
     /** How many orders cursor() reads — and decorates — per query: a page of the export, never the whole file. */
     private const EXPORT_CHUNK = 500;
 
-    /** The states purchase_orders.tally_staging may carry (addendum 6). */
-    public const STAGING_STATES = ['disabled', 'refused', 'enqueued'];
+    /**
+     * The states purchase_orders.tally_staging may carry (addendum 6, plus
+     * 'dismissed' — the staged voucher was withdrawn before the agent
+     * collected it because the order was cancelled or short-closed).
+     */
+    public const STAGING_STATES = ['disabled', 'refused', 'enqueued', 'dismissed'];
 
     public function __construct(
         private readonly ProcurementDocumentQuery $query,
@@ -296,7 +306,10 @@ class PurchaseOrderService
      * status Closed with closed_reason / closed_by / closed_at, and what was
      * still open per line at that moment kept as a kind-'close' revision
      * row. Refused for a Draft (send or cancel it), for Closed / Cancelled,
-     * and on a Tally mirror. Touches no stock, no Tally.
+     * and on a Tally mirror. Touches no stock and posts no Tally of its
+     * own: it announces PurchaseOrderClosed AFTER the transaction committed
+     * (DB::afterCommit, exactly as send() does) and TallySync decides what
+     * that means for a voucher it staged.
      */
     public function close(PurchaseOrder $order, string $reason, ?int $closedBy): PurchaseOrder
     {
@@ -320,6 +333,8 @@ class PurchaseOrderService
                 'closed_at' => now(),
             ]);
 
+            DB::afterCommit(fn () => event(new PurchaseOrderClosed($fresh)));
+
             return $fresh;
         });
 
@@ -334,7 +349,10 @@ class PurchaseOrderService
      * order is short-closed instead), for Closed / Cancelled, and on a
      * Tally mirror. Judged and written under the row lock, so an arrival
      * committing between the read and the write cannot leave a cancelled
-     * order with a receipt (GoodsReceiptService locks the same row).
+     * order with a receipt (GoodsReceiptService locks the same row). Posts
+     * no Tally of its own: it announces PurchaseOrderCancelled AFTER the
+     * transaction committed (DB::afterCommit, exactly as send() does) and
+     * TallySync decides what that means for a voucher it staged.
      */
     public function cancel(PurchaseOrder $order, string $reason, ?int $cancelledBy): PurchaseOrder
     {
@@ -354,6 +372,8 @@ class PurchaseOrderService
                 'cancelled_by' => $cancelledBy,
                 'cancelled_at' => now(),
             ]);
+
+            DB::afterCommit(fn () => event(new PurchaseOrderCancelled($fresh)));
 
             return $fresh;
         });
@@ -385,17 +405,37 @@ class PurchaseOrderService
     }
 
     /**
-     * Record what the Tally side made of a SENT order — the ONLY writer of
+     * Record what the Tally side made of this order — the ONLY writer of
      * purchase_orders.tally_staging (addendum 6). Called by TallySync's
-     * PurchaseOrderSent listener (a cross-module write, through this
-     * service): state 'disabled' (tally-sync.purchase_orders_enabled is
-     * off — the default; owner gate Q35), 'refused' (reasons[] {code,
-     * detail}: purchase_orders_disabled | party_unmapped | item_unmapped |
-     * purchase_ledger_unmapped | no_lines) or 'enqueued' (entry_id). The
-     * latest word replaces the earlier one; `at` is stamped here. Writes
-     * this one column and nothing else — no Tally, no status change.
+     * PurchaseOrderSent / PurchaseOrderClosed / PurchaseOrderCancelled
+     * listeners (a cross-module write, through this service).
      *
-     * @param  array{state: string, reasons?: list<array{code: string, detail?: ?string}>, entry_id?: ?int, at?: ?string}  $staging
+     * STATES: 'disabled' (tally-sync.purchase_orders_enabled is off — the
+     * default; owner gate Q35) · 'refused' (the enqueue named why) ·
+     * 'enqueued' (entry_id) · 'dismissed' (the staged voucher was withdrawn
+     * before the agent collected it — the order was cancelled or closed).
+     *
+     * REASON CODES, the whole documented set — it must match what the
+     * emitters actually emit:
+     *   purchase_orders_disabled   the flag is off (state 'disabled')
+     *   party_unmapped             the vendor has no Tally ledger name
+     *   item_unmapped              a line's item has no Tally identity
+     *   purchase_ledger_unmapped   no ledger is mapped to the Purchase role
+     *   godown_unresolved          no single Tally godown to allocate to
+     *   no_lines                   the order has no lines to order
+     *   cancelled_before_delivery  withdrawn: cancelled while still pending
+     *   closed_before_delivery     withdrawn: short-closed while pending
+     *
+     * `after` — 'cancelled_after_delivery' | 'closed_after_delivery' — is
+     * added to the UNCHANGED staging when the agent already holds the
+     * voucher: the ERP no longer owns its fate, and what Tally should be
+     * told is owner question Q48.
+     *
+     * The latest word replaces the earlier one; `at` is stamped here unless
+     * the caller carries the earlier one forward. Writes this one column
+     * and nothing else — no Tally, no status change.
+     *
+     * @param  array{state: string, reasons?: list<array{code: string, detail?: ?string}>, entry_id?: ?int, at?: ?string, after?: ?string}  $staging
      */
     public function recordTallyStaging(PurchaseOrder $order, array $staging): void
     {
@@ -421,6 +461,12 @@ class PurchaseOrderService
         ];
         if (isset($staging['entry_id'])) {
             $record['entry_id'] = (int) $staging['entry_id'];
+        }
+        // Present only when the order ended after the agent had collected
+        // its voucher — absent (never null) otherwise, so "no `after`" and
+        // "an `after` nobody set" cannot be confused.
+        if (isset($staging['after'])) {
+            $record['after'] = (string) $staging['after'];
         }
 
         // One column, nothing else on the order changes.

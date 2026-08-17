@@ -320,7 +320,7 @@ class GoodsReceiptService
                     // This is still the one and only inventory receipt. The
                     // material lots below add physical bag identity; they do
                     // not create another stock movement and never post Tally.
-                    $this->stock->recordReceipt(
+                    $movement = $this->stock->recordReceipt(
                         itemId: $poLine->item_id,
                         warehouseId: $data['warehouse_id'],
                         quantity: (string) $lineData['quantity'],
@@ -331,6 +331,14 @@ class GoodsReceiptService
                         createdBy: $createdBy,
                         purpose: StockMovementPurpose::Receipt,
                     );
+
+                    // NAME the ledger row instead of hunting for it later.
+                    // The reference the movement carries is not an identity:
+                    // two arrivals on one order with no reference of their
+                    // own share the same fallback string, and the trace used
+                    // to show each other's movements. The id is written here,
+                    // at the one place that knows it (Phase 6, P6-02).
+                    $grnLine->update(['stock_movement_id' => $movement->id]);
 
                     foreach ($lineData['lots'] ?? [] as $lotData) {
                         $this->traceability->createLot([

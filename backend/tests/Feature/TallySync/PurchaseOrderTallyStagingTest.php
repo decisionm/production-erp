@@ -17,10 +17,8 @@ use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Models\TallySyncEvent;
 use App\Modules\TallySync\Services\TallyLedgerMappingService;
 use App\Modules\TallySync\Services\TallySyncService;
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
@@ -54,12 +52,18 @@ use Tests\TestCase;
  * rate 1.0000, a made-up ledger name. No real rate, vendor, GSTIN, Tally
  * item name or voucher number appears here.
  *
- * vendors.tally_ledger_name and purchase_orders.tally_staging are WS-A's
- * additive columns (migration 2026_08_18_100001). setUp() keeps a
- * Schema::hasColumn guard for the ledger column so the file still proves
- * the enqueue contract on a checkout without that migration; with it the
- * guard is a no-op. PurchaseOrderService::recordTallyStaging() (WS-A's) is
- * asserted when it exists — the listener calls it behind method_exists.
+ * vendors.tally_ledger_name and purchase_orders.tally_staging are the
+ * additive columns of migration 2026_08_18_100001, and
+ * PurchaseOrderService::recordTallyStaging() is their one writer. Both have
+ * landed, so this file asserts them outright: a column or a method that
+ * went missing FAILS here rather than being tiptoed around.
+ *
+ * (vii) the order's OWN END: cancelled or short-closed. A staged voucher
+ * the agent has not collected is WITHDRAWN (Dismissed through the same
+ * write-off dismiss() performs, with the reason on the history row) and the
+ * order records state 'dismissed'; one the agent already holds is left
+ * alone and the order only notes `after`. What Tally should be told about
+ * an order it already received is owner question Q48 — not built.
  *
  * TWO ROADS INTO THE QUEUE ARE TESTED APART. The pure enqueue contract
  * (enqueuePurchaseOrder on an order already Sent — sentOrder() sets the
@@ -102,10 +106,6 @@ class PurchaseOrderTallyStagingTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-
-        if (! Schema::hasColumn('vendors', 'tally_ledger_name')) {
-            Schema::table('vendors', fn (Blueprint $table) => $table->string('tally_ledger_name')->nullable());
-        }
 
         $this->itemA = Item::create(['sku' => 'ITEM-A', 'name' => 'ITEM_A', 'uom' => 'Kgs', 'tally_stock_item_guid' => 'itm-a']);
         $this->itemB = Item::create(['sku' => 'ITEM-B', 'name' => 'ITEM_B', 'uom' => 'Kgs', 'tally_stock_item_guid' => 'itm-b']);
@@ -205,6 +205,104 @@ class PurchaseOrderTallyStagingTest extends TestCase
 
         $this->assertSame(['33.3333', '33.3333', '33.3334'], array_column($line['schedules'], 'amount'));
         $this->assertSame($line['amount'], array_reduce($line['schedules'], fn ($c, $s) => bcadd($c, $s['amount'], 4), '0.0000'));
+    }
+
+    /**
+     * An UNDER-SCHEDULED line — the schedules promise less than the line —
+     * gets one allocation per schedule at ITS OWN quantity × rate, plus ONE
+     * remainder allocation for what no schedule dated: quantity = line − Σ,
+     * amount = line amount − Σ (rounding lands on the remainder), due on
+     * the order's expected_date when there is one, else undated (the agent
+     * emits no ORDERDUEDATE — never a made-up date). Quantities AND amounts
+     * sum to the line; the schedule's own figures are never inflated to
+     * absorb what it did not promise.
+     */
+    public function test_an_under_scheduled_line_gets_a_remainder_allocation_and_quantities_and_amounts_sum_to_the_line(): void
+    {
+        config(['tally-sync.purchase_orders_enabled' => true]);
+        // 100 @ 1 with one schedule of 60 → [60/60, 40/40]; the order has an
+        // expected date, so the remainder is dated with it.
+        $po = $this->sentOrder([['item' => $this->itemA, 'quantity' => '100.0000', 'rate' => '1.0000', 'schedules' => [
+            ['due_date' => '2026-09-01', 'quantity' => '60.0000'],
+        ]]], expectedDate: '2026-09-30');
+
+        $line = app(TallySyncService::class)->enqueuePurchaseOrder($po)->payload['lines'][0];
+
+        $this->assertSame([
+            ['due_date' => '2026-09-01', 'quantity' => '60.0000', 'amount' => '60.0000'],
+            ['due_date' => '2026-09-30', 'quantity' => '40.0000', 'amount' => '40.0000'],
+        ], $line['schedules']);
+        $this->assertAllocationsSumToTheLine($line);
+
+        // 100 @ 2 with [30, 50] → [30/60, 50/100, 20/40]; no expected date, so
+        // the remainder carries no due date at all.
+        $po = $this->sentOrder([['item' => $this->itemB, 'quantity' => '100.0000', 'rate' => '2.0000', 'schedules' => [
+            ['due_date' => '2026-09-01', 'quantity' => '30.0000'],
+            ['due_date' => '2026-09-15', 'quantity' => '50.0000'],
+        ]]]);
+
+        $entry = app(TallySyncService::class)->enqueuePurchaseOrder($po);
+        $line = $entry->payload['lines'][0];
+
+        $this->assertSame([
+            ['due_date' => '2026-09-01', 'quantity' => '30.0000', 'amount' => '60.0000'],
+            ['due_date' => '2026-09-15', 'quantity' => '50.0000', 'amount' => '100.0000'],
+            ['due_date' => null, 'quantity' => '20.0000', 'amount' => '40.0000'],
+        ], $line['schedules']);
+        $this->assertAllocationsSumToTheLine($line);
+
+        // The queue's summary line shows the undated remainder too, so the
+        // quantities it lists add up to the line — never an amount.
+        $this->actAsStaff(['tally-sync.view', 'finance.view']);
+        $summary = $this->getJson("/api/v1/tally-sync/entries/{$entry->id}")->assertOk()->json('data.summary.lines');
+        $this->assertSame(['ITEM_B × 100 → '.self::GODOWN.' · due 01-Sep-2026 × 30, 15-Sep-2026 × 50, undated × 20'], $summary);
+    }
+
+    public function test_the_remainder_absorbs_the_rounding_when_the_schedules_do_not_multiply_out_exactly(): void
+    {
+        config(['tally-sync.purchase_orders_enabled' => true]);
+        // 100 @ 1.5 with one schedule of 33.3333: 33.3333 × 1.5 = 49.99995 →
+        // 49.9999 at 4 dp; the remainder (66.6667) takes 150.0000 − 49.9999 =
+        // 100.0001, so the two still sum to the line to the paisa.
+        $po = $this->sentOrder([['item' => $this->itemA, 'quantity' => '100.0000', 'rate' => '1.5000', 'schedules' => [
+            ['due_date' => '2026-09-01', 'quantity' => '33.3333'],
+        ]]]);
+
+        $line = app(TallySyncService::class)->enqueuePurchaseOrder($po)->payload['lines'][0];
+
+        $this->assertSame('150.0000', $line['amount']);
+        $this->assertSame([
+            ['due_date' => '2026-09-01', 'quantity' => '33.3333', 'amount' => '49.9999'],
+            ['due_date' => null, 'quantity' => '66.6667', 'amount' => '100.0001'],
+        ], $line['schedules']);
+        $this->assertAllocationsSumToTheLine($line);
+    }
+
+    public function test_an_exactly_covered_line_and_an_unscheduled_line_are_unchanged_by_the_remainder_rule(): void
+    {
+        config(['tally-sync.purchase_orders_enabled' => true]);
+        $po = $this->sentOrder([
+            ['item' => $this->itemA, 'quantity' => '100.0000', 'rate' => '1.0000', 'schedules' => [
+                ['due_date' => '2026-09-01', 'quantity' => '60.0000'],
+                ['due_date' => '2026-09-15', 'quantity' => '40.0000'],
+            ]],
+            ['item' => $this->itemB, 'quantity' => '25.0000', 'rate' => '2.0000', 'schedules' => []],
+        ], expectedDate: '2026-09-30');
+
+        $lines = app(TallySyncService::class)->enqueuePurchaseOrder($po)->payload['lines'];
+
+        // Exact cover: one allocation per schedule, no remainder row.
+        $this->assertSame([
+            ['due_date' => '2026-09-01', 'quantity' => '60.0000', 'amount' => '60.0000'],
+            ['due_date' => '2026-09-15', 'quantity' => '40.0000', 'amount' => '40.0000'],
+        ], $lines[0]['schedules']);
+        // Unscheduled: ONE allocation for the whole line on the expected date.
+        $this->assertSame([
+            ['due_date' => '2026-09-30', 'quantity' => '25.0000', 'amount' => '50.0000'],
+        ], $lines[1]['schedules']);
+        foreach ($lines as $line) {
+            $this->assertAllocationsSumToTheLine($line);
+        }
     }
 
     // ---- (iv) idempotent ------------------------------------------------------
@@ -498,6 +596,148 @@ class PurchaseOrderTallyStagingTest extends TestCase
         $this->assertSame([$entry->id], $ids);
     }
 
+    // ---- (vii) cancelled / closed AFTER send: the ERP's own queue row ---------------
+
+    /**
+     * A staged order the ERP then cancels BEFORE the agent collected it: the
+     * queue row is the ERP's own (never handed out), so the ERP withdraws it
+     * — status Dismissed through the existing write-off path, a
+     * voucher.dismissed event with the reason — and the order says so:
+     * tally_staging {state: 'dismissed', reasons: [cancelled_before_delivery],
+     * entry_id}. Nothing else changes; Tally never saw the voucher.
+     */
+    public function test_cancel_before_the_agent_collected_it_dismisses_the_staged_entry_and_records_it_on_the_order(): void
+    {
+        config(['tally-sync.purchase_orders_enabled' => true]);
+        $po = $this->draftOrder([['item' => $this->itemA, 'quantity' => '10.0000', 'rate' => '1.0000', 'schedules' => []]]);
+        app(PurchaseOrderService::class)->send($po);
+        $entry = TallySyncEntry::query()->sole();
+        $this->assertSame('pending', $entry->status->value);
+        $this->assertNull($entry->delivered_at);
+        $before = $this->tableCounts();
+
+        app(PurchaseOrderService::class)->cancel($po->fresh(), 'vendor cannot supply', null);
+
+        $entry->refresh();
+        $this->assertSame('dismissed', $entry->status->value, 'the uncollected row is withdrawn');
+        $this->assertNull($entry->delivered_at);
+        $this->assertNull($entry->synced_at);
+        $this->assertSame(1, TallySyncEntry::query()->count(), 'no second row minted');
+        $this->assertSame(array_diff_key($before, ['purchase_orders' => 0]), array_diff_key($this->tableCounts(), ['purchase_orders' => 0]));
+
+        // The write-off is on the durable record in the shape dismiss() writes.
+        $dismissed = TallySyncEvent::query()->where('event', TallySyncEventKind::VoucherDismissed->value)->sole();
+        $this->assertSame($entry->id, $dismissed->tally_sync_entry_id);
+        $this->assertSame('cancelled_before_delivery', $dismissed->details['reason']);
+        $log = $entry->payload['resolution_log'];
+        $this->assertCount(1, $log);
+        $this->assertStringContainsString('cancelled', $log[0]['note']);
+
+        // And the order says so, in the staging shape the frontend words.
+        $this->assertStaging($po, 'dismissed', ['cancelled_before_delivery'], $entry->id);
+        $staging = $po->fresh()->tally_staging;
+        $this->assertArrayNotHasKey('after', $staging);
+        $this->assertStringContainsString('before the agent collected it', $staging['reasons'][0]['detail']);
+        $this->assertSame(PurchaseOrderStatus::Cancelled, $po->fresh()->status);
+
+        // The order's tally link now reads dismissed too (TallySyncLinkService).
+        $this->actAsStaff(['procurement.view']);
+        $this->getJson("/api/v1/procurement/purchase-orders/{$po->id}")
+            ->assertOk()
+            ->assertJsonPath('data.tally.status', 'dismissed')
+            ->assertJsonPath('data.tally_staging.state', 'dismissed')
+            ->assertJsonPath('data.tally_staging.reasons.0.code', 'cancelled_before_delivery');
+    }
+
+    public function test_close_before_the_agent_collected_it_dismisses_the_staged_entry_with_its_own_reason(): void
+    {
+        config(['tally-sync.purchase_orders_enabled' => true]);
+        $po = $this->draftOrder([['item' => $this->itemA, 'quantity' => '10.0000', 'rate' => '1.0000', 'schedules' => []]]);
+        app(PurchaseOrderService::class)->send($po);
+        $entry = TallySyncEntry::query()->sole();
+
+        app(PurchaseOrderService::class)->close($po->fresh(), 'short-closed, nothing more coming', null);
+
+        $this->assertSame('dismissed', $entry->fresh()->status->value);
+        $this->assertSame('closed_before_delivery', TallySyncEvent::query()->where('event', TallySyncEventKind::VoucherDismissed->value)->sole()->details['reason']);
+        $this->assertStaging($po, 'dismissed', ['closed_before_delivery'], $entry->id);
+        $this->assertSame(PurchaseOrderStatus::Closed, $po->fresh()->status);
+    }
+
+    /**
+     * Once the agent HAS collected the row (delivered_at set — or it synced,
+     * or failed) the ERP no longer owns its fate: the entry is left exactly
+     * as it is, and the order records `after: cancelled_after_delivery` on
+     * its unchanged staging — the Tally side is the owner's question.
+     */
+    public function test_cancel_after_the_agent_collected_it_leaves_the_entry_and_records_after_on_the_order(): void
+    {
+        config(['tally-sync.purchase_orders_enabled' => true]);
+        $po = $this->draftOrder([['item' => $this->itemA, 'quantity' => '10.0000', 'rate' => '1.0000', 'schedules' => []]]);
+        app(PurchaseOrderService::class)->send($po);
+        $entry = TallySyncEntry::query()->sole();
+        // As if the agent's poll had handed it out (fixture write; the poll
+        // itself is VoucherPostedOnceTest's subject).
+        TallySyncEntry::query()->whereKey($entry->id)->update(['delivered_at' => now()->subMinute()]);
+        $eventsBefore = TallySyncEvent::query()->count();
+
+        app(PurchaseOrderService::class)->cancel($po->fresh(), 'vendor cannot supply', null);
+
+        $entry->refresh();
+        $this->assertSame('pending', $entry->status->value, 'a collected voucher is not withdrawn under the agent');
+        $this->assertNotNull($entry->delivered_at);
+        $this->assertArrayNotHasKey('resolution_log', $entry->payload);
+        $this->assertSame($eventsBefore, TallySyncEvent::query()->count(), 'no dismissal recorded');
+
+        $staging = $po->fresh()->tally_staging;
+        $this->assertSame('enqueued', $staging['state'], 'the staging state is unchanged');
+        $this->assertSame([], $staging['reasons']);
+        $this->assertSame($entry->id, $staging['entry_id']);
+        $this->assertSame('cancelled_after_delivery', $staging['after']);
+        $this->assertSame(PurchaseOrderStatus::Cancelled, $po->fresh()->status);
+    }
+
+    public function test_close_after_the_voucher_synced_or_failed_leaves_the_entry_and_records_after(): void
+    {
+        config(['tally-sync.purchase_orders_enabled' => true]);
+        foreach (['synced' => ['status' => 'synced', 'synced_at' => now()], 'failed' => ['status' => 'failed', 'error_message' => 'rejected']] as $case => $columns) {
+            $po = $this->draftOrder([['item' => $this->itemA, 'quantity' => '10.0000', 'rate' => '1.0000', 'schedules' => []]]);
+            app(PurchaseOrderService::class)->send($po);
+            $entry = TallySyncEntry::query()->where('syncable_id', $po->id)->sole();
+            TallySyncEntry::query()->whereKey($entry->id)->update(['delivered_at' => now()->subMinute(), ...$columns]);
+            $eventsBefore = TallySyncEvent::query()->count();
+
+            app(PurchaseOrderService::class)->close($po->fresh(), 'short-closed', null);
+
+            $this->assertSame($case, $entry->fresh()->status->value, "a {$case} voucher is left as it is");
+            $this->assertSame($eventsBefore, TallySyncEvent::query()->count());
+            $staging = $po->fresh()->tally_staging;
+            $this->assertSame('enqueued', $staging['state']);
+            $this->assertSame($entry->id, $staging['entry_id']);
+            $this->assertSame('closed_after_delivery', $staging['after']);
+        }
+    }
+
+    public function test_with_the_flag_off_cancel_and_close_record_nothing_new_and_the_staging_stays_disabled(): void
+    {
+        $cancelled = $this->draftOrder([['item' => $this->itemA, 'quantity' => '10.0000', 'rate' => '1.0000', 'schedules' => []]]);
+        $closed = $this->draftOrder([['item' => $this->itemA, 'quantity' => '10.0000', 'rate' => '1.0000', 'schedules' => []]]);
+        app(PurchaseOrderService::class)->send($cancelled);
+        app(PurchaseOrderService::class)->send($closed);
+        $this->assertStaging($cancelled, 'disabled', ['purchase_orders_disabled']);
+        $stagingBefore = [$cancelled->fresh()->tally_staging, $closed->fresh()->tally_staging];
+
+        app(PurchaseOrderService::class)->cancel($cancelled->fresh(), 'never mind', null);
+        app(PurchaseOrderService::class)->close($closed->fresh(), 'short-closed', null);
+
+        $this->assertSame(0, TallySyncEntry::query()->count());
+        $this->assertSame(0, TallySyncEvent::query()->count());
+        $this->assertSame($stagingBefore, [$cancelled->fresh()->tally_staging, $closed->fresh()->tally_staging], 'nothing new on the order');
+        $this->assertArrayNotHasKey('after', $cancelled->fresh()->tally_staging);
+        $this->assertSame(PurchaseOrderStatus::Cancelled, $cancelled->fresh()->status);
+        $this->assertSame(PurchaseOrderStatus::Closed, $closed->fresh()->status);
+    }
+
     // ---- helpers ------------------------------------------------------------------
 
     /**
@@ -586,20 +826,13 @@ class PurchaseOrderTallyStagingTest extends TestCase
     }
 
     /**
-     * What the listener recorded on the order — asserted only when WS-A's
-     * PurchaseOrderService::recordTallyStaging() exists (the listener calls
-     * it behind method_exists); until then the outcome is logged, not stored.
+     * What the listener recorded on the order, through the one writer —
+     * PurchaseOrderService::recordTallyStaging().
      *
      * @param  list<string>  $codes
      */
     private function assertStaging(PurchaseOrder $po, string $state, array $codes, ?int $entryId = null): void
     {
-        if (! method_exists(PurchaseOrderService::class, 'recordTallyStaging')) {
-            $this->addWarning('PurchaseOrderService::recordTallyStaging() not present — tally_staging not asserted (WS-A).');
-
-            return;
-        }
-
         $staging = $po->fresh()->tally_staging;
         $staging = is_string($staging) ? json_decode($staging, true) : $staging;
         $this->assertIsArray($staging, 'tally_staging recorded on the order');
@@ -608,6 +841,13 @@ class PurchaseOrderTallyStagingTest extends TestCase
         if ($entryId !== null) {
             $this->assertSame($entryId, $staging['entry_id']);
         }
+    }
+
+    /** Every line's allocations sum to the line — quantities and amounts both. */
+    private function assertAllocationsSumToTheLine(array $line): void
+    {
+        $this->assertSame($line['quantity'], array_reduce($line['schedules'], fn ($c, $s) => bcadd($c, $s['quantity'], 4), '0.0000'), 'allocation quantities sum to the line');
+        $this->assertSame($line['amount'], array_reduce($line['schedules'], fn ($c, $s) => bcadd($c, $s['amount'], 4), '0.0000'), 'allocation amounts sum to the line');
     }
 
     /** @return array<string, int> */

@@ -6,6 +6,7 @@ import { getPurchaseOrder, getPurchaseOrderTrace } from '@/features/procurement/
 import { apiMessage, apiStatus } from '@/features/procurement/components/apiMessage';
 import PurchaseOrderTallyCell from '@/features/procurement/components/PurchaseOrderTallyCell';
 import {
+    CONSUMPTION_NONE_WORDS,
     type FlatLot,
     type FlatMovement,
     WITHHELD_CELL,
@@ -586,7 +587,7 @@ export default function PurchaseOrderTraceDrawer({ orderId, listRow, onClose, on
                     <Silence
                         rows={flat.consumption}
                         absent="Consumption could not be read for this order — the day-bin ledger did not answer, or this backend does not trace it yet."
-                        none="Nothing received on this order has been consumed by a production entry yet."
+                        none={CONSUMPTION_NONE_WORDS}
                     />
                     {flat.consumption && flat.consumption.length > 0 && <ConsumptionTable rows={flat.consumption} />}
                     {flat.consumption && flat.consumption.length > 0 && (

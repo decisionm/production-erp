@@ -17,10 +17,13 @@ use Illuminate\Http\Resources\Json\JsonResource;
  *   tally             TallyLink|null — status + flags + link ONLY
  *                     (TallySyncLinkService, stamped by PurchaseOrderService
  *                     on every row it returns); null = no queue entry
- *   tally_staging     what the Tally side made of the SENT order (disabled /
- *                     refused / enqueued, with reasons) — written only by
- *                     PurchaseOrderService::recordTallyStaging; null until
- *                     the order was sent and judged
+ *   tally_staging     what the Tally side made of the order (disabled /
+ *                     refused / enqueued / dismissed, with reasons — plus
+ *                     an `after` note when the order was cancelled or
+ *                     closed only AFTER the agent had collected the
+ *                     voucher) — written only by PurchaseOrderService::
+ *                     recordTallyStaging; null until the order was sent
+ *                     and judged
  *   receipts_count / revisions_count
  *   closed_* / cancelled_*   the lifecycle record (reason, actor id, time)
  *   can               {amend, close, cancel, send} — PurchaseOrderService::

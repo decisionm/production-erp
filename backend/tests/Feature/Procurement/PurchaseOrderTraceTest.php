@@ -13,9 +13,12 @@ use App\Modules\Inventory\Services\TraceabilityService;
 use App\Modules\Procurement\Events\GoodsReceiptNoteReceived;
 use App\Modules\Procurement\Events\PurchaseOrderSent;
 use App\Modules\Procurement\Models\GoodsReceiptNote;
+use App\Modules\Procurement\Models\GoodsReceiptNoteLine;
 use App\Modules\Procurement\Models\PurchaseOrder;
 use App\Modules\Procurement\Models\Vendor;
+use App\Modules\Production\Models\DayBinMovement;
 use App\Modules\Production\Models\Enums\BatchStatus;
+use App\Modules\Production\Models\Enums\DayBinMovementType;
 use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\WorkCenter;
@@ -280,12 +283,26 @@ class PurchaseOrderTraceTest extends TestCase
         MaterialBag::query()->update(['status' => MaterialBagStatus::InStore->value]);
         config(['production.traceability.fifo_enforced' => false]);
         $trace = app(TraceabilityService::class);
-        $trace->loadBagToDayBin([
+        // LEGACY MACHINE-STAMPED LOAD — a historical audit row
+        // (DEC-20260807-006 retired the machine-stamped load: the floor's
+        // only resin flow is the centralized day bin, and rows written under
+        // the previous understanding are preserved untouched). It is written
+        // here as the database holds it, NOT through the live service,
+        // because the trace's job is to READ such a row correctly; the live
+        // write door at POST production/day-bin/load is a Phase 7/8
+        // retirement item.
+        $bagOne = MaterialBag::query()->where('barcode', 'BAG-A1-1')->firstOrFail();
+        $bagOne->update(['remaining_kg' => bcsub((string) $bagOne->remaining_kg, '10', 4)]);
+        DayBinMovement::create([
             'work_center_id' => $this->machine->id,
-            'barcode' => 'BAG-A1-1',
-            'quantity_kg' => '10',
+            'item_id' => $this->itemA->id,
             'shift_production_entry_id' => $entry->id,
-        ], $user->id);
+            'type' => DayBinMovementType::Load,
+            'material_bag_id' => $bagOne->id,
+            'quantity_kg' => '10.0000',
+            'recorded_by' => $user->id,
+            'recorded_at' => now(),
+        ]);
         $trace->loadBagToDayBin([
             'work_center_id' => null,
             'barcode' => 'BAG-A1-2',
@@ -431,6 +448,85 @@ class PurchaseOrderTraceTest extends TestCase
         $this->assertSame([], $data['receipts']);
         $this->assertSame([], $data['consumption']);
         $this->assertSame('10.0000', $data['lines'][0]['remaining']);
+    }
+
+    /**
+     * TWO ARRIVALS ON ONE ORDER, NEITHER CARRYING A REFERENCE. Both stock
+     * movements are then stamped with the same fallback string
+     * ("GRN for PO #{id}"), so a trace that matched by that string alone
+     * showed BOTH movements under BOTH receipts — 30 and 20 each read as
+     * [30, 20]. The receipt line now carries the movement's own id, so each
+     * arrival shows exactly the ledger row it wrote, and the row says HOW it
+     * was resolved (`match`).
+     */
+    public function test_two_referenceless_receipts_on_one_order_each_show_only_their_own_stock_movement(): void
+    {
+        $this->actAs(['procurement.view', 'procurement.manage', 'finance.view']);
+        [$orderId, $lineId] = $this->sentOrderForTwoArrivals();
+
+        $first = $this->receiveWithoutReference($orderId, $lineId, '30', 'rk-two-1');
+        $second = $this->receiveWithoutReference($orderId, $lineId, '20', 'rk-two-2');
+
+        $data = $this->getJson("/api/v1/procurement/purchase-orders/{$orderId}/trace")->assertOk()->json('data');
+
+        $receipts = collect($data['receipts'])->keyBy('id');
+        $this->assertSame([$first, $second], $receipts->keys()->all());
+
+        $firstLine = $receipts[$first]['lines'][0];
+        $this->assertCount(1, $firstLine['stock_movements'], "the first arrival showed another arrival's movement");
+        $this->assertSame('30.0000', $firstLine['stock_movements'][0]['quantity']);
+        $this->assertSame('by_id', $firstLine['match']);
+
+        $secondLine = $receipts[$second]['lines'][0];
+        $this->assertCount(1, $secondLine['stock_movements'], "the second arrival showed another arrival's movement");
+        $this->assertSame('20.0000', $secondLine['stock_movements'][0]['quantity']);
+        $this->assertSame('by_id', $secondLine['match']);
+
+        // A LEGACY line — booked before the column existed, so it carries no
+        // movement id (fixture write, said out loud). The old reference walk
+        // still answers it, and the row says that is what happened.
+        GoodsReceiptNoteLine::query()
+            ->where('goods_receipt_note_id', $second)
+            ->update(['stock_movement_id' => null]);
+
+        $data = $this->getJson("/api/v1/procurement/purchase-orders/{$orderId}/trace")->assertOk()->json('data');
+        $legacy = collect($data['receipts'])->firstWhere('id', $second)['lines'][0];
+        $this->assertSame('by_reference', $legacy['match']);
+        $this->assertNotSame([], $legacy['stock_movements'], 'a legacy line still resolves its ledger rows');
+        // The line that DOES carry an id is unaffected by its neighbour.
+        $stillById = collect($data['receipts'])->firstWhere('id', $first)['lines'][0];
+        $this->assertSame('by_id', $stillById['match']);
+        $this->assertCount(1, $stillById['stock_movements']);
+    }
+
+    /**
+     * A sent order of 100 with one line — the fixture the two-arrival test
+     * receives against.
+     *
+     * @return array{0: int, 1: int}
+     */
+    private function sentOrderForTwoArrivals(): array
+    {
+        $orderId = (int) $this->postJson('/api/v1/procurement/purchase-orders', [
+            'vendor_id' => $this->vendor->id,
+            'order_date' => '2026-08-10',
+            'lines' => [['item_id' => $this->itemA->id, 'quantity' => '100', 'unit_price' => '1.00']],
+        ])->assertCreated()->json('data.id');
+        $this->postJson("/api/v1/procurement/purchase-orders/{$orderId}/send")->assertOk();
+
+        return [$orderId, (int) PurchaseOrder::findOrFail($orderId)->lines()->firstOrFail()->id];
+    }
+
+    /** One arrival with NO reference of its own — the case that used to cross-attribute. */
+    private function receiveWithoutReference(int $orderId, int $lineId, string $quantity, string $receiptKey): int
+    {
+        return (int) $this->postJson('/api/v1/procurement/goods-receipts', [
+            'receipt_key' => $receiptKey,
+            'purchase_order_id' => $orderId,
+            'warehouse_id' => $this->store->id,
+            'received_date' => '2026-08-17',
+            'lines' => [['purchase_order_line_id' => $lineId, 'quantity' => $quantity]],
+        ])->assertCreated()->json('data.id');
     }
 
     // ---- GRN show -------------------------------------------------------------------

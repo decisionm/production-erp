@@ -182,13 +182,25 @@ class PurchaseOrderTraceService
      */
     private function receiptRow(PurchaseOrder $order, GoodsReceiptNote $receipt, Collection $loadsByBag, bool $showsCost): array
     {
-        // The ledger carries no GRN foreign key: GoodsReceiptService stamped
-        // each line's movement with the receipt's reference (or "GRN for PO
-        // #{id}" when blank) — matched on that, then narrowed to the line's
-        // item and the receipt's warehouse.
-        $movements = $this->stock
-            ->receiptsForReference($receipt->reference ?? "GRN for PO #{$order->id}")
-            ->where('warehouse_id', $receipt->warehouse_id);
+        // WHICH LEDGER ROWS THIS ARRIVAL WROTE, by the best evidence each
+        // line has. A line booked since Phase 6 NAMES its movement
+        // (stock_movement_id) — exact, whatever else was received against
+        // this order. A line booked before the column existed has only the
+        // reference GoodsReceiptService stamped (the receipt's own, else
+        // "GRN for PO #{id}"), narrowed by item and warehouse — which cannot
+        // tell two referenceless arrivals on ONE order apart, so the row
+        // SAYS which road it took (`match`) rather than pretending both are
+        // the same kind of certain.
+        $named = $this->stock
+            ->byIds($receipt->lines->pluck('stock_movement_id')->filter()->all())
+            ->keyBy('id');
+
+        // The legacy walk is only queried when some line actually needs it.
+        $referenced = $receipt->lines->contains(fn (GoodsReceiptNoteLine $line) => $line->stock_movement_id === null)
+            ? $this->stock
+                ->receiptsForReference($receipt->reference ?? "GRN for PO #{$order->id}")
+                ->where('warehouse_id', $receipt->warehouse_id)
+            : new Collection;
 
         return [
             'id' => $receipt->id,
@@ -210,8 +222,11 @@ class PurchaseOrderTraceService
                 'item' => $this->itemStub($line->item),
                 'quantity' => (string) $line->quantity,
                 ...$this->rate('unit_cost', $line->unit_cost, $showsCost),
-                'stock_movements' => $movements
-                    ->where('item_id', $line->item_id)
+                // How the ledger rows below were found — see the note above.
+                'match' => $line->stock_movement_id === null ? 'by_reference' : 'by_id',
+                'stock_movements' => ($line->stock_movement_id === null
+                    ? $referenced->where('item_id', $line->item_id)
+                    : $named->only([$line->stock_movement_id]))
                     ->values()
                     ->map(fn (StockMovement $movement) => $this->movementRow($movement, $showsCost))
                     ->all(),

@@ -10,6 +10,7 @@ import type {
     PurchaseOrderRevisionLine,
     PurchaseOrderStatus,
     PurchaseOrderTrace,
+    TallyStagingAfter,
     TallyStagingReason,
     TraceConsumption,
     TraceDayBin,
@@ -82,28 +83,60 @@ export function tallyReasonWords(reason: TallyStagingReason): string {
             return detail ? `item ${detail} has no Tally identity` : 'an item has no Tally identity';
         case 'purchase_ledger_unmapped':
             return 'purchase ledger not mapped';
+        case 'godown_unresolved':
+            return 'no single Tally godown to allocate to';
         case 'no_lines':
             return 'no lines';
         case 'purchase_orders_disabled':
             return DISABLED_WORDS;
+        case 'cancelled_before_delivery':
+            return 'cancelled before the agent collected it';
+        case 'closed_before_delivery':
+            return 'closed before the agent collected it';
         default:
             return detail ? `${reason.code}: ${detail}` : String(reason.code);
     }
 }
 
+/**
+ * The words for the staging record's optional `after` key: the ERP
+ * cancelled or closed the order AFTER the agent had collected the voucher,
+ * so the queue entry stands and the Tally side is the owner's call — said
+ * out loud, never silent. Null when there is nothing to say; an unknown
+ * code is carried with the same tail rather than dropped.
+ */
+export function tallyAfterWords(after: TallyStagingAfter | string | null | undefined): string | null {
+    if (typeof after !== 'string' || after.trim() === '') return null;
+
+    switch (after.trim()) {
+        case 'cancelled_after_delivery':
+            return `cancelled ${AFTER_TAIL}`;
+        case 'closed_after_delivery':
+            return `closed ${AFTER_TAIL}`;
+        default:
+            return `${after.trim()} ${AFTER_TAIL}`;
+    }
+}
+
+const AFTER_TAIL = 'in the ERP after Tally received it (owner question)';
 const DISABLED_WORDS = 'PO posting is disabled (owner gate Q35)';
 const NOT_SENT = 'Not sent to Tally';
 
-export type TallyStateKind = 'mirror' | 'link' | 'enqueued' | 'refused' | 'disabled' | 'draft' | 'cancelled';
+export type TallyStateKind = 'mirror' | 'link' | 'enqueued' | 'refused' | 'disabled' | 'dismissed' | 'draft' | 'cancelled';
 
 export interface TallyStateLine {
     kind: TallyStateKind;
-    /** The one sentence for the Tally cell. */
+    /** The one sentence for the Tally cell — with the `after` note appended when there is one. */
     text: string;
     /** antd Tag colour. */
     color: string;
     /** The queue entry, when one exists — the cell deep-links into Tally Sync from it. */
     link: TallyLink | null;
+    /**
+     * The `after` note on its own (tallyAfterWords), so a cell that renders
+     * the link's Tag rather than `text` can still print it; null otherwise.
+     */
+    note: string | null;
 }
 
 /**
@@ -118,10 +151,19 @@ export interface TallyStateLine {
  *   3. the staging record the cloud wrote at send time — enqueued without a
  *      readable link, refused with its reasons, or disabled by the owner
  *      gate (nothing was queued; the flag is off until Q35/Q39 are answered);
+ *      or, written later by the lifecycle, DISMISSED — the order was
+ *      cancelled/closed before the agent collected the staged voucher. A
+ *      dismissed link and a dismissed record say the same thing, and the
+ *      record carries the why, so its words are used and the link kept;
+ *      a LIVE link (pending/synced/failed) still outranks it (rule 2);
  *   4. no record at all: a draft has not been sent anywhere; a cancelled
  *      order says so; anything else that is Sent-or-beyond with neither a
  *      link nor a record was sent before staging existed — and since the
  *      flag has never been on, "disabled" is the honest word for it too.
+ *
+ * Whatever the line, the record's `after` note — cancelled/closed in the ERP
+ * AFTER Tally received the voucher; the entry stands; the owner decides —
+ * is appended to the sentence and returned on its own as `note`.
  */
 export function tallyStateLine(order: Pick<PurchaseOrder, 'status' | 'source' | 'tally_order_no' | 'tally' | 'tally_staging'>): TallyStateLine {
     if (order.source === 'tally') {
@@ -130,52 +172,72 @@ export function tallyStateLine(order: Pick<PurchaseOrder, 'status' | 'source' | 
             text: order.tally_order_no ? `Lives in Tally — mirror of ${order.tally_order_no}` : 'Lives in Tally — mirror',
             color: 'geekblue',
             link: null,
-        };
-    }
-
-    const link = order.tally ?? null;
-    if (link) {
-        return {
-            kind: 'link',
-            text: tallyStatusLabel[link.status] ?? link.status,
-            color: tallyStatusColor[link.status] ?? 'default',
-            link,
+            note: null,
         };
     }
 
     const staging = order.tally_staging ?? null;
+    const note = tallyAfterWords(staging?.after);
+    const withNote = (line: Omit<TallyStateLine, 'note'>): TallyStateLine => ({
+        ...line,
+        text: note ? `${line.text} — ${note}` : line.text,
+        note,
+    });
+
+    const link = order.tally ?? null;
+    if (link && !(link.status === 'dismissed' && staging?.state === 'dismissed')) {
+        return withNote({
+            kind: 'link',
+            text: tallyStatusLabel[link.status] ?? link.status,
+            color: tallyStatusColor[link.status] ?? 'default',
+            link,
+        });
+    }
+
+    if (staging?.state === 'dismissed') {
+        const reasons = (staging.reasons ?? []).map(tallyReasonWords).filter((words) => words !== '');
+
+        return withNote({
+            kind: 'dismissed',
+            text: reasons.length > 0
+                ? `${NOT_SENT} — the staged order was dismissed: ${reasons.join('; ')}`
+                : `${NOT_SENT} — the staged order was dismissed (no reason recorded)`,
+            color: 'default',
+            link,
+        });
+    }
     if (staging?.state === 'enqueued') {
-        return {
+        return withNote({
             kind: 'enqueued',
             text: staging.entry_id
                 ? `Queued for Tally — entry #${staging.entry_id} (status not readable here)`
                 : 'Queued for Tally (status not readable here)',
             color: 'default',
             link: null,
-        };
+        });
     }
     if (staging?.state === 'refused') {
         const reasons = (staging.reasons ?? []).map(tallyReasonWords).filter((words) => words !== '');
 
-        return {
+        return withNote({
             kind: 'refused',
             text: reasons.length > 0 ? `${NOT_SENT} — ${reasons.join('; ')}` : `${NOT_SENT} — refused (no reason recorded)`,
             color: 'orange',
             link: null,
-        };
+        });
     }
     if (staging?.state === 'disabled') {
-        return { kind: 'disabled', text: `${NOT_SENT} — ${DISABLED_WORDS}`, color: 'default', link: null };
+        return withNote({ kind: 'disabled', text: `${NOT_SENT} — ${DISABLED_WORDS}`, color: 'default', link: null });
     }
 
     if (order.status === 'draft') {
-        return { kind: 'draft', text: 'Not sent yet — Tally staging happens on Send', color: 'default', link: null };
+        return withNote({ kind: 'draft', text: 'Not sent yet — Tally staging happens on Send', color: 'default', link: null });
     }
     if (order.status === 'cancelled') {
-        return { kind: 'cancelled', text: `${NOT_SENT} — cancelled`, color: 'default', link: null };
+        return withNote({ kind: 'cancelled', text: `${NOT_SENT} — cancelled`, color: 'default', link: null });
     }
 
-    return { kind: 'disabled', text: `${NOT_SENT} — ${DISABLED_WORDS}`, color: 'default', link: null };
+    return withNote({ kind: 'disabled', text: `${NOT_SENT} — ${DISABLED_WORDS}`, color: 'default', link: null });
 }
 
 // --------------------------------------------------------- lifecycle actions --
@@ -716,6 +778,18 @@ export interface NormalisedConsumption {
 }
 
 export const CONSUMPTION_NOT_COMPUTABLE = 'not computable yet (no closing count)';
+
+/**
+ * The trace drawer's sentence for a MEASURED-EMPTY consumption list. It
+ * never says "nothing consumed": under the confirmed common-input flow a
+ * resin bag belongs to no machine and no batch (FC-01), and consumption is
+ * not attributable to one order's bags through the day-bin ledger — an
+ * empty list is "not attributable", not "not consumed". The item's own
+ * Consumption movements live on the batches that consumed it. One place, so
+ * the drawer cannot drift from the constitution.
+ */
+export const CONSUMPTION_NONE_WORDS =
+    'No consumption is attributable to this order\'s bags through the day-bin ledger — under the common input a bag belongs to no machine or batch (FC-01). The item\'s Consumption movements live on the batches that consumed it.';
 
 /**
  * One consumption row as the drawer prints it, from either spelling the

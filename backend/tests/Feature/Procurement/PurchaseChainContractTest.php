@@ -27,7 +27,6 @@ use App\Modules\Production\Services\FactoryDayBinService;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use Database\Seeders\CanonicalMachineSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Route;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
@@ -329,17 +328,6 @@ class PurchaseChainContractTest extends TestCase
         );
     }
 
-    private function routeExists(string $method, string $uri): bool
-    {
-        foreach (Route::getRoutes() as $route) {
-            if ($route->uri() === $uri && in_array($method, $route->methods(), true)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     // ---- 1. Draft → Sent → Partial → over-receipt refused → Closed → refused -----
 
     public function test_the_chain_from_draft_to_closed_keeps_the_ledger_balanced_the_lots_per_line_and_one_receipt_note_per_grn(): void
@@ -474,16 +462,13 @@ class PurchaseChainContractTest extends TestCase
     }
 
     /**
-     * The same refusal reached through the lifecycle: WS-A's
+     * The same refusal reached through the lifecycle:
      * `POST purchase-orders/{po}/cancel` (Draft|Sent with zero receipts →
-     * Cancelled). Skipped only while that endpoint is absent.
+     * Cancelled). The endpoint has landed, so this test no longer asks
+     * whether the route exists — renaming it FAILS the contract.
      */
     public function test_a_receipt_against_an_order_cancelled_through_the_lifecycle_endpoint_is_refused(): void
     {
-        if (! $this->routeExists('POST', 'api/v1/procurement/purchase-orders/{purchase_order}/cancel')) {
-            $this->markTestSkipped('WS-A: POST purchase-orders/{purchase_order}/cancel is not registered at run time — un-skip when the lifecycle lands.');
-        }
-
         $this->actingAsTheWholeFactory();
         [$orderId, $lineId] = $this->sentOrder('1000');
 
@@ -678,17 +663,15 @@ class PurchaseChainContractTest extends TestCase
         $this->assertCarriesNoRate($receipts, 'goods-receipts index');
         $this->assertCount(2, $receipts['data']);
 
-        // The Phase 6 reads (WS-A). Walked whenever they are registered so a
-        // new payload can never open the gate the lists keep shut.
+        // The Phase 6 reads, all landed: every one is walked, so a new
+        // payload can never open the gate the lists keep shut — and a read
+        // that stops answering fails here instead of being stepped over.
         $shows = [
-            ['GET', 'api/v1/procurement/purchase-orders/{purchase_order}', "/api/v1/procurement/purchase-orders/{$orderId}"],
-            ['GET', 'api/v1/procurement/purchase-orders/{purchase_order}/trace', "/api/v1/procurement/purchase-orders/{$orderId}/trace"],
-            ['GET', 'api/v1/procurement/goods-receipts/{goods_receipt}', "/api/v1/procurement/goods-receipts/{$grnId}"],
+            "/api/v1/procurement/purchase-orders/{$orderId}",
+            "/api/v1/procurement/purchase-orders/{$orderId}/trace",
+            "/api/v1/procurement/goods-receipts/{$grnId}",
         ];
-        foreach ($shows as [$method, $pattern, $url]) {
-            if (! $this->routeExists($method, $pattern)) {
-                continue;
-            }
+        foreach ($shows as $url) {
             $this->assertCarriesNoRate($this->getJson($url)->assertSuccessful()->json(), $url);
         }
     }

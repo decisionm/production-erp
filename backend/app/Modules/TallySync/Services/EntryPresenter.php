@@ -299,7 +299,10 @@ class EntryPresenter
     /**
      * " · due 01-Sep-2026 × 60, 15-Sep-2026 × 40" — a purchase-order line's
      * schedules (enqueuePurchaseOrder writes schedules[{due_date, quantity,
-     * amount}]); empty when the line has none. The amount is never read.
+     * amount}]); empty when the line has none. An UNDATED allocation (the
+     * remainder of an under-scheduled line on an order without an expected
+     * date — due_date null) reads "undated × 20", so the quantities shown
+     * still add up to the line. The amount is never read.
      *
      * @param  array<string, mixed>  $line
      */
@@ -308,10 +311,11 @@ class EntryPresenter
         $parts = [];
         foreach ($this->rows($line, 'schedules') as $schedule) {
             $due = $this->string($schedule, 'due_date');
-            if ($due === null) {
+            $quantity = isset($schedule['quantity']) ? ' × '.$this->quantity($schedule['quantity']) : '';
+            if ($due === null && $quantity === '') {
                 continue;
             }
-            $parts[] = $this->humanDate($due).(isset($schedule['quantity']) ? ' × '.$this->quantity($schedule['quantity']) : '');
+            $parts[] = ($due === null ? 'undated' : $this->humanDate($due)).$quantity;
         }
 
         return $parts === [] ? '' : ' · due '.implode(', ', $parts);

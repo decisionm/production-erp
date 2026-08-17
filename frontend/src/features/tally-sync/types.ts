@@ -9,14 +9,17 @@ export type TallySyncStatus = 'pending' | 'synced' | 'failed' | 'dismissed';
  *
  * Two honesty axes, kept apart. `source` is where the transaction LIVES:
  * 'erp' rows are built here and can have entries; 'tally' rows live in
- * the accountant's books (Purchase, Purchase Order, Payment, Receipt,
- * Contra, Credit/Debit Note) and can NEVER have an entry — the page names
- * them as "lives in Tally, not mirrored" rather than showing a zero it
- * never measured; 'absent' is Sales Order — no such voucher type exists in
- * the books at all. `erp_build` is what the ERP has BUILT for it: 'built'
- * for the six ERP categories, 'planned' for the ERP-originated Purchase
- * Order (Phase 6), 'none' otherwise — so a Purchase Order can be in the
- * books AND planned without one word having to say both.
+ * the accountant's books (Purchase, Payment, Receipt, Contra, Credit/Debit
+ * Note) and can NEVER have an entry — the page names them as "lives in
+ * Tally, not mirrored" rather than showing a zero it never measured;
+ * 'absent' is Sales Order — no such voucher type exists in the books at
+ * all. `erp_build` is what the ERP has BUILT for it: 'built' for the ERP
+ * categories — Purchase Order among them since Phase 6: ERP-built and
+ * STAGED (source 'erp'; live posting owner-gated, flag off — Q35), so its
+ * count is an honest 0 until the owner opens the gate; 'planned' is kept
+ * as a value for a category the ERP has committed to but not built (none
+ * today); 'none' otherwise — so a row can be in the books AND planned
+ * without one word having to say both.
  * `erp_label_differs_from_wire` is true only where the ERP's label is not
  * the voucher type Tally receives — today the per-batch production
  * voucher, labelled "Manufacturing Journal" here but posted as a Stock

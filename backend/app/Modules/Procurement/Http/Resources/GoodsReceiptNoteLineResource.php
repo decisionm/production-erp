@@ -35,6 +35,10 @@ class GoodsReceiptNoteLineResource extends JsonResource
             'purchase_order_line_id' => $this->purchase_order_line_id,
             'item' => ItemResource::make($this->whenLoaded('item')),
             'quantity' => $this->quantity,
+            // The ledger row this line wrote (Phase 6) — an id, never a
+            // rate: null on a line booked before the column existed, and
+            // the purchase-order trace says how it resolved such a line.
+            'stock_movement_id' => $this->stock_movement_id,
             ...($showsCost ? ['unit_cost' => $this->unit_cost] : []),
             'material_lots' => MaterialLotResource::collection($this->whenLoaded('materialLots')),
         ];

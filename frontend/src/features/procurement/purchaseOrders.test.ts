@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
     ACTION_LABELS,
+    CONSUMPTION_NONE_WORDS,
     PURCHASE_ORDER_STATUSES,
     amendFormDefaults,
     buildPurchaseOrderQuery,
@@ -19,6 +20,7 @@ import {
     searchParamsFromFilters,
     statusOptions,
     statusTag,
+    tallyAfterWords,
     tallyReasonWords,
     tallyStateLine,
     unwrapTraceResponse,
@@ -122,6 +124,107 @@ describe('tallyReasonWords', () => {
         expect(tallyReasonWords({ code: 'item_unmapped' })).toBe('an item has no Tally identity');
         expect(tallyReasonWords({ code: 'godown_unmapped', detail: 'godown X' })).toBe('godown_unmapped: godown X');
         expect(tallyReasonWords({ code: 'godown_unmapped' })).toBe('godown_unmapped');
+    });
+
+    it('words the godown refusal: no single Tally godown to allocate the lines to', () => {
+        expect(tallyReasonWords({ code: 'godown_unresolved' })).toBe('no single Tally godown to allocate to');
+        // The server's detail is the identity text; the reason words stand on their own.
+        expect(tallyReasonWords({ code: 'godown_unresolved', detail: 'two warehouses' })).toBe('no single Tally godown to allocate to');
+    });
+
+    it('words the dismissal reasons the lifecycle writes: cancelled / closed before the agent collected the staged voucher', () => {
+        expect(tallyReasonWords({ code: 'cancelled_before_delivery' })).toBe('cancelled before the agent collected it');
+        expect(tallyReasonWords({ code: 'closed_before_delivery' })).toBe('closed before the agent collected it');
+    });
+
+    it('words the after-delivery note: the ERP cancelled/closed an order Tally already received — an owner question, never silent', () => {
+        expect(tallyAfterWords('cancelled_after_delivery')).toBe('cancelled in the ERP after Tally received it (owner question)');
+        expect(tallyAfterWords('closed_after_delivery')).toBe('closed in the ERP after Tally received it (owner question)');
+        expect(tallyAfterWords('reissued_after_delivery')).toBe('reissued_after_delivery in the ERP after Tally received it (owner question)');
+        expect(tallyAfterWords(null)).toBeNull();
+        expect(tallyAfterWords(undefined)).toBeNull();
+        expect(tallyAfterWords('  ')).toBeNull();
+    });
+});
+
+describe('tallyStateLine — dismissed (cancel/close before the agent collected the staged voucher)', () => {
+    it('dismissed with the cancel reason: says nothing was sent and why, in the words the brief fixes', () => {
+        const state = tallyStateLine(
+            po({
+                status: 'cancelled',
+                tally: null,
+                tally_staging: { state: 'dismissed', reasons: [{ code: 'cancelled_before_delivery' }], entry_id: 41, at: '2026-08-12T10:00:00Z' },
+            }),
+        );
+        expect(state.kind).toBe('dismissed');
+        expect(state.text).toBe('Not sent to Tally — the staged order was dismissed: cancelled before the agent collected it');
+        expect(state.color).toBe('default');
+        expect(state.link).toBeNull();
+        expect(state.note).toBeNull();
+    });
+
+    it('dismissed with the close reason', () => {
+        const state = tallyStateLine(po({ status: 'closed', tally: null, tally_staging: { state: 'dismissed', reasons: [{ code: 'closed_before_delivery' }], entry_id: 41 } }));
+        expect(state.text).toBe('Not sent to Tally — the staged order was dismissed: closed before the agent collected it');
+    });
+
+    it('dismissed with no reason recorded still says dismissed, never sent', () => {
+        expect(tallyStateLine(po({ tally: null, tally_staging: { state: 'dismissed', reasons: [] } })).text).toBe(
+            'Not sent to Tally — the staged order was dismissed (no reason recorded)',
+        );
+        expect(tallyStateLine(po({ tally: null, tally_staging: { state: 'dismissed' } })).kind).toBe('dismissed');
+    });
+
+    it('a dismissed link agrees with the dismissed staging record — the record carries the why, so its words win and the link is kept for the deep link', () => {
+        const state = tallyStateLine(
+            po({
+                status: 'cancelled',
+                tally: link({ status: 'dismissed', entry_id: 41 }),
+                tally_staging: { state: 'dismissed', reasons: [{ code: 'cancelled_before_delivery' }], entry_id: 41 },
+            }),
+        );
+        expect(state.kind).toBe('dismissed');
+        expect(state.text).toBe('Not sent to Tally — the staged order was dismissed: cancelled before the agent collected it');
+        expect(state.link?.entry_id).toBe(41);
+    });
+
+    it('a LIVE link still outranks a dismissed staging record — a re-issued voucher\'s status is the live fact', () => {
+        const state = tallyStateLine(po({ tally: link({ status: 'pending', entry_id: 42 }), tally_staging: { state: 'dismissed', reasons: [{ code: 'cancelled_before_delivery' }], entry_id: 41 } }));
+        expect(state.kind).toBe('link');
+        expect(state.text).toBe('Waiting for agent');
+    });
+});
+
+describe('tallyStateLine — the `after` note (cancelled/closed in the ERP after Tally received the voucher)', () => {
+    it('with a synced link: the link\'s words carry the trailing note, and the note stands alone for the cell to print under the link', () => {
+        const state = tallyStateLine(
+            po({
+                status: 'cancelled',
+                tally: link({ status: 'synced', synced_at: '2026-08-11T05:00:00Z' }),
+                tally_staging: { state: 'enqueued', entry_id: 7, after: 'cancelled_after_delivery', at: '2026-08-12T10:00:00Z' },
+            }),
+        );
+        expect(state.kind).toBe('link');
+        expect(state.text).toBe('In Tally — cancelled in the ERP after Tally received it (owner question)');
+        expect(state.note).toBe('cancelled in the ERP after Tally received it (owner question)');
+        expect(state.link?.entry_id).toBe(7);
+    });
+
+    it('with a failed link and a close: the same shape', () => {
+        const state = tallyStateLine(po({ status: 'closed', tally: link({ status: 'failed' }), tally_staging: { state: 'enqueued', entry_id: 7, after: 'closed_after_delivery' } }));
+        expect(state.text).toBe('FAILED — closed in the ERP after Tally received it (owner question)');
+        expect(state.color).toBe('red');
+    });
+
+    it('enqueued with the link unreadable: the queued words carry the note too', () => {
+        const state = tallyStateLine(po({ status: 'cancelled', tally: null, tally_staging: { state: 'enqueued', entry_id: 41, after: 'cancelled_after_delivery' } }));
+        expect(state.kind).toBe('enqueued');
+        expect(state.text).toBe('Queued for Tally — entry #41 (status not readable here) — cancelled in the ERP after Tally received it (owner question)');
+    });
+
+    it('no `after` key (or a null one) adds nothing — the words the earlier cases pinned are unchanged', () => {
+        expect(tallyStateLine(po({ tally: link({ status: 'synced' }), tally_staging: { state: 'enqueued', entry_id: 7, after: null } })).text).toBe('In Tally');
+        expect(tallyStateLine(po({ tally: link({ status: 'synced' }), tally_staging: { state: 'enqueued', entry_id: 7 } })).note).toBeNull();
     });
 });
 
@@ -534,6 +637,15 @@ describe('consumptionRow', () => {
     it('sums the issues at four places without float drift', () => {
         const normalised = consumptionRow({ stock_issues: [{ id: 1, purpose: 'Consumption', quantity: '0.1000' }, { id: 2, purpose: 'Consumption', quantity: '0.2000' }] });
         expect(normalised.issued_qty).toBe('0.3000');
+    });
+});
+
+describe('the empty-consumption sentence (FC-01)', () => {
+    it('never claims "nothing consumed": under the common input a bag belongs to no machine or batch, so an empty list is "not attributable", and the Consumption movements are named as living on the batches', () => {
+        expect(CONSUMPTION_NONE_WORDS).toBe(
+            'No consumption is attributable to this order\'s bags through the day-bin ledger — under the common input a bag belongs to no machine or batch (FC-01). The item\'s Consumption movements live on the batches that consumed it.',
+        );
+        expect(CONSUMPTION_NONE_WORDS).not.toMatch(/has been consumed|not .*consumed yet/i);
     });
 });
 

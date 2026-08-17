@@ -194,18 +194,28 @@ against an item.** The data exists; the GRN code already branches on
 
 92 purchase orders, entered by `admin`, carrying full GST, payment terms
 (45 days on 51, 60 days on 17, plus 30 and 15), Door Delivery, Party Vehicle,
-and — importantly — an **`ORDERNO` on each line that is DISTINCT from the
-voucher number**.
+and an **`ORDERNO` on every allocation line**. Measured over the full 107-voucher
+set (both Day Books): on **99/107** vouchers `ORDERNO` **equals the voucher's own
+`VOUCHERNUMBER`** on every allocation; 5 vouchers carry an `ORDERNO` distinct
+from it on every allocation, 1 is mixed, and the 2 cancelled vouchers have no
+allocations at all. So `ORDERNO` is, in the usual case, the voucher number
+repeated per line — *not* an independent line-level order number. (An earlier
+draft of this note read the 5 distinct-number vouchers as the rule; the count
+above is the corrected premise for Q35(c).)
 
 So DEC-20260812-002 (POs raised in the ERP, sent to Tally) is worth building,
 and the payload must carry those fields. A real resin line for the builder to
-model on, from the export: vendor **Shivmith Polymer Pvt Ltd**, item
-**"Relpet"**, **15,000 Kgs**, IGST applied, **ORDERNO 146**. *(Rates and totals
-are in the pinned source, deliberately not reproduced here — FC-06.)*
+model on, from the export: one vendor's multi-schedule resin line — vendor,
+item, order number and quantity are in the pinned export, not here — FC-06/Q38;
+IGST applied. *(Rates and totals are likewise in the pinned source, deliberately
+not reproduced here — FC-06.)*
 
-Note the per-line `ORDERNO` directly informs Q35(c): whose PO number is
-authoritative. Tally already carries a line-level order number that is not the
-voucher number.
+Note what this means for Q35(c) (whose PO number is authoritative): Tally's
+line-level `ORDERNO` mostly repeats the voucher number, so the question is
+NOT "which of two Tally numbers wins" — it is whether the ERP's `PO-{id}`
+or a Tally-side numbering is the one both `VOUCHERNUMBER` and `ORDERNO`
+should carry. The 5 distinct-number vouchers show the accountant CAN key a
+different order number per line when there is one to key.
 
 ### 4 · The ERP has no purchase invoice and Tally has 351
 

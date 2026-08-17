@@ -226,12 +226,16 @@ class TallySyncService
      *   lines[]{item, quantity, rate, amount, schedules[]{due_date, quantity,
      *   amount}} · total_amount.
      *   schedules[] mirror PurchaseOrderSchedule (Tally's ORDERDUEDATE
-     *   allocations, one BATCHALLOCATIONS each); a line with no schedule
-     *   gets ONE allocation for the whole line dated the order's
-     *   expected_date, or none at all when there is no expected date — the
-     *   agent then emits no ORDERDUEDATE rather than a made-up one. The last
-     *   allocation's amount is the remainder, so allocations always sum to
-     *   the line exactly. NO `unit`: Item.uom is Tally's base unit at the
+     *   allocations, one BATCHALLOCATIONS each), each at its own quantity ×
+     *   rate; a line whose schedules promise LESS than the line gets one
+     *   more REMAINDER allocation (quantity = line − Σ schedules, due_date =
+     *   the order's expected_date or null); a line with no schedule gets ONE
+     *   allocation for the whole line dated the order's expected_date, or
+     *   none at all when there is no expected date — the agent emits no
+     *   ORDERDUEDATE for a null due date rather than a made-up one. The last
+     *   allocation's amount is the remainder, so allocation quantities and
+     *   amounts always sum to the line exactly (docs/tally-sync/
+     *   PO-VOUCHER-CONTRACT.md §4). NO `unit`: Item.uom is Tally's base unit at the
      *   last pull but is user-editable and carries no provenance, so the ERP
      *   cannot say it IS the Tally symbol (Q40) — the agent emits bare
      *   decimals, the form the live Stock Journals already post with.
@@ -326,8 +330,22 @@ class TallySyncService
                 $schedules = [['due_date' => $expected, 'quantity' => $quantity]];
             }
 
-            // Allocation amounts: quantity × rate each, the LAST one the
-            // remainder so the allocations sum to the line to the paisa.
+            // Allocation amounts: each schedule at ITS OWN quantity × rate.
+            // Whatever the schedules did not promise — an UNDER-SCHEDULED
+            // line — is one REMAINDER allocation (quantity = line − Σ) dated
+            // the order's expected_date when there is one, else undated
+            // (the agent then emits no ORDERDUEDATE — the same rule the
+            // unscheduled line already follows; a date is never made up).
+            // The LAST allocation — the remainder, or the last schedule when
+            // the schedules cover the line exactly — takes the amount
+            // remainder, so allocation quantities AND amounts sum to the
+            // line to the paisa in every case.
+            $scheduledQuantity = array_reduce($schedules, fn ($carry, $schedule) => bcadd($carry, $schedule['quantity'], 4), '0.0000');
+            $unscheduled = bcsub($quantity, $scheduledQuantity, 4);
+            if ($schedules !== [] && bccomp($unscheduled, '0.0000', 4) === 1) {
+                $schedules[] = ['due_date' => $expected, 'quantity' => $unscheduled];
+            }
+
             $allocated = '0.0000';
             $count = count($schedules);
             foreach ($schedules as $index => $schedule) {
@@ -1444,14 +1462,72 @@ class TallySyncService
         // one log tells the whole story in order: failed, retried, failed
         // again, dismissed. error_message deliberately stays on the row —
         // dismissal is not a repair, and the reason it failed is part of
-        // why it was written off.
+        // why it was written off. No reason of its own is taken today (the
+        // endpoint carries no body); none is invented.
+        return $this->writeOff(
+            $entry,
+            note: 'Dismissed — will never be sent to Tally.',
+            details: ['previous_error' => $entry->error_message],
+            userId: $userId,
+            actor: $actor,
+        );
+    }
+
+    /**
+     * WITHDRAW a voucher THIS ERP staged and the agent has NOT collected —
+     * the one dismissal nobody has to click, because the document behind it
+     * stopped existing: a purchase order cancelled or short-closed while
+     * its Purchase Order voucher was still sitting Pending in our own
+     * queue (Phase 6; TallySyncEventServiceProvider's PurchaseOrderCancelled
+     * / PurchaseOrderClosed listeners are the only callers).
+     *
+     * The SAME write-off dismiss() performs — status Dismissed, the act in
+     * the resolution_log, a voucher.dismissed history row — so the queue's
+     * history reads identically however a row died. What differs is who may
+     * be written off and why: dismiss() writes off a FAILED voucher a human
+     * gave up on; this writes off a PENDING one nothing has ever seen.
+     *
+     * Refused for anything the ERP no longer owns — a row already delivered
+     * to the agent, already synced, already failed, or already dismissed.
+     * Those are left exactly as they are: what Tally should be told about an
+     * order it has already received (an Alter or a Cancel voucher) is owner
+     * question Q48, and this method never guesses it.
+     *
+     * @param  string  $reasonCode  the withdrawal's own reason, on the history row
+     * @param  string  $note  the human sentence for the resolution_log
+     */
+    public function withdrawUncollected(TallySyncEntry $entry, string $reasonCode, string $note, ?int $userId = null, ?Authenticatable $actor = null): ?TallySyncEntry
+    {
+        if ($entry->status !== TallySyncStatus::Pending || $entry->delivered_at !== null || $entry->isInTally()) {
+            return null;
+        }
+
+        return $this->writeOff(
+            $entry,
+            note: $note,
+            details: ['reason' => $reasonCode],
+            userId: $userId,
+            actor: $actor,
+        );
+    }
+
+    /**
+     * THE dismissal write, shared by dismiss() and withdrawUncollected() so
+     * a withdrawn row and a written-off one are the same kind of dead: one
+     * status change, one resolution_log line, one voucher.dismissed history
+     * row. Judges nothing — every caller has already decided.
+     *
+     * @param  array<string, mixed>  $details  what the history row carries beyond the act itself
+     */
+    private function writeOff(TallySyncEntry $entry, string $note, array $details, ?int $userId, ?Authenticatable $actor): TallySyncEntry
+    {
         $payload = $entry->payload;
         $log = $payload['resolution_log'] ?? [];
         $log[] = [
             'at' => now()->toIso8601String(),
             'by' => $userId,
             'previous_error' => $entry->error_message,
-            'note' => 'Dismissed — will never be sent to Tally.',
+            'note' => $note,
         ];
         $payload['resolution_log'] = $log;
 
@@ -1460,13 +1536,7 @@ class TallySyncService
             'payload' => $payload,
         ]);
 
-        // The write-off on the durable record, carrying the error it was
-        // written off WITH — dismissal is not a repair, and the reason it
-        // failed is part of why it was abandoned. No reason of its own is
-        // taken today (the endpoint carries no body); none is invented.
-        $this->events->record(TallySyncEventKind::VoucherDismissed, $entry, [
-            'previous_error' => $entry->error_message,
-        ], actor: $actor);
+        $this->events->record(TallySyncEventKind::VoucherDismissed, $entry, $details, actor: $actor);
 
         return $entry;
     }

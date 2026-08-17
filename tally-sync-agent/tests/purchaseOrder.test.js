@@ -379,6 +379,97 @@ test('a line with NO schedule gets ONE allocation for the whole line and NO ORDE
     assert.deepEqual(childTags(allocations[0]), ['GODOWNNAME', 'BATCHNAME', 'ORDERNO', 'AMOUNT', 'ACTUALQTY', 'BILLEDQTY']);
 });
 
+test('an UNDER-SCHEDULED line as the cloud stages it (schedules + an undated remainder) → N+1 allocations whose quantities and amounts sum to the line, the remainder without ORDERDUEDATE', () => {
+    // TallySyncService::enqueuePurchaseOrder appends the remainder allocation
+    // itself (due_date = the order's expected_date, or null): 100 @ 2 with
+    // schedules [30, 50] → [30/60, 50/100, 20/40 undated].
+    const xml = buildPurchaseOrderXml(payload({
+        lines: [{
+            item: 'ITEM_A',
+            quantity: '100.0000',
+            rate: '2.0000',
+            amount: '200.0000',
+            schedules: [
+                { due_date: '2026-09-01', quantity: '30.0000', amount: '60.0000' },
+                { due_date: '2026-09-15', quantity: '50.0000', amount: '100.0000' },
+                { due_date: null, quantity: '20.0000', amount: '40.0000' },
+            ],
+        }],
+        total_amount: '200.0000',
+    }), COMPANY);
+    const [line] = blocks(xml, 'ALLINVENTORYENTRIES.LIST');
+    const allocations = blocks(line, 'BATCHALLOCATIONS.LIST');
+
+    assert.equal(allocations.length, 3, 'one per schedule plus the remainder');
+    assert.match(allocations[0], /<ORDERDUEDATE JD="46265" P="1-Sep-26">1-Sep-26<\/ORDERDUEDATE>/);
+    assert.match(allocations[1], /<ORDERDUEDATE JD="46279" P="15-Sep-26">15-Sep-26<\/ORDERDUEDATE>/);
+    assert.match(allocations[2], /<ACTUALQTY>20\.0000<\/ACTUALQTY>/);
+    assert.match(allocations[2], /<AMOUNT>-40\.0000<\/AMOUNT>/);
+    assert.doesNotMatch(allocations[2], /ORDERDUEDATE/, 'a null due date emits no ORDERDUEDATE — never a made-up date');
+    assert.deepEqual(childTags(allocations[2]), ['GODOWNNAME', 'BATCHNAME', 'ORDERNO', 'AMOUNT', 'ACTUALQTY', 'BILLEDQTY']);
+
+    const quantities = allocations.map((a) => a.match(/<ACTUALQTY>([^<]+)<\/ACTUALQTY>/)[1]);
+    const amounts = allocations.map((a) => a.match(/<AMOUNT>([^<]+)<\/AMOUNT>/)[1]);
+    assert.equal(sumDecimals(quantities), '100.0000', 'allocation quantities sum to the line');
+    assert.equal(sumDecimals(amounts), '-200.0000', 'allocation amounts sum to the line');
+});
+
+test('a partial-schedule payload WITHOUT the remainder row (schedules promising less than the line) still emits N+1 allocations that sum to the line — the second lock on the same rule', () => {
+    // A cloud that predates the remainder rule sent the schedules alone; the
+    // builder tops the line up with an undated remainder (quantity = line − Σ,
+    // amount = line amount − Σ) rather than posting allocations that do not
+    // add up to the line: 100 @ 1 with [60] → [60/60, 40/40 undated].
+    const xml = buildPurchaseOrderXml(payload({
+        lines: [{
+            item: 'ITEM_A',
+            quantity: '100.0000',
+            rate: '1.0000',
+            amount: '100.0000',
+            schedules: [{ due_date: '2026-09-01', quantity: '60.0000', amount: '60.0000' }],
+        }],
+        total_amount: '100.0000',
+    }), COMPANY);
+    const [line] = blocks(xml, 'ALLINVENTORYENTRIES.LIST');
+    const allocations = blocks(line, 'BATCHALLOCATIONS.LIST');
+
+    assert.equal(allocations.length, 2);
+    assert.match(allocations[0], /<ACTUALQTY>60\.0000<\/ACTUALQTY>/);
+    assert.match(allocations[0], /<AMOUNT>-60\.0000<\/AMOUNT>/);
+    assert.match(allocations[0], /<ORDERDUEDATE JD="46265" P="1-Sep-26">1-Sep-26<\/ORDERDUEDATE>/);
+    assert.match(allocations[1], /<ACTUALQTY>40\.0000<\/ACTUALQTY>/);
+    assert.match(allocations[1], /<AMOUNT>-40\.0000<\/AMOUNT>/);
+    assert.doesNotMatch(allocations[1], /ORDERDUEDATE/);
+    // Nothing invented: the remainder names the same godown and order.
+    assert.match(allocations[1], /<GODOWNNAME>Godown Alpha<\/GODOWNNAME>/);
+    assert.match(allocations[1], /<ORDERNO>PO-7<\/ORDERNO>/);
+
+    // Rounding lands on the remainder: 33.3333 @ 1.5 → 49.9999 on the
+    // schedule; the remainder takes 150.0000 − 49.9999 = 100.0001.
+    const rounded = buildPurchaseOrderXml(payload({
+        lines: [{
+            item: 'ITEM_A',
+            quantity: '100.0000',
+            rate: '1.5000',
+            amount: '150.0000',
+            schedules: [{ due_date: '2026-09-01', quantity: '33.3333', amount: '49.9999' }],
+        }],
+        total_amount: '150.0000',
+    }), COMPANY);
+    const [roundedLine] = blocks(rounded, 'ALLINVENTORYENTRIES.LIST');
+    const roundedAllocations = blocks(roundedLine, 'BATCHALLOCATIONS.LIST');
+    assert.equal(roundedAllocations.length, 2);
+    assert.match(roundedAllocations[1], /<ACTUALQTY>66\.6667<\/ACTUALQTY>/);
+    assert.match(roundedAllocations[1], /<AMOUNT>-100\.0001<\/AMOUNT>/);
+});
+
+test('an exactly covered line and an unscheduled line get no remainder allocation', () => {
+    const xml = buildPurchaseOrderXml(payload(), COMPANY);
+    const [lineA, lineB] = blocks(xml, 'ALLINVENTORYENTRIES.LIST');
+
+    assert.equal(blocks(lineA, 'BATCHALLOCATIONS.LIST').length, 2, '60 + 40 covers 100 exactly — no third row');
+    assert.equal(blocks(lineB, 'BATCHALLOCATIONS.LIST').length, 1, 'no schedule → the one whole-line allocation, unchanged');
+});
+
 /* ── ORDERDUEDATE: JD = excelSerial − 1, P = d-Mmm-yy ────────────────────── */
 
 test('ORDERDUEDATE JD is the Excel serial minus one (days since 1899-12-31); P is d-Mmm-yy without padding', () => {

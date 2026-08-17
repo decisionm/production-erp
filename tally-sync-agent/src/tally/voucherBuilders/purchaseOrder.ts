@@ -6,8 +6,12 @@ import { envelope, escapeXml, toTallyDate } from './xmlHelpers';
  * ("100.0000") — the SIGNS Tally wants are this builder's job (see below).
  */
 export interface PurchaseOrderSchedule {
-    /** ISO date (YYYY-MM-DD) — one Tally ORDERDUEDATE allocation. */
-    due_date: string;
+    /**
+     * ISO date (YYYY-MM-DD) — one Tally ORDERDUEDATE allocation. NULL on the
+     * cloud's REMAINDER allocation of an under-scheduled line on an order
+     * without an expected date: emitted with no ORDERDUEDATE at all.
+     */
+    due_date: string | null;
     quantity: string;
     /** This allocation's share of the line amount; the cloud makes them sum to the line exactly. */
     amount: string;
@@ -25,7 +29,13 @@ export interface PurchaseOrderLine {
      * form is emitted (the form the live Stock Journals already post with).
      */
     unit?: string | null;
-    /** Zero or more due-date allocations; empty → one allocation, no ORDERDUEDATE. */
+    /**
+     * Zero or more due-date allocations; empty → one allocation, no
+     * ORDERDUEDATE. When they promise LESS than the line, the cloud appends
+     * the remainder as one more row (due_date = the order's expected date,
+     * or null) — and this builder tops the line up itself if that row is
+     * missing (see the docblock's remainder rule).
+     */
     schedules: PurchaseOrderSchedule[];
 }
 
@@ -105,8 +115,10 @@ export interface PurchaseOrderPayload {
  *         ACTUALQTY · BILLEDQTY · ORDERDUEDATE JD="…" P="…">…</ORDERDUEDATE>?
  *       ACCOUNTINGALLOCATIONS.LIST: LEDGERNAME=purchase ledger · ISDEEMEDPOSITIVE · AMOUNT
  *     LEDGERENTRIES.LIST: LEDGERNAME=party ledger · ISDEEMEDPOSITIVE · ISPARTYLEDGER · AMOUNT
- *   PARTYNAME and BASICBASEPARTYNAME repeat PARTYLEDGERNAME (107/107 and 106/107
- *   in the exports). NARRATION is the agent's convention (no real order has one).
+ *   PARTYNAME and BASICBASEPARTYNAME repeat PARTYLEDGERNAME (105/105 and 104/105
+ *   of the live vouchers; the 2 cancelled ones name no party at all — none of
+ *   the three tags, no PARTYGSTIN). NARRATION is the agent's convention (no
+ *   real order has one).
  *
  * WHAT IS DELIBERATELY NOT EMITTED, AND WHY:
  *   tax ledger line     105/107 real orders carry one; the ERP computes no GST
@@ -129,13 +141,29 @@ export interface PurchaseOrderPayload {
  * "d-Mmm-yy" date), with the element's text repeating P (232/232), and JD
  * and P do NOT agree consistently in the exports:
  * JD == Excel-serial(P) − 1 (days since 1899-12-31) on 130 of 232 (56%);
- * the rest scatter, and 13 JD values pair with more than one P. They are
- * therefore not a formatting pair, and this builder derives BOTH from the
- * ONE due date the ERP holds: JD = excelSerial(due) − 1, P = "d-Mmm-yy" (no
- * zero padding, 3-letter Title-case month, 2-digit year). The first
- * owner-gated live post is the check. A line with no schedule at all gets
- * ONE allocation for the whole line and NO ORDERDUEDATE — a due date is
- * never made up.
+ * of the 102 that do not, 97 equal Excel-serial(the voucher's own DATE) − 1
+ * — the ORDER date, not the due date — and 5 are neither; 13 JD values pair
+ * with more than one P. They are therefore not a formatting pair, and this
+ * builder derives BOTH from the ONE due date the ERP holds: JD =
+ * excelSerial(due) − 1, P = "d-Mmm-yy" (no zero padding, 3-letter
+ * Title-case month, 2-digit year). The first owner-gated live post is the
+ * check (if Tally re-derives one from the other, either pattern in the
+ * exports is explained; if it does not, the first live voucher's due dates
+ * are read back before a second is sent). A line with no schedule at all
+ * gets ONE allocation for the whole line and NO ORDERDUEDATE — a due date
+ * is never made up.
+ *
+ * THE REMAINDER RULE (allocations always sum to the line). One allocation
+ * per schedule at ITS OWN quantity and amount; when the schedules promise
+ * LESS than the line, one more allocation for the rest — quantity = line −
+ * Σ schedules, amount = line amount − Σ schedule amounts (so any rounding
+ * lands on the remainder), and NO ORDERDUEDATE unless the cloud dated it
+ * with the order's expected date. The cloud (TallySyncService::
+ * enqueuePurchaseOrder) already appends that row; this builder appends it
+ * only if it is missing — the second lock on the same door, so a payload
+ * from before the rule cannot post allocations that do not add up to the
+ * line. Nothing is invented: the same godown, the same order number, no
+ * date. A line whose schedules cover it exactly gets no extra row.
  *
  * VOUCHERNUMBER. Q35(c) — whose number is authoritative — is PENDING; the
  * staged default is the ERP reference "PO-{id}" the cloud sends, and
@@ -213,10 +241,10 @@ function inventoryEntry(line: PurchaseOrderLine, godown: string, orderNo: string
     const rate = unit ? `${line.rate}/${unit}` : line.rate;
     const amount = negate(line.amount);
 
-    const schedules = Array.isArray(line.schedules) ? line.schedules : [];
+    const schedules = withRemainder(line);
     const allocations = (
         schedules.length > 0
-            ? schedules.map((schedule) => allocation(godown, orderNo, negate(schedule.amount), quantity(schedule.quantity, unit), schedule.due_date))
+            ? schedules.map((schedule) => allocation(godown, orderNo, negate(schedule.amount), quantity(schedule.quantity, unit), schedule.due_date ?? null))
             : [allocation(godown, orderNo, amount, qty, null)]
     ).join('');
 
@@ -233,6 +261,37 @@ function inventoryEntry(line: PurchaseOrderLine, godown: string, orderNo: string
                 <AMOUNT>${escapeXml(amount)}</AMOUNT>
               </ACCOUNTINGALLOCATIONS.LIST>
             </ALLINVENTORYENTRIES.LIST>`;
+}
+
+/**
+ * The line's schedules plus, when they promise LESS than the line and the
+ * cloud did not already append it, ONE undated remainder allocation
+ * (quantity = line − Σ, amount = line amount − Σ) — the remainder rule in
+ * the docblock. Exact decimal strings throughout; a line with no schedule
+ * is left empty (the caller emits the one whole-line allocation).
+ */
+export function withRemainder(line: PurchaseOrderLine): PurchaseOrderSchedule[] {
+    const schedules = Array.isArray(line.schedules) ? line.schedules : [];
+    if (schedules.length === 0) {
+        return schedules;
+    }
+
+    const scheduledQuantity = sumDecimals(schedules.map((schedule) => schedule.quantity));
+    const remainderQuantity = sumDecimals([line.quantity, negate(scheduledQuantity)]);
+    if (!isPositive(remainderQuantity)) {
+        return schedules;
+    }
+
+    const scheduledAmount = sumDecimals(schedules.map((schedule) => schedule.amount));
+    const remainderAmount = sumDecimals([line.amount, negate(scheduledAmount)]);
+
+    return [...schedules, { due_date: null, quantity: remainderQuantity, amount: remainderAmount }];
+}
+
+function isPositive(value: string): boolean {
+    const trimmed = value.trim();
+
+    return !trimmed.startsWith('-') && !/^0*(\.0*)?$/.test(trimmed);
 }
 
 /** One BATCHALLOCATIONS.LIST — a due-date window, or the whole line when there is none. */
