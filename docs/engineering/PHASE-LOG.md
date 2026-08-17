@@ -1675,3 +1675,113 @@ PR:                 #191 (base: feat/phase-7-regression-hardening → #190 → �
 Deployment state:   not deployed; stack #179 → … → #190 → #191
 Next phase:         7.5 (material flow) then 8 (end-to-end acceptance)
 ```
+
+## PHASE 7.5 — Store → Production material flow
+
+```
+Phase:    7.5 — the lead's business-rule correction of 17-Aug (DEC-20260817-001)
+Status:   PASS
+Branch:   feat/phase-7.5-material-flow (stacked on Phase 7.6 PR #191 → … → #179)
+Dates:    2026-08-17
+
+Goal:
+  Store Stock → Production Material Request → Store Issue → Scan/Handover →
+  Issued-to-Production → Actual Consumption → Return unused. The Day Bin leaves
+  the TARGET workflow without a row being deleted.
+
+The rule the phase exists for:
+  A STORE ISSUE IS NOT A CONSUMPTION. Three states stay distinct — Store Stock,
+  Issued to Production (Production/WIP), Consumed — plus Issued → Returned.
+  Production/WIP is a LOCATION, not a flag: signed transfer pairs carry stock in
+  and out, so the ledger invariant and inventory:check-ledger hold at every
+  state. The audit's decisive finding was that a movement-PURPOSE-only change
+  would have been invisible to that invariant, which signs by movement TYPE.
+  DEC-20260817-001 named the locations and confirmed there is no Day Bin; the
+  existing WIP warehouse row is reused, never duplicated.
+
+What changed:
+  • Material requests + lines: requester, time, shift, work centre (nullable),
+    item, quantity, uom snapshotted from the item, status draft → submitted →
+    partially_issued → issued (or cancelled). The store works a QUEUE with every
+    filter applied in SQL, over the FACTORY day localised through the factory
+    timezone — without that every night-shift request files under the wrong day.
+  • Store issues + lines + bag scans: partial fulfilment, remaining quantity,
+    completion, cancellation and the return of unused material; the bag/lot
+    resolution and QC-hold refusals reuse the existing scanner rather than a
+    second one. Nothing assumes a daily cadence.
+  • FC-01 honoured, not weakened, and Q50 was resolved by inspection rather than
+    by a ruling: a common-input (resin) request REFUSES to name a machine, while
+    consumable requests carry one; and the trace from a batch stops at the
+    ISSUE — the ERP records which bags left the store, to whom and against which
+    request, and never claims a batch consumed a particular bag.
+  • The Day Bin: three dead doors closed, every reader either migrated to the
+    issue ledger or recorded as historical-only, and the table, its rows and the
+    machine-stamped history left exactly as they are (DEC-20260807-006). No
+    Tally payload derives from it, verified.
+
+What the gate found (two FAILs) and the fix loop closed:
+  • P0 — THE TWO HALVES WERE NEVER CONNECTED. applyIssuedQuantities() is the one
+    writer of issued_quantity and the only place a request advances, and the
+    issue flow never called it: issuing left the request untouched, so the
+    store's queue would have shown work already done, for ever. Now called
+    inside the issue's transaction on both handover paths, with a scan crediting
+    the request line the SCAN named — two bags of one resin share an issue line,
+    so the second would otherwise have been credited to the first scan's request.
+  • P1 — a reversal was bounded by issue-line arithmetic rather than by what is
+    still standing, so cancelling after a batch had consumed drained another
+    issue's material and erased the trace. Reversals are now bounded by what is
+    genuinely unconsumed, read from stock movements rather than a balance that
+    predates the phase, and they REFUSE rather than quietly writing a smaller
+    number — the storekeeper typed a figure, and recording a different one
+    records a return that did not happen. The refusal names the real figure.
+  • P1 — material standing in Production/WIP was invisible to the Tally stock
+    reconciliation, so every open issue would have read as store DRIFT and the
+    accountant would have chased a discrepancy that is just material on the
+    floor. It is now folded in and named, and never "fixed" by moving stock.
+  • P1 — over-consumption. The brief said to refuse if in doubt; the fixer
+    declined and was right: config/production.php records the 30-Jul incident by
+    name — a real shift's completion refused at 6am over a balance nobody had
+    entered — and the rule already decided is that a paperwork gap must never
+    become lost production. So it is allowed and made VISIBLE. The genuinely
+    silent hole was the SECOND over-draw: once WIP hit zero the next batch fell
+    through to the store, whose balance dropped for material it never issued.
+    WIP now stays the source while anything is standing, and a WIP shortfall
+    carries a sentence saying nothing is missing from the store.
+  • P2 — the WIP resolver depended on a sole-tally_guid fallback; two warehouses
+    carry a guid on the live instance TODAY, so every store issue would have
+    422'd on day one. WIP is identified by its own identity now, still
+    fail-closed if it genuinely cannot be found.
+  • P2 — the carton trace's owner-fixed sentence (DEC-20260810-001) had come to
+    cover lots that never passed through the day bin. Owner wording is not
+    rewritten by an agent: store-issue lots get their own separately-worded
+    block, and the wording question is recorded.
+
+Tests:
+  Backend 1,766 → 1,874 (1 skipped: the CEC golden) / 16,688 · vitest 456 → 489
+  · inventory:check-ledger VERDICT clean · knowledge sound. (Counts are after
+  the rebase onto 7.6, so they include that phase.)
+
+Gate:
+  Sonnet FAIL · Opus FAIL → fix loop → Sonnet RE-GATE **PASS, zero findings**,
+  with the reviewer's own scratch tests re-proving the reversal bounds, the
+  reconciliation, the second over-draw and the resolver under two other
+  Tally-linked warehouses, and confirming append-only behaviour by id.
+
+Owner-gated items (recorded as Q54, none answered):
+  whether every kg-family item is a common input or masterbatch may name a
+  machine; refuse-or-cap on a late reversal; what the Start Batch availability
+  panel should show now; the carton-trace wording; and whether a batch may
+  consume more than was issued.
+
+Deferred items:
+  • The three legacy day-bin writers now have no production caller and survive
+    through tests, deliberately kept and docblocked as historical.
+  • returnUnused reads its budgets before the per-line lock, so two concurrent
+    reversals on DIFFERENT issues could both pass their checks; the transfer's
+    own non-negative decrement still protects the ledger (one wins, one 422s).
+  • A backdated issue would be charged consumption it predates — the bound is
+    inclusive and conservative (a refusal, never a wrong reversal).
+PR:                 stacked on #191 (base: feat/phase-7.6-configuration-lifecycle)
+Deployment state:   not deployed; stack #179 → … → #191 → this PR
+Next phase:         8 — end-to-end acceptance
+```
