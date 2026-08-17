@@ -844,62 +844,53 @@ configuration already knows:
 **Blocks:** nothing — the endpoint is inert without a caller. It decides whether
 Phase 8 builds the screen or the endpoint is retired. *Open since 2026-08-17.*
 
-## Q50 · Does a material request name a MACHINE, and may consumption name a BAG — for resin?
+## Q50 · RESOLVED (17-Aug-2026) — the required provenance chain does NOT conflict with FC-01
 
-The program lead has confirmed a corrected Store-to-Production workflow (17-Aug-2026):
+The lead asked to see the exact conflict before any owner decision was required. It was
+checked line by line against the constitution, and **there is none for the chain as
+specified**. This entry is kept as the record of that check; nothing is asked of the owner
+and FC-01 is not weakened.
 
-    Store Stock -> Production Material Request -> Store Issue -> Scan/Handover
-      -> Issued-to-Production -> Actual Consumption -> Return unused
+**FC-01 verbatim** forbids exactly three things:
+1. "A resin bag must never be represented as physically assigned to a machine or a batch"
+2. "scanning or loading a bag is a **pour record, not Tally consumption**"
+3. "the system must not claim physical bag-to-machine or bag-to-batch provenance"
 
-Production raises a material request (request number, requester, date/time, shift,
-machine/production area where applicable, SKU/batch where known, material, quantity,
-UOM, status); the Store works a queue, with partial fulfilment, remaining quantity,
-completion, cancellation and the return of unused material. For PET and raw-material
-bags the Store scans the actual bag at handover, recording bag/lot identity,
-quantity/weight, the request, issued by, received by and the time. Replenishment is
-not necessarily daily.
+**The required chain, link by link:**
 
-**Most of this needs no ruling and is being built**, including the heart of it: a
-Store issue is NOT a consumption, and the ERP must keep `Store Stock` / `Issued to
-Production` / `Consumed` distinct with a return path. That AGREES with FC-01, which
-already says a bag scan is "a pour record, not Tally consumption" — this change moves
-the accounting event further away from the scan, not closer.
+| Link | Against FC-01 |
+|---|---|
+| bag/barcode -> lot | Not a machine, not a batch. **No conflict** — bags and lots already exist. |
+| lot -> quantity/weight | **No conflict.** |
+| -> material request | **No conflict**, provided a RESIN request names no machine (guardrail 1). |
+| -> issue | Store-to-production CUSTODY, not an assignment to a machine or a batch. **No conflict.** |
+| -> received by | A person. **No conflict.** |
+| -> production consumption / return | **No conflict** — the chain says *production* consumption, the aggregate, not "batch X consumed bag Y". |
 
-**Two clauses need the owner, and only for the COMMON-INPUT RESIN.** The audit
-(`docs/engineering/AUDIT-WAREHOUSES-2026-08-17.md`'s sibling material-flow audit)
-finds the conflict is not with the workflow but with two specific claims, and only
-where the material is resin:
+Point 2 of FC-01 actively AGREES with the new workflow: it already says a bag scan is an
+operational pour record and not consumption, which is exactly the rule that a Store issue
+is not a consumption.
 
-1. **A resin request naming a machine or area.** DEC-20260807-006 records the physical
-   fact: ONE loading point, crane-fed, piped to all ten machines — "bag-to-batch
-   identity is physically impossible in this plant". A machine on a *resin* request
-   would be a field the floor cannot answer truthfully. For packing film, cartons,
-   tape and other non-common-input consumables a machine or area is perfectly
-   meaningful, and the ERP will carry it there.
-2. **Consumption tracing to the exact lot/bag.** FC-01: "the system must not claim
-   physical bag-to-machine or bag-to-batch provenance"; DEC-20260810-001 requires the
-   wording always be "the bin held these lots", never "this batch used this bag". And
-   DEC-20260807-007 records that the bin is never weighed, so the ledger never
-   re-anchors — a bag-level attribution would drift permanently with nothing to
-   correct it. What IS exact and true, and is being built: consumption traced to its
-   STORE ISSUE, and to the lots the bin held in that shift window.
+**Two guardrails keep it that way, and neither is in the required chain:**
+1. A **resin** material request carries no machine or area — all machines draw from one
+   common piped loading point (DEC-20260807-006), so the field could not be answered
+   truthfully. Requests for film, cartons, tape and other non-common-input consumables DO
+   carry a machine or area: "where applicable" is doing real work.
+2. The trace from a batch stops at the ISSUE. The ERP says "these bags were issued to
+   production, by whom, when, against which request"; it never says "this batch used this
+   bag". Batch consumption stays calculated, exactly as FC-01 requires.
 
-So the question is a question of fact about the floor:
+**One correction for the record.** The note asked to separate this traceability from
+"cost/rate/vendor-sensitive fields protected by FC-01". Those fields are protected by
+**FC-06** (purchase rates and supplier identity are Owner/Accounts only), not FC-01 —
+FC-01 is solely about bag-to-machine/batch provenance and says nothing about money. The
+separation asked for is real and already enforced: the material-flow chain carries bag,
+lot, weight, request, issue, people and time, and carries no rate, amount or vendor
+identity to a reader without finance standing.
 
-(a) Has the resin flow physically CHANGED — is resin now issued from the store for a
-    named machine or area, rather than every machine drawing from one common piped
-    loading point? If yes, FC-01's premise no longer holds, the owner can supersede
-    it, and bag-level provenance becomes honest to record.
-(b) Or does the common input still stand — in which case the ERP traces resin
-    consumption to the ISSUE (exact), names machines only on consumable requests, and
-    keeps saying "the bin held these lots" for resin.
+*Opened 2026-08-17; resolved the same day by inspection, no owner ruling required.*
 
-**Blocks:** only the resin bag-to-batch provenance claim and the machine field on a
-resin request. The request itself, the store queue, partial fulfilment, returns, the
-three stock states, bag scanning at handover, and issue-level traceability all proceed
-either way, for every material. *Open since 2026-08-17.*
-
-## Q51 · How many stores does the factory actually have, and which rows are they?
+## Q51 · ANSWERED (DEC-20260817-001) · How many stores does the factory actually have, and which rows are they?
 
 The ERP holds five warehouses. Two pairs are functionally duplicated and the
 evidence says accidentally so (full audit:
@@ -942,7 +933,7 @@ Nothing else — the ERP runs fine with the duplicates, it merely cannot tidy th
 safely without this. **Nothing has been merged, deleted or deactivated.**
 *Open since 2026-08-17.*
 
-## Q52 · Configuration lifecycle — five things the contract cannot decide for the factory
+## Q52 · ANSWERED (DEC-20260817-002) · Configuration lifecycle — five things the contract cannot decide for the factory
 
 The lead has formalised a product-wide Configuration Lifecycle Contract (17-Aug-2026):
 every master supports Create → View → Edit → Activate/Deactivate → Safe Delete → Audit,
