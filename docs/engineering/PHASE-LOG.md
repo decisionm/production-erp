@@ -799,3 +799,206 @@ PR:                 #185 (base: feat/phase-4-agent-xml-snapshot → #184 → …
 Deployment state:   not deployed; stack #179 → … → #184 → #185
 Next phase:         5 — Product / SKU configuration (operator workflow, first slice)
 ```
+
+## PHASE 5 — Product / SKU configuration (operator workflow, first slice)
+
+```
+Phase:    5 — Product / SKU configuration (MASTER-PLAN rev 3, P5-01..06)
+Status:   PASS WITH DEFERRED ITEMS
+Branch:   feat/phase-5-product-sku-configuration (stacked on Phase 4.5 PR #185 → … → #179)
+Dates:    2026-08-17
+
+Goal:
+  Everything downstream reads configuration. Make the ERP able to HOLD one
+  logical product → N SKUs/variants → each with its production configuration
+  and exact Tally identity; name what is missing instead of asking the floor
+  again; make ambiguity a review item, never a guess; keep every configured
+  pack quantity behind ONE reader; make the stock ledger say why it moved and
+  prove it against balances. The mapping VALUES stay the owner's (Q33, Q43,
+  the SKU format programme).
+
+What changed:
+  • D1 (§4.12): psp_standard_mode_unique → psp_standard_variant_unique over
+    the whole count tuple; a 490/box tray and a 520/box tray coexist on ONE
+    standard (red-before: the old index refused); an exact twin is a 422
+    domain error; at most one default per standard; the packaging store/update
+    logic moved out of the controller into ProductionStandardPackagingService.
+    With NULL count columns the DB unique never collides — the SERVICE's
+    refusal is the twin guard; the index's real effect is removing the old
+    (standard, mode) refusal (documented in the migration).
+  • One pack-quantity reader (§4.14): PackQuantityResolver — frozen entry
+    columns → the entry's packaging row → item master, with a named source;
+    the metric path (~2907/2927) and BatchEstimationService read through it,
+    byte-identical on every existing test; red-before proved the old metric
+    reader ignored the packaging row for tray/pouch counts. `metrics.pack_
+    quantities` and estimate `pack_quantity_source` additive.
+  • packing_lines PERSISTED (§4.16): shift_production_entry_packing_lines —
+    the full validated wire line, written in completeBatch's transaction,
+    replaced on amend, on the resource.
+  • Variant surface: GET production/products/{item}/variants — item →
+    standards → packagings with the resolved Tally identity {sku, name, guid},
+    state complete|incomplete with the missing pieces NAMED from a fixed
+    vocabulary (standard, cavities, unit_weight, cycle_time, packaging,
+    counts, tally_identity — tally_identity missing when the resolved identity
+    is null, GUID-less or a LOCAL fixture), ambiguity via TallySync's
+    LineMappingResolver (advisory); the same configuration_status rides the
+    batch preview additively (+ sku/guid on tally_item).
+  • Review queue: GET production/configuration/review — packagings without an
+    identity, packagings whose Tally name is shared, items with a provisional
+    SKU — each with candidate Tally-pulled non-fixture items to LINK through
+    the existing PUT packaging endpoint (never a Tally-less item created,
+    never a candidate pre-selected); `fix_target` names the affordance.
+  • items.sku_provisional: the masters pull's CREATE path seeds a SKU from the
+    Tally name and now says so; a manual SKU change clears it; no SKU format
+    invented (HELD).
+  • Ledger (§4.2/§4.3): stock_movements.purpose (opening | receipt |
+    consumption | output | dispatch | adjustment | reconcile | unknown) set by
+    the writer that knows (GRN, production consumption/output, delivery,
+    Tally opening/reconcile) and back-filled ONLY where the reference shape is
+    unambiguous (rule in the migration docblock; the rest 'unknown'; counts
+    logged); a movement refuses update and delete (query-builder bulk deletes
+    bypass by Eloquent design — production:reset-test-data relies on that,
+    documented); inventory:check-ledger compares Σ movements to balances per
+    (item, warehouse), read-only, exit 0/1; the invariant holds through the
+    real GRN → issue → output → delivery paths (tested).
+  • Frontend: Product Standards workspace shows each packaging's Tally identity
+    (or "no Tally identity of its own — posts as the product's item"), an
+    INCOMPLETE tag with the missing words, a "provisional SKU" tag; a
+    "Needs review" panel fed by the review endpoint with the candidate picker
+    (production.manage) that PUTs the packaging's item_id; the Shift Floor
+    "How is it packed?" option for an incomplete packaging carries the
+    server's words (8-line diff, disabling logic untouched).
+
+Files/modules:
+  Production (migrations ×2, ProductionStandardPackagingService,
+  DuplicatePackagingVariantException, PackQuantityResolver + PackQuantities,
+  ShiftProductionEntryPackingLine + resource, ProductVariantService,
+  ConfigurationReviewService, controllers ×3, resources ×2, BatchPreview
+  Controller, ShiftProductionEntryService, BatchEstimationService, models) ·
+  Inventory (migration sku_provisional, migrations purpose + backfill,
+  StockMovementPurpose, StockLedgerAppendOnlyException, StockMovement,
+  StockMovementService, ItemService, Item, resources) · one-arg purpose
+  additions in Procurement/GoodsReceiptService, Sales/DeliveryService,
+  TallySync/TallyOpeningStockService + TallyStockReconcileService · Console/
+  CheckStockLedger · routes · frontend production (productStandardsConfig.ts
+  + test, ConfigurationReviewPanel.tsx, ProductStandardsPage.tsx,
+  ShiftProductionEntryPage.tsx label, api.ts, types.ts; inventory/types.ts)
+
+Migrations:       2026_08_17_130000 (index swap, reversible) · 130001 (packing lines) ·
+                  131000 (sku_provisional) · 150000 (purpose) · 150001 (backfill; down nulls)
+Tests before:     1,352 / 11,879 (backend) · 143 (frontend)
+Tests after:      1,428 / 12,377 (backend, +76) · 190 (frontend, +47)
+                  agent untouched · pint/typecheck/build clean · knowledge sound
+
+Sonnet first gate:   PASS_WITH_DEFERRED (its P1: the importer keyed on
+                     (standard, mode) — below)
+Findings (adversarial: Opus NOT_READY · Fable NOT_READY — no invented value
+found on any read surface; the two P1s were both WRITE paths):
+  P1  An identity-only "Link" from the new review panel PUT mode + the
+      unchanged inner counts + item_id, and the service re-derived
+      nos_per_box = inner × containers on every update — an importer-flagged
+      inconsistent row (105/pouch × 5 beside the sheet's 520, kept verbatim
+      for a person to settle) silently became 525: a factory count the import
+      refused to pick, picked by code (reproduced by two reviewers). FIXED:
+      an identity-only PATCH …/packagings/{p}/identity that sets item_id and
+      provenance and touches no count (fixture/inactive/GUID-less/foreign
+      standard refused, production.manage); the service keeps a stored
+      nos_per_box when the mode and inner counts are unchanged; the panel
+      sends {item_id} only. Red-before 8/10 → 10/10.
+  P1  D1 made `mode` non-unique per standard, but the completion drawer
+      picked the run's packaging BY MODE (three sites) and the entry resource
+      carried no packaging id — with a 490 tray and a 520 tray on one
+      standard a batch started against the 520 tray got the 490 tray's counts
+      pre-filled; quantity_produced is computed from the lines → FG stock and
+      the voucher. FIXED: the resource emits production_standard_packaging_id;
+      one helper packagingForCompletion (id first, mode fallback) at exactly
+      the three sites (page diff 13+/5−); vitest.
+  P2  ProductionStandardImportService updateOrCreate keyed on (standard,
+      mode) → a re-import silently rewrote an arbitrary one of two same-mode
+      rows (a person's 200/5/1000 tray became the sheet's 208/5/1040 —
+      reproduced). FIXED: with more than one row of the mode the importer
+      matches the inner-count tuple; exactly one → update; none/several →
+      untouched and named in a warning (variant.packaging_warnings, summary,
+      both import commands). Red-before 2 → 18/18.
+  P3  candidates not filtered is_active → filtered · a shared Tally NAME
+      cannot be cleared by linking → advisory (fix_target name_ambiguity, no
+      Link, "catalogue duplicate — Q43") · packagingCountsSummary printed a
+      false equation → the stored count shown separately and a mismatch
+      named ("sheet says 520/box; 105/pouch × 5 = 525 — confirm which is
+      right") · a packing line on a run without a standard could cite another
+      product's packaging → nulled on write · report/active-batch queries
+      lacked the packaging eager load → added · no lock on the standard row →
+      lockForUpdate in store()/update() · migration docblocks (the new index
+      is documentation of the variant key — the service refusal is the guard;
+      the purpose backfill's down() reverses only with its column migration
+      and only the backfilled values) · workspace showed the first-of-mode
+      only → one line per same-mode packaging · soft-deleted tallyItem and
+      migration round-trip pinned by tests · Q45 (must a standard keep one
+      default packaging?) recorded.
+  P3  (recorded) the resolver's packaging rung changes expected_boxes/pouches
+      for entries completed WITHOUT a typed box count whose packaging differs
+      from the item master — the intended §4.14 correction, byte-identical on
+      every other rung and on the whole existing suite; Tally payloads read
+      no pack count (TallySyncService::producedScrapLine reads rejection/lumps
+      kg only) — stated precisely rather than "byte-identical" outright.
+Fixes:               af8ad0c — all of the above; 1,428 / 12,377 · 190 vitest.
+Sonnet final gate:   re-gate PASS — both P1 guards mutation-tested (revert →
+                     the exact original bug reproduces, fix → green), the
+                     importer's tuple match likewise; the page diff exactly
+                     the named sites; agent untouched; knowledge exit 0. One
+                     low note: on a pouch/tray PUT with unchanged inner
+                     counts an explicit nos_per_box in the payload is ignored
+                     in favour of the stored value (as before the fix — the
+                     field was always derived for those modes); to settle a
+                     disagreeing box count a person changes an inner count.
+Independent review:  Opus NOT_READY → both P1s fixed · Fable NOT_READY → fixed.
+
+API proof (dev API, Administrator; dev DB migrated — five migrations DONE):
+  inventory:check-ledger → "VERDICT: clean — every stock balance equals the
+  sum of its movements." (37 movements, 20 balances) exit 0.
+  GET production/products/{1,2,3}/variants → configuration_status
+  {complete:false, missing:[standard, tally_identity]} for the resins (no
+  standards — honest), standards=0. GET production/configuration/review →
+  103 rows on the dev seed (every product is a LOCAL- fixture): kind
+  packaging_no_identity, missing [tally_identity], candidates [] (no Tally-
+  pulled item bears the name), fix_target packaging_item / attach_item.
+
+Browser proof (Chrome MCP, vite dev, Administrator):
+  /production/configuration?tab=products → "Needs review — 103 packing
+  identities still waiting on a person" panel with What / Product / Currently /
+  Missing / Link an existing Tally item; the candidate cell reads "No Tally
+  item matches this name. Tally has to carry the product first — the ERP
+  never creates one." (screenshot-1786947771411-19.jpg).
+
+Data/transaction proof:
+  Nothing that reaches Tally changed (payload builders untouched; the pack-
+  quantity reader is byte-identical on existing data). No historical
+  production rewritten. Migrations additive/reversible (up/down/up proved on
+  sqlite by the implementer). No stock change: purposes are labels; the
+  backfill touches only `purpose`.
+
+Security proof:
+  New reads under module:production (production.view); the review panel's
+  link action under production.manage; ledger command read-only.
+
+Deferred items:
+  • ProductionStandardImportService still updateOrCreates packagings keyed on
+    (standard, mode) — with two same-mode rows a re-import updates the first
+    found (noted; the import is the workbook path).
+  • config_snapshot's start-frozen pack values are not a resolver rung (entry
+    columns → live packaging row → item) — flagged for history preservation
+    review.
+  • The workspace endpoint carries no configuration_status yet — the table
+    tag is derived client-side by the SAME rule; embed the server verdict
+    later.
+  • FinishedCartonService/Resource labels read config_snapshot (a different
+    precedence) — not routed through the resolver; ProductReadinessService /
+    SalesCostInsightService gates untouched.
+
+Owner-gated items:  Q33 (490/box mapping), any ambiguous SKU→Tally link, the SKU
+                    format programme, Q43 (block vs warn); "must a standard
+                    keep one default packaging" — listed, not decided.
+PR:                 (recorded on open)
+Deployment state:   not deployed; stack #179 → … → #185 → this PR
+Next phase:         5.5 — Shift Floor → Start → Estimation → Complete → Completed Today
+```
