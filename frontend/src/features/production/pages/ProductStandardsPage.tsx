@@ -24,7 +24,7 @@ import {
 } from 'antd';
 import type { FormInstance } from 'antd';
 import dayjs from 'dayjs';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { listAllItems } from '@/features/inventory/api';
 import {
@@ -53,7 +53,21 @@ import {
     updateProductionConfiguration,
     updateStandardPackaging,
 } from '@/features/production/api';
+import ConfigurationReviewPanel from '@/features/production/components/ConfigurationReviewPanel';
 import { useProductionSettings } from '@/features/production/packing';
+import {
+    PACKING_MODE_LABEL,
+    attachmentNote,
+    fmt,
+    missingWords,
+    num,
+    packagingState,
+    pkg,
+    provisionalSkuTag,
+    standardSpec,
+    tallyIdentityLabel,
+    type PackagingState,
+} from '@/features/production/productStandardsConfig';
 import type {
     ProductionConfiguration,
     ProductStandardGap,
@@ -63,7 +77,6 @@ import type {
     StandardPackaging,
     StandardPackagingMode,
     StandardSpecColumn,
-    StandardSpecProvenance,
 } from '@/features/production/types';
 import { itemLabel } from '@/lib/itemLabel';
 
@@ -120,22 +133,9 @@ const DEFAULT_PAGE_SIZE = PRODUCT_STANDARDS_PAGE_SIZES[0];
 /** Figures line up column-wise only if the digits are the same width. */
 const numeric = { fontVariantNumeric: 'tabular-nums' } as const;
 
-/** The standard's packaging row for one mode, if the workbook gave one. */
-const pkg = (r: ProductStandardsWorkspaceRow, mode: StandardPackagingMode) =>
-    r.packagings.find((p) => p.mode === mode);
-
-const fmt = (v: string | number | null | undefined, suffix = ''): string => {
-    if (v === null || v === undefined || v === '') return '—';
-    const n = typeof v === 'number' ? v : parseFloat(v);
-    return Number.isNaN(n) ? '—' : `${parseFloat(n.toFixed(4))}${suffix}`;
-};
-
-/** A decimal string from the wire, as a number a form control can hold. */
-const num = (v: string | number | null | undefined): number | undefined => {
-    if (v === null || v === undefined || v === '') return undefined;
-    const n = typeof v === 'number' ? v : parseFloat(v);
-    return Number.isNaN(n) ? undefined : n;
-};
+// `pkg`, `fmt`, `num`, `attachmentNote`, `standardSpec` and PACKING_MODE_LABEL
+// live in productStandardsConfig.ts (pure, vitest-covered) and are imported
+// above; the page keeps only what renders.
 
 const STATUS: Record<string, { colour: string; label: string; help: string }> = {
     approved: { colour: 'green', label: 'Approved', help: 'Signed off by a person.' },
@@ -157,43 +157,9 @@ const CONFIG_STATUS_COLOUR: Record<string, string> = {
     inactive: 'default',
 };
 
-const PACKING_MODE_LABEL: Record<StandardPackagingMode, string> = {
-    pouch: 'Pouch',
-    tray: 'Tray',
-    direct_box: 'Straight into the box',
-};
-
 // ---------------------------------------------------------------------------
 // Packing-material specs, and whether the value in the cell was inferred
 // ---------------------------------------------------------------------------
-
-/**
- * A packing-material spec, plus its provenance entry when one exists.
- *
- * The workbook leaves some of these blank and the factory can still answer
- * them from its own sheet — 375ML KIDNEY's carton is the 500ML KIDNEY's
- * carton, stated two rows above it. What such a fill must never do is *look*
- * like the factory stated it here, which is why the source travels beside the
- * value rather than inside it.
- *
- * A column with no entry in the map came from the workbook verbatim.
- */
-function standardSpec(
-    r: ProductStandardsWorkspaceRow,
-    column: StandardSpecColumn,
-): { value: string | null; inferred: StandardSpecProvenance | null } {
-    const value =
-        column === 'carton_spec' ? r.carton_spec : column === 'tray_spec' ? r.tray_spec : r.pouch_spec;
-
-    // `inferred: false` would be a stated value whose origin happens to be
-    // recorded — no marker, because it needs no caveat.
-    const entry = r.spec_provenance?.[column] ?? null;
-
-    return {
-        value: value === null || value === undefined || value === '' ? null : value,
-        inferred: entry && entry.inferred !== false ? entry : null,
-    };
-}
 
 const specCell = (r: ProductStandardsWorkspaceRow, column: StandardSpecColumn) => {
     const { value, inferred } = standardSpec(r, column);
@@ -230,25 +196,36 @@ const specCell = (r: ProductStandardsWorkspaceRow, column: StandardSpecColumn) =
 };
 
 /**
- * How this standard came to point at its Tally item, in one line — or nothing,
- * which is itself the answer for the rows the importer matched by name.
- *
- * `item_attached_by` is a users foreign key, so an endpoint that has not
- * eager-loaded the relation sends a bare id. An id is not a name: "attached by
- * 7" tells nobody anything and reads as a bug. The DATE still says the thing
- * that matters most — that a PERSON decided this in the app, rather than the
- * importer matching two strings — so it is shown either way, named or not.
+ * A packing that is not yet configured (Phase 5): its counts unstated, or no
+ * real Tally item to post as — its own identity, else the product's
+ * (DEC-20260810-003). The tag names the missing pieces in words, from the
+ * server's keys; a bare "incomplete" would send someone hunting.
  */
-const attachmentNote = (r: ProductStandardsWorkspaceRow): string | null => {
-    const by = r.item_attached_by;
-    const name = by !== null && by !== undefined && typeof by !== 'number' ? (by.name ?? '').trim() : '';
-    const on = r.item_attached_at ? r.item_attached_at.slice(0, 10) : '';
+function IncompleteTag({ state, style }: { state: PackagingState; style?: CSSProperties }) {
+    const words = missingWords(state.missing);
+    return (
+        <Tooltip title={words === '' ? undefined : `${words} missing.`}>
+            <Tag color="orange" style={{ fontWeight: 600, ...style }}>
+                {words === '' ? 'INCOMPLETE' : `INCOMPLETE — ${words} missing`}
+            </Tag>
+        </Tooltip>
+    );
+}
 
-    if (name === '' && on === '') return null;
-    if (name === '') return `attached here · ${on}`;
-
-    return on === '' ? `attached by ${name}` : `attached by ${name} · ${on}`;
-};
+/**
+ * The item's SKU is still the one the Tally pull seeded from its name and
+ * nobody has set it (P5-02 `sku_provisional`). Says that and no more: which
+ * SKU it should carry is the SKU format programme's answer, the owner's.
+ */
+function ProvisionalSkuTag({ item }: { item: Parameters<typeof provisionalSkuTag>[0] }) {
+    const text = provisionalSkuTag(item);
+    if (text === null) return null;
+    return (
+        <Tooltip title="The SKU was seeded from the Tally item name when the item was pulled, and no person has set it yet. Setting the SKU on the item master clears this.">
+            <Tag color="purple">{text}</Tag>
+        </Tooltip>
+    );
+}
 
 const showSaveError = (error: any, title: string) => {
     const errors = error?.response?.data?.errors;
@@ -1580,35 +1557,52 @@ function ProductConfigurationDrawer({
                 </Typography.Text>
             ) : (
                 <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                    {row.packagings.map((p) => (
-                        <div key={p.id}>
-                            <Typography.Text style={numeric}>
-                                {PACKING_MODE_LABEL[p.mode]} — <b>{p.nos_per_box ?? '—'}</b> pieces per box
-                                {p.mode === 'pouch' && p.nos_per_pouch ? ` (${p.nos_per_pouch}/pouch × ${p.pouches_per_box ?? '—'})` : ''}
-                                {p.mode === 'tray' && p.nos_per_tray ? ` (${p.nos_per_tray}/tray × ${p.trays_per_box ?? '—'})` : ''}
-                                {p.id === row.resolved_packaging_id ? ' · used by a run' : ''}
-                            </Typography.Text>
-                            {/* Which Tally item THIS packing posts as
-                                (DEC-20260810-003). The fallback is stated in
-                                so many words, with the edit right beside it —
-                                an unknown identity is a question on screen,
-                                never a guess. */}
-                            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
-                                {p.tally_item?.name
-                                    ? <>Posts to Tally as <b>{p.tally_item.name}</b></>
-                                    : <>Posts to Tally as the product's own item (no identity of its own yet)</>}
-                                {' '}
-                                <Button
-                                    type="link"
-                                    size="small"
-                                    style={{ padding: 0, height: 'auto' }}
-                                    onClick={() => setEditingPackaging(p)}
-                                >
-                                    {p.tally_item?.name ? 'Change' : 'Set the Tally identity'}
-                                </Button>
-                            </Typography.Text>
-                        </div>
-                    ))}
+                    {row.packagings.map((p) => {
+                        // The product's item is the fallback identity
+                        // (DEC-20260810-003), so it is part of the verdict.
+                        const state = packagingState(p, item);
+                        return (
+                            <div key={p.id}>
+                                <Typography.Text style={numeric}>
+                                    {PACKING_MODE_LABEL[p.mode]} — <b>{p.nos_per_box ?? '—'}</b> pieces per box
+                                    {p.mode === 'pouch' && p.nos_per_pouch ? ` (${p.nos_per_pouch}/pouch × ${p.pouches_per_box ?? '—'})` : ''}
+                                    {p.mode === 'tray' && p.nos_per_tray ? ` (${p.nos_per_tray}/tray × ${p.trays_per_box ?? '—'})` : ''}
+                                    {p.id === row.resolved_packaging_id ? ' · used by a run' : ''}
+                                </Typography.Text>
+                                {/* Configured or not (Phase 5): counts stated AND
+                                    a real Tally item to post as (its own, else
+                                    the product's). The tag carries the missing
+                                    pieces in words, so "incomplete" is never a
+                                    bare verdict. */}
+                                {!state.complete && <IncompleteTag state={state} style={{ marginLeft: 8 }} />}
+                                {/* Which Tally item THIS packing posts as
+                                    (DEC-20260810-003): "sku · name" when it has
+                                    one of its own; otherwise the fallback is
+                                    stated in so many words, with the edit right
+                                    beside it — an unknown identity is a
+                                    question on screen, never a guess. */}
+                                <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
+                                    {p.tally_item ? (
+                                        <>Tally identity: <b>{tallyIdentityLabel(p.tally_item)}</b></>
+                                    ) : (
+                                        <>
+                                            {tallyIdentityLabel(null)} of its own — posts to Tally as the product's item
+                                            {item ? <> (<b>{tallyIdentityLabel(item)}</b>)</> : ' (none attached yet)'}
+                                        </>
+                                    )}
+                                    {' '}
+                                    <Button
+                                        type="link"
+                                        size="small"
+                                        style={{ padding: 0, height: 'auto' }}
+                                        onClick={() => setEditingPackaging(p)}
+                                    >
+                                        {p.tally_item ? 'Change' : 'Set the Tally identity'}
+                                    </Button>
+                                </Typography.Text>
+                            </div>
+                        );
+                    })}
                 </Space>
             )}
             <div style={{ marginTop: 8 }}>
@@ -1705,6 +1699,7 @@ function ProductConfigurationDrawer({
                         ) : (
                             <Tag color="orange">not in Tally</Tag>
                         )}
+                        <ProvisionalSkuTag item={item} />
                         {/* Editable identity (DEC-20260810-003) — the modal
                             asks for confirmation and the backend records the
                             re-point with a name and date. */}
@@ -2035,6 +2030,22 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
                 />
             )}
 
+            {/* NEEDS REVIEW (Phase 5, P5-03): every configuration that still
+                waits on a person — a packing with no Tally identity of its
+                own, one whose identity name is carried by more than one item,
+                an item still on its provisional SKU — with the Tally items
+                that match by name so the person LINKS one. The panel writes
+                through the same packaging PUT the drawer uses; it never
+                creates an item and never picks a match itself. */}
+            <ConfigurationReviewPanel
+                onFindInTable={(product) => {
+                    setView('all');
+                    setSearchInput(product);
+                    setSearch(product);
+                    setPage(1);
+                }}
+            />
+
             {/* THE "Which machines a product runs on" PANEL IS GONE.
 
                 Five sentences explaining a rule the software already applies by
@@ -2207,6 +2218,7 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
                                                     <Tag color="orange">not in Tally</Tag>
                                                 </Tooltip>
                                             )}
+                                            <ProvisionalSkuTag item={r.item} />
                                         </Space>
                                         {/* Silent for a row the IMPORTER matched
                                             by name — which is the truth about
@@ -2228,6 +2240,47 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
                                         <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setAttaching(r)}>
                                             Attach
                                         </Button>
+                                    </Space>
+                                ),
+                        },
+                        {
+                            // Each packing's OWN Tally identity (DEC-20260810-003)
+                            // and whether it is configured (Phase 5). One line
+                            // per packing: the mode, then "sku · name" or the
+                            // honest "no Tally identity of its own", then the
+                            // missing pieces — judged on the identity it WILL
+                            // post as (its own, else the product's). Beside the
+                            // product's item on purpose — the two identities
+                            // are read together.
+                            title: 'PACKING → TALLY',
+                            width: 260,
+                            render: (_, r) =>
+                                r.packagings.length === 0 ? (
+                                    <Typography.Text type="secondary">—</Typography.Text>
+                                ) : (
+                                    <Space direction="vertical" size={2}>
+                                        {r.packagings.map((p) => {
+                                            const state = packagingState(p, r.item);
+                                            return (
+                                                <div key={p.id} style={{ fontSize: 12, lineHeight: '18px' }}>
+                                                    <Typography.Text type="secondary">{PACKING_MODE_LABEL[p.mode]}: </Typography.Text>
+                                                    <Tooltip
+                                                        title={
+                                                            p.tally_item
+                                                                ? 'This packing posts to Tally under its own item.'
+                                                                : 'No identity of its own — this packing posts as the product\'s item.'
+                                                        }
+                                                    >
+                                                        <Typography.Text type={p.tally_item ? undefined : 'secondary'}>
+                                                            {p.tally_item ? tallyIdentityLabel(p.tally_item) : `${tallyIdentityLabel(null)} of its own`}
+                                                        </Typography.Text>
+                                                    </Tooltip>
+                                                    {!state.complete && (
+                                                        <IncompleteTag state={state} style={{ marginLeft: 6, fontSize: 11 }} />
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
                                     </Space>
                                 ),
                         },

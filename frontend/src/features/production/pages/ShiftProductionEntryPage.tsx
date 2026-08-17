@@ -77,6 +77,7 @@ import {
     readStockShortfalls,
 } from '@/features/production/types';
 import { currentShift, justEndedShift, productionDateFor } from '@/features/production/shiftClock';
+import { incompleteWordsFromServer } from '@/features/production/productStandardsConfig';
 import { cavityPrefill } from '@/features/production/startBatchCavities';
 import { roundPer, useProductionSettings } from '@/features/production/packing';
 import { itemLabel } from '@/lib/itemLabel';
@@ -5763,7 +5764,12 @@ export default function ShiftProductionEntryPage() {
                                     // doesn't take.
                                     options={chosen.packagings.map((p) => ({
                                         value: p.id,
-                                        label: p.is_complete ? p.label : `${p.label} — incomplete in workbook`,
+                                        // The server's own missing pieces when the
+                                        // preview carries them ("incomplete: counts
+                                        // missing"); the old wording otherwise.
+                                        label: p.is_complete
+                                            ? p.label
+                                            : `${p.label} — ${incompleteWordsFromServer(p) ?? 'incomplete in workbook'}`,
                                         disabled: !p.is_complete,
                                     }))}
                                 />

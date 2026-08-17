@@ -1890,7 +1890,7 @@ export interface StandardPackaging {
      * product identity"), never guess. Optional because older payload shapes
      * (and the workspace's toArray) may omit or nest it differently.
      */
-    tally_item?: { id: number; name: string } | null;
+    tally_item?: PackagingTallyItem | null;
     /**
      * Whether the row can actually run a batch: pieces per box plus its
      * mode's inner count, both stated. A half-stated workbook row (item
@@ -1898,6 +1898,53 @@ export interface StandardPackaging {
      * disables it, and the server refuses to resolve it either way.
      */
     is_complete: boolean;
+    /**
+     * Phase 5 (P5-06): whether this packing is CONFIGURED — counts stated
+     * AND a real Tally item to post as (its own identity, else the
+     * product's) — and, when it is not, which pieces are missing, in the
+     * server's keys (`counts`, `tally_identity`, …). Additive: the batch
+     * preview embeds it per packaging; the workspace's `toArray()` rows do
+     * not carry it and derive the same answer locally by the same rule
+     * (see productStandardsConfig.ts `packagingState`).
+     */
+    configuration_status?: ConfigurationCompleteness | null;
+}
+
+/**
+ * The Tally item a packing posts as. Three producers, three widths: the
+ * packaging write sends `{id, name}`; the batch preview and the variants
+ * endpoint send `{id, sku, name, guid}`; the workspace rows carry the
+ * eager-loaded Item verbatim (`sku`, `tally_stock_item_guid`, …).
+ * Everything past `id` and `name` is optional so a reader can show the SKU
+ * when it has one and say nothing when it does not.
+ */
+export interface PackagingTallyItem {
+    id: number;
+    name: string;
+    sku?: string | null;
+    guid?: string | null;
+    tally_stock_item_guid?: string | null;
+}
+
+/**
+ * "Is this configured, and if not, what is missing?" — the server's verdict
+ * on one packing, one standard or one product (ProductVariantService,
+ * P5-02 / P5-06). `missing` holds the server's KEYS in the server's order —
+ * `standard`, `cavities`, `unit_weight`, `cycle_time`, `packaging`, `counts`,
+ * `tally_identity` — never sentences; the words a person reads are made from
+ * them once, on the client (productStandardsConfig.ts), so an unknown key
+ * still shows rather than vanishing.
+ *
+ * Two spellings of the verdict arrive and both are read: a packing or a
+ * standard says `state: 'complete' | 'incomplete'`, the product says
+ * `complete: boolean`. A packing's verdict also carries `ambiguity` — set
+ * when the identity it resolves to has a NAME shared by more than one item.
+ */
+export interface ConfigurationCompleteness {
+    complete?: boolean;
+    state?: 'complete' | 'incomplete';
+    missing: string[];
+    ambiguity?: { shared_name_count: number } | null;
 }
 
 /**
@@ -1914,6 +1961,8 @@ export interface StandardVariant {
     cycle_time: string | null;
     status: 'draft' | 'approved' | 'unresolved';
     packagings: StandardPackaging[];
+    /** Phase 5 additive: the variant's own configured-or-not verdict, when the server sends it. */
+    configuration_status?: ConfigurationCompleteness | null;
 }
 
 /** Advisory only — watch mode never blocks a start. */
@@ -2224,6 +2273,149 @@ export interface ProductStandardsSummary {
     ready: number;
     incomplete: number;
     all: number;
+}
+
+// ---------------------------------------------------------------------------
+// PHASE 5 — the product / SKU configuration surfaces (P5-02, P5-03).
+//
+// One logical product = one items row; its variants are the production
+// standards, each with its packagings, and EACH PACKAGING carries its own
+// Tally identity (DEC-20260810-003). These two reads answer "is this product
+// fully configured?" and "which configurations still need a person?" — and
+// the only writes either leads to are the EXISTING ones (the packaging PUT
+// with an item_id, the standard's attach-item, the item's SKU): a human
+// LINKS an existing Tally item; the ERP never invents one, and never picks
+// one on a person's behalf.
+// ---------------------------------------------------------------------------
+
+/** The five packing counts, as the review surface carries them per packaging. */
+export interface PackagingCounts {
+    nos_per_pouch?: number | null;
+    pouches_per_box?: number | null;
+    nos_per_tray?: number | null;
+    trays_per_box?: number | null;
+    nos_per_box?: number | null;
+}
+
+/** The product an item IS, with its provisional-SKU flag (P5-02). */
+export interface ProductVariantsItem {
+    id: number;
+    sku: string;
+    name: string;
+    guid: string | null;
+    /**
+     * TRUE while the SKU is the name-derived one the Tally pull seeded and
+     * no person has set it. Never says what the SKU SHOULD be — the SKU
+     * format programme is the owner's, and this screen only marks the rows
+     * still waiting on it.
+     */
+    sku_provisional: boolean;
+}
+
+/** One packaging as the variants endpoint describes it — counts, identity, verdict. */
+export interface ProductVariantPackaging extends PackagingCounts {
+    id: number;
+    mode: StandardPackagingMode;
+    label: string;
+    is_default: boolean;
+    /** Runnable on its counts alone — the older flag the Start Batch picker disables on. */
+    is_complete: boolean;
+    /** The packing's OWN identity, or null when it posts as the product's item. */
+    tally_item: PackagingTallyItem | null;
+    /** The item it WILL post as — its own, else the product's (DEC-20260810-003); null when neither exists. */
+    resolved_tally_item: PackagingTallyItem | null;
+    uses_product_identity: boolean;
+    state: 'complete' | 'incomplete';
+    missing: string[];
+    /**
+     * Set when the identity this packing resolves to has a NAME carried by
+     * more than one items row, so the name alone cannot say which — the
+     * review surface lists it as `packaging_ambiguous` and a person chooses.
+     */
+    ambiguity: { shared_name_count: number } | null;
+    /** The same verdict under the key every other surface reads. */
+    configuration_status: ConfigurationCompleteness;
+}
+
+export interface ProductVariantStandard {
+    id: number;
+    label: string;
+    source_product_name: string;
+    cavities: number | null;
+    unit_weight_grams: string | null;
+    cycle_time: string | null;
+    status: 'draft' | 'approved' | 'unresolved';
+    unresolved_reason: string | null;
+    packagings: ProductVariantPackaging[];
+    /** The standard's own figures + its packing + its product's identity, plus every word its packagings say. */
+    configuration_status: ConfigurationCompleteness;
+}
+
+/** GET production/products/{item}/variants */
+export interface ProductVariants {
+    item: ProductVariantsItem;
+    standards: ProductVariantStandard[];
+    configuration_status: ConfigurationCompleteness;
+}
+
+/**
+ * The three kinds of row the review surface lists — a packaging with no
+ * Tally identity of its own, a packaging whose identity name is shared by
+ * more than one item, and an item still on its provisional SKU. A closed
+ * union on purpose: a fourth kind added on the server should fail this
+ * typecheck rather than arrive on the panel labelled with its raw slug.
+ */
+export type ConfigurationReviewKind = 'packaging_no_identity' | 'packaging_ambiguous' | 'item_provisional_sku';
+
+/**
+ * A Tally item offered as a possible identity — matched by exact /
+ * normalised NAME, from Tally-pulled rows only (never a local fixture). A
+ * shortlist to read, never a decision: nothing is written until a person
+ * picks one.
+ */
+export interface ConfigurationReviewCandidate {
+    id: number;
+    sku: string | null;
+    name: string;
+    guid: string | null;
+}
+
+/**
+ * Where a review row's fix goes — which EXISTING endpoint closes it:
+ * the packaging's own item_id (PUT packagings), the product's item (POST
+ * attach-item), or the item's SKU (PUT inventory/items). Optional: a
+ * backend that predates the key leaves the panel to infer it from the row.
+ */
+export type ConfigurationReviewFixTarget = 'packaging_item' | 'attach_item' | 'item_sku';
+
+/** One thing a person has to look at (P5-03). */
+export interface ConfigurationReviewRow {
+    kind: ConfigurationReviewKind;
+    /** The standard the packaging belongs to; null on an item-only row. */
+    standard: { id: number; product: string } | null;
+    /**
+     * The packaging concerned. Null on an item-only row — and on a
+     * `packaging_no_identity` row that is about the STANDARD itself (its
+     * product's identity is missing and no packing inherits it), whose fix
+     * is attach-item rather than a packaging link.
+     */
+    packaging: { id: number; mode: StandardPackagingMode; counts: PackagingCounts | null } | null;
+    /**
+     * The item the row is ABOUT: the identity the packing resolves to today
+     * (its own, else the product's — null when it resolves to nothing), or
+     * the provisional-SKU item itself.
+     */
+    item: { id: number; sku: string | null; name: string } | null;
+    /** The server's keys for what is missing — same vocabulary as ConfigurationCompleteness.missing. */
+    missing: string[];
+    ambiguity?: { shared_name_count: number } | null;
+    candidates: ConfigurationReviewCandidate[];
+    fix_target?: ConfigurationReviewFixTarget;
+}
+
+/** GET production/configuration/review */
+export interface ConfigurationReview {
+    rows: ConfigurationReviewRow[];
 }
 
 // ---------------------------------------------------------------------------

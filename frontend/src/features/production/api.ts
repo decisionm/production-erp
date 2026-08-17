@@ -1,6 +1,8 @@
 import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
 import type {
+    ConfigurationReview,
+    ProductVariants,
     ProductionStandardRow,
     ProductStandardsSummary,
     ProductStandardsView,
@@ -687,6 +689,29 @@ export async function updateStandardPackaging(
         `/production/standards/${standardId}/packagings/${packagingId}`,
         payload,
     );
+    return data.data;
+}
+
+/**
+ * One product's whole variant model (P5-02): the item, every standard with
+ * its packagings, each packaging's own Tally identity and its
+ * configured-or-not verdict, and the product-level verdict.
+ */
+export async function getProductVariants(itemId: number): Promise<ProductVariants> {
+    const { data } = await api.get<{ data: ProductVariants }>(`/production/products/${itemId}/variants`);
+    return data.data;
+}
+
+/**
+ * Everything in the product configuration that still needs a person
+ * (P5-03): packagings with no Tally identity, packagings whose identity
+ * name is shared by more than one item, items on a provisional SKU — each
+ * with the Tally items that match by name, so the person LINKS one through
+ * `updateStandardPackaging` (item_id). Read-only; the ERP never creates a
+ * Tally-less item for real production and never picks a match itself.
+ */
+export async function getConfigurationReview(): Promise<ConfigurationReview> {
+    const { data } = await api.get<{ data: ConfigurationReview }>('/production/configuration/review');
     return data.data;
 }
 
