@@ -85,6 +85,15 @@ class ExportRequest extends FormRequest
 
     public function rules(): array
     {
-        return $this->kind()->filterRules();
+        $kind = $this->kind();
+
+        // A blocked kind has ONE answer — its reason (409). Its documented
+        // filters are for the catalogue's form, not a gate a body must pass
+        // before hearing that the kind is blocked.
+        if ($kind->status() === ExportKind::STATUS_BLOCKED) {
+            return [];
+        }
+
+        return $kind->filterRules();
     }
 }

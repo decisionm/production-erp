@@ -43,7 +43,7 @@ class CsvStreamerTest extends TestCase
         yield 'negative number then newline' => ["-1\n", "\"'-1\n\""];
         yield 'plus sign alone' => ['+', "'+"];
 
-        // RFC-4180 quoting: commas, quotes, line breaks; quotes doubled.
+        // RFC 4180 quoting: commas, quotes, line breaks; quotes doubled.
         yield 'comma' => ['a,b', '"a,b"'];
         yield 'quote' => ['say "hi"', '"say ""hi"""'];
         yield 'newline' => ["line1\nline2", "\"line1\nline2\""];

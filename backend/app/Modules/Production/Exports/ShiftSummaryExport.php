@@ -2,6 +2,7 @@
 
 namespace App\Modules\Production\Exports;
 
+use App\Modules\Production\Http\Requests\ShiftSummaryReportRequest;
 use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Services\ShiftSummaryService;
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -50,12 +51,10 @@ class ShiftSummaryExport extends AbstractProductionExport
     }
 
     /** ShiftSummaryController::report's rules (see class docblock) — the date first, as a form reads. */
+    /** The report endpoint's own grammar (ShiftSummaryReportRequest) — never a copy of it. */
     public function filterRules(): array
     {
-        return [
-            'production_date' => ['required', 'date'],
-            'shift_id' => ['nullable', 'integer', 'exists:shifts,id'],
-        ];
+        return (new ShiftSummaryReportRequest)->rules();
     }
 
     public function columns(?Authenticatable $reader): array

@@ -7,7 +7,7 @@ use Symfony\Component\HttpFoundation\HeaderUtils;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
- * Streams RFC-4180 CSV: a UTF-8 BOM (so Excel opens it as UTF-8), CRLF
+ * Streams RFC 4180 CSV: a UTF-8 BOM (so Excel opens it as UTF-8), CRLF
  * line ends, cells quoted only when they contain a comma, a quote or a
  * line break (quotes doubled), and a formula-injection guard that MIRRORS
  * frontend/src/lib/csv.ts EXACTLY — a cell starting with = + - @ tab or CR
@@ -78,8 +78,8 @@ final class CsvStreamer
     }
 
     /**
-     * frontend/src/lib/csv.ts escapeCell, byte for byte: null → empty; the
-     * formula guard; then RFC-4180 quoting. \z (not $) so a trailing
+     * the retired frontend/src/lib/csv.ts escapeCell (ported byte for byte; the JS is gone, CsvStreamerTest is the authority): null → empty; the
+     * formula guard; then RFC 4180 quoting. \z (not $) so a trailing
      * newline cannot make a non-number pass as a number, which JS's $
      * without the m flag never allows.
      */

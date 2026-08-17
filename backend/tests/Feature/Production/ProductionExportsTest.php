@@ -499,8 +499,12 @@ class ProductionExportsTest extends TestCase
             $this->assertSame(CecExport::BLOCKED_REASON, $run->refusal_reason);
         }
 
-        // The grammar still judges a malformed body before the slot answers.
-        $this->postJson('/api/v1/exports/cec', ['date' => 'someday'])->assertUnprocessable()->assertJsonValidationErrors('date');
+        // A blocked kind has ONE answer — its reason — whatever the body: a
+        // malformed date is not judged first (its documented filters feed the
+        // catalogue's form, not a gate before the block).
+        $this->postJson('/api/v1/exports/cec', ['date' => 'someday'])
+            ->assertStatus(409)
+            ->assertJsonPath('message', CecExport::BLOCKED_REASON);
         $this->assertSame(0, app(CecExport::class)->count([], $user));
     }
 

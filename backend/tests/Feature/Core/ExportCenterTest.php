@@ -26,7 +26,7 @@ use Tests\TestCase;
  *   - POST: 404 unknown kind · 403 no permission · 409 blocked with the
  *     reason · 422 over the cap with the exact sentence · else a streamed
  *     CSV attachment named {kind}-{YYYYMMDD-HHMM}.csv in factory time;
- *   - the bytes: UTF-8 BOM, CRLF, RFC-4180 quoting, the formula guard
+ *   - the bytes: UTF-8 BOM, CRLF, RFC 4180 quoting, the formula guard
  *     (mirroring frontend/src/lib/csv.ts) — and a negative number is NOT
  *     quoted or prefixed;
  *   - EVERY POST writes an ExportRun for the caller — streamed (completed,

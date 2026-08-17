@@ -154,3 +154,25 @@ The agent's report surface is the agent's alone (session refused on pending/ack/
 
 ### Still open (from the baseline list)
 `OverReceiptException` · CRM · Finance · `ShiftSummaryService::report()` · second same-mode packaging · `stock_balances == Σ stock_movements` — Phases 5 and 7. **Still:** MySQL CI leg (Phase 7). **New:** agent snapshot for a post made while the cloud was down (journal-persisted, later).
+
+## Phase 4.5 (feat/phase-4.5-export-center, gate closed 2026-08-17)
+
+| Suite | Result | Evidence |
+|---|---|---|
+| Pint (whole tree) | PASS | clean |
+| Backend PHPUnit | PASS | **1,352 / 11,879** (Phase 4 close 1,276 / 9,429; +76: Core/ExportCenterTest 10 · Unit/Core/CsvStreamerTest 27 · TallySyncEntriesExportTest 5 · TallySyncHistoryExportTest 5 · Production/ProductionExportsTest 8 · Procurement/ProcurementListFiltersTest 9 + ProcurementExportsTest 6 · Sales/SalesExportsTest 6) — phpunit.xml memory_limit 512M (the suite sat at PHP's 128M default) |
+| Frontend vitest | PASS | 127 → **143** (`exports/filters.test.ts` 16: schema→control, serialisation, Content-Disposition plain/quoted/RFC 5987, refusal sentences, grouping) |
+| Typecheck · build | PASS | clean · built |
+| Agent | UNTOUCHED | — |
+| Factory-knowledge | PASS | exit 0 (validator regex word-anchored; "RFC 4180" wording) |
+| Red-before / green-after | PROVEN | per kind (rows == endpoint, FC-06 per reader, count == total, catalogue per reader); reviewers' scratch probes: 5,000-row chunk-boundary walk, deliveries decorate parity, history lazy(200) boundary, mid-stream abort, cap boundary |
+| Sonnet independent QA | PASS_WITH_DEFERRED (no P1) | see PHASE-LOG |
+| Adversarial review | Opus PASS_WITH_DEFERRED (2 P2 fixed) · Fable PASS (P3s) | |
+| Browser proof | PASS | /exports cards from the catalogue, generated forms, CEC card disabled with the reason, a real download (blob saved under the server's filename), Recent downloads |
+| API proof | PASS | catalogue per reader; one file per family; cec 409 with the reason; unknown 404; runs |
+
+### Coverage gaps closed this phase
+Server-side exports equal to their lists/reports for the same filters and reader · FC-06 on files (rate columns absent / withheld cells worded) · CSV byte contract (BOM, CRLF, RFC 4180, formula guard, UTF-8, arrays) · stated cap + audit rows · blocked kinds (CEC exact reason; traceability when off) · PO/GRN list filters (new) · frontend schema-driven form and filename parsing.
+
+### Still open (from the baseline list)
+`OverReceiptException` · CRM · Finance · `ShiftSummaryService::report()` (Phase 5.7) · second same-mode packaging (Phase 5 D1) · `stock_balances == Σ stock_movements` (Phase 5) — **Still:** MySQL CI leg (Phase 7).

@@ -70,12 +70,23 @@ class ReconciliationReportExport extends AbstractProductionExport
      * @param  array<string, mixed>  $filters
      * @return array{date_from: string, date_to: string, rows: array<int, array<string, mixed>>}
      */
+    /** @var array{key: string, report: array<string, mixed>}|null the last report, so count() and rows() in one run compute it once */
+    private ?array $memo = null;
+
     private function report(array $filters): array
     {
-        return $this->reports->reconciliationReport(
+        $key = json_encode($filters);
+        if ($this->memo !== null && $this->memo['key'] === $key) {
+            return $this->memo['report'];
+        }
+
+        $report = $this->reports->reconciliationReport(
             (string) $filters['date_from'],
             (string) $filters['date_to'],
             isset($filters['shift_id']) ? (int) $filters['shift_id'] : null,
         );
+        $this->memo = ['key' => $key, 'report' => $report];
+
+        return $report;
     }
 }

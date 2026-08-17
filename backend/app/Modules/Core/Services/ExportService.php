@@ -48,6 +48,11 @@ class ExportService
      */
     public function run(ExportKind $kind, array $filters, Authenticatable $user): StreamedResponse
     {
+        // A per-run copy: a kind may memoise between count() and rows() (the
+        // report kinds do), and the registry's instance is long-lived — the
+        // memo must die with the run, never leak into the next request or
+        // the next test.
+        $kind = clone $kind;
         $fileName = $this->fileName($kind);
 
         if ($kind->status() === ExportKind::STATUS_BLOCKED) {

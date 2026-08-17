@@ -21,7 +21,7 @@ PHASE 2   Sync Control Center — foundation     PASS WITH DEFERRED · PR #181 (
 PHASE 3   Sync Control Center — every type     PASS WITH DEFERRED · PR #182 (stacked on #181) · Q43 fail-closed
 PHASE 3.5 Sales visibility (first-class)       PASS WITH DEFERRED · PR #183 (stacked on #182) · Q44 · Sales stays Tally-originated
 PHASE 4   Agent XML/response snapshot          PASS WITH DEFERRED · PR #184 (stacked on #183) · agent 0.3.8 built, NOT published
-PHASE 4.5 Download / Export Center             NEXT · CEC slot BLOCKED until a sample exists
+PHASE 4.5 Download / Export Center             PASS WITH DEFERRED · PR (stacked on #184) · CEC slot BLOCKED (exact reason) · synchronous, stated cap
 ──────────────────────────── OPERATIONAL WORKFLOW (rev 3) ────────────────────────────
 PHASE 5   Product / SKU configuration          variant model · SKU→Tally identity · multi-match review · pack qty in config
 PHASE 5.5 Shift Floor → Complete → Today       select SKU once · estimation verified · completion durable · Completed Today server-side

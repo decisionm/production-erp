@@ -78,7 +78,7 @@ class ProductionReportExport extends AbstractProductionExport
         }
     }
 
-    /** The report is computed once here and once for rows(): it is bounded to one date and there is no cheaper count that is the same query. */
+    /** count() and rows() share one computed report per run (memoised on the filters). */
     public function count(array $filters, ?Authenticatable $reader): int
     {
         $rows = count($this->report($filters)['rows']);
@@ -90,12 +90,23 @@ class ProductionReportExport extends AbstractProductionExport
      * @param  array<string, mixed>  $filters
      * @return array{date: string, rows: array<int, array<string, mixed>>, totals: array<string, mixed>}
      */
+    /** @var array{key: string, report: array<string, mixed>}|null the last report, so count() and rows() in one run compute it once */
+    private ?array $memo = null;
+
     private function report(array $filters): array
     {
-        return $this->reports->productionReport(
+        $key = json_encode($filters);
+        if ($this->memo !== null && $this->memo['key'] === $key) {
+            return $this->memo['report'];
+        }
+
+        $report = $this->reports->productionReport(
             (string) $filters['date'],
             isset($filters['shift_id']) ? (int) $filters['shift_id'] : null,
             isset($filters['work_center_id']) ? (int) $filters['work_center_id'] : null,
         );
+        $this->memo = ['key' => $key, 'report' => $report];
+
+        return $report;
     }
 }

@@ -69,12 +69,12 @@ return [
     */
 
     'kinds' => [
-        TallySyncEntriesExport::class,
         ShiftSummaryExport::class,
         ProductionReportExport::class,
         ReconciliationReportExport::class,
         TraceabilityReportExport::class,
         CecExport::class,
+        TallySyncEntriesExport::class,
         TallySyncHistoryExport::class,
         SalesOrdersExport::class,
         DeliveriesExport::class,

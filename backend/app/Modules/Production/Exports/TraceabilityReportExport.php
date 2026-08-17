@@ -19,6 +19,12 @@ use Illuminate\Support\Arr;
  * report's own lot / bag / fed arrays side by side; the columns dot into
  * them and every figure is the report's.
  *
+ * DELIBERATE DIVERGENCE FROM THE ROUTE: with the flag off the report's own
+ * route answers 404 (EnsureTraceabilityEnabled), while this kind is
+ * catalogued BLOCKED and answers 409 with the reason — the Center has no
+ * "hidden" state and a stated reason beats a route that pretends not to
+ * exist. Do not "fix" one to match the other.
+ *
  * The report exists only with production.traceability_enabled on (its
  * route answers 404 otherwise — EnsureTraceabilityEnabled); with the flag
  * off this kind is BLOCKED with the reason, never a file for a screen that
@@ -111,14 +117,25 @@ class TraceabilityReportExport extends AbstractProductionExport
      * @param  array<string, mixed>  $filters
      * @return array{date_from: string, date_to: string, lots: array<int, array<string, mixed>>}
      */
+    /** @var array{key: string, report: array<string, mixed>}|null the last report, so count() and rows() in one run compute it once */
+    private ?array $memo = null;
+
     private function report(array $filters): array
     {
-        return $this->reports->traceabilityReport(
+        $key = json_encode($filters);
+        if ($this->memo !== null && $this->memo['key'] === $key) {
+            return $this->memo['report'];
+        }
+
+        $report = $this->reports->traceabilityReport(
             isset($filters['lot_id']) ? (int) $filters['lot_id'] : null,
             isset($filters['item_id']) ? (int) $filters['item_id'] : null,
             (string) $filters['date_from'],
             (string) $filters['date_to'],
         );
+        $this->memo = ['key' => $key, 'report' => $report];
+
+        return $report;
     }
 
     /**
