@@ -2,6 +2,7 @@ import type { Employee } from '@/features/hrms/types';
 import type { Item, Warehouse } from '@/features/inventory/types';
 import type { Vendor } from '@/features/procurement/types';
 import type { TallyLink } from '@/features/sales/types';
+import type { TallySyncStatus } from '@/features/tally-sync/types';
 
 export interface WorkCenter {
     id: number;
@@ -1105,9 +1106,36 @@ export interface ShiftKpiReport {
     rejection_kg: string;
     net_good_output_kg: string;
     efficiency_percent: number | null;
+    /**
+     * What efficiency_percent is measured AGAINST (Phase 5.7): the
+     * supervisor-typed target_production_kg — the only basis the server has
+     * — or null when no target was typed and the percentage is null too.
+     * Optional: a backend that predates the key omits it.
+     */
+    efficiency_basis?: 'supervisor_target' | null;
+    /**
+     * Where the two raw inputs came from (Phase 5.7): 'supervisor' when a
+     * summary row on this date carries the figure, null when none does —
+     * the report never invents a target or a power reading. Optional: a
+     * backend that predates the key omits it.
+     */
+    kpi_inputs?: {
+        target_production_kg: 'supervisor' | null;
+        power_consumption_units: 'supervisor' | null;
+    };
     rejection_percent: number | null;
+    /**
+     * LIVE counts, not the date's fact: machines_running is the machines with
+     * a batch in progress RIGHT NOW (filed under this date/shift) and
+     * machines_down the machines with an OPEN breakdown right now. Phase 5.7
+     * names them so — `machines_running_now` / `machines_down_now` — and keeps
+     * the old keys as aliases for one release; read the new key first and
+     * fall back to the old.
+     */
     machines_running: number;
     machines_down: number;
+    machines_running_now?: number;
+    machines_down_now?: number;
     idle_time_hours: string;
     no_of_mold_changes: number;
     power_consumption_units: string | null;
@@ -1120,6 +1148,86 @@ export interface ShiftKpiReport {
     mold_change_logs: ShiftKpiMoldChangeLog[];
     power_interruption_logs: ShiftKpiPowerInterruptionLog[];
     stock_counts: ShiftKpiStockCount[];
+}
+
+/**
+ * GET production/cec (Phase 5.7, WS-B) — the CEC's DATA, composed thinly on
+ * the server from the two things the factory already computes for a date:
+ * the Shift KPI Summary (per shift, and the day) and the entries index's
+ * completed rows (the Completed Today read), grouped by machine. Every
+ * figure IS one of theirs; the only server-side arithmetic is a plain sum,
+ * labelled as one (`sums.basis`). THE FORMAT IS NOT KNOWN: no CEC sample
+ * exists in the repo, the export kind stays blocked, and `format` says so
+ * verbatim. The frontend previews these figures and computes nothing.
+ */
+export interface CecBatch {
+    entry_id: number;
+    batch_number: string | null;
+    item: { id: number; sku: string | null; name: string | null } | null;
+    /** metrics.expected_pieces — null when the run had no standard. */
+    expected_pieces: string | null;
+    actual_pieces: string | null;
+    good_production_kg: string | null;
+    /** metrics.rejection_kg_production. */
+    rejection_kg: string | null;
+    /** metrics.rejection_kg_qc — null until quality weighs it. */
+    rejection_kg_qc: string | null;
+    efficiency_pct: number | null;
+    efficiency_band: ProductionMetrics['efficiency_band'] | null;
+    expected_boxes: number | null;
+    /** no_of_box as entered at Complete Batch. */
+    packs: number | null;
+    /** metrics.downtime_minutes_total ("30.00"). */
+    downtime_minutes_total: string | null;
+    calculation_version: string | null;
+    approval_status: ShiftProductionEntryStatus | null;
+    tally_status: TallySyncStatus | null;
+    tally: TallyLink | null;
+}
+
+/**
+ * A plain sum over a block's batches — every key the server's, a null where
+ * there was nothing to sum (never an invented zero), `skipped_nulls` naming
+ * how many batches each figure could not include, `basis` the sentence
+ * that says so.
+ */
+export interface CecSums {
+    batches: number;
+    expected_pieces: string | null;
+    actual_pieces: string | null;
+    good_production_kg: string | null;
+    rejection_kg: string | null;
+    packs: number | null;
+    downtime_minutes_total: string | null;
+    skipped_nulls: Record<string, number>;
+    basis: string;
+}
+
+export interface CecMachineBlock {
+    /** The work centre as the index knows it; code/name null for a machine since deleted. */
+    machine: { id: number; code: string | null; name: string | null; display_sequence?: number | null };
+    batches: CecBatch[];
+    sums: CecSums;
+}
+
+export interface CecShiftBlock {
+    shift: { id: number; name: string; start_time?: string; end_time?: string };
+    /** ShiftSummaryService::report for this shift and date, verbatim. */
+    summary: ShiftKpiReport;
+    machines: CecMachineBlock[];
+    sums: CecSums;
+}
+
+export interface CecReport {
+    /** The server's statement of the CEC format state, shown verbatim. */
+    format: string;
+    figures_from: string[];
+    production_date: string;
+    shift_id: number | null;
+    scope: 'day' | 'shift';
+    shifts: CecShiftBlock[];
+    /** The whole-day rollup — null on a single-shift read. */
+    day: { summary: ShiftKpiReport; sums: CecSums } | null;
 }
 
 export interface WorkOrderScrap {

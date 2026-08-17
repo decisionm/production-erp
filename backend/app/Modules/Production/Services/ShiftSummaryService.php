@@ -25,6 +25,19 @@ use Illuminate\Database\Eloquent\Collection;
  * report() takes an optional $shiftId: given, it's the per-shift view;
  * null means "every shift that ran this date," the day-wise rollup —
  * same computation, just without the shift_id filter on each query.
+ *
+ * WHAT THE REPORT SAYS ABOUT ITSELF (Phase 5.7). Two of its keys are not
+ * the date's facts but the CURRENT state of the date's records —
+ * `machines_running_now` (the date's batches still in progress) and
+ * `machines_down_now` (the date's breakdowns still open) — and are named
+ * for it; `machines_running` / `machines_down` are the same values under
+ * the old names, kept for one release as aliases and then to be dropped
+ * (there is no historical machine-state model, and none is invented here).
+ * `efficiency_basis` names what efficiency_percent divides by
+ * ('supervisor_target', or null when no efficiency is claimed) and
+ * `kpi_inputs` names, per supervisor-typed input, whether one is on
+ * record ('supervisor') or absent (null) — the report never invents a
+ * target or a power reading. Every figure's arithmetic is as it was.
  */
 class ShiftSummaryService
 {
@@ -234,6 +247,11 @@ class ShiftSummaryService
             ->whereDate('production_date', $productionDate)
             ->get();
 
+        // "Now", not the date's: batches of this date still in progress —
+        // a batch completed since (even the same shift) no longer counts,
+        // one still open two weeks later still does. See the class docblock.
+        $machinesRunningNow = $entries->where('batch_status', BatchStatus::InProgress)->pluck('work_center_id')->unique()->count();
+
         return [
             'shift_id' => $shiftId,
             'production_date' => $productionDate,
@@ -242,14 +260,29 @@ class ShiftSummaryService
             'rejection_kg' => $rejectionKg,
             'net_good_output_kg' => $netGoodOutputKg,
             'efficiency_percent' => $efficiencyPercent,
+            // What efficiency_percent divides by. The only basis today is the
+            // supervisor-typed target on this date's summary row(s); null
+            // whenever no efficiency is claimed (no target, or a zero one).
+            'efficiency_basis' => $efficiencyPercent !== null ? 'supervisor_target' : null,
             'rejection_percent' => $rejectionPercent,
-            'machines_running' => $entries->where('batch_status', BatchStatus::InProgress)->pluck('work_center_id')->unique()->count(),
+            // Current-state counts (see the class docblock): the *_now keys
+            // are the names; the old keys are aliases for one release.
+            'machines_running_now' => $machinesRunningNow,
+            'machines_down_now' => $machinesDown,
+            'machines_running' => $machinesRunningNow,
             'machines_down' => $machinesDown,
             'idle_time_hours' => $idleTimeHours,
             'no_of_mold_changes' => $moldChangeLogs->count(),
             'power_consumption_units' => $powerConsumptionUnits,
             'unit_per_kg' => $unitPerKg,
             'power_interruption_hours' => $powerInterruptionHours,
+            // Where the two raw inputs came from — 'supervisor' when a
+            // summary row on this date carries the figure, null when none
+            // does. Nothing else ever supplies them.
+            'kpi_inputs' => [
+                'target_production_kg' => $targetProductionKg !== null ? 'supervisor' : null,
+                'power_consumption_units' => $powerConsumptionUnits !== null ? 'supervisor' : null,
+            ],
             // Day-wide has no single accountable name — that's a per-shift
             // concept (whoever closes that shift), see UX doc §2.
             'remarks' => $shiftId ? $summaries->first()?->remarks : $summaries->pluck('remarks')->filter()->implode(' | '),
