@@ -199,3 +199,26 @@ Two same-mode packagings on one standard (D1) · one pack-quantity reader with p
 
 ### Still open (from the baseline list)
 `OverReceiptException` · CRM · Finance · `ShiftSummaryService::report()` (Phase 5.7) — **Closed here:** second same-mode packaging (D1) · `stock_balances == Σ stock_movements`. **Still:** MySQL CI leg (Phase 7).
+
+## Phase 5.5 (feat/phase-5.5-shift-floor, gate closed 2026-08-17)
+
+| Suite | Result | Evidence |
+|---|---|---|
+| Pint (whole tree) | PASS | clean |
+| Backend PHPUnit | PASS | **1,502 / 13,167** (Phase 5 close 1,428 / 12,377; +74: EstimationUnifiedTest 24 · CompletionEventAndDefaultsTest 13 · EntriesIndexFiltersTest 20 · BatchPreviewMouldTest 4 · BatchPreviewRunStatusTest 7 · SegmentHandoverTest +4 · v3 arms in ExpectedOutputDivergence / ProductionCalculationEngine / ExpectedOutputEngine) |
+| Frontend vitest | PASS | 190 → **269** (`startBatchChoices.test.ts` 32 incl. the previous inline conditions verbatim · `expectedOutput.test.ts` 28 · `completedToday.test.ts` 19) |
+| Typecheck · build | PASS | clean · built |
+| Agent | UNTOUCHED | — |
+| Factory-knowledge | PASS | exit 0 (Q46 added; preamble → Q47) |
+| Migrations | none | — |
+| Red-before / green-after | PROVEN | preview-vs-entry divergence under v3; legacy golden pins (Opus: 871,563-case equivalence, zero divergence); handover child unstamped (13580 vs 13584.91); snapshot 'live' → 'snapshot'; N+1 15 → 22 queries; client mirror float floor (19,995 vs 20,000); modal gaps grain; efficiency ceiling |
+| Sonnet independent QA | FAIL → fix loop → re-gate (see PHASE-LOG) | |
+| Adversarial review | Opus NOT_READY (P0 + 2 P1 + P2s) · Fable PASS_WITH_DEFERRED (2 P2) → all fixed | |
+| Browser proof | NOT DONE (extension disconnected mid-session) | pinned by vitest/backend tests; to be re-proven in Phase 8's chain walk |
+| API proof | PASS | entries index filters (422s, per_page bound, unknown ignored); preview carries calculation_version production_v3_unified + downtime_netted false, configuration.mould, per-variant statuses |
+
+### Coverage gaps closed this phase
+One estimation engine for preview and entry, versioned, legacy pinned · every entry-creation path stamps · completion event after the outer commit · configuration gaps frozen at Start · packing defaults on the entry · entries index filters (factory day, index-friendly) + TallyLink at constant cost · Completed Today row mapper (nothing recomputed; settings ceiling) · Start Batch choices helper == the previous inline conditions · client mirror exact arithmetic (integer micro-units; downtime 6-dp truncation).
+
+### Still open (from the baseline list)
+`OverReceiptException` · CRM · Finance · `ShiftSummaryService::report()` (**Phase 5.7, next**) — **Still:** MySQL CI leg (Phase 7). **New (recorded):** the two pre-existing per-row cost reads on the entries list (materialCost stock_movements; bag-cost allocations) — a batching follow-up.
