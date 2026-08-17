@@ -1856,3 +1856,93 @@ Deployment state:   not deployed; stack #179 → … → #192 → #193
 Next:               wire the Tier-1 masters through the contract, re-walk D
                     against them, run the chains on MySQL, take the browser walk
 ```
+
+────────────────────────────────────────────────────────────────────────────
+D-WIRING + verification night — 17→18 Aug 2026 (02:00–03:00 IST)
+────────────────────────────────────────────────────────────────────────────
+```
+Scope:              close the three engineering items that held Phase 8 at
+                    NOT READY — D-WIRING, the MySQL leg, the browser walk.
+
+Commits (branch feat/phase-8-acceptance):
+  55ab682  D-WIRING: the Configuration Lifecycle Contract becomes real on the
+           masters the factory uses. Eleven of them — Warehouse, Item,
+           WorkCenter, Mold, Shift, ScrapReason, DowntimeReason,
+           ProductionStandard, ProductionStandardPackaging,
+           ProductionConfiguration, Employee — plus the configuration-delete
+           permission tier. Chain D re-walked through those entities' OWN
+           routes, replacing the guard test that had recorded "no module
+           declares a lifecycle yet".
+  7e37261  The local fixture stops granting the floor three tiers live
+           withholds (see FOUND, below).
+  fa35b83  A mould-lifecycle test stops passing only because sqlite is
+           forgiving (see MYSQL, below).
+
+MYSQL — the acceptance chains on the driver live runs, at last:
+  A MySQL 8.0 container matching CI's service image; the WHOLE backend suite
+  against it. 2,113 tests · 2,111 passed · 1 skipped by design · 1 ERROR.
+  The error was in the NEW D-WIRING work and was a genuine driver divergence:
+  MoldLifecycleTest seeded a bare '08:00' into mold_change_logs.from_time,
+  which is a dateTime column. sqlite is typeless and stored it; MySQL refused
+  it outright (SQLSTATE 22007). Green on the dev driver, red on the real one.
+  Fixed; 13/13 on both afterwards. Third time the MySQL leg has caught what
+  sqlite hid — and the first time it caught it before CI did.
+
+BROWSER — 20 screens, full record in E2E-BROWSER-WALK-2026-08-18.md.
+  Served the phase-8 build from Laravel on its own port: the PRODUCTION
+  topology, not the Vite dev server.
+  Proven in the browser, not merely at the API:
+    · Delete refused with counts — "Cannot delete warehouse RM Store — used
+      by 3 stock balances, 3 stock movements, 2 material bags and 1 Tally
+      godown identity. Deactivate instead.", itemised.
+    · Delete ALLOWED when genuinely unused — a warehouse created through the
+      UI was hard-deleted; the row left the table (deleted_at not set).
+    · Store → Production/WIP: the Stock page lists RM-STORE and WIP as
+      separate locations with separate balances, and both the Material
+      Requests and Store Issue Queue screens state the rule in words:
+      "A store issue is not a consumption."
+    · The PO→Tally owner gate reads honestly on screen: "Not sent to Tally —
+      PO posting is disabled (owner gate Q35)".
+  METHOD LIMIT, stated rather than buried: the driven tab reports
+  visibilityState "hidden", so Chrome throttles its CSS animations and AntD
+  modals never finish their enter transition — invisible, and masking
+  coordinate clicks. Interactions were therefore dispatched in page context.
+  Real handlers, real requests, real responses; NOT mouse-level. Overlay and
+  z-index defects remain UNTESTED. A visible tab was attempted once and was
+  also hidden.
+
+FOUND — the fixture, not the product, was failing FC-06 open:
+  Logged in as the fixture supervisor, a Procurement Receipt Note returned its
+  supplier in the clear. The gate is correct; AgentIdentity::
+  mayReadPurchaseDetails() opens FC-06 to finance.view/finance.manage, and the
+  fixture handed the supervisor every permission except carton-trace.*. So
+  every manual FC-06 walkthrough had been passing for the WRONG REASON — the
+  same silent failure the seeder already carried a carton-trace comment about.
+  Generalised to a withheld-prefix list and pinned by a test asserting through
+  the product's own predicates, not permission names. Re-verified after: the
+  Receipt Note's party is null with an explicit party_withheld note and
+  party_ledger/party_gstin omitted, while a Delivery Note's CUSTOMER still
+  reads — a customer is not FC-06. The discrimination is correct.
+
+RECORDED AS GAPS, deliberately not fixed unattended:
+  · Duplicate business codes are not normalized IN CODE. 17+ masters use a
+    bare unique rule; no shared rule exists. Measured on both drivers rather
+    than assumed: MySQL (live) CATCHES a case-variant duplicate, sqlite does
+    NOT, and neither catches whitespace. The browser observation that started
+    this was therefore a sqlite artefact, not a live defect — the severity was
+    corrected by measuring instead of shipping. NOT fixed tonight because a
+    case-insensitive unique rule would begin refusing EDITS to any live pair
+    already differing only by case, and whether live holds such pairs is a
+    read-only query nobody has run. "Warn on likely duplicate NAMES" is
+    UNTESTED, not passing.
+  · The Day Bin surface outlives the decision — the page, the dashboard tile
+    and UpdateDayBinWarehouseRequest are all still wired, so it IS still
+    relied upon and was not blindly deleted; but the copy contradicts
+    DEC-20260817-001 and should not reach the floor that way.
+  · Mould master and duplicate-posting/retry were NOT exercised in the
+    browser — the fixture seeds no moulds and no retryable entry.
+
+GATE:               Sonnet independent QA + Opus adversarial safety review on
+                    the D-WIRING delta. The first Opus reviewer died on a 529
+                    after retries and was relaunched.
+```

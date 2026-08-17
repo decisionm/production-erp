@@ -1,6 +1,13 @@
-# Release readiness — Phase 8 verdict (17-Aug-2026)
+# Release readiness — Phase 8 verdict (rev 2, 18-Aug-2026)
 
-## VERDICT: **NOT READY**
+> **Rev 2 supersedes the 17-Aug verdict below in three places.** D-WIRING has landed, the
+> suite has been run on MySQL 8.0, and a browser walk has been taken. The three items that
+> were open for engineering reasons are closed; what remains open is owner-gated or
+> explicitly recorded as a gap. **The ceiling remains `PASS WITH OWNER-GATED ITEMS` — never
+> unconditional PRODUCT READY — while the CEC format and the first PO→Tally live write
+> stand.** See "Rev 2 — what changed" at the end.
+
+## VERDICT (17-Aug, superseded in part): **NOT READY**
 
 Not because something is broken. Every one of the five acceptance chains passes, the full
 backend suite is green at **1,904 tests / 1,903 passed / 1 skipped by design / 17,806
@@ -47,18 +54,27 @@ ITEMS`, not unconditional PRODUCT READY**, while those two remain.
 
 ## What would change the verdict
 
-1. **Wire the Tier-1 masters through the contract** with real routes (Create · View · Edit ·
-   Activate/Deactivate · Safe Delete · Audit) and re-walk chain D **against those
-   entities** — not against `warehouses` again, which only re-proves the mechanism.
+1. ~~**Wire the Tier-1 masters through the contract**~~ — **DONE** (`55ab682`). Eleven
+   masters wired: Warehouse, Item, WorkCenter, Mold, Shift, ScrapReason, DowntimeReason,
+   ProductionStandard, ProductionStandardPackaging, ProductionConfiguration, Employee, plus
+   the `configuration-delete` permission tier. Chain D re-walked through those entities'
+   OWN routes.
 2. **Close the audit's GAP rows** for the masters the factory touches daily. This is the
    material configuration gap the lead named as a Phase 8 blocker.
-3. **Run the acceptance chains on the MySQL leg.** Every chain result in this phase is
-   SQLite-only; no MySQL is installed on the build machine. The CI `app-mysql` job exists
-   (Phase 7) and must execute these files before "green on both drivers" is claimed.
-4. **Take the browser proof.** No UI walk has been performed for any chain at any point in
-   this phase's history — the Chrome extension disconnected early and never returned.
-   Every PASS above is at the transaction-model / API layer. If the operator-facing screens
-   are part of the acceptance bar, that work has not started.
+3. ~~**Run the acceptance chains on the MySQL leg.**~~ — **DONE.** A MySQL 8.0 container was
+   stood up locally (matching CI's service image) and the WHOLE backend suite run against
+   it: **2,113 tests · 2,111 passed · 1 skipped by design · 1 error**. The single error was
+   in the new D-WIRING work and was a real driver divergence — `MoldLifecycleTest` seeded a
+   bare `'08:00'` into a `dateTime` column, which sqlite stores and MySQL rejects. Fixed in
+   `fa35b83`; 13/13 on both drivers afterwards. This is the third time the MySQL leg has
+   caught something sqlite hid, and the first time it caught it *before* CI did.
+4. ~~**Take the browser proof.**~~ — **DONE, with a stated method limit.** Twenty screens
+   walked against the phase-8 build served by Laravel on its own port (the production
+   topology). Full record: `E2E-BROWSER-WALK-2026-08-18.md`. It is genuine browser evidence
+   — real React handlers, real requests, real server responses — but it is **not
+   mouse-level** evidence: the driven tab is a background tab, so Ant Design's modal
+   animations are throttled and interactions had to be dispatched in page context. Overlay
+   and z-index defects therefore remain UNTESTED.
 5. Then the two owner gates above, which only the owner can lift.
 
 ## What IS proven
@@ -93,12 +109,56 @@ ITEMS`, not unconditional PRODUCT READY**, while those two remain.
 | No P0 | ✅ none open |
 | No unresolved P1 data-integrity issue | ✅ every P1 raised by a gate was fixed and re-gated |
 | Migrations accounted for and reversible | ✅ each phase's listed in DEPLOYMENT-RUNBOOK |
-| All suites green | ✅ 1,903 passed / 1 skipped by design |
+| All suites green | ✅ sqlite; and MySQL 8.0 at 2,111 passed / 1 skipped |
 | Production build passes | ✅ |
-| Browser smoke | ❌ **not performed** — extension unavailable |
+| Browser smoke | ⚠️ **performed** (20 screens, `E2E-BROWSER-WALK-2026-08-18.md`) — genuine but **not mouse-level**; overlay/z-index class untested |
 | Sync dry-run | ✅ reconciliation dry run exercised in chain B2 |
 | Rollback documented | ✅ DEPLOYMENT-RUNBOOK |
-| MySQL leg on the acceptance chains | ❌ **not run** |
+| MySQL leg on the acceptance chains | ✅ whole suite on MySQL 8.0 — 2,111 passed / 1 skipped; the 1 error it found is fixed (`fa35b83`) |
 | `DEVELOPMENT-PLAN.md` current or superseded | ⚠️ superseded in practice by MASTER-PLAN rev 3; say so explicitly before release |
 
 Nothing in this programme has been merged. Live remains at `9a9cbe3`.
+
+
+---
+
+## Rev 2 — what changed on the night of 17→18 Aug
+
+### Closed
+- **D-WIRING** (`55ab682`) — the NOT TESTED link. Eleven masters, chain D re-walked through
+  their own routes, and **proved in a browser**: deleting `RM Store` is refused with
+  `Cannot delete warehouse "RM Store" — used by 3 stock balances, 3 stock movements, 2
+  material bags and 1 Tally godown identity. Deactivate instead.`, itemised with counts;
+  while a genuinely unused warehouse created through the UI was really hard-deleted (row
+  gone from the table, `deleted_at` not set).
+- **The MySQL leg** — see item 3 above.
+- **The browser walk** — see item 4 above.
+
+### Found and fixed
+- **The local fixture granted the floor three tiers live withholds** (`7e37261`). The
+  acceptance fixture gave its supervisor desk every permission except `carton-trace.*`,
+  which meant it held `finance.view` — and `AgentIdentity::mayReadPurchaseDetails()` opens
+  **FC-06** to exactly that. A supervisor login read a Procurement Receipt Note's supplier
+  in the clear. The product gate was never broken; the fixture made every manual FC-06
+  walkthrough pass for the wrong reason. Now withheld and pinned by a test that asserts
+  through the product's own predicates rather than permission names.
+
+### Recorded as GAPS — deliberately not fixed unattended
+- **Duplicate business codes are not normalized in code.** All 17+ masters use a bare
+  `unique:<table>,<column>`; there is no shared normalized-unique rule. Measured on both
+  drivers: MySQL (live) **catches** a case-variant duplicate, sqlite does **not**; neither
+  catches leading/trailing whitespace. So the contract's "normalized comparison" holds on
+  live only by accident of collation. **Not fixed tonight on purpose:** a case-insensitive
+  unique rule would begin refusing EDITS to any live master pair that already differs only
+  by case, making those records uneditable, and whether live holds such pairs is a
+  read-only query nobody has run. The separate "warn on likely duplicate NAMES" requirement
+  is **UNTESTED**, not passing.
+- **The Day Bin surface outlives the decision.** `/production/day-bin` and the dashboard's
+  `DAY BIN` tile still exist, and `UpdateDayBinWarehouseRequest` plus the day-bin setting
+  are still wired — so per the standing instruction, it IS still relied upon and was not
+  blindly deleted. But the copy contradicts DEC-20260817-001 ("There is no Day Bin") and
+  should not reach the floor in that state.
+- **The mould master was not exercised in the browser** — the fixture seeds no moulds. Its
+  backend lifecycle is covered by `MoldLifecycleTest` on both drivers.
+- **Duplicate-posting / retry was not exercised in the browser** — the fixture contains no
+  failed or retryable Tally entry to retry. Covered by the backend contract suite only.
