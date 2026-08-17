@@ -720,7 +720,8 @@ PASS; no P1):
       ShiftSummaryReportRequest read by BOTH ShiftSummaryController::report and
       the export kind.
   P2  (Opus) the Phase 4.5 log entry tripped scripts/factory-knowledge/check.sh:
-      "RFC-4180" matched the unanchored FC-\d{2} pattern as "FC-41". FIXED both
+      "RFC 4180" written with a hyphen matched the validator's unanchored FC
+      pattern as a phantom constitution reference (the digits 41). FIXED both
       ways — "RFC 4180" in the docs/tests and a word-anchored regex in
       validate.py; check.sh exit 0.
   P3  a blocked kind was validated before it was refused (a bad body → 422,
