@@ -757,13 +757,28 @@ function StockShortfallSection({ shortfalls }: { shortfalls: ReadableStockShortf
                                     {line.unit ? ` ${line.unit}` : ''}
                                 </Typography.Text>{' '}
                                 of {line.item} came out of {line.warehouse} that the stock record did not have
+                                {/* THE SERVER'S OWN SENTENCE, printed verbatim
+                                    where it sent one. A shortfall out of
+                                    Production/WIP is not a missing receipt —
+                                    that location holds only what a store issue
+                                    put there — so the line says what it
+                                    actually means instead of sending the
+                                    accountant after a purchase that does not
+                                    exist. */}
+                                {line.basis && (
+                                    <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                                        {line.basis}
+                                    </Typography.Text>
+                                )}
                             </li>
                         ))}
                     </ul>
-                    <Typography.Text>
-                        The material was really used — receive it against a purchase, or enter its opening stock, on the{' '}
-                        <Link to="/production/day-bin">Factory Day Bin</Link> page.
-                    </Typography.Text>
+                    {shortfalls.some((line) => line.basis === null) && (
+                        <Typography.Text>
+                            The material was really used — receive it against a purchase, or enter its opening stock, on the{' '}
+                            <Link to="/production/day-bin">Factory Day Bin</Link> page.
+                        </Typography.Text>
+                    )}
                     <Typography.Text type="secondary" style={{ display: 'block', marginTop: 4, fontSize: 12 }}>
                         This does not stop approval — the batch can be signed as it stands.
                     </Typography.Text>

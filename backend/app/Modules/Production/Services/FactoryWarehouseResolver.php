@@ -180,23 +180,40 @@ class FactoryWarehouseResolver
         // anywhere else would issue stock out of a location that no longer
         // holds it and strand the issued material where nothing can draw it.
         //
-        // TWO CONDITIONS, NOT ONE, and the second is the important one.
-        // The stock balance decides where the material is — never a name or
-        // a person's answer, same as the day-bin branch below. But the WIP
-        // row is OLDER THAN THIS PHASE and already carries balances from the
-        // rehearsal data, so "WIP holds some" alone would fire on material
-        // no store issue ever put there and quietly redirect the first
-        // completion after deploy. A STORE ISSUE has to have put it there.
+        // TWO CONDITIONS, NOT ONE. A STORE ISSUE has to have put material
+        // there: the WIP row is OLDER THAN THIS PHASE and already carries
+        // balances from the rehearsal data, so "WIP holds some" alone would
+        // fire on material no store issue ever put there and quietly
+        // redirect the first completion after deploy.
         //
-        // With both satisfied, a location holding SOME but not enough still
-        // wins — that is the real shortage the completion is meant to
-        // report, not a signal to issue from somewhere the material never
-        // was. A factory that has issued nothing sees no change at all.
+        // THE OTHER CONDITION IS "STILL IN PLAY", NOT "HOLDS A POSITIVE
+        // BALANCE", and the difference closes a hole this phase would
+        // otherwise leave open. A positive-balance test stops being true the
+        // moment a batch consumes everything standing — so the NEXT batch
+        // would drop through to the store and draw material the store never
+        // issued: the store's balance falls, NO shortfall is recorded
+        // anywhere, the issue still says the kilograms are out on the floor,
+        // and the over-consumption becomes invisible. Production/WIP
+        // therefore stays the source while EITHER its balance is non-zero
+        // (including negative — a location already over-drawn is not one to
+        // walk away from) OR the store has an open handover of this material
+        // it has not had back. The over-draw then lands on Production/WIP,
+        // where it belongs, and trips the completion's own shortfall record.
+        //
+        // A location holding SOME but not enough still wins, exactly as the
+        // day-bin branch below does: that is the real shortage the
+        // completion is meant to report, not a signal to issue from
+        // somewhere the material never was.
+        //
+        // AND IT STILL LETS GO. Once the balance is flat and no issue is
+        // open, nothing is standing in production and consumption is
+        // answered exactly as it was before this phase existed. A factory
+        // that has issued nothing sees no change at all.
         $wip = $this->productionWip->warehouse();
 
         if ($wip !== null
-            && $this->holdsStock($wip, $itemId)
             && $this->storeIssues->hasIssuedIntoProduction($itemId, $wip->id)
+            && $this->productionWipIsInPlay($wip, $itemId)
         ) {
             return $wip;
         }
@@ -208,6 +225,21 @@ class FactoryWarehouseResolver
         }
 
         return $this->rawMaterial();
+    }
+
+    /**
+     * Is this the Production/WIP location? Asked by the completion path so a
+     * shortfall drawn out of it can say what it actually means — the store
+     * has not issued this much, rather than the store's stock record being
+     * behind (see ShiftProductionEntryService::completeBatch).
+     */
+    public function isProductionWip(?int $warehouseId): bool
+    {
+        if ($warehouseId === null) {
+            return false;
+        }
+
+        return $this->productionWip->warehouseId() === $warehouseId;
     }
 
     /**
@@ -330,5 +362,25 @@ class FactoryWarehouseResolver
             ->where('item_id', $itemId)
             ->where('quantity', '>', 0)
             ->exists();
+    }
+
+    /**
+     * Is Production/WIP still the place this material's consumption belongs
+     * against? See the long note in consumptionSource() for why this is not
+     * holdsStock().
+     *
+     * A NON-ZERO balance, not a positive one: an already over-drawn location
+     * keeps every further over-draw where it can be seen, instead of pushing
+     * it onto a store that never handed the material over.
+     */
+    private function productionWipIsInPlay(Warehouse $wip, int $itemId): bool
+    {
+        $balance = StockBalance::query()
+            ->where('warehouse_id', $wip->id)
+            ->where('item_id', $itemId)
+            ->where('quantity', '!=', 0)
+            ->exists();
+
+        return $balance || $this->storeIssues->hasMaterialStandingInProduction($itemId, $wip->id);
     }
 }

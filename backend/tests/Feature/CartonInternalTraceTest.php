@@ -419,14 +419,27 @@ class CartonInternalTraceTest extends TestCase
             ->assertSuccessful()
             ->json('data.day_bin_attribution');
 
-        // The owner-fixed sentence is untouched (DEC-20260810-001 requires
-        // the bin-held-these-lots wording); `sources` says, beside it, which
-        // ledger the kilograms actually came from.
+        // THE OWNER-FIXED SENTENCE COVERS ONLY WHAT THE DAY BIN HELD.
+        // DEC-20260810-001 fixed the bin-held-these-lots wording, so a lot
+        // that never went through the day bin must not be listed under it —
+        // and the sentence itself is not this workstream's to reword. The
+        // store-issue lots therefore get their own block and their own
+        // separately-worded sentence.
         $this->assertSame(FinishedCartonService::ATTRIBUTION_SENTENCE, $attribution['basis']);
         $this->assertSame(['day_bin_loaded_kg' => '20.0000', 'store_issued_kg' => '45.0000'], $attribution['sources']);
 
-        $lots = collect($attribution['lots'])->keyBy('supplier_lot_no');
-        $this->assertSame(['OLD-DAYBIN', 'ISS-START', 'ISS-IN'], $lots->keys()->all());
+        $this->assertSame(['OLD-DAYBIN'], array_column($attribution['lots'], 'supplier_lot_no'));
+        $this->assertSame('0.0000', $attribution['unattributed_loaded_kg']);
+
+        $issued = $this->getJson("/api/v1/production/cartons/{$entry->batch_number}-C01/trace")
+            ->assertSuccessful()
+            ->json('data.store_issue_attribution');
+
+        $this->assertSame(FinishedCartonService::STORE_ISSUE_ATTRIBUTION_SENTENCE, $issued['basis']);
+        $this->assertNotSame(FinishedCartonService::ATTRIBUTION_SENTENCE, $issued['basis']);
+
+        $lots = collect($issued['lots'])->keyBy('supplier_lot_no');
+        $this->assertSame(['ISS-START', 'ISS-IN'], $lots->keys()->all());
         $this->assertSame('10.0000', $lots['ISS-START']['loaded_kg']);
         $this->assertSame('35.0000', $lots['ISS-IN']['loaded_kg']);
         $this->assertSame('PET Resin', $lots['ISS-IN']['material']);
@@ -434,7 +447,7 @@ class CartonInternalTraceTest extends TestCase
         // ordinary lot-attribution path — the issue ledger carries none.
         $this->assertSame('101.0000', $lots['ISS-IN']['rate_per_kg']);
 
-        $this->assertSame('0.0000', $attribution['unattributed_loaded_kg']);
+        $this->assertSame('0.0000', $issued['unattributed_issued_kg']);
     }
 
     public function test_an_overnight_shifts_window_crosses_midnight_in_factory_time(): void

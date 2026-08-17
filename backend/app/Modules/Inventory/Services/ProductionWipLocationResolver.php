@@ -16,10 +16,13 @@ use Illuminate\Validation\ValidationException;
  * on a row, and the decision is explicit that a WIP warehouse already exists
  * and must be REUSED — a synonym must never be minted beside it.
  *
- * PRECEDENCE:
+ * PRECEDENCE — WIP'S OWN IDENTITY, and nothing about any other warehouse:
  *   1. the app setting, when it names a warehouse that still exists;
  *   2. else the single warehouse whose code is exactly 'WIP';
  *   3. else null → the caller refuses with a plain 422 naming the fix.
+ *
+ * Which godown Tally sees for it is a SEPARATE question (tallyGodown()), and
+ * deliberately not one the handover is refused over — see warehouseOrFail().
  *
  * `is_active` IS DELIBERATELY NOT FILTERED, and that is the one place this
  * class parts company with FactoryWarehouseResolver. The same reasoning
@@ -78,6 +81,25 @@ class ProductionWipLocationResolver
         return $this->warehouse()?->id;
     }
 
+    /**
+     * The godown Tally would see for the material standing in Production/WIP
+     * — WIP's own tally_guid, else the nearest Tally-linked ancestor, else
+     * the sole Tally-linked warehouse (TallyGodownResolver's rules, asked
+     * once so that the voucher payload, the voucher preview and the stock
+     * reconcile can never disagree about it).
+     *
+     * Null is a real answer and means exactly one thing: the kilograms
+     * standing in Production/WIP post under NO godown the accountant's books
+     * know. Callers must say so rather than attach them to a godown they
+     * were not proven to belong to.
+     */
+    public function tallyGodown(): ?Warehouse
+    {
+        $warehouse = $this->warehouse();
+
+        return $warehouse === null ? null : $this->godowns->resolve($warehouse);
+    }
+
     /** Name the Production/WIP location (null clears it, back to the code lookup). */
     public function setWarehouseId(?int $warehouseId): void
     {
@@ -85,20 +107,36 @@ class ProductionWipLocationResolver
     }
 
     /**
-     * The location, or a 422 naming the fix — and it checks the SECOND thing
-     * too: that a batch consuming out of Production/WIP will still name a
-     * godown Tally knows.
+     * The location, or a 422 naming the fix. THE ONE THING IT REFUSES OVER is
+     * WIP's own identity: no setting names a warehouse that still exists and
+     * no single row carries the canonical code, so there is genuinely nowhere
+     * to issue this material TO.
      *
-     * Why that check lives at the issue and not at the voucher: this phase
-     * moves the consumption source to Production/WIP, and Tally has never
-     * heard of it. TallyGodownResolver already aliases an internal location
-     * to the godown it sits under (its own tally_guid, else the nearest
-     * parent's, else the sole Tally-linked godown), which is exactly this
-     * factory's one-godown shape — so on live the name a NEW voucher carries
-     * does not change. Where the alias is genuinely ambiguous the resolver
-     * correctly refuses to guess, and the honest moment to say so is BEFORE
-     * the material is handed over, not hours later when a finished batch
-     * turns out to be unpostable.
+     * IT DELIBERATELY DOES NOT REFUSE OVER TALLY. An earlier draft of this
+     * phase also required that Production/WIP alias to a godown Tally knows,
+     * on the reasoning that a batch consuming out of an unaliased location
+     * would later be unpostable. The reasoning is right; the place was wrong.
+     * TallyGodownResolver's alias ends in a SOLE-Tally-linked-warehouse
+     * fallback, and AUDIT-WAREHOUSES-2026-08-17 §4 records that this system
+     * already has TWO rows carrying a `tally_guid` — which kills that
+     * fallback for every unparented internal location. The gate would
+     * therefore have refused EVERY store issue on day one, over a warehouse
+     * master question, while the resin was physically walking out of the
+     * store either way. A gate that fires on the count of OTHER warehouses'
+     * Tally identity is not a statement about Production/WIP at all.
+     *
+     * The unpostable-godown question is not lost — it is asked where it is
+     * answerable and where it is actually enforced:
+     *
+     *   - `VoucherPreviewService` flags the line by name (`name_only`: no
+     *     Tally identity here and it aliases to no Tally-known godown), and
+     *   - the accounts-approval gate refuses the approval outright when
+     *     `production.approvals.require_postable_voucher` is on.
+     *
+     * The store records the physical handover; the POSTING waits for the
+     * master, and the fix is the ordinary one — parent the WIP row to the
+     * company godown, which is master data a person changes (on live through
+     * the manual workflow, dry-run first), never a side effect of an issue.
      *
      * @throws ValidationException 422 naming the fix
      */
@@ -108,24 +146,6 @@ class ProductionWipLocationResolver
 
         if ($warehouse === null) {
             throw ValidationException::withMessages(['production_wip' => self::UNRESOLVED_MESSAGE]);
-        }
-
-        // ONLY WHERE THERE IS A GODOWN TO PRESERVE. A system with no
-        // Tally-linked warehouse at all has no godown name for a new voucher
-        // to change, and the voucher preview/readiness gate already flags
-        // every line in that state — refusing the factory's material flow on
-        // top of that would stop the store recording real handovers over a
-        // Tally setting. Where Tally identity DOES exist and Production/WIP
-        // aliases to none of it, the refusal is the point.
-        if ($this->godowns->resolve($warehouse) === null && Warehouse::query()->whereNotNull('tally_guid')->exists()) {
-            throw ValidationException::withMessages([
-                'production_wip' => sprintf(
-                    'Production/WIP ("%s") aliases to no godown Tally knows, so a batch consuming from it could '
-                    .'not be posted. Link it to the company godown (set its parent warehouse) before issuing '
-                    .'material to production.',
-                    $warehouse->name,
-                ),
-            ]);
         }
 
         return $warehouse;

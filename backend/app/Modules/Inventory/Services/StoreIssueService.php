@@ -3,9 +3,12 @@
 namespace App\Modules\Inventory\Services;
 
 use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
+use App\Modules\Inventory\Models\Enums\StockMovementType;
 use App\Modules\Inventory\Models\Enums\StoreIssueStatus;
 use App\Modules\Inventory\Models\Item;
+use App\Modules\Inventory\Models\MaterialRequest;
 use App\Modules\Inventory\Models\StockBalance;
+use App\Modules\Inventory\Models\StockMovement;
 use App\Modules\Inventory\Models\StoreIssue;
 use App\Modules\Inventory\Models\StoreIssueBagScan;
 use App\Modules\Inventory\Models\StoreIssueLine;
@@ -53,6 +56,7 @@ class StoreIssueService
         private readonly StockMovementService $stock,
         private readonly ProductionWipLocationResolver $wip,
         private readonly MaterialBagIssueResolver $bags,
+        private readonly MaterialRequestService $requests,
     ) {}
 
     /**
@@ -61,6 +65,17 @@ class StoreIssueService
      *
      * Lines may be empty: the store may open an issue and then scan bags
      * onto it (scanBag), which is how resin is actually handed over.
+     *
+     * AND IT FULFILS THE REQUEST, in this same transaction. Every line that
+     * names a request line hands its quantity to
+     * MaterialRequestService::applyIssuedQuantities — the ONE writer of
+     * `issued_quantity` and the only place submitted → partially_issued →
+     * issued happens. Without that call the two halves of this phase never
+     * meet: the store's queue goes on showing the full quantity as still
+     * owed, for ever, against work that was done this morning. A refusal
+     * from the request side (a line that is not on it, a request that is not
+     * open to the store) rolls the whole handover back, stock included —
+     * which is the point of doing it here rather than after the commit.
      *
      * @param  array{material_request_id?: ?int, received_by?: ?int, issued_at?: ?string, notes?: ?string, lines?: array<int, array<string, mixed>>}  $data
      */
@@ -82,9 +97,18 @@ class StoreIssueService
                 'notes' => $data['notes'] ?? null,
             ]);
 
+            $deltas = [];
+
             foreach ($data['lines'] ?? [] as $index => $line) {
-                $this->addLine($issue, $wip, $line, "lines.{$index}");
+                $created = $this->addLine($issue, $wip, $line, "lines.{$index}");
+
+                if ($created->material_request_line_id !== null) {
+                    $key = (int) $created->material_request_line_id;
+                    $deltas[$key] = bcadd($deltas[$key] ?? '0.0000', (string) $created->quantity_issued, 4);
+                }
             }
+
+            $this->fulfilRequest($issue, $deltas);
 
             return $issue->fresh(['lines.item', 'bagScans']);
         });
@@ -101,6 +125,11 @@ class StoreIssueService
      * the whole chain: bag, lot, kg, issued by, received by, when, and the
      * request line it answers. It stops there: it never says which batch
      * used the bag (FC-01).
+     *
+     * IT FULFILS THE REQUEST TOO, exactly as issue() does and for the same
+     * reason. This is the resin path — the store opens an empty issue and
+     * scans bags onto it — so wiring only issue() would leave the queue
+     * stale for the one material that actually moves that way.
      */
     public function scanBag(
         StoreIssue $issue,
@@ -145,6 +174,19 @@ class StoreIssueService
             $line->quantity_issued = bcadd((string) $line->quantity_issued, $quantity, 4);
             $line->save();
 
+            // THE REQUEST LINE THIS SCAN NAMED, not the one the issue line
+            // happens to carry. The issue line is found by (material, source
+            // store), so two bags of the same resin share one line — and its
+            // material_request_line_id is whatever the FIRST scan set. A
+            // second bag scanned against a different request line would
+            // otherwise be credited to the first line, and the store's queue
+            // would show one line over-fulfilled and the other untouched.
+            $creditLineId = $materialRequestLineId ?? $line->material_request_line_id;
+
+            if ($creditLineId !== null) {
+                $this->fulfilRequest($issue, [(int) $creditLineId => $quantity]);
+            }
+
             $this->stock->recordTransfer(
                 itemId: (int) $lot->item_id,
                 fromWarehouseId: $from,
@@ -179,6 +221,21 @@ class StoreIssueService
      * before anything moves. Returning more than was issued is not a
      * generous correction, it is material appearing from nowhere.
      *
+     * AND IT NEVER TAKES ANOTHER ISSUE'S MATERIAL. The line's own arithmetic
+     * is not enough on its own: once a batch has consumed against this
+     * issue, part of what the line says it handed over is GONE, and a return
+     * of the full line would come out of whatever else happens to be
+     * standing in Production/WIP — another issue's kilograms — with the
+     * transfer succeeding quietly because the pooled balance covered it. So
+     * a second bound applies: unconsumedBudgets(). See its docblock for the
+     * rule and why it is the conservative one.
+     *
+     * IT REFUSES, IT DOES NOT SILENTLY CAP. The storekeeper typed a figure;
+     * writing a smaller one under it would record a return that did not
+     * happen, and the difference would then be missing from both sides. The
+     * refusal names what is actually standing, so the next attempt is a
+     * number a person chose.
+     *
      * @param  array<int, array{store_issue_line_id: int, quantity: string}>  $lines
      */
     public function returnUnused(StoreIssue $issue, array $lines, int $recordedBy, ?string $notes = null): StoreIssue
@@ -197,6 +254,11 @@ class StoreIssueService
         // waiting, which is what happened.
 
         return DB::transaction(function () use ($issue, $lines, $recordedBy, $notes) {
+            // Read ONCE, before the first line moves, and spent down as the
+            // lines are honoured: two lines of one material on the same
+            // issue must not each be told the whole budget is theirs.
+            $budgets = $this->unconsumedBudgets($issue);
+
             foreach ($lines as $index => $requested) {
                 $line = $issue->lines()->whereKey($requested['store_issue_line_id'])->lockForUpdate()->first();
 
@@ -225,6 +287,17 @@ class StoreIssueService
                         ),
                     ]);
                 }
+
+                $budgetKey = $this->budgetKey($line);
+                $unconsumed = $budgets[$budgetKey] ?? '0.0000';
+
+                if (bccomp($quantity, $unconsumed, 4) === 1) {
+                    throw ValidationException::withMessages([
+                        "lines.{$index}" => $this->consumedAwayMessage($issue, $outstanding, $unconsumed, $quantity, 'return'),
+                    ]);
+                }
+
+                $budgets[$budgetKey] = bcsub($unconsumed, $quantity, 4);
 
                 $this->stock->recordTransfer(
                     itemId: (int) $line->item_id,
@@ -280,13 +353,26 @@ class StoreIssueService
      *
      * Only while it is untouched. Once any part has come back the reversal
      * is no longer a fact about the floor (some of it is already home), and
-     * once production has consumed against it the stock is simply not there
-     * to move — which the transfer's own refusal will say plainly rather
-     * than quietly running the location negative.
+     * once production has CONSUMED against it the kilograms are gone — so
+     * the cancellation is refused outright, naming what is still standing.
+     *
+     * WHY REFUSE RATHER THAN CANCEL WHAT IS LEFT. A cancellation asserts
+     * that the whole handover never effectively happened. Once a batch has
+     * burnt part of it that assertion is false, and a "cancellation" that
+     * silently reversed only the remainder would write a smaller number than
+     * the document claims and leave the rest unaccounted on both sides. What
+     * actually happened — some was used, some is coming back — is a RETURN,
+     * and the refusal says so. It never leans on the transfer's own
+     * insufficient-stock refusal either: that one only fires when the whole
+     * POOLED Production/WIP balance is short, so with a second issue
+     * standing beside this one it would succeed and take that issue's
+     * material instead.
      *
      * Nothing is deleted and no movement is rewritten: the reversal is new
      * return_from_production movements, exactly like every other correction
-     * in this ledger.
+     * in this ledger. The REQUEST behind it is given its remainder back at
+     * the same time (reverseIssuedQuantities), because a cancelled handover
+     * is owed again.
      */
     public function cancel(StoreIssue $issue, string $reason, int $cancelledBy): StoreIssue
     {
@@ -301,11 +387,30 @@ class StoreIssueService
         }
 
         return DB::transaction(function () use ($issue, $reason, $cancelledBy) {
+            $budgets = $this->unconsumedBudgets($issue);
+            $deltas = [];
+
             foreach ($issue->lines()->lockForUpdate()->get() as $line) {
                 $outstanding = $line->quantityOutstanding();
 
                 if (bccomp($outstanding, '0', 4) !== 1) {
                     continue;
+                }
+
+                $budgetKey = $this->budgetKey($line);
+                $unconsumed = $budgets[$budgetKey] ?? '0.0000';
+
+                if (bccomp($outstanding, $unconsumed, 4) === 1) {
+                    throw ValidationException::withMessages([
+                        'status' => $this->consumedAwayMessage($issue, $outstanding, $unconsumed, $outstanding, 'cancellation'),
+                    ]);
+                }
+
+                $budgets[$budgetKey] = bcsub($unconsumed, $outstanding, 4);
+
+                if ($line->material_request_line_id !== null) {
+                    $key = (int) $line->material_request_line_id;
+                    $deltas[$key] = bcsub($deltas[$key] ?? '0.0000', (string) $line->quantity_issued, 4);
                 }
 
                 $this->stock->recordTransfer(
@@ -328,6 +433,8 @@ class StoreIssueService
             $issue->closed_at = now();
             $issue->closed_by = $cancelledBy;
             $issue->save();
+
+            $this->unfulfilRequest($issue, $deltas);
 
             return $issue->fresh(['lines.item', 'bagScans']);
         });
@@ -450,6 +557,37 @@ class StoreIssueService
             ->where('item_id', $itemId)
             ->where('to_warehouse_id', $wipWarehouseId)
             ->whereHas('storeIssue', fn ($query) => $query->where('status', '!=', StoreIssueStatus::Cancelled->value))
+            ->exists();
+    }
+
+    /**
+     * IS THE STORE STILL WAITING ON MATERIAL IT HANDED OVER? — an OPEN issue
+     * (issued or partly returned) with kilograms it has not had back.
+     *
+     * The second half of "is Production/WIP still in play for this material"
+     * (FactoryWarehouseResolver::consumptionSource), and the half the stock
+     * balance cannot answer. A batch that consumed everything standing
+     * leaves the WIP balance at zero while the store's paperwork still says
+     * the kilograms are out there; the NEXT batch's consumption belongs
+     * against that open handover, driving Production/WIP negative and
+     * recording the shortfall loudly, rather than quietly falling back to
+     * the store and taking material nobody ever issued.
+     *
+     * A CLOSED issue does not keep it in play, deliberately. Once the store
+     * has completed or been fully returned and the balance is flat, nothing
+     * is standing in production, and consumption goes back to being answered
+     * exactly as it was before this phase existed.
+     */
+    public function hasMaterialStandingInProduction(int $itemId, int $wipWarehouseId): bool
+    {
+        return StoreIssueLine::query()
+            ->where('item_id', $itemId)
+            ->where('to_warehouse_id', $wipWarehouseId)
+            ->whereColumn('quantity_issued', '>', 'quantity_returned')
+            ->whereHas('storeIssue', fn ($query) => $query->whereIn('status', [
+                StoreIssueStatus::Issued->value,
+                StoreIssueStatus::PartiallyReturned->value,
+            ]))
             ->exists();
     }
 
@@ -579,6 +717,175 @@ class StoreIssueService
             ->orderByDesc('issued_at')
             ->orderByDesc('id')
             ->paginate($perPage);
+    }
+
+    // ---- the request behind the handover -----------------------------------
+
+    /**
+     * Hand the deltas to the request's ONE writer, inside the caller's
+     * transaction. Silent when there is nothing to tell it: an issue against
+     * a verbal ask (no request), a line that answers no request line, or a
+     * request id that names no row.
+     *
+     * @param  array<int, string>  $deltas  request line id → quantity handed over now
+     */
+    private function fulfilRequest(StoreIssue $issue, array $deltas): void
+    {
+        $request = $this->requestBehind($issue, $deltas);
+
+        if ($request !== null) {
+            $this->requests->applyIssuedQuantities($request, $deltas);
+        }
+    }
+
+    /**
+     * The mirror, for a cancelled handover. Deltas are negative.
+     *
+     * @param  array<int, string>  $deltas  request line id → quantity taken back
+     */
+    private function unfulfilRequest(StoreIssue $issue, array $deltas): void
+    {
+        $request = $this->requestBehind($issue, $deltas);
+
+        if ($request !== null) {
+            $this->requests->reverseIssuedQuantities($request, $deltas);
+        }
+    }
+
+    /** @param  array<int, string>  $deltas */
+    private function requestBehind(StoreIssue $issue, array $deltas): ?MaterialRequest
+    {
+        if ($issue->material_request_id === null || $deltas === []) {
+            return null;
+        }
+
+        return MaterialRequest::query()->find((int) $issue->material_request_id);
+    }
+
+    // ---- what is still standing, unconsumed, against THIS issue ------------
+
+    /**
+     * HOW MUCH OF THIS ISSUE IS STILL UNCONSUMED — the ceiling on any
+     * reversal of it, per material and per Production/WIP location.
+     *
+     *   budget = (what this issue handed over and has not had back)
+     *            − (every consumption drawn out of that location, for that
+     *               material, since this issue was made)
+     *
+     * THE SECOND TERM IS CHARGED IN FULL TO THIS ISSUE, and that is the
+     * deliberate, conservative half. A batch's consumption is CALCULATED
+     * (FC-01, DEC-20260807-007): nothing in this factory can say which
+     * handover the kilograms a machine burnt came out of, and a rule that
+     * split them between issues would be inventing an attribution. So the
+     * issue being reversed is assumed to be the one that was eaten. The
+     * worst that can happen is a refusal on an issue that was in fact
+     * untouched — and a refusal naming real figures is a question a person
+     * can answer, where a reversal that quietly drained the issue standing
+     * next to it is a wrong number nobody would ever see. Whether the
+     * factory would rather cap than refuse here is an OWNER question, and it
+     * is recorded as one.
+     *
+     * "SINCE THIS ISSUE WAS MADE" is the one thing that keeps it from being
+     * gratuitous: material handed over at 14:00 cannot have been consumed at
+     * 09:00, so consumption older than the issue is not charged to it. That
+     * also keeps the pre-phase residue on the WIP row — which the warehouse
+     * audit found and hasIssuedIntoProduction() already guards against —
+     * from eating a budget it has nothing to do with.
+     *
+     * TWO ASSUMPTIONS IN THAT COMPARISON, both load-bearing, both currently
+     * true and worth re-checking if either side changes. (1) A consumption's
+     * movement_date is the system clock: completeBatch is the only caller
+     * that books purpose Consumption and it supplies no date. (2) An issue's
+     * issued_at is normally the system clock too, but the API accepts one —
+     * a handover BACKDATED by a week is charged every consumption since that
+     * week began, and would be refused a reversal it should have. The bound
+     * is inclusive (>=), so an issue and a consumption recorded in the same
+     * second are charged to each other: the conservative direction, a
+     * refusal rather than a wrong reversal, but the refusal message cannot
+     * explain it and this note is where it is written down.
+     *
+     * Floored at zero and never above what the line itself is standing: a
+     * budget is a ceiling, never a permission to move more.
+     *
+     * @return array<string, string> "item@warehouse" → kilograms still unconsumed
+     */
+    private function unconsumedBudgets(StoreIssue $issue): array
+    {
+        $standing = [];
+        foreach ($issue->lines()->get() as $line) {
+            $key = $this->budgetKey($line);
+            $standing[$key] = bcadd($standing[$key] ?? '0.0000', $line->quantityOutstanding(), 4);
+        }
+
+        $budgets = [];
+        foreach ($standing as $key => $outstanding) {
+            [$itemId, $warehouseId] = array_map('intval', explode('@', $key));
+
+            $left = bcsub($outstanding, $this->consumedSince($itemId, $warehouseId, $issue->issued_at), 4);
+            $budgets[$key] = bccomp($left, '0', 4) === 1 ? $left : '0.0000';
+        }
+
+        return $budgets;
+    }
+
+    private function budgetKey(StoreIssueLine $line): string
+    {
+        return ((int) $line->item_id).'@'.((int) $line->to_warehouse_id);
+    }
+
+    /**
+     * Consumption drawn out of a Production/WIP location for one material
+     * since a moment — read from the LEDGER's own consumption movements, not
+     * from the stock balance.
+     *
+     * The balance is the wrong source and dangerously so: the WIP row
+     * predates this phase and carries rehearsal receipts, so a reversal
+     * bounded by "what the balance holds" could draw on kilograms no store
+     * issue ever put there.
+     *
+     * Summed in bcmath rather than SQL SUM(): SQLite hands a DECIMAL sum
+     * back as a float, and a kilogram figure that has been through a float
+     * is not one this codebase will print.
+     */
+    private function consumedSince(int $itemId, int $warehouseId, mixed $since): string
+    {
+        $total = '0.0000';
+
+        StockMovement::query()
+            ->where('item_id', $itemId)
+            ->where('warehouse_id', $warehouseId)
+            ->where('type', StockMovementType::Issue->value)
+            ->where('purpose', StockMovementPurpose::Consumption->value)
+            ->when($since !== null, fn ($query) => $query->where('movement_date', '>=', $since))
+            ->orderBy('id')
+            ->get(['quantity'])
+            ->each(function ($movement) use (&$total) {
+                $total = bcadd($total, (string) $movement->quantity, 4);
+            });
+
+        return $total;
+    }
+
+    /** The one sentence both reversals refuse with — figures, never a guess. */
+    private function consumedAwayMessage(
+        StoreIssue $issue,
+        string $outstanding,
+        string $unconsumed,
+        string $asked,
+        string $action,
+    ): string {
+        return sprintf(
+            'Production has already consumed against store issue %s: of the %s this line handed over and has not '
+            .'had back, only %s is still standing unconsumed in Production/WIP, so a %s of %s would take material '
+            .'belonging to another issue. Record a return of what actually came back (at most %s); if more than '
+            .'that has genuinely come home, the batch consumption figures are what need correcting.',
+            $issue->issue_number,
+            $outstanding,
+            $unconsumed,
+            $action,
+            $asked,
+            $unconsumed,
+        );
     }
 
     // ---- the parts the writers share ---------------------------------------

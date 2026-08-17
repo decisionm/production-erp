@@ -204,6 +204,46 @@ class MaterialRequestService
             throw MaterialRequestLifecycleException::notOpenToTheStore($request);
         }
 
+        return $this->writeIssuedQuantities($request, $deltasByLineId);
+    }
+
+    /**
+     * THE SAME WRITER, RUNNING BACKWARDS — for a store issue that is
+     * CANCELLED (StoreIssueService::cancel), where the handover is reversed
+     * in full and the request is owed its remainder again.
+     *
+     * Why this exists at all: `quantity_remaining_on_request` on the ISSUE
+     * side already excludes cancelled issues, so without this the request's
+     * own `remaining_quantity` and the issue's would disagree from the
+     * moment the first handover was cancelled — the store's queue would go
+     * on showing a request as fulfilled by material that went straight back
+     * on the shelf.
+     *
+     * NO STATUS GATE, deliberately, and it is the mirror of the gate on
+     * applyIssuedQuantities. Cancelling a handover is arithmetic on a number
+     * that is already wrong; refusing it because the request has since moved
+     * to `issued` (which the handover itself caused) would leave the wrong
+     * number standing. A withdrawn or draft request keeps its status — a
+     * reversal corrects a figure, it never resurrects a document.
+     *
+     * It is NOT called for a RETURN. A return is a later, separate fact —
+     * the store did hand the material over and some of it came back — and
+     * the issue side records it the same way, by leaving `quantity_issued`
+     * alone. Reversing the request there would claim the handover never
+     * happened.
+     *
+     * @param  array<int, string>  $deltasByLineId  line id → quantity being taken back (negative)
+     */
+    public function reverseIssuedQuantities(MaterialRequest $request, array $deltasByLineId): MaterialRequest
+    {
+        return $this->writeIssuedQuantities($request, $deltasByLineId);
+    }
+
+    /**
+     * @param  array<int, string>  $deltasByLineId
+     */
+    private function writeIssuedQuantities(MaterialRequest $request, array $deltasByLineId): MaterialRequest
+    {
         return DB::transaction(function () use ($request, $deltasByLineId) {
             $lines = $request->lines()->lockForUpdate()->get()->keyBy('id');
 
@@ -346,11 +386,26 @@ class MaterialRequestService
     }
 
     /**
-     * Submitted → partially_issued → issued, from what the lines now say.
-     * A request with nothing handed over stays where it was.
+     * Submitted → partially_issued → issued, from what the lines now say —
+     * and back again when a handover is cancelled.
+     *
+     * A DRAFT OR CANCELLED REQUEST IS NEVER MOVED BY THIS. Those two are the
+     * floor's and the owner's statements about the document, not arithmetic
+     * about kilograms: a reversal must never turn a withdrawn request back
+     * into an open one behind the person who withdrew it.
+     *
+     * For the other three the status is derived, not remembered, so it is
+     * reversible: a request whose only handover has been cancelled reads
+     * `submitted` again — which is what the store's queue has to show,
+     * because the material is back on the shelf and it is owed in full.
      */
     private function fulfilmentStatus(MaterialRequest $request): MaterialRequestStatus
     {
+        if ($request->status === MaterialRequestStatus::Draft
+            || $request->status === MaterialRequestStatus::Cancelled) {
+            return $request->status;
+        }
+
         $lines = $request->lines()->get();
 
         $anyIssued = $lines->contains(fn ($line) => bccomp((string) $line->issued_quantity, '0', 4) === 1);
@@ -360,7 +415,7 @@ class MaterialRequestService
             return MaterialRequestStatus::Issued;
         }
 
-        return $anyIssued ? MaterialRequestStatus::PartiallyIssued : $request->status;
+        return $anyIssued ? MaterialRequestStatus::PartiallyIssued : MaterialRequestStatus::Submitted;
     }
 
     private function decorate(MaterialRequest $request): MaterialRequest

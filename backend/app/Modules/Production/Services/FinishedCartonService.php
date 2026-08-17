@@ -41,6 +41,26 @@ class FinishedCartonService
      */
     public const ATTRIBUTION_SENTENCE = 'The common day bin held loads from these lots during this production date and shift — a calculated attribution, costed at the resin pool\'s weighted average, never physical bag-to-batch identity';
 
+    /**
+     * THE STORE-ISSUE SENTENCE — separate on purpose, and it is NOT a reword
+     * of the one above.
+     *
+     * DEC-20260810-001 fixed the wording of ATTRIBUTION_SENTENCE, and the
+     * sentence says the COMMON DAY BIN held these lots. Since
+     * DEC-20260817-001 material reaches production as a store issue into
+     * Production/WIP instead, and those lots never passed through the day
+     * bin — so listing them under the owner's sentence would make the
+     * owner's sentence untrue about half the lots on the screen. An owner's
+     * wording is not an agent's to fix, so the new arrival gets its own
+     * block and its own words, and the question of what the owner wants the
+     * two sentences to say is recorded for them, not answered here.
+     *
+     * Everything the owner's sentence guarantees is kept verbatim in
+     * substance: a CALCULATED attribution by shift window, costed at the
+     * pool's weighted average, never physical bag-to-batch identity (FC-01).
+     */
+    public const STORE_ISSUE_ATTRIBUTION_SENTENCE = 'The store issued these lots to production during this production date and shift — a calculated attribution, costed at the resin pool\'s weighted average, never physical bag-to-batch identity';
+
     public function __construct(
         // The batch's costing rate for the internal tier — called, never
         // reimplemented; its weighted-average arithmetic lives in one place.
@@ -224,6 +244,7 @@ class FinishedCartonService
      *     carton: FinishedCarton,
      *     completion: array{completed_at: ?string, completed_on: ?string, shift: ?string},
      *     day_bin_attribution: array<string, mixed>,
+     *     store_issue_attribution: array<string, mixed>,
      *     costing: array<string, mixed>,
      * }
      */
@@ -247,6 +268,11 @@ class FinishedCartonService
                 'shift' => $this->shiftFor($entry)?->name,
             ],
             'day_bin_attribution' => $this->dayBinAttribution($entry),
+            // THE SECOND LEDGER, IN ITS OWN BLOCK. Not merged into the one
+            // above: the sentence above is owner-fixed and says the day bin
+            // held these lots (DEC-20260810-001), which is not true of a lot
+            // that came out of a store issue.
+            'store_issue_attribution' => $this->storeIssueAttribution($entry),
             // withDetail: the pool rates behind the totals. This gate is the
             // rate-bearing tier by the owner's word; everywhere else keeps
             // the finance.view gate ShiftProductionEntryResource applies.
@@ -295,12 +321,7 @@ class FinishedCartonService
             ];
         }
 
-        $timezone = config('tally-sync.factory_timezone');
-        $from = CarbonImmutable::parse("{$date} {$shift->start_time}", $timezone);
-        $until = CarbonImmutable::parse("{$date} {$shift->end_time}", $timezone);
-        if ($shift->start_time > $shift->end_time) {
-            $until = $until->addDay();
-        }
+        [$from, $until, $window] = $this->attributionWindow($shift, $date);
 
         $loads = DayBinMovement::query()
             ->where('type', DayBinMovementType::Load->value)
@@ -337,47 +358,9 @@ class FinishedCartonService
             $byLot[$lot->id]['loaded_kg'] = bcadd($byLot[$lot->id]['loaded_kg'], (string) $load->quantity_kg, 4);
         }
 
-        // THE SAME WINDOW, ASKED OF THE STORE-ISSUE LEDGER (Phase 7.5, WS-C).
-        // The attribution is by shift window and has always been — it never
-        // claimed a bag reached a batch (FC-01, DEC-20260810-001). What
-        // changed is where material physically arrives from: since
-        // DEC-20260817-001 it is a store issue into Production/WIP, not a
-        // day-bin load. Reading only day_bin_movements would leave this
-        // internal tier empty for every batch run under the current flow,
-        // which is the one failure a provenance surface must not have.
-        //
-        // The two sources are summed into the same per-lot rows because they
-        // are the same physical event recorded under two designs; which
-        // ledger a kilogram came from is reported alongside, so nothing is
-        // silently merged.
-        $issuedKg = '0.0000';
-        foreach ($this->storeIssues->scansBetween($from->utc(), $until->utc()) as $scan) {
-            $lot = $scan->lot;
-            $issuedKg = bcadd($issuedKg, (string) $scan->quantity_kg, 4);
-
-            if ($lot === null) {
-                $unattributed = bcadd($unattributed, (string) $scan->quantity_kg, 4);
-
-                continue;
-            }
-
-            $byLot[$lot->id] ??= [
-                'lot' => $lot,
-                'material' => $scan->line?->item?->name,
-                'loaded_kg' => '0.0000',
-            ];
-            $byLot[$lot->id]['loaded_kg'] = bcadd($byLot[$lot->id]['loaded_kg'], (string) $scan->quantity_kg, 4);
-        }
-
         return [
             ...$base,
-            'window' => [
-                'production_date' => $date,
-                'shift' => $shift->name,
-                'timezone' => $timezone,
-                'from' => $from->toIso8601String(),
-                'until' => $until->toIso8601String(),
-            ],
+            'window' => $window,
             'lots' => array_values(array_map(
                 fn (array $row) => $this->lotAttribution($row['lot'], $row['material'], $row['loaded_kg']),
                 $byLot,
@@ -388,12 +371,135 @@ class FinishedCartonService
             // bin-held-these-lots wording and it is not this workstream's to
             // reword); this says, without touching it, how much of the window
             // is historical day-bin evidence and how much is store-issue
-            // evidence.
+            // evidence — the two are reported in their own blocks and never
+            // summed into one list of lots.
             'sources' => [
                 'day_bin_loaded_kg' => $this->sumLoads($loads),
-                'store_issued_kg' => $issuedKg,
+                'store_issued_kg' => $this->sumIssuedKg($from, $until),
             ],
         ];
+    }
+
+    /**
+     * WHICH LOTS THE STORE ISSUED TO PRODUCTION during this batch's
+     * production date and shift — the same window, the same calculated
+     * claim, asked of the ledger material actually arrives through now
+     * (DEC-20260817-001: Raw Material Store → Production/WIP, no Day Bin).
+     *
+     * IT IS ITS OWN BLOCK AND NOT A ROW IN THE ONE ABOVE. The day-bin
+     * attribution carries an owner-fixed sentence saying the common day bin
+     * HELD these lots (DEC-20260810-001); a lot issued straight from the
+     * store never entered the day bin, so listing it there would make the
+     * owner's own sentence untrue about the rows beneath it. Reading only
+     * day_bin_movements would be just as wrong the other way — this internal
+     * tier would be empty for every batch run under the current flow — so
+     * both are reported, each under words that are true of it.
+     *
+     * FC-01 is unchanged: the trace stops at the ISSUE. This says the store
+     * handed these lots to production while the batch's shift ran. It never
+     * says a batch burnt a particular bag, and there is nothing here to join
+     * one from.
+     *
+     * @return array<string, mixed>
+     */
+    private function storeIssueAttribution(ShiftProductionEntry $entry): array
+    {
+        $base = [
+            'basis' => self::STORE_ISSUE_ATTRIBUTION_SENTENCE,
+            'reason' => null,
+            'window' => null,
+            'lots' => [],
+            'unattributed_issued_kg' => '0.0000',
+        ];
+
+        $shift = $this->shiftFor($entry);
+        $date = $entry->production_date?->toDateString();
+
+        if ($shift === null || $date === null) {
+            return [
+                ...$base,
+                'reason' => 'this batch no longer resolves a shift and production date, so the issue window cannot be reconstructed',
+            ];
+        }
+
+        [$from, $until, $window] = $this->attributionWindow($shift, $date);
+
+        $byLot = [];
+        $unattributed = '0.0000';
+
+        foreach ($this->storeIssues->scansBetween($from->utc(), $until->utc()) as $scan) {
+            $lot = $scan->lot;
+
+            // Defensive, and deliberately kept: `material_lot_id` is NOT NULL
+            // and foreign-key constrained on store_issue_bag_scans, so a
+            // scan without a lot cannot exist today. If that ever changes,
+            // the kilograms are still counted — under THIS block's figure,
+            // never under the day bin's, which renders beneath the
+            // owner-fixed sentence.
+            if ($lot === null) {
+                $unattributed = bcadd($unattributed, (string) $scan->quantity_kg, 4);
+
+                continue;
+            }
+
+            $byLot[$lot->id] ??= [
+                'lot' => $lot,
+                'material' => $scan->line?->item?->name,
+                'issued_kg' => '0.0000',
+            ];
+            $byLot[$lot->id]['issued_kg'] = bcadd($byLot[$lot->id]['issued_kg'], (string) $scan->quantity_kg, 4);
+        }
+
+        return [
+            ...$base,
+            'window' => $window,
+            // The per-lot row shape is the day bin's verbatim — one carton
+            // trace screen, one lot line, whichever ledger it came from.
+            'lots' => array_values(array_map(
+                fn (array $row) => $this->lotAttribution($row['lot'], $row['material'], $row['issued_kg']),
+                $byLot,
+            )),
+            'unattributed_issued_kg' => $unattributed,
+        ];
+    }
+
+    /**
+     * The shift's own wall-clock span on a production date, in factory time:
+     * [start_time, end_time), end-exclusive, an overnight shift ending on the
+     * following calendar day. Shared by both attribution blocks so the two
+     * can never disagree about which shift a kilogram belongs to.
+     *
+     * @return array{0: CarbonImmutable, 1: CarbonImmutable, 2: array<string, string>}
+     */
+    private function attributionWindow(Shift $shift, string $date): array
+    {
+        $timezone = config('tally-sync.factory_timezone');
+        $from = CarbonImmutable::parse("{$date} {$shift->start_time}", $timezone);
+        $until = CarbonImmutable::parse("{$date} {$shift->end_time}", $timezone);
+
+        if ($shift->start_time > $shift->end_time) {
+            $until = $until->addDay();
+        }
+
+        return [$from, $until, [
+            'production_date' => $date,
+            'shift' => $shift->name,
+            'timezone' => $timezone,
+            'from' => $from->toIso8601String(),
+            'until' => $until->toIso8601String(),
+        ]];
+    }
+
+    /** Total kilograms the store issued inside a window — the cross-reference figure only. */
+    private function sumIssuedKg(CarbonImmutable $from, CarbonImmutable $until): string
+    {
+        $total = '0.0000';
+
+        foreach ($this->storeIssues->scansBetween($from->utc(), $until->utc()) as $scan) {
+            $total = bcadd($total, (string) $scan->quantity_kg, 4);
+        }
+
+        return $total;
     }
 
     /**

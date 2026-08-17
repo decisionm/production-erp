@@ -818,6 +818,32 @@ class ShiftProductionEntryService
                         'warehouse_id' => (int) $warehouseId,
                         'warehouse_name' => Warehouse::withTrashed()->find($warehouseId)?->name,
                         'short_kg' => $shortfallKg,
+                        // WHAT A SHORTFALL OUT OF PRODUCTION/WIP ACTUALLY
+                        // MEANS, said in words on the snapshot (Phase 7.5).
+                        //
+                        // Every other location holds material the store
+                        // BOUGHT, so a shortfall there is the stock record
+                        // being behind — a missed receipt, an opening
+                        // balance never entered — and the accountant fixes
+                        // the record. Production/WIP holds only what a store
+                        // issue put there, so a shortfall there is a
+                        // different fact with a different owner: this batch
+                        // consumed more than the store ever handed over.
+                        // Printing the two identically would send the
+                        // accountant hunting a receipt that does not exist.
+                        //
+                        // The completion is NOT refused for it — that is
+                        // config/production.php 'stock' and the 30-Jul
+                        // incident behind it, and a paperwork gap must never
+                        // become lost production. Whether the factory would
+                        // rather refuse is an OWNER question and is recorded
+                        // as one.
+                        'basis' => $this->factoryWarehouses->isProductionWip((int) $warehouseId)
+                            ? 'Production/WIP holds only what the store issued and production has not yet '
+                                .'consumed, so this batch consumed more of this material than was ever issued '
+                                .'to it. Nothing is missing from the store: either the handover is short of what '
+                                .'the machine actually ate, or the calculated consumption is high.'
+                            : null,
                     ];
                 }
             }
@@ -3162,7 +3188,7 @@ class ShiftProductionEntryService
      *     blocks_approval: bool,
      *     stock_shortfalls: list<array{item_id: ?int, item_name: ?string,
      *         warehouse_id: ?int, warehouse_name: ?string, short_kg: string,
-     *         item_uom: ?string}>,
+     *         item_uom: ?string, basis: ?string}>,
      *     pack_quantities: array{nos_per_box: ?int, nos_per_tray: ?int,
      *         trays_per_box: ?int, nos_per_pouch: ?int, pouches_per_box: ?int,
      *         source: string, sources: array<string, string>},
@@ -3369,7 +3395,8 @@ class ShiftProductionEntryService
      * without distinguishing that from "this field is missing".
      *
      * @return list<array{item_id: ?int, item_name: ?string, item_uom: ?string,
-     *     warehouse_id: ?int, warehouse_name: ?string, short_kg: string}>
+     *     warehouse_id: ?int, warehouse_name: ?string, short_kg: string,
+     *     basis: ?string}>
      */
     private function stockShortfalls(ShiftProductionEntry $entry): array
     {
@@ -3389,6 +3416,10 @@ class ShiftProductionEntryService
             'warehouse_id' => isset($line['warehouse_id']) ? (int) $line['warehouse_id'] : null,
             'warehouse_name' => $line['warehouse_name'] ?? null,
             'short_kg' => (string) ($line['short_kg'] ?? '0'),
+            // Absent on every snapshot written before Phase 7.5, and null
+            // for every location that is not Production/WIP. The screen
+            // prints the extra sentence only when there is one to print.
+            'basis' => $line['basis'] ?? null,
         ], array_filter($recorded, 'is_array')));
     }
 

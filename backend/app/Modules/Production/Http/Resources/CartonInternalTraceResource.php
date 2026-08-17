@@ -14,7 +14,7 @@ use Illuminate\Http\Resources\Json\JsonResource;
  * exactly this tier); the attribution block carries its bin-held-these-lots
  * sentence in `basis`, and no field in here names a bag→batch identity.
  *
- * @property array{carton: FinishedCarton, completion: array<string, mixed>, day_bin_attribution: array<string, mixed>, costing: array<string, mixed>} $resource
+ * @property array{carton: FinishedCarton, completion: array<string, mixed>, day_bin_attribution: array<string, mixed>, store_issue_attribution: array<string, mixed>, costing: array<string, mixed>} $resource
  */
 class CartonInternalTraceResource extends JsonResource
 {
@@ -28,6 +28,10 @@ class CartonInternalTraceResource extends JsonResource
             'carton' => FinishedCartonResource::make($carton)->toArray($request),
             'completion' => $this->resource['completion'],
             'day_bin_attribution' => $this->resource['day_bin_attribution'],
+            // The store-issue ledger's own block, under its own sentence —
+            // never folded into the day bin's, whose wording is owner-fixed
+            // (DEC-20260810-001) and speaks only of what the bin held.
+            'store_issue_attribution' => $this->resource['store_issue_attribution'],
             'costing' => $this->resource['costing'],
         ];
     }

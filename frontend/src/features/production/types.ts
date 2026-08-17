@@ -278,6 +278,16 @@ export interface StockShortfall {
     warehouse_name?: string | null;
     /** kg issued beyond the recorded balance. Numeric string — print, never round. */
     short_kg?: string | null;
+    /**
+     * WHAT THIS PARTICULAR SHORTFALL MEANS, when the location makes it a
+     * different fact (Phase 7.5). Null — and absent on every snapshot
+     * written before it existed — for an ordinary store, where a shortfall
+     * is the stock record being behind and the accountant fixes the record.
+     * Present for Production/WIP, which holds only what a store issue put
+     * there: a gap there says the batch consumed more than was ever issued
+     * to it, and nobody should be sent hunting a purchase receipt for it.
+     */
+    basis?: string | null;
 }
 
 /** A shortfall reduced to display strings. `shortKg` stays exact. */
@@ -297,6 +307,8 @@ export interface ReadableStockShortfall {
      * the masterbatch are kilograms.
      */
     unit: string | null;
+    /** The server's sentence about what this shortfall means, or null. */
+    basis: string | null;
 }
 
 /**
@@ -358,6 +370,10 @@ export function readStockShortfalls(
         // writes "Kgs.", "Nos", "KGS" — because that is the unit the store
         // counts in, and tidying it here would invent a unit of our own.
         unit: (line.item_uom ?? '').trim() || null,
+        // Printed verbatim when present, never composed here: which location
+        // makes a shortfall mean what is the server's call, and a sentence
+        // this side invented could contradict it.
+        basis: (line.basis ?? '').trim() || null,
     }));
 }
 
@@ -3017,6 +3033,44 @@ export interface CartonInternalTrace {
         } | null;
         lots: CartonTraceLot[];
         unattributed_loaded_kg: string;
+        /**
+         * Which ledger the window's kilograms came from — the day bin's own
+         * loads, and what the store issued. A cross-reference between the two
+         * blocks, never a merge of them.
+         *
+         * OPTIONAL ON PURPOSE: the server omits it on the degraded branch
+         * (a batch that no longer resolves a shift and production date has no
+         * window to total), which is the same branch that leaves `window`
+         * null. It is present on every trace that has a window.
+         */
+        sources?: {
+            day_bin_loaded_kg: string;
+            store_issued_kg: string;
+        };
+    };
+    /**
+     * THE STORE-ISSUE LEDGER'S OWN BLOCK, under its own sentence.
+     *
+     * Since DEC-20260817-001 material reaches production as a store issue
+     * into Production/WIP, not as a day-bin load. Those lots are NOT listed
+     * under `day_bin_attribution`: that block's `basis` is owner-fixed
+     * (DEC-20260810-001) and says the common day bin HELD these lots, which
+     * is not true of a lot issued straight from the store. Two blocks, each
+     * under words that are true of it — and `basis` here must be rendered
+     * beside these rows exactly as it is there.
+     */
+    store_issue_attribution: {
+        basis: string;
+        reason: string | null;
+        window: {
+            production_date: string;
+            shift: string;
+            timezone: string;
+            from: string;
+            until: string;
+        } | null;
+        lots: CartonTraceLot[];
+        unattributed_issued_kg: string;
     };
     /**
      * BagCostAllocationService::summary(withDetail) — totals, the

@@ -156,14 +156,66 @@ class WipGodownAliasingTest extends TestCase
         ])->assertCreated();
     }
 
-    // (b) a genuinely ambiguous alias is refused, not guessed ----------------
+    // (b) a SECOND godown does not stop the store handing material over -----
 
-    public function test_the_issue_is_refused_when_production_wip_aliases_to_no_tally_godown(): void
+    /**
+     * THE DAY-ONE SHAPE (AUDIT-WAREHOUSES-2026-08-17 §4).
+     *
+     * Two warehouse rows on this system carry a `tally_guid`, which kills
+     * TallyGodownResolver's sole-linked fallback for every unparented
+     * internal location — Production/WIP among them. Gating the HANDOVER on
+     * that fallback meant every store issue would be refused on day one,
+     * over a Tally master-data question, while the material was physically
+     * walking out of the store either way.
+     *
+     * So the issue is allowed and the unpostable-godown question is asked
+     * where it is actually answerable and actually enforced: the voucher
+     * preview, and the accounts-approval gate that reads it
+     * (production.approvals.require_postable_voucher). The store records the
+     * physical fact; the posting waits for the master.
+     */
+    public function test_a_second_tally_linked_godown_does_not_refuse_the_handover(): void
     {
-        // A second Tally-linked godown kills the sole-godown fallback, and
-        // WIP is parented to nothing — the resolver correctly declines to
-        // guess, so the handover must not happen.
         Warehouse::create(['code' => 'GDN-2', 'name' => 'Second Godown', 'is_active' => true, 'tally_guid' => 'gd-second']);
+
+        $user = $this->actingAsStore();
+        $this->stockInTheGodown();
+
+        $this->postJson('/api/v1/inventory/store-issues', [
+            'received_by' => $user->id,
+            'lines' => [['item_id' => $this->resin->id, 'quantity' => '100']],
+        ])->assertCreated();
+    }
+
+    public function test_an_unaliased_wip_is_still_reported_by_the_voucher_preview(): void
+    {
+        Warehouse::create(['code' => 'GDN-2', 'name' => 'Second Godown', 'is_active' => true, 'tally_guid' => 'gd-second']);
+
+        $entry = $this->completedEntryConsumingFrom($this->wip);
+
+        $preview = app(VoucherPreviewService::class)->forShiftProductionEntry($entry);
+
+        $this->assertFalse($preview['postable']);
+
+        $problems = array_merge(
+            $preview['problems'] ?? [],
+            ...array_map(fn ($line) => $line['problems'] ?? [], $preview['lines'] ?? []),
+        );
+
+        $this->assertNotEmpty(array_filter(
+            $problems,
+            fn (string $problem) => str_contains($problem, 'Work In Progress'),
+        ), 'the unpostable godown must be named where posting is decided');
+    }
+
+    // (b2) fail-closed where WIP itself cannot be identified -----------------
+
+    public function test_the_issue_is_refused_when_no_production_wip_location_can_be_identified(): void
+    {
+        // The row DEC-20260817-001 names is what makes "issued to production"
+        // a real stock state. Without it there is nowhere to issue TO, and
+        // that — not a Tally master — is what the handover is refused over.
+        $this->wip->update(['code' => 'NOT-WIP']);
 
         $user = $this->actingAsStore();
         $this->stockInTheGodown();
@@ -173,19 +225,19 @@ class WipGodownAliasingTest extends TestCase
             'lines' => [['item_id' => $this->resin->id, 'quantity' => '100']],
         ])->assertStatus(422)->assertJsonPath(
             'errors.production_wip.0',
-            'Production/WIP ("Work In Progress") aliases to no godown Tally knows, so a batch consuming from it '
-            .'could not be posted. Link it to the company godown (set its parent warehouse) before issuing material '
-            .'to production.',
+            ProductionWipLocationResolver::UNRESOLVED_MESSAGE,
         );
     }
 
-    public function test_parenting_production_wip_to_the_company_godown_restores_both_halves(): void
+    public function test_parenting_production_wip_to_the_company_godown_restores_the_godown_name(): void
     {
         Warehouse::create(['code' => 'GDN-2', 'name' => 'Second Godown', 'is_active' => true, 'tally_guid' => 'gd-second']);
 
         // The alias mechanism that already exists for every internal
         // location: the parent link. No row is renamed, merged or
-        // deactivated — DEC-20260817-001 gates all of that.
+        // deactivated — DEC-20260817-001 gates all of that. This is the fix
+        // for the preview problem above, and it is master data a person
+        // makes, never a side effect of an issue being recorded.
         $this->wip->update(['parent_id' => $this->godown->id, 'tally_parent_name' => self::COMPANY_GODOWN]);
 
         $user = $this->actingAsStore();
@@ -196,8 +248,10 @@ class WipGodownAliasingTest extends TestCase
             'lines' => [['item_id' => $this->resin->id, 'quantity' => '100']],
         ])->assertCreated();
 
-        $payload = app(TallySyncService::class)->buildBatchVoucherPayload($this->completedEntryConsumingFrom($this->wip));
+        $entry = $this->completedEntryConsumingFrom($this->wip);
+        $payload = app(TallySyncService::class)->buildBatchVoucherPayload($entry);
         $this->assertSame(self::COMPANY_GODOWN, $payload['consumed'][0]['godown']);
+        $this->assertTrue(app(VoucherPreviewService::class)->forShiftProductionEntry($entry)['postable']);
     }
 
     // (c) the resolver itself ------------------------------------------------
