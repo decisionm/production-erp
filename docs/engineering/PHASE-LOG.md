@@ -1576,3 +1576,102 @@ Deployment state:   not deployed; stack #179 → … → #189 → #190
 Next phase:         7.5 — Store → Production material flow (the lead's
                     business-rule correction of 17-Aug), then 8 acceptance
 ```
+
+## PHASE 7.6 — The Configuration Lifecycle Contract (Tier 0)
+
+```
+Phase:    7.6 — the lead's product-wide configuration contract, mechanism first
+Status:   PASS WITH DEFERRED ITEMS
+Branch:   feat/phase-7.6-configuration-lifecycle (stacked on Phase 7 PR #190 → … → #179)
+Dates:    2026-08-17
+
+Goal:
+  Make every applicable master behave the same way — Create → View → Edit →
+  Activate/Deactivate → Safe Delete → Audit — with the delete guard enforced in
+  the BACKEND, one shared policy rather than per-page logic, and duplicate
+  guards. This pass ships the MECHANISM and the live-facing fixes; no entity is
+  wired and no route is exposed. The duplicated warehouses are one test case of
+  the contract, not the contract itself.
+
+What changed:
+  • The mechanism (app/Support/Configuration): DependencyCheck (declarative —
+    a table+column, a callable, an attribute; with cascadeSide() and
+    includeTrashed()), DependencyReport, ConfigurationLifecycle,
+    ConfigurationInUseException, and a trait so a module declares only its own
+    checks. The 422 carries code=configuration_in_use, `blocking` with integer
+    counts, `unprovable`, `cascade_gaps` and `alternative`, so the UI renders
+    "used by 12 stock movements and 2 production batches" from DATA.
+  • THE HARD DELETE IS REAL (DEC-20260817-002 §1): a record whose LOCKED report
+    is clear is destroyed outright, which is what frees its business code (§2).
+    A retained soft-deleted row would keep reserving the code and satisfy
+    neither half of the decision.
+  • THE SCHEMA IS THE BACKSTOP — the gate's central finding. The delete used to
+    trust a hand-written list; a reviewer proved an EMPTY list deleted an
+    employee and took a real attendances row with it. The report now asks the
+    database which foreign keys cascade into the table (sqlite PRAGMA, MySQL
+    information_schema — both implemented, both tested, no driver skips) and
+    REFUSES, naming table and column, for any cascading COLUMN no check covers.
+    Per-COLUMN, not per-table: masterbatch_dosings reaches items through two
+    columns, so a check on one proves nothing about the other. A check that
+    skips soft-deleted rows also fails to cover its table, because a trashed
+    child is still a physical row and cascades identically. The backstop
+    immediately caught THREE incomplete declarations in the phase's own tests.
+  • Status-enum masters: ActiveFlag expresses a boolean flag OR a status enum;
+    activate and archive are two separate predicates, so a mould under repair
+    is neither active nor retired and is never stranded. Declaring a boolean
+    over an enum column now throws, naming the fix.
+  • The hard-delete authority seam (§3), asked FIRST and fail-closed: a
+    lifecycle that names nobody deletes nothing. No permission name and no role
+    invented — the repo has no Super Admin construct and the wiring wave
+    supplies the callback.
+  • THE LIVE-FACING HALF, which needed no delete to matter: eleven is_active /
+    status flags were set and filtered NOWHERE — a retired mould and a
+    withdrawn scrap reason were selectable on the floor — and Item/Warehouse
+    were unfiltered on eight stock/GRN paths. All closed in the FormRequests,
+    each with a test proving the inactive row is refused, the active one still
+    passes, and history still renders the inactive row. The pickers that fed
+    those forms were narrowed too, so the operator never picks a row the server
+    will refuse.
+  • The audit trail: spatie/laravel-activitylog was installed, migrated and
+    used nowhere, and no updated_by column existed. Now on for the ten Tier-1
+    models with created_by/updated_by, and a test proving nothing is logged for
+    a transaction model — the blast radius is bounded deliberately.
+  • The shared frontend: one hook, row actions that READ `can` and never
+    re-derive it, a delete modal rendering all THREE refusal lists, one status
+    vocabulary, and an error helper that keeps field keys.
+
+The convention correction, stated rather than slipped in:
+  routes/api.php claimed "there is no PUT and no DELETE here or anywhere" —
+  false in 47 places in that same file. It now states the truth, scoped:
+  transactions and ledgers are append-only; configuration masters carry a
+  lifecycle including a guarded hard delete. CLAUDE.md gained the matching
+  half. MaterialLotCostVersionTest is untouched and a new test (T16) pins that
+  every append-only surface still answers 405/404.
+
+Tests:
+  Backend 1,670 → 1,766 (1 skipped: the CEC golden) / 15,925. Frontend vitest
+  383 → 456. The mechanism's own tests pass 41/41 on sqlite AND on a real
+  MySQL 8. Knowledge sound.
+
+Gate:
+  Sonnet PASS_WITH_DEFERRED · Opus FAIL · Fable PASS_WITH_DEFERRED → fix loop →
+  Sonnet re-gate PASS_WITH_DEFERRED. All three reviewers independently found
+  the cascade P1. The re-gate's P2 (archive/activate did not enforce their own
+  abilities) and the vocabulary P3 were fixed after it.
+
+Owner-gated items:
+  DEC-20260817-002 answered the contract's open points. Q43 still owns
+  duplicate NAMES (block vs warn). Q51 still gates any warehouse consolidation.
+
+Deferred items:
+  • NO ENTITY IS WIRED and no route exposed — the next wave does that, carrying
+    the Super-Admin-only grant (and the repo has no Super Admin construct yet).
+  • Tier 1 entity rows are not yet green: this pass shipped the mechanism, the
+    live-facing flag fixes and the audit trail.
+  • payload()['alternative'] is hardcoded 'archive' even for a master that can
+    neither flag nor soft-delete; DependencyCheck's soft-delete-column cache
+    has no flush counterpart.
+PR:                 stacked on #190 (base: feat/phase-7-regression-hardening)
+Deployment state:   not deployed; stack #179 → … → #190 → this PR
+Next phase:         7.5 (material flow) then 8 (end-to-end acceptance)
+```
