@@ -247,6 +247,7 @@ One estimation engine for preview and entry, versioned, legacy pinned · every e
 `OverReceiptException` (**Phase 6 WS-B, in progress**) · CRM · Finance — **Still:** MySQL CI leg (Phase 7). **New (recorded):** P5.7-03 reporting honesty sweep → P7-05; ShiftSummaryExport alias columns; per-entry cost reads (2 queries/batch) on the entries resource → P7-03.
 
 ## Phase 6 (feat/phase-6-purchase-chain, gate closed 2026-08-17)
+## Phase 7 (feat/phase-7-regression-hardening, integrated 2026-08-17; gate pending)
 
 | Suite | Result | Evidence |
 |---|---|---|
@@ -268,3 +269,21 @@ One estimation engine for preview and entry, versioned, legacy pinned · every e
 
 ### Still open (from the baseline list)
 CRM · Finance — **Still:** MySQL CI leg (**Phase 7, next**). **New (recorded):** the ORDERDUEDATE JD/P read-back at the first attended live post; the machine-stamped `day-bin/load` write door (cleanup against DEC-20260807-006); `match` not yet typed in the frontend procurement types.
+| Backend PHPUnit — **sqlite leg** | PASS | **1,661 / 15,382** (1 skipped by design: CecGoldenTest); Phase 6 close 1,595 / 14,633 |
+| Backend PHPUnit — **MySQL 8 leg** | **PASS** | **1,661 / 15,382**, identical counts, run against a real `mysql:8.0` container as well as the new `app-mysql` CI job — the driver the live factory runs on had never met this suite before |
+| Frontend vitest | PASS | 368 → **383** |
+| Typecheck · build | PASS | clean · built |
+| Agent | PASS | 122 → **135** (snapshot journal + retry) |
+| Factory-knowledge | PASS | exit 0 (Q49 added; preamble → Q50) |
+| Migrations | 1, additive | a widened quality/scrap note column (from the MySQL work) |
+| Red-before / green-after | PROVEN | four MySQL failures reproduced and fixed: JSON object-key order ×2, sqlite identifier quoting in a SQL-predicate assertion, and the published decimal shape; the report cap's cut proved directly (7 rows → 3 with `truncated: true`, and exactly-at-cap NOT called truncated) |
+| Sonnet independent QA | **NOT YET RUN** | the gate is the next act — recorded honestly rather than implied |
+| Adversarial review | **NOT YET RUN** | as above |
+| Browser proof | NOT DONE (extension disconnected) | Phase 8 chain walk |
+| API proof | pending the gate | |
+
+### Coverage gaps closed this phase
+The MySQL leg itself (the longest-standing gap) · two published figures that differed between dev and live now single-shaped · the entries index cost per page instead of per row · work-queue filters in SQL before the page is cut · report `row_cap`/`truncated` · a regression smoke over the WHOLE read surface (401 unauthenticated, never 5xx to an admin, every parameterised GET classified — SKIPPED is empty) · auth/roles/module-index coverage where there was none · the agent no longer drops a snapshot captured while the cloud was down.
+
+### Still open (from the baseline list)
+CRM · Finance · the Phase 7 gate itself. **New (recorded):** Q49 (the paper-page screen); the `app-mysql` check needs adding to branch protection by the repo owner.

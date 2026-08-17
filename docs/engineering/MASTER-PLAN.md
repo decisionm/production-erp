@@ -27,7 +27,9 @@ PHASE 5   Product / SKU configuration          PASS WITH DEFERRED · PR #186 (st
 PHASE 5.5 Shift Floor → Complete → Today       PASS WITH DEFERRED · PR #187 (stacked on #186) · v3 estimation, legacy pinned · Q46
 PHASE 5.7 Shift Summary + CEC infrastructure   PASS WITH DEFERRED · PR #188 (stacked on #187) · report contract + honesty keys · CEC data endpoint + golden harness · format BLOCKED · Q47
 PHASE 6   Purchase chain + PO→Tally staged      PASS WITH DEFERRED · PR #189 (stacked on #188) · lifecycle/show/trace · flag OFF (Q35) · Q48
-PHASE 7   Regression + reporting honesty + hardening (MySQL leg; deferred items)
+PHASE 7   Regression + hardening               INTEGRATED (gate pending) · PR (stacked on #189) · suite green on sqlite AND MySQL 8 · Q49
+PHASE 7.5 Store → Production material flow     NEW (lead, 17-Aug): Material Request → Store Issue → Issued-to-Production → Consumption → Return; Day Bin leaves the target workflow
+PHASE 7.6 Configuration Lifecycle Contract     NEW (lead, 17-Aug): Create·View·Edit·Activate/Deactivate·Safe Delete·Audit, enforced in the BACKEND, across every master
 PHASE 8   END-TO-END ACCEPTANCE: operator workflow, then accounting traceability, purchase chain, sales visibility + downloads
 ──────────────────────────────────────────────────────────────────────
 HELD      Sales in ERP · CEC format · reconciliation-by-read · SKU format · Q33 (490/box) · Q35 (PO live write)
@@ -269,6 +271,67 @@ today and the PO voucher staged behind the flag.
 | **P7-04** Decide `ingestPage` — finish or document as API-only | §4.19 |
 | **P7-05** Full-application regression across every adopted module (prompt §111 kept) | |
 
+### Phase 7.5 — Store → Production material flow (lead's correction, 17-Aug-2026)
+
+The lead has corrected the target workflow for material moving from the store to
+production. **The Day Bin leaves the TARGET workflow** — but nothing is deleted blindly:
+what is relied upon is determined first, then the operational workflow is refactored
+safely and the historical rows stay exactly where they are.
+
+```
+Store Stock → Production Material Request → Store Issue → Scan/Handover
+   → Issued-to-Production → Actual Consumption → Return unused (where applicable)
+```
+
+| Task | What "done" is |
+|---|---|
+| **P7.5-01** Audit first: what the Day Bin actually is, every writer and reader, what breaks if it stops being written, and what already exists to reuse (bags, lots, QC on arrival, warehouses) | a written audit with file:line, before a line is refactored |
+| **P7.5-02** **Material Request**: request number · requested by · date/time · shift · machine/production area (where applicable) · SKU/batch (where known) · material · requested quantity + UOM · status. Production raises it; the Store gets a QUEUE | endpoints + tests |
+| **P7.5-03** **Store Issue** against a request: partial fulfilment, remaining quantity, completed issue, cancellation, and unused-material RETURN | lifecycle tests, each state proven |
+| **P7.5-04** **Scan/handover** for PET and raw-material bags: the actual bag/barcode scanned at handover, recording bag/lot identity, quantity/weight, the request, issued by, received by and timestamp. Replenishment is NOT daily (weekly / bi-weekly / consumption-driven); other consumables may be daily — nothing in the model may assume a daily cadence | tests incl. a non-daily cadence |
+| **P7.5-05** **The accounting distinction, which is the heart of this change:** a Store issue is NOT consumption. Three states — `Store Stock → Issued to Production → Consumed` — plus `Issued to Production → Returned to Store`. Stock must never be deducted as production consumption at the moment the store issues it | ledger invariant holds at every state; `inventory:check-ledger` clean |
+| **P7.5-06** Consumption traces back to its Store issue | trace tests |
+| **P7.5-07** Day Bin retired from the target workflow: the live write doors closed, historical rows preserved and still readable, every reader migrated or explicitly retired | no data destroyed; readers named |
+
+**HELD — one clause needs the owner (FC-01).** The lead also asks that consumption trace
+to *the exact lot/bag*, and that a request may name a machine/area. `FACTORY-CONSTITUTION`
+**FC-01** — sourced to the owner's own rulings of 01–06 Aug and reaffirmed in the owner's
+06-Aug architecture brief — says the opposite in terms: *all machines draw from one common
+resin loading point; a resin bag must never be represented as physically assigned to a
+machine or a batch; batch consumption is calculated and the system must not claim physical
+bag-to-machine or bag-to-batch provenance.* Everything else in this phase is compatible
+with FC-01 (indeed FC-01 itself says a bag scan is a pour record, **not** consumption —
+which is exactly the Store-issue-is-not-consumption rule). Only the bag→batch/machine
+**provenance claim** collides. It is recorded as an owner question and **not built on an
+agent's judgement**: either the owner supersedes FC-01 with a new decision (because the
+floor now issues per machine/area), or consumption traces to the ISSUE and bag-level
+identity stops at the store handover.
+
+### Phase 7.6 — The Configuration Lifecycle Contract (lead's requirement, 17-Aug-2026)
+
+The ERP is configuration-first — `Configuration → Operational Workflow → Transactions →
+Reports/Tally` — and every applicable master must behave the same way. This is a
+product-wide contract, not a Warehouse patch; the duplicated warehouses (FG / FG-STORE,
+RM / RM-STORE) are one test case of it.
+
+**Every applicable configuration/master entity supports:**
+`Create → View → Edit → Activate/Deactivate → Safe Delete → Audit`
+
+| Task | What "done" is |
+|---|---|
+| **P7.6-01** Audit every master and publish the matrix: `Configuration \| Create \| Edit \| Active-Inactive \| Delete-unused \| Dependency guard \| Duplicate guard \| Audit \| Tests`, each cell PASS / GAP / N/A | the matrix, in TEST-MATRIX.md |
+| **P7.6-02** **Safe Delete, enforced in the BACKEND** (UI-only disabling is insufficient): hard delete ONLY when genuinely unused. The guard counts transaction history, stock/inventory, GRN/PO/Sales, production/batch, material requests/issues, child configuration, reporting dependencies, Tally/master mappings and every other FK/domain reference. Previously used → REFUSED, with Deactivate/Archive offered. **No destructive cascade to make a check pass** | per-entity dependency tests |
+| **P7.6-03** One shared policy/service — dependency checks, delete eligibility, active/inactive, audit metadata, the API error contract, permissions — with domain-specific checks plugged in; NOT reimplemented per page | one mechanism, many registrations |
+| **P7.6-04** The refusal EXPLAINS itself, with counts: "Cannot delete — used by 12 stock movements and 2 production batches. Deactivate instead." A `can` block on every configuration resource so the UI never re-derives eligibility | contract test on the error shape |
+| **P7.6-05** Duplicate prevention: exact unique business codes where appropriate, normalised comparison where appropriate, WARN on likely duplicate names. Never auto-merge; **never merge records carrying transaction history without explicit evidence and an owner decision** | tests |
+| **P7.6-06** The lifecycle test matrix: create · edit unused · delete unused · direct API delete unused · delete referenced → refused · direct API delete referenced → refused · deactivate referenced · inactive excluded from new operational selection · historical transactions still display the inactive configuration · reactivate where allowed · duplicate code refused · likely duplicate name handled · authorization · audit trail · Tally-linked configuration safety | one matrix, every applicable module |
+
+**Convention note the reviewer must see, not have slipped past them:** `routes/api.php`
+declares the repo append-only with no PUT and no DELETE anywhere, and CLAUDE.md says
+anything deletable with transactional history uses soft deletes. A real Delete on unused
+configuration is a deliberate, stated change to that convention — it is written down here
+rather than introduced quietly.
+
 ### Phase 8 — End-to-end acceptance, then release readiness
 
 **The product is not complete until this chain passes**, with Sonnet as the
@@ -284,6 +347,13 @@ A · OPERATOR WORKFLOW
 B · ACCOUNTING TRACEABILITY
    Purchase (PO → GRN → lot) → Inventory (ledger == balance) → Production consumption
    [PO→Tally only if the Q35 live-write gate passed]
+B2 · STORE → PRODUCTION MATERIAL FLOW (Phase 7.5, the lead's 17-Aug correction)
+   Production Request → Store Issue → Bag Scan → Production Receipt
+   → Batch Consumption → Remaining / Return → Stock reconciliation
+   with Store Stock / Issued-to-Production / Consumed kept DISTINCT at every step
+D · CONFIGURATION LIFECYCLE (Phase 7.6)
+   Every applicable master: Create → View → Edit → Activate/Deactivate → Safe Delete
+   → Audit, with delete REFUSED (backend-enforced, explained with counts) once used
 C · SALES VISIBILITY + DOWNLOADS
    Sales documents traced to their Tally entries (Layer A; Layer B stated) →
    one export per kind from the Center, FC-06 on every file
@@ -296,6 +366,8 @@ C · SALES VISIBILITY + DOWNLOADS
 | **P8-03** Sonnet independent QA runs the walk **without** the implementer's notes and reports per link: PASS / FAIL / NOT TESTED / BLOCKED | |
 | **P8-04** Browser proof at every link (screenshots + the API responses behind them), attached to the phase log | |
 | **P8-05** Full-application regression across every adopted module (prompt §111): login · roles · masters · products · purchase · inventory · production · sales · reports · downloads · Tally | |
+| **P8-07** **Chain B2 proven end to end:** Production Request → Store Issue → Bag Scan → Production Receipt → Batch Consumption → Remaining/Return → stock reconciliation, with the three states never collapsed into one (an issue is not a consumption) | walk + assertions |
+| **P8-08** **The Configuration Lifecycle Contract holds** for every master rated applicable: the matrix is all PASS, delete-when-used is refused by the BACKEND with an explanation, and no duplicate active code can be created. **Phase 8 cannot be called PRODUCT READY while a material configuration gap remains** | the matrix, green |
 | **P8-06** Release readiness (prompt §86 kept): no P0, no unresolved P1 data-integrity issue, all migrations accounted for, all tests green, production build passes, browser smoke passes, sync dry-run passes, rollback documented, monitoring ready. `DEVELOPMENT-PLAN.md` brought current or explicitly superseded by this file | |
 
 **Verdict rule:** any link FAIL or NOT TESTED → the phase is `NOT READY`, full stop. A
@@ -316,5 +388,7 @@ is **not called complete** while a BLOCKED link remains.
 | Committing XML/exports to the repo | Q31, Q38 |
 | Finance / CRM surfaces | DEC-20260812-001 |
 | ERP sales-document lifecycle defaults | Q44 |
+| Bag → batch / machine consumption provenance (Phase 7.5) | Collides with **FC-01**; either a new owner decision superseding it, or consumption traces to the ISSUE and bag identity stops at the store handover |
+| Merging any two masters that already carry transaction history (e.g. the duplicate warehouses) | Explicit evidence + an owner decision; never an agent's call |
 
 ---

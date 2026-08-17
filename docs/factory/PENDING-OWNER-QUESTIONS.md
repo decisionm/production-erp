@@ -843,3 +843,101 @@ configuration already knows:
 
 **Blocks:** nothing — the endpoint is inert without a caller. It decides whether
 Phase 8 builds the screen or the endpoint is retired. *Open since 2026-08-17.*
+
+## Q50 · Does a material request name a MACHINE, and may consumption name a BAG — for resin?
+
+The program lead has confirmed a corrected Store-to-Production workflow (17-Aug-2026):
+
+    Store Stock -> Production Material Request -> Store Issue -> Scan/Handover
+      -> Issued-to-Production -> Actual Consumption -> Return unused
+
+Production raises a material request (request number, requester, date/time, shift,
+machine/production area where applicable, SKU/batch where known, material, quantity,
+UOM, status); the Store works a queue, with partial fulfilment, remaining quantity,
+completion, cancellation and the return of unused material. For PET and raw-material
+bags the Store scans the actual bag at handover, recording bag/lot identity,
+quantity/weight, the request, issued by, received by and the time. Replenishment is
+not necessarily daily.
+
+**Most of this needs no ruling and is being built**, including the heart of it: a
+Store issue is NOT a consumption, and the ERP must keep `Store Stock` / `Issued to
+Production` / `Consumed` distinct with a return path. That AGREES with FC-01, which
+already says a bag scan is "a pour record, not Tally consumption" — this change moves
+the accounting event further away from the scan, not closer.
+
+**Two clauses need the owner, and only for the COMMON-INPUT RESIN.** The audit
+(`docs/engineering/AUDIT-WAREHOUSES-2026-08-17.md`'s sibling material-flow audit)
+finds the conflict is not with the workflow but with two specific claims, and only
+where the material is resin:
+
+1. **A resin request naming a machine or area.** DEC-20260807-006 records the physical
+   fact: ONE loading point, crane-fed, piped to all ten machines — "bag-to-batch
+   identity is physically impossible in this plant". A machine on a *resin* request
+   would be a field the floor cannot answer truthfully. For packing film, cartons,
+   tape and other non-common-input consumables a machine or area is perfectly
+   meaningful, and the ERP will carry it there.
+2. **Consumption tracing to the exact lot/bag.** FC-01: "the system must not claim
+   physical bag-to-machine or bag-to-batch provenance"; DEC-20260810-001 requires the
+   wording always be "the bin held these lots", never "this batch used this bag". And
+   DEC-20260807-007 records that the bin is never weighed, so the ledger never
+   re-anchors — a bag-level attribution would drift permanently with nothing to
+   correct it. What IS exact and true, and is being built: consumption traced to its
+   STORE ISSUE, and to the lots the bin held in that shift window.
+
+So the question is a question of fact about the floor:
+
+(a) Has the resin flow physically CHANGED — is resin now issued from the store for a
+    named machine or area, rather than every machine drawing from one common piped
+    loading point? If yes, FC-01's premise no longer holds, the owner can supersede
+    it, and bag-level provenance becomes honest to record.
+(b) Or does the common input still stand — in which case the ERP traces resin
+    consumption to the ISSUE (exact), names machines only on consumable requests, and
+    keeps saying "the bin held these lots" for resin.
+
+**Blocks:** only the resin bag-to-batch provenance claim and the machine field on a
+resin request. The request itself, the store queue, partial fulfilment, returns, the
+three stock states, bag scanning at handover, and issue-level traceability all proceed
+either way, for every material. *Open since 2026-08-17.*
+
+## Q51 · How many stores does the factory actually have, and which rows are they?
+
+The ERP holds five warehouses. Two pairs are functionally duplicated and the
+evidence says accidentally so (full audit:
+`docs/engineering/AUDIT-WAREHOUSES-2026-08-17.md`):
+
+    RM-STORE "Raw Material Store"   vs   RM "RM Store"
+    FG-STORE "Finished Goods Store" vs   FG "FG Store"
+    WIP      "Work In Progress"
+
+All five predate the current engineering programme. The `RM-STORE`/`WIP`/`FG-STORE`
+three came from a demo-data seeder (19-Jul); `RM` and `FG` came ten days later from
+an acceptance-fixture seeder whose own comment says *"Godowns that exist in Tally."*
+An archived go-live plan already flagged the overlap and deferred it: *"Consolidate
+after go-live; vouchers must reference godown names that exist in Tally."*
+
+Two things make this the owner's call rather than an engineering tidy-up:
+
+1. **The history sits on the wrong side.** In the rehearsal database the stock
+   movements, receipts and deliveries hang off the DEMO rows, while the
+   Tally-linked identity hangs off the fixture rows. Consolidating therefore means
+   REWRITING `warehouse_id` on historical movements, receipts and deliveries —
+   altering records of things that already happened, and (once vouchers exist) the
+   godown a past line claims to have posted under. This repo does not rewrite
+   history on an agent's judgement.
+2. **It is already costing something.** Two rows carry a Tally godown id, and the
+   resolver that falls back to *the sole* Tally-linked warehouse therefore finds
+   two and gives up. That fallback is dead while the pair exists.
+
+What is needed from the owner and the accountant:
+
+(a) How many stores does the factory actually keep, and what are they called in
+    Tally? (One godown, or a raw-material and a finished-goods godown, or more?)
+(b) For each ERP row above: is it a real place, or residue to retire?
+(c) If two rows are the same place, may their historical rows be moved onto the
+    surviving row — and on which side? This is the destructive half and needs an
+    explicit yes, after a dry run showing exactly what would move.
+
+**Blocks:** consolidating the warehouses, and the Tally sole-godown fallback.
+Nothing else — the ERP runs fine with the duplicates, it merely cannot tidy them
+safely without this. **Nothing has been merged, deleted or deactivated.**
+*Open since 2026-08-17.*

@@ -1470,4 +1470,108 @@ Deferred items:
 PR:                 #189 (base: feat/phase-5.7-shift-summary-cec → #188 → … → #179)
 Deployment state:   not deployed; stack #179 → … → #188 → #189
 Next phase:         7 — regression, MySQL CI leg, reporting honesty, hardening
+## PHASE 7 — Regression + reporting honesty + hardening
+
+```
+Phase:    7 — the suite runs on the driver the factory runs on
+          (MASTER-PLAN rev 3, P7-01..05)
+Status:   PASS WITH DEFERRED ITEMS
+Branch:   feat/phase-7-regression-hardening (stacked on Phase 6 PR #189 → … → #179)
+Dates:    2026-08-17
+
+Goal:
+  Close the standing gaps the earlier phases kept recording: run the suite on
+  MySQL as well as sqlite (live is MySQL and the suite had never met it), pay
+  off the deferred hardening from Phases 3–5.7, make the reports say when they
+  are showing part of a range, and put a regression smoke under the whole read
+  surface so a route added tomorrow is walked the day it lands.
+
+What changed:
+  • The MySQL CI leg (P7-02). ci.yml gains `app-mysql`: the same suite against
+    a real MySQL 8 service. No second phpunit config was needed — PHPUnit
+    applies a non-force <env> only when the variable is absent from the
+    process environment, so a job-level DB_CONNECTION wins over the pinned
+    sqlite. The deploy gate stays sqlite deliberately (it is the fast leg) and
+    its comment, which had claimed a DB service could not override the pinned
+    values, is corrected. Tests\TestCase gains assertSameJson: MySQL's native
+    JSON type normalises object keys (by length, then bytes) where sqlite
+    returns them as written, so an assertSame over a payload row was pinning
+    the driver rather than the contract. It sorts associative keys on both
+    sides and still asserts list ORDER, every key's presence and every value —
+    it is deliberately not assertEqualsCanonicalizing, which would lose which
+    value sat under which key.
+  • TWO REAL dev-vs-live differences the leg exposed. `accepted_quantity` (the
+    batch cost summary) and `actual_pieces` (metrics, the production report,
+    the CEC, the exports) both came from `(string) $entry->quantity_produced`
+    — a decimal(15,4) column with NO Eloquent cast, so the raw driver value
+    was published: live (MySQL) has always emitted '5880.0000' while dev
+    (sqlite) emitted '5880', and the tests documented dev. Both are normalised
+    to the 4-dp form live already emits: LIVE BEHAVIOUR IS UNCHANGED, dev now
+    matches it. Four test expectations that had pinned the in-memory shape
+    moved with it. This is the class of defect the leg was built to find.
+  • Deferred hardening paid off (P7-03): the entries index cost two queries
+    per completed batch (one stock_movements read, one bag-cost read per row)
+    and now costs one of each PER PAGE, pinned by a query-count test at N=1
+    against N=60 — Completed Today and the CEC inherit it; a snapshot show
+    cap; TallySyncLinkService ranking so a synced older entry outranks a
+    pending newer one for legacy duplicates; ShiftSummaryExport's honest
+    *_now columns; and the two work-queue filters (awaiting_correction,
+    correctable) applied in SQL BEFORE the page is cut, with a parity test
+    against the resource's own derivation. The frontend's 25-page walk over
+    every pending entry is replaced by those filters.
+  • Reporting honesty: the reconciliation and traceability reports carry
+    `row_cap` and `truncated`, so a range wider than the cap is cut but never
+    silently — a partial list can no longer read as a whole period. A cap of
+    zero cannot produce an empty report (the floor is one row).
+  • Regression smoke (P7-05): every parameterless GET under /api/v1 answers
+    401 unauthenticated and NEVER a 5xx to an administrator, on an empty
+    database and on a fully seeded one; every parameterised GET is either read
+    against a fixture (all 31) or named in SKIPPED — which is EMPTY, so
+    nothing is unclassified; auth, roles and per-module index/permission
+    coverage; and the SPA's route table is pinned.
+  • P7-04 (ingestPage) is deliberately NOT declared "API-only". The endpoint
+    works, is tested, and has no screen; the priority it was built for is
+    quoted in its own docblocks from a 05-Aug discussion, and a discussion is
+    not a decision (AGENTS.md) — so whether the factory still wants the page
+    screen is owner question Q49. Two tests pin today's truth in both
+    directions: no screen calls it, and the endpoint is still registered.
+
+Tests:
+  Backend 1,595 → 1,661 (1 skipped: the CEC golden) / 15,382 assertions —
+  green on BOTH drivers: sqlite AND a real MySQL 8 (verified locally against
+  a mysql:8.0 container as well as in the new CI job). Frontend vitest 368 →
+  383. Agent 122 → 135 (snapshot journal + retry: a Tally answer captured
+  while the cloud was down is no longer dropped). Knowledge sound.
+
+Independent QA + adversarial review:
+  NOT YET RUN for this phase — the phase was integrated by hand after a
+  session limit interrupted three of its four implementers mid-flight, and the
+  gate is the next act. What IS proven: both driver legs green, every leg's
+  counts reproduced, and the four MySQL failures that remained after the
+  implementers stopped were diagnosed and fixed by the integrator (three were
+  driver-portability in tests — JSON key order and sqlite's identifier
+  quoting; one was the real published-shape difference above).
+
+Data/transaction proof:
+  Nothing that reaches Tally changed. One migration, additive, from an
+  implementer's MySQL work (a widened quality/scrap note column).
+
+Owner-gated items:
+  • Q49 (NEW) — is the "type a whole paper page in one go" screen still
+    wanted, or is the endpoint dead weight to retire?
+
+Deferred items:
+  • The gate for this phase (Sonnet QA + adversarial) — next.
+  • The new `app-mysql` check must be added to branch protection by the
+    repository owner; an agent cannot set that.
+  • Still open from the deferred lists: `needs_review` status, the
+    unvalidated_builder flag, the "queued payload predates the document"
+    flag, delivery `delivered_date` raw ISO, snapshot_count on the list, the
+    90-day retention nobody has been asked about, the shift-KPI sub-table
+    export kinds, the import updateOrCreate on (standard, mode), and
+    FinishedCartonService label precedence.
+PR:                 stacked on #189 (base: feat/phase-6-purchase-chain)
+Deployment state:   not deployed; stack #179 → … → #189 → this PR
+Next phase:         7.5 — Store → Production material flow (the lead's
+                    business-rule correction of 17-Aug), then 8 acceptance
 ```
