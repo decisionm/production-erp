@@ -525,6 +525,12 @@ Route::prefix('v1')->group(function () {
             // Same group, so the POST and PUT need production.manage.
             Route::post('standards/{standard}/packagings', [ProductionStandardPackagingController::class, 'store']);
             Route::put('standards/{standard}/packagings/{packaging}', [ProductionStandardPackagingController::class, 'update']);
+            // Identity ONLY — item_id and its provenance, never a count. The
+            // review panel's Link uses this so that linking a Tally item can
+            // never re-derive a box count the importer deliberately left as
+            // the sheet stated it (Phase 5 fix P1-a). production.manage via
+            // the group, like the PUT above.
+            Route::patch('standards/{standard}/packagings/{packaging}/identity', [ProductionStandardPackagingController::class, 'identity']);
             // One product's variant tree — item → standards → packagings,
             // each packaging with its Tally identity (sku · name · guid) and
             // a configuration_status whose `missing` words the screens

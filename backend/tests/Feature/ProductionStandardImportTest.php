@@ -215,6 +215,72 @@ class ProductionStandardImportTest extends TestCase
         );
     }
 
+    public function test_a_reimport_beside_a_person_added_second_tray_updates_only_the_row_it_matches(): void
+    {
+        // Phase 5 (D1): a standard may hold two same-mode packings. The
+        // importer used to key on (standard, mode) and would have rewritten
+        // whichever of the two it found first with the sheet's counts.
+        $this->import();
+        $standard = ProductionStandard::where('source_product_name', '90ML RIB')->firstOrFail();
+        $sheetTray = $standard->packagings()->where('mode', 'tray')->firstOrFail();
+        $this->assertSame([208, 5, 1040], [$sheetTray->nos_per_tray, $sheetTray->trays_per_box, $sheetTray->nos_per_box]);
+
+        // A person adds the tray packing the workbook never carried.
+        $personTray = $standard->packagings()->create([
+            'mode' => 'tray', 'nos_per_tray' => 200, 'trays_per_box' => 5, 'nos_per_box' => 1000,
+        ]);
+
+        $result = $this->import();
+
+        $trays = $standard->packagings()->where('mode', 'tray')->orderBy('id')->get();
+        $this->assertCount(2, $trays, 'the re-import must neither drop nor duplicate a tray row');
+        $this->assertSame([208, 5, 1040], [$trays[0]->nos_per_tray, $trays[0]->trays_per_box, $trays[0]->nos_per_box]);
+        $this->assertSame($personTray->id, $trays[1]->id);
+        $this->assertSame([200, 5, 1000], [$trays[1]->nos_per_tray, $trays[1]->trays_per_box, $trays[1]->nos_per_box], 'a person-entered tray must survive a re-import untouched');
+
+        $variant = collect($result['variants'])->firstWhere('source_product_name', '90ML RIB');
+        $this->assertSame([], $variant['packaging_warnings'] ?? [], 'the sheet\'s tray matched exactly one row — nothing to warn about');
+        $this->assertSame(0, $result['summary']['packaging_warnings']);
+    }
+
+    public function test_a_reimport_whose_tray_matches_none_of_two_leaves_both_intact_and_reports_it(): void
+    {
+        $this->import();
+        $standard = ProductionStandard::where('source_product_name', '90ML RIB')->firstOrFail();
+        $sheetTray = $standard->packagings()->where('mode', 'tray')->firstOrFail();
+
+        // A person corrects the imported tray's count in the workspace AND
+        // adds a second tray. The sheet's 208 × 5 now matches neither.
+        $sheetTray->update(['nos_per_tray' => 210, 'nos_per_box' => 1050]);
+        $personTray = $standard->packagings()->create([
+            'mode' => 'tray', 'nos_per_tray' => 200, 'trays_per_box' => 5, 'nos_per_box' => 1000,
+        ]);
+
+        $result = $this->import();
+
+        $trays = $standard->packagings()->where('mode', 'tray')->orderBy('id')->get();
+        $this->assertCount(2, $trays);
+        $this->assertSame([210, 5, 1050], [$trays[0]->nos_per_tray, $trays[0]->trays_per_box, $trays[0]->nos_per_box], 'a corrected row is not silently put back');
+        $this->assertSame([200, 5, 1000], [$trays[1]->nos_per_tray, $trays[1]->trays_per_box, $trays[1]->nos_per_box]);
+        $this->assertSame($personTray->id, $trays[1]->id);
+
+        $variant = collect($result['variants'])->firstWhere('source_product_name', '90ML RIB');
+        $warnings = $variant['packaging_warnings'] ?? [];
+        $this->assertCount(1, $warnings);
+        $this->assertStringContainsString('90ML RIB', $warnings[0]);
+        $this->assertStringContainsString('2 tray packings', $warnings[0]);
+        $this->assertStringContainsString('208', $warnings[0]);
+        $this->assertStringContainsString('left untouched', $warnings[0]);
+        $this->assertSame(1, $result['summary']['packaging_warnings']);
+
+        // A standard with ONE row of the mode keeps today's behaviour: the
+        // sheet's figures update it in place (60ML ROUND's pouch row).
+        $pouch = ProductionStandard::where('source_product_name', '60ML ROUND')->where('cavities', 5)->firstOrFail()
+            ->packagings()->where('mode', 'pouch')->get();
+        $this->assertCount(1, $pouch);
+        $this->assertSame(1225, $pouch[0]->nos_per_box);
+    }
+
     public function test_a_row_imported_unlinked_adopts_its_item_when_the_link_arrives(): void
     {
         // The go-live sequence: the whole workbook is loaded first so the

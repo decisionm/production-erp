@@ -77,7 +77,7 @@ import {
     readStockShortfalls,
 } from '@/features/production/types';
 import { currentShift, justEndedShift, productionDateFor } from '@/features/production/shiftClock';
-import { incompleteWordsFromServer } from '@/features/production/productStandardsConfig';
+import { incompleteWordsFromServer, packagingForCompletion } from '@/features/production/productStandardsConfig';
 import { cavityPrefill } from '@/features/production/startBatchCavities';
 import { roundPer, useProductionSettings } from '@/features/production/packing';
 import { itemLabel } from '@/lib/itemLabel';
@@ -2832,8 +2832,11 @@ export default function ShiftProductionEntryPage() {
     const packagingForLine = useCallback(
         (line: PackingLineValues): StandardPackaging | undefined =>
             packingModes.find((p) => p.id === line.production_standard_packaging_id) ??
-            packingModes.find((p) => p.mode === line.mode),
-        [packingModes],
+            // A line without an id of its own: the run's FROZEN packaging when
+            // it is of this line's mode (two same-mode packings can coexist —
+            // the mode alone would pick the first), else the first of the mode.
+            packagingForCompletion(completingEntry, packingModes, line.mode),
+        [packingModes, completingEntry],
     );
 
     /**
@@ -2938,10 +2941,14 @@ export default function ShiftProductionEntryPage() {
         // directly, which are the figures that were actually recorded.
         if (amending) return;
         if (((completeForm.getValues('packing_lines') ?? []) as PackingLineValues[]).length > 0) return;
+        // The row the batch was started against BY ID first (two same-mode
+        // packings can coexist on one standard — a 520 tray must not be
+        // seeded with the 490 tray's counts), the mode as the fallback for a
+        // batch started before the id was frozen.
         const initial =
             packingModes.length === 1
                 ? packingModes[0]
-                : (packingModes.find((p) => p.mode === completingPackagingMode) ??
+                : (packagingForCompletion(completingEntry, packingModes) ??
                    packingModes.find((p) => p.is_default) ??
                    packingModes[0]);
         packingFields.replace([blankPackingLine(initial)]);
@@ -2986,7 +2993,8 @@ export default function ShiftProductionEntryPage() {
         if ((completingEntry.no_of_trays ?? 0) <= 0) return;
         if (completeForm.getFieldState('nos_per_tray').isDirty) return;
         if (hasPackStd(completeForm.getValues('nos_per_tray'))) return;
-        const trayStandard = packingModes.find((p) => p.mode === 'tray')?.nos_per_tray ?? null;
+        // The run's OWN tray (frozen id) before any tray of the standard.
+        const trayStandard = packagingForCompletion(completingEntry, packingModes, 'tray')?.nos_per_tray ?? null;
         if (!hasPackStd(trayStandard)) return;
         completeForm.setValue('nos_per_tray', trayStandard);
     }, [amending, completingEntry, packingModes, completeForm]);

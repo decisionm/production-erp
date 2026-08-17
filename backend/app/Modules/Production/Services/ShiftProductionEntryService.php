@@ -144,7 +144,9 @@ class ShiftProductionEntryService
     public function activeBatches(): Collection
     {
         return ShiftProductionEntry::query()
-            ->with(['shift', 'workCenter', 'item'])
+            // standardPackaging for the same reason paginate() loads it: the
+            // pack-quantity resolver reads the run's packaging row per entry.
+            ->with(['shift', 'workCenter', 'item', 'standardPackaging'])
             ->where('batch_status', BatchStatus::InProgress->value)
             ->orderByDesc('id')
             ->get();
@@ -1212,9 +1214,17 @@ class ShiftProductionEntryService
      */
     private function storePackingLines(ShiftProductionEntry $entry, array $lines): void
     {
+        // A run with NO standard has no packaging rows of its own, so a
+        // packaging id on its lines can only name another product's packing
+        // — CompleteBatchRequest's ownership check is skipped when there is
+        // no standard to own against, so the id is dropped here rather than
+        // stored as a claim the entry cannot back. The counts on the line
+        // are the supervisor's and are kept as typed.
+        $hasStandard = $entry->production_standard_id !== null;
+
         foreach (array_values($lines) as $position => $line) {
             $entry->packingLines()->create([
-                'production_standard_packaging_id' => $line['production_standard_packaging_id'] ?? null,
+                'production_standard_packaging_id' => $hasStandard ? ($line['production_standard_packaging_id'] ?? null) : null,
                 'position' => $position,
                 'mode' => (string) $line['mode'],
                 'boxes' => (int) ($line['boxes'] ?? 0),

@@ -17,10 +17,17 @@ use Illuminate\Support\Facades\Schema;
  *
  * Replaced by `psp_standard_variant_unique` over the standard, the mode and
  * the five counts. Additive-safe: no existing row can violate a unique
- * that is a strict superset of the one it replaces. NULL semantics apply
- * (a NULL count never collides), so the exact-twin refusal a person sees
- * lives in ProductionStandardPackagingService — this index is the backstop
- * for fully-stated rows and, above all, the removal of the old refusal.
+ * that is a strict superset of the one it replaces.
+ *
+ * WHAT THE NEW INDEX IS, AND IS NOT. It is DOCUMENTATION of the variant key
+ * in the schema — not a backstop. Every real row leaves the other mode's
+ * counts NULL (a tray row has no pouch counts, a direct box has no inner
+ * counts at all), and a NULL never collides in a unique index, so no real
+ * row is ever fully stated and this index never refuses anything. The
+ * exact-twin refusal a person actually meets lives in
+ * ProductionStandardPackagingService (refuseExactDuplicate, under a row
+ * lock on the standard so two writers cannot both pass the read). What
+ * this migration DOES enforce is the removal of the old refusal.
  *
  * Both names are explicit and short: MySQL caps identifiers at 64 chars
  * and the generated name for seven columns would be far past it. Guarded

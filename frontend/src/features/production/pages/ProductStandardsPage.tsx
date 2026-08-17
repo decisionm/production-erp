@@ -62,7 +62,7 @@ import {
     missingWords,
     num,
     packagingState,
-    pkg,
+    packagingsOfMode,
     provisionalSkuTag,
     standardSpec,
     tallyIdentityLabel,
@@ -133,9 +133,9 @@ const DEFAULT_PAGE_SIZE = PRODUCT_STANDARDS_PAGE_SIZES[0];
 /** Figures line up column-wise only if the digits are the same width. */
 const numeric = { fontVariantNumeric: 'tabular-nums' } as const;
 
-// `pkg`, `fmt`, `num`, `attachmentNote`, `standardSpec` and PACKING_MODE_LABEL
-// live in productStandardsConfig.ts (pure, vitest-covered) and are imported
-// above; the page keeps only what renders.
+// `packagingsOfMode`, `fmt`, `num`, `attachmentNote`, `standardSpec` and
+// PACKING_MODE_LABEL live in productStandardsConfig.ts (pure,
+// vitest-covered) and are imported above; the page keeps only what renders.
 
 const STATUS: Record<string, { colour: string; label: string; help: string }> = {
     approved: { colour: 'green', label: 'Approved', help: 'Signed off by a person.' },
@@ -192,6 +192,31 @@ const specCell = (r: ProductStandardsWorkspaceRow, column: StandardSpecColumn) =
         >
             <span style={{ borderBottom: '1px dotted #ad6800', cursor: 'help' }}>{value}</span>
         </Tooltip>
+    );
+};
+
+/**
+ * One workbook count column, ONE LINE PER PACKAGING OF THE MODE. Two
+ * same-mode packings can coexist on one standard (Phase 5, D1 — a person's
+ * 490/box tray beside the sheet's 520), and a column that showed only the
+ * first row would hide the second; the lines are in the server's order, so
+ * the three columns of a mode read across as rows. "—" for a count no row
+ * states — never a filled-in figure.
+ */
+const packCountCell = (
+    r: ProductStandardsWorkspaceRow,
+    mode: StandardPackagingMode,
+    field: 'nos_per_pouch' | 'pouches_per_box' | 'nos_per_tray' | 'trays_per_box' | 'nos_per_box',
+) => {
+    const rows = packagingsOfMode(r, mode);
+    if (rows.length === 0) return '—';
+    if (rows.length === 1) return rows[0][field] ?? '—';
+    return (
+        <>
+            {rows.map((p, i) => (
+                <div key={p.id ?? i}>{p[field] ?? '—'}</div>
+            ))}
+        </>
     );
 };
 
@@ -2347,24 +2372,24 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
                             // up with it.
                             title: 'POUCH',
                             children: [
-                                { title: 'BOTL/POUCH', width: 100, align: 'right' as const, render: (_: unknown, r: ProductStandardsWorkspaceRow) => pkg(r, 'pouch')?.nos_per_pouch ?? '—' },
-                                { title: 'BOT/BOX', width: 92, align: 'right' as const, render: (_: unknown, r: ProductStandardsWorkspaceRow) => pkg(r, 'pouch')?.nos_per_box ?? '—' },
-                                { title: 'POUCH/BOX', width: 100, align: 'right' as const, render: (_: unknown, r: ProductStandardsWorkspaceRow) => pkg(r, 'pouch')?.pouches_per_box ?? '—' },
+                                { title: 'BOTL/POUCH', width: 100, align: 'right' as const, render: (_: unknown, r: ProductStandardsWorkspaceRow) => packCountCell(r, 'pouch', 'nos_per_pouch') },
+                                { title: 'BOT/BOX', width: 92, align: 'right' as const, render: (_: unknown, r: ProductStandardsWorkspaceRow) => packCountCell(r, 'pouch', 'nos_per_box') },
+                                { title: 'POUCH/BOX', width: 100, align: 'right' as const, render: (_: unknown, r: ProductStandardsWorkspaceRow) => packCountCell(r, 'pouch', 'pouches_per_box') },
                             ],
                         },
                         {
                             title: 'TRAY',
                             children: [
-                                { title: 'BOTL/TRAY', width: 96, align: 'right' as const, render: (_: unknown, r: ProductStandardsWorkspaceRow) => pkg(r, 'tray')?.nos_per_tray ?? '—' },
-                                { title: 'BOT/BOX', width: 92, align: 'right' as const, render: (_: unknown, r: ProductStandardsWorkspaceRow) => pkg(r, 'tray')?.nos_per_box ?? '—' },
-                                { title: 'TRAY/BOX', width: 96, align: 'right' as const, render: (_: unknown, r: ProductStandardsWorkspaceRow) => pkg(r, 'tray')?.trays_per_box ?? '—' },
+                                { title: 'BOTL/TRAY', width: 96, align: 'right' as const, render: (_: unknown, r: ProductStandardsWorkspaceRow) => packCountCell(r, 'tray', 'nos_per_tray') },
+                                { title: 'BOT/BOX', width: 92, align: 'right' as const, render: (_: unknown, r: ProductStandardsWorkspaceRow) => packCountCell(r, 'tray', 'nos_per_box') },
+                                { title: 'TRAY/BOX', width: 96, align: 'right' as const, render: (_: unknown, r: ProductStandardsWorkspaceRow) => packCountCell(r, 'tray', 'trays_per_box') },
                             ],
                         },
                         {
                             title: 'Box only',
                             width: 96,
                             align: 'right' as const,
-                            render: (_, r) => pkg(r, 'direct_box')?.nos_per_box ?? '—',
+                            render: (_, r) => packCountCell(r, 'direct_box', 'nos_per_box'),
                         },
                         {
                             // The three right-hand spec columns of the sheet:

@@ -142,6 +142,23 @@ class ProductVariantsTest extends TestCase
         $this->assertSame(['tally_identity'], $packaging['missing']);
     }
 
+    public function test_a_soft_deleted_identity_is_missing_tally_identity_not_a_crash(): void
+    {
+        // The packaging still points at the item's id, but the item has been
+        // retired: the relation resolves to nothing, and the row says so.
+        $retired = $this->standard->packagings()->create([
+            'mode' => 'direct_box', 'nos_per_box' => 300, 'item_id' => $this->trayIdentity->id,
+        ]);
+        $this->trayIdentity->delete();
+
+        $packaging = $this->variants()['standards'][0]['packagings'][0];
+
+        $this->assertSame($retired->id, $packaging['id']);
+        $this->assertNull($packaging['tally_item']);
+        $this->assertSame('incomplete', $packaging['state']);
+        $this->assertSame(['tally_identity'], $packaging['missing']);
+    }
+
     public function test_a_local_fixture_product_is_missing_tally_identity_on_every_inheriting_packaging(): void
     {
         $fixture = Item::create([

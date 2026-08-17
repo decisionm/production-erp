@@ -40,6 +40,18 @@ class ImportProductionStandards extends Command
             [[$s['source_rows'], $s['variants'], $s['matched'], $s['unmatched'], $s['unresolved'], $s['packaging_options'], $s['importable'], $s['skipped']]],
         );
 
+        $packagingWarnings = array_merge(...array_map(
+            fn ($v) => array_map(fn (string $w) => "  · {$w}", $v['packaging_warnings'] ?? []),
+            $result['variants'],
+        ));
+        if ($packagingWarnings !== []) {
+            $this->newLine();
+            $this->warn('Sheet packagings NOT written (the standard already holds more than one packing of that mode):');
+            foreach ($packagingWarnings as $line) {
+                $this->line($line);
+            }
+        }
+
         $unresolved = array_filter($result['variants'], fn ($v) => $v['status'] === 'unresolved');
         if ($unresolved !== []) {
             $this->warn('Unresolved variants (need a factory answer):');

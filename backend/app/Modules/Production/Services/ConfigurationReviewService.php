@@ -21,20 +21,28 @@ use Illuminate\Database\Eloquent\Collection;
  *   packaging_ambiguous   — a packaging whose resolved identity's NAME is
  *       carried by more than one ERP item (LineMappingResolver's
  *       `ambiguous`, read through ProductVariantService): Tally would match
- *       one by name and this ERP cannot say which.
+ *       one by name and this ERP cannot say which. ADVISORY: linking any of
+ *       the rows that share the name does not clear the ambiguity — Tally
+ *       still matches the voucher line by that name — so the fix_target is
+ *       `name_ambiguity` (no Link offered; the rows sharing the name are
+ *       listed as information). The duplicate is a catalogue question and
+ *       block-vs-warn is the owner's (Q43).
  *   item_provisional_sku  — an item still carrying the SKU the masters pull
  *       seeded from its Tally name (items.sku_provisional).
  *
  * EVERY ROW OFFERS CANDIDATES — the existing Tally items a person could
  * LINK: exact/normalised-name matches (case, trim, runs of whitespace) among
- * Tally-pulled rows that are not fixtures. Deliberately nothing cleverer:
+ * ACTIVE, Tally-pulled rows that are not fixtures (the identity requests
+ * refuse an inactive item, so offering one would offer a refusal).
+ * Deliberately nothing cleverer:
  * the standards page already has a scored picker
  * (ProductionStandardController::itemCandidates) for the hard cases; this
  * list is for the obvious ones, and a near-miss offered here would put the
  * wrong bottle on a packing. The link itself is made through the endpoints
- * that already exist — PUT standards/{standard}/packagings/{packaging}
- * (item_id), POST standards/{standard}/attach-item, PUT inventory/items/{item}
- * (sku) — and `fix_target` names which. THIS SERVICE WRITES NOTHING, and the
+ * that already exist — PATCH standards/{standard}/packagings/{packaging}/
+ * identity (item_id only, never a count), POST standards/{standard}/
+ * attach-item, PUT inventory/items/{item} (sku) — and `fix_target` names
+ * which. THIS SERVICE WRITES NOTHING, and the
  * ERP never creates a Tally-less item for real production: the answer to a
  * gap is always an item Tally already has.
  *
@@ -49,7 +57,7 @@ class ConfigurationReviewService
 
     public const KIND_ITEM_PROVISIONAL_SKU = 'item_provisional_sku';
 
-    /** Where the fix goes: the packaging's own item_id (PUT packagings). */
+    /** Where the fix goes: the packaging's own item_id (PATCH packagings/{packaging}/identity). */
     public const FIX_PACKAGING_ITEM = 'packaging_item';
 
     /** The product's item (POST standards/{standard}/attach-item). */
@@ -57,6 +65,13 @@ class ConfigurationReviewService
 
     /** The item's SKU (PUT inventory/items/{item}). */
     public const FIX_ITEM_SKU = 'item_sku';
+
+    /**
+     * Nothing this ERP can link fixes it: the NAME is shared by more than
+     * one catalogue row, and Tally matches by name. Advisory — a person
+     * settles the duplicate in the catalogue (Q43).
+     */
+    public const FIX_NAME_AMBIGUITY = 'name_ambiguity';
 
     /** The suffix the product-master import puts on a fixture's name. */
     private const LOCAL_FIXTURE_NAME_SUFFIX = '(LOCAL FIXTURE)';
@@ -178,10 +193,11 @@ class ConfigurationReviewService
 
                 $status = $this->variants->packagingStatus($packaging, $standard, $product);
 
-                // The rows that share the name ARE the choice — every one
-                // of them a person could link, so every linkable one is
-                // offered (a fixture sharing the name is counted by the
-                // resolver, but linking it would be linking nothing).
+                // The rows that share the name, as information: linking any
+                // of them leaves the NAME shared, so no Link is offered — the
+                // list says which catalogue rows a person has to tell apart
+                // (a fixture or a retired item sharing the name is counted
+                // by the resolver, but is not one a person could link).
                 $candidates = $this->variants->sharingName($identity)
                     ->filter(fn (Item $item) => $this->isLinkable($item))
                     ->sortBy('id')
@@ -196,7 +212,7 @@ class ConfigurationReviewService
                     $status['missing'],
                     $ambiguity,
                     $candidates,
-                    self::FIX_PACKAGING_ITEM,
+                    self::FIX_NAME_AMBIGUITY,
                 );
             }
         }
@@ -336,6 +352,7 @@ class ConfigurationReviewService
 
         $items = Item::query()
             ->whereNotNull('tally_stock_item_guid')
+            ->where('is_active', true)
             ->orderBy('name')
             ->orderBy('id')
             ->get();
@@ -351,12 +368,15 @@ class ConfigurationReviewService
     }
 
     /**
-     * Tally-pulled and not a local fixture — the only rows a voucher may
-     * ever name, so the only rows worth offering as a link.
+     * Active, Tally-pulled and not a local fixture — the only rows a voucher
+     * may ever name (and the only rows the identity requests accept), so the
+     * only rows worth offering as a link.
      */
     private function isLinkable(Item $item): bool
     {
-        return $item->tally_stock_item_guid !== null && ! $item->isLocalFixture();
+        return (bool) $item->is_active
+            && $item->tally_stock_item_guid !== null
+            && ! $item->isLocalFixture();
     }
 
     /**

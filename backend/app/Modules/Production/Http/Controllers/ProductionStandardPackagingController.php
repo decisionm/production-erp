@@ -4,6 +4,7 @@ namespace App\Modules\Production\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Production\Http\Requests\SaveProductionStandardPackagingRequest;
+use App\Modules\Production\Http\Requests\SetProductionStandardPackagingIdentityRequest;
 use App\Modules\Production\Models\ProductionStandard;
 use App\Modules\Production\Models\ProductionStandardPackaging;
 use App\Modules\Production\Services\ProductionStandardPackagingService;
@@ -31,6 +32,27 @@ class ProductionStandardPackagingController extends Controller
         ProductionStandardPackaging $packaging,
     ): JsonResponse {
         $packaging = $this->packagings->update($standard, $packaging, $request->validated(), $request->user()?->id);
+
+        return response()->json(['data' => $this->packagings->describe($packaging)]);
+    }
+
+    /**
+     * Identity only — item_id and its provenance, never a count (P1-a).
+     * The review panel's Link comes through here.
+     */
+    public function identity(
+        SetProductionStandardPackagingIdentityRequest $request,
+        ProductionStandard $standard,
+        ProductionStandardPackaging $packaging,
+    ): JsonResponse {
+        $itemId = $request->validated('item_id');
+
+        $packaging = $this->packagings->setIdentity(
+            $standard,
+            $packaging,
+            $itemId === null ? null : (int) $itemId,
+            $request->user()?->id,
+        );
 
         return response()->json(['data' => $this->packagings->describe($packaging)]);
     }

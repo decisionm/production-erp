@@ -319,6 +319,40 @@ class PackingLinesPersistTest extends TestCase
         $this->assertSame(0, ShiftProductionEntryPackingLine::query()->where('shift_production_entry_id', $entry->id)->count());
     }
 
+    public function test_a_run_with_no_standard_stores_no_packaging_id_on_its_lines(): void
+    {
+        // Another product's tray packing. CompleteBatchRequest checks that a
+        // cited packaging belongs to the run's standard — but a run with no
+        // standard has nothing to check against, so the claim is dropped on
+        // write rather than stored as this entry's.
+        $this->actingAsProduction();
+        $other = $this->item('BTL-OTHER');
+        [, , $foreignTray] = $this->bothModes($other);
+
+        $item = $this->item('BTL-NOSTD');
+        $entry = $this->inProgressEntry($item, null);
+
+        $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/complete", [
+            'quantity_produced' => '1150',
+            'no_of_box' => 1,
+            'packing_lines' => [
+                [
+                    'mode' => 'tray', 'production_standard_packaging_id' => $foreignTray->id,
+                    'boxes' => 1, 'nos_per_box' => 1150, 'loose_inner' => 0, 'nos_per_inner' => 230,
+                    'derived_pieces' => 1150, 'actual_pieces' => 1150,
+                ],
+            ],
+        ])->assertOk();
+
+        $line = ShiftProductionEntryPackingLine::query()->where('shift_production_entry_id', $entry->id)->firstOrFail();
+        $this->assertNull($line->production_standard_packaging_id, 'a run with no standard cannot own another product\'s packing');
+        // The typed figures are the supervisor's and stay.
+        $this->assertSame('tray', $line->mode);
+        $this->assertSame(1, (int) $line->boxes);
+        $this->assertSame(1150, (int) $line->nos_per_box);
+        $this->assertSame(230, (int) $line->nos_per_inner);
+    }
+
     public function test_the_lines_belong_to_their_entry(): void
     {
         $this->actingAsProduction();

@@ -750,6 +750,18 @@ export interface ShiftProductionEntry {
     parent_entry_id?: number | null;
     batch_status: BatchStatus;
     /**
+     * Configurable-production provenance, frozen at Start: the standard the
+     * run started against, WHICH packaging row of it (two same-mode packings
+     * can coexist on one standard — Phase 5, D1 — so the mode alone no
+     * longer names one), and the mode. The completion drawer seeds its
+     * packing line from the packaging id first and falls back to the mode
+     * only for a batch started before the id was frozen. All optional: a
+     * backend that predates them omits them; null is "none was chosen".
+     */
+    production_standard_id?: number | null;
+    production_standard_packaging_id?: number | null;
+    packaging_mode?: string | null;
+    /**
      * WHICH COLOUR THIS RUN IS RECORDED AS MAKING — read back out of the
      * config snapshot Start Batch froze it into, so a later item-master edit
      * cannot restate it.
@@ -2382,11 +2394,15 @@ export interface ConfigurationReviewCandidate {
 
 /**
  * Where a review row's fix goes — which EXISTING endpoint closes it:
- * the packaging's own item_id (PUT packagings), the product's item (POST
- * attach-item), or the item's SKU (PUT inventory/items). Optional: a
- * backend that predates the key leaves the panel to infer it from the row.
+ * the packaging's own item_id (PATCH packagings/{packaging}/identity —
+ * identity only, never a count), the product's item (POST attach-item), or
+ * the item's SKU (PUT inventory/items). `name_ambiguity` is ADVISORY: the
+ * identity's NAME is carried by more than one catalogue row and Tally
+ * matches by name, so no link clears it — a catalogue duplicate (Q43).
+ * Optional: a backend that predates the key leaves the panel to infer it
+ * from the row.
  */
-export type ConfigurationReviewFixTarget = 'packaging_item' | 'attach_item' | 'item_sku';
+export type ConfigurationReviewFixTarget = 'packaging_item' | 'attach_item' | 'item_sku' | 'name_ambiguity';
 
 /** One thing a person has to look at (P5-03). */
 export interface ConfigurationReviewRow {

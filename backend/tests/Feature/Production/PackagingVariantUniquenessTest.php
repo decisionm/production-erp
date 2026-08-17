@@ -73,6 +73,26 @@ class PackagingVariantUniquenessTest extends TestCase
         );
     }
 
+    public function test_the_index_swap_migration_rolls_back_and_forward_cleanly(): void
+    {
+        $migration = require base_path('database/migrations/2026_08_17_130000_replace_packaging_mode_unique_with_variant_unique.php');
+
+        $migration->down();
+        $indexes = collect(Schema::getIndexes('production_standard_packagings'))->keyBy('name');
+        $this->assertTrue($indexes->has('psp_standard_mode_unique'), 'down() restores the old (standard, mode) unique');
+        $this->assertFalse($indexes->has('psp_standard_variant_unique'), 'down() drops the variant unique');
+        $this->assertSame(['production_standard_id', 'mode'], $indexes->get('psp_standard_mode_unique')['columns']);
+
+        $migration->up();
+        $indexes = collect(Schema::getIndexes('production_standard_packagings'))->keyBy('name');
+        $this->assertFalse($indexes->has('psp_standard_mode_unique'));
+        $this->assertTrue($indexes->has('psp_standard_variant_unique'));
+
+        // And up() is idempotent — a half-applied run completes.
+        $migration->up();
+        $this->assertTrue(collect(Schema::getIndexes('production_standard_packagings'))->keyBy('name')->has('psp_standard_variant_unique'));
+    }
+
     // ------------------------------------------- two trays, one standard ---
 
     public function test_two_tray_packings_with_different_box_counts_coexist_on_one_standard(): void

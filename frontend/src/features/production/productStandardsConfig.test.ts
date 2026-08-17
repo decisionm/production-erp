@@ -7,7 +7,9 @@ import {
     missingWords,
     num,
     packagingCountsSummary,
+    packagingForCompletion,
     packagingState,
+    packagingsOfMode,
     provisionalSkuTag,
     standardSpec,
     tallyIdentityLabel,
@@ -343,10 +345,83 @@ describe('packagingCountsSummary — a packing\'s counts in one line', () => {
         expect(packagingCountsSummary('direct_box', { nos_per_box: 500 })).toBe('500/box');
     });
 
+    it('never prints a false equation: when inner × containers ≠ the stored box, it says so and asks', () => {
+        // The importer keeps the workbook's disagreeing figures verbatim
+        // (105/pouch × 5 pouches, sheet says 520/box — "confirm which is
+        // correct"); the line must show the stored box count APART from the
+        // derivation rather than assert 105 × 5 = 520.
+        expect(packagingCountsSummary('pouch', { nos_per_pouch: 105, pouches_per_box: 5, nos_per_box: 520 })).toBe(
+            'sheet says 520/box; 105/pouch × 5 = 525 — confirm which is right',
+        );
+        expect(packagingCountsSummary('tray', { nos_per_tray: 98, trays_per_box: 5, nos_per_box: 500 })).toBe(
+            'sheet says 500/box; 98/tray × 5 = 490 — confirm which is right',
+        );
+    });
+
     it('prints a count the server did not send as "—", never a filled-in figure', () => {
         expect(packagingCountsSummary('tray', { nos_per_tray: 24, trays_per_box: null, nos_per_box: null })).toBe(
             '24/tray × — = —/box',
         );
+        // A stored box with one inner count missing: no derivation is
+        // possible, so no equation is claimed either way.
+        expect(packagingCountsSummary('tray', { nos_per_tray: 24, trays_per_box: null, nos_per_box: 480 })).toBe(
+            '24/tray × — = 480/box',
+        );
         expect(packagingCountsSummary('direct_box', null)).toBe('—/box');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// packagingForCompletion — the run's packaging by ID first, mode as fallback
+// ---------------------------------------------------------------------------
+
+describe('packagingForCompletion — which packaging row a completion is about', () => {
+    const tray490 = packaging({ id: 11, mode: 'tray', nos_per_tray: 98, trays_per_box: 5, nos_per_box: 490, is_default: false });
+    const tray520 = packaging({ id: 12, mode: 'tray', nos_per_tray: 104, trays_per_box: 5, nos_per_box: 520, is_default: true });
+    const pouch = packaging({ id: 13, mode: 'pouch', nos_per_pouch: 130, pouches_per_box: 4, nos_per_box: 520 });
+    const rows = [tray490, tray520, pouch];
+
+    it('picks the row whose id the entry froze at Start — even when another row shares the mode', () => {
+        expect(packagingForCompletion({ production_standard_packaging_id: 12, packaging_mode: 'tray' }, rows)).toBe(tray520);
+        expect(packagingForCompletion({ production_standard_packaging_id: 11, packaging_mode: 'tray' }, rows)).toBe(tray490);
+    });
+
+    it('falls back to the mode for a batch started before the id was frozen', () => {
+        expect(packagingForCompletion({ production_standard_packaging_id: null, packaging_mode: 'pouch' }, rows)).toBe(pouch);
+        expect(packagingForCompletion({ packaging_mode: 'tray' }, rows)).toBe(tray490);
+    });
+
+    it('falls back to the mode when the frozen id names a row no longer offered', () => {
+        expect(packagingForCompletion({ production_standard_packaging_id: 99, packaging_mode: 'pouch' }, rows)).toBe(pouch);
+    });
+
+    it('answers nothing when neither the id nor the mode matches — the caller keeps its own default', () => {
+        expect(packagingForCompletion({ production_standard_packaging_id: null, packaging_mode: null }, rows)).toBeUndefined();
+        expect(packagingForCompletion(null, rows)).toBeUndefined();
+        expect(packagingForCompletion({ production_standard_packaging_id: 12 }, [])).toBeUndefined();
+    });
+
+    it('can be asked for one mode only — the amend tray recovery wants the run\'s tray, not any tray', () => {
+        expect(packagingForCompletion({ production_standard_packaging_id: 12, packaging_mode: 'tray' }, rows, 'tray')).toBe(tray520);
+        // The frozen id is a pouch: asked for a tray, the mode fallback answers.
+        expect(packagingForCompletion({ production_standard_packaging_id: 13, packaging_mode: 'pouch' }, rows, 'tray')).toBe(tray490);
+        expect(packagingForCompletion({ production_standard_packaging_id: 13, packaging_mode: 'pouch' }, [pouch], 'tray')).toBeUndefined();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// packagingsOfMode — every packaging of one mode, in stored order
+// ---------------------------------------------------------------------------
+
+describe('packagingsOfMode — the workbook columns show every same-mode packing, not the first', () => {
+    it('lists each row of the mode in the order the server sent them', () => {
+        const row = { packagings: [
+            packaging({ id: 1, mode: 'tray', nos_per_tray: 98, trays_per_box: 5, nos_per_box: 490 }),
+            packaging({ id: 2, mode: 'pouch', nos_per_pouch: 130, pouches_per_box: 4, nos_per_box: 520 }),
+            packaging({ id: 3, mode: 'tray', nos_per_tray: 104, trays_per_box: 5, nos_per_box: 520 }),
+        ] };
+        expect(packagingsOfMode(row, 'tray').map((p) => p.id)).toEqual([1, 3]);
+        expect(packagingsOfMode(row, 'pouch').map((p) => p.id)).toEqual([2]);
+        expect(packagingsOfMode(row, 'direct_box')).toEqual([]);
     });
 });

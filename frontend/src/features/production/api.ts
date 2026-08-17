@@ -693,6 +693,27 @@ export async function updateStandardPackaging(
 }
 
 /**
+ * Set or clear ONE packaging variant's own Tally identity and nothing else
+ * (Phase 5 fix P1-a). The full PUT above carries the mode and the counts,
+ * and re-deriving a box count from unchanged inner counts is how a link
+ * once turned the sheet's 520 into 525 on a row the importer had
+ * deliberately left inconsistent. This route's payload is `{ item_id }`
+ * alone: a link can never move a count. Null = "no identity of its own —
+ * use the product's".
+ */
+export async function setPackagingIdentity(
+    standardId: number,
+    packagingId: number,
+    itemId: number | null,
+): Promise<unknown> {
+    const { data } = await api.patch<{ data: unknown }>(
+        `/production/standards/${standardId}/packagings/${packagingId}/identity`,
+        { item_id: itemId },
+    );
+    return data.data;
+}
+
+/**
  * One product's whole variant model (P5-02): the item, every standard with
  * its packagings, each packaging's own Tally identity and its
  * configured-or-not verdict, and the product-level verdict.
@@ -707,8 +728,9 @@ export async function getProductVariants(itemId: number): Promise<ProductVariant
  * (P5-03): packagings with no Tally identity, packagings whose identity
  * name is shared by more than one item, items on a provisional SKU — each
  * with the Tally items that match by name, so the person LINKS one through
- * `updateStandardPackaging` (item_id). Read-only; the ERP never creates a
- * Tally-less item for real production and never picks a match itself.
+ * `setPackagingIdentity` (item_id only — never a count). Read-only; the ERP
+ * never creates a Tally-less item for real production and never picks a
+ * match itself.
  */
 export async function getConfigurationReview(): Promise<ConfigurationReview> {
     const { data } = await api.get<{ data: ConfigurationReview }>('/production/configuration/review');

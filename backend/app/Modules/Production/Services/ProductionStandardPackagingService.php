@@ -16,10 +16,22 @@ use Illuminate\Validation\ValidationException;
  * THE VARIANT KEY IS THE MODE PLUS ITS COUNTS (Phase 5, D1). One standard
  * may carry a 490/box tray AND a 520/box tray; what it may not carry is the
  * same mode with the same counts twice — that is refused here, named, as a
- * 422 (DuplicatePackagingVariantException). The database's
- * psp_standard_variant_unique is the backstop for fully-stated rows; NULL
- * counts never collide at the database, so this rule is the one a person
- * actually meets.
+ * 422 (DuplicatePackagingVariantException). THIS REFUSAL IS THE GUARD. The
+ * database's psp_standard_variant_unique documents the key but enforces
+ * nothing a real row meets: every real row leaves the other mode's counts
+ * NULL (a tray row has no pouch counts, a direct box has no inner counts at
+ * all), and NULL never collides in a unique index — so no real row is ever
+ * fully stated and the index never fires. Writers on one standard are
+ * serialised by a row lock on the standard (store/update), so two requests
+ * adding the same twin at once cannot both pass this check.
+ *
+ * AN IDENTITY-ONLY WRITE TOUCHES NO COUNT. setIdentity() sets item_id (and
+ * its provenance) and nothing else, and attributes() keeps a stored
+ * nos_per_box when the mode's inner counts are unchanged — the importer
+ * deliberately keeps rows whose three figures disagree (105/pouch × 5, sheet
+ * says 520 — flagged "confirm which is correct") and neither a link nor an
+ * edit that leaves the counts alone may pick the figure the import refused
+ * to pick.
  *
  * ONE DEFAULT PER STANDARD. `is_default` is what resolvePackaging() adopts
  * when a standard has more than one complete option and nobody chose —
@@ -44,6 +56,7 @@ class ProductionStandardPackagingService
     public function store(ProductionStandard $standard, array $data, ?int $userId): ProductionStandardPackaging
     {
         return DB::transaction(function () use ($data, $standard, $userId) {
+            $this->lockStandard($standard);
             $this->refuseExactDuplicate($standard, $data, null);
 
             $packaging = $standard->packagings()->create(
@@ -65,18 +78,45 @@ class ProductionStandardPackagingService
         array $data,
         ?int $userId,
     ): ProductionStandardPackaging {
-        if ((int) $packaging->production_standard_id !== (int) $standard->id) {
-            throw ValidationException::withMessages([
-                'packaging' => 'This packing option belongs to a different product standard.',
-            ]);
-        }
+        $this->refuseForeignRow($standard, $packaging);
 
         return DB::transaction(function () use ($data, $standard, $packaging, $userId) {
+            $this->lockStandard($standard);
             $this->refuseExactDuplicate($standard, $data, $packaging);
 
             $packaging->fill($this->attributes($data, $packaging, (int) $userId))->save();
 
             $this->keepOneDefault($standard, $packaging);
+
+            return $packaging->fresh();
+        });
+    }
+
+    /**
+     * Set or clear ONE packaging's own Tally identity and touch nothing else
+     * — no mode, no count, no default. The review panel's Link and any
+     * other identity-only client come through here so that a link can never
+     * move a figure (P1-a). Provenance stamps only when the answer changes,
+     * exactly as the full update does.
+     */
+    public function setIdentity(
+        ProductionStandard $standard,
+        ProductionStandardPackaging $packaging,
+        ?int $itemId,
+        ?int $userId,
+    ): ProductionStandardPackaging {
+        $this->refuseForeignRow($standard, $packaging);
+
+        return DB::transaction(function () use ($packaging, $itemId, $userId) {
+            $current = $packaging->item_id === null ? null : (int) $packaging->item_id;
+
+            if ($itemId !== $current) {
+                $packaging->fill([
+                    'item_id' => $itemId,
+                    'item_set_by' => $userId ?: null,
+                    'item_set_at' => now(),
+                ])->save();
+            }
 
             return $packaging->fresh();
         });
@@ -119,7 +159,14 @@ class ProductionStandardPackagingService
      * The writable columns from one validated payload. nos_per_box is
      * DERIVED for pouch/tray (inner × count) exactly as the standards page
      * derives it — the third figure can never disagree with the two it came
-     * from. Identity provenance stamps only when the answer changes.
+     * from — EXCEPT when an existing row's mode and inner counts are left
+     * exactly as they were: then the stored box count stands, byte for
+     * byte. The importer keeps rows whose figures disagree on purpose
+     * (105 × 5 stored beside the sheet's 520, flagged for a person), and an
+     * edit that touches no count — an identity, a default flag — must not
+     * be the thing that silently settles which figure was right. A genuine
+     * count edit still derives. Identity provenance stamps only when the
+     * answer changes.
      *
      * @param  array<string, mixed>  $data
      * @return array<string, mixed>
@@ -136,7 +183,18 @@ class ProductionStandardPackagingService
         $nosPerTray = $tray ? ($data['nos_per_tray'] ?? $existing?->nos_per_tray) : null;
         $traysPerBox = $tray ? ($data['trays_per_box'] ?? $existing?->trays_per_box) : null;
 
+        $innerCountsUnchanged = $existing !== null
+            && (string) $existing->mode === $mode
+            && match (true) {
+                $pouch => $this->sameCount($nosPerPouch, $existing->nos_per_pouch)
+                    && $this->sameCount($pouchesPerBox, $existing->pouches_per_box),
+                $tray => $this->sameCount($nosPerTray, $existing->nos_per_tray)
+                    && $this->sameCount($traysPerBox, $existing->trays_per_box),
+                default => false,
+            };
+
         $nosPerBox = match (true) {
+            $innerCountsUnchanged => $existing->nos_per_box,
             $pouch => $nosPerPouch !== null && $pouchesPerBox !== null ? $nosPerPouch * $pouchesPerBox : null,
             $tray => $nosPerTray !== null && $traysPerBox !== null ? $nosPerTray * $traysPerBox : null,
             default => $data['nos_per_box'] ?? $existing?->nos_per_box,
@@ -201,6 +259,38 @@ class ProductionStandardPackagingService
         if ($duplicate !== null) {
             throw DuplicatePackagingVariantException::make($standard, $mode);
         }
+    }
+
+    /** Two count values are the same figure when both are null or both are the same integer. */
+    private function sameCount(mixed $incoming, mixed $stored): bool
+    {
+        if ($incoming === null || $stored === null) {
+            return $incoming === null && $stored === null;
+        }
+
+        return (int) $incoming === (int) $stored;
+    }
+
+    /** A packaging is only ever written through its OWN standard's URL. */
+    private function refuseForeignRow(ProductionStandard $standard, ProductionStandardPackaging $packaging): void
+    {
+        if ((int) $packaging->production_standard_id !== (int) $standard->id) {
+            throw ValidationException::withMessages([
+                'packaging' => 'This packing option belongs to a different product standard.',
+            ]);
+        }
+    }
+
+    /**
+     * Serialise the writers of one standard's packagings: the twin check
+     * reads siblings and then writes, and two requests adding the same twin
+     * at once would both pass the read. A FOR UPDATE on the standard row
+     * makes the second wait for the first's commit (a no-op on sqlite,
+     * which serialises writers anyway).
+     */
+    private function lockStandard(ProductionStandard $standard): void
+    {
+        ProductionStandard::query()->whereKey($standard->id)->lockForUpdate()->first();
     }
 
     /**

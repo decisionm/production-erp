@@ -142,6 +142,12 @@ class ProductionStandardImportService
             'local_fixture_items' => $dryRun ? count($missing) : $fixturesCreated,
             'importable' => 0,
             'skipped' => 0,
+            // Sheet packagings NOT written because the standard already held
+            // more than one row of that mode and the sheet's figures matched
+            // none of them (Phase 5, D1) — each named on its variant under
+            // `packaging_warnings`. Zero on a dry run: nothing is written, so
+            // nothing is refused.
+            'packaging_warnings' => 0,
             // Row-scoped, and deliberately reported alongside rather than
             // instead of the counts above. One mould standard covers every
             // colour variant of its bottle, so a variant writes one row PER
@@ -160,6 +166,7 @@ class ProductionStandardImportService
             if (($variant['skip_reason'] ?? null) === null) {
                 $summary['standard_rows'] += count($variant['matched_items'] ?? []);
             }
+            $summary['packaging_warnings'] += count($variant['packaging_warnings'] ?? []);
         }
 
         return ['dry_run' => $dryRun, 'summary' => $summary, 'variants' => array_values($variants)];
@@ -660,6 +667,7 @@ class ProductionStandardImportService
             }
 
             $variant['created_ids'] = [];
+            $variant['packaging_warnings'] = [];
 
             // An unmatched variant still gets a row, with a null item. That is
             // what production_standards.item_id is nullable FOR: an unmatched
@@ -763,10 +771,10 @@ class ProductionStandardImportService
                 }
 
                 foreach ($variant['packagings'] as $packaging) {
-                    ProductionStandardPackaging::updateOrCreate(
-                        ['production_standard_id' => $standard->id, 'mode' => $packaging['mode']],
-                        $packaging,
-                    );
+                    $warning = $this->writePackaging($standard, $packaging);
+                    if ($warning !== null) {
+                        $variant['packaging_warnings'][] = $warning;
+                    }
                 }
 
                 // Exactly one option = the default, so the supervisor is never
@@ -785,6 +793,86 @@ class ProductionStandardImportService
         unset($variant);
 
         return $variants;
+    }
+
+    /**
+     * One sheet packaging onto one standard — WITHOUT ever rewriting an
+     * arbitrary row.
+     *
+     * A standard may now hold two packings of one mode (Phase 5, D1 — the
+     * 490/box tray a person added beside the sheet's 520). Keyed on
+     * (standard, mode), updateOrCreate() would land on whichever of the two
+     * the database returned first and put the sheet's counts over a
+     * person-entered row. So:
+     *
+     *   - no row of the mode  → create (unchanged);
+     *   - ONE row of the mode → update it in place (today's behaviour — the
+     *     sheet is the record for the row it imported);
+     *   - MORE than one       → match on the mode's full inner-count tuple
+     *     (pouch: nos_per_pouch + pouches_per_box; tray: nos_per_tray +
+     *     trays_per_box; direct box: nos_per_box). Exactly one match →
+     *     update that one. None (or, from hand-written data, several) →
+     *     write nothing and return a warning naming the standard, the
+     *     count and the sheet's figures — the person adds or corrects it in
+     *     the workspace, where the twin rule and the identity live.
+     *
+     * @param  array<string, mixed>  $packaging  the sheet's figures for one mode
+     * @return ?string a warning when nothing was written, else null
+     */
+    private function writePackaging(ProductionStandard $standard, array $packaging): ?string
+    {
+        $mode = (string) $packaging['mode'];
+        $sameMode = $standard->packagings()->where('mode', $mode)->orderBy('id')->get();
+
+        if ($sameMode->count() <= 1) {
+            ProductionStandardPackaging::updateOrCreate(
+                ['production_standard_id' => $standard->id, 'mode' => $mode],
+                $packaging,
+            );
+
+            return null;
+        }
+
+        $tuple = match ($mode) {
+            ProductionStandardPackaging::MODE_POUCH => ['nos_per_pouch', 'pouches_per_box'],
+            ProductionStandardPackaging::MODE_TRAY => ['nos_per_tray', 'trays_per_box'],
+            default => ['nos_per_box'],
+        };
+
+        $matches = $sameMode->filter(function (ProductionStandardPackaging $row) use ($packaging, $tuple) {
+            foreach ($tuple as $field) {
+                $sheet = $packaging[$field] ?? null;
+                $stored = $row->{$field};
+                $same = ($sheet === null || $stored === null) ? $sheet === $stored : (int) $sheet === (int) $stored;
+                if (! $same) {
+                    return false;
+                }
+            }
+
+            return true;
+        });
+
+        if ($matches->count() === 1) {
+            $matches->first()->update($packaging);
+
+            return null;
+        }
+
+        $noun = $mode === ProductionStandardPackaging::MODE_DIRECT_BOX ? 'direct-box' : $mode;
+        $sheetFigures = implode(' × ', array_map(
+            fn (string $field) => (string) ($packaging[$field] ?? '?'),
+            $tuple,
+        ));
+
+        return sprintf(
+            '%s already carries %d %s packings; the sheet\'s %s (%s) matches %s — left untouched, add or correct it in the workspace.',
+            $standard->source_product_name,
+            $sameMode->count(),
+            $noun,
+            $noun,
+            $sheetFigures,
+            $matches->isEmpty() ? 'none of them' : 'more than one of them',
+        );
     }
 
     /**

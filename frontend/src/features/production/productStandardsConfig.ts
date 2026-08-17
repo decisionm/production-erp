@@ -41,6 +41,52 @@ export const PACKING_MODE_LABEL: Record<StandardPackagingMode, string> = {
 export const pkg = (r: Pick<ProductStandardsWorkspaceRow, 'packagings'>, mode: StandardPackagingMode) =>
     r.packagings.find((p) => p.mode === mode);
 
+/**
+ * EVERY packaging row of one mode, in the order the server sent them. Two
+ * same-mode packings can coexist on one standard (Phase 5, D1 — a 490/box
+ * tray beside the sheet's 520), and a column that showed only the first
+ * would hide the second; the workbook columns render one line per row.
+ */
+export const packagingsOfMode = <P extends { mode: StandardPackagingMode }>(
+    r: { packagings: P[] },
+    mode: StandardPackagingMode,
+): P[] => r.packagings.filter((p) => p.mode === mode);
+
+/**
+ * WHICH packaging row a completion is about — the completion drawer's
+ * seed, its per-line lookup and the amend tray recovery all ask this.
+ *
+ * The id the entry froze at Start (`production_standard_packaging_id`)
+ * FIRST: two same-mode packings can coexist on one standard, so the mode
+ * alone no longer names one, and a batch started against the 520 tray must
+ * not be pre-filled with the 490 tray's counts (quantity_produced is
+ * computed from the lines → FG stock and the voucher). The mode is the
+ * fallback only — for a batch started before the id was frozen, or a
+ * frozen id the preview no longer offers. `onlyMode` narrows the answer to
+ * one mode (the amend recovery wants the run's TRAY, not the run's pouch);
+ * with it, an id of another mode is not the answer and the mode fallback
+ * looks for `onlyMode`. Undefined when nothing matches — the caller keeps
+ * whatever default it had; nothing is invented here.
+ */
+export function packagingForCompletion<P extends { id: number; mode: string }>(
+    entry: { production_standard_packaging_id?: number | null; packaging_mode?: string | null } | null | undefined,
+    packagings: readonly P[],
+    onlyMode?: string | null,
+): P | undefined {
+    if (!entry || packagings.length === 0) return undefined;
+
+    const frozenId = entry.production_standard_packaging_id ?? null;
+    if (frozenId !== null) {
+        const byId = packagings.find((p) => p.id === frozenId && (!onlyMode || p.mode === onlyMode));
+        if (byId) return byId;
+    }
+
+    const mode = onlyMode ?? entry.packaging_mode ?? null;
+    if (mode === null || mode === '') return undefined;
+
+    return packagings.find((p) => p.mode === mode);
+}
+
 export const fmt = (v: string | number | null | undefined, suffix = ''): string => {
     if (v === null || v === undefined || v === '') return '—';
     const n = typeof v === 'number' ? v : parseFloat(v);
@@ -306,12 +352,31 @@ export function provisionalSkuTag(
  * showing the whole standard: "24/tray × 20 = 480/box", "120/pouch × 4 =
  * 480/box", "500/box". A count the server did not send prints as "—" — a
  * missing figure is reported missing, never filled in.
+ *
+ * NEVER A FALSE EQUATION. The importer keeps a row whose three figures
+ * disagree exactly as the sheet stated them (105/pouch × 5 pouches beside
+ * the sheet's 520/box, flagged "confirm which is correct"); printing
+ * "105/pouch × 5 = 520/box" would assert an arithmetic that is not true
+ * and hide the very contradiction a person is meant to settle. When the
+ * derivation and the stored box count disagree, both are shown apart and
+ * the line asks: "sheet says 520/box; 105/pouch × 5 = 525 — confirm which
+ * is right". Which is right is the factory's answer, not this function's.
  */
 export function packagingCountsSummary(mode: StandardPackagingMode, counts: PackagingCounts | null | undefined): string {
     const c = (v: number | null | undefined): string => (v === null || v === undefined ? '—' : String(v));
     const box = c(counts?.nos_per_box);
 
-    if (mode === 'pouch') return `${c(counts?.nos_per_pouch)}/pouch × ${c(counts?.pouches_per_box)} = ${box}/box`;
-    if (mode === 'tray') return `${c(counts?.nos_per_tray)}/tray × ${c(counts?.trays_per_box)} = ${box}/box`;
-    return `${box}/box`;
+    if (mode === 'direct_box') return `${box}/box`;
+
+    const inner = mode === 'pouch' ? counts?.nos_per_pouch : counts?.nos_per_tray;
+    const containers = mode === 'pouch' ? counts?.pouches_per_box : counts?.trays_per_box;
+    const derivation = `${c(inner)}/${mode} × ${c(containers)}`;
+
+    const derivable = inner !== null && inner !== undefined && containers !== null && containers !== undefined;
+    const stored = counts?.nos_per_box;
+    if (derivable && stored !== null && stored !== undefined && inner * containers !== stored) {
+        return `sheet says ${stored}/box; ${derivation} = ${inner * containers} — confirm which is right`;
+    }
+
+    return `${derivation} = ${box}/box`;
 }

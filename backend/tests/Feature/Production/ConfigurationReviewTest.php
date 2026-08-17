@@ -152,7 +152,39 @@ class ConfigurationReviewTest extends TestCase
         $this->assertSame([], $row['missing']);
         $this->assertSame(['shared_name_count' => 3], $row['ambiguity']);
         $this->assertSame([$a->id, $b->id], array_column($row['candidates'], 'id'));
-        $this->assertSame('packaging_item', $row['fix_target']);
+        // ADVISORY: linking either row does not clear the ambiguity — Tally
+        // matches a voucher line by NAME, and both rows carry it. The panel
+        // offers no Link here; the duplicate is a catalogue question (Q43).
+        $this->assertSame('name_ambiguity', $row['fix_target']);
+    }
+
+    public function test_an_inactive_item_is_never_offered_as_a_candidate(): void
+    {
+        // Two kinds of row, one rule: a retired item cannot become a packing's
+        // identity (the identity requests refuse it), so offering it would
+        // offer a refusal.
+        $fixture = Item::create(['sku' => 'LOCAL-200ML-RA', 'name' => '200ML RA (LOCAL FIXTURE)', 'uom' => 'Nos', 'is_local_fixture' => true]);
+        $active = $this->tallyItem('BTL-200', '200ML RA', 'itm-200');
+        Item::create(['sku' => 'BTL-200-OLD', 'name' => '200ML RA', 'uom' => 'NOS', 'is_active' => false, 'tally_stock_item_guid' => 'itm-200-old']);
+        $this->standard('200ML RA', $fixture)->packagings()->create(['mode' => 'direct_box', 'nos_per_box' => 100]);
+
+        $bottle = $this->tallyItem('BTL-1', 'Bottle One - 520 Nos', 'itm-1');
+        $a = $this->tallyItem('BTL-A', 'Bottle One', 'itm-a');
+        $this->tallyItem('BTL-B', 'Bottle One', 'itm-b');
+        Item::create(['sku' => 'BTL-C', 'name' => 'Bottle One', 'uom' => 'NOS', 'is_active' => false, 'tally_stock_item_guid' => 'itm-c']);
+        $this->standard('ONE', $bottle)->packagings()->create(['mode' => 'direct_box', 'nos_per_box' => 10, 'item_id' => $a->id]);
+
+        $rows = $this->review()['rows'];
+
+        $this->assertCount(2, $rows);
+        $identityRow = $rows[0];
+        $this->assertSame('packaging_no_identity', $identityRow['kind']);
+        $this->assertSame([$active->id], array_column($identityRow['candidates'], 'id'));
+
+        $ambiguousRow = $rows[1];
+        $this->assertSame('packaging_ambiguous', $ambiguousRow['kind']);
+        $this->assertNotContains('BTL-C', array_column($ambiguousRow['candidates'], 'sku'));
+        $this->assertSame(['BTL-A', 'BTL-B'], array_column($ambiguousRow['candidates'], 'sku'));
     }
 
     public function test_an_item_still_carrying_its_seeded_sku_is_listed(): void

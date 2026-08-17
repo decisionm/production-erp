@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { hasManageAccess } from '@/features/auth/permissions';
 import { useAuthStore } from '@/features/auth/store';
-import { attachStandardItem, getConfigurationReview, updateStandardPackaging } from '@/features/production/api';
+import { attachStandardItem, getConfigurationReview, setPackagingIdentity } from '@/features/production/api';
 import {
     PACKING_MODE_LABEL,
     missingWords,
@@ -39,10 +39,22 @@ import type {
  *    screen's to guess.
  *  - **Create.** There is no "make a Tally item" here and never will be: the
  *    ERP links an EXISTING Tally item, through the endpoints that already
- *    exist — the packaging PUT (item_id) the product drawer uses, or the
- *    standard's attach-item when the row is about the product's own
- *    identity (`fix_target`). A product Tally has never heard of is reported
- *    as such — the row stays until Tally carries it.
+ *    exist — the packaging's identity-only PATCH (item_id and nothing
+ *    else), or the standard's attach-item when the row is about the
+ *    product's own identity (`fix_target`). A product Tally has never heard
+ *    of is reported as such — the row stays until Tally carries it.
+ *  - **Move a count.** Link sends `{ item_id }` alone. It used to send the
+ *    row's mode and inner counts through the full PUT, and the server
+ *    re-derived the box count from them — which quietly turned the sheet's
+ *    520 into 525 on a row the importer had deliberately left inconsistent
+ *    ("confirm which is correct"). Identity is independent of counts: a
+ *    packing whose counts are still open links all the same, and its counts
+ *    stay exactly as stored.
+ *  - **Resolve a shared name.** A `packaging_ambiguous` row is ADVISORY
+ *    (`fix_target: name_ambiguity`): more than one catalogue row carries
+ *    the identity's NAME, and Tally matches a voucher line by name, so
+ *    linking any of them clears nothing. The panel names the duplicate and
+ *    offers no Link — the catalogue question is the owner's (Q43).
  *  - **Name a SKU.** A provisional-SKU row says the SKU is provisional and
  *    where it is set; what it should become is the SKU format programme's
  *    answer, which is held by the owner.
@@ -73,10 +85,13 @@ const candidateLabel = (c: ConfigurationReviewCandidate): string =>
 /**
  * Which existing endpoint closes a row. The server names it (`fix_target`);
  * an older payload without the key is read from the row's own shape — a
- * packaging present means the packaging PUT, a standard alone means
- * attach-item, an item alone means the item's SKU.
+ * shared-name row is advisory, a packaging present means the identity
+ * PATCH, a standard alone means attach-item, an item alone means the
+ * item's SKU. An older server that still says `packaging_item` on an
+ * ambiguous row is read as advisory too: linking never clears a shared name.
  */
 const fixTargetOf = (r: ConfigurationReviewRow): ConfigurationReviewFixTarget => {
+    if (r.kind === 'packaging_ambiguous') return 'name_ambiguity';
     if (r.fix_target) return r.fix_target;
     if (r.kind === 'item_provisional_sku') return 'item_sku';
     if (r.packaging) return 'packaging_item';
@@ -127,25 +142,11 @@ export default function ConfigurationReviewPanel({
     };
 
     const linkPackaging = useMutation({
-        mutationFn: ({ row, itemId }: { row: ConfigurationReviewRow; itemId: number }) => {
-            const standard = row.standard!;
-            const packaging = row.packaging!;
-            const counts = packaging.counts ?? {};
-            // The same payload the product drawer sends: the mode (the request
-            // requires it), the mode's own inner counts unchanged, and the
-            // identity. nos_per_box is derived server-side for pouch/tray and
-            // stated only for direct_box — exactly as PackagingEditModal does,
-            // so a link here can never move a count.
-            return updateStandardPackaging(standard.id, packaging.id, {
-                mode: packaging.mode,
-                nos_per_pouch: packaging.mode === 'pouch' ? (counts.nos_per_pouch ?? null) : undefined,
-                pouches_per_box: packaging.mode === 'pouch' ? (counts.pouches_per_box ?? null) : undefined,
-                nos_per_tray: packaging.mode === 'tray' ? (counts.nos_per_tray ?? null) : undefined,
-                trays_per_box: packaging.mode === 'tray' ? (counts.trays_per_box ?? null) : undefined,
-                nos_per_box: packaging.mode === 'direct_box' ? (counts.nos_per_box ?? null) : undefined,
-                item_id: itemId,
-            });
-        },
+        // Identity ONLY — `{ item_id }` to the identity route, never a mode
+        // or a count. The row's stored counts (consistent or not) are left
+        // exactly as the importer or a person wrote them.
+        mutationFn: ({ row, itemId }: { row: ConfigurationReviewRow; itemId: number }) =>
+            setPackagingIdentity(row.standard!.id, row.packaging!.id, itemId),
         onSuccess: () => {
             invalidate();
             message.success('Linked — every future batch packed this way posts under this Tally item.');
@@ -352,6 +353,17 @@ export default function ConfigurationReviewPanel({
                                                 </Typography.Text>
                                             );
                                         }
+                                        if (target === 'name_ambiguity') {
+                                            const n = r.ambiguity?.shared_name_count;
+                                            return (
+                                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                                    A catalogue duplicate — {n ? `${n} items` : 'more than one item'} carry this
+                                                    name, and Tally matches a voucher line by name, so linking any one of them
+                                                    does not clear it. The duplicate is settled in the catalogue (Q43 — whether
+                                                    it blocks or warns is the owner&rsquo;s call); nothing here picks a row.
+                                                </Typography.Text>
+                                            );
+                                        }
                                         if (!r.standard || (target === 'packaging_item' && !r.packaging)) {
                                             return <Typography.Text type="secondary">—</Typography.Text>;
                                         }
@@ -408,7 +420,8 @@ export default function ConfigurationReviewPanel({
                             ]}
                         />
                         <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
-                            Candidates are matched by name from the Tally catalogue only. Linking changes future batches;
+                            Candidates are matched by name from the active Tally catalogue only. Linking sets the identity
+                            and nothing else — a packing&rsquo;s counts stay exactly as stored — and changes future batches;
                             posted vouchers keep the identity they were posted under.
                         </Typography.Text>
                     </div>

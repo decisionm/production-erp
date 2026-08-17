@@ -34,7 +34,7 @@ run (DEC-20260812-001 HRMS/payroll adoption, DEC-20260812-002 PO raised in
 the ERP). Q38-Q41 are claimed by the 12-Aug Tally
 evidence set and the purchase/tax configuration design. Q42 is claimed by the SKU scheme
 design. Q43 is claimed by the Phase 3 sync fix loop (duplicate master names).
-New questions continue from Q45.
+New questions continue from Q46.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 DEC-20260809-002/-003 landed with PR #155 (the finance-pull discovery
@@ -737,3 +737,18 @@ invoicable at all; should drafts count as invoiced; is a cancellation reason
 (and actor) wanted; and is the carton/batch read for Sales users acceptable? Any
 of these can be flipped without touching data. **Blocks:** nothing — defaults in
 force are stated in the UI. *Open since 2026-08-17.*
+
+## Q45 · Must a product standard always keep ONE default packaging?
+
+Phase 5 (Product / SKU configuration) lets one product standard carry two
+packings of the same mode with different counts (the case DEC-20260810-003 was
+raised for — a 490/box tray beside a 520/box tray). The ERP now enforces AT MOST
+one default packaging per standard: setting a new default clears the old one;
+clearing the last default is allowed, and then Shift Floor asks the supervisor
+"How is it packed?" only when the standard genuinely offers more than one
+packing (the rule that already stands). The engineering default in force is
+"at most one"; nothing in the ERP picks a default for the factory. The
+question: should a standard be REQUIRED to keep exactly one default (so the
+floor is never asked), or is asking the supervisor when there is a real choice
+the intended behaviour? **Blocks:** nothing — the floor is asked only when there
+is a real choice. *Open since 2026-08-17.*

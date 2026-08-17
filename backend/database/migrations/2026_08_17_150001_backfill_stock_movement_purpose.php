@@ -50,8 +50,18 @@ use Illuminate\Support\Facades\Log;
  *
  * Counted per purpose and logged, so the pass is auditable rather than
  * assumed. Chunked, portable (the shapes are matched in PHP, not in a
- * dialect's regex), and reversible: down() takes every purpose back to the
- * null the column arrived with.
+ * dialect's regex).
+ *
+ * REVERSIBLE ONLY TOGETHER WITH 2026_08_17_150000. down() nulls the purpose
+ * on rows carrying one of the values THIS pass writes — it does not touch
+ * a value the pass never produces. But the pass and the service write the
+ * same vocabulary ('receipt', 'consumption', 'output', 'dispatch'), the
+ * migrations table records no run time, and this pass stores no list of
+ * the ids it touched — so a `migrate:rollback --step=1` that stops here
+ * would ALSO strip the purposes StockMovementService stamped on rows
+ * written after the column arrived. Roll back both migrations together
+ * (the column goes with them and nothing is left half-classified), never
+ * this one alone on a live database.
  */
 return new class extends Migration
 {
@@ -120,6 +130,10 @@ return new class extends Migration
 
     public function down(): void
     {
-        DB::table('stock_movements')->whereNotNull('purpose')->update(['purpose' => null]);
+        // Only the values this pass writes (see the docblock: still not a
+        // clean inverse on its own — roll back with 150000).
+        $written = array_unique(array_merge(array_column(self::PATTERNS, 2), ['unknown']));
+
+        DB::table('stock_movements')->whereIn('purpose', $written)->update(['purpose' => null]);
     }
 };

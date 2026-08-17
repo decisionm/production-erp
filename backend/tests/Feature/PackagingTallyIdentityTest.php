@@ -118,6 +118,22 @@ class PackagingTallyIdentityTest extends TestCase
 
     // ------------------------------------------ selection drives the name ---
 
+    public function test_the_entry_resource_names_the_frozen_packaging_by_id_not_only_by_mode(): void
+    {
+        // Two same-mode packings can coexist on one standard (Phase 5, D1),
+        // so `packaging_mode` alone no longer says which one the run started
+        // against; the completion drawer seeds its packing line from the id.
+        $this->actingAsProduction();
+        $entry = $this->inProgressEntry($this->trayPacking->id);
+
+        $this->getJson('/api/v1/production/shift-production-entries/active')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $entry->id)
+            ->assertJsonPath('data.0.production_standard_id', $this->standard->id)
+            ->assertJsonPath('data.0.production_standard_packaging_id', $this->trayPacking->id)
+            ->assertJsonPath('data.0.packaging_mode', 'tray');
+    }
+
     public function test_completing_against_the_tray_packing_freezes_and_books_its_own_identity(): void
     {
         $this->actingAsProduction();
