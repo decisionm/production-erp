@@ -1467,7 +1467,7 @@ Deferred items:
     against a decision in force, not an owner question (Phase 7/8).
   • `match: 'by_id'|'by_reference'` is not yet typed in the frontend's
     procurement types (additive, typechecks clean).
-PR:                 stacked on #188 (base: feat/phase-5.7-shift-summary-cec)
-Deployment state:   not deployed; stack #179 → … → #188 → this PR
+PR:                 #189 (base: feat/phase-5.7-shift-summary-cec → #188 → … → #179)
+Deployment state:   not deployed; stack #179 → … → #188 → #189
 Next phase:         7 — regression, MySQL CI leg, reporting honesty, hardening
 ```

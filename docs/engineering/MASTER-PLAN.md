@@ -26,7 +26,7 @@ PHASE 4.5 Download / Export Center             PASS WITH DEFERRED · PR #185 (st
 PHASE 5   Product / SKU configuration          PASS WITH DEFERRED · PR #186 (stacked on #185) · Q45 · mapping values stay the owner's (Q33/Q43)
 PHASE 5.5 Shift Floor → Complete → Today       PASS WITH DEFERRED · PR #187 (stacked on #186) · v3 estimation, legacy pinned · Q46
 PHASE 5.7 Shift Summary + CEC infrastructure   PASS WITH DEFERRED · PR #188 (stacked on #187) · report contract + honesty keys · CEC data endpoint + golden harness · format BLOCKED · Q47
-PHASE 6   Purchase chain + PO→Tally staged      PASS WITH DEFERRED · PR (stacked on #188) · lifecycle/show/trace · flag OFF (Q35) · Q48
+PHASE 6   Purchase chain + PO→Tally staged      PASS WITH DEFERRED · PR #189 (stacked on #188) · lifecycle/show/trace · flag OFF (Q35) · Q48
 PHASE 7   Regression + reporting honesty + hardening (MySQL leg; deferred items)
 PHASE 8   END-TO-END ACCEPTANCE: operator workflow, then accounting traceability, purchase chain, sales visibility + downloads
 ──────────────────────────────────────────────────────────────────────
