@@ -339,6 +339,39 @@ class StockMovementService
     }
 
     /**
+     * The same read for MANY references at once — one whereIn query, the
+     * rows grouped by reference in the same id order issuesForReference()
+     * returns them (Phase 7, P7-03 (e)). Production prices a page of
+     * completed batches from this: twenty entries used to cost twenty
+     * stock_movements reads. A reference with no issue movement is simply
+     * absent from the result; the caller treats absence as an empty pool.
+     * Additive — issuesForReference() keeps answering exactly as before.
+     *
+     * @param  list<string>  $references
+     * @return array<string, Collection<int, StockMovement>>
+     */
+    public function issuesForReferences(array $references): array
+    {
+        $references = array_values(array_unique(array_map('strval', $references)));
+        if ($references === []) {
+            return [];
+        }
+
+        $grouped = [];
+        $movements = StockMovement::query()
+            ->whereIn('reference', $references)
+            ->where('type', StockMovementType::Issue)
+            ->orderBy('id')
+            ->get();
+
+        foreach ($movements->groupBy('reference') as $reference => $rows) {
+            $grouped[(string) $reference] = $rows->values();
+        }
+
+        return $grouped;
+    }
+
+    /**
      * Every RECEIPT movement stamped with one reference — the cross-module
      * read Procurement's purchase-order trace uses for a receipt line booked
      * BEFORE stock_movement_id existed (Phase 6). The ledger carries no GRN

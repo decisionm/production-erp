@@ -20,7 +20,8 @@ import {
     amendBatch,
     cancelShiftProductionEntry,
     listPackingMaterialOptions,
-    listPendingEntries,
+    listAwaitingCorrectionEntries,
+    listCorrectableEntries,
     closeDowntimeLog,
     closeMoldChangeLog,
     completeBatch,
@@ -78,6 +79,7 @@ import {
     readStockShortfalls,
 } from '@/features/production/types';
 import { currentShift, justEndedShift, productionDateFor } from '@/features/production/shiftClock';
+import { correctionLists } from '@/features/production/correctionReads';
 import { packagingForCompletion } from '@/features/production/productStandardsConfig';
 import { cavityPrefill } from '@/features/production/startBatchCavities';
 import { chosenStartVariant, mouldLabel, startBatchChoices, startBatchTallyIdentity } from '@/features/production/startBatchChoices';
@@ -1488,8 +1490,11 @@ export default function ShiftProductionEntryPage() {
     // Completed Today's read lives beside `today` below (it is a query on
     // the factory day, which the shift clock decides) — Phase 5.5, WS-C.
     /**
-     * The WHOLE pending list, on its own query and deliberately not filtered
-     * to today.
+     * The two correction reads, on their own queries and deliberately not
+     * filtered to today (Phase 7, WS-C — the server's `awaiting_correction=1`
+     * and `correctable=1` filters, one request each; they replaced one
+     * `status=pending` walk to page 25 that fed both lists from the whole
+     * approval backlog every minute).
      *
      * Completed Today (below) is exactly today's completed batches, and both
      * of the things this page has to say about a completed batch outlive that
@@ -1498,17 +1503,25 @@ export default function ShiftProductionEntryPage() {
      * still theirs to correct at 06:45 when the clock has already rolled to
      * Day. Reading either off today's list would hide exactly the batches
      * somebody is standing there holding — so `awaitingCorrection` and
-     * `correctableEarlier` still read the whole approval backlog here.
+     * `correctableEarlier` still read across every production date here.
      *
      * Polled more slowly than the floor state: these change when a person at a
-     * desk decides something, not when a machine does.
+     * desk decides something, not when a machine does. Keyed under the same
+     * prefix `invalidate()` clears, so a completion or an amendment refreshes
+     * both.
      */
-    const { data: pendingEntries } = useQuery({
-        queryKey: ['production', 'shift-production-entries', 'pending-all'],
-        queryFn: listPendingEntries,
+    const { data: awaitingCorrectionRead } = useQuery({
+        queryKey: ['production', 'shift-production-entries', 'awaiting-correction'],
+        queryFn: listAwaitingCorrectionEntries,
         refetchInterval: 60000,
         // A login without production.view 403s — a normal answer here, and one
         // that must leave the rest of the floor screen working.
+        retry: false,
+    });
+    const { data: correctableRead } = useQuery({
+        queryKey: ['production', 'shift-production-entries', 'correctable'],
+        queryFn: listCorrectableEntries,
+        refetchInterval: 60000,
         retry: false,
     });
     // Authoritative machine-running state — every in-progress batch across
@@ -1809,27 +1822,31 @@ export default function ShiftProductionEntryPage() {
     });
     const completedToday = completedTodayPage?.data ?? [];
 
-    const awaitingCorrection = (pendingEntries ?? []).filter(isAwaitingCorrection);
-
     /**
-     * Completed batches the floor may still correct that Completed Today does
-     * not show — an earlier production date (the night shift's paperwork at
-     * 06:45 files under yesterday), so they still come off the whole pending
-     * list, not today's.
+     * The amber panel and the "completed earlier" line, from the two server
+     * reads above (correctionReads.ts).
      *
-     * The predicate is the entry's own state, so this list is exactly "what the
-     * backend would still accept an amendment for" minus the ones already
-     * standing in the amber panel above. Without it the Edit door existed only
-     * for today's first fifteen batches while the server went on allowing the
-     * rest — an offer that disappears at 06:45 for the shift that is still
-     * writing its paperwork.
+     * `correctableEarlier` is the completed batches the floor may still
+     * correct that Completed Today does not show — an earlier production date
+     * (the night shift's paperwork at 06:45 files under yesterday), so they
+     * still come off the cross-date read, not today's. The predicate is the
+     * entry's own state, so this list is exactly "what the backend would still
+     * accept an amendment for" minus the ones already standing in the amber
+     * panel above. Without it the Edit door existed only for today's first
+     * fifteen batches while the server went on allowing the rest — an offer
+     * that disappears at 06:45 for the shift that is still writing its
+     * paperwork.
+     *
+     * The client predicates (isAwaitingCorrection / canAmendCompletion) still
+     * run inside correctionLists() as a PARITY GUARD: the server filtered by
+     * the same fields, so they drop nothing on a matching backend — and on one
+     * that does not know the two query keys yet they keep the panel honest.
      */
-    const correctableEarlier = (pendingEntries ?? []).filter(
-        (entry) =>
-            canAmendCompletion(entry)
-            && !isAwaitingCorrection(entry)
-            && !completedToday.some((shown) => shown.id === entry.id),
-    );
+    const { awaitingCorrection, correctableEarlier } = correctionLists({
+        awaiting: awaitingCorrectionRead?.entries,
+        correctable: correctableRead?.entries,
+        completedToday,
+    });
 
     // A grid outage can happen more than once in a shift — this is a list,
     // not a single per-shift value, so every "Log Power Interruption" adds

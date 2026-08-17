@@ -71,9 +71,15 @@ jobs:
       #     it: a smoke test hits "/" and 500s if backend/public/build/index.html
       #     does not exist yet).
       #   * The suite runs on in-memory sqlite because backend/phpunit.xml pins
-      #     DB_CONNECTION=sqlite / DB_DATABASE=":memory:". That is why no database
-      #     is configured here — configuring one would override the pinned values
-      #     and test against something production is not.
+      #     DB_CONNECTION=sqlite / DB_DATABASE=":memory:" AND no DB_* variable is
+      #     set in this job's environment. Note the second half: PHPUnit applies
+      #     a non-force <env> only when the variable is absent from the process
+      #     environment, so a job-level DB_CONNECTION=mysql WOULD switch the
+      #     driver (that is exactly how ci.yml's `app-mysql` leg runs the same
+      #     suite against MySQL 8 with no second phpunit config). This gate
+      #     stays on sqlite deliberately — it is the fast leg, and slowing the
+      #     deploy buys nothing the PR's `app-mysql` check has not already
+      #     proven for the commit being deployed.
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:

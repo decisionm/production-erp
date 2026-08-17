@@ -12,6 +12,9 @@ Tray app (this machine)
   ├─ cloudApi.ts     — GET /tally-sync/pending, POST .../ack, .../fail, .../snapshot (Sanctum bearer token)
   ├─ snapshot.ts     — (0.3.8) after each post: {xml, sha256, what Tally answered} uploaded to the cloud as a
   │                    record — after ack/fail, never before; a failed upload is one warn line, never a failed sync
+  ├─ snapshotQueue.ts / snapshotJournal.ts — (0.3.9) a snapshot the cloud would not take (a maintenance-window
+  │                    503, a network blip) is journalled to snapshot-journal.json and re-sent, verbatim, at the
+  │                    start of a later cycle once /pending answers again; bounded attempts, then a logged give-up
   ├─ version.ts      — the agent's version from package.json, stamped on every snapshot (testable outside Electron)
   ├─ tally/client.ts — POST XML to http://<tallyHost>:<tallyPort>, parse response body for real result
   ├─ tally/voucherBuilders/ — one file per Tally voucher type, dispatched by tally_voucher_type
@@ -35,7 +38,7 @@ The published feed is what the factory PC runs; a version bump on a branch is NO
 |---|---|---|
 | 0.3.5 | the consolidated shift Stock Journal builder (`Stock Journal` case) | yes — the fleet floor for shift vouchers |
 | 0.3.8 | post-Tally snapshots (`snapshot.ts`), version stamp | built and tested; **not published** (owner-gated, DEPLOYMENT-RUNBOOK) |
-| 0.3.9 | the Purchase Order builder (`purchaseOrder.ts`, Phase 6) — an ORDER voucher, staged behind a cloud flag that is OFF | built and tested on the branch; **NOT published**. Nothing reaches an agent until the owner flips `tally-sync.purchase_orders_enabled` (Q35), and an older agent would fail such an entry loudly ("No XML builder"), never post it wrongly |
+| 0.3.9 | the Purchase Order builder (`purchaseOrder.ts`, Phase 6) — an ORDER voucher, staged behind a cloud flag that is OFF; the snapshot journal + retry (`snapshotQueue.ts`, `snapshotJournal.ts`, Phase 7) so a post-Tally snapshot captured while the cloud was down still reaches it | built and tested on the branch; **NOT published**. Nothing reaches an agent until the owner flips `tally-sync.purchase_orders_enabled` (Q35), and an older agent would fail such an entry loudly ("No XML builder"), never post it wrongly |
 
 ## Setup
 

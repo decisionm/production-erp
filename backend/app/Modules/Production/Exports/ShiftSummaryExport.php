@@ -72,8 +72,15 @@ class ShiftSummaryExport extends AbstractProductionExport
             'net_good_output_kg' => 'net_good_output_kg',
             'efficiency_percent' => 'efficiency_percent',
             'rejection_percent' => 'rejection_percent',
-            'machines_running' => 'machines_running',
-            'machines_down' => 'machines_down',
+            // The CURRENT-STATE counts under their honest names (Phase 7,
+            // P7-03 (f)): the report's *_now keys — the date's batches still
+            // in progress / breakdowns still open as of the download, not a
+            // fact of the date (ShiftSummaryService, class docblock). The
+            // file read the aliases (`machines_running` / `machines_down`)
+            // until now; the aliases stay on the JSON this release for the
+            // screen's fallback, the file names what it carries.
+            'machines_running_now' => 'machines_running_now',
+            'machines_down_now' => 'machines_down_now',
             'idle_time_hours' => 'idle_time_hours',
             'no_of_mold_changes' => 'no_of_mold_changes',
             'power_consumption_units' => 'power_consumption_units',

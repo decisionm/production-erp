@@ -251,8 +251,11 @@ class ControlledProductEndToEndTest extends TestCase
         $this->assertSame('pending', $queued->status->value);
         $this->assertSame('SPE-'.$entryId, $queued->payload['voucher_number']);
 
-        // The queued payload IS what the preview showed — same builder.
-        $this->assertSame(
+        // The queued payload IS what the preview showed — same builder. The
+        // preview is built in memory; the queued one comes back through the
+        // json column, whose object-key order is the driver's (MySQL
+        // re-orders it) — assertSameJson, see Tests\TestCase.
+        $this->assertSameJson(
             $voucher->json('data.voucher.consumed'),
             $queued->payload['consumed'],
         );

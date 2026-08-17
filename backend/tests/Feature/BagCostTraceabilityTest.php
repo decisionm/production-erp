@@ -726,7 +726,9 @@ class BagCostTraceabilityTest extends TestCase
         // the whole bill. 2500 ÷ 9,500 = 0.263157…, truncated at 4 dp.
         $netted = $allocator->summary(ShiftProductionEntry::find($entry));
 
-        $this->assertSame('9500', $netted['accepted_quantity']);
+        // 4 dp: the shape the live (MySQL) instance emits, now normalised so
+        // sqlite agrees — see BagCostAllocationService::summary.
+        $this->assertSame('9500.0000', $netted['accepted_quantity']);
         $this->assertSame('0.2631', $netted['cost_per_accepted_unit']);
         $this->assertSame('2500.0000', $netted['material_cost_total']);
     }

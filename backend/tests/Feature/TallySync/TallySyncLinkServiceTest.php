@@ -15,6 +15,7 @@ use App\Modules\TallySync\Models\Enums\TallySyncEventKind;
 use App\Modules\TallySync\Models\Enums\TallySyncStatus;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Models\TallySyncEvent;
+use App\Modules\TallySync\Services\EntryPresenter;
 use App\Modules\TallySync\Services\TallySyncLinkService;
 use App\Modules\TallySync\Services\TallySyncService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -184,6 +185,95 @@ class TallySyncLinkServiceTest extends TestCase
         $this->assertSame('failed', $links->for($other)['status']);
     }
 
+    /**
+     * Phase 7 (P7-03 (c)) — among a document's live entries the link is the
+     * one that stands for it in Tally: synced first, then pending/delivered,
+     * then failed, newest among equals; `flags.superseded_count` says how
+     * many other candidates were outranked. RED before: the newest live row
+     * won outright, so the legacy pair (synced older + pending newer) linked
+     * the pending one.
+     */
+    public function test_a_synced_older_entry_outranks_a_pending_newer_one_and_the_link_says_it_was_ranked(): void
+    {
+        $links = app(TallySyncLinkService::class);
+        $delivery = $this->delivery();
+
+        // The legacy pair, written by hand: a voucher that reached Tally,
+        // then a second row for the same document from before enqueue()
+        // became idempotent.
+        $syncedOlder = $this->row($delivery, TallySyncStatus::Synced, ['synced_at' => '2026-08-10 12:00:00']);
+        $pendingNewer = $this->row($delivery, TallySyncStatus::Pending);
+        $this->assertGreaterThan($syncedOlder->id, $pendingNewer->id);
+
+        $link = $links->for($delivery);
+        $this->assertSame($syncedOlder->id, $link['entry_id']);
+        $this->assertSame('synced', $link['status']);
+        $this->assertNotNull($link['synced_at']);
+        $this->assertSame(1, ((array) $link['flags'])['superseded_count']);
+        // The shape is unchanged — the count rides INSIDE flags.
+        $this->assertSame(['entry_id', 'voucher_type', 'status', 'voucher_number', 'synced_at', 'flags', 'link'], array_keys($link));
+
+        // failed newer + synced older → synced.
+        $other = $this->delivery();
+        $syncedOld = $this->row($other, TallySyncStatus::Synced, ['synced_at' => '2026-08-10 12:00:00']);
+        $this->row($other, TallySyncStatus::Failed, ['attempts' => 3]);
+        $this->assertSame($syncedOld->id, $links->for($other)['entry_id']);
+        $this->assertSame(1, ((array) $links->for($other)['flags'])['superseded_count']);
+
+        // two pending → the newest; three candidates → superseded 2 when a
+        // failed one sits beside them.
+        $third = $this->delivery();
+        $this->row($third, TallySyncStatus::Pending);
+        $newestPending = $this->row($third, TallySyncStatus::Pending);
+        $this->assertSame($newestPending->id, $links->for($third)['entry_id']);
+        $this->assertSame(1, ((array) $links->for($third)['flags'])['superseded_count']);
+        $this->row($third, TallySyncStatus::Failed, ['attempts' => 1]);
+        $this->assertSame($newestPending->id, $links->for($third)['entry_id'], 'a newer FAILED row does not outrank a pending one');
+        $this->assertSame(2, ((array) $links->for($third)['flags'])['superseded_count']);
+
+        // pending newer + failed older → the pending one (rank before age).
+        $fourth = $this->delivery();
+        $this->row($fourth, TallySyncStatus::Failed, ['attempts' => 1]);
+        $pending = $this->row($fourth, TallySyncStatus::Pending);
+        $this->assertSame($pending->id, $links->for($fourth)['entry_id']);
+
+        // A lone entry is a plain answer: no superseded_count at all, and
+        // the flags are exactly EntryPresenter's.
+        $lone = $this->delivery();
+        $only = $this->row($lone, TallySyncStatus::Pending);
+        $flags = (array) $links->for($lone)['flags'];
+        $this->assertArrayNotHasKey('superseded_count', $flags);
+        $this->assertSame(array_keys(app(EntryPresenter::class)->flags($only)), array_keys($flags));
+
+        // Dismissed rows never compete while a live one exists (an older
+        // live entry still beats a newer dismissed one, and the dismissed
+        // one is not counted as superseded); with no live row the newest
+        // dismissed speaks and the others count.
+        $fifth = $this->delivery();
+        $failedOlder = $this->row($fifth, TallySyncStatus::Failed, ['attempts' => 1]);
+        $this->row($fifth, TallySyncStatus::Dismissed);
+        $this->assertSame($failedOlder->id, $links->for($fifth)['entry_id']);
+        $this->assertArrayNotHasKey('superseded_count', (array) $links->for($fifth)['flags']);
+        $sixth = $this->delivery();
+        $this->row($sixth, TallySyncStatus::Dismissed);
+        $newestDismissed = $this->row($sixth, TallySyncStatus::Dismissed);
+        $this->assertSame($newestDismissed->id, $links->for($sixth)['entry_id']);
+        $this->assertSame('dismissed', $links->for($sixth)['status']);
+        $this->assertSame(1, ((array) $links->for($sixth)['flags'])['superseded_count']);
+
+        // forMany answers every one of them the same way, still in ONE query.
+        $queries = 0;
+        DB::listen(function () use (&$queries) {
+            $queries++;
+        });
+        $many = $links->forMany((new Delivery)->getMorphClass(), [$delivery->id, $other->id, $third->id, $fourth->id, $lone->id, $fifth->id, $sixth->id]);
+        $this->assertSame(1, $queries);
+        $this->assertSame(
+            [$syncedOlder->id, $syncedOld->id, $newestPending->id, $pending->id, $only->id, $failedOlder->id, $newestDismissed->id],
+            [$many[$delivery->id]['entry_id'], $many[$other->id]['entry_id'], $many[$third->id]['entry_id'], $many[$fourth->id]['entry_id'], $many[$lone->id]['entry_id'], $many[$fifth->id]['entry_id'], $many[$sixth->id]['entry_id']],
+        );
+    }
+
     // ---- enqueue() idempotency (the replay guard) ---------------------------
 
     public function test_refiring_delivery_dispatched_returns_the_one_entry_and_records_no_second_enqueue(): void
@@ -262,6 +352,22 @@ class TallySyncLinkServiceTest extends TestCase
         $delivery->lines()->create(['sales_order_line_id' => $this->order->lines()->first()->id, 'item_id' => $this->bottle->id, 'quantity' => '100']);
 
         return $delivery;
+    }
+
+    /**
+     * A queue row for a document, written by hand — the legacy shapes the
+     * ranking exists for are exactly the ones the idempotent enqueue() no
+     * longer produces.
+     *
+     * @param  array<string, mixed>  $extra
+     */
+    private function row(Delivery $delivery, TallySyncStatus $status, array $extra = []): TallySyncEntry
+    {
+        return TallySyncEntry::create([
+            'syncable_type' => $delivery->getMorphClass(), 'syncable_id' => $delivery->id,
+            'tally_voucher_type' => 'Delivery Note', 'payload' => ['voucher_number' => "DN-{$delivery->id}"],
+            'status' => $status, 'attempts' => 0,
+        ] + $extra);
     }
 
     private function issuedInvoice(): Invoice

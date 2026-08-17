@@ -5,6 +5,8 @@ import logger from './logger';
 import { decideAction } from './postDecision';
 import * as journal from './postJournal';
 import { sendSnapshot } from './snapshot';
+import * as snapshotJournal from './snapshotJournal';
+import { flushSnapshotQueue } from './snapshotQueue';
 import { postVoucherXml, type TallyImportResult } from './tally/client';
 import { buildVoucherXml } from './tally/voucherBuilders';
 import { agentVersion } from './version';
@@ -139,7 +141,11 @@ async function reportRejection(entry: TallySyncEntry, message: string): Promise<
  * built and posted this cycle. It is a record, not a report — it changes
  * nothing about the entry, and it is not allowed to fail into the loop:
  * sendSnapshot never throws, and this wrapper catches anyway, so a cloud
- * that will not take the snapshot costs one warn line and nothing else.
+ * that will not take the snapshot costs one warn line and nothing else —
+ * and, since Phase 7, a journal record: the failed body is written to
+ * snapshot-journal.json and re-sent by resendQueuedSnapshots() on a later
+ * cycle, so a Tally answer captured while the cloud was down still reaches
+ * the drawer.
  */
 async function snapshot(entry: TallySyncEntry, xml: string, tally: TallyImportResult | null): Promise<void> {
     try {
@@ -149,10 +155,36 @@ async function snapshot(entry: TallySyncEntry, xml: string, tally: TallyImportRe
                 upload: uploadSnapshot,
                 warn: (message, meta) => logger.warn(message, meta),
                 info: (message, meta) => logger.info(message, meta),
+                error: (message, meta) => logger.error(message, meta),
+                queue: snapshotJournal.snapshotQueue,
             },
         );
     } catch (err) {
         logger.warn(`Snapshot upload failed for entry #${entry.id}`, {
+            message: err instanceof Error ? err.message : String(err),
+        });
+    }
+}
+
+/**
+ * Re-send the snapshots an earlier cycle could not upload (Phase 7). Runs
+ * right after /pending has answered — the cloud is demonstrably up, so the
+ * bounded attempts in snapshotQueue.ts are spent on a cloud that refuses a
+ * record, never on an outage — and BEFORE this cycle's entries are worked,
+ * so the drawer receives records in the order the posts happened. Records
+ * only: nothing here posts, acks or reports, and flushSnapshotQueue never
+ * throws; the catch is belt-and-braces like snapshot()'s.
+ */
+async function resendQueuedSnapshots(): Promise<void> {
+    try {
+        await flushSnapshotQueue(snapshotJournal.snapshotQueue, {
+            upload: uploadSnapshot,
+            warn: (message, meta) => logger.warn(message, meta),
+            info: (message, meta) => logger.info(message, meta),
+            error: (message, meta) => logger.error(message, meta),
+        });
+    } catch (err) {
+        logger.warn('Re-sending queued snapshots failed', {
             message: err instanceof Error ? err.message : String(err),
         });
     }
@@ -325,6 +357,9 @@ export async function runSyncCycle(): Promise<void> {
         const pending = await fetchPending();
         logger.info(`Fetched ${pending.length} pending entr${pending.length === 1 ? 'y' : 'ies'}`);
 
+        // The cloud answered: anything it would not take earlier goes first.
+        await resendQueuedSnapshots();
+
         // Anything we're still holding that the cloud no longer lists as
         // pending has been resolved elsewhere — forget it rather than carry
         // it forever.
@@ -366,6 +401,7 @@ export function startSyncLoop(): void {
 
     logger.info(`Starting sync loop, polling every ${intervalMs / 1000}s`);
     journal.logOutstandingOnStartup();
+    snapshotJournal.logOutstandingOnStartup();
     void runSyncCycle();
     intervalHandle = setInterval(() => void runSyncCycle(), intervalMs);
 }

@@ -24,16 +24,38 @@ use Illuminate\Database\Eloquent\Model;
  * who wants the voucher follows the link and meets the gate there.
  *
  * WHICH ENTRY, when a syncable has several (history from before enqueue()
- * became idempotent, or a dismissed voucher re-issued): the LIVE one —
- * pending / synced / failed over dismissed — newest first among equals. A
- * lone dismissed entry still links (dismissed is a state a reader must see,
- * not a hole); a syncable with no entry at all is null, never a fabricated
- * status.
+ * became idempotent, or a dismissed voucher re-issued): among the LIVE
+ * (non-dismissed) entries, the one that stands for the document in Tally —
+ * SYNCED first (it is in the books), then pending / delivered (on its way),
+ * then failed — newest first among equals (Phase 7, P7-03 (c); it used to
+ * be plainly the newest live row, so a legacy pair of a synced older
+ * voucher and a pending newer one linked the pending one and the document
+ * read "pending" while its voucher sat in Tally). When more than one
+ * candidate was weighed the link's flags carry `superseded_count` — how
+ * many OTHER candidates the chosen one outranked — so a reader can tell a
+ * plain answer from a ranked one. A lone dismissed entry still links
+ * (dismissed is a state a reader must see, not a hole), and only when NO
+ * live entry exists do the dismissed ones compete, by the same rule; a
+ * syncable with no entry at all is null, never a fabricated status.
  *
  * Read-only. Touches no Tally, writes no row.
  */
 class TallySyncLinkService
 {
+    /**
+     * The ranking among a document's live entries — lower wins. Delivered
+     * is not a status of its own (a pending row with delivered_at stamped),
+     * so it ranks with pending. Dismissed rows are never candidates while
+     * a live one exists; among themselves (a document whose every voucher
+     * was written off) they tie at the bottom and the newest speaks.
+     */
+    private const STATUS_RANK = [
+        'synced' => 0,
+        'pending' => 1,
+        'failed' => 2,
+        'dismissed' => 3,
+    ];
+
     public function __construct(private readonly EntryPresenter $presenter) {}
 
     /**
@@ -69,13 +91,15 @@ class TallySyncLinkService
 
         $links = [];
         foreach ($entries->groupBy('syncable_id') as $syncableId => $group) {
-            // Newest-first already; the first non-dismissed row is the live
-            // one, and only when none is live does the newest dismissed
-            // row speak for the syncable.
-            $chosen = $group->first(fn (TallySyncEntry $entry) => $entry->status !== TallySyncStatus::Dismissed)
-                ?? $group->first();
+            // The live rows compete; only when none is live do the
+            // dismissed ones. Newest-first already, so a stable sort by
+            // rank keeps "newest among equals" without a second key.
+            $live = $group->filter(fn (TallySyncEntry $entry) => $entry->status !== TallySyncStatus::Dismissed);
+            $candidates = ($live->isNotEmpty() ? $live : $group)
+                ->sortBy(fn (TallySyncEntry $entry) => self::STATUS_RANK[$entry->status->value] ?? count(self::STATUS_RANK))
+                ->values();
 
-            $links[(int) $syncableId] = $this->link($chosen);
+            $links[(int) $syncableId] = $this->link($candidates->first(), superseded: $candidates->count() - 1);
         }
 
         // Callers iterate documents in their own order; the keys are what
@@ -113,10 +137,22 @@ class TallySyncLinkService
     }
 
     /**
+     * @param  int  $superseded  how many OTHER candidates this entry outranked
+     *                           for its document (forMany); 0 — the usual
+     *                           case, and every forEntryIds() link — adds no
+     *                           flag, so the shape is exactly what it was.
      * @return array{entry_id: int, voucher_type: string, status: string, voucher_number: string, synced_at: ?string, flags: object, link: string}
      */
-    private function link(TallySyncEntry $entry): array
+    private function link(TallySyncEntry $entry, int $superseded = 0): array
     {
+        $flags = $this->presenter->flags($entry);
+        if ($superseded > 0) {
+            // A ranked answer says so: the document has more than one
+            // voucher row and this one was chosen over the others by the
+            // class rule (synced > pending > failed, newest among equals).
+            $flags['superseded_count'] = $superseded;
+        }
+
         return [
             'entry_id' => $entry->id,
             'voucher_type' => $entry->tally_voucher_type,
@@ -126,7 +162,7 @@ class TallySyncLinkService
             // An object, as TallySyncEntryResource emits it: an empty PHP
             // array wires as `[]`, a non-empty one as `{}`, and a client
             // typed to Record<string, …> must never meet a list.
-            'flags' => (object) $this->presenter->flags($entry),
+            'flags' => (object) $flags,
             'link' => "/tally-sync?entry={$entry->id}",
         ];
     }

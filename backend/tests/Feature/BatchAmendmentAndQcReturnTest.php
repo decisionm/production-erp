@@ -253,7 +253,7 @@ class BatchAmendmentAndQcReturnTest extends TestCase
     {
         $entry = ShiftProductionEntry::query()->findOrFail($entryId);
 
-        $this->assertSame('9500', (string) $entry->quantity_produced);
+        $this->assertAmount('9500', $entry->quantity_produced);
         $this->assertAmount('122.5500', $entry->quantity_produced_kg);
         $this->assertNull($entry->gross_quantity_produced);
         $this->assertNull($entry->quality_checked_at);
@@ -357,7 +357,7 @@ class BatchAmendmentAndQcReturnTest extends TestCase
         $this->assertCount(1, $amendments);
         $this->assertSame('Counted the last pallet twice', $amendments[0]['reason']);
         $this->assertSame($supervisor->id, $amendments[0]['amended_by']);
-        $this->assertSame('10000', $amendments[0]['previous_quantity_produced']);
+        $this->assertAmount('10000', $amendments[0]['previous_quantity_produced']);
 
         // Still the same batch — a correction is not a new run.
         $this->assertSame($entryId, $amended->json('data.id'));
@@ -478,7 +478,7 @@ class BatchAmendmentAndQcReturnTest extends TestCase
 
         // Nothing moved.
         $this->assertSame('870.0000', (string) $this->balance($this->resin, $this->rm)?->quantity);
-        $this->assertSame('10000', (string) ShiftProductionEntry::query()->find($entryId)->quantity_produced);
+        $this->assertAmount('10000', ShiftProductionEntry::query()->find($entryId)->quantity_produced);
     }
 
     public function test_quality_can_return_a_batch_it_has_not_checked_and_the_floor_then_corrects_it(): void
@@ -749,7 +749,7 @@ class BatchAmendmentAndQcReturnTest extends TestCase
 
         // The PM's signature still describes the figures they signed.
         $entry = ShiftProductionEntry::query()->findOrFail($entryId);
-        $this->assertSame('10000', (string) $entry->quantity_produced);
+        $this->assertAmount('10000', $entry->quantity_produced);
         $this->assertNotNull($entry->quality_checked_at);
         $this->assertSame(ShiftProductionEntryStatus::PmApproved, $entry->status);
     }
@@ -884,7 +884,7 @@ class BatchAmendmentAndQcReturnTest extends TestCase
         )->assertStatus(403);
 
         // Refused at the door, so nothing was touched.
-        $this->assertSame('10000', (string) ShiftProductionEntry::query()->find($entryId)->quantity_produced);
+        $this->assertAmount('10000', ShiftProductionEntry::query()->find($entryId)->quantity_produced);
     }
 
     public function test_quality_cannot_return_a_batch_when_the_stage_is_switched_off(): void

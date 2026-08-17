@@ -86,7 +86,9 @@ class ExpectedOutputEngineTest extends TestCase
         $this->assertSame('13584.91', $metrics['expected_pieces']);
         $this->assertSame(16, $metrics['expected_boxes']);
         $this->assertSame(7, $metrics['actual_boxes']);
-        $this->assertSame('5880', $metrics['actual_pieces']);
+        // 4 dp: `actual_pieces` carries ONE shape now, the live (MySQL)
+        // one — see ShiftProductionEntryService::productionMetrics.
+        $this->assertSame('5880.0000', $metrics['actual_pieces']);
         $this->assertSame(43.3, $metrics['efficiency_pct']);
     }
 
@@ -235,7 +237,9 @@ class ExpectedOutputEngineTest extends TestCase
         $this->assertNull($metrics['expected_boxes']);
         $this->assertNull($metrics['efficiency_pct']);
         $this->assertSame(7, $metrics['actual_boxes']);
-        $this->assertSame('5880', $metrics['actual_pieces']);
+        // 4 dp: `actual_pieces` carries ONE shape now, the live (MySQL)
+        // one — see ShiftProductionEntryService::productionMetrics.
+        $this->assertSame('5880.0000', $metrics['actual_pieces']);
     }
 
     public function test_metrics_is_null_until_the_batch_completes(): void

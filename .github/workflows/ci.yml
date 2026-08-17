@@ -3,6 +3,14 @@
 # The frontend build runs BEFORE the backend tests on purpose: Laravel's
 # catch-all route serves backend/public/build/index.html, and the smoke test
 # that hits "/" 500s if the build output doesn't exist.
+#
+# Two backend legs, same suite, two drivers (Phase 7, P7-02):
+#   * `app`       — in-memory sqlite, the fast leg (what phpunit.xml pins and
+#                   what deploy.yml's pre-deploy gate runs).
+#   * `app-mysql` — the SAME suite against a real MySQL 8 service, because the
+#                   factory's live instance runs MySQL and sqlite is silent
+#                   about JSON-column key order, strict-mode casts, collation
+#                   and identifier limits. Slower; a PR must pass both.
 name: CI
 
 on:
@@ -63,6 +71,93 @@ jobs:
         run: ./vendor/bin/pint --test
 
       - name: Backend tests
+        working-directory: backend
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+          php artisan test
+
+  # The MySQL leg. Identical steps to `app` minus the frontend typecheck/tests
+  # (already proven above; the build itself is still needed for the "/" smoke
+  # test) — the difference is the database the suite talks to. phpunit.xml's
+  # <env DB_CONNECTION="sqlite"> is NOT force="true", so PHPUnit applies it
+  # only when the variable is absent from the process environment: the
+  # job-level DB_* below therefore win with no second phpunit config, and
+  # every RefreshDatabase test migrates and runs against the service.
+  app-mysql:
+    name: Backend tests on MySQL 8
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: erp_test
+        ports:
+          - 3306:3306
+        # The job does not start until the server answers ping — a
+        # migrate:fresh against a still-booting MySQL is a red run for nothing.
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      DB_CONNECTION: mysql
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_DATABASE: erp_test
+      DB_USERNAME: root
+      DB_PASSWORD: root
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # Build only: Laravel's catch-all serves backend/public/build/index.html
+      # and the "/" smoke test 500s without it. Typecheck + vitest ran in `app`.
+      - name: Frontend build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          # composer.lock pins Symfony v8 packages that require PHP >= 8.4.1
+          php-version: '8.4'
+          extensions: mbstring, bcmath, pdo_sqlite, sqlite3, pdo_mysql, mysql, zip
+          coverage: none
+
+      - name: Install composer dependencies
+        working-directory: backend
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      # Belt and braces: the service healthcheck gates the job, but a plain
+      # PDO connection from the runner — the same driver and credentials the
+      # suite will use — proves the port mapping before ~1,600 tests depend
+      # on it. PHP only, so it needs no mysql client on the runner image.
+      - name: Wait for MySQL
+        run: |
+          php -r '
+            for ($i = 0; $i < 30; $i++) {
+                try {
+                    new PDO("mysql:host=127.0.0.1;port=3306;dbname=erp_test", "root", "root");
+                    echo "MySQL is up\n";
+                    exit(0);
+                } catch (Throwable $e) {
+                    sleep(2);
+                }
+            }
+            fwrite(STDERR, "::error::MySQL service never answered on 127.0.0.1:3306\n");
+            exit(1);
+          '
+
+      - name: Backend tests (MySQL)
         working-directory: backend
         run: |
           cp .env.example .env

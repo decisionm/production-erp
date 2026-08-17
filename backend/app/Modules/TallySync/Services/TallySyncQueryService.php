@@ -167,10 +167,25 @@ class TallySyncQueryService
      * One entry with its history AND its snapshots (what the agent sent to
      * Tally and what Tally answered — Phase 4), for the drawer. Both are
      * relations on the model; the resource keys off relationLoaded().
+     *
+     * THE SNAPSHOTS ARE CAPPED (Phase 7, P7-03 (b)): the newest
+     * config('tally-sync.snapshot_show_cap') of them ride the response
+     * (newest first — the relation's own order), never every row. An XML
+     * body can run to 2 MB and a voucher retried through a long Tally
+     * outage carries one snapshot per attempt; the drawer showed them all.
+     * The total is loaded beside them (snapshots_count) so the resource can
+     * say how many exist and whether the list is cut — additive: the
+     * response gains `snapshots_total` and `snapshots_truncated`, and a
+     * voucher with fewer snapshots than the cap answers exactly as before.
+     * The retention prune (TallySyncSnapshotService) is a separate,
+     * unchanged rule about what is KEPT; this is only about what is SHOWN.
      */
     public function show(TallySyncEntry $entry): TallySyncEntry
     {
-        $entry->load(['events', 'snapshots']);
+        $cap = max(1, (int) config('tally-sync.snapshot_show_cap', 20));
+
+        $entry->load(['events', 'snapshots' => fn ($query) => $query->limit($cap)])
+            ->loadCount('snapshots');
 
         return $entry;
     }

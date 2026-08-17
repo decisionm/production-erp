@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Col, DatePicker, Modal, Row, Select, Space, Table, Tabs, Tag, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { type ReactElement, useState } from 'react';
@@ -11,6 +11,12 @@ import {
     listWorkCenters,
 } from '@/features/production/api';
 import { useProductionSettings } from '@/features/production/packing';
+import {
+    efficiencyColumnTitle,
+    lotFilterOptions,
+    traceabilityFilters,
+    traceabilityQueryKey,
+} from '@/features/production/productionReports';
 import type {
     MaterialBagStatus,
     ProductionReportRow,
@@ -21,6 +27,7 @@ import type {
     TraceabilityReportRow,
 } from '@/features/production/types';
 import { exportErrorSentence, runExport } from '@/features/exports/api';
+import { listAllItems } from '@/features/inventory/api';
 import { downloadBlob } from '@/lib/csv';
 import { itemLabel } from '@/lib/itemLabel';
 
@@ -214,8 +221,15 @@ function ProductionTab() {
                     { title: 'Lumps Kg', dataIndex: 'lumps_kg', align: 'right', render: fmtKg },
                     {
                         // The one place the grain is named — rows and the
-                        // pinned Day total are both pieces ÷ pieces.
-                        title: 'Efficiency (pcs)',
+                        // pinned Day total are both pieces ÷ pieces — and,
+                        // beside it, WHAT THE RATIO DIVIDES BY (Phase 7):
+                        // the basis the server names, or the report's own
+                        // documented one (the standard cycle time's expected
+                        // pieces — productionReports.ts). Not the supervisor
+                        // target Shift Summary measures against; a reader
+                        // moving between the two pages must not assume one
+                        // basis for both.
+                        title: efficiencyColumnTitle(report?.efficiency_basis),
                         align: 'right',
                         render: (_, r) => (
                             <Space size={6}>
@@ -250,8 +264,11 @@ function ProductionTab() {
             />
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 Day-total efficiency = Σ actual pieces ÷ Σ expected pieces × 100 (ratio of sums) — the same grain as
-                every row above it, deliberately not the average of the per-row percentages. Rows with no recorded
-                standard join neither sum. Boxes are reported as plain column totals only.
+                every row above it, deliberately not the average of the per-row percentages. Expected pieces come
+                from the standard cycle time snapshotted at Start Batch, the active cavities and the running hours net
+                of the downtime logged at completion — the product standard, not the supervisor-typed target the Shift
+                Summary measures against. Rows with no recorded standard join neither sum. Boxes are reported as
+                plain column totals only.
             </Typography.Text>
         </Space>
     );
@@ -392,34 +409,96 @@ function TraceabilityTab() {
         dayjs().subtract(6, 'day').format('YYYY-MM-DD'),
         dayjs().format('YYYY-MM-DD'),
     ]);
+    const [lotId, setLotId] = useState<number | undefined>(undefined);
+    const [itemId, setItemId] = useState<number | undefined>(undefined);
+    const queryClient = useQueryClient();
+
+    // ONE filter object (Phase 7, WS-C): the query key, the report request
+    // and the CSV export all read it — TraceabilityReportRequest accepts
+    // lot_id / item_id beside the range and the export's filterRules are
+    // the same request's, so what the table shows is what the file holds.
+    const filters = traceabilityFilters(range, lotId, itemId);
 
     const { data: rows, isLoading } = useQuery({
-        queryKey: ['production', 'reports', 'traceability', range[0], range[1]],
-        queryFn: () => getTraceabilityReport({ date_from: range[0], date_to: range[1] }),
+        queryKey: traceabilityQueryKey(filters),
+        queryFn: () => getTraceabilityReport(filters),
     });
 
     const dataSource = rows ?? [];
 
-    // The same range getTraceabilityReport() was called with above; the
+    // Reports filter HISTORY, so retired materials stay listed — a lot
+    // received under an item since made inactive is still a lot to trace.
+    const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
+    const itemOptions = (items?.data ?? []).map((item) => ({ value: item.id, label: itemLabel(item) }));
+
+    // The lot picker offers the lots of THIS window (a lot outside it cannot
+    // narrow the report to anything). While one lot is chosen the response
+    // holds only that lot, so the options come from the cached lot-agnostic
+    // read of the same range and material when there is one — the read the
+    // reader was looking at when they picked — and from the response
+    // otherwise. Clearing the pick always widens back to the window.
+    const lotAgnosticRows =
+        lotId === undefined
+            ? rows
+            : queryClient.getQueryData<TraceabilityReportRow[] | null>(
+                traceabilityQueryKey(traceabilityFilters(range, undefined, itemId)),
+            ) ?? rows;
+    const lotOptions = lotFilterOptions(lotAgnosticRows);
+
+    // The same filters getTraceabilityReport() was called with above; the
     // server flattens the lot → bag → fed drill-down itself.
     const csv = useServerCsv('traceability_report');
-    const exportCsv = () => csv.mutate({ date_from: range[0], date_to: range[1] });
+    const exportCsv = () => csv.mutate(filters);
 
     return (
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
             <Row gutter={[12, 12]} align="bottom">
-                <Col xs={24} sm={12} md={8}>
+                <Col xs={24} sm={12} md={7}>
                     <DatePicker.RangePicker
                         style={{ width: '100%' }}
                         value={[dayjs(range[0]), dayjs(range[1])]}
                         allowClear={false}
                         onChange={(_, dateStrings) => {
                             const [start, end] = dateStrings as [string, string];
-                            if (start && end) setRange([start, end]);
+                            if (start && end) {
+                                setRange([start, end]);
+                                // The lot was picked from the old window's
+                                // lots; a new window offers its own.
+                                setLotId(undefined);
+                            }
                         }}
                     />
                 </Col>
-                <Col xs={24} md={16} style={{ textAlign: 'right' }}>
+                <Col xs={24} sm={12} md={5}>
+                    <Select
+                        style={{ width: '100%' }}
+                        placeholder="All materials"
+                        allowClear
+                        showSearch
+                        optionFilterProp="label"
+                        options={itemOptions}
+                        value={itemId}
+                        onChange={(value) => {
+                            setItemId(value);
+                            // A lot belongs to one material — a lot picked
+                            // under another material would filter to nothing.
+                            setLotId(undefined);
+                        }}
+                    />
+                </Col>
+                <Col xs={24} sm={12} md={6}>
+                    <Select
+                        style={{ width: '100%' }}
+                        placeholder="All lots in this window"
+                        allowClear
+                        showSearch
+                        optionFilterProp="label"
+                        options={lotOptions}
+                        value={lotId}
+                        onChange={setLotId}
+                    />
+                </Col>
+                <Col xs={24} sm={12} md={6} style={{ textAlign: 'right' }}>
                     <Button onClick={exportCsv} disabled={dataSource.length === 0} loading={csv.isPending}>Download CSV</Button>
                 </Col>
             </Row>
@@ -440,8 +519,9 @@ function TraceabilityTab() {
                 ]}
             />
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                Lots received in the selected window. Expand a lot to see its bags, and a bag to see every
-                machine/batch segment it was loaded into.
+                Lots received in the selected window, narrowed by material and lot when chosen — the CSV carries the
+                same filters. Expand a lot to see its bags, and a bag to see every machine/batch segment it was loaded
+                into.
             </Typography.Text>
         </Space>
     );

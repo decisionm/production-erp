@@ -242,10 +242,16 @@ class LineMappingResolverTest extends TestCase
     {
         Warehouse::create(['code' => 'GDN', 'name' => 'RM Store', 'is_active' => true, 'tally_guid' => 'gd-rm']);
 
-        $unknown = $this->resolver()->godown('Rm store');
+        // A name that exists NOWHERE — not a case variant of a real one. The
+        // lookup is `where name = ?`, and whether that is case-sensitive is
+        // the driver's collation: sqlite compares bytes ('Rm store' misses
+        // 'RM Store'); MySQL's utf8mb4_unicode_ci matches it (the live
+        // instance). This test is about an unknown name; the case question
+        // is a driver fact, not the resolver's contract.
+        $unknown = $this->resolver()->godown('Nowhere Bin');
         $this->assertSame('unmapped', $unknown['state']);
         $this->assertNull($unknown['warehouse_id']);
-        $this->assertStringContainsString('No warehouse named "Rm store"', $unknown['note']);
+        $this->assertStringContainsString('No warehouse named "Nowhere Bin"', $unknown['note']);
 
         $this->assertSame('none', $this->resolver()->godown(null)['state']);
         $this->assertSame('none', $this->resolver()->godown('')['state']);

@@ -15,6 +15,7 @@ use App\Modules\Production\Services\ShiftProductionEntryService;
 use App\Modules\TallySync\Services\PackingVoucherLines;
 use App\Modules\TallySync\Services\TallySyncService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 /**
@@ -237,6 +238,43 @@ class ScrapItemResolverTest extends TestCase
 
         // A miss still withholds — nothing was booked against a guess.
         $this->assertDatabaseMissing('stock_movements', ['reference' => "QC #{$entry->id}", 'type' => 'receipt']);
+    }
+
+    /**
+     * The misconfiguration note above is 300+ characters with a real name in
+     * it, and the column was created as string(255). sqlite (the fast test
+     * leg) enforces no varchar length, so the suite was green while MySQL
+     * (the live instance, strict mode) refused the UPDATE with 1406 "Data too
+     * long" — and, because it sits inside the rejection's transaction, the
+     * whole quality check answered 500 wherever the configured scrap item
+     * did not resolve. Found by ci.yml's MySQL leg (Phase 7).
+     *
+     * RED BEFORE on both drivers (the column type), and on MySQL alone the
+     * behavioural half (the note stored whole). Widened to text by
+     * 2026_08_18_120000_widen_quality_scrap_note_on_shift_production_entries.
+     */
+    public function test_the_scrap_note_column_holds_the_longest_reason_the_gate_writes(): void
+    {
+        $this->assertSame(
+            'text',
+            Schema::getColumnType('shift_production_entries', 'quality_scrap_note'),
+            'quality_scrap_note must be an unbounded text column: the named-but-not-found note is over 255 characters',
+        );
+
+        $this->factory();
+        // A long configured name makes the note as long as it gets in the field.
+        $configured = trim(str_repeat('Pet Scrap (renamed) ', 4));
+        config(['production.scrap.rejected_item_sku' => $configured]);
+        $entry = $this->completedEntry();
+
+        $note = $this->qualityScrapNote($entry);
+
+        $this->assertNotNull($note);
+        $this->assertGreaterThan(255, strlen($note), 'the fixture must exercise a note longer than the old varchar(255)');
+        $this->assertStringContainsString("configured scrap item '{$configured}' matches no stock item", $note);
+        // Stored whole — the tail is the sentence that tells the accountant
+        // the rejected bottles are already out of finished goods.
+        $this->assertStringEndsWith('the scrap weight is not yet on any item.', $note);
     }
 
     public function test_both_services_use_the_same_item_once_it_resolves(): void

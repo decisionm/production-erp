@@ -158,10 +158,13 @@ class HandoverOpeningBasisTest extends TestCase
             'opening_kg' => '4.2000',
         ]];
 
-        // Named on the returned segment...
-        $this->assertSame($expected, $child->config_snapshot['opening_day_bin_basis']);
-        // ...and persisted, so it is still answerable weeks later.
-        $this->assertSame(
+        // Named on the returned segment... (json object-key order is the
+        // driver's on BOTH reads — assertSameJson, see Tests\TestCase)
+        $this->assertSameJson($expected, $child->config_snapshot['opening_day_bin_basis']);
+        // ...and persisted, so it is still answerable weeks later. Read back
+        // through the json column, whose object-key order is the driver's
+        // (MySQL re-orders it) — assertSameJson, see Tests\TestCase.
+        $this->assertSameJson(
             $expected,
             ShiftProductionEntry::findOrFail($child->id)->config_snapshot['opening_day_bin_basis'],
         );
@@ -187,7 +190,7 @@ class HandoverOpeningBasisTest extends TestCase
         ], null);
 
         $this->assertSame('3.0000', app(DayBinLedgerService::class)->openingFor($child, $resin->id));
-        $this->assertSame([[
+        $this->assertSameJson([[
             'item_id' => $resin->id,
             'basis' => 'counted',
             'opening_kg' => '3.0000',
@@ -343,7 +346,7 @@ class HandoverOpeningBasisTest extends TestCase
 
         // 4.2 inherited − 2.0 consumed = 2.2 kg still in the bin.
         $this->assertSame('2.2000', $ledger->openingFor($c, $resin->id));
-        $this->assertSame([[
+        $this->assertSameJson([[
             'item_id' => $resin->id,
             'basis' => 'ledger',
             'opening_kg' => '2.2000',

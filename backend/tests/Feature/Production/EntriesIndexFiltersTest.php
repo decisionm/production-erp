@@ -420,8 +420,10 @@ class EntriesIndexFiltersTest extends TestCase
             $log = DB::getQueryLog();
             DB::disableQueryLog();
 
+            // Identifiers normalised to one quoting: sqlite's grammar writes
+            // "production_date", MySQL's `production_date` — the suite runs on both.
             $reads = array_values(array_filter(
-                array_column($log, 'query'),
+                array_map(fn (string $sql) => str_replace('`', '"', $sql), array_column($log, 'query')),
                 fn (string $sql) => str_contains($sql, 'from "shift_production_entries"') && str_contains($sql, 'production_date'),
             ));
             $this->assertNotEmpty($reads, 'the list read names production_date');
@@ -458,10 +460,12 @@ class EntriesIndexFiltersTest extends TestCase
      * name lookup for an ambiguity judgment the run's verdict never even
      * carried).
      *
-     * The count excludes exactly one thing, by name: the two per-row cost
-     * reads (stock_movements by reference, batch_resin_allocations) that
-     * predate Phase 5.5 and belong to material costing, not to this key —
-     * they are counted separately so nothing else can hide among them.
+     * The two COST reads (stock_movements by reference, batch_resin_
+     * allocations) are counted separately by name so nothing else can hide
+     * among them: they were 2 PER ROW until Phase 7 (P7-03 (e)) batched
+     * them — one whereIn read each per PAGE — and are pinned at that
+     * constant here (test_the_cost_reads_cost_a_constant_number_of_queries_
+     * per_page pins the whole page at 1 vs 60 rows).
      */
     public function test_configuration_gaps_and_packing_defaults_cost_no_query_per_row(): void
     {
@@ -519,19 +523,19 @@ class EntriesIndexFiltersTest extends TestCase
                 $this->assertContains($row['configuration_gaps']['source'], ['snapshot', 'live']);
             }
 
-            // Everything except the two per-row COST reads that predate this
-            // phase and are outside it — materialCost()'s stock_movements
-            // lookup by reference (its own docblock: "not cheap — a
-            // stock_movements query per entry") and the bag-cost summary's
-            // batch_resin_allocations read. Named here so the pin says
-            // exactly what it holds constant, and a fix to those reads can
-            // tighten it to the bare total.
+            // The two COST reads named apart — materialCosts()'s ONE
+            // stock_movements read for the page's references and the
+            // bag-cost forEntries() ONE batch_resin_allocations read (Phase
+            // 7; they were one of each PER ROW before) — so the pin says
+            // exactly what it holds constant and nothing else can hide
+            // among them.
             $ownedByThisPin = array_filter(
-                array_column($log, 'query'),
+                // sqlite quotes "stock_movements", MySQL `stock_movements` — one spelling before matching.
+                array_map(fn (string $sql) => str_replace('`', '"', $sql), array_column($log, 'query')),
                 fn (string $sql) => ! str_contains($sql, '"stock_movements"') && ! str_contains($sql, '"batch_resin_allocations"'),
             );
             $costReads = count($log) - count($ownedByThisPin);
-            $this->assertSame(2 * $rows, $costReads, 'the known per-row cost reads — exactly two per row, nothing else hiding among them');
+            $this->assertSame(2, $costReads, 'the two cost reads — exactly one of each per PAGE (they were one of each per row), nothing else hiding among them');
 
             return count($ownedByThisPin);
         };

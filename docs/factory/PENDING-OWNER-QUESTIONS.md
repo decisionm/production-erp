@@ -35,7 +35,7 @@ the ERP). Q38-Q41 are claimed by the 12-Aug Tally
 evidence set and the purchase/tax configuration design. Q42 is claimed by the SKU scheme
 design. Q43 is claimed by the Phase 3 sync fix loop (duplicate master names).
 Q46 is claimed by the Phase 5.5 fix loop (paper-page ingest and the
-estimation version). New questions continue from Q49.
+estimation version). New questions continue from Q52.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 DEC-20260809-002/-003 landed with PR #155 (the finance-pull discovery
@@ -816,3 +816,30 @@ ERP's queue, not Tally's book. What is asked here is only the Tally side, once
 a voucher exists there. **Blocks:** nothing today — the flag is off; it decides
 what Phase 6's lifecycle must post the day the flag turns on. *Open since
 2026-08-17.*
+
+## Q49 · Is the "type a whole paper page in one go" screen still wanted?
+
+`POST production/shift-production-entries/page` exists and works: a date, a
+shift and ten to twelve machine rows in one submit, each row in its own
+transaction so eleven good rows are never lost to a twelfth bad one
+(`ShiftPageEntryService`). It has tests. It has **no screen** — nothing in the
+bundled SPA calls it, so today it can only be reached by an API client.
+
+It was built for a priority quoted in the code's own docblocks — the daily
+production entry, each page entered in the app rather than two dialogs per
+machine row. That sentence is quoted from a 05-Aug discussion; it is NOT in
+`docs/factory/decisions/`, so by this repo's own rule (a discussion is not a
+decision) the ERP does not actually know whether the factory wants it. The
+question is therefore neither "finish it" nor "delete it" — it is whether the
+paper page is still how the floor works now that Shift Floor asks nothing the
+configuration already knows:
+
+(a) Does the supervisor still fill a paper page per shift and type it later,
+    or is the batch entered on the floor as it happens?
+(b) If the page is still real, should the ERP grow the page screen (the
+    endpoint is ready), or is the endpoint dead weight to retire?
+(c) If a page of a shift that ALREADY RAN is typed in, Q46 already asks which
+    expected-output arithmetic it should follow.
+
+**Blocks:** nothing — the endpoint is inert without a caller. It decides whether
+Phase 8 builds the screen or the endpoint is retired. *Open since 2026-08-17.*

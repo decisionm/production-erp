@@ -8,6 +8,7 @@ use App\Modules\Production\Models\BatchResinAllocation;
 use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 
 /**
  * WHAT A BATCH'S RESIN COST — an ACCOUNTING ALLOCATION at the common resin
@@ -268,10 +269,18 @@ class BagCostAllocationService
      * method quietly repeats them. Null means "compute it yourself", so
      * direct callers (and every test) stay one-argument simple.
      *
+     * $liveRows, likewise, lets a caller that has ALREADY read this entry's
+     * live allocation rows (forEntries(), one query for a whole page — Phase
+     * 7, P7-03 (e)) hand them in instead of paying a batch_resin_allocations
+     * read per row. Null means "read them yourself", exactly as before; the
+     * rows must be THIS entry's live rows in id order, item loaded, which is
+     * what forEntries() returns.
+     *
      * @param  array{lines: list<array<string, mixed>>, total_cost: ?string}|null  $materialCost
+     * @param  Collection<int, BatchResinAllocation>|null  $liveRows
      * @return array<string, mixed>
      */
-    public function summary(ShiftProductionEntry $entry, bool $withDetail = false, ?array $materialCost = null): array
+    public function summary(ShiftProductionEntry $entry, bool $withDetail = false, ?array $materialCost = null, ?Collection $liveRows = null): array
     {
         $base = [
             'as_of' => now()->toIso8601String(),
@@ -297,7 +306,7 @@ class BagCostAllocationService
             ];
         }
 
-        $rows = $this->liveRows($entry)
+        $rows = $liveRows ?? $this->liveRows($entry)
             ->when($withDetail, fn ($query) => $query->with([
                 'item' => fn ($relation) => $relation->withTrashed(),
             ]))
@@ -358,7 +367,13 @@ class BagCostAllocationService
             ? bcadd($resinCost, $otherCost, 4)
             : null;
 
-        $accepted = $entry->quantity_produced !== null ? (string) $entry->quantity_produced : null;
+        // `quantity_produced` is decimal(15,4) with no Eloquent cast, so the
+        // RAW driver value reaches us: MySQL hands back '9500.0000', sqlite
+        // '9500'. The figure is the same; the string is not, and this one is
+        // published (the cost summary's `accepted_quantity`). Normalise it to
+        // the 4-dp form the live instance already emits, so dev and live —
+        // and the two CI legs — read identically.
+        $accepted = $entry->quantity_produced !== null ? bcadd((string) $entry->quantity_produced, '0', 4) : null;
         $perUnit = null;
         $reason = null;
 
@@ -401,6 +416,45 @@ class BagCostAllocationService
         }
 
         return $summary;
+    }
+
+    /**
+     * The LIVE allocation rows of many entries in ONE query, keyed by entry
+     * id, each entry's rows in id order with the item loaded (withTrashed,
+     * as summary() loads it for the detail) — what summary() reads per row
+     * when nothing is handed in (Phase 7, P7-03 (e)). An entry with no live
+     * rows maps to an empty collection, never to a missing key, so a caller
+     * can hand summary() the answer for every row of a page without a
+     * per-row read. Read-only.
+     *
+     * @param  list<int>  $entryIds
+     * @return array<int, Collection<int, BatchResinAllocation>>
+     */
+    public function forEntries(array $entryIds): array
+    {
+        $entryIds = array_values(array_unique(array_map('intval', $entryIds)));
+
+        $rows = [];
+        foreach ($entryIds as $id) {
+            $rows[$id] = new Collection;
+        }
+
+        if ($entryIds === []) {
+            return $rows;
+        }
+
+        $live = BatchResinAllocation::query()
+            ->live()
+            ->whereIn('shift_production_entry_id', $entryIds)
+            ->with(['item' => fn ($relation) => $relation->withTrashed()])
+            ->orderBy('id')
+            ->get();
+
+        foreach ($live as $row) {
+            $rows[(int) $row->shift_production_entry_id]->push($row);
+        }
+
+        return $rows;
     }
 
     /**

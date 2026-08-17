@@ -5,6 +5,7 @@ namespace App\Modules\Production\Services;
 use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Models\Item;
+use App\Modules\Inventory\Models\StockMovement;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Inventory\Services\ScrapItemResolver;
 use App\Modules\Inventory\Services\StockMovementService;
@@ -22,11 +23,13 @@ use App\Modules\Production\Models\ShiftScrap;
 use App\Modules\Production\Models\WorkCenter;
 use App\Modules\TallySync\Services\VoucherPreviewService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
+use RuntimeException;
 
 /**
  * Fast shop-floor capture, modeled as a batch lifecycle rather than a
@@ -114,6 +117,16 @@ class ShiftProductionEntryService
      * page number off a query string. Null keeps the framework's own
      * resolution (the request's `page`), so every existing caller answers
      * exactly as before.
+     *
+     * `$correctable` / `$awaitingCorrection` (Phase 7, P7-03 (g)): the two
+     * work-queue questions the production page used to answer by walking
+     * every page of `status=pending` and filtering in the browser, asked
+     * of the database instead — IN SQL, before the page is cut, so the
+     * page and its total are the filtered set. Each is the SAME predicate
+     * the resource derives per row (correctable → the frontend's
+     * canAmendCompletion; awaiting → correctionHistory()['awaiting_
+     * correction']), mirrored in correctableSql() / awaitingCorrectionSql()
+     * below; a false is "no filter", never a match on the complement.
      */
     public function paginate(
         int $perPage = 20,
@@ -126,6 +139,8 @@ class ShiftProductionEntryService
         ?int $shiftId = null,
         ?BatchStatus $batchStatus = null,
         ?int $page = null,
+        bool $correctable = false,
+        bool $awaitingCorrection = false,
     ): LengthAwarePaginator {
         $includeCancelled = $includeCancelled || $batchStatus === BatchStatus::Cancelled;
 
@@ -201,9 +216,72 @@ class ShiftProductionEntryService
             ->when($dateTo, fn ($query) => $query->where('production_date', '<', Carbon::parse($dateTo)->addDay()->toDateString()))
             ->when($workCenterId, fn ($query) => $query->where('work_center_id', $workCenterId))
             ->when($shiftId, fn ($query) => $query->where('shift_id', $shiftId))
+            ->when($correctable, fn ($query) => $this->whereCorrectable($query))
+            ->when($awaitingCorrection, fn ($query) => $this->whereAwaitingCorrection($query))
             ->orderByDesc('production_date')
             ->orderByDesc('id')
             ->paginate($perPage, ['*'], 'page', $page);
+    }
+
+    /**
+     * "May the floor still correct this completion?" — in SQL. The SAME three
+     * facts the frontend's canAmendCompletion reads off a row (status
+     * pending · batch_status completed · quality not checked) and the ones
+     * amendCompletion() tests first; the further refusals it can only make
+     * on the row itself (a voucher already carries it, a handed-over
+     * segment) are not part of the list predicate on either side.
+     *
+     * @param  Builder<ShiftProductionEntry>  $query
+     */
+    private function whereCorrectable($query): void
+    {
+        $query->where('status', ShiftProductionEntryStatus::Pending->value)
+            ->where('batch_status', BatchStatus::Completed->value)
+            ->whereNull('quality_checked_at');
+    }
+
+    /**
+     * "Has quality sent this back and the floor not yet re-submitted it?" —
+     * correctionHistory()['awaiting_correction'], in SQL: correctable (the
+     * three column facts above) AND at least one quality return on the
+     * frozen snapshot AND no amendment on it that ANSWERED them all.
+     *
+     * The PHP reads `count(quality_returns) > max(amendments[].answered_
+     * returns)`. Both arrays live in config_snapshot, so the comparison is
+     * a JSON walk, and the two drivers this ERP runs on spell it apart:
+     *
+     *   sqlite         json_each over the amendments array;
+     *   mysql/mariadb  json_contains — "is there an amendment whose
+     *                  answered_returns equals the current return count".
+     *
+     * Equality is the same question as ">= count" HERE and only here: an
+     * amendment's answered_returns is stamped from count(quality_returns)
+     * at the moment it is written and quality_returns is append-only
+     * (amendCompletion / returnToProduction, the only writers), so no
+     * amendment can ever have answered MORE returns than exist. Both
+     * spellings ask that one question so what the sqlite suite proves is
+     * what MySQL runs (JSON_TABLE, the literal max, needs MySQL ≥ 8.0.4 /
+     * MariaDB ≥ 10.6 and the host's engine is not pinned). Absent keys and
+     * a null snapshot are handled: no returns → not awaiting; returns and
+     * no amendments → awaiting (COALESCE, because json_contains over a
+     * missing path is NULL, not false).
+     *
+     * @param  Builder<ShiftProductionEntry>  $query
+     */
+    private function whereAwaitingCorrection($query): void
+    {
+        $this->whereCorrectable($query);
+        $query->whereJsonLength('config_snapshot->quality_returns', '>', 0);
+
+        $driver = $query->getConnection()->getDriverName();
+        $query->whereRaw(match ($driver) {
+            'sqlite' => 'not exists (select 1 from json_each(shift_production_entries.config_snapshot, \'$.amendments\') as amendment'
+                .' where json_extract(amendment.value, \'$.answered_returns\') = json_array_length(shift_production_entries.config_snapshot, \'$.quality_returns\'))',
+            'mysql', 'mariadb' => 'coalesce(json_contains(shift_production_entries.config_snapshot,'
+                .' concat(\'{"answered_returns":\', json_length(shift_production_entries.config_snapshot, \'$.quality_returns\'), \'}\'),'
+                .' \'$.amendments\'), 0) = 0',
+            default => throw new RuntimeException("The awaiting_correction filter has no SQL for the '{$driver}' driver."),
+        });
     }
 
     /**
@@ -2892,9 +2970,68 @@ class ShiftProductionEntryService
             'materialConsumptions.item' => fn ($query) => $query->withTrashed(),
         ]);
 
+        return $this->priceConsumptions($entry, $this->stock->issuesForReference("SPE #{$entry->id}"));
+    }
+
+    /**
+     * materialCost() for a whole page at once — the SAME pricing, per
+     * entry, off ONE stock_movements read for every entry's reference
+     * (StockMovementService::issuesForReferences) instead of one per row
+     * (Phase 7, P7-03 (e)). Keyed by entry id; an entry that has not
+     * completed maps to null exactly as materialCost() answers it. The
+     * resource collection resolves this once per page and hands each row
+     * its answer; a resource made on its own still calls materialCost().
+     *
+     * @param  iterable<ShiftProductionEntry>  $entries
+     * @return array<int, array{
+     *     lines: list<array{item_id: int, item_name: ?string, warehouse_id: int,
+     *         quantity_issued_kg: string, unit_cost: ?string, cost: ?string}>,
+     *     total_cost: ?string,
+     * }|null>
+     */
+    public function materialCosts(iterable $entries): array
+    {
+        $entries = $entries instanceof Collection ? $entries : Collection::make($entries);
+        $completed = $entries->filter(fn (ShiftProductionEntry $entry) => $entry->batch_status === BatchStatus::Completed)->values();
+
+        if ($completed->isNotEmpty()) {
+            $completed->loadMissing([
+                'materialConsumptions.item' => fn ($query) => $query->withTrashed(),
+            ]);
+        }
+
+        $pools = $completed->isEmpty()
+            ? []
+            : $this->stock->issuesForReferences($completed->map(fn (ShiftProductionEntry $entry) => "SPE #{$entry->id}")->all());
+
+        $out = [];
+        foreach ($entries as $entry) {
+            $out[(int) $entry->id] = $entry->batch_status === BatchStatus::Completed
+                ? $this->priceConsumptions($entry, $pools["SPE #{$entry->id}"] ?? new Collection)
+                : null;
+        }
+
+        return $out;
+    }
+
+    /**
+     * The pricing behind materialCost() — the entry's consumption lines
+     * paired against the ISSUE movements stamped with its reference, one
+     * pool per (item, warehouse), newest first (see materialCost()). The
+     * movements are handed in so the single-entry and the per-page reads
+     * share every rule below byte for byte.
+     *
+     * @param  Collection<int, StockMovement>  $issues
+     * @return array{
+     *     lines: list<array{item_id: int, item_name: ?string, warehouse_id: int,
+     *         quantity_issued_kg: string, unit_cost: ?string, cost: ?string}>,
+     *     total_cost: ?string,
+     * }
+     */
+    private function priceConsumptions(ShiftProductionEntry $entry, Collection $issues): array
+    {
         // One pool per (item, warehouse); each line shift()s its own movement.
-        $pool = $this->stock->issuesForReference("SPE #{$entry->id}")
-            ->groupBy(fn ($movement) => "{$movement->item_id}@{$movement->warehouse_id}");
+        $pool = $issues->groupBy(fn ($movement) => "{$movement->item_id}@{$movement->warehouse_id}");
 
         // ZERO IS NOT A PRICE. A bin holding no recorded stock holds no
         // recorded average cost either, so an issue that ran it negative
@@ -3063,7 +3200,13 @@ class ShiftProductionEntryService
         // two roundings. Boxes are still reported alongside; only the ratio
         // moved to the honest grain. Piece grain in BOTH formulas.
         $actualBoxes = $entry->no_of_box;
-        $actualPieces = $entry->quantity_produced !== null ? (string) $entry->quantity_produced : null;
+        // Same normalisation as BagCostAllocationService::summary and for the
+        // same reason: `quantity_produced` is decimal(15,4) with no Eloquent
+        // cast, so the RAW driver value reaches us — MySQL '5880.0000',
+        // sqlite '5880'. `actual_pieces` is published (metrics, the report,
+        // the CEC, the exports), so it gets ONE shape: the 4-dp form the live
+        // instance already emits, which dev now matches.
+        $actualPieces = $entry->quantity_produced !== null ? bcadd((string) $entry->quantity_produced, '0', 4) : null;
 
         $formula = $entry->calculation_version === ProductionCalculationEngine::VERSION_UNIFIED
             ? $this->unifiedMetrics

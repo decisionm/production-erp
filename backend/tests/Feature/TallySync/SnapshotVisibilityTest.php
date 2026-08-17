@@ -382,6 +382,58 @@ class SnapshotVisibilityTest extends TestCase
         $this->assertArrayNotHasKey('snapshots', $this->postJson("/api/v1/tally-sync/entries/{$shift->id}/retry")->assertOk()->json('data'));
     }
 
+    /**
+     * Phase 7 (P7-03 (b)) — the show endpoint carries the NEWEST
+     * config('tally-sync.snapshot_show_cap') snapshots (default 20), newest
+     * first, plus `snapshots_total` (how many exist) and
+     * `snapshots_truncated` (whether the list is cut). RED before: every
+     * snapshot rode the response and neither key existed. A voucher under
+     * the cap answers exactly as before, the two keys added.
+     */
+    public function test_the_show_endpoint_caps_the_snapshots_at_the_configured_newest_and_says_so(): void
+    {
+        $shift = $this->stockJournalShift();
+        $ids = [];
+        foreach (range(1, 5) as $attempt) {
+            Carbon::setTestNow("2026-08-17 10:0{$attempt}:00");
+            $ids[] = $this->uploaded($shift, self::STOCK_JOURNAL_XML."<!-- attempt {$attempt} -->", null, attempt: $attempt)->json('data.id');
+        }
+        Carbon::setTestNow();
+
+        Sanctum::actingAs($this->staff(['tally-sync.view']));
+        $this->assertSame(20, (int) config('tally-sync.snapshot_show_cap'), 'the packaged default');
+
+        // Under the cap: everything, newest first, honestly not truncated.
+        $shown = $this->getJson("/api/v1/tally-sync/entries/{$shift->id}")->assertOk()->json('data');
+        $this->assertSame(array_reverse($ids), array_column($shown['snapshots'], 'id'));
+        $this->assertSame(5, $shown['snapshots_total']);
+        $this->assertFalse($shown['snapshots_truncated']);
+
+        // Over the cap: the newest N only, the total still the whole count,
+        // and the flag says the list is cut.
+        config(['tally-sync.snapshot_show_cap' => 2]);
+        $shown = $this->getJson("/api/v1/tally-sync/entries/{$shift->id}")->assertOk()->json('data');
+        $this->assertSame([$ids[4], $ids[3]], array_column($shown['snapshots'], 'id'), 'the newest two, newest first');
+        $this->assertSame([5, 4], array_column($shown['snapshots'], 'attempt'));
+        $this->assertSame(5, $shown['snapshots_total']);
+        $this->assertTrue($shown['snapshots_truncated']);
+        // The oldest bodies do not ride at all.
+        $this->assertStringNotContainsString('attempt 1 -->', json_encode($shown));
+
+        // A nonsense cap (0) still shows one.
+        config(['tally-sync.snapshot_show_cap' => 0]);
+        $shown = $this->getJson("/api/v1/tally-sync/entries/{$shift->id}")->assertOk()->json('data');
+        $this->assertCount(1, $shown['snapshots']);
+        $this->assertTrue($shown['snapshots_truncated']);
+
+        // The list and the action responses carry none of the three keys —
+        // the cap is a show-only concern, like the snapshots themselves.
+        $row = collect($this->getJson('/api/v1/tally-sync/entries')->assertOk()->json('data'))->firstWhere('id', $shift->id);
+        foreach (['snapshots', 'snapshots_total', 'snapshots_truncated'] as $key) {
+            $this->assertArrayNotHasKey($key, $row);
+        }
+    }
+
     public function test_no_body_is_not_a_withholding_and_an_answer_without_text_needs_no_note(): void
     {
         $grn = $this->receiptNote();

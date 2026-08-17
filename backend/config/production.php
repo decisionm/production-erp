@@ -406,6 +406,23 @@ return [
     // GRN → bag labels → bin-bay workflow is now the factory's live path, so
     // it ships on. A deployment can still fail closed by explicitly setting
     // PROD_TRACEABILITY=false; schema changes remain additive either way.
+    /*
+    |--------------------------------------------------------------------------
+    | Report row cap
+    |--------------------------------------------------------------------------
+    |
+    | The reconciliation and traceability reports walk a date range whose only
+    | bound is MAX_RANGE_DAYS (92). A wide range on a busy factory is a long
+    | list, and a list silently cut is worse than a short one: both payloads
+    | carry `row_cap` and `truncated`, so a reader is told the range holds
+    | more than they were shown rather than reading a partial list as the
+    | whole. The Export Center's own cap (config/exports.php) is separate and
+    | governs the FILE; this one governs the SCREEN's read.
+    |
+    */
+
+    'report_row_cap' => (int) env('PROD_REPORT_ROW_CAP', 5000),
+
     'traceability_enabled' => (bool) env('PROD_TRACEABILITY', true),
 
     'traceability' => [
