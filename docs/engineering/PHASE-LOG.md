@@ -470,7 +470,7 @@ Next phase:         4 — Agent-side sanitized XML + response snapshot
 
 ```
 Phase:    4 — what the agent sent, what Tally answered (MASTER-PLAN P4-01..05)
-Status:   (GATE PENDING)
+Status:   PASS WITH DEFERRED ITEMS
 Branch:   feat/phase-4-agent-xml-snapshot (stacked on Phase 3.5 PR #183 → #182 → #181 → #180 → #179)
 Dates:    2026-08-17
 
@@ -526,14 +526,60 @@ Files/modules:
 
 Migrations:       2026_08_17_100000_create_tally_sync_snapshots_table (additive; Blueprint only)
 Tests before:     1,243 / 9,064 (backend) · 105 (frontend) · 69 (agent)
-Tests after:      1,273 / 9,418 (backend, +30) · 126 (frontend, +21) · 94 (agent, +25)
+Tests after:      1,276 / 9,429 (backend, +33) · 127 (frontend, +22) · 94 (agent, +25)
                   pint/typecheck/build clean · voucherBuilders diff empty · knowledge sound
 
-Sonnet first gate:   (at close)
-Findings:            (at close)
-Fixes:               (at close)
-Sonnet final gate:   (at close)
-Independent review:  (at close)
+Sonnet first gate:   PASS (2 P3) — mutation-verified the sha recompute, the
+                     verdicts table and the prune by editing source to red.
+Findings (adversarial: Opus FC-06/rules NOT_READY · Fable correctness PASS):
+  P1  (Opus) The new snapshot endpoint gated on tokenCan('tally-sync:report')
+      alone — a browser session's TransientToken answers TRUE — so any
+      logged-in staff member could (a) use payload_matches as a hash-
+      comparison oracle to recover a withheld payload value (Sales rate:
+      demonstrated in 26 unthrottled requests) and (b) author a snapshot
+      readers see as the agent's own record. The AUTH property was inherited
+      from ack/fail (documented in routes/api.php as accepted precedent —
+      "staff can still exercise these from the browser regardless of their
+      tally-sync role"); the consequences were new. FIXED for the WHOLE agent
+      report surface — pending, ack, fail, snapshot now require a REAL agent
+      token (AgentIdentity::isAgent ∧ ability); the precedent comment
+      corrected; a web session holding tally-sync.manage AND finance.view is
+      refused on all four (red-before proven; the only test that had relied
+      on a session polling /pending was updated). Live agent unaffected (its
+      PAT carries poll+report); the frontend has no callers of these routes.
+  P2  (Opus) `attempt` meant three things (agent: attempts+1 ordinal; cloud
+      fallback: entry->attempts, which markFailed increments and markSynced
+      does not; docblocks: "as the agent saw it"). FIXED: one meaning — the
+      1-based ordinal of THIS post as the agent counted it; an agent that
+      sent none stores 0, never guessed; docblocks aligned (migration,
+      request, client).
+  P3  dead TallySyncSnapshotService::forEntry + unused injection → removed ·
+      xml_bytes no max vs its column → max:4294967295 · snapshot_count typed
+      but never emitted → dropped · chain doc retention without the
+      "engineering default" qualifier → added · TrimStrings trimmed the
+      byte-exact XML body (a trailing newline 422'd its own hash) → the
+      snapshot route exempted from trimStrings/convertEmptyStringsToNull,
+      byte-exact test · idempotency swallowed an ANSWERED post behind an
+      unanswered one of the same XML/attempt inside 60 s → predicate
+      distinguishes answered/unanswered, tested both ways · agent info-logger
+      fault after a successful upload read as failure → own try · formatXml
+      mis-split a quoted attribute containing '>' → quote-aware tokenizer +
+      test · headline "payload matches" implied a live comparison → "payload
+      matched at upload" / "had changed before upload".
+  P3  (deferred) a voucher posted while the cloud was unreachable for its ack
+      ends up synced with no snapshot (the ack-only re-cycle builds no XML) ·
+      show returns every snapshot of an entry (bounded in practice; a
+      newest-N cap with a true total is a later touch) · prune is one DELETE
+      inside the write transaction (bounded by the index; a LIMIT is a later
+      touch).
+Fixes:               8cdb302 (all P1/P2/P3 above except the three deferred).
+Sonnet final gate:   re-gate PASS_WITH_DEFERRED — P1 guard mutation-tested (revert
+                     → 201, fix → 403), P2 and every P3 verified by diff/grep;
+                     two doc nits (stale class docblock echoing the old
+                     precedent; a dangling comment) + one theoretical edge
+                     (an empty-string body after the trim exemption) fixed on
+                     the branch after the re-gate; suites re-run green.
+Independent review:  Opus NOT_READY → P1 + P2 fixed · Fable PASS.
 
 API proof (dev API; real agent PAT with poll+report):
   /pending as the agent carries payload_hash per entry. POST entries/4/

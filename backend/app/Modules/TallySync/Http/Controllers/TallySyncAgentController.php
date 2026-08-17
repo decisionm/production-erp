@@ -32,11 +32,16 @@ use Illuminate\Support\Facades\Log;
  * The local sync agent's endpoints — meant to be called with a Sanctum
  * personal access token scoped to exactly these abilities, not a
  * general-purpose token or an admin's full session. A leaked agent token
- * can poll and report sync status; it can't do anything else. A
- * session-authenticated SPA user gets Sanctum's "transient token" (all
- * abilities) automatically, so staff can still exercise these from the
- * dashboard if needed — the restriction is what a token-only client is
- * limited to, not what staff can do.
+ * can poll and report sync status; it can't do anything else.
+ *
+ * The voucher lifecycle — pending, ack, fail, snapshot — is judged on a
+ * REAL agent token (AgentIdentity::isAgent) AND the ability, since Phase 4:
+ * a session-authenticated SPA user's "transient token" answers tokenCan()
+ * true for every ability, and that used to let any logged-in staff member
+ * collect, ack or fail a voucher from the browser regardless of role. Only
+ * the agent may say what Tally took; people act through the module:tally-
+ * sync routes (retry, dismiss, release). The masters / companies /
+ * stock-summary-preview endpoints keep the older tokenCan()-only gate.
  */
 class TallySyncAgentController extends Controller
 {

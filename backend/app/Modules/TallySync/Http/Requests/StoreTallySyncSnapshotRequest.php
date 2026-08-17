@@ -77,9 +77,14 @@ class StoreTallySyncSnapshotRequest extends FormRequest
                 }
 
                 $xml = $this->input('xml');
-                if (! is_string($xml) || $xml === '') {
+                if (! is_string($xml)) {
                     return;
                 }
+                // The route is exempt from ConvertEmptyStringsToNull (the
+                // body is byte-exact), so an empty string reaches here as
+                // a string: a body that is PRESENT must hash — "" never
+                // matches a real document's sha, and is refused as such
+                // rather than stored as a zero-byte "body".
 
                 if (! hash_equals(hash('sha256', $xml), strtolower((string) $this->input('xml_sha256')))) {
                     $validator->errors()->add(

@@ -313,7 +313,6 @@ export interface TallySyncEntry {
      * until an agent ≥ 0.3.8 has posted this voucher at least once.
      */
     snapshots?: TallySyncSnapshot[];
-    /** How many snapshots exist — the list may carry this so a count can show without a fetch; absent otherwise. */
 }
 
 /**
