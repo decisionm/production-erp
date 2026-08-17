@@ -35,7 +35,9 @@ the ERP). Q38-Q41 are claimed by the 12-Aug Tally
 evidence set and the purchase/tax configuration design. Q42 is claimed by the SKU scheme
 design. Q43 is claimed by the Phase 3 sync fix loop (duplicate master names).
 Q46 is claimed by the Phase 5.5 fix loop (paper-page ingest and the
-estimation version). New questions continue from Q53.
+estimation version). Q53 is claimed by the Phase 7.6 configuration-lifecycle
+branch (the four selection-rule deferrals WS-B left open).
+New questions continue from Q54.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 DEC-20260809-002/-003 landed with PR #155 (the finance-pull discovery
@@ -968,3 +970,63 @@ the factory's call, not engineering's:
 **Blocks:** nothing immediately — the mechanism is built to refuse rather than guess, and
 Archive is always available. (a) and (b) decide how much of the contract's Delete half is
 ever switched on. *Open since 2026-08-17.*
+
+## Q53 · Four selection rules WS-B narrowed without a ruling — is each narrowing what the factory wants?
+
+Phase 7.6's WS-B closed eleven `is_active`/`status` flags that were set on
+masters but filtered nowhere, so a retired mould and a withdrawn scrap reason
+were selectable on the floor. Four of those rules sit on a line only the
+factory can draw; the code took the narrowest reading it could defend and
+left the wider question here. DEC-20260817-002 settled the DELETE half of the
+configuration lifecycle (Q52) — none of these four is covered by it, because
+they are about what may be SELECTED, not about what may be destroyed.
+**Each is a question. Nothing below is an answer, and the code does not
+behave as if one had been given.**
+
+(a) **May an AMENDMENT to a COMPLETED batch keep the scrap reason that was
+    live when the batch ran, after that reason has since been withdrawn — or
+    must the floor re-pick a live reason to save the amendment?** Today it
+    must re-pick: `AmendBatchRequest extends CompleteBatchRequest`, so the
+    new active-only rule on `scrap_reason_id` bites the amendment path
+    exactly as it bites a first completion. Correcting a typo in a six-week-old
+    batch therefore also forces a change of the reason recorded against that
+    run.
+
+(b) **May a mould whose status is `under_repair` be scheduled at Start
+    Batch, or only an `active` one?** `MoldStatus` has three cases —
+    `active`, `under_repair`, `retired`. `StartBatchRequest` refuses only
+    `retired`, so an `under_repair` mould can still be picked for a new
+    batch. Nobody has said whether a mould in repair is unavailable for
+    scheduling or merely flagged.
+
+(c) **Should a retired vendor also block a Tally-MIRROR purchase order
+    (`source: tally`), or is mirroring an order Tally already holds always
+    permitted?** A new ERP-entered order is refused for a retired vendor; a
+    mirror is not, on the reasoning that the ERP reflects Tally's book and
+    should not refuse to record what that book already contains. Two facts
+    the answer needs: `source` is a plain field in the request body of
+    `StorePurchaseOrderRequest` — nothing checks that a matching order
+    exists in Tally — so today anyone who may raise a purchase order at all
+    can opt out of the retired-vendor rule by sending `source: tally` (the
+    route's only gate is the ordinary procurement write permission); and that
+    behaviour is pinned by
+    `backend/tests/Feature/Procurement/TallyMirrorRetiredVendorBypassTest.php`
+    so answering this changes it deliberately rather than by drift.
+
+(d) **The companion to (b): editing a production configuration that still
+    names a now-retired mould is currently refused until the mould is
+    re-pointed — is that wanted?**
+    `StoreProductionConfigurationRequest` serves both `store()` and
+    `update()` on `ProductionConfigurationController`, so a PUT that
+    re-sends the configuration's existing (now retired) `mold_id` is
+    refused; changing the cycle time on such a configuration cannot be saved
+    without first choosing a different mould. The alternative — let an edit
+    keep a retired mould it already names, and refuse the retired mould only
+    on a NEW configuration — is a different rule, not a bug fix, so it is
+    asked rather than applied.
+
+**Blocks:** nothing on the floor — every rule above is live and working in
+its narrow reading, and history still displays every retired master it
+already names. What it blocks is knowing whether the narrow reading is the
+factory's. (c) additionally decides whether the `source: tally` route needs a
+trust check at all. *Open since 2026-08-17.*

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
+import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { listAllItems } from '@/features/inventory/api';
 import { listAllVendors, listPurchaseOrders, sendPurchaseOrder } from '@/features/procurement/api';
 import { apiMessage } from '@/features/procurement/components/apiMessage';
@@ -65,7 +66,16 @@ export default function PurchaseOrdersPage() {
     const { data: vendors } = useQuery({ queryKey: ['procurement', 'vendors', 'all'], queryFn: listAllVendors });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
 
-    const vendorOptions = vendors?.data.map((v) => ({ value: v.id, label: `${v.code} — ${v.name}` })) ?? [];
+    // WS-B: `StorePurchaseOrderRequest` refuses a RETIRED vendor on an
+    // ERP-entered order, so the buyer is no longer offered one. (The Tally
+    // MIRROR path keeps accepting it — it records an order Tally already
+    // holds — but nothing on this screen raises a mirror.) The FILTER bar is
+    // deliberately untouched: past orders against a retired vendor must stay
+    // findable.
+    const vendorOptions = activePickerOptions(vendors?.data, {
+        isActive: (v) => v.is_active,
+        option: (v) => ({ value: v.id, label: `${v.code} — ${v.name}` }),
+    });
     const itemOptions = items?.data.map((item) => ({ value: item.id, label: itemLabel(item) })) ?? [];
 
     const orders = useMemo(() => data?.data ?? [], [data]);

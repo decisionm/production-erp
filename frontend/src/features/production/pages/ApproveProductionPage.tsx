@@ -41,6 +41,7 @@ import {
 } from '@/features/production/types';
 import { type PackingRounding, roundPer, useProductionSettings } from '@/features/production/packing';
 import { itemLabel } from '@/lib/itemLabel';
+import { showApiError } from '@/lib/showApiError';
 
 const statusColor: Record<ShiftProductionEntryStatus, string> = {
     pending: 'processing',
@@ -1536,18 +1537,11 @@ export default function ApproveProductionPage() {
             setCancelReason('');
             setDetailRow(null);
         },
-        onError: (error: any) => {
-            const errors = error?.response?.data?.errors;
-            Modal.error({
-                title: 'Could not cancel this batch',
-                // The server names exactly what blocked it (a quality check, an
-                // approval, carton labels, a Tally voucher). That sentence is
-                // the whole value of the refusal, so it is shown verbatim.
-                content: errors
-                    ? Object.values(errors).flat().join(' ')
-                    : (error?.response?.data?.message ?? 'Refresh and try again.'),
-            });
-        },
+        // The server names exactly what blocked it (a quality check, an
+        // approval, carton labels, a Tally voucher). That sentence is the whole
+        // value of the refusal, so it is shown verbatim; the last argument is
+        // this screen's own words for a failure the server did not describe.
+        onError: (error: unknown) => showApiError(error, 'Could not cancel this batch', 'Refresh and try again.'),
     });
 
     const canCancel = (row: ShiftProductionEntry): boolean =>

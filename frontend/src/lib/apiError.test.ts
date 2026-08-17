@@ -95,3 +95,27 @@ describe('apiErrorSummary', () => {
         expect(apiErrorSummary(axiosError(422, { message: 'Batch already approved.' }))).toBe('Batch already approved.');
     });
 });
+
+// ---------------------------------------------------------------------------
+// The caller's own last words
+// ---------------------------------------------------------------------------
+
+describe('the fallback a caller supplies', () => {
+    it('uses the caller words when the server sent no message at all', () => {
+        expect(apiErrorParts(axiosError(500, {}), 'Refresh and try again.').message).toBe('Refresh and try again.');
+    });
+
+    it('still prefers the server sentence over the caller fallback', () => {
+        expect(apiErrorParts(axiosError(422, { message: 'Batch already approved.' }), 'Please try again.').message).toBe(
+            'Batch already approved.',
+        );
+    });
+
+    it('falls back to the shared words when the caller names none', () => {
+        expect(apiErrorParts(axiosError(500, {})).message).toBe(FALLBACK_API_ERROR);
+    });
+
+    it('carries the caller fallback into the one-line form as well', () => {
+        expect(apiErrorSummary(axiosError(500, {}), 'Refresh and try again.')).toBe('Refresh and try again.');
+    });
+});

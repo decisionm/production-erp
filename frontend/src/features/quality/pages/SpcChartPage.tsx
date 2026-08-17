@@ -1,11 +1,12 @@
 import { Line } from '@ant-design/plots';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Col, DatePicker, Form, Input, InputNumber, Modal, Row, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Col, DatePicker, Form, Input, InputNumber, Modal, Row, Table, Tag, Tooltip, Typography } from 'antd';
 import { useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { useParams } from 'react-router-dom';
 import { z } from 'zod';
+import { CONFIGURATION_STATUS_WORDS } from '@/components/configuration/configurationWords';
 import { getSpcChart, listSpcCharacteristics, recordSpcMeasurement } from '@/features/quality/api';
 import type { SpcChartPoint } from '@/features/quality/types';
 
@@ -103,9 +104,23 @@ export default function SpcChartPage() {
             <Typography.Title level={3}>
                 SPC Chart {characteristic ? `— ${characteristic.item.sku}: ${characteristic.name}` : ''}
             </Typography.Title>
-            <Button type="primary" style={{ marginBottom: 16 }} onClick={() => setModalOpen(true)}>
-                Record Measurement
-            </Button>
+            {/* WS-B: `RecordSpcMeasurementRequest` refuses a WITHDRAWN
+                characteristic — one the factory has stopped measuring — so the
+                button that would ask stops asking. The chart itself keeps
+                every measurement already recorded. */}
+            {characteristic !== undefined && !characteristic.is_active ? (
+                <Tooltip title={CONFIGURATION_STATUS_WORDS.retired.description}>
+                    <span style={{ display: 'inline-block', marginBottom: 16 }}>
+                        <Button type="primary" disabled>
+                            Record Measurement
+                        </Button>
+                    </span>
+                </Tooltip>
+            ) : (
+                <Button type="primary" style={{ marginBottom: 16 }} onClick={() => setModalOpen(true)}>
+                    Record Measurement
+                </Button>
+            )}
 
             {!isLoading && chart && !chart.sufficient_data && (
                 <Alert

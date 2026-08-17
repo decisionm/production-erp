@@ -37,7 +37,6 @@ export function DeleteConfigurationModal({
     open,
     entityLabel,
     recordName = null,
-    isActive = true,
     can,
     loadAbilities,
     onDelete,
@@ -48,8 +47,6 @@ export function DeleteConfigurationModal({
     /** The page's word for the thing — "mould", "item", "machine". */
     entityLabel: string;
     recordName?: string | null;
-    /** A retired record has nothing to archive; the alternative is hidden for it. */
-    isActive?: boolean;
     /** The abilities the list already has. `delete: null` means undetermined. */
     can?: ConfigurationAbilities | null;
     /** Resolves the authoritative abilities (usually the hook's `loadAbilities`). */
@@ -100,11 +97,16 @@ export function DeleteConfigurationModal({
         canOfferArchive({
             // After a refusal the server says what the alternative is. BEFORE
             // one there is no payload to read, so the reversible act is offered
-            // on the strength of `can.archive` alone — which is still the
-            // server's word, never the record re-inspected here.
+            // on the strength of `can.archive` alone.
+            //
+            // `can.archive` is the WHOLE answer, including "this record is
+            // already retired": the server computes it as
+            // `!trashed && isActive && …`. The modal used to re-derive that
+            // half from an `isActive` prop, which is the re-derivation this
+            // contract exists to stop — a page that passed the flag wrongly
+            // would have overruled the server on its own question.
             alternative: refusal?.alternative ?? 'archive',
             can: resolved,
-            isActive,
         });
 
     const attemptDelete = () => {

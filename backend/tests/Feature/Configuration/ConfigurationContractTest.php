@@ -11,6 +11,8 @@ use App\Support\Configuration\ConfigurationInUseException;
 use App\Support\Configuration\ConfigurationLifecycle;
 use App\Support\Configuration\DependencyCheck;
 use App\Support\Configuration\ManagesConfigurationLifecycle;
+use Closure;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
@@ -56,7 +58,15 @@ class ConfigurationContractTest extends TestCase
         return Item::create(['sku' => $sku, 'name' => 'Item '.$sku, 'uom' => 'Nos', 'is_active' => true]);
     }
 
-    /** The lifecycle under test: a warehouse blocked by its stock balances. */
+    /**
+     * The lifecycle under test: a warehouse blocked by its stock balances.
+     *
+     * `stock_balances` is not a decoration here — it is the ONLY table the
+     * schema cascades from `warehouses`, so this declaration is complete and
+     * the schema backstop has nothing to add. `canHardDelete` is declared
+     * because the hard-delete seam (DEC-20260817-002 §3) is fail-closed: a
+     * lifecycle that names nobody deletes nothing.
+     */
     private function warehouseLifecycle(): ConfigurationLifecycle
     {
         return new ConfigurationLifecycle(
@@ -66,6 +76,7 @@ class ConfigurationContractTest extends TestCase
                     ->label('stock balance')
                     ->cascadeSide(),
             ],
+            canHardDelete: fn (?Authenticatable $user): bool => true,
         );
     }
 
@@ -119,6 +130,7 @@ class ConfigurationContractTest extends TestCase
                 DependencyCheck::table('stock_balances', 'warehouse_id')->label('stock balance')->cascadeSide(),
                 DependencyCheck::callable(fn (Model $model) => 2, 'production_batches')->label('production batch'),
             ],
+            canHardDelete: fn (?Authenticatable $user): bool => true,
         );
 
         $this->assertSame(
@@ -178,6 +190,7 @@ class ConfigurationContractTest extends TestCase
                     ->cascadeSide(),
             ],
             nameUsing: fn (DowntimeReason $model) => $model->description,
+            canHardDelete: fn (?Authenticatable $user): bool => true,
         );
 
         $lifecycle->delete($reason);
@@ -268,7 +281,12 @@ class ConfigurationContractTest extends TestCase
 
                     return 0;
                 }, 'probe')->label('probe'),
+                // `warehouses` cascades to `stock_balances`, so a lifecycle
+                // that means to delete a warehouse must declare it — the
+                // schema backstop refuses otherwise.
+                DependencyCheck::table('stock_balances', 'warehouse_id')->label('stock balance')->cascadeSide(),
             ],
+            canHardDelete: fn (?Authenticatable $user): bool => true,
         );
 
         $lifecycle->report($warehouse);
@@ -296,6 +314,7 @@ class ConfigurationContractTest extends TestCase
                     ->label('masterbatch dosing')
                     ->cascadeSide(),
             ],
+            canHardDelete: fn (?Authenticatable $user): bool => true,
         );
 
         $this->assertFalse($lifecycle->report($item)->isClear());
@@ -317,8 +336,16 @@ class ConfigurationContractTest extends TestCase
             checks: [DependencyCheck::table('masterbatch_dosings', 'masterbatch_item_id')->label('masterbatch dosing')->includeTrashed()],
         );
 
-        $this->assertTrue($ignores->report($item)->isClear());
-        $this->assertFalse($counts->report($item)->isClear());
+        // The subject is what the CHECK counts, so the assertion is on the
+        // counted list. (The report as a whole is not clear either way here:
+        // the schema cascades six more tables from `items` and neither
+        // declaration names them — which is the backstop doing its job, and
+        // is pinned in ConfigurationCascadeBackstopTest.)
+        $this->assertSame([], $ignores->report($item)->blocking());
+        $this->assertSame(
+            [['code' => 'masterbatch_dosings', 'label' => 'masterbatch dosing', 'count' => 1]],
+            $counts->report($item)->blocking(),
+        );
     }
 
     public function test_a_check_that_cannot_prove_non_use_blocks_the_delete(): void
@@ -326,7 +353,11 @@ class ConfigurationContractTest extends TestCase
         $warehouse = $this->warehouse();
         $lifecycle = new ConfigurationLifecycle(
             label: 'warehouse',
-            checks: [DependencyCheck::unprovable('legacy_stock_history')->label('legacy stock history')],
+            checks: [
+                DependencyCheck::unprovable('legacy_stock_history')->label('legacy stock history'),
+                DependencyCheck::table('stock_balances', 'warehouse_id')->label('stock balance')->cascadeSide(),
+            ],
+            canHardDelete: fn (?Authenticatable $user): bool => true,
         );
 
         $report = $lifecycle->report($warehouse);
@@ -359,6 +390,7 @@ class ConfigurationContractTest extends TestCase
         $lifecycle = new ConfigurationLifecycle(
             label: 'warehouse',
             checks: [DependencyCheck::attribute('tally_guid')->label('Tally godown identity')],
+            canHardDelete: fn (?Authenticatable $user): bool => true,
         );
 
         $this->assertSame(
@@ -402,6 +434,11 @@ class ConfigurationContractTest extends TestCase
             protected function dependencyChecks(): array
             {
                 return [DependencyCheck::table('stock_balances', 'warehouse_id')->label('stock balance')->cascadeSide()];
+            }
+
+            protected function configurationHardDeleteAuthorisation(): ?Closure
+            {
+                return fn (?Authenticatable $user): bool => true;
             }
         };
 

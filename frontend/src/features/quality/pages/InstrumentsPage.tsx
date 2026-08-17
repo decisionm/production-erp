@@ -1,9 +1,10 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Typography } from 'antd';
+import { Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Tooltip, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
+import { CONFIGURATION_STATUS_WORDS } from '@/components/configuration/configurationWords';
 import { createMeasuringInstrument, listMeasuringInstruments, recordCalibration } from '@/features/quality/api';
 import type { CalibrationRecord, CalibrationResult, MeasuringInstrument, MeasuringInstrumentStatus } from '@/features/quality/types';
 
@@ -123,9 +124,20 @@ export default function InstrumentsPage() {
                     },
                     {
                         title: 'Actions',
-                        render: (_, row) => (
-                            <Button size="small" onClick={() => setCalibratingId(row.id)}>Record Calibration</Button>
-                        ),
+                        // WS-B: `RecordCalibrationRequest` refuses a RETIRED
+                        // gauge, so the button that would ask stops asking.
+                        // The row stays visible with its calibration history —
+                        // only the act of adding to it is closed.
+                        render: (_, row) =>
+                            row.status === 'retired' ? (
+                                <Tooltip title={CONFIGURATION_STATUS_WORDS.retired.description}>
+                                    <span>
+                                        <Button size="small" disabled>Record Calibration</Button>
+                                    </span>
+                                </Tooltip>
+                            ) : (
+                                <Button size="small" onClick={() => setCalibratingId(row.id)}>Record Calibration</Button>
+                            ),
                     },
                 ]}
                 expandable={{

@@ -14,6 +14,16 @@ export async function listGLAccounts(): Promise<Paginated<GLAccount>> {
     return data;
 }
 
+/**
+ * Full reference list for a PICKER (all rows, not the default first page).
+ * A dropdown that offers active rows only must be given every row to filter,
+ * or it hides part of a list that was already truncated.
+ */
+export async function listAllGLAccounts(): Promise<Paginated<GLAccount>> {
+    const { data } = await api.get<Paginated<GLAccount>>('/finance/gl-accounts', { params: { per_page: 1000 } });
+    return data;
+}
+
 export interface CreateGLAccountPayload {
     code: string;
     name: string;

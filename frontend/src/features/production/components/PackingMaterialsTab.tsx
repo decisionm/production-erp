@@ -16,6 +16,7 @@ import {
 } from 'antd';
 import { useState } from 'react';
 import { hasManageAccess } from '@/features/auth/permissions';
+import { showApiError } from '@/lib/showApiError';
 import { useAuthStore } from '@/features/auth/store';
 import {
     listPackingMaterialMappings,
@@ -112,17 +113,10 @@ export default function PackingMaterialsTab() {
             setEditing(null);
             message.success('Saved — every future batch prefills from this answer.');
         },
-        onError: (error: any) => {
-            const errors = error?.response?.data?.errors;
-            Modal.error({
-                title: 'Could not save this mapping',
-                // The backend's messages name the fix ("this figure is the
-                // weight of ONE film piece…"), so they are shown verbatim.
-                content: errors
-                    ? Object.values(errors).flat().join(' ')
-                    : (error?.response?.data?.message ?? 'Unexpected error.'),
-            });
-        },
+        // The backend's messages name the fix ("this figure is the weight of
+        // ONE film piece…"), so they are shown verbatim — under the field key
+        // they belong to, which the hand-rolled copy threw away.
+        onError: (error: unknown) => showApiError(error, 'Could not save this mapping'),
     });
 
     const withdraw = useMutation({

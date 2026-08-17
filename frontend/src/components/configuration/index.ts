@@ -12,6 +12,7 @@ export { DeleteConfigurationModal } from './DeleteConfigurationModal';
 export { useConfigurationLifecycle } from './useConfigurationLifecycle';
 export type { ConfigurationId, ReasonedChange, UseConfigurationLifecycleOptions } from './useConfigurationLifecycle';
 export * from './configurationWords';
+export * from './pickerOptions';
 export type {
     BlockingReason,
     ConfigurationAbilities,

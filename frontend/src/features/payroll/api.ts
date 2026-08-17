@@ -15,6 +15,16 @@ export async function listSalaryComponents(): Promise<Paginated<SalaryComponent>
     return data;
 }
 
+/**
+ * Full reference list for a PICKER (all rows, not the default first page).
+ * A dropdown that offers active rows only must be given every row to filter,
+ * or it hides part of a list that was already truncated.
+ */
+export async function listAllSalaryComponents(): Promise<Paginated<SalaryComponent>> {
+    const { data } = await api.get<Paginated<SalaryComponent>>('/payroll/salary-components', { params: { per_page: 1000 } });
+    return data;
+}
+
 export interface CreateSalaryComponentPayload {
     code: string;
     name: string;

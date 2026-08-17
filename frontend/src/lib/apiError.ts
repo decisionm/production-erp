@@ -1,13 +1,15 @@
 /**
  * ONE reading of an API failure, for the whole app.
  *
- * Two pages had hand-rolled this and both lost information doing it:
- * `ProductStandardsPage.tsx` and `ProductionConfigurationPage.tsx` each did
- * `Object.values(errors).flat().join(' ')`, which throws the FIELD KEYS away.
- * A refusal then reads "This field is required. Must be a number." with
- * nothing saying WHICH field — on a standards form with thirty inputs that is
- * not an answer, it is a hunt. The keys are the most useful half of a Laravel
- * validation body and this helper keeps them.
+ * SIX handlers had hand-rolled this and every one lost information doing it:
+ * `ProductStandardsPage`, `ProductionConfigurationPage`, `ApproveProductionPage`,
+ * `ShiftProductionEntryPage`, `PackingMaterialsTab` and
+ * `ConfigurationReviewPanel` each did `Object.values(errors).flat().join(' ')`,
+ * which throws the FIELD KEYS away. A refusal then reads "This field is
+ * required. Must be a number." with nothing saying WHICH field — on a
+ * standards form with thirty inputs that is not an answer, it is a hunt. The
+ * keys are the most useful half of a Laravel validation body and this helper
+ * keeps them. All six read through this module now.
  *
  * Everything here is pure: it reads an axios rejection and returns data. The
  * rendering (an antd modal) lives in `showApiError.tsx` so that this file can
@@ -18,7 +20,11 @@
  * the field they belong to.
  */
 
-/** The words both hand-rolled handlers ended on. Kept, so adoption changes nothing but the keys. */
+/**
+ * The words five of the six hand-rolled handlers ended on. Kept, so adoption
+ * changed nothing but the keys. The two cancel paths ended on their own
+ * sentence and pass it as the `fallback` argument instead.
+ */
 export const FALLBACK_API_ERROR = 'Unexpected error.';
 
 export interface ApiFieldError {
@@ -68,8 +74,15 @@ export function fieldLabel(key: string): string {
     return joined.charAt(0).toUpperCase() + joined.slice(1);
 }
 
-/** Everything worth showing about one failed request, read once. */
-export function apiErrorParts(error: unknown): ApiErrorParts {
+/**
+ * Everything worth showing about one failed request, read once.
+ *
+ * `fallback` is the caller's own last words for a failure the server did not
+ * describe ("Refresh and try again."). It is only ever reached when there is
+ * no server message: the server's sentence always wins, because it is the one
+ * that knows what actually happened.
+ */
+export function apiErrorParts(error: unknown, fallback: string = FALLBACK_API_ERROR): ApiErrorParts {
     const data = body(error);
     const rawErrors = data.errors;
     const fields: ApiFieldError[] = [];
@@ -83,7 +96,7 @@ export function apiErrorParts(error: unknown): ApiErrorParts {
         }
     }
 
-    const message = typeof data.message === 'string' && data.message !== '' ? data.message : FALLBACK_API_ERROR;
+    const message = typeof data.message === 'string' && data.message !== '' ? data.message : fallback;
 
     return {
         message,
@@ -97,8 +110,8 @@ export function apiErrorParts(error: unknown): ApiErrorParts {
  * the generic "The given data was invalid." headline, because the headline
  * says nothing the reader can act on.
  */
-export function apiErrorSummary(error: unknown): string {
-    const parts = apiErrorParts(error);
+export function apiErrorSummary(error: unknown, fallback: string = FALLBACK_API_ERROR): string {
+    const parts = apiErrorParts(error, fallback);
     if (parts.fields.length === 0) return parts.message;
     return parts.fields.map((f) => `${f.label}: ${f.messages.join(' ')}`).join(' · ');
 }

@@ -3,6 +3,7 @@
 namespace App\Support\Configuration;
 
 use Closure;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -51,14 +52,14 @@ trait ManagesConfigurationLifecycle
     }
 
     /** @return array{edit: bool, activate: bool, archive: bool, delete: bool|null} */
-    public function abilities(Model $model, bool $resolveDelete = true): array
+    public function abilities(Model $model, bool $resolveDelete = true, ?Authenticatable $user = null): array
     {
-        return $this->configurationLifecycle()->abilities($model, $resolveDelete);
+        return $this->configurationLifecycle()->abilities($model, $resolveDelete, $user);
     }
 
-    public function delete(Model $model): void
+    public function delete(Model $model, ?Authenticatable $user = null): void
     {
-        $this->configurationLifecycle()->delete($model);
+        $this->configurationLifecycle()->delete($model, $user);
     }
 
     public function archive(Model $model, ?string $reason = null): Model
@@ -71,10 +72,29 @@ trait ManagesConfigurationLifecycle
         return $this->configurationLifecycle()->activate($model, $reason);
     }
 
-    /** The Activate/Deactivate flag, or null for a master that has none. */
-    protected function configurationActiveColumn(): ?string
+    /**
+     * The Activate/Deactivate flag: a column name for the ordinary boolean
+     * master, an ActiveFlag::status(...) for one whose state is a BackedEnum
+     * `status` (Mold, Asset, MeasuringInstrument), null for a master with
+     * neither.
+     */
+    protected function configurationActiveColumn(): ActiveFlag|string|null
     {
         return 'is_active';
+    }
+
+    /**
+     * Who may hard-delete this module's master — DEC-20260817-002 §3, Super
+     * Admin / Owner only. NULL means "nobody, yet": the mechanism refuses
+     * every hard delete until a module answers this, because the repo has
+     * no Super Admin role or permission to name today and the mechanism will
+     * not invent one. The wiring wave answers it.
+     *
+     * @return ?Closure fn (?Authenticatable): bool
+     */
+    protected function configurationHardDeleteAuthorisation(): ?Closure
+    {
+        return null;
     }
 
     /** How a refusal names one record; null = name, then code, then the key. */
@@ -90,6 +110,7 @@ trait ManagesConfigurationLifecycle
             checks: $this->dependencyChecks(),
             activeColumn: $this->configurationActiveColumn(),
             nameUsing: $this->configurationNameUsing(),
+            canHardDelete: $this->configurationHardDeleteAuthorisation(),
         );
     }
 }

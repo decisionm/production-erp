@@ -38,7 +38,13 @@ export type ConfigurationId = number | string;
 
 export interface ReasonedChange {
     id: ConfigurationId;
-    /** Kept with the record. Archive and Reactivate are both explainable acts. */
+    /**
+     * Sent to the server with the act. NOT stored on the record today —
+     * there is no reason column and `ConfigurationLifecycle` drops the
+     * argument — so nothing on screen may say it is kept (see
+     * `REASON_REQUIRED`). Archive and Reactivate still ASK, because both are
+     * explainable acts and the wiring wave is where a reason gains a home.
+     */
     reason: string;
 }
 

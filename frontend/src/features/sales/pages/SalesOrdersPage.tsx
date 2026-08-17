@@ -5,6 +5,7 @@ import dayjs from 'dayjs';
 import { useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
+import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { listAllItems } from '@/features/inventory/api';
 import {
     confirmSalesOrder,
@@ -483,7 +484,12 @@ export default function SalesOrdersPage() {
     });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
 
-    const customerOptions = customers?.data.map((c) => ({ value: c.id, label: `${c.code} — ${c.name}` })) ?? [];
+    // WS-B: `StoreSalesOrderRequest` refuses a RETIRED customer, so one is
+    // no longer offered for a new order. Existing orders still name theirs.
+    const customerOptions = activePickerOptions(customers?.data, {
+        isActive: (c) => c.is_active,
+        option: (c) => ({ value: c.id, label: `${c.code} — ${c.name}` }),
+    });
     const itemOptions = items?.data.map((item) => ({ value: item.id, label: `${item.sku} — ${item.name}` })) ?? [];
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<OrderFormValues>({

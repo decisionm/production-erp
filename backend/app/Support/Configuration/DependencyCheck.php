@@ -64,6 +64,9 @@ class DependencyCheck
 
     private bool $includeTrashed = false;
 
+    /** @var array<string, list<string>> child table => the columns this check counts */
+    private array $covers = [];
+
     /** @var array<string, bool> table => has a deleted_at column */
     private static array $softDeleteColumns = [];
 
@@ -157,6 +160,61 @@ class DependencyCheck
         return $this;
     }
 
+    /**
+     * This check ALSO answers for rows of $table pointing here through
+     * $columns — the declaration the schema backstop reads.
+     *
+     * ::table() covers its own table and columns automatically; this is for
+     * the checks that do not name a table in their counting query. A
+     * ::callable() that asks another module's Service how many shift
+     * entries name this mould still covers `shift_production_entries`, and
+     * says so here, so the backstop can see that the cascade IS declared.
+     *
+     * On a check that covers a child whose rows soft-delete, ->cascadeSide()
+     * (or ->includeTrashed()) is the module's assertion that the archived
+     * ones are counted too — a physical row cascades whether or not it is
+     * trashed, so a cover that ignores them is not a cover.
+     *
+     * @param  string|list<string>  $columns
+     */
+    public function covers(string $table, string|array $columns): self
+    {
+        $columns = array_values((array) $columns);
+
+        if ($columns === []) {
+            throw new InvalidArgumentException("DependencyCheck::covers({$table}) needs at least one column.");
+        }
+
+        $key = mb_strtolower($table);
+        $this->covers[$key] = array_values(array_unique([...($this->covers[$key] ?? []), ...$columns]));
+
+        return $this;
+    }
+
+    /**
+     * The cascading children this check accounts for: child table (lower
+     * case) => the columns it counts.
+     *
+     * @return array<string, list<string>>
+     */
+    public function coveredCascades(): array
+    {
+        $covered = $this->covers;
+
+        if ($this->kind === self::KIND_TABLE && $this->table !== null) {
+            $key = mb_strtolower($this->table);
+            $covered[$key] = array_values(array_unique([...($covered[$key] ?? []), ...$this->columns]));
+        }
+
+        return $covered;
+    }
+
+    /** Does this check count soft-deleted children? */
+    public function countsTrashed(): bool
+    {
+        return $this->includeTrashed;
+    }
+
     public function code(): string
     {
         return $this->code;
@@ -197,7 +255,7 @@ class DependencyCheck
             }
         });
 
-        if (! $this->includeTrashed && $this->tableSoftDeletes($connection->getName(), $this->table)) {
+        if (! $this->includeTrashed && self::tableSoftDeletes($connection->getName(), $this->table)) {
             $query->whereNull('deleted_at');
         }
 
@@ -215,7 +273,8 @@ class DependencyCheck
         return is_bool($counted) ? (int) $counted : (int) $counted;
     }
 
-    private function tableSoftDeletes(?string $connection, string $table): bool
+    /** Does $table keep soft-deleted rows? Shared with the schema backstop. */
+    public static function tableSoftDeletes(?string $connection, string $table): bool
     {
         $cacheKey = ($connection ?? 'default').':'.$table;
 

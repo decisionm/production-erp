@@ -187,17 +187,21 @@ describe('inUseHeadline', () => {
 
 describe('canOfferArchive', () => {
     it('offers it when the server named archive as the alternative and allows archiving', () => {
-        expect(canOfferArchive({ alternative: 'archive', can: abilities(), isActive: true })).toBe(true);
+        expect(canOfferArchive({ alternative: 'archive', can: abilities() })).toBe(true);
     });
 
-    it('does not offer it when the record is already retired — that button would do nothing', () => {
-        expect(canOfferArchive({ alternative: 'archive', can: abilities(), isActive: false })).toBe(false);
+    it('does not offer it for an already-retired record — because the SERVER said archive: false', () => {
+        // `abilities()` on the backend is `!trashed && isActive && …`, so a
+        // retired record arrives with archive: false. Reading that is the whole
+        // rule; re-deriving it here from the row would be a second opinion on a
+        // question the server has already answered.
+        expect(canOfferArchive({ alternative: 'archive', can: abilities({ archive: false }) })).toBe(false);
     });
 
-    it('does not offer it when the server did not name it, or does not allow it', () => {
-        expect(canOfferArchive({ alternative: null, can: abilities(), isActive: true })).toBe(false);
-        expect(canOfferArchive({ alternative: 'archive', can: abilities({ archive: false }), isActive: true })).toBe(false);
-        expect(canOfferArchive({ alternative: 'archive', can: null, isActive: true })).toBe(false);
+    it('does not offer it when the server did not name it, or has not answered at all', () => {
+        expect(canOfferArchive({ alternative: null, can: abilities() })).toBe(false);
+        expect(canOfferArchive({ alternative: 'archive', can: null })).toBe(false);
+        expect(canOfferArchive({ alternative: 'archive', can: undefined })).toBe(false);
     });
 });
 
@@ -307,5 +311,51 @@ describe('the fail-closed verdict reaches the reader (DEC-20260817-002 point 5)'
     it('states an uncountable reason without inventing a number', () => {
         expect(blockingLine({ code: 'x', label: 'legacy stock history', count: null })).toBe('legacy stock history');
         expect(blockingLine({ code: 'x', label: 'stock movements', count: 12 })).toBe('12 stock movements');
+    });
+});
+
+describe('a cascade gap is a visible refusal, never an empty modal', () => {
+    const refusal = (data: Record<string, unknown>) => ({ response: { data } });
+
+    it('renders the server\'s cascade-gap message with no invented count', () => {
+        const inUse = configurationInUse(
+            refusal({
+                code: 'configuration_in_use',
+                message: null,
+                blocking: [],
+                unprovable: [],
+                cascade_gaps: [
+                    {
+                        table: 'attendances',
+                        column: 'employee_id',
+                        reason: 'undeclared',
+                        message: 'the schema cascades attendances.employee_id and no check declares it',
+                    },
+                ],
+                alternative: 'archive',
+            }),
+        );
+
+        expect(inUse!.blocking).toHaveLength(1);
+        expect(inUse!.blocking[0].count).toBeNull();
+        expect(inUse!.blocking[0].code).toBe('undeclared');
+        expect(blockingLine(inUse!.blocking[0])).toContain('attendances.employee_id');
+        expect(inUseHeadline(inUse!, 'employee')).toContain('attendances.employee_id');
+    });
+
+    it('shows all three lists together when a refusal has every kind of reason', () => {
+        const inUse = configurationInUse(
+            refusal({
+                code: 'configuration_in_use',
+                message: null,
+                blocking: [{ code: 'stock_balances', label: 'stock balances', count: 3 }],
+                unprovable: [{ code: 'legacy', label: 'legacy stock history' }],
+                cascade_gaps: [{ table: 't', column: 'c', reason: 'undeclared', message: 'the schema cascades t.c' }],
+                alternative: 'archive',
+            }),
+        );
+
+        expect(inUse!.blocking).toHaveLength(3);
+        expect(inUse!.blocking.map((b) => b.count)).toEqual([3, null, null]);
     });
 });

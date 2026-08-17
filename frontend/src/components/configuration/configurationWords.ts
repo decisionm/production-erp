@@ -119,6 +119,35 @@ function normaliseBlocking(raw: unknown): BlockingReason[] {
 }
 
 /**
+ * A cascade gap is the THIRD refusal list, and it is not the reader's fault:
+ * the schema says this table cascades from a column the module's declaration
+ * never accounted for, so the mechanism refuses rather than destroy a child it
+ * cannot see. It is shown like any other reason — a refusal is a refusal to the
+ * person holding the mouse — but it carries the server's own message, which
+ * names the table and column so an engineer can close the gap.
+ */
+function normaliseCascadeGaps(raw: unknown): BlockingReason[] {
+    if (!Array.isArray(raw)) return [];
+    const out: BlockingReason[] = [];
+    for (const entry of raw) {
+        if (entry === null || typeof entry !== 'object') continue;
+        const row = entry as Record<string, unknown>;
+        const table = typeof row.table === 'string' ? row.table : '';
+        const column = typeof row.column === 'string' ? row.column : '';
+        const message = typeof row.message === 'string' && row.message !== '' ? row.message : '';
+        const label = message !== '' ? message : (table !== '' ? `an unchecked link from ${table}` : '');
+        if (label === '') continue;
+        out.push({
+            code: typeof row.reason === 'string' && row.reason !== '' ? row.reason : 'cascade_gap',
+            label,
+            // Never a number: a gap is "we cannot see this", not "there are N".
+            count: null,
+        });
+    }
+    return out;
+}
+
+/**
  * Is this failure the contract's in-use refusal? THE discriminator: an in-use
  * 422 must render the blocking list with its counts, and every other failure
  * must go to the shared error modal. Routing an in-use refusal into the
@@ -136,7 +165,11 @@ export function configurationInUse(error: unknown): ConfigurationInUse | null {
         // the uncountable ones join with a null count and `blockingLine` states
         // them without a number. Dropping them would render an EMPTY modal for a
         // refusal that really happened.
-        blocking: [...normaliseBlocking(data.blocking), ...normaliseBlocking(data.unprovable)],
+        blocking: [
+            ...normaliseBlocking(data.blocking),
+            ...normaliseBlocking(data.unprovable),
+            ...normaliseCascadeGaps(data.cascade_gaps),
+        ],
         alternative: typeof data.alternative === 'string' && data.alternative !== '' ? data.alternative : null,
     };
 }
@@ -160,16 +193,22 @@ export function inUseHeadline(inUse: ConfigurationInUse, entityLabel: string): s
 // ---------------------------------------------------------------------------
 
 /**
- * Offered only when the server named archive as the alternative AND allows
- * archiving AND the record is not already retired. An "Archive instead"
- * button on an already-retired record is a dead control that reads like the
- * refusal has a way out when it does not.
+ * Offered only when the server named archive as the alternative AND says the
+ * record may be archived. An "Archive instead" button on an already-retired
+ * record is a dead control that reads like the refusal has a way out when it
+ * does not — and the server already refuses it: `abilities()` is
+ * `!trashed && isActive && …`, so a retired record arrives with
+ * `archive: false`.
+ *
+ * That is why the record's own active flag is NOT read here. Re-deriving
+ * eligibility from the row is exactly what this contract exists to stop; the
+ * `can` block is the answer, and a UI second opinion could only ever disagree
+ * with it.
  */
 export const canOfferArchive = (input: {
     alternative: string | null;
     can: ConfigurationAbilities | null | undefined;
-    isActive: boolean;
-}): boolean => input.alternative === 'archive' && input.can?.archive === true && input.isActive;
+}): boolean => input.alternative === 'archive' && input.can?.archive === true;
 
 // ---------------------------------------------------------------------------
 // The four acts
@@ -259,6 +298,13 @@ export const deleteConfirmBody = (entityLabel: string, recordName: string | null
 /** The reversible way out, offered on a refusal. */
 export const ARCHIVE_INSTEAD_LABEL = 'Archive instead';
 
-/** Archive and Reactivate both carry a reason, which is kept with the record. */
+/**
+ * Archive and Reactivate both ASK for a reason, and today nothing stores it:
+ * there is no reason column on any master and `ConfigurationLifecycle` takes
+ * the argument and drops it. So the words do not promise otherwise. The
+ * earlier wording ("the reason is kept with the record") described a feature
+ * that does not exist — a promise a screen must never make on the factory's
+ * behalf. If a reason column is added, this is the string that changes.
+ */
 export const REASON_LABEL = 'Reason';
-export const REASON_REQUIRED = 'Say why — the reason is kept with the record.';
+export const REASON_REQUIRED = 'Say why this is being archived.';

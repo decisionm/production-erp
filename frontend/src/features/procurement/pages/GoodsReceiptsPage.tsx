@@ -16,6 +16,7 @@ import type { GoodsReceiptNote, GoodsReceiptNoteLine, PurchaseOrderSchedule } fr
 import { useProductionSettings } from '@/features/production/packing';
 import { TallyLinkCell } from '@/features/sales/SalesDocumentDrawer';
 import { formatDateTime } from '@/lib/datetime';
+import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { itemLabel } from '@/lib/itemLabel';
 
 /** Wall-clock text the API stores as-is — never a timezone-converted instant. */
@@ -278,7 +279,12 @@ export default function GoodsReceiptsPage() {
         [orders],
     );
     const orderOptions = receivableOrders.map((o) => ({ value: o.id, label: `PO #${o.id} — ${o.vendor.name}` }));
-    const warehouseOptions = warehouses?.data.map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })) ?? [];
+    // WS-B: `StoreGoodsReceiptRequest` refuses a RETIRED store, so an
+    // arrival can no longer be booked into one from this form.
+    const warehouseOptions = activePickerOptions(warehouses?.data, {
+        isActive: (w) => w.is_active,
+        option: (w) => ({ value: w.id, label: `${w.code} — ${w.name}` }),
+    });
 
     const receipts = data?.data ?? [];
     /**

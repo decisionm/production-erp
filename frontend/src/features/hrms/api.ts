@@ -42,6 +42,16 @@ export async function listLeaveTypes(): Promise<Paginated<LeaveType>> {
     return data;
 }
 
+/**
+ * Full reference list for a PICKER (all rows, not the default first page).
+ * A dropdown that offers active rows only must be given every row to filter,
+ * or it hides part of a list that was already truncated.
+ */
+export async function listAllLeaveTypes(): Promise<Paginated<LeaveType>> {
+    const { data } = await api.get<Paginated<LeaveType>>('/hrms/leave-types', { params: { per_page: 1000 } });
+    return data;
+}
+
 export interface CreateLeaveTypePayload {
     code: string;
     name: string;

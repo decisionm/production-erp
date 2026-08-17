@@ -5,6 +5,7 @@ import dayjs from 'dayjs';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
+import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { createOpportunity, listOpportunities, updateOpportunity, updateOpportunityStage } from '@/features/crm/api';
 import type { Opportunity, OpportunityStage } from '@/features/crm/types';
 import { listCustomers } from '@/features/sales/api';
@@ -52,7 +53,20 @@ export default function OpportunitiesPage() {
         // rather than the 20-row default this used to get.
         queryFn: () => listCustomers(1, 200),
     });
-    const customerOptions = customers?.data.map((c) => ({ value: c.id, label: `${c.code} — ${c.name}` })) ?? [];
+    // WS-B: `StoreOpportunityRequest` refuses a RETIRED customer, so a new
+    // opportunity is not offered one. The EDIT form is a separate list
+    // because an opportunity opened before the customer was retired still
+    // names them: that row stays on screen, marked and unselectable, rather
+    // than the field silently blanking the record's own customer.
+    const customerOptions = activePickerOptions(customers?.data, {
+        isActive: (c) => c.is_active,
+        option: (c) => ({ value: c.id, label: `${c.code} — ${c.name}` }),
+    });
+    const editingCustomerOptions = activePickerOptions(customers?.data, {
+        isActive: (c) => c.is_active,
+        option: (c) => ({ value: c.id, label: `${c.code} — ${c.name}` }),
+        keep: editingOpportunity?.customer?.id ?? null,
+    });
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<OpportunityFormValues>({
         resolver: zodResolver(opportunitySchema),
@@ -234,7 +248,7 @@ export default function OpportunitiesPage() {
                             name="customer_id"
                             control={editControl}
                             render={({ field }) => (
-                                <Select {...field} options={customerOptions} showSearch optionFilterProp="label" />
+                                <Select {...field} options={editingCustomerOptions} showSearch optionFilterProp="label" />
                             )}
                         />
                     </Form.Item>

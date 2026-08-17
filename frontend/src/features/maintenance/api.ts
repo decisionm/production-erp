@@ -14,6 +14,16 @@ export async function listAssets(): Promise<Paginated<Asset>> {
     return data;
 }
 
+/**
+ * Full reference list for a PICKER (all rows, not the default first page).
+ * A dropdown that offers active rows only must be given every row to filter,
+ * or it hides part of a list that was already truncated.
+ */
+export async function listAllAssets(): Promise<Paginated<Asset>> {
+    const { data } = await api.get<Paginated<Asset>>('/maintenance/assets', { params: { per_page: 1000 } });
+    return data;
+}
+
 export interface CreateAssetPayload {
     code: string;
     name: string;

@@ -24,6 +24,7 @@ import { listAllWarehouses } from '@/features/inventory/api';
 import PackingMaterialsTab from '@/features/production/components/PackingMaterialsTab';
 import ProductStandardsPage from '@/features/production/pages/ProductStandardsPage';
 import { hasManageAccess } from '@/features/auth/permissions';
+import { showApiError } from '@/lib/showApiError';
 import { useAuthStore } from '@/features/auth/store';
 import {
     createWorkCenter,
@@ -258,18 +259,11 @@ function MachinesTab() {
     const [editing, setEditing] = useState<WorkCenter | 'new' | null>(null);
     const [form] = Form.useForm();
 
-    const onError = (error: any) => {
-        const errors = error?.response?.data?.errors;
-        Modal.error({
-            title: 'Could not save',
-            // Field-level messages say exactly which limit was refused and why
-            // ("max cavities must be at least min cavities"). A generic failure
-            // leaves the office guessing at a number.
-            content: errors
-                ? Object.values(errors).flat().join(' ')
-                : (error?.response?.data?.message ?? 'Unexpected error.'),
-        });
-    };
+    // Field-level messages say exactly which limit was refused and why ("max
+    // cavities must be at least min cavities"), and the shared helper prints
+    // each one under its own key. A generic failure leaves the office guessing
+    // at a number.
+    const onError = (error: unknown) => showApiError(error, 'Could not save');
 
     const mutation = useMutation({
         mutationFn: (values: MachineFormValues) => {

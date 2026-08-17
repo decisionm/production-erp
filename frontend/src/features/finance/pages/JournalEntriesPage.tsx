@@ -4,7 +4,8 @@ import { Alert, Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumb
 import { useMemo, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { createJournalEntry, listGLAccounts, listJournalEntries, postJournalEntry } from '@/features/finance/api';
+import { activePickerOptions } from '@/components/configuration/pickerOptions';
+import { createJournalEntry, listAllGLAccounts, listJournalEntries, postJournalEntry } from '@/features/finance/api';
 import type { JournalEntry, JournalEntryStatus } from '@/features/finance/types';
 
 const lineSchema = z.object({
@@ -41,8 +42,14 @@ export default function JournalEntriesPage() {
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['finance', 'journal-entries'], queryFn: listJournalEntries });
-    const { data: accounts } = useQuery({ queryKey: ['finance', 'gl-accounts'], queryFn: listGLAccounts });
-    const accountOptions = accounts?.data.map((a) => ({ value: a.id, label: `${a.code} — ${a.name}` })) ?? [];
+    const { data: accounts } = useQuery({ queryKey: ['finance', 'gl-accounts', 'all'], queryFn: listAllGLAccounts });
+    // WS-B: a DEACTIVATED account takes no new posting, so the line picker
+    // stops offering one. Entries already posted against it are untouched and
+    // still read back on the list below.
+    const accountOptions = activePickerOptions(accounts?.data, {
+        isActive: (a) => a.is_active,
+        option: (a) => ({ value: a.id, label: `${a.code} — ${a.name}` }),
+    });
 
     const { control, handleSubmit, reset, watch, formState: { errors } } = useForm<EntryFormValues>({
         resolver: zodResolver(entrySchema),
