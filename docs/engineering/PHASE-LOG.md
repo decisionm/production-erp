@@ -1851,8 +1851,8 @@ Honest limits, stated rather than implied:
     as a PASS with the deviation stated, not as a gap.
 
 What would change the verdict: see docs/engineering/RELEASE-READINESS.md.
-PR:                 stacked on #192 (base: feat/phase-7.5-material-flow)
-Deployment state:   not deployed; stack #179 → … → #192 → this PR
+PR:                 #193 (base: feat/phase-7.5-material-flow → #192 → … → #179)
+Deployment state:   not deployed; stack #179 → … → #192 → #193
 Next:               wire the Tier-1 masters through the contract, re-walk D
                     against them, run the chains on MySQL, take the browser walk
 ```
