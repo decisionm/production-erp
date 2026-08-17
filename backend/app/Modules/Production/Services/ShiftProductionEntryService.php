@@ -84,6 +84,11 @@ class ShiftProductionEntryService
         // the inline WB2 computation it was approved under, byte-for-byte.
         private readonly UnifiedEntryMetrics $unifiedMetrics,
         private readonly LegacyEntryMetrics $legacyMetrics,
+        // The ONE judgment of what a run's configuration is missing
+        // (runStatus) — frozen into config_snapshot['configuration_gaps'] at
+        // Start, copied to a handover child, so the entry resource never
+        // restates a finished batch when a master is fixed later.
+        private readonly ProductVariantService $variants,
     ) {}
 
     /**
@@ -131,11 +136,18 @@ class ShiftProductionEntryService
                 'scraps.scrapReason', 'packingLines', 'approvedBy',
                 // Loaded so the resource can name all three figure sources
                 // apart — workbook, machine exception, and the run's own.
-                'productionStandard', 'productionConfiguration', 'cancelledBy',
+                // The standard's packagings and their Tally items ride with
+                // it: a run started before the configuration_gaps snapshot
+                // existed is judged live from these frozen ids
+                // (CompletionDefaultsService → runStatus), and without the
+                // nested load that judgment cost one packagings query per
+                // distinct standard plus an items query per row.
+                'productionStandard.packagings.tallyItem', 'productionConfiguration', 'cancelledBy',
                 // The run's packaging row — the metrics' pack-quantity
                 // resolver reads it per entry (P5-04); loaded here so a
-                // 20-row page costs one query for it, not twenty.
-                'standardPackaging',
+                // 20-row page costs one query for it, not twenty. Its Tally
+                // item too, for the same live gaps judgment.
+                'standardPackaging.tallyItem',
                 'downtimeEvents.reason',
                 'tallySyncEntries',
                 // The quality queue and the approval queue are the same list
@@ -165,9 +177,20 @@ class ShiftProductionEntryService
                 $query->where('status', $status->value)->where('batch_status', BatchStatus::Completed->value);
             })
             ->when($batchStatus, fn ($query) => $query->where('batch_status', $batchStatus->value))
-            ->when($productionDate, fn ($query) => $query->whereDate('production_date', $productionDate))
-            ->when($dateFrom, fn ($query) => $query->whereDate('production_date', '>=', $dateFrom))
-            ->when($dateTo, fn ($query) => $query->whereDate('production_date', '<=', $dateTo))
+            // Plain range comparisons, NOT whereDate: production_date is a
+            // DATE column, so the predicates mean the same thing — but
+            // whereDate emits date(production_date) = ?, which MySQL cannot
+            // serve from spe_date_shift_wc_index (production_date, shift_id,
+            // work_center_id), and Completed Today asks this every 20 s. The
+            // day is the half-open range [day, day + 1) rather than an
+            // equality so the same SQL is right wherever the driver stores
+            // the cast date with a midnight time appended (SQLite in the
+            // test suite) — every bound is a bare column compare.
+            ->when($productionDate, fn ($query) => $query
+                ->where('production_date', '>=', $productionDate)
+                ->where('production_date', '<', Carbon::parse($productionDate)->addDay()->toDateString()))
+            ->when($dateFrom, fn ($query) => $query->where('production_date', '>=', $dateFrom))
+            ->when($dateTo, fn ($query) => $query->where('production_date', '<', Carbon::parse($dateTo)->addDay()->toDateString()))
             ->when($workCenterId, fn ($query) => $query->where('work_center_id', $workCenterId))
             ->when($shiftId, fn ($query) => $query->where('shift_id', $shiftId))
             ->orderByDesc('production_date')
@@ -187,8 +210,11 @@ class ShiftProductionEntryService
     {
         return ShiftProductionEntry::query()
             // standardPackaging for the same reason paginate() loads it: the
-            // pack-quantity resolver reads the run's packaging row per entry.
-            ->with(['shift', 'workCenter', 'item', 'standardPackaging'])
+            // pack-quantity resolver reads the run's packaging row per entry;
+            // the standard, its packagings and their Tally items for the
+            // resource's figure_sources and the live configuration_gaps of a
+            // run started before the snapshot existed.
+            ->with(['shift', 'workCenter', 'item', 'standardPackaging.tallyItem', 'productionStandard.packagings.tallyItem'])
             ->where('batch_status', BatchStatus::InProgress->value)
             ->orderByDesc('id')
             ->get();
@@ -443,6 +469,18 @@ class ShiftProductionEntryService
                     // Explicitly recorded so every downstream reader can see
                     // this run had no agreed standard behind it.
                     'unconfigured' => $configuration === null,
+                    // WHAT THIS RUN'S CONFIGURATION WAS STILL MISSING, judged
+                    // once, here, for the standard and packaging frozen two
+                    // lines above (ProductVariantService::runStatus — the
+                    // run's own words, never a sibling packaging's), and
+                    // never judged again: the entry resource reads this
+                    // snapshot (source 'snapshot') and computes live only for
+                    // a run started before it existed. Without it, a
+                    // finished batch's "config incomplete" tag restated
+                    // itself whenever a master was edited later — the exact
+                    // retroactive restatement the calculation_version stamp
+                    // exists to prevent.
+                    'configuration_gaps' => $this->variants->runStatus($standard, $packaging, $item),
                     // Material-shortage override. Deliberately NOT written to
                     // the override_reason / override_by COLUMNS: those already
                     // carry this run's bounded cycle-time/cavity deviation
@@ -1365,6 +1403,18 @@ class ShiftProductionEntryService
                 'standard_cavities' => $completed->standard_cavities,
                 'actual_cycle_time' => $completed->actual_cycle_time,
                 'active_cavities' => $completed->active_cavities,
+                // The formula version is PART of that snapshot: the stamp
+                // selects which expected-output formula productionMetrics()
+                // reads (P5.5-03), so a child left unstamped computed under
+                // the legacy inline formula while its parent — the same run,
+                // the same inputs — computed under the engine (13584.91
+                // against 13580.00). Inherited, never re-stamped: a run
+                // started under production_v2_floor stays v2 in every
+                // segment. Only a parent with no stamp at all (before
+                // stamping existed) yields a child on the current version —
+                // a null is not a version to inherit, and every creation
+                // path leaves this column non-null.
+                'calculation_version' => $completed->calculation_version ?? ProductionCalculationEngine::VERSION_CURRENT,
                 'operator_id' => $data['operator_id'] ?? null,
                 'created_by' => $userId,
                 // WHERE THE INCOMING SHIFT'S OPENING CAME FROM, per material:
@@ -1373,7 +1423,21 @@ class ShiftProductionEntryService
                 // figure belongs to, and on config_snapshot because that is
                 // already this run's frozen per-segment record — the same
                 // least-schema route stock_shortfalls took.
-                'config_snapshot' => ['opening_day_bin_basis' => $openingBasis],
+                'config_snapshot' => [
+                    'opening_day_bin_basis' => $openingBasis,
+                    // The run's configuration gaps, as frozen at its Start —
+                    // copied, because the child is a segment of the SAME run
+                    // and must never say something different about it. A
+                    // parent from before the snapshot existed is judged once
+                    // now, from the ids IT froze (the child carries none of
+                    // its own), and that verdict is frozen here.
+                    'configuration_gaps' => $completed->config_snapshot['configuration_gaps']
+                        ?? $this->variants->runStatus(
+                            $completed->productionStandard,
+                            $completed->standardPackaging,
+                            $completed->item,
+                        ),
+                ],
             ]);
 
             return $child->fresh(['shift', 'workCenter', 'item', 'warehouse', 'operator', 'parentEntry']);

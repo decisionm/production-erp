@@ -2,7 +2,14 @@ import { Card, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { completedTodayRows, type CompletedTodayRow, type EfficiencyBand } from '@/features/production/completedToday';
+import {
+    EFFICIENCY_CEILING_PCT,
+    completedTodayRows,
+    configMissingTooltip,
+    type CompletedTodayRow,
+    type EfficiencyBand,
+} from '@/features/production/completedToday';
+import { useProductionSettings } from '@/features/production/packing';
 import type { ShiftProductionEntry, ShiftProductionEntryStatus } from '@/features/production/types';
 import type { TallySyncStatus } from '@/features/tally-sync/types';
 
@@ -103,7 +110,7 @@ function StateCell({ row }: { row: CompletedTodayRow }) {
                 </Link>
             )}
             {row.configIncomplete && (
-                <Tooltip title={row.configMissing.length > 0 ? `Missing: ${row.configMissing.join(', ')}` : undefined}>
+                <Tooltip title={configMissingTooltip(row) ?? undefined}>
                     <Tag color="warning" style={{ marginInlineEnd: 0 }}>
                         config incomplete
                     </Tag>
@@ -120,7 +127,11 @@ export default function CompletedTodayTable({
     controlsFor,
     emptyText = 'Nothing completed yet today.',
 }: CompletedTodayTableProps) {
-    const rows = useMemo(() => completedTodayRows(entries), [entries]);
+    // The over-100% ceiling as the BACKEND rules it (tolerances.efficiency_over),
+    // the same reading ApproveProductionPage makes, so this list and the
+    // approvers' screen paint one figure one colour.
+    const efficiencyCeiling = useProductionSettings()?.tolerances?.efficiency_over ?? EFFICIENCY_CEILING_PCT;
+    const rows = useMemo(() => completedTodayRows(entries, efficiencyCeiling), [entries, efficiencyCeiling]);
     const byId = useMemo(() => new Map((entries ?? []).map((entry) => [entry.id, entry])), [entries]);
     const controls = (row: CompletedTodayRow): ReactNode => {
         const entry = byId.get(row.id);

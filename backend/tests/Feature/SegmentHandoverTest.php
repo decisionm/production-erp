@@ -6,15 +6,20 @@ use App\Models\User;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Inventory\Services\TraceabilityService;
+use App\Modules\Production\Events\ShiftProductionEntryCompleted;
 use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
 use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\WorkCenter;
 use App\Modules\Production\Services\DayBinLedgerService;
+use App\Modules\Production\Services\ProductionCalculationEngine;
 use App\Modules\Production\Services\ShiftProductionEntryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Laravel\Sanctum\Sanctum;
+use RuntimeException;
 use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
 
@@ -263,5 +268,146 @@ class SegmentHandoverTest extends TestCase
 
         $this->assertSame(BatchStatus::InProgress, $entry->fresh()->batch_status);
         $this->assertNull(ShiftProductionEntry::query()->whereNotNull('parent_entry_id')->first());
+    }
+
+    // =================================================================
+    // Phase 5.5 fix loop — the child segment computes under the SAME
+    // formula as its parent (P0), and the completion event rides the
+    // handover's outer commit (P3)
+    // =================================================================
+
+    /**
+     * RED BEFORE: the child inherited CT/cavities/batch_number but NOT the
+     * calculation_version stamp, so it computed under LegacyEntryMetrics
+     * (unfloored WB2: 144000/10.6 = 13584.91) while its parent — and its
+     * own Start Batch preview — computed under production_v3_unified
+     * (FLOOR(28800/10.6)=2716 × 5 = 13580). Two segments of ONE run, two
+     * formulas. The version belongs to the same Start-time snapshot the
+     * child already inherits.
+     */
+    public function test_the_child_segment_inherits_the_parents_calculation_version_and_computes_under_the_same_formula(): void
+    {
+        $this->enableTraceability();
+        $user = $this->actingAsUserWithPermissions('production.manage');
+        [$entry, $evening] = $this->runningBatch($user->id);
+
+        $this->assertSame(ProductionCalculationEngine::VERSION_UNIFIED, $entry->calculation_version, 'a batch started now is stamped v3');
+
+        $response = $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/handover", [
+            'shift_id' => $evening->id,
+            'completion' => ['quantity_produced' => '5880', 'running_hours' => '8'],
+        ])->assertSuccessful();
+
+        $parent = $entry->fresh();
+        $child = ShiftProductionEntry::query()->find($response->json('data.id'));
+
+        $this->assertNotNull($child->calculation_version, 'a segment with no stamp would silently compute under the legacy formula');
+        $this->assertSame($parent->calculation_version, $child->calculation_version);
+        $this->assertSame(ProductionCalculationEngine::VERSION_UNIFIED, $response->json('data.calculation_version'));
+
+        // Identical inputs on the child: identical figure, from the same formula.
+        $service = app(ShiftProductionEntryService::class);
+        $service->completeBatch($child, ['quantity_produced' => '5880', 'running_hours' => '8'], $user->id);
+
+        $parentMetrics = $service->productionMetrics($parent->fresh());
+        $childMetrics = $service->productionMetrics($child->fresh());
+
+        $this->assertSame('13580.00', $parentMetrics['expected_pieces']);
+        $this->assertSame($parentMetrics['expected_pieces'], $childMetrics['expected_pieces'], 'one run, one formula — the parent read 13580.00 and the child 13584.91 before the fix');
+        $this->assertSame($parentMetrics['calculation_version'], $childMetrics['calculation_version']);
+        $this->assertSame($parentMetrics['expected_boxes'], $childMetrics['expected_boxes']);
+    }
+
+    /**
+     * INHERITED, not re-stamped: a run started under production_v2_floor
+     * (before Phase 5.5) hands over to a child that keeps v2 — both segments
+     * stay on the inline WB2 figures they were signed against. Only a parent
+     * carrying NO stamp at all (before stamping existed) yields a child on
+     * the current version, because a null stamp is not a version to inherit
+     * and every creation path must leave the column non-null.
+     */
+    public function test_a_pre_v3_parent_hands_its_own_stamp_to_the_child_never_the_current_one(): void
+    {
+        $this->enableTraceability();
+        $user = $this->actingAsUserWithPermissions('production.manage');
+        [$entry, $evening] = $this->runningBatch($user->id);
+        ShiftProductionEntry::query()->whereKey($entry->id)->update(['calculation_version' => ProductionCalculationEngine::VERSION_FLOOR]);
+
+        $response = $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/handover", [
+            'shift_id' => $evening->id,
+            'completion' => ['quantity_produced' => '5880', 'running_hours' => '8'],
+        ])->assertSuccessful();
+
+        $child = ShiftProductionEntry::query()->find($response->json('data.id'));
+        $this->assertSame(ProductionCalculationEngine::VERSION_FLOOR, $child->calculation_version);
+
+        $service = app(ShiftProductionEntryService::class);
+        $service->completeBatch($child, ['quantity_produced' => '5880', 'running_hours' => '8'], $user->id);
+        $this->assertSame('13584.91', $service->productionMetrics($entry->fresh())['expected_pieces'], 'the parent keeps its v2 figure');
+        $this->assertSame('13584.91', $service->productionMetrics($child->fresh())['expected_pieces'], 'so does the child of the same run');
+    }
+
+    /**
+     * The completion event on a handover: exactly ONE, carrying the CLOSED
+     * (parent) segment — never the child, which has not completed anything —
+     * raised only after the handover's OWN transaction has committed.
+     */
+    public function test_a_handover_raises_the_completion_event_once_for_the_closed_segment_after_the_outer_commit(): void
+    {
+        $this->enableTraceability();
+        $user = $this->actingAsUserWithPermissions('production.manage');
+        [$entry, $evening] = $this->runningBatch($user->id);
+
+        $outside = DB::transactionLevel();
+        $seen = [];
+        Event::listen(ShiftProductionEntryCompleted::class, function (ShiftProductionEntryCompleted $event) use (&$seen) {
+            $seen[] = [
+                'entry_id' => $event->entry->id,
+                'batch_status' => $event->entry->batch_status,
+                'transaction_level' => DB::transactionLevel(),
+                // The child exists by the time the event fires: the whole
+                // handover — completion AND the new segment — is committed.
+                'child_exists' => ShiftProductionEntry::query()->where('parent_entry_id', $event->entry->id)->exists(),
+            ];
+        });
+
+        $response = $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/handover", [
+            'shift_id' => $evening->id,
+            'completion' => ['quantity_produced' => '5880', 'running_hours' => '8'],
+        ])->assertSuccessful();
+
+        $this->assertCount(1, $seen, 'one handover, one completion, one event');
+        $this->assertSame($entry->id, $seen[0]['entry_id'], 'the event carries the CLOSED segment');
+        $this->assertNotSame($response->json('data.id'), $seen[0]['entry_id'], 'never the child');
+        $this->assertSame(BatchStatus::Completed, $seen[0]['batch_status']);
+        $this->assertSame($outside, $seen[0]['transaction_level'], 'raised after the handover transaction committed, not inside it');
+        $this->assertTrue($seen[0]['child_exists']);
+    }
+
+    public function test_a_handover_whose_enclosing_transaction_rolls_back_raises_no_completion_event(): void
+    {
+        $this->enableTraceability();
+        $user = $this->actingAsUserWithPermissions('production.manage');
+        [$entry, $evening] = $this->runningBatch($user->id);
+
+        Event::fake([ShiftProductionEntryCompleted::class]);
+
+        try {
+            DB::transaction(function () use ($entry, $evening, $user) {
+                $child = app(ShiftProductionEntryService::class)->handover($entry, [
+                    'shift_id' => $evening->id,
+                    'completion' => ['quantity_produced' => '5880', 'running_hours' => '8'],
+                ], $user->id);
+                $this->assertSame(BatchStatus::InProgress, $child->batch_status, 'the handover itself succeeded');
+
+                throw new RuntimeException('the outer work failed after the handover returned');
+            });
+        } catch (RuntimeException $e) {
+            $this->assertSame('the outer work failed after the handover returned', $e->getMessage());
+        }
+
+        $this->assertSame(BatchStatus::InProgress, $entry->fresh()->batch_status, 'rolled back with the outer transaction');
+        $this->assertNull(ShiftProductionEntry::query()->whereNotNull('parent_entry_id')->first());
+        Event::assertNotDispatched(ShiftProductionEntryCompleted::class);
     }
 }

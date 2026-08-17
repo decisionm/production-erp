@@ -1,5 +1,6 @@
 import type { TallySyncStatus } from '@/features/tally-sync/types';
 import { itemLabel } from '@/lib/itemLabel';
+import { missingWords } from './productStandardsConfig';
 import type { ProductionMetrics, ShiftProductionEntry, ShiftProductionEntryStatus } from './types';
 
 /**
@@ -58,7 +59,7 @@ export interface CompletedTodayRow {
     tally: CompletedTodayTallyState | null;
     /** configuration_gaps.complete === false — the run started without something the configuration should hold. */
     configIncomplete: boolean;
-    /** configuration_gaps.missing, verbatim vocabulary ("counts", "tally_identity", …). */
+    /** configuration_gaps.missing, verbatim vocabulary KEYS ("counts", "tally_identity", …) — worded for the eye by configMissingTooltip(). */
     configMissing: string[];
 }
 
@@ -71,8 +72,17 @@ export interface CompletedTodayTallyState {
 
 export type EfficiencyBand = NonNullable<ProductionMetrics['efficiency_band']>;
 
-/** 100% is a ceiling, not a target — anything above it means a number is wrong. */
-const EFFICIENCY_CEILING_PCT = 100;
+/**
+ * 100% is a ceiling, not a target — anything above it means a number is
+ * wrong. FALLBACK VALUE ONLY: the live ceiling is the backend's
+ * `production.tolerances.efficiency_over`, served by /production/settings
+ * and passed in by the table (the same reading ApproveProductionPage makes),
+ * so a deployment that later allows a small measurement margin does not
+ * leave this list painting red what the approvers' screen calls fine. 100 is
+ * what that config defaults to, and what is used while settings load or
+ * against a backend too old to send it.
+ */
+export const EFFICIENCY_CEILING_PCT = 100;
 
 /**
  * The band to colour an efficiency by — the approval screen's rule, kept
@@ -81,10 +91,15 @@ const EFFICIENCY_CEILING_PCT = 100;
  * (a 107% banded "ok" by an older backend must still be red); the server's
  * band is trusted otherwise; the fixed thresholds are only for a backend
  * that sent no band at all. Compared with `>`, mirroring the backend: a
- * dead-on 100.0 is the standard met, not beaten.
+ * dead-on 100.0 is the standard met, not beaten. `ceiling` is the backend's
+ * efficiency_over tolerance (100 by default).
  */
-export function efficiencyBandFor(pct: number | null, band: ProductionMetrics['efficiency_band'] | undefined): EfficiencyBand | null {
-    if (pct !== null && pct > EFFICIENCY_CEILING_PCT) return 'over_standard';
+export function efficiencyBandFor(
+    pct: number | null,
+    band: ProductionMetrics['efficiency_band'] | undefined,
+    ceiling: number = EFFICIENCY_CEILING_PCT,
+): EfficiencyBand | null {
+    if (pct !== null && pct > ceiling) return 'over_standard';
     if (band) return band;
     if (pct === null) return null;
     if (pct >= 95) return 'ok';
@@ -105,16 +120,23 @@ export function pieces(value: string | number | null | undefined): string {
 }
 
 /**
- * The batch's `configuration_gaps` (Phase 5.5, WS-B) read defensively: a
- * backend that predates the key sends nothing, and nothing is "not known to
- * be incomplete", never "incomplete".
+ * The words behind the "config incomplete" tag — the row's vocabulary KEYS
+ * through the ONE wording (missingWords: "counts and Tally identity"), never
+ * the raw keys ("counts, tally_identity") a supervisor would have to decode.
+ * Null when there is nothing to say (complete, or incomplete with no words
+ * sent — the tag alone stands).
  */
-type ConfigurationGaps = { complete?: boolean | null; missing?: string[] | null } | null | undefined;
+export function configMissingTooltip(row: Pick<CompletedTodayRow, 'configIncomplete' | 'configMissing'>): string | null {
+    if (!row.configIncomplete || row.configMissing.length === 0) return null;
+    return `Missing: ${missingWords(row.configMissing)}`;
+}
 
-const configurationGapsOf = (entry: ShiftProductionEntry): ConfigurationGaps =>
-    (entry as ShiftProductionEntry & { configuration_gaps?: ConfigurationGaps }).configuration_gaps;
-
-export function completedTodayRow(entry: ShiftProductionEntry): CompletedTodayRow {
+/**
+ * One row. `ceiling` is the backend's efficiency_over tolerance as the table
+ * read it from the production settings (100 while they load, or on a backend
+ * too old to send it) — see efficiencyBandFor.
+ */
+export function completedTodayRow(entry: ShiftProductionEntry, ceiling: number = EFFICIENCY_CEILING_PCT): CompletedTodayRow {
     const item = entry.item ?? null;
     const sku = (item?.sku ?? '').trim();
     const finished = entry.finished_item ?? null;
@@ -122,7 +144,9 @@ export function completedTodayRow(entry: ShiftProductionEntry): CompletedTodayRo
     const productName = (item?.name ?? '').trim();
     const metrics = entry.metrics ?? null;
     const quality = entry.quality ?? null;
-    const gaps = configurationGapsOf(entry);
+    // Read defensively: a backend that predates the key sends nothing, and
+    // nothing is "not known to be incomplete", never "incomplete".
+    const gaps = entry.configuration_gaps ?? null;
     const tally = entry.tally ?? null;
     const efficiencyPct = metrics?.efficiency_pct ?? null;
 
@@ -145,7 +169,7 @@ export function completedTodayRow(entry: ShiftProductionEntry): CompletedTodayRo
         qcRejectedPieces: quality?.checked ? (quality.rejected_nos ?? null) : null,
         efficiencyPct,
         efficiency: efficiencyPct === null ? '—' : `${efficiencyPct}%`,
-        efficiencyBand: efficiencyBandFor(efficiencyPct, metrics?.efficiency_band),
+        efficiencyBand: efficiencyBandFor(efficiencyPct, metrics?.efficiency_band, ceiling),
         approval: entry.status,
         tally: tally === null ? null : { status: tally.status, voucherNumber: tally.voucher_number, link: tally.link },
         configIncomplete: gaps?.complete === false,
@@ -154,6 +178,6 @@ export function completedTodayRow(entry: ShiftProductionEntry): CompletedTodayRo
 }
 
 /** The whole page, in the server's order (production_date desc, id desc). */
-export function completedTodayRows(entries: ShiftProductionEntry[] | null | undefined): CompletedTodayRow[] {
-    return (entries ?? []).map(completedTodayRow);
+export function completedTodayRows(entries: ShiftProductionEntry[] | null | undefined, ceiling: number = EFFICIENCY_CEILING_PCT): CompletedTodayRow[] {
+    return (entries ?? []).map((entry) => completedTodayRow(entry, ceiling));
 }

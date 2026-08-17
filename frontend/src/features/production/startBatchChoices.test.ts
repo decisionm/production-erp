@@ -300,6 +300,64 @@ describe('gaps', () => {
         const v = variant([], { configuration_status: { state: 'incomplete', missing: ['mould_code'] } });
         expect(startBatchChoices(preview([v]), undefined).gaps).toEqual(['mould code']);
     });
+
+    // The RUN's verdict vs the STANDARD's union (Phase 5.5 fix loop). A
+    // two-packaging standard — a complete tray row beside a pouch row still
+    // missing its counts — has an incomplete UNION; a tray run on it is
+    // complete. The server now sends the run's verdict at the top level with
+    // its grain, and the two states must read differently on the modal.
+    describe('the run\'s verdict outranks the standard\'s union', () => {
+        const tray = () => packaging('complete');
+        const pouch = () => packaging('incomplete-server-counts');
+        const twinVariant = (t: StartBatchPackagingLite, p: StartBatchPackagingLite) =>
+            variant([t, p], { configuration_status: { state: 'incomplete', missing: ['counts'] } });
+
+        it('a tray run on the complete row names NO gap although the standard\'s union names counts', () => {
+            const t = tray();
+            const p = preview([twinVariant(t, pouch())], {
+                packaging: { id: t.id },
+                configuration_status: { state: 'complete', missing: [], grain: 'run' },
+            });
+            expect(startBatchChoices(p, undefined).gaps).toEqual([]);
+        });
+
+        it('while the packaging is still to be chosen, the standard\'s union is named and says so by grain', () => {
+            const p = preview([twinVariant(tray(), pouch())], {
+                packaging: null,
+                configuration_status: { state: 'incomplete', missing: ['counts'], grain: 'standard' },
+            });
+            expect(startBatchChoices(p, undefined).gaps).toEqual(['counts']);
+        });
+
+        it('the two states differ for one and the same standard', () => {
+            const t = tray();
+            const v = twinVariant(t, pouch());
+            const resolved = startBatchChoices(
+                preview([v], { packaging: { id: t.id }, configuration_status: { state: 'complete', missing: [], grain: 'run' } }),
+                undefined,
+            );
+            const open = startBatchChoices(
+                preview([v], { packaging: null, configuration_status: { state: 'incomplete', missing: ['counts'], grain: 'standard' } }),
+                undefined,
+            );
+            expect(resolved.gaps).not.toEqual(open.gaps);
+            expect(resolved.gaps).toEqual([]);
+            expect(open.gaps).toEqual(['counts']);
+        });
+
+        it('an older backend without the top-level verdict still reads the union — the reading it always had', () => {
+            const t = tray();
+            const p = preview([twinVariant(t, pouch())], { packaging: { id: t.id } });
+            expect(startBatchChoices(p, undefined).gaps).toEqual(['counts']);
+        });
+
+        it('a null top-level verdict (the standard still to be chosen) names nothing', () => {
+            const a = twinVariant(tray(), pouch());
+            const b = twinVariant(tray(), pouch());
+            const p = preview([a, b], { packaging: null, configuration_status: null });
+            expect(startBatchChoices(p, undefined).gaps).toEqual([]);
+        });
+    });
 });
 
 // ---------------------------------------------------------------------------

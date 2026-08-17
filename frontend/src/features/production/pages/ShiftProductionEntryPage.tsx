@@ -81,7 +81,7 @@ import { currentShift, justEndedShift, productionDateFor } from '@/features/prod
 import { packagingForCompletion } from '@/features/production/productStandardsConfig';
 import { cavityPrefill } from '@/features/production/startBatchCavities';
 import { chosenStartVariant, mouldLabel, startBatchChoices, startBatchTallyIdentity } from '@/features/production/startBatchChoices';
-import { expectedOutput } from '@/features/production/expectedOutput';
+import { expectedOutput, netRunningHours } from '@/features/production/expectedOutput';
 import { roundPer, useProductionSettings } from '@/features/production/packing';
 import { itemLabel } from '@/lib/itemLabel';
 import {
@@ -1512,10 +1512,10 @@ export default function ShiftProductionEntryPage() {
         retry: false,
     });
     // Authoritative machine-running state — every in-progress batch across
-    // all shifts/dates, unpaginated. Distinct from `entries` (a paginated,
-    // today-scoped view for the completed list) so a batch left running from
-    // a past shift can never leave a machine looking idle while Start Batch
-    // is refused by the backend's global guard.
+    // all shifts/dates, unpaginated. Distinct from `completedToday` (the
+    // server's today-scoped, completed-only page below) so a batch left
+    // running from a past shift can never leave a machine looking idle while
+    // Start Batch is refused by the backend's global guard.
     const { data: activeBatches } = useQuery({
         queryKey: ['production', 'active-batches'],
         queryFn: listActiveBatches,
@@ -3318,9 +3318,12 @@ export default function ShiftProductionEntryPage() {
         const cavities = activeCavitiesWatch ?? completingEntry.active_cavities ?? completingEntry.standard_cavities ?? null;
         // Downtime typed below comes off the hours BEFORE any expected-output
         // arithmetic — the paper report nets B/D and idle time out of the day
-        // the same way. Unrounded, floored at zero: mirrors the backend rule.
+        // the same way. Netted exactly as the server nets it (downtime hours
+        // truncated to 6 dp, then subtracted, floored at zero — see
+        // netRunningHours), so the card floors its cycles from the same
+        // figure the server will.
         const grossHours = runningHoursWatch ?? null;
-        const hours = grossHours !== null ? Math.max(grossHours - downtimeMinutes / 60, 0) : null;
+        const hours = netRunningHours(grossHours, downtimeMinutes);
         // Form's corrected pack size wins over the master (mirrors backend).
         const nosPerBox = nosPerBoxWatch ?? completingEntry.item.nos_per_box ?? null;
         // Pouch standard has no per-run correction field — always the master's.

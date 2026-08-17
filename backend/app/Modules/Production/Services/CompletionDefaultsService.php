@@ -18,11 +18,13 @@ use App\Modules\Production\Models\ShiftProductionEntry;
  * invented: a figure no rung holds is null.
  *
  * `configurationGaps` — the missing-vocabulary of ProductVariantService, for
- * the standard and packaging THIS run froze (runStatus). A snapshot written
- * at Start under config_snapshot['configuration_gaps'] outranks the live
- * computation, so history never restates itself once a master is fixed;
- * until Start writes one, the answer is computed from the frozen ids at read
- * time and the payload says so (`source`: 'snapshot' | 'live').
+ * the standard and packaging THIS run froze (runStatus). Start writes that
+ * verdict into config_snapshot['configuration_gaps'] (and a handover child
+ * copies its parent's), and the snapshot outranks any live computation, so
+ * history never restates itself once a master is fixed. A run started
+ * before the snapshot existed has none: its answer is computed from the
+ * frozen ids at read time, and the payload says which it was
+ * (`source`: 'snapshot' | 'live').
  */
 class CompletionDefaultsService
 {
@@ -64,10 +66,13 @@ class CompletionDefaultsService
             ];
         }
 
-        // The frozen ids, not the item's current variants: a standard or a
-        // packaging edited since the run still answers for THIS run by id.
-        // loadMissing keeps whatever the list already eager-loaded.
-        $entry->loadMissing(['productionStandard', 'standardPackaging', 'item']);
+        // A run from before Start froze the verdict. The frozen ids, not the
+        // item's current variants: a standard or a packaging edited since
+        // the run still answers for THIS run by id. loadMissing keeps
+        // whatever the list already eager-loaded (paginate()/activeBatches()
+        // load the standard's packagings and their Tally items for exactly
+        // this read), so a page of such runs costs no query per row.
+        $entry->loadMissing(['productionStandard.packagings.tallyItem', 'standardPackaging.tallyItem', 'item']);
 
         $status = $this->variants->runStatus(
             $entry->productionStandard,

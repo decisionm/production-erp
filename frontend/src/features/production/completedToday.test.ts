@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { completedTodayRow, completedTodayRows, efficiencyBandFor } from './completedToday';
+import { EFFICIENCY_CEILING_PCT, completedTodayRow, completedTodayRows, configMissingTooltip, efficiencyBandFor } from './completedToday';
 import type { ShiftProductionEntry } from './types';
 
 /**
@@ -162,12 +162,12 @@ describe('completedTodayRow — every figure is the resource\'s own, never recom
     });
 
     it('flags an incomplete configuration from the batch\'s own configuration_gaps snapshot, and nothing else', () => {
-        const complete = completedTodayRow(entry({ configuration_gaps: { complete: true, missing: [], source: 'live' } } as Partial<ShiftProductionEntry>));
+        const complete = completedTodayRow(entry({ configuration_gaps: { complete: true, missing: [], source: 'live' } }));
         expect(complete.configIncomplete).toBe(false);
         expect(complete.configMissing).toEqual([]);
 
         const incomplete = completedTodayRow(
-            entry({ configuration_gaps: { complete: false, missing: ['counts', 'tally_identity'], source: 'snapshot' } } as Partial<ShiftProductionEntry>),
+            entry({ configuration_gaps: { complete: false, missing: ['counts', 'tally_identity'], source: 'snapshot' } }),
         );
         expect(incomplete.configIncomplete).toBe(true);
         expect(incomplete.configMissing).toEqual(['counts', 'tally_identity']);
@@ -175,14 +175,14 @@ describe('completedTodayRow — every figure is the resource\'s own, never recom
         // Absent (older backend) or null: not incomplete — the tag says
         // "known to be missing something", never "unknown".
         expect(completedTodayRow(entry()).configIncomplete).toBe(false);
-        expect(completedTodayRow(entry({ configuration_gaps: null } as Partial<ShiftProductionEntry>)).configIncomplete).toBe(false);
+        expect(completedTodayRow(entry({ configuration_gaps: null })).configIncomplete).toBe(false);
     });
 
     it('names the Tally identity when the run posts as a packaging item different from the product', () => {
-        const row = completedTodayRow(entry({ finished_item: { id: 12, name: '500ML KIDNEY TRAY' } } as Partial<ShiftProductionEntry>));
+        const row = completedTodayRow(entry({ finished_item: { id: 12, name: '500ML KIDNEY TRAY' } }));
         expect(row.finishedItemName).toBe('500ML KIDNEY TRAY');
 
-        const same = completedTodayRow(entry({ finished_item: { id: 9, name: '500ml Kidney Bottle' } } as Partial<ShiftProductionEntry>));
+        const same = completedTodayRow(entry({ finished_item: { id: 9, name: '500ml Kidney Bottle' } }));
         expect(same.finishedItemName).toBeNull();
     });
 });
@@ -213,5 +213,55 @@ describe('efficiencyBandFor — the approval screen\'s rule, one place', () => {
         expect(efficiencyBandFor(90, null)).toBe('watch');
         expect(efficiencyBandFor(70, undefined)).toBe('investigate');
         expect(efficiencyBandFor(null, undefined)).toBeNull();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 5.5 fix loop
+// ---------------------------------------------------------------------------
+
+describe('efficiencyBandFor — the ceiling is the backend\'s efficiency_over, not a hard-coded 100', () => {
+    it('101% is "ok" under a 102% ceiling, over_standard under the default', () => {
+        expect(efficiencyBandFor(101, 'ok', 102)).toBe('ok');
+        expect(efficiencyBandFor(101, 'ok')).toBe('over_standard');
+        expect(efficiencyBandFor(101, 'ok', EFFICIENCY_CEILING_PCT)).toBe('over_standard');
+    });
+
+    it('a dead-on ceiling is met, not beaten, whatever the ceiling is', () => {
+        expect(efficiencyBandFor(102, 'ok', 102)).toBe('ok');
+        expect(efficiencyBandFor(102.1, 'ok', 102)).toBe('over_standard');
+    });
+
+    it('the row mapper carries the ceiling through to the band', () => {
+        const hot = entry({ metrics: { ...entry().metrics!, efficiency_pct: 101, efficiency_band: 'ok' } });
+        expect(completedTodayRow(hot).efficiencyBand).toBe('over_standard');
+        expect(completedTodayRow(hot, 102).efficiencyBand).toBe('ok');
+        expect(completedTodayRows([hot], 102)[0].efficiencyBand).toBe('ok');
+        expect(completedTodayRows([hot])[0].efficiencyBand).toBe('over_standard');
+    });
+});
+
+describe('configMissingTooltip — the vocabulary in words, the raw keys kept on the row', () => {
+    it('words the keys through the one vocabulary', () => {
+        const row = completedTodayRow(entry({ configuration_gaps: { complete: false, missing: ['counts', 'tally_identity'], source: 'snapshot' } }));
+        expect(row.configMissing).toEqual(['counts', 'tally_identity']);
+        expect(configMissingTooltip(row)).toBe('Missing: counts and Tally identity');
+
+        const one = completedTodayRow(entry({ configuration_gaps: { complete: false, missing: ['cycle_time'], source: 'live' } }));
+        expect(configMissingTooltip(one)).toBe('Missing: cycle time');
+
+        const three = completedTodayRow(entry({ configuration_gaps: { complete: false, missing: ['cavities', 'unit_weight', 'counts'], source: 'snapshot' } }));
+        expect(configMissingTooltip(three)).toBe('Missing: cavities, unit weight and counts');
+    });
+
+    it('says nothing for a complete run, or an incomplete one that sent no words', () => {
+        expect(configMissingTooltip(completedTodayRow(entry({ configuration_gaps: { complete: true, missing: [], source: 'snapshot' } })))).toBeNull();
+        expect(configMissingTooltip(completedTodayRow(entry({ configuration_gaps: { complete: false, missing: [], source: 'snapshot' } })))).toBeNull();
+        expect(configMissingTooltip(completedTodayRow(entry()))).toBeNull();
+    });
+
+    it('an unknown server key reads readably rather than raw', () => {
+        const row = completedTodayRow(entry({ configuration_gaps: { complete: false, missing: ['mould_code'], source: 'snapshot' } }));
+        expect(configMissingTooltip(row)).toBe('Missing: mould code');
     });
 });

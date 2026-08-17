@@ -51,9 +51,15 @@ export interface StartBatchPreviewLite {
     /** The packaging the SERVER resolved for this run (chosen id, else the only complete one, else the default). */
     packaging?: { id: number } | null;
     /**
-     * A product-level verdict. The preview today judges per variant and per
-     * packaging only (BatchPreviewController); this key is read when a
-     * backend sends one and wins over the per-variant reading below.
+     * THE RUN'S OWN VERDICT (BatchPreviewController, Phase 5.5 fix loop):
+     * ProductVariantService::runStatus for the resolved standard and
+     * packaging — the SAME rule startBatch freezes into the entry's
+     * configuration_gaps — with `grain` 'run' once a packaging is resolved
+     * or 'standard' (the union) while the packaging is still to be chosen;
+     * null while the standard is. Read first and wins over the per-variant
+     * reading below, which is the standard's union over EVERY packaging and
+     * named a tray run's sibling pouch as the run's gap. Absent on an older
+     * backend, where the per-variant reading stands in.
      */
     configuration_status?: ConfigurationCompleteness | null;
 }
@@ -118,13 +124,15 @@ export function startBatchChoices(
 }
 
 /**
- * The gaps the modal names. A top-level verdict, when a backend sends one,
- * is the product's own answer and wins. Otherwise the CHOSEN standard's
- * verdict — which, by the server's rule (ProductVariantService::
- * standardStatus), already includes every word its packagings say. With no
- * standard chosen yet (several on offer, none picked) nothing is named: the
- * standard question comes first, and naming the union would name gaps of a
- * standard this run will not use.
+ * The gaps the modal names. The top-level verdict — the RUN's, the same
+ * judgment the entry will freeze — wins when the backend sends one, so the
+ * modal and Completed Today say one thing about one run. Otherwise (an
+ * older backend) the CHOSEN standard's verdict — which, by the server's
+ * rule (ProductVariantService::standardStatus), includes every word its
+ * packagings say, siblings included. With no standard chosen yet (several
+ * on offer, none picked) nothing is named: the standard question comes
+ * first, and naming the union would name gaps of a standard this run will
+ * not use.
  *
  * Words, not keys, and each once: the server orders and dedupes its list;
  * this dedupes again so a hand-built or older payload cannot print "counts,

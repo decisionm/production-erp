@@ -7,6 +7,8 @@ use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Production\Http\Requests\BatchPreviewRequest;
 use App\Modules\Production\Http\Resources\MasterbatchDosingResource;
+use App\Modules\Production\Models\ProductionStandard;
+use App\Modules\Production\Models\ProductionStandardPackaging;
 use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\WorkCenter;
 use App\Modules\Production\Services\BatchEstimationService;
@@ -254,6 +256,25 @@ class BatchPreviewController extends Controller
                     'id' => $packaging->id, 'mode' => $packaging->mode, 'label' => $packaging->label(),
                     'nos_per_box' => $packaging->nos_per_box,
                 ],
+                // THE RUN'S OWN VERDICT (Phase 5.5 fix loop, P5.5-06): what a
+                // batch started from this preview, as it stands, would be
+                // missing — the SAME rule startBatch freezes into the entry
+                // (ProductVariantService::runStatus for the resolved standard
+                // and packaging), so the modal and Completed Today can never
+                // contradict each other about one run. The per-variant
+                // `configuration_status` above is the STANDARD's union over
+                // every packaging and stays as it was; reading it for the run
+                // warned a tray run on a complete tray row about the sibling
+                // pouch's missing counts.
+                //
+                // `grain` says whose verdict it is: 'run' once a packaging is
+                // resolved (or there is no standard to speak of — the run
+                // freezes exactly this), 'standard' while the packaging is
+                // still to be chosen (the standard's union; the run's may be
+                // narrower). Null while the STANDARD is still to be chosen —
+                // that question comes first, and no gap is named for a
+                // standard this run may not use.
+                'configuration_status' => $this->runConfigurationStatus($item, $variants->count(), $standard, $packaging),
                 // The resolved configuration goes in too: without it the
                 // preview told a machine WITH approved settings that it had
                 // none.
@@ -284,5 +305,20 @@ class BatchPreviewController extends Controller
                 ],
             ],
         ]);
+    }
+
+    /**
+     * @return ?array{state: string, missing: list<string>, grain: 'run'|'standard'}
+     */
+    private function runConfigurationStatus(Item $item, int $variantCount, ?ProductionStandard $standard, ?ProductionStandardPackaging $packaging): ?array
+    {
+        if ($standard === null && $variantCount > 1) {
+            return null;
+        }
+
+        return [
+            ...$this->variantStatus->runStatus($standard, $packaging, $item),
+            'grain' => $packaging !== null || $standard === null ? 'run' : 'standard',
+        ];
     }
 }

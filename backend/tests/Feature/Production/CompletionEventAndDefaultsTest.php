@@ -486,6 +486,202 @@ class CompletionEventAndDefaultsTest extends TestCase
             ->assertJsonPath('data.0.configuration_gaps.source', 'snapshot');
     }
 
+    /**
+     * FROZEN AT START, through the REAL start path. Before this, nothing
+     * wrote config_snapshot['configuration_gaps']: every read was 'live',
+     * so a finished batch's "config incomplete" tag restated itself the
+     * moment a master was fixed — the exact retroactive restatement the
+     * calculation_version stamp exists to prevent. Now POST start writes
+     * runStatus() for the frozen standard/packaging, the resource says
+     * source 'snapshot', and a later master edit moves nothing.
+     */
+    public function test_start_freezes_the_configuration_gaps_and_a_later_master_fix_never_restates_the_batch(): void
+    {
+        $this->actingAsProduction();
+        [$shift, $machine, $warehouse] = $this->floor();
+
+        // A product with no Tally identity and a tray packing missing its
+        // per-tray count: the run starts with two named gaps.
+        $thin = $this->item('BTL-THIN', ['tally_stock_item_guid' => null]);
+        $thinStd = $this->standardFor($thin, [[
+            'mode' => ProductionStandardPackaging::MODE_TRAY, 'trays_per_box' => 5, 'nos_per_box' => 1150,
+        ]]);
+        $packaging = $thinStd->packagings->first();
+
+        $started = $this->postJson('/api/v1/production/shift-production-entries', [
+            'shift_id' => $shift->id,
+            'work_center_id' => $machine->id,
+            'item_id' => $thin->id,
+            'warehouse_id' => $warehouse->id,
+            'production_date' => '2026-08-17',
+            'production_standard_id' => $thinStd->id,
+        ])->assertOk()
+            ->assertJsonPath('data.configuration_gaps.source', 'snapshot')
+            ->assertJsonPath('data.configuration_gaps.complete', false)
+            ->assertJsonPath('data.configuration_gaps.missing', ['counts', 'tally_identity']);
+        $entryId = $started->json('data.id');
+
+        // The snapshot is on the row itself, in the run's frozen record.
+        $entry = ShiftProductionEntry::query()->findOrFail($entryId);
+        $this->assertSame(['counts', 'tally_identity'], $entry->config_snapshot['configuration_gaps']['missing']);
+        $this->assertSame('incomplete', $entry->config_snapshot['configuration_gaps']['state']);
+
+        // (An incomplete packing is never resolved for a run — the resolver
+        // offers complete rows only — so this run froze the standard and no
+        // packaging, and its verdict was the standard's, over its one row.)
+        $this->assertNull($entry->production_standard_packaging_id);
+
+        // The masters are fixed AFTER the run started.
+        $thin->forceFill(['tally_stock_item_guid' => 'itm-thin-fixed'])->save();
+        $packaging->forceFill(['nos_per_tray' => 230])->save();
+        $this->assertTrue($packaging->fresh()->isComplete(), 'the packaging is complete NOW');
+
+        // The batch still says what it was started without — on every door.
+        $this->getJson('/api/v1/production/shift-production-entries/active')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $entryId)
+            ->assertJsonPath('data.0.configuration_gaps.source', 'snapshot')
+            ->assertJsonPath('data.0.configuration_gaps.missing', ['counts', 'tally_identity']);
+
+        $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/complete", [
+            'quantity_produced' => '1150', 'no_of_box' => 1, 'nos_per_box' => 1150,
+        ])->assertOk()
+            ->assertJsonPath('data.configuration_gaps.source', 'snapshot')
+            ->assertJsonPath('data.configuration_gaps.missing', ['counts', 'tally_identity']);
+
+        $this->getJson('/api/v1/production/shift-production-entries?status=pending')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $entryId)
+            ->assertJsonPath('data.0.configuration_gaps.source', 'snapshot')
+            ->assertJsonPath('data.0.configuration_gaps.missing', ['counts', 'tally_identity']);
+
+        // CONTROL: a batch started NOW, against the fixed masters, is complete
+        // — the snapshot is a fact about each run, not a stale cache.
+        WorkCenter::firstOrCreate(['code' => 'MC-02'], ['name' => 'Machine 2']);
+        $this->postJson('/api/v1/production/shift-production-entries', [
+            'shift_id' => $shift->id,
+            'work_center_id' => WorkCenter::where('code', 'MC-02')->value('id'),
+            'item_id' => $thin->id,
+            'warehouse_id' => $warehouse->id,
+            'production_date' => '2026-08-17',
+            'production_standard_id' => $thinStd->id,
+        ])->assertOk()
+            ->assertJsonPath('data.configuration_gaps.source', 'snapshot')
+            ->assertJsonPath('data.configuration_gaps.complete', true)
+            ->assertJsonPath('data.configuration_gaps.missing', []);
+    }
+
+    /**
+     * A run from before Start froze the verdict (no snapshot on the row) is
+     * still judged live from its frozen ids, and SAYS so — and, being live,
+     * it does follow a later master fix. That is the honest reading for a
+     * row that never recorded what it started with; it is not the reading
+     * new rows get.
+     */
+    public function test_a_run_started_before_the_snapshot_existed_stays_live_and_says_so(): void
+    {
+        $this->actingAsProduction();
+        $thin = $this->item('BTL-LEGACY', ['tally_stock_item_guid' => null]);
+        $thinStd = $this->standardFor($thin, [$this->trayPackaging()]);
+        // A row created without going through startBatch — as every entry
+        // before this change was, as far as this key is concerned.
+        $entry = $this->inProgressEntry($thin, $thinStd, $thinStd->packagings->first());
+        $this->assertArrayNotHasKey('configuration_gaps', $entry->config_snapshot ?? []);
+
+        $this->getJson('/api/v1/production/shift-production-entries/active')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $entry->id)
+            ->assertJsonPath('data.0.configuration_gaps.source', 'live')
+            ->assertJsonPath('data.0.configuration_gaps.missing', ['tally_identity']);
+
+        $thin->forceFill(['tally_stock_item_guid' => 'itm-legacy-fixed'])->save();
+
+        $this->getJson('/api/v1/production/shift-production-entries/active')
+            ->assertOk()
+            ->assertJsonPath('data.0.configuration_gaps.source', 'live')
+            ->assertJsonPath('data.0.configuration_gaps.missing', []);
+    }
+
+    /**
+     * A handover child is a segment of the SAME run: it carries its parent's
+     * frozen verdict verbatim (source 'snapshot'), never a fresh judgment of
+     * masters that may have moved since — and never the "no standard" a
+     * bare child row would read live, since the child freezes no ids of
+     * its own.
+     */
+    public function test_a_handover_child_copies_its_parents_frozen_configuration_gaps(): void
+    {
+        config(['production.traceability_enabled' => true]);
+        $this->actingAsProduction();
+        [$shift, $machine, $warehouse] = $this->floor();
+        $evening = Shift::firstOrCreate(['name' => 'Evening'], ['start_time' => '14:00', 'end_time' => '22:00']);
+
+        $thin = $this->item('BTL-THIN', ['tally_stock_item_guid' => null]);
+        $thinStd = $this->standardFor($thin, [$this->trayPackaging()]);
+
+        $parentId = $this->postJson('/api/v1/production/shift-production-entries', [
+            'shift_id' => $shift->id,
+            'work_center_id' => $machine->id,
+            'item_id' => $thin->id,
+            'warehouse_id' => $warehouse->id,
+            'production_date' => '2026-08-17',
+            'production_standard_id' => $thinStd->id,
+        ])->assertOk()
+            ->assertJsonPath('data.configuration_gaps.missing', ['tally_identity'])
+            ->json('data.id');
+
+        // Fixed between the start and the handover.
+        $thin->forceFill(['tally_stock_item_guid' => 'itm-thin-fixed'])->save();
+
+        $this->postJson("/api/v1/production/shift-production-entries/{$parentId}/handover", [
+            'shift_id' => $evening->id,
+            'completion' => ['quantity_produced' => '1150', 'no_of_box' => 1, 'nos_per_box' => 1150],
+        ])->assertSuccessful()
+            ->assertJsonPath('data.parent_entry_id', $parentId)
+            ->assertJsonPath('data.configuration_gaps.source', 'snapshot')
+            ->assertJsonPath('data.configuration_gaps.complete', false)
+            ->assertJsonPath('data.configuration_gaps.missing', ['tally_identity']);
+
+        $child = ShiftProductionEntry::query()->where('parent_entry_id', $parentId)->firstOrFail();
+        $this->assertSame(
+            ShiftProductionEntry::query()->findOrFail($parentId)->config_snapshot['configuration_gaps'],
+            $child->config_snapshot['configuration_gaps'],
+        );
+    }
+
+    /**
+     * A parent from before the snapshot existed carries no verdict to copy.
+     * Its child is judged ONCE, at the handover, from the ids the parent
+     * froze — the child freezes none of its own, and read live it would say
+     * "no standard" about a run that has one — and that verdict is frozen
+     * on the child. The parent itself keeps reading live.
+     */
+    public function test_a_handover_child_of_a_pre_snapshot_parent_is_judged_once_from_the_parents_frozen_ids(): void
+    {
+        config(['production.traceability_enabled' => true]);
+        $this->actingAsProduction();
+        $evening = Shift::firstOrCreate(['name' => 'Evening'], ['start_time' => '14:00', 'end_time' => '22:00']);
+
+        $thin = $this->item('BTL-THIN', ['tally_stock_item_guid' => null]);
+        $thinStd = $this->standardFor($thin, [$this->trayPackaging()]);
+        $parent = $this->inProgressEntry($thin, $thinStd, $thinStd->packagings->first());
+        $this->assertArrayNotHasKey('configuration_gaps', $parent->config_snapshot ?? []);
+
+        $this->postJson("/api/v1/production/shift-production-entries/{$parent->id}/handover", [
+            'shift_id' => $evening->id,
+            'completion' => ['quantity_produced' => '1150', 'no_of_box' => 1, 'nos_per_box' => 1150],
+        ])->assertSuccessful()
+            ->assertJsonPath('data.configuration_gaps.source', 'snapshot')
+            ->assertJsonPath('data.configuration_gaps.missing', ['tally_identity']);
+
+        // The parent, having no snapshot, is still read live — and says so.
+        $this->getJson('/api/v1/production/shift-production-entries?status=pending')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $parent->id)
+            ->assertJsonPath('data.0.configuration_gaps.source', 'live')
+            ->assertJsonPath('data.0.configuration_gaps.missing', ['tally_identity']);
+    }
+
     public function test_the_gaps_ride_the_paginated_list_and_the_completion_response_too(): void
     {
         $this->actingAsProduction();

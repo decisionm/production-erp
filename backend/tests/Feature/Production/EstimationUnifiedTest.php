@@ -15,6 +15,7 @@ use App\Modules\Production\Services\BatchEstimationService;
 use App\Modules\Production\Services\ProductionCalculationEngine;
 use App\Modules\Production\Services\ShiftProductionEntryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\File;
 use Laravel\Sanctum\Sanctum;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Spatie\Permission\Models\Permission;
@@ -405,6 +406,108 @@ class EstimationUnifiedTest extends TestCase
             $this->assertSame($stamp, $metrics['calculation_version']);
             $this->assertNull($metrics['expected_pieces_gross']);
         }
+    }
+
+    // =================================================================
+    // GUARD: every creation path stamps a version — none may leave the
+    // column null, because null selects the legacy formula silently
+    // =================================================================
+
+    /**
+     * EVERY door that creates a ShiftProductionEntry in app/ leaves
+     * calculation_version non-null. Enumerated — grep `ShiftProductionEntry::create(`
+     * (and `->create([` on the model) under app/:
+     *
+     *   1. ShiftProductionEntryService::startBatch()  — stamps VERSION_CURRENT
+     *   2. ShiftProductionEntryService::handover()    — the child INHERITS the
+     *      parent's stamp (a run keeps one formula across its segments;
+     *      SegmentHandoverTest pins the equality), current only for a parent
+     *      that has no stamp at all
+     *   3. ShiftPageEntryService::recordRow()         — composes startBatch();
+     *      no create of its own (the paper-page ingest therefore stamps the
+     *      CURRENT engine for a shift that already ran — an owner question,
+     *      Q46, not decided here)
+     *
+     * No factory or seeder builds this model, and a test's own `create()`
+     * (a fixture, not a door) is exempt. Two halves: STATIC — every
+     * `ShiftProductionEntry::create(` in app/ names 'calculation_version'
+     * inside its attribute array, so a fourth door added later fails here
+     * before it ships an unstamped row; RUNTIME — the three doors above,
+     * driven, all yield a non-null stamp.
+     */
+    public function test_every_creation_path_in_app_stamps_a_calculation_version(): void
+    {
+        // ---- static half -------------------------------------------------
+        $sites = [];
+        foreach (File::allFiles(app_path()) as $file) {
+            if ($file->getExtension() !== 'php') {
+                continue;
+            }
+            $source = $file->getContents();
+            $offset = 0;
+            while (($at = strpos($source, 'ShiftProductionEntry::create(', $offset)) !== false) {
+                $open = $at + strlen('ShiftProductionEntry::create');
+                $depth = 0;
+                $close = null;
+                for ($i = $open, $n = strlen($source); $i < $n; $i++) {
+                    if ($source[$i] === '(') {
+                        $depth++;
+                    } elseif ($source[$i] === ')' && --$depth === 0) {
+                        $close = $i;
+                        break;
+                    }
+                }
+                $this->assertNotNull($close, "unbalanced create( in {$file->getRelativePathname()}");
+                $line = substr_count(substr($source, 0, $at), "\n") + 1;
+                $sites["{$file->getRelativePathname()}:{$line}"] = str_contains(substr($source, $open, $close - $open), "'calculation_version'");
+                $offset = $close;
+            }
+        }
+
+        $this->assertSame([
+            'Modules/Production/Services/ShiftProductionEntryService.php',
+            'Modules/Production/Services/ShiftProductionEntryService.php',
+        ], array_map(fn (string $site) => explode(':', $site)[0], array_keys($sites)), 'the enumerated doors — startBatch and handover, both in ShiftProductionEntryService; a new site must be added to the docblock and stamp too');
+        foreach ($sites as $site => $stamps) {
+            $this->assertTrue($stamps, "{$site} creates a ShiftProductionEntry without a calculation_version");
+        }
+
+        // ---- runtime half ------------------------------------------------
+        $user = $this->actAs();
+        [$shift, $machine, $item, $warehouse] = $this->factoryFloor(cycleTime: '10.6', nosPerBox: 840);
+        $warehouse->forceFill(['tally_guid' => 'gd-fg'])->save();
+        config(['production.traceability_enabled' => true]);
+        $evening = Shift::create(['name' => 'Evening', 'start_time' => '14:00', 'end_time' => '22:00']);
+
+        // 1. startBatch
+        $service = app(ShiftProductionEntryService::class);
+        $started = $service->startBatch([
+            'shift_id' => $shift->id, 'work_center_id' => $machine->id,
+            'item_id' => $item->id, 'warehouse_id' => $warehouse->id, 'production_date' => '2026-08-17',
+        ], $user->id);
+        $this->assertSame(ProductionCalculationEngine::VERSION_CURRENT, $started->calculation_version);
+
+        // 2. handover — the child
+        $child = $service->handover($started, [
+            'shift_id' => $evening->id,
+            'completion' => ['quantity_produced' => '5880', 'running_hours' => '8'],
+        ], $user->id);
+        $this->assertNotNull($child->calculation_version);
+        $this->assertSame($started->calculation_version, $child->calculation_version);
+        $service->cancelTestBatch($child, $user->id, 'guard test — free the machine');
+
+        // 3. the paper page (ShiftPageEntryService::recordRow → startBatch)
+        $this->postJson('/api/v1/production/shift-production-entries/page', [
+            'shift_id' => $shift->id,
+            'production_date' => '2026-08-16',
+            'rows' => [[
+                'work_center_id' => $machine->id, 'item_id' => $item->id,
+                'quantity_produced' => 10080, 'quantity_scrap' => 237, 'running_hours' => 8,
+            ]],
+        ])->assertOk()->assertJsonPath('data.failed', []);
+
+        $this->assertSame(0, ShiftProductionEntry::query()->whereNull('calculation_version')->count(), 'no door left a row unstamped');
+        $this->assertGreaterThanOrEqual(3, ShiftProductionEntry::query()->whereNotNull('calculation_version')->count());
     }
 
     // =================================================================

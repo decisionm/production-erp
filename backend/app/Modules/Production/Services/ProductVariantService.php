@@ -196,23 +196,41 @@ class ProductVariantService
      */
     public function packagingStatus(ProductionStandardPackaging $packaging, ProductionStandard $standard, ?Item $item): array
     {
+        $missing = $this->packagingMissing($packaging, $item);
+
+        return [
+            'state' => $missing === [] ? self::STATE_COMPLETE : self::STATE_INCOMPLETE,
+            'missing' => $this->ordered($missing),
+            'ambiguity' => $this->ambiguityFor($this->identityFor($packaging, $item)),
+        ];
+    }
+
+    /**
+     * The words alone — what one packaging is missing, WITHOUT the ambiguity
+     * judgment. The standard's and the run's verdicts (standardStatus,
+     * runStatus) only ever carried `missing`; they used to reach it through
+     * packagingStatus() and so paid for an ambiguity lookup they discarded —
+     * a LineMappingResolver::item(name) query per packaging, per row of a
+     * list, whose memo dies with each per-row service instance (Phase 5.5
+     * fix loop: +2 items queries per Completed Today row). Same rule, same
+     * words, same order; only packagingStatus() — the per-packaging block
+     * that REPORTS ambiguity — still asks for it.
+     *
+     * @return list<string>
+     */
+    private function packagingMissing(ProductionStandardPackaging $packaging, ?Item $item): array
+    {
         $missing = [];
 
         if (! $packaging->isComplete()) {
             $missing[] = self::MISSING_COUNTS;
         }
 
-        $identity = $this->identityFor($packaging, $item);
-
-        if (! $this->hasTallyIdentity($identity)) {
+        if (! $this->hasTallyIdentity($this->identityFor($packaging, $item))) {
             $missing[] = self::MISSING_TALLY_IDENTITY;
         }
 
-        return [
-            'state' => $missing === [] ? self::STATE_COMPLETE : self::STATE_INCOMPLETE,
-            'missing' => $this->ordered($missing),
-            'ambiguity' => $this->ambiguityFor($identity),
-        ];
+        return $missing;
     }
 
     /**
@@ -234,7 +252,7 @@ class ProductVariantService
         }
 
         foreach ($standard->packagings as $packaging) {
-            $missing = [...$missing, ...$this->packagingStatus($packaging, $standard, $item)['missing']];
+            $missing = [...$missing, ...$this->packagingMissing($packaging, $item)];
         }
 
         return [
@@ -263,7 +281,16 @@ class ProductVariantService
      * standard's judgment, and a run with no standard says so — plus the
      * product's identity, the only other thing such a run can post with.
      * Same vocabulary, same order; no ambiguity block, because a batch has
-     * nowhere to send a person to settle one.
+     * nowhere to send a person to settle one — and none is computed, so a
+     * list of runs costs no name lookups (packagingMissing).
+     *
+     * FROZEN AT START. startBatch() writes this verdict into the entry's
+     * config_snapshot['configuration_gaps'] and the handover child copies
+     * its parent's; the entry resource reads the snapshot first
+     * (CompletionDefaultsService) and computes live only for a run started
+     * before the snapshot existed. So a master fixed later never restates
+     * a finished batch's "config incomplete" — the same reason the
+     * calculation_version stamp exists.
      *
      * @return array{state: string, missing: list<string>}
      */
@@ -287,7 +314,7 @@ class ProductVariantService
         }
 
         $missing = $this->standardFigureGaps($standard, $item);
-        $missing = [...$missing, ...$this->packagingStatus($packaging, $standard, $item)['missing']];
+        $missing = [...$missing, ...$this->packagingMissing($packaging, $item)];
 
         return [
             'state' => $missing === [] ? self::STATE_COMPLETE : self::STATE_INCOMPLETE,

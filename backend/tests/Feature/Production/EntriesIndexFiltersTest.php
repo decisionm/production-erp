@@ -7,6 +7,8 @@ use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
+use App\Modules\Production\Models\ProductionStandard;
+use App\Modules\Production\Models\ProductionStandardPackaging;
 use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\WorkCenter;
@@ -397,6 +399,147 @@ class EntriesIndexFiltersTest extends TestCase
         // however many, the same number for 8 rows as for 2.
         $this->assertSame($forTwo, $forEight, 'tally_sync_entries reads must not grow with the page');
         $this->assertLessThanOrEqual(3, $forEight);
+    }
+
+    /**
+     * The day filters are plain column comparisons, never a function of the
+     * column: production_date is a DATE column carrying
+     * spe_date_shift_wc_index (production_date, shift_id, work_center_id),
+     * and whereDate's date(production_date) = ? cannot use it — Completed
+     * Today asks this every 20 s. The day is the half-open range
+     * [day, day + 1), a range is >= / <, and every bound is the bare column.
+     */
+    public function test_the_day_filters_compare_the_bare_column_so_the_composite_index_can_serve_them(): void
+    {
+        $this->entry(['production_date' => '2026-08-10']);
+
+        $sqlFor = function (string $query): array {
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $this->getJson('/api/v1/production/shift-production-entries?'.$query)->assertOk();
+            $log = DB::getQueryLog();
+            DB::disableQueryLog();
+
+            $reads = array_values(array_filter(
+                array_column($log, 'query'),
+                fn (string $sql) => str_contains($sql, 'from "shift_production_entries"') && str_contains($sql, 'production_date'),
+            ));
+            $this->assertNotEmpty($reads, 'the list read names production_date');
+
+            return $reads;
+        };
+
+        foreach ($sqlFor('production_date=2026-08-10') as $sql) {
+            $this->assertStringNotContainsString('strftime', $sql, 'SQLite spelling of whereDate — the column wrapped in a function');
+            $this->assertStringNotContainsString('date("production_date")', $sql, 'MySQL spelling of whereDate — the column wrapped in a function');
+            $this->assertStringContainsString('"production_date" >= ?', $sql);
+            $this->assertStringContainsString('"production_date" < ?', $sql);
+        }
+        foreach ($sqlFor('date_from=2026-08-09&date_to=2026-08-11') as $sql) {
+            $this->assertStringNotContainsString('strftime', $sql);
+            $this->assertStringContainsString('"production_date" >= ?', $sql);
+            $this->assertStringContainsString('"production_date" < ?', $sql);
+        }
+    }
+
+    // ---- configuration_gaps / packing_defaults: no query per row -----------
+
+    /**
+     * Every row's `configuration_gaps` and `packing_defaults` cost NO query of
+     * their own — the page's TOTAL query count is the same for 8 rows as for
+     * 2, across every shape the judgment takes: a distinct standard per row
+     * (so a per-standard packagings read would show), rows WITH and WITHOUT
+     * a frozen packaging (without, the live judgment walks every packaging
+     * of the standard and each one's Tally item), and rows WITH and WITHOUT
+     * a Start snapshot (with one, nothing is computed at all).
+     *
+     * RED BEFORE: +1 packagings query per distinct standard and +2 items
+     * queries per row (the packaging's Tally item, and LineMappingResolver's
+     * name lookup for an ambiguity judgment the run's verdict never even
+     * carried).
+     *
+     * The count excludes exactly one thing, by name: the two per-row cost
+     * reads (stock_movements by reference, batch_resin_allocations) that
+     * predate Phase 5.5 and belong to material costing, not to this key —
+     * they are counted separately so nothing else can hide among them.
+     */
+    public function test_configuration_gaps_and_packing_defaults_cost_no_query_per_row(): void
+    {
+        $tallyItem = Item::create(['sku' => 'BTL-1-TRAY', 'name' => 'Bottle tray pack', 'uom' => 'pcs', 'tally_stock_item_guid' => 'itm-tray']);
+
+        $totalQueries = function (int $rows) use ($tallyItem): int {
+            ShiftProductionEntry::query()->forceDelete();
+            ProductionStandard::query()->forceDelete();
+
+            foreach (range(1, $rows) as $i) {
+                // A standard of its own for every row, two packagings each:
+                // a complete tray row (its own Tally item on the odd ones)
+                // and a pouch row still missing its per-pouch count.
+                $standard = ProductionStandard::create([
+                    'item_id' => $this->item->id, 'source_product_name' => "Bottle {$i}",
+                    'cavities' => 5, 'unit_weight_grams' => '12.9000', 'cycle_time' => '12.30',
+                    'status' => 'approved', 'source' => 'entries-index-test',
+                ]);
+                $tray = $standard->packagings()->create([
+                    'mode' => ProductionStandardPackaging::MODE_TRAY,
+                    'nos_per_tray' => 230, 'trays_per_box' => 5, 'nos_per_box' => 1150,
+                    'item_id' => $i % 2 === 1 ? $tallyItem->id : null,
+                ]);
+                $standard->packagings()->create([
+                    'mode' => ProductionStandardPackaging::MODE_POUCH,
+                    'pouches_per_box' => 5, 'nos_per_box' => 1225,
+                ]);
+
+                $withPackaging = $i % 2 === 1;
+                $withSnapshot = $i % 4 < 2;
+                $this->entry([
+                    'production_standard_id' => $standard->id,
+                    'production_standard_packaging_id' => $withPackaging ? $tray->id : null,
+                    'packaging_mode' => $withPackaging ? $tray->mode : null,
+                    'config_snapshot' => $withSnapshot
+                        ? ['configuration_gaps' => ['state' => 'incomplete', 'missing' => ['tally_identity']]]
+                        : null,
+                ]);
+            }
+
+            // Warm the once-per-process reads (the user's permissions, the
+            // BOM memo) so both measurements see the same steady state.
+            $this->getJson('/api/v1/production/shift-production-entries?per_page=100')->assertOk();
+
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $response = $this->getJson('/api/v1/production/shift-production-entries?per_page=100')->assertOk();
+            $log = DB::getQueryLog();
+            DB::disableQueryLog();
+
+            $this->assertCount($rows, $response->json('data'));
+            foreach ($response->json('data') as $row) {
+                $this->assertArrayHasKey('configuration_gaps', $row);
+                $this->assertArrayHasKey('packing_defaults', $row);
+                $this->assertContains($row['configuration_gaps']['source'], ['snapshot', 'live']);
+            }
+
+            // Everything except the two per-row COST reads that predate this
+            // phase and are outside it — materialCost()'s stock_movements
+            // lookup by reference (its own docblock: "not cheap — a
+            // stock_movements query per entry") and the bag-cost summary's
+            // batch_resin_allocations read. Named here so the pin says
+            // exactly what it holds constant, and a fix to those reads can
+            // tighten it to the bare total.
+            $ownedByThisPin = array_filter(
+                array_column($log, 'query'),
+                fn (string $sql) => ! str_contains($sql, '"stock_movements"') && ! str_contains($sql, '"batch_resin_allocations"'),
+            );
+            $costReads = count($log) - count($ownedByThisPin);
+            $this->assertSame(2 * $rows, $costReads, 'the known per-row cost reads — exactly two per row, nothing else hiding among them');
+
+            return count($ownedByThisPin);
+        };
+
+        $forTwo = $totalQueries(2);
+        $forEight = $totalQueries(8);
+
+        $this->assertSame($forTwo, $forEight, "the page's query count (outside the known per-row cost reads) must not grow with the rows ({$forTwo} for 2 rows, {$forEight} for 8)");
     }
 
     public function test_a_single_entry_response_carries_the_same_tally_key(): void
