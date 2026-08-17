@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
-import { Button, Col, DatePicker, Row, Select, Space, Table, Tabs, Tag, Typography } from 'antd';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { Button, Col, DatePicker, Modal, Row, Select, Space, Table, Tabs, Tag, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { type ReactElement, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -20,7 +20,8 @@ import type {
     TraceabilityReportFeed,
     TraceabilityReportRow,
 } from '@/features/production/types';
-import { downloadCsv, toCsv } from '@/lib/csv';
+import { exportErrorSentence, runExport } from '@/features/exports/api';
+import { downloadBlob } from '@/lib/csv';
 import { itemLabel } from '@/lib/itemLabel';
 
 // Bands are ruled server-side (config/production.php tolerances) — the UI
@@ -82,6 +83,24 @@ function useShiftOptions() {
     return (shifts?.data ?? []).filter((s) => s.is_active).map((s) => ({ value: s.id, label: s.name }));
 }
 
+/**
+ * The tab's "Download CSV": a SERVER export (POST /exports/{kind}) of the
+ * same report query, with the same filters the tab is showing, for the
+ * same reader — never the rows this table happens to have rendered (Phase
+ * 4.5; the client-side CSV builder that used to sit here is gone). The
+ * file lands under the name the server gave it; a refusal (over the row
+ * cap, an invalid filter, no permission) shows the server's own sentence.
+ */
+function useServerCsv(kind: string) {
+    return useMutation({
+        mutationFn: (filters: Record<string, unknown>) => runExport(kind, filters),
+        onSuccess: (file) => downloadBlob(file.filename, file.blob),
+        onError: async (error) => {
+            Modal.error({ title: 'Download refused', content: await exportErrorSentence(error) });
+        },
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Production tab — one row per completed entry; pinned totals row aggregated
 // as ratio-of-sums (formula dictionary row 24), never an average of row %s.
@@ -117,58 +136,9 @@ function ProductionTab() {
     const rows = report?.rows ?? [];
     const totals: ProductionReportTotals | undefined = report?.totals;
 
-    const exportCsv = () => {
-        const csv = toCsv(
-            ['Date', 'Shift', 'Machine', 'Item', 'Batch', 'Running Hrs', 'Expected Boxes', 'Actual Boxes', 'Expected Pcs', 'Actual Pcs', 'Good Kg', 'Rejection Kg', 'Reviewed Pcs', 'Rejected by QC Kg', 'Lumps Kg', 'Efficiency % (pcs)'],
-            [
-                ...rows.map((r) => [
-                    r.production_date,
-                    r.shift.name,
-                    r.work_center.code,
-                    itemLabel(r.item),
-                    r.batch_number,
-                    r.running_hours,
-                    r.expected_boxes,
-                    r.actual_boxes,
-                    r.expected_pieces,
-                    r.actual_pieces,
-                    r.good_production_kg,
-                    r.rejection_kg_production,
-                    r.qc_reviewed_pieces ?? '',
-                    r.rejection_kg_qc,
-                    r.lumps_kg,
-                    r.efficiency_pct,
-                ]),
-                ...(totals
-                    ? [[
-                          date,
-                          'TOTAL',
-                          '',
-                          '',
-                          '',
-                          '',
-                          totals.expected_boxes,
-                          totals.actual_boxes,
-                          // The totals row's denominator (Σ eligible expected
-                          // pieces) is not on the wire — the server sends the
-                          // finished ratio, not its parts — so this cell stays
-                          // blank rather than summing the row column, which
-                          // would include rows the ratio excluded and read as
-                          // a denominator that does not produce the % beside it.
-                          '',
-                          totals.actual_pieces,
-                          totals.good_production_kg,
-                          totals.rejection_kg_production,
-                          totals.qc_reviewed_pieces ?? '',
-                          totals.rejection_kg_qc,
-                          totals.lumps_kg,
-                          totals.efficiency_pct,
-                      ] as (string | number | null)[]]
-                    : []),
-            ],
-        );
-        downloadCsv(`production-report-${date}.csv`, csv);
-    };
+    // The same three filters getProductionReport() was called with above.
+    const csv = useServerCsv('production_report');
+    const exportCsv = () => csv.mutate({ date, shift_id: shiftId, work_center_id: workCenterId });
 
     return (
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -204,7 +174,7 @@ function ProductionTab() {
                     />
                 </Col>
                 <Col xs={24} md={8} style={{ textAlign: 'right' }}>
-                    <Button onClick={exportCsv} disabled={rows.length === 0}>Export CSV</Button>
+                    <Button onClick={exportCsv} disabled={rows.length === 0} loading={csv.isPending}>Download CSV</Button>
                 </Col>
             </Row>
 
@@ -309,23 +279,9 @@ function ReconciliationTab() {
 
     const dataSource = rows ?? [];
 
-    const exportCsv = () => {
-        const csv = toCsv(
-            ['Date', 'Shift', 'Machine', 'Item', 'Batch', 'Good Kg', 'Confirmed Rejection Kg', 'Lumps Kg', 'Resin Consumed Kg'],
-            dataSource.map((r) => [
-                r.production_date,
-                r.shift.name,
-                r.work_center.code,
-                itemLabel(r.item),
-                r.batch_number,
-                r.good_production_kg,
-                r.confirmed_rejection_kg,
-                r.lumps_kg,
-                r.issued_kg,
-            ]),
-        );
-        downloadCsv(`reconciliation-report-${range[0]}-to-${range[1]}.csv`, csv);
-    };
+    // The same range and shift getReconciliationReport() was called with above.
+    const csv = useServerCsv('reconciliation_report');
+    const exportCsv = () => csv.mutate({ date_from: range[0], date_to: range[1], shift_id: shiftId });
 
     return (
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -352,7 +308,7 @@ function ReconciliationTab() {
                     />
                 </Col>
                 <Col xs={24} md={10} style={{ textAlign: 'right' }}>
-                    <Button onClick={exportCsv} disabled={dataSource.length === 0}>Export CSV</Button>
+                    <Button onClick={exportCsv} disabled={dataSource.length === 0} loading={csv.isPending}>Download CSV</Button>
                 </Col>
             </Row>
 
@@ -444,42 +400,10 @@ function TraceabilityTab() {
 
     const dataSource = rows ?? [];
 
-    // Flattened lot/bag/fed grain — the whole loaded drill-down, one line
-    // per deepest visible level (machine/segment destination).
-    const exportCsv = () => {
-        const flat: (string | number | null)[][] = [];
-        dataSource.forEach((lot) => {
-            if (lot.bags.length === 0) {
-                flat.push([lot.supplier_lot_no, itemLabel(lot.item), lot.received_date, '', '', '', '', '', '', '']);
-                return;
-            }
-            lot.bags.forEach((bag) => {
-                if (bag.fed.length === 0) {
-                    flat.push([lot.supplier_lot_no, itemLabel(lot.item), lot.received_date, bag.barcode, bag.status, bag.remaining_kg, '', '', '', '']);
-                    return;
-                }
-                bag.fed.forEach((feed) => {
-                    flat.push([
-                        lot.supplier_lot_no,
-                        itemLabel(lot.item),
-                        lot.received_date,
-                        bag.barcode,
-                        bag.status,
-                        bag.remaining_kg,
-                        feed.machine.code,
-                        feed.segment?.batch_number ?? '',
-                        feed.loaded_kg,
-                        feed.loads,
-                    ]);
-                });
-            });
-        });
-        const csv = toCsv(
-            ['Supplier Lot', 'Material', 'Received', 'Bag Barcode', 'Bag Status', 'Bag Remaining Kg', 'Machine', 'Batch', 'Loaded Kg', 'Loads'],
-            flat,
-        );
-        downloadCsv(`traceability-report-${range[0]}-to-${range[1]}.csv`, csv);
-    };
+    // The same range getTraceabilityReport() was called with above; the
+    // server flattens the lot → bag → fed drill-down itself.
+    const csv = useServerCsv('traceability_report');
+    const exportCsv = () => csv.mutate({ date_from: range[0], date_to: range[1] });
 
     return (
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -496,7 +420,7 @@ function TraceabilityTab() {
                     />
                 </Col>
                 <Col xs={24} md={16} style={{ textAlign: 'right' }}>
-                    <Button onClick={exportCsv} disabled={dataSource.length === 0}>Export CSV</Button>
+                    <Button onClick={exportCsv} disabled={dataSource.length === 0} loading={csv.isPending}>Download CSV</Button>
                 </Col>
             </Row>
             <Table<TraceabilityReportRow>

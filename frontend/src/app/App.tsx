@@ -4,6 +4,7 @@ import UsersPage from '@/features/access/pages/UsersPage';
 import ChangePasswordPage from '@/features/auth/pages/ChangePasswordPage';
 import LoginPage from '@/features/auth/pages/LoginPage';
 import DashboardPage from '@/features/dashboard/pages/DashboardPage';
+import ExportCenterPage from '@/features/exports/pages/ExportCenterPage';
 import GstRatesPage from '@/features/compliance/pages/GstRatesPage';
 import GstRegistrationsPage from '@/features/compliance/pages/GstRegistrationsPage';
 import GstReportsPage from '@/features/compliance/pages/GstReportsPage';
@@ -178,6 +179,12 @@ export default function App() {
                                     <Route path="/tally-sync" element={<TallySyncPage />} />
                                     <Route path="/tally-sync/agent-tokens" element={<AgentTokensPage />} />
                                     <Route path="/tally-sync/settings" element={<TallySettingsPage />} />
+                                    {/* The Download / Export Center. Open to every
+                                        login like every other route — the SERVER's
+                                        catalogue is what filters: a kind is offered,
+                                        and runnable, only to a reader holding one of
+                                        its permissions. */}
+                                    <Route path="/exports" element={<ExportCenterPage />} />
                                     <Route path="/help" element={<HelpPage />} />
                                     <Route path="/administration/users" element={<UsersPage />} />
                                     <Route path="/administration/roles" element={<RolesPage />} />

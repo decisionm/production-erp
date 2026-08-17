@@ -3,6 +3,7 @@ import {
     BuildOutlined,
     ContactsOutlined,
     DashboardOutlined,
+    DownloadOutlined,
     FileProtectOutlined,
     InboxOutlined,
     KeyOutlined,
@@ -236,6 +237,13 @@ const allNavItems: NavGroup[] = [
             { key: '/tally-sync/settings', label: 'Settings' },
         ],
     },
+    // The Download / Export Center — a utility, not a module, so it sits
+    // with Help below the divider. Deliberately NO `module` gate: every
+    // login may open it, and the server's catalogue decides which kinds
+    // (if any) that login is offered. Gating the entry by one module here
+    // would hide the Tally Sync downloads from an accountant who holds no
+    // production permission, or the reverse.
+    { key: '/exports', icon: <DownloadOutlined />, label: 'Downloads' },
     { key: '/help', icon: <QuestionCircleOutlined />, label: 'Help' },
     {
         key: 'administration',
@@ -306,7 +314,7 @@ export default function AppLayout({ children }: PropsWithChildren) {
     const menuItems = useMemo(() => {
         const items: unknown[] = [];
         navItems.forEach((item) => {
-            if (item.key === '/help') {
+            if (item.key === '/exports') {
                 items.push({ type: 'divider', key: 'divider-utility', style: { borderColor: 'rgba(255,255,255,0.12)', margin: '8px 16px' } });
             }
             items.push(item);
