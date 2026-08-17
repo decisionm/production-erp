@@ -232,8 +232,13 @@ class EmployeeService
                 ->label('payslip'),
 
             // ---- set-null side: the quietest of the three ----------------
+            // includeTrashed because `employees` soft-deletes and this column
+            // is SET NULL: a manager whose only report is ARCHIVED otherwise
+            // reads as clear, and hard-deleting them blanks that archived
+            // record's manager without a word. An archived employee is still
+            // a physical row the database will act on.
             DependencyCheck::table('employees', 'manager_id')
-                ->label('direct report'),
+                ->label('direct report')->includeTrashed(),
             DependencyCheck::table('capas', 'owner')
                 ->label('CAPA owned'),
             DependencyCheck::table('maintenance_work_orders', 'assigned_to')

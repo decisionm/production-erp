@@ -102,7 +102,9 @@ abstract class ProductDefinitionLifecycleTestCase extends TestCase
         foreach ($checks as $check) {
             foreach ($check->coveredCascades() as $child => $columns) {
                 foreach ($columns as $column) {
-                    $declared[mb_strtolower($child)][mb_strtolower($column)] = true;
+                    // Record WHETHER the covering check counts trashed rows,
+                    // not merely that one exists — see the second assertion.
+                    $declared[mb_strtolower($child)][mb_strtolower($column)] = $check->countsTrashed();
                 }
             }
         }
@@ -111,11 +113,37 @@ abstract class ProductDefinitionLifecycleTestCase extends TestCase
 
         $this->assertNotSame([], $undefended, "no non-cascading foreign key points at {$table} — this assertion would prove nothing");
 
+        $connection = $this->app['db']->connection()->getName();
+
         foreach ($undefended as [$child, $column, $rule]) {
             $this->assertTrue(
                 isset($declared[$child][$column]),
                 "{$child}.{$column} references {$table} ON DELETE {$rule}. The schema backstop only sees CASCADE, "
                 .'so nothing would stop a hard delete from rewriting it — declare a DependencyCheck covering it.',
+            );
+
+            // A DECLARATION IS NOT ENOUGH IF IT CANNOT SEE THE ROW. count()
+            // appends `whereNull(deleted_at)` for any child table that soft
+            // deletes unless the check says includeTrashed(), so a covered
+            // column can still report zero while an ARCHIVED child sits there
+            // holding the reference. The delete then succeeds and blanks it.
+            //
+            // This assertion is here because exactly that happened: D-WIRING's
+            // own migration added `deleted_at` to production_standard_packagings
+            // for the first time, which turned Item's existing, correct-looking
+            // check into a blind one. Adding a lifecycle column to any child
+            // table can silently do this again to a check nobody edited —
+            // which is why the rule is enforced from the SCHEMA rather than
+            // trusted to review.
+            if (! DependencyCheck::tableSoftDeletes($connection, $child)) {
+                continue;
+            }
+
+            $this->assertTrue(
+                $declared[$child][$column],
+                "{$child}.{$column} references {$table} ON DELETE {$rule}, and {$child} SOFT DELETES. The covering "
+                .'DependencyCheck does not say ->includeTrashed(), so it counts only live children: an ARCHIVED one '
+                ."reports zero, the hard delete proceeds, and that archived row's reference is rewritten in silence.",
             );
         }
     }

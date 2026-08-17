@@ -119,8 +119,17 @@ class ItemService
             // --- SET NULL children: the delete would SUCCEED and blank these.
             DependencyCheck::table('production_standards', 'item_id')
                 ->label('production standard')->includeTrashed(),
+            // includeTrashed, like its sibling above and for a reason this
+            // very commit created: the D-WIRING migration gave
+            // production_standard_packagings a `deleted_at` for the FIRST
+            // time, and countRows() silently starts excluding trashed rows
+            // the moment a child table soft-deletes. So adding the lifecycle
+            // column turned a complete check into an incomplete one. An Item
+            // named ONLY by an ARCHIVED pack variant then read as clear,
+            // hard-deleted, and — the column is SET NULL — left that variant
+            // permanently unable to say which product it packed.
             DependencyCheck::table('production_standard_packagings', 'item_id')
-                ->label('production standard packaging'),
+                ->label('production standard packaging')->includeTrashed(),
             DependencyCheck::table('shift_production_entries', ['item_id', 'finished_item_id'], 'shift_production_entries')
                 ->label('shift production entry'),
             DependencyCheck::table('mold_change_logs', ['changed_to_item_id', 'changed_from_item_id'], 'mold_change_logs')
