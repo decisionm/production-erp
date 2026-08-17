@@ -1323,7 +1323,7 @@ Deferred items:
   • ShiftSummaryExport columns still read the alias keys (machines_running/
     down); rename to *_now with the header pin when the aliases are dropped.
   • Per-entry cost reads on the entries resource (2 queries/batch) → P7-03.
-PR:                 stacked on #187 (base: feat/phase-5.5-shift-floor)
-Deployment state:   not deployed; stack #179 → … → #187 → this PR
+PR:                 #188 (base: feat/phase-5.5-shift-floor → #187 → … → #179)
+Deployment state:   not deployed; stack #179 → … → #187 → #188
 Next phase:         6 — Purchase → GRN → lot → inventory → consumption; PO → Tally staged, flag OFF
 ```
