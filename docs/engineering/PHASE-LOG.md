@@ -1327,3 +1327,147 @@ PR:                 #188 (base: feat/phase-5.5-shift-floor → #187 → … → 
 Deployment state:   not deployed; stack #179 → … → #187 → #188
 Next phase:         6 — Purchase → GRN → lot → inventory → consumption; PO → Tally staged, flag OFF
 ```
+
+## PHASE 6 — Purchase → GRN → lot → inventory → consumption; PO → Tally staged, flag OFF
+
+```
+Phase:    6 — the purchase chain, and the first ERP-raised Tally voucher, staged
+          (MASTER-PLAN rev 3, P6-01..03; MASTER-PROMPT-AUDIT §7.4)
+Status:   PASS WITH DEFERRED ITEMS
+Branch:   feat/phase-6-purchase-chain (stacked on Phase 5.7 PR #188 → … → #179)
+Dates:    2026-08-17
+
+Goal:
+  Make the accounting half of the final chain a tested contract — PO → GRN →
+  material lot → stock movement → balance → production consumption — give the
+  purchase order the lifecycle it never had (amend, short-close, cancel, show,
+  trace), and STAGE the ERP-raised Purchase Order voucher for Tally behind a
+  flag that defaults OFF. The first live PO write is an owner gate (Q35(d)) and
+  never happens unattended; it did not happen here.
+
+What changed:
+  • PO lifecycle (P6-01/02): amend is Draft-only and records the prior lines as
+    a revision; close (Sent|PartiallyReceived → Closed) and cancel (Draft|Sent
+    with zero receipts → Cancelled, bringing a dead enum case to life) each take
+    a reason and record who and when; a Tally-originated mirror refuses all
+    three ("change it in Tally") — the ERP never rewrites Tally's book. All are
+    POST actions: no PUT, no DELETE, anywhere. send() now raises
+    PurchaseOrderSent after the commit. GET purchase-orders/{po} carries the
+    revisions, the receipts, the Tally link, the staging record and `can`
+    {amend, close, cancel, send} computed by the service, so the screen never
+    re-derives the state machine; GET .../trace walks PO → GRNs → movements
+    (with purpose) → lots → bags → day-bin loads → the consuming segments,
+    through the Inventory and Production SERVICES, never their models. GET
+    goods-receipts/{grn} likewise. FC-06 holds on every one of them: a
+    procurement-only reader gets the key OMITTED and a `rate_withheld` note,
+    never a blank that would read as "no rate".
+  • The chain as a contract (P6-01): three test files walk the REAL endpoints
+    and services — create → send → partial receipt → over-receipt refused by
+    LINE (naming the remaining to 4 dp) → exact remainder → Closed → a receipt
+    against a Closed order refused by STATUS before quantity is even read;
+    after every step the ledger invariant holds (Σ signed movements ==
+    balances, and `inventory:check-ledger` exits 0), one material lot per
+    receipt line, every movement's purpose is Receipt, and exactly ONE Receipt
+    Note per GRN. receipt_key idempotency is proved across the WHOLE chain:
+    the same request twice yields one GRN, one movement set, one lot set, 16
+    bags once, and ONE Tally entry.
+  • PO → Tally, staged (P6-03): `tally-sync.purchase_orders_enabled` defaults
+    FALSE and nothing outside an in-test config() sets it. With it off, send()
+    enqueues nothing and the order says so (`tally_staging.state = 'disabled'`).
+    With it on, enqueuePurchaseOrder REFUSES rather than guesses — party_
+    unmapped (the vendor has no Tally ledger name), item_unmapped, purchase_
+    ledger_unmapped (the Purchase role, not an env default), godown_unresolved,
+    no_lines — and the refusal is recorded on the order for the screen to say
+    out loud. DEC-20260812-002's "must not touch accounts or stock, stated in
+    the code and proved by a test" is proved on BOTH sides: the cloud counts
+    ten tables before and after (a stray stock write would fail the assertion),
+    and the agent pins VCHTYPE/VOUCHERTYPENAME 'Purchase Order' with
+    ISINVOICE=No. The agent's builder (0.3.9, NOT published) was derived from
+    the STRUCTURE of 107 real Purchase Order vouchers the owner exported on
+    12-Aug — tag order, the sign of every amount, the ORDERDUEDATE JD/P pair —
+    read locally and never copied into the repo (Q38). Its golden fixture is
+    synthetic.
+  • Cancelling or closing an order now WITHDRAWS its staged queue row if the
+    agent has not collected it yet, so the agent can never post an order the
+    ERP knows is cancelled; if Tally already has it, the entry is left alone
+    and the fact is recorded — what Tally should be told is Q48.
+
+Tests:
+  Backend 1,526 → 1,595 (1 skipped: the CEC golden, by design) / 14,633
+  assertions. Frontend vitest 304 → 368. Agent 119 → 122. Knowledge sound.
+
+Independent QA + adversarial review (Sonnet QA · Opus rules · Fable correctness):
+  Sonnet PASS with zero findings — it rebuilt the state-machine matrix itself
+  (8 reachable status × mirror combinations driven through the real endpoints,
+  asserting the `can` flags never disagree with the actual HTTP outcome),
+  fired the real PurchaseOrderSent event twice to prove one entry, counted the
+  trace's queries (flat from 1 GRN to 2 GRNs/3 lines/6 bags), and recomputed
+  the ORDERDUEDATE JD epoch independently in Python against the golden.
+  Opus and Fable both returned FAIL, and both were right:
+    P1 · FC-06/Q38 — the redaction commit's own message claimed completeness
+      it did not have: a SECOND supplier from the same export was still named
+      in an evidence note, with an order number and a quantity. Redacted; a
+      full name sweep (every party name extracted from the exports locally and
+      grepped across docs, backend, frontend and the agent) now returns zero.
+    P2 · An under-scheduled PO line staged allocations no real voucher has:
+      quantities that did not sum to the line and a last amount that was not
+      its own quantity × rate. Each schedule is now its own quantity × rate and
+      the unpromised remainder is one more allocation — undated when the order
+      has no expected date, because a due date is never invented.
+    P2 · The trace showed every receipt the movements of every receipt sharing
+      a reference (two blank-reference GRNs each listed both). Receipt lines
+      now carry stock_movement_id and the trace reads by id, saying `by_id` or
+      `by_reference` per row so legacy receipts stay honest.
+    P2 · The trace drawer claimed "nothing has been consumed" where the truth
+      is that consumption is not ATTRIBUTABLE — under the common input a bag
+      belongs to no machine and no batch (FC-01). The words now say that.
+    P3s · the documented reason set matched to the emitted one; the parallel-
+      build scaffolding removed so a renamed route fails instead of skipping;
+      the trace fixture writes its legacy machine-stamped load as the
+      historical row it is (DEC-20260807-006) instead of through the live door;
+      the contract doc's measured counts corrected (105/107, not 107/107) and
+      the second JD pattern stated; the tally-sync catalogue fixtures updated
+      to the shape actually served.
+
+API proof (dev API, Administrator):
+  Recorded in the re-gate; the flag-off path is proved through the REAL send()
+  (HTTP and service): zero tally_sync_entries, tally_staging.state 'disabled'.
+
+Browser proof:
+  NOT DONE (the Chrome extension is still disconnected). The procurement screens
+  are pinned by 50 vitest cases over the pure helpers and by the backend suite;
+  to be re-proven in Phase 8's chain walk.
+
+Data/transaction proof:
+  Nothing that already reaches Tally changed (the Receipt Note payload and
+  builder are byte-identical; the TallySync and agent suites are green). Three
+  additive, reversible migrations (purchase_order_revisions; the close/cancel
+  and tally_staging columns plus vendors.tally_ledger_name;
+  goods_receipt_note_lines.stock_movement_id — no backfill).
+
+Owner-gated items:
+  • Q35(d) — does the accountant want an ORDER voucher in Tally at all? The
+    flag stays FALSE until answered; the first live post is attended.
+  • Q35(c) — whose PO number is authoritative. Staged default is the ERP's
+    own 'PO-{id}', stated as provisional in the contract doc and the builder.
+  • Q35(e) / Q39 — which purchase/tax/rounding ledgers a PO voucher names. No
+    tax and no rounding line is emitted; one Purchase role, or a refusal.
+  • Q40 — the unit. No unit suffix is emitted; bare decimals, as the live Stock
+    Journals already post.
+  • Q48 (NEW) — once Tally has the order, what should reach it when the ERP
+    amends, short-closes or cancels it? Nothing is sent today.
+
+Deferred items:
+  • The ORDERDUEDATE JD/P pair disagrees on 44% of real allocations; the
+    builder derives both from the one ERP due date and the contract doc states
+    the disagreement. The first ATTENDED live post must read the due dates back
+    before a second order is sent.
+  • The machine-stamped `POST production/day-bin/load` write door still exists
+    though DEC-20260807-006 retired that path — engineering cleanup measured
+    against a decision in force, not an owner question (Phase 7/8).
+  • `match: 'by_id'|'by_reference'` is not yet typed in the frontend's
+    procurement types (additive, typechecks clean).
+PR:                 stacked on #188 (base: feat/phase-5.7-shift-summary-cec)
+Deployment state:   not deployed; stack #179 → … → #188 → this PR
+Next phase:         7 — regression, MySQL CI leg, reporting honesty, hardening
+```

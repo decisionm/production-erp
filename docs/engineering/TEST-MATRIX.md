@@ -245,3 +245,26 @@ One estimation engine for preview and entry, versioned, legacy pinned · every e
 
 ### Still open (from the baseline list)
 `OverReceiptException` (**Phase 6 WS-B, in progress**) · CRM · Finance — **Still:** MySQL CI leg (Phase 7). **New (recorded):** P5.7-03 reporting honesty sweep → P7-05; ShiftSummaryExport alias columns; per-entry cost reads (2 queries/batch) on the entries resource → P7-03.
+
+## Phase 6 (feat/phase-6-purchase-chain, gate closed 2026-08-17)
+
+| Suite | Result | Evidence |
+|---|---|---|
+| Pint (whole tree) | PASS | clean |
+| Backend PHPUnit | PASS | **1,595 / 14,633** (1 skipped by design: CecGoldenTest); Phase 5.7 close 1,526 / 13,602; +69: PurchaseOrderLifecycleTest 17 · PurchaseOrderTraceTest 9 · PurchaseOrderTallyStagingTest 27 · PurchaseChainContractTest 6 · OverReceiptContractTest 5 · GoodsReceiptIdempotencyContractTest 4 · additive TallySync catalogue cases |
+| Frontend vitest | PASS | 304 → **368** (`procurement/purchaseOrders.test.ts` 63 · tally-sync catalogue fixtures refreshed) |
+| Typecheck · build | PASS | clean · built |
+| Agent | PASS | 119 → **122** (`purchaseOrder.test.js` 25 incl. the DEC-20260812-002 half and a synthetic byte-exact golden); version 0.3.9 **NOT published** |
+| Factory-knowledge | PASS | exit 0 (Q48 added; preamble → Q49) |
+| Migrations | 3, additive + reversible | purchase_order_revisions · close/cancel + tally_staging + vendors.tally_ledger_name · goods_receipt_note_lines.stock_movement_id (no backfill); rollback→migrate proven |
+| Red-before / green-after | PROVEN | 24 of 26 lifecycle/trace tests red on 404 before the routes; the withdrawal pair red ('pending' where 'dismissed' expected, `after` key undefined); the two-GRN trace defect reproduced (size 2 ≠ 1) before the fix |
+| Sonnet independent QA | **PASS, zero findings** | own state-machine matrix (8 status × mirror combinations, `can` vs actual HTTP), real double-fire of PurchaseOrderSent, trace query count flat 15→16 across a 6× wider chain, JD epoch recomputed independently |
+| Adversarial review | Opus **FAIL** (P1 FC-06 + 4 P2/P3) · Fable **FAIL** (P1 FC-06 + 5 P2/P3) → all fixed → re-gate | the P1 was a real second supplier name still in a committed doc |
+| Browser proof | NOT DONE (extension disconnected) | pinned by 50 vitest helper cases + the backend suite; Phase 8 chain walk |
+| API proof | PASS | flag-off through the REAL send(): zero entries, `tally_staging.state = 'disabled'` |
+
+### Coverage gaps closed this phase
+`OverReceiptException` (the long-standing baseline gap) · PO send() transition · the whole purchase chain as one contract with the ledger invariant after every step · receipt_key idempotency across the chain incl. exactly one Receipt Note · PO lifecycle (amend/close/cancel) with mirror refusal · PO show + trace with FC-06 gating · the first ERP-raised Tally voucher staged, refusing rather than guessing, proved to touch neither accounts nor stock.
+
+### Still open (from the baseline list)
+CRM · Finance — **Still:** MySQL CI leg (**Phase 7, next**). **New (recorded):** the ORDERDUEDATE JD/P read-back at the first attended live post; the machine-stamped `day-bin/load` write door (cleanup against DEC-20260807-006); `match` not yet typed in the frontend procurement types.
