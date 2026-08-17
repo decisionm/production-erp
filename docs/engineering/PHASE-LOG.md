@@ -998,7 +998,7 @@ Deferred items:
 Owner-gated items:  Q33 (490/box mapping), any ambiguous SKU→Tally link, the SKU
                     format programme, Q43 (block vs warn); "must a standard
                     keep one default packaging" — listed, not decided.
-PR:                 (recorded on open)
-Deployment state:   not deployed; stack #179 → … → #185 → this PR
+PR:                 #186 (base: feat/phase-4.5-export-center → #185 → … → #179)
+Deployment state:   not deployed; stack #179 → … → #185 → #186
 Next phase:         5.5 — Shift Floor → Start → Estimation → Complete → Completed Today
 ```
