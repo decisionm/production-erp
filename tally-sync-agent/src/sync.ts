@@ -1,11 +1,13 @@
 import axios from 'axios';
-import { acknowledge, fetchPending, reportFailure, type TallySyncEntry } from './cloudApi';
+import { acknowledge, fetchPending, reportFailure, uploadSnapshot, type TallySyncEntry } from './cloudApi';
 import { getConfig, isConfigured } from './config';
 import logger from './logger';
 import { decideAction } from './postDecision';
 import * as journal from './postJournal';
+import { sendSnapshot } from './snapshot';
 import { postVoucherXml, type TallyImportResult } from './tally/client';
 import { buildVoucherXml } from './tally/voucherBuilders';
+import { agentVersion } from './version';
 
 export interface SyncStatus {
     running: boolean;
@@ -128,6 +130,34 @@ async function reportRejection(entry: TallySyncEntry, message: string): Promise<
     }
 }
 
+/**
+ * Upload the record of this post — the exact XML we sent and what Tally
+ * answered (null when it never did) — to the cloud (Phase 4).
+ *
+ * Called ONLY after the outcome above it is settled: after the ack or the
+ * failure report has run, and only on the paths where an XML was actually
+ * built and posted this cycle. It is a record, not a report — it changes
+ * nothing about the entry, and it is not allowed to fail into the loop:
+ * sendSnapshot never throws, and this wrapper catches anyway, so a cloud
+ * that will not take the snapshot costs one warn line and nothing else.
+ */
+async function snapshot(entry: TallySyncEntry, xml: string, tally: TallyImportResult | null): Promise<void> {
+    try {
+        await sendSnapshot(
+            { entry, xml, tally, agentVersion: agentVersion() },
+            {
+                upload: uploadSnapshot,
+                warn: (message, meta) => logger.warn(message, meta),
+                info: (message, meta) => logger.info(message, meta),
+            },
+        );
+    } catch (err) {
+        logger.warn(`Snapshot upload failed for entry #${entry.id}`, {
+            message: err instanceof Error ? err.message : String(err),
+        });
+    }
+}
+
 async function syncOne(entry: TallySyncEntry): Promise<SyncOutcome> {
     const cfg = getConfig();
     const action = decideAction(entry, journal.lookup(entry.id));
@@ -185,9 +215,13 @@ async function syncOne(entry: TallySyncEntry): Promise<SyncOutcome> {
     }
 
     let posted: TallyImportResult;
+    // Hoisted so the catch below can snapshot the document we actually sent
+    // on the timed-out path; stays null when the builder itself threw (no
+    // XML existed, nothing to record).
+    let xml: string | null = null;
 
     try {
-        const xml = buildVoucherXml(entry, cfg.tallyCompanyName);
+        xml = buildVoucherXml(entry, cfg.tallyCompanyName);
         posted = await postVoucherXml(xml);
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -203,6 +237,12 @@ async function syncOne(entry: TallySyncEntry): Promise<SyncOutcome> {
                 + 'it MAY be in the books. Left queued and untouched; check Tally for this voucher.',
                 { message },
             );
+
+            // The one record that IS useful here: what we sent, and that
+            // nothing came back (tally: null). Cannot change the outcome.
+            if (xml !== null) {
+                await snapshot(entry, xml, null);
+            }
 
             return 'skipped';
         }
@@ -222,6 +262,10 @@ async function syncOne(entry: TallySyncEntry): Promise<SyncOutcome> {
             rawResponse: posted.rawResponse.slice(0, 2000),
         });
 
+        // After the failure report, never before it: the record of what we
+        // sent and what Tally said, for the dashboard drawer.
+        await snapshot(entry, xml, posted);
+
         return 'failed';
     }
 
@@ -229,20 +273,24 @@ async function syncOne(entry: TallySyncEntry): Promise<SyncOutcome> {
     // wrong, so a crash between here and the acknowledgement can't lose it.
     journal.record(entry.id, 'posted', voucherNumberOf(entry));
 
-    if (await acknowledgeWithRetry(entry.id)) {
+    const acknowledged = await acknowledgeWithRetry(entry.id);
+
+    if (acknowledged) {
         journal.forget(entry.id);
         logger.info(`Synced entry #${entry.id} (${entry.tally_voucher_type})`, { message: posted.message });
-
-        return 'synced';
+    } else {
+        logger.error(
+            `Entry #${entry.id} POSTED TO TALLY but the cloud could not be told after ${ACK_ATTEMPTS} attempts. `
+            + 'It stays queued and will be acknowledged on a later poll — the voucher will NOT be posted again. '
+            + 'No failure has been reported, because the voucher is in the books.',
+        );
     }
 
-    logger.error(
-        `Entry #${entry.id} POSTED TO TALLY but the cloud could not be told after ${ACK_ATTEMPTS} attempts. `
-        + 'It stays queued and will be acknowledged on a later poll — the voucher will NOT be posted again. '
-        + 'No failure has been reported, because the voucher is in the books.',
-    );
+    // After the acknowledgement path has run, whichever way it went: the
+    // outcome is settled, so the record cannot alter it.
+    await snapshot(entry, xml, posted);
 
-    return 'skipped';
+    return acknowledged ? 'synced' : 'skipped';
 }
 
 function voucherNumberOf(entry: TallySyncEntry): string | null {

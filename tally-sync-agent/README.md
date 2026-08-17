@@ -8,8 +8,11 @@ The local Windows tray app from `docs/archive/TALLY-SYNC-MASTER-PLAN.md` §11/Ph
 
 ```
 Tray app (this machine)
-  ├─ sync.ts        — poll loop: fetch pending → build XML → post to Tally → ack/fail back to cloud
-  ├─ cloudApi.ts     — GET /tally-sync/pending, POST .../ack, POST .../fail (Sanctum bearer token)
+  ├─ sync.ts        — poll loop: fetch pending → build XML → post to Tally → ack/fail back to cloud → snapshot
+  ├─ cloudApi.ts     — GET /tally-sync/pending, POST .../ack, .../fail, .../snapshot (Sanctum bearer token)
+  ├─ snapshot.ts     — (0.3.8) after each post: {xml, sha256, what Tally answered} uploaded to the cloud as a
+  │                    record — after ack/fail, never before; a failed upload is one warn line, never a failed sync
+  ├─ version.ts      — the agent's version from package.json, stamped on every snapshot (testable outside Electron)
   ├─ tally/client.ts — POST XML to http://<tallyHost>:<tallyPort>, parse response body for real result
   ├─ tally/voucherBuilders/ — one file per Tally voucher type, dispatched by tally_voucher_type
   ├─ tray.ts         — tray icon + menu (status, Sync Now, Pause, View Logs, Settings, Quit)

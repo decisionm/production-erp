@@ -1,13 +1,15 @@
 import axios, { type AxiosInstance } from 'axios';
 import { getConfig } from './config';
+import type { SnapshotBody } from './snapshot';
 import type { MastersPayload } from './tally/masters';
 import type { StockSummaryPayload } from './tally/stockSummary';
 
 /**
  * Matches App\Modules\TallySync\Http\Controllers\TallySyncAgentController
- * exactly: GET /pending, POST /entries/{id}/ack, POST /entries/{id}/fail.
- * Auth is a Sanctum bearer token scoped to tally-sync:poll (for pending)
- * and tally-sync:report (for ack/fail) — see README for how to issue one.
+ * exactly: GET /pending, POST /entries/{id}/ack, POST /entries/{id}/fail,
+ * POST /entries/{id}/snapshot. Auth is a Sanctum bearer token scoped to
+ * tally-sync:poll (for pending) and tally-sync:report (for ack/fail/snapshot)
+ * — see README for how to issue one.
  */
 export interface TallySyncEntry {
     id: number;
@@ -30,6 +32,13 @@ export interface TallySyncEntry {
      */
     delivered_at: string | null;
     created_at: string;
+    /**
+     * sha256 the cloud stamps over the payload it handed us (Phase 4). Echoed
+     * back untouched on the snapshot so the cloud can say whether the XML was
+     * built from the payload it holds NOW or from an earlier one. Optional:
+     * an older cloud does not send it, and this agent never computes it.
+     */
+    payload_hash?: string;
 }
 
 function client(): AxiosInstance {
@@ -55,6 +64,19 @@ export async function acknowledge(entryId: number): Promise<void> {
 
 export async function reportFailure(entryId: number, errorMessage: string): Promise<void> {
     await client().post(`/entries/${entryId}/fail`, { error_message: errorMessage });
+}
+
+/**
+ * Upload the post-Tally snapshot — {xml, sha256, what Tally answered} — for
+ * one entry (Phase 4). POST /entries/{id}/snapshot, tally-sync:report ability.
+ *
+ * A RECORD, not a report: it runs after ack/fail and its failure changes
+ * nothing about the entry — sync.ts wraps it so it can never throw into the
+ * loop. The body is built by snapshot.ts (raw capped at 64 KB, xml omitted
+ * over 2 MB with the hash still sent). The 15 s client timeout applies.
+ */
+export async function uploadSnapshot(entryId: number, body: SnapshotBody): Promise<void> {
+    await client().post(`/entries/${entryId}/snapshot`, body);
 }
 
 export type MastersSyncSummary = Record<string, { created: number; updated: number; total: number }>;
