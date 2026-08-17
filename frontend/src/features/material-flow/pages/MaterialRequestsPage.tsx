@@ -1,0 +1,388 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Alert, Button, Card, Col, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { useMemo, useState } from 'react';
+import { listShifts, listWorkCenters, machineLabel } from '@/features/production/api';
+import { itemLabel } from '@/lib/itemLabel';
+import {
+    apiRefusalMessage,
+    cancelMaterialRequest,
+    createMaterialRequest,
+    listMaterialRequests,
+    listRequestableMaterials,
+    submitMaterialRequest,
+} from '../api';
+import RequestLinesTable from '../components/RequestLinesTable';
+import ThreeStatesLegend from '../components/ThreeStatesLegend';
+import type { CreateMaterialRequestLinePayload, MaterialFlowMaterial, MaterialRequest } from '../types';
+import {
+    ISSUE_IS_NOT_CONSUMPTION,
+    machineAppliesToRequest,
+    machineFieldDecision,
+    REFUSAL_MESSAGE,
+    REQUEST_STATUS_HELP,
+    REQUEST_STATUS_LABEL,
+    REQUEST_STATUS_TONE,
+    TRANSITION_HELP,
+    TRANSITION_LABEL,
+    type MaterialRequestStatus,
+} from '../words';
+
+/**
+ * PRODUCTION'S SIDE OF THE MATERIAL FLOW — ask the store for material, and
+ * then watch what has actually happened to it.
+ *
+ * The screen is built around one refusal to blur: a request that reads
+ * "issued" has had material handed over, and that material is standing in
+ * Production/WIP as stock. It has NOT been consumed. Consumption happens
+ * once, later, when a batch is completed — so every line shows four
+ * separately named quantities (asked for · issued to production, not yet
+ * consumed · still to issue · returned to store) rather than one "done"
+ * number that would quietly mean whichever of them the reader assumed.
+ *
+ * The machine/area field follows FC-01 and nothing else: it appears only for
+ * a material the SERVER says takes one. Resin never does — the factory has
+ * one common loading point, crane-fed and piped to all ten machines
+ * (DEC-20260807-006) — and where the backend has not said, this screen names
+ * no machine and guesses none.
+ */
+const STATUS_FILTERS: { value: MaterialRequestStatus | 'all'; label: string }[] = [
+    { value: 'all', label: 'All requests' },
+    { value: 'draft', label: REQUEST_STATUS_LABEL.draft },
+    { value: 'submitted', label: REQUEST_STATUS_LABEL.submitted },
+    { value: 'partially_issued', label: REQUEST_STATUS_LABEL.partially_issued },
+    { value: 'issued', label: REQUEST_STATUS_LABEL.issued },
+    { value: 'cancelled', label: REQUEST_STATUS_LABEL.cancelled },
+];
+
+interface DraftLine {
+    key: number;
+    item_id: number | null;
+    quantity: number | null;
+    notes: string;
+}
+
+const emptyLine = (key: number): DraftLine => ({ key, item_id: null, quantity: null, notes: '' });
+
+export default function MaterialRequestsPage() {
+    const queryClient = useQueryClient();
+    const [statusFilter, setStatusFilter] = useState<MaterialRequestStatus | 'all'>('all');
+    const [createOpen, setCreateOpen] = useState(false);
+    const [lines, setLines] = useState<DraftLine[]>([emptyLine(0)]);
+    const [shiftId, setShiftId] = useState<number | null>(null);
+    const [workCenterId, setWorkCenterId] = useState<number | null>(null);
+    const [notes, setNotes] = useState('');
+    const [cancelling, setCancelling] = useState<MaterialRequest | null>(null);
+    const [cancelReason, setCancelReason] = useState('');
+
+    const requestsQuery = useQuery({
+        queryKey: ['material-flow', 'requests', statusFilter],
+        queryFn: () => listMaterialRequests(statusFilter === 'all' ? {} : { status: statusFilter }),
+    });
+    const materialsQuery = useQuery({ queryKey: ['material-flow', 'materials'], queryFn: listRequestableMaterials });
+    const shiftsQuery = useQuery({ queryKey: ['production', 'shifts', 'active'], queryFn: () => listShifts(true) });
+    const machinesQuery = useQuery({ queryKey: ['production', 'work-centers', 'active'], queryFn: () => listWorkCenters(true) });
+
+    const materialsById = useMemo(() => {
+        const map = new Map<number, MaterialFlowMaterial>();
+        (materialsQuery.data ?? []).forEach((material) => map.set(material.id, material));
+        return map;
+    }, [materialsQuery.data]);
+
+    const machineDecisionInput = lines.map((line) => (line.item_id === null ? undefined : materialsById.get(line.item_id)));
+    const machineApplies = machineAppliesToRequest(machineDecisionInput);
+    const machineField = machineFieldDecision(machineApplies);
+
+    const invalidate = () => queryClient.invalidateQueries({ queryKey: ['material-flow'] });
+
+    const resetDraft = () => {
+        setLines([emptyLine(0)]);
+        setShiftId(null);
+        setWorkCenterId(null);
+        setNotes('');
+    };
+
+    const createMutation = useMutation({
+        mutationFn: () =>
+            createMaterialRequest({
+                shift_id: shiftId,
+                work_center_id: machineApplies === true ? workCenterId : null,
+                notes: notes.trim() === '' ? null : notes.trim(),
+                lines: lines
+                    .filter((line) => line.item_id !== null && (line.quantity ?? 0) > 0)
+                    .map<CreateMaterialRequestLinePayload>((line) => ({
+                        item_id: line.item_id as number,
+                        quantity: line.quantity as number,
+                        notes: line.notes.trim() === '' ? null : line.notes.trim(),
+                    })),
+            }),
+        onSuccess: () => {
+            message.success('Request raised. Send it to the store when it is ready.');
+            setCreateOpen(false);
+            resetDraft();
+            invalidate();
+        },
+        onError: (error) => message.error(apiRefusalMessage(error, 'The request was refused.')),
+    });
+
+    const submitMutation = useMutation({
+        mutationFn: (request: MaterialRequest) => submitMaterialRequest(request.id),
+        onSuccess: () => {
+            message.success('Sent to the store. Nothing has moved in stock yet.');
+            invalidate();
+        },
+        onError: (error) => message.error(apiRefusalMessage(error, REFUSAL_MESSAGE.request_closed)),
+    });
+
+    const cancelMutation = useMutation({
+        mutationFn: () => cancelMaterialRequest((cancelling as MaterialRequest).id, cancelReason.trim()),
+        onSuccess: () => {
+            setCancelling(null);
+            setCancelReason('');
+            invalidate();
+        },
+        onError: (error) => message.error(apiRefusalMessage(error, REFUSAL_MESSAGE.request_closed)),
+    });
+
+    const validDraftLines = lines.filter((line) => line.item_id !== null && (line.quantity ?? 0) > 0);
+
+    return (
+        <>
+            <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }} wrap>
+                <Typography.Title level={3} style={{ margin: 0 }}>
+                    Material Requests
+                </Typography.Title>
+                <Space wrap>
+                    <Select
+                        value={statusFilter}
+                        onChange={setStatusFilter}
+                        options={STATUS_FILTERS}
+                        style={{ width: 200 }}
+                    />
+                    <Button type="primary" onClick={() => setCreateOpen(true)}>
+                        New request
+                    </Button>
+                </Space>
+            </Space>
+
+            <Alert type="info" showIcon style={{ marginBottom: 16 }} message={ISSUE_IS_NOT_CONSUMPTION} />
+            <ThreeStatesLegend />
+
+            <Table<MaterialRequest>
+                rowKey="id"
+                loading={requestsQuery.isLoading}
+                dataSource={requestsQuery.data?.data}
+                pagination={false}
+                scroll={{ x: 'max-content' }}
+                expandable={{
+                    expandedRowRender: (request) => <RequestLinesTable lines={request.lines} />,
+                }}
+                columns={[
+                    { title: 'Request', dataIndex: 'request_number' },
+                    {
+                        title: 'Status',
+                        render: (_, request) => (
+                            <Tooltip title={REQUEST_STATUS_HELP[request.status]}>
+                                <Tag color={REQUEST_STATUS_TONE[request.status]}>{REQUEST_STATUS_LABEL[request.status]}</Tag>
+                            </Tooltip>
+                        ),
+                    },
+                    { title: 'Raised by', render: (_, request) => request.requested_by_name ?? '—' },
+                    { title: 'Raised at', render: (_, request) => request.requested_at ?? '—' },
+                    { title: 'Shift', render: (_, request) => request.shift_name ?? '—' },
+                    {
+                        title: 'Machine / area',
+                        render: (_, request) =>
+                            request.work_center_name ?? (
+                                <Typography.Text type="secondary">None — common input (FC-01)</Typography.Text>
+                            ),
+                    },
+                    { title: 'Lines', render: (_, request) => request.lines.length },
+                    {
+                        title: 'Actions',
+                        render: (_, request) => (
+                            <Space>
+                                {request.can.submit ? (
+                                    <Tooltip title={TRANSITION_HELP.submit_request}>
+                                        <Button
+                                            size="small"
+                                            type="primary"
+                                            loading={submitMutation.isPending}
+                                            onClick={() => submitMutation.mutate(request)}
+                                        >
+                                            {TRANSITION_LABEL.submit_request}
+                                        </Button>
+                                    </Tooltip>
+                                ) : null}
+                                {request.can.cancel ? (
+                                    <Button size="small" danger onClick={() => setCancelling(request)}>
+                                        {TRANSITION_LABEL.cancel_request}
+                                    </Button>
+                                ) : null}
+                            </Space>
+                        ),
+                    },
+                ]}
+            />
+
+            <Modal
+                open={createOpen}
+                width={860}
+                title="New material request"
+                okText="Raise request"
+                okButtonProps={{ loading: createMutation.isPending }}
+                onCancel={() => setCreateOpen(false)}
+                onOk={() => {
+                    if (validDraftLines.length === 0) {
+                        message.error(REFUSAL_MESSAGE.quantity_not_positive);
+                        return;
+                    }
+                    createMutation.mutate();
+                }}
+                destroyOnHidden
+            >
+                <Row gutter={12} style={{ marginBottom: 12 }}>
+                    <Col xs={24} sm={12}>
+                        <Typography.Text type="secondary">Shift</Typography.Text>
+                        <Select
+                            allowClear
+                            value={shiftId}
+                            onChange={(value) => setShiftId(value ?? null)}
+                            style={{ width: '100%' }}
+                            placeholder="Which shift is asking?"
+                            options={(shiftsQuery.data?.data ?? []).map((shift) => ({ value: shift.id, label: shift.name }))}
+                        />
+                    </Col>
+                    <Col xs={24} sm={12}>
+                        <Typography.Text type="secondary">Machine / area</Typography.Text>
+                        {machineField.show ? (
+                            <Select
+                                allowClear
+                                value={workCenterId}
+                                onChange={(value) => setWorkCenterId(value ?? null)}
+                                style={{ width: '100%' }}
+                                placeholder="Where is it going?"
+                                options={(machinesQuery.data?.data ?? []).map((machine) => ({
+                                    value: machine.id,
+                                    label: machineLabel(machine),
+                                }))}
+                            />
+                        ) : (
+                            <div>
+                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                    {machineField.note}
+                                </Typography.Text>
+                            </div>
+                        )}
+                    </Col>
+                </Row>
+
+                <Card size="small" title="What is needed" style={{ marginBottom: 12 }}>
+                    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                        {lines.map((line) => (
+                            <Row key={line.key} gutter={8} align="middle">
+                                <Col xs={24} sm={11}>
+                                    <Select
+                                        showSearch
+                                        optionFilterProp="label"
+                                        value={line.item_id}
+                                        placeholder="Material"
+                                        style={{ width: '100%' }}
+                                        loading={materialsQuery.isLoading}
+                                        onChange={(value: number) =>
+                                            setLines((current) =>
+                                                current.map((row) => (row.key === line.key ? { ...row, item_id: value } : row)),
+                                            )
+                                        }
+                                        options={(materialsQuery.data ?? []).map((material) => ({
+                                            value: material.id,
+                                            label: itemLabel(material),
+                                        }))}
+                                    />
+                                </Col>
+                                <Col xs={12} sm={5}>
+                                    <InputNumber
+                                        min={0}
+                                        value={line.quantity}
+                                        placeholder={
+                                            line.item_id === null ? 'Quantity' : `Quantity (${materialsById.get(line.item_id)?.uom ?? ''})`
+                                        }
+                                        style={{ width: '100%' }}
+                                        onChange={(value) =>
+                                            setLines((current) =>
+                                                current.map((row) => (row.key === line.key ? { ...row, quantity: value } : row)),
+                                            )
+                                        }
+                                    />
+                                </Col>
+                                <Col xs={12} sm={6}>
+                                    <Input
+                                        value={line.notes}
+                                        placeholder="Note (optional)"
+                                        onChange={(event) =>
+                                            setLines((current) =>
+                                                current.map((row) =>
+                                                    row.key === line.key ? { ...row, notes: event.target.value } : row,
+                                                ),
+                                            )
+                                        }
+                                    />
+                                </Col>
+                                <Col xs={24} sm={2}>
+                                    <Button
+                                        size="small"
+                                        danger
+                                        disabled={lines.length === 1}
+                                        onClick={() => setLines((current) => current.filter((row) => row.key !== line.key))}
+                                    >
+                                        Remove
+                                    </Button>
+                                </Col>
+                            </Row>
+                        ))}
+                        <Button
+                            size="small"
+                            onClick={() => setLines((current) => [...current, emptyLine((current.at(-1)?.key ?? 0) + 1)])}
+                        >
+                            Add a material
+                        </Button>
+                    </Space>
+                </Card>
+
+                <Input.TextArea
+                    rows={2}
+                    value={notes}
+                    onChange={(event) => setNotes(event.target.value)}
+                    placeholder="Anything the store should know"
+                />
+                <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 8, marginBottom: 0 }}>
+                    Raising a request moves nothing in stock. Material leaves the Raw Material Store only when the store
+                    issues it, and even then it is issued to production — not consumed.
+                </Typography.Paragraph>
+            </Modal>
+
+            <Modal
+                open={cancelling !== null}
+                title={`${TRANSITION_LABEL.cancel_request} ${cancelling?.request_number ?? ''}`}
+                okText={TRANSITION_LABEL.cancel_request}
+                okButtonProps={{ danger: true, loading: cancelMutation.isPending }}
+                onCancel={() => setCancelling(null)}
+                onOk={() => {
+                    if (cancelReason.trim() === '') {
+                        message.error(REFUSAL_MESSAGE.reason_missing);
+                        return;
+                    }
+                    cancelMutation.mutate();
+                }}
+                destroyOnHidden
+            >
+                <Typography.Paragraph type="secondary">{REQUEST_STATUS_HELP.cancelled}</Typography.Paragraph>
+                <Input.TextArea
+                    rows={3}
+                    value={cancelReason}
+                    onChange={(event) => setCancelReason(event.target.value)}
+                    placeholder="Why is the request being withdrawn?"
+                />
+            </Modal>
+        </>
+    );
+}

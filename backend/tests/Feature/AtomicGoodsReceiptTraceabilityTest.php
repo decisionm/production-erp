@@ -24,11 +24,12 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Tests\Concerns\RecordsDayBinHistory;
 use Tests\TestCase;
 
 class AtomicGoodsReceiptTraceabilityTest extends TestCase
 {
-    use RefreshDatabase;
+    use RecordsDayBinHistory, RefreshDatabase;
 
     protected function setUp(): void
     {
@@ -366,12 +367,15 @@ class AtomicGoodsReceiptTraceabilityTest extends TestCase
             'warehouse_id' => $warehouse->id,
         ], null)->bags->first();
 
-        $this->postJson('/api/v1/production/day-bin/load', [
-            'work_center_id' => $machineB->id,
-            'barcode' => $bag->barcode,
-            'quantity_kg' => '5',
-            'shift_production_entry_id' => $entry->id,
-        ])->assertStatus(422)->assertJsonValidationErrors('shift_production_entry_id');
+        $this->assertSame(
+            'The selected production segment belongs to a different machine.',
+            $this->refusedDayBinWrite(fn () => $this->loadDayBin([
+                'work_center_id' => $machineB->id,
+                'barcode' => $bag->barcode,
+                'quantity_kg' => '5',
+                'shift_production_entry_id' => $entry->id,
+            ])),
+        );
 
         $this->assertSame('100.0000', (string) $bag->fresh()->remaining_kg);
         $this->assertSame(0, DayBinMovement::query()->count());

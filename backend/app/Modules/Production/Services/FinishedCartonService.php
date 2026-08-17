@@ -3,6 +3,7 @@
 namespace App\Modules\Production\Services;
 
 use App\Modules\Inventory\Models\MaterialLot;
+use App\Modules\Inventory\Services\StoreIssueLedgerReader;
 use App\Modules\Production\Models\DayBinMovement;
 use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\DayBinMovementType;
@@ -47,6 +48,10 @@ class FinishedCartonService
         // The lot-rate seam (FC-06: rates surface ONLY on the internal
         // tier). Production's one door to Inventory's rate contract.
         private readonly BagLotRateResolver $rates,
+        // The store-issue ledger, read only — the shift window's other
+        // source of "which lots reached production" now that the Day Bin has
+        // left the target workflow (Phase 7.5, WS-C).
+        private readonly StoreIssueLedgerReader $storeIssues,
     ) {}
 
     public function generateFor(ShiftProductionEntry $entry, ?int $userId): Collection
@@ -332,6 +337,38 @@ class FinishedCartonService
             $byLot[$lot->id]['loaded_kg'] = bcadd($byLot[$lot->id]['loaded_kg'], (string) $load->quantity_kg, 4);
         }
 
+        // THE SAME WINDOW, ASKED OF THE STORE-ISSUE LEDGER (Phase 7.5, WS-C).
+        // The attribution is by shift window and has always been — it never
+        // claimed a bag reached a batch (FC-01, DEC-20260810-001). What
+        // changed is where material physically arrives from: since
+        // DEC-20260817-001 it is a store issue into Production/WIP, not a
+        // day-bin load. Reading only day_bin_movements would leave this
+        // internal tier empty for every batch run under the current flow,
+        // which is the one failure a provenance surface must not have.
+        //
+        // The two sources are summed into the same per-lot rows because they
+        // are the same physical event recorded under two designs; which
+        // ledger a kilogram came from is reported alongside, so nothing is
+        // silently merged.
+        $issuedKg = '0.0000';
+        foreach ($this->storeIssues->scansBetween($from->utc(), $until->utc()) as $scan) {
+            $lot = $scan->lot;
+            $issuedKg = bcadd($issuedKg, (string) $scan->quantity_kg, 4);
+
+            if ($lot === null) {
+                $unattributed = bcadd($unattributed, (string) $scan->quantity_kg, 4);
+
+                continue;
+            }
+
+            $byLot[$lot->id] ??= [
+                'lot' => $lot,
+                'material' => $scan->line?->item?->name,
+                'loaded_kg' => '0.0000',
+            ];
+            $byLot[$lot->id]['loaded_kg'] = bcadd($byLot[$lot->id]['loaded_kg'], (string) $scan->quantity_kg, 4);
+        }
+
         return [
             ...$base,
             'window' => [
@@ -346,7 +383,30 @@ class FinishedCartonService
                 $byLot,
             )),
             'unattributed_loaded_kg' => $unattributed,
+            // WHICH LEDGER THE KILOGRAMS CAME FROM. `basis` above is the
+            // owner-fixed sentence (DEC-20260810-001 requires the
+            // bin-held-these-lots wording and it is not this workstream's to
+            // reword); this says, without touching it, how much of the window
+            // is historical day-bin evidence and how much is store-issue
+            // evidence.
+            'sources' => [
+                'day_bin_loaded_kg' => $this->sumLoads($loads),
+                'store_issued_kg' => $issuedKg,
+            ],
         ];
+    }
+
+    /**
+     * @param  SupportCollection<int, DayBinMovement>  $loads
+     */
+    private function sumLoads($loads): string
+    {
+        $total = '0.0000';
+        foreach ($loads as $load) {
+            $total = bcadd($total, (string) $load->quantity_kg, 4);
+        }
+
+        return $total;
     }
 
     /**

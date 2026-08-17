@@ -15,6 +15,30 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
+ * HISTORICAL-ONLY READER SINCE PHASE 7.5 (WS-C), and deliberately so.
+ *
+ * DEC-20260817-001 removed the Day Bin from the factory's logical inventory
+ * locations; material now reaches production as a store issue into
+ * Production/WIP. This class is NOT migrated to that ledger, and could not
+ * be: every formula here is scoped to a (machine, item, segment) triple, a
+ * resin issue names no machine (one common piped loading point,
+ * DEC-20260807-006 / FC-01), and no issue names a batch — the trace stops at
+ * the issue. There is nothing in the new ledger to key these sums by.
+ *
+ * So it keeps reading `day_bin_movements`, whose rows are never deleted or
+ * rewritten, and keeps answering correctly about the period they cover. Its
+ * two live writers are untouched by the phase: the common-input bag scan
+ * (FactoryDayBinService::loadBag, which writes work_center_id NULL) and the
+ * closing counts written at completion and handover
+ * (ShiftProductionEntryService::recordClosingDayBin).
+ *
+ * WHAT THAT MEANS GOING FORWARD, stated plainly so no reader is surprised:
+ * no new row carries a machine, so a new segment's `loaded_kg` is 0.0000 and
+ * its `consumed_kg` is null. Null is the honest answer — "we did not count"
+ * is not "nothing was consumed" — and it is not new: it has been so since
+ * DEC-20260807-006 retired the machine-stamped load, ten days before the Day
+ * Bin itself left the target workflow.
+ *
  * The machine-side half of Phase 6 traceability: owns day_bin_movements
  * (the per-machine per-material ledger) and every formula over it. The
  * bag-side half (lots/bags, remaining_kg, FIFO) lives in Inventory's

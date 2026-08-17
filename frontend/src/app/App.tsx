@@ -23,6 +23,8 @@ import BomsPage from '@/features/production/pages/BomsPage';
 import CapacityPlanPage from '@/features/production/pages/CapacityPlanPage';
 import CartonTracePage from '@/features/production/pages/CartonTracePage';
 import FactoryDayBinPage from '@/features/production/pages/FactoryDayBinPage';
+import MaterialRequestsPage from '@/features/material-flow/pages/MaterialRequestsPage';
+import StoreIssueQueuePage from '@/features/material-flow/pages/StoreIssueQueuePage';
 import MoldsPage from '@/features/production/pages/MoldsPage';
 import MrpPage from '@/features/production/pages/MrpPage';
 import ProductionReportsPage from '@/features/production/pages/ReportsPage';
@@ -97,6 +99,12 @@ export default function App() {
                                     <Route path="/inventory/material-lots" element={<MaterialLotsPage />} />
                                     <Route path="/inventory/batches" element={<BatchesPage />} />
                                     <Route path="/inventory/serial-numbers" element={<SerialNumbersPage />} />
+                                    {/* The STORE's half of the Phase 7.5 material
+                                        flow: the queue of what production has asked
+                                        for, fulfilled here. It sits under /inventory
+                                        because the store is its reader — the floor's
+                                        half is /production/material-requests. */}
+                                    <Route path="/inventory/store-issue-queue" element={<StoreIssueQueuePage />} />
                                     {/* Work Centers is retired as a screen, not as a
                                         record: the WorkCenter rows it edited are the
                                         machine master, now shown in full on Machine
@@ -138,6 +146,13 @@ export default function App() {
                                         per-machine bag-level bin bay below it is the
                                         optional detail, not the main path. */}
                                     <Route path="/production/day-bin" element={<FactoryDayBinPage />} />
+                                    {/* Store -> Production material flow (Phase 7.5).
+                                        Two screens, one flow: production asks, the
+                                        store issues. They are separate URLs because
+                                        they are separate readers with separate
+                                        standing, and both name the three states in
+                                        full — issued to production is NOT consumed. */}
+                                    <Route path="/production/material-requests" element={<MaterialRequestsPage />} />
                                     <Route path="/production/shift-summary" element={<ShiftSummaryPage />} />
                                     <Route path="/production/approve-production" element={<ApproveProductionPage />} />
                                     <Route path="/production/reports" element={<ProductionReportsPage />} />

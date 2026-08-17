@@ -1388,10 +1388,19 @@ export interface LoadDayBinPayload {
     override_fifo?: boolean;
 }
 
-export async function loadDayBin(payload: LoadDayBinPayload): Promise<DayBinMovement> {
-    const { data } = await api.post<{ data: DayBinMovement }>('/production/day-bin/load', payload);
-    return data.data;
-}
+/*
+ * loadDayBin / returnDayBin / countDayBin are GONE (Phase 7.5, WS-C).
+ *
+ * No page ever called them, and the three endpoints behind them —
+ * POST production/day-bin/load, day-bin/return and day-bin/count — were
+ * retired with the Day Bin's departure from the target workflow
+ * (DEC-20260817-001; the machine-stamped load was already retired by
+ * DEC-20260807-006, and DEC-20260807-007 records that the bin is never
+ * weighed). The floor's one load flow remains loadFactoryDayBinBag below.
+ *
+ * Their payload types stay above: the day-bin READS (movements, consumption,
+ * per-machine state) are untouched and still serve the historical rows.
+ */
 
 /**
  * The Shift Floor's bag load — POST /production/day-bin/load-bag. The bag's
@@ -1483,22 +1492,12 @@ export interface ReturnDayBinPayload {
     shift_production_entry_id?: number;
 }
 
-export async function returnDayBin(payload: ReturnDayBinPayload): Promise<DayBinMovement> {
-    const { data } = await api.post<{ data: DayBinMovement }>('/production/day-bin/return', payload);
-    return data.data;
-}
-
 export interface CountDayBinPayload {
     work_center_id: number;
     item_id: number;
     /** The weighed/estimated absolute figure — an observation, not a delta. */
     quantity_kg: number;
     shift_production_entry_id?: number;
-}
-
-export async function countDayBin(payload: CountDayBinPayload): Promise<DayBinMovement> {
-    const { data } = await api.post<{ data: DayBinMovement }>('/production/day-bin/count', payload);
-    return data.data;
 }
 
 /**

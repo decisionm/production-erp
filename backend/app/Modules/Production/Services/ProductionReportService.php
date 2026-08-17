@@ -2,6 +2,8 @@
 
 namespace App\Modules\Production\Services;
 
+use App\Modules\Inventory\Models\StoreIssueBagScan;
+use App\Modules\Inventory\Services\StoreIssueLedgerReader;
 use App\Modules\Inventory\Services\TraceabilityService;
 use App\Modules\Production\Models\DayBinMovement;
 use App\Modules\Production\Models\Enums\BatchStatus;
@@ -58,6 +60,11 @@ class ProductionReportService
     public function __construct(
         private readonly ShiftProductionEntryService $entries,
         private readonly TraceabilityService $traceability,
+        // The store-issue ledger, read only — the half of the traceability
+        // chain that replaced the day bin in the target workflow
+        // (Phase 7.5, WS-C). Cross-module read through Inventory's own
+        // service, never through its models.
+        private readonly StoreIssueLedgerReader $storeIssues,
     ) {}
 
     /**
@@ -212,6 +219,16 @@ class ProductionReportService
      * Bag/lot data comes through Inventory's TraceabilityService (their
      * module); the feed map comes from this module's day_bin_movements.
      *
+     * TWO SOURCES SINCE PHASE 7.5, answering different questions. `fed` is
+     * the HISTORICAL machine/segment map from day_bin_movements — kept and
+     * never rewritten, because those rows are the audit record of how the
+     * factory ran under the previous understanding. `issued` is the
+     * store-issue ledger that replaced it (DEC-20260817-001): which bags the
+     * store handed to production, by whom, received by whom, when, and
+     * against which request. It names NO machine and NO batch — the trace
+     * stops at the issue and batch consumption stays calculated (FC-01).
+     * Neither half carries a rate or a supplier (FC-06).
+     *
      * @return array{date_from: string, date_to: string, lots: array<int, array<string, mixed>>}
      */
     public function traceabilityReport(?int $lotId, ?int $itemId, string $dateFrom, string $dateTo): array
@@ -230,6 +247,12 @@ class ProductionReportService
             ->get()
             ->groupBy('material_bag_id');
 
+        // The store-issue half of the same question, one query for the whole
+        // report (Phase 7.5, WS-C).
+        $issues = $bagIds === []
+            ? collect()
+            : $this->storeIssues->scansForBags($bagIds)->groupBy('material_bag_id');
+
         $lotRows = [];
         foreach ($lots as $lot) {
             $bags = [];
@@ -241,6 +264,7 @@ class ProductionReportService
                     'original_kg' => $bag->original_kg,
                     'remaining_kg' => $bag->remaining_kg,
                     'fed' => $this->feedDestinations($feeds->get($bag->id) ?? collect()),
+                    'issued' => $this->issueHandovers($issues->get($bag->id) ?? collect()),
                 ];
             }
 
@@ -297,6 +321,53 @@ class ProductionReportService
         }
 
         return array_values($destinations);
+    }
+
+    /**
+     * Collapse one bag's STORE ISSUE scans into handovers, one row per
+     * issue: how many kg of this bag went, who issued it, who received it,
+     * when, and the request it went out against.
+     *
+     * WHAT IS DELIBERATELY ABSENT: a machine and a batch. A resin request
+     * names no machine (one common piped loading point, DEC-20260807-006)
+     * and no issue names a batch — the trace stops here, and the ERP never
+     * says "this batch used this bag" (FC-01). No rate and no supplier
+     * appear either; those are FC-06 and belong to a different reader.
+     *
+     * @param  \Illuminate\Support\Collection<int, StoreIssueBagScan>  $scans
+     * @return array<int, array<string, mixed>>
+     */
+    private function issueHandovers($scans): array
+    {
+        $handovers = [];
+
+        foreach ($scans as $scan) {
+            $issue = $scan->storeIssue;
+            $key = (int) $scan->store_issue_id;
+
+            if (! isset($handovers[$key])) {
+                $handovers[$key] = [
+                    'store_issue_id' => $key,
+                    'issue_number' => $issue?->issue_number,
+                    'material_request_id' => $issue?->material_request_id,
+                    'status' => $issue?->status?->value,
+                    'issued_at' => $issue?->issued_at?->toIso8601String(),
+                    'issued_by' => $scan->issuedBy === null ? null : [
+                        'id' => $scan->issuedBy->id, 'name' => $scan->issuedBy->name,
+                    ],
+                    'received_by' => $scan->receivedBy === null ? null : [
+                        'id' => $scan->receivedBy->id, 'name' => $scan->receivedBy->name,
+                    ],
+                    'issued_kg' => '0.0000',
+                    'scans' => 0,
+                ];
+            }
+
+            $handovers[$key]['issued_kg'] = bcadd($handovers[$key]['issued_kg'], (string) $scan->quantity_kg, 4);
+            $handovers[$key]['scans']++;
+        }
+
+        return array_values($handovers);
     }
 
     /**

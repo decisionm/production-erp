@@ -21,6 +21,7 @@ use Illuminate\Support\Facades\Event;
 use Laravel\Sanctum\Sanctum;
 use RuntimeException;
 use Spatie\Permission\Models\Permission;
+use Tests\Concerns\RecordsDayBinHistory;
 use Tests\TestCase;
 
 /**
@@ -32,7 +33,7 @@ use Tests\TestCase;
  */
 class SegmentHandoverTest extends TestCase
 {
-    use RefreshDatabase;
+    use RecordsDayBinHistory, RefreshDatabase;
 
     protected function setUp(): void
     {
@@ -168,19 +169,19 @@ class SegmentHandoverTest extends TestCase
         ], $user->id);
         [$bag1, $bag2] = $lot->bags->sortBy('id')->values();
 
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->loadDayBin([
             'barcode' => $bag1->barcode, 'work_center_id' => $machine->id,
             'shift_production_entry_id' => $entry->id,
-        ])->assertSuccessful();
-        $this->postJson('/api/v1/production/day-bin/load', [
+        ]);
+        $this->loadDayBin([
             'barcode' => $bag2->barcode, 'work_center_id' => $machine->id,
             'quantity_kg' => '7.5', 'shift_production_entry_id' => $entry->id,
-        ])->assertSuccessful();
-        $this->postJson('/api/v1/production/day-bin/return', [
+        ]);
+        $this->returnDayBin([
             'work_center_id' => $machine->id, 'item_id' => $resin->id,
             'quantity_kg' => '1.3', 'material_bag_id' => $bag2->id,
             'shift_production_entry_id' => $entry->id,
-        ])->assertSuccessful();
+        ]);
 
         // Handover records the closing count against the OUTGOING segment.
         $response = $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/handover", [
@@ -206,14 +207,14 @@ class SegmentHandoverTest extends TestCase
         $this->assertSame('4.2000', $ledger->openingFor($child, $resin->id));
 
         // Segment 2: load the rest of bag 2 (18.8 kg), close at 2.0.
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->loadDayBin([
             'barcode' => $bag2->barcode, 'work_center_id' => $machine->id,
             'shift_production_entry_id' => $child->id,
-        ])->assertSuccessful();
-        $this->postJson('/api/v1/production/day-bin/count', [
+        ]);
+        $this->countDayBin([
             'work_center_id' => $machine->id, 'item_id' => $resin->id,
             'quantity_kg' => '2.0', 'shift_production_entry_id' => $child->id,
-        ])->assertSuccessful();
+        ]);
 
         $this->getJson('/api/v1/production/day-bin/consumption?shift_production_entry_id='
             .$child->id.'&item_id='.$resin->id)
@@ -253,10 +254,10 @@ class SegmentHandoverTest extends TestCase
             'item_id' => $resin->id, 'received_date' => '2026-07-20',
             'bag_count' => 1, 'bag_weight_kg' => '25', 'total_received_kg' => '25',
         ], $user->id);
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->loadDayBin([
             'barcode' => $lot->bags->first()->barcode, 'work_center_id' => $machine->id,
             'shift_production_entry_id' => $entry->id,
-        ])->assertSuccessful();
+        ]);
 
         // Claiming 40 kg remain when only 25 were ever loaded: refused,
         // and the batch must NOT have been completed by the failed attempt.

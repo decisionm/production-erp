@@ -234,6 +234,25 @@ class TraceabilityService
                 }
             }
 
+            // EXACTLY ONE IDENTIFIER, NAMED EXPLICITLY. Both halves of this
+            // guard used to sit in the day-bin/load FormRequest, retired with
+            // its endpoint (Phase 7.5, WS-C) — and they belong on the writer
+            // anyway. NEITHER identifier is refused in words instead of
+            // tripping over an undefined key; BOTH is refused because the
+            // query below silently prefers the id, so a caller sending a
+            // mismatched pair would pour out of a bag it did not name.
+            if (! isset($data['material_bag_id']) && ! isset($data['barcode'])) {
+                throw ValidationException::withMessages([
+                    'barcode' => 'Name the bag being loaded — send either its barcode or its material_bag_id.',
+                ]);
+            }
+
+            if (isset($data['material_bag_id']) && isset($data['barcode'])) {
+                throw ValidationException::withMessages([
+                    'material_bag_id' => 'Send either material_bag_id or barcode, not both.',
+                ]);
+            }
+
             $bag = MaterialBag::query()
                 ->when(
                     isset($data['material_bag_id']),

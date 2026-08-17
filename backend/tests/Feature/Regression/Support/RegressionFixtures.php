@@ -21,10 +21,14 @@ use App\Modules\HRMS\Models\LeaveBalance;
 use App\Modules\HRMS\Models\LeaveRequest;
 use App\Modules\HRMS\Models\LeaveType;
 use App\Modules\Inventory\Models\Batch;
+use App\Modules\Inventory\Models\Enums\MaterialRequestStatus;
 use App\Modules\Inventory\Models\Enums\SerialNumberStatus;
+use App\Modules\Inventory\Models\Enums\StoreIssueStatus;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\MaterialLot;
+use App\Modules\Inventory\Models\MaterialRequest;
 use App\Modules\Inventory\Models\SerialNumber;
+use App\Modules\Inventory\Models\StoreIssue;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Maintenance\Models\Asset;
@@ -356,6 +360,45 @@ trait RegressionFixtures
         $quotation = Quotation::create(['opportunity_id' => $opportunity->id, 'customer_id' => $customer->id, 'quotation_date' => '2026-08-12', 'created_by' => $actor->id]);
         $quotation->lines()->create(['item_id' => $bottle->id, 'quantity' => '1', 'unit_price' => '1.0000']);
 
+        // ---- Store → production material flow (Phase 7.5) -------------------
+        // A consumable request, so it legitimately names a machine; a resin
+        // request would carry none (FC-01 / DEC-20260807-006).
+        $materialRequest = MaterialRequest::create([
+            'status' => MaterialRequestStatus::Submitted,
+            'requested_by' => $actor->id,
+            'requested_at' => '2026-08-12 07:00:00',
+            'submitted_at' => '2026-08-12 07:05:00',
+            'shift_id' => $shift->id,
+            'work_center_id' => $machine->id,
+        ]);
+        $materialRequest->lines()->create([
+            'item_id' => $carton->id, 'quantity' => '40', 'uom' => $carton->uom,
+        ]);
+
+        // The store's answer to it: a handover into Production/WIP. Written
+        // straight to the models rather than through StoreIssueService, so
+        // this fixture stays a fixture — it must not move stock or need a
+        // configured WIP location to exist (Phase 7.5, WS-B).
+        $wip = Warehouse::firstOrCreate(['code' => 'WIP'], ['name' => 'Work In Progress', 'is_active' => false]);
+        $storeIssue = StoreIssue::create([
+            'issue_number' => 'SI-999001',
+            'material_request_id' => $materialRequest->id,
+            'status' => StoreIssueStatus::Issued,
+            'issued_by' => $actor->id,
+            'received_by' => $actor->id,
+            'issued_at' => '2026-08-12 07:30:00',
+        ]);
+        $storeIssue->lines()->create([
+            'material_request_line_id' => $materialRequest->lines()->value('id'),
+            'quantity_requested' => '40',
+            'item_id' => $carton->id,
+            'from_warehouse_id' => $rm->id,
+            'to_warehouse_id' => $wip->id,
+            'quantity_issued' => '25',
+            'quantity_returned' => '0',
+            'uom' => $carton->uom,
+        ]);
+
         // ---- Compliance -----------------------------------------------------
         $gstRate = GstRate::create(['hsn_sac_code' => '99999999', 'description' => 'Regression rate', 'rate_percent' => '18.00']);
         $gstRegistration = GstRegistration::create(['gstin' => '33AAAAA0000A1Z5', 'state_code' => '33', 'state_name' => 'Regression State', 'is_primary' => true]);
@@ -375,6 +418,7 @@ trait RegressionFixtures
             'bank', 'revenue', 'journal',
             'lead', 'opportunity', 'quotation',
             'gstRate', 'gstRegistration',
+            'materialRequest', 'storeIssue',
         );
     }
 }

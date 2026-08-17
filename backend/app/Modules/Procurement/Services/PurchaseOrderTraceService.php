@@ -6,6 +6,7 @@ use App\Modules\Inventory\Models\MaterialBag;
 use App\Modules\Inventory\Models\MaterialLot;
 use App\Modules\Inventory\Models\StockMovement;
 use App\Modules\Inventory\Services\StockMovementService;
+use App\Modules\Inventory\Services\StoreIssueLedgerReader;
 use App\Modules\Inventory\Services\TraceabilityService;
 use App\Modules\Procurement\Http\Resources\PurchaseOrderLineResource;
 use App\Modules\Procurement\Models\GoodsReceiptNote;
@@ -63,6 +64,9 @@ class PurchaseOrderTraceService
         private readonly StockMovementService $stock,
         private readonly TraceabilityService $traceability,
         private readonly DayBinLedgerService $dayBin,
+        // The store-issue ledger, read only — where this order's bags went
+        // once the Day Bin left the target workflow (Phase 7.5, WS-C).
+        private readonly StoreIssueLedgerReader $storeIssues,
     ) {}
 
     /**
@@ -129,6 +133,16 @@ class PurchaseOrderTraceService
                 ->map(fn (GoodsReceiptNote $receipt) => $this->receiptRow($order, $receipt, $loadsByBag, $showsCost))
                 ->all(),
             'consumption' => $this->consumptionRows($loadsByBag->flatten(1), $showsCost),
+            // WHERE THIS ORDER'S BAGS WENT UNDER THE CURRENT FLOW
+            // (Phase 7.5, WS-C). `consumption` above is the HISTORICAL
+            // machine/segment answer, and it only ever fills for
+            // machine-stamped day-bin rows — those doors are closed, so for
+            // material received from here on it is legitimately empty. This
+            // block is the answer that replaced it, and it stops at the
+            // ISSUE: which bags the store handed to production, how many kg,
+            // by whom, received by whom, when, against which request. No
+            // machine and no batch, because an issue names neither (FC-01).
+            'issued_to_production' => $this->issuedToProductionRows($bagIds),
         ];
     }
 
@@ -333,6 +347,62 @@ class PurchaseOrderTraceService
             }
 
             $rows[$key]['loaded_kg_from_this_order'] = bcadd($rows[$key]['loaded_kg_from_this_order'], (string) $load->quantity_kg, 4);
+        }
+
+        return array_values($rows);
+    }
+
+    /**
+     * Where this order's bags went under the CURRENT flow: one row per store
+     * issue, with the bags of this order that rode on it (Phase 7.5, WS-C).
+     *
+     * The trace stops here on purpose. The ERP can say "these bags were
+     * issued to production, this many kg, by this person, received by that
+     * person, at this time, against this request" — and it never says "this
+     * batch used this bag" (FC-01). Batch consumption stays calculated, and
+     * the `consumption` block above is where it is read.
+     *
+     * FC-06: nothing below is money and no supplier appears — the store
+     * issue ledger carries no rate at all, so this section is safe for every
+     * reader the drawer already admits, cost gate or not.
+     *
+     * @param  list<int>  $bagIds
+     * @return list<array<string, mixed>>
+     */
+    private function issuedToProductionRows(array $bagIds): array
+    {
+        $rows = [];
+
+        foreach ($this->storeIssues->scansForBags($bagIds) as $scan) {
+            $issue = $scan->storeIssue;
+            $key = (int) $scan->store_issue_id;
+
+            if (! isset($rows[$key])) {
+                $rows[$key] = [
+                    'store_issue_id' => $key,
+                    'issue_number' => $issue?->issue_number,
+                    'material_request_id' => $issue?->material_request_id,
+                    'status' => $issue?->status?->value,
+                    'issued_at' => $issue?->issued_at?->toIso8601String(),
+                    'issued_by' => $scan->issuedBy === null ? null : ['id' => $scan->issuedBy->id, 'name' => $scan->issuedBy->name],
+                    'received_by' => $scan->receivedBy === null ? null : ['id' => $scan->receivedBy->id, 'name' => $scan->receivedBy->name],
+                    'item' => $this->itemStub($scan->line?->item),
+                    'issued_kg_from_this_order' => '0.0000',
+                    'bags' => [],
+                ];
+            }
+
+            $rows[$key]['issued_kg_from_this_order'] = bcadd(
+                $rows[$key]['issued_kg_from_this_order'],
+                (string) $scan->quantity_kg,
+                4,
+            );
+            $rows[$key]['bags'][] = [
+                'material_bag_id' => (int) $scan->material_bag_id,
+                'barcode' => $scan->bag?->barcode,
+                'quantity_kg' => (string) $scan->quantity_kg,
+                'scanned_at' => $scan->scanned_at?->toIso8601String(),
+            ];
         }
 
         return array_values($rows);

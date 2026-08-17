@@ -4,14 +4,14 @@ namespace App\Modules\Production\Services;
 
 use App\Models\User;
 use App\Modules\Core\Services\AppSettingService;
-use App\Modules\Inventory\Exceptions\BagOverloadException;
-use App\Modules\Inventory\Models\Enums\MaterialBagStatus;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\MaterialBag;
 use App\Modules\Inventory\Models\StockBalance;
 use App\Modules\Inventory\Models\StockMovement;
 use App\Modules\Inventory\Models\Warehouse;
+use App\Modules\Inventory\Services\MaterialBagIssueResolver;
 use App\Modules\Inventory\Services\StockMovementService;
+use App\Modules\Inventory\Services\StoreIssueLedgerReader;
 use App\Modules\Inventory\Services\WarehouseService;
 use App\Modules\Production\Models\DayBinMovement;
 use App\Modules\Production\Models\Enums\DayBinMovementType;
@@ -98,6 +98,15 @@ class FactoryDayBinService
         // mechanism.
         private readonly ResinPoolService $pool,
         private readonly BagLotRateResolver $rates,
+        // THE ONE SCANNER. A barcode → bag → lot → kilograms reading, with
+        // the incoming-QC and over-pour refusals that belong to it, lifted
+        // out of loadBag() unchanged so the store-issue handover cannot grow
+        // a second, quietly divergent copy of it (Phase 7.5, WS-B).
+        private readonly MaterialBagIssueResolver $bags,
+        // THE STORE-ISSUE LEDGER, read only. The common-input estimate's
+        // numerator has to include material issued to Production/WIP now
+        // that the Day Bin has left the target workflow (Phase 7.5, WS-C).
+        private readonly StoreIssueLedgerReader $storeIssues,
     ) {}
 
     /**
@@ -185,71 +194,22 @@ class FactoryDayBinService
             ]);
         }
 
-        $barcode = trim($barcode);
-        if ($barcode === '') {
-            throw ValidationException::withMessages([
-                'barcode' => 'Scan or type a bag barcode.',
-            ]);
-        }
-
         return DB::transaction(function () use ($barcode, $quantityKg, $recordedBy, $supervisorId, $ackReason, $ackNote) {
-            $bag = MaterialBag::query()->where('barcode', $barcode)->lockForUpdate()->first();
-            if ($bag === null) {
-                throw ValidationException::withMessages([
-                    'barcode' => 'Unknown bag barcode — no registered bag carries this code.',
-                ]);
-            }
-
-            if ($bag->status === MaterialBagStatus::Consumed || bccomp((string) $bag->remaining_kg, '0', 4) !== 1) {
-                throw ValidationException::withMessages([
-                    'barcode' => "Bag {$bag->barcode} is already consumed — nothing is left in it to load.",
-                ]);
-            }
-
-            // ARRIVAL HOLD (owner-confirmed): a bag keeps its permanent
-            // identity from the moment the lorry is unloaded, but it is not
-            // production's until Incoming QC says so.
-            if ($bag->status === MaterialBagStatus::WaitingQc) {
-                throw ValidationException::withMessages([
-                    'barcode' => "Bag {$bag->barcode} is waiting for incoming QC — it cannot be loaded until quality releases it.",
-                ]);
-            }
-
-            if ($bag->status === MaterialBagStatus::RejectedQc) {
-                throw ValidationException::withMessages([
-                    'barcode' => "Bag {$bag->barcode} was rejected by incoming QC — it is out of usable stock and cannot be loaded.",
-                ]);
-            }
-
-            if ($bag->current_warehouse_id === null) {
-                throw ValidationException::withMessages([
-                    'barcode' => "Bag {$bag->barcode} has no store recorded against it — register the lot with its warehouse first.",
-                ]);
-            }
-
-            // THE "ALREADY IN THE DAY BIN" REFUSAL IS GONE, with the transfer
-            // it existed to protect.
+            // THE BARCODE, THE BAG, THE LOT AND THE KILOGRAMS — resolved by
+            // the one shared scanner (MaterialBagIssueResolver), which is
+            // this method's own resolution and its own refusals, moved out
+            // unchanged so the store-issue handover (Phase 7.5) reads a
+            // barcode exactly as the floor does. Blank barcode, unknown
+            // barcode, a consumed or empty bag, the incoming-QC arrival
+            // hold, a bag with no store, and the over-pour guard all still
+            // refuse with the same words in the same order.
             //
-            // It refused a scan whose bag already sat in the day-bin
-            // warehouse, which was right while loading MOVED stock between two
-            // warehouses. Under one accounting godown the store and the day bin
-            // are the same warehouse for every bag in the factory, so that
-            // check would have refused EVERY SCAN — the common input would have
-            // stopped working the moment the roles were pointed at the real
-            // Tally godown.
-
-            $remaining = bcadd((string) $bag->remaining_kg, '0', 4);
-            $quantity = $quantityKg !== null ? bcadd($quantityKg, '0', 4) : $remaining;
-
-            if (bccomp($quantity, '0', 4) !== 1 || bccomp($quantity, $remaining, 4) === 1) {
-                throw BagOverloadException::make($bag->barcode, $quantity, $remaining);
-            }
-
-            // THE LOT (and therefore the material) IS RESOLVED BEFORE ANY
-            // MUTATION, because the acknowledgement gate below needs to know
-            // which material the common input is being topped up with, and a
-            // 422 must never leave a half-applied scan behind it.
-            $lot = $bag->lot()->first();
+            // THE "ALREADY IN THE DAY BIN" REFUSAL IS STILL GONE, with the
+            // transfer it existed to protect: under one accounting godown the
+            // store and the day bin are the same warehouse for every bag in
+            // the factory, so that check would have refused EVERY SCAN.
+            ['bag' => $bag, 'lot' => $lot, 'quantity' => $quantity, 'remaining' => $remaining, 'full' => $fullLoad]
+                = $this->bags->resolve($barcode, $quantityKg);
 
             $this->guardCommonInputBalance(
                 itemId: (int) $lot->item_id,
@@ -259,18 +219,9 @@ class FactoryDayBinService
             // A load that drives remaining_kg to 0 leaves the bag Consumed
             // (it holds nothing any more); a partial load pours off the
             // weighed kg and the bag stays InStore, because it is still
-            // physically in the store holding its remainder.
-            //
-            // NO MACHINE IS STAMPED ON THE BAG. day_bin_work_center_id keeps
-            // whatever history it already holds and is no longer written
-            // here: a bag at the common input is not at a machine, and
-            // recording one would re-assert the claim the owner removed.
-            $fullLoad = bccomp($quantity, $remaining, 4) === 0;
-            $bag->remaining_kg = bcsub($remaining, $quantity, 4);
-            if ($fullLoad) {
-                $bag->status = MaterialBagStatus::Consumed;
-            }
-            $bag->save();
+            // physically in the store holding its remainder. No machine is
+            // stamped on the bag.
+            $this->bags->pour($bag, $quantity, $remaining, $fullLoad);
 
             $notes = null;
             if ($supervisorId !== null) {
@@ -677,9 +628,32 @@ class FactoryDayBinService
                 }
             });
 
-        // No load of anything means no baseline for anything — there is
-        // nothing to estimate against, and reporting the factory's whole
-        // consumption history as a deficit would be inventing a shortage.
+        // AND EVERY STORE ISSUE, on exactly the same footing (Phase 7.5,
+        // WS-C). DEC-20260817-001 retires the Day Bin from the target
+        // workflow: material now reaches production as a store issue into
+        // Production/WIP, so an estimate that counted only day-bin Load rows
+        // would keep subtracting the factory's whole consumption from a
+        // numerator that had stopped growing — and would report a deficit
+        // that is an artefact of the migration, not a shortage on the floor.
+        //
+        // NET of returns, per line, and cancelled issues excluded — that is
+        // StoreIssueLedgerReader's contract. A partially returned issue
+        // contributes only the part that stayed with production.
+        foreach ($this->storeIssues->netIssuedKgByItem() as $key => $issued) {
+            $loaded[$key] = bcadd($loaded[$key] ?? '0.0000', $issued['kg'], 4);
+
+            if (! isset($firstLoadAt[$key]) || $issued['first_at']->lessThan($firstLoadAt[$key])) {
+                $firstLoadAt[$key] = $issued['first_at'];
+            }
+            if (! isset($lastLoadAt[$key]) || $issued['last_at']->greaterThan($lastLoadAt[$key])) {
+                $lastLoadAt[$key] = $issued['last_at'];
+            }
+        }
+
+        // Nothing loaded and nothing issued means no baseline for anything —
+        // there is nothing to estimate against, and reporting the factory's
+        // whole consumption history as a deficit would be inventing a
+        // shortage.
         if ($loaded === []) {
             return collect();
         }

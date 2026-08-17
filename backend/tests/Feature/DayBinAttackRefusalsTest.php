@@ -16,6 +16,7 @@ use App\Modules\TallySync\Models\TallySyncEntry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Tests\Concerns\RecordsDayBinHistory;
 use Tests\TestCase;
 
 /**
@@ -32,7 +33,7 @@ use Tests\TestCase;
  */
 class DayBinAttackRefusalsTest extends TestCase
 {
-    use RefreshDatabase;
+    use RecordsDayBinHistory, RefreshDatabase;
 
     protected function setUp(): void
     {
@@ -89,10 +90,10 @@ class DayBinAttackRefusalsTest extends TestCase
 
         $entryId = $this->startBatch($shift->id, $machine->id, $bottle->id, $warehouse->id);
 
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->loadDayBin([
             'barcode' => $lot->bags->first()->barcode, 'work_center_id' => $machine->id,
             'shift_production_entry_id' => $entryId, 'quantity_kg' => '10',
-        ])->assertSuccessful();
+        ]);
 
         $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/complete", [
             'quantity_produced' => '100',
@@ -101,10 +102,13 @@ class DayBinAttackRefusalsTest extends TestCase
 
         // The segment is closed. A return tied to it now must be refused —
         // its consumption figure was already computed and submitted.
-        $this->postJson('/api/v1/production/day-bin/return', [
-            'work_center_id' => $machine->id, 'item_id' => $resin->id,
-            'quantity_kg' => '1', 'shift_production_entry_id' => $entryId,
-        ])->assertStatus(422)->assertJsonFragment(['message' => 'Segment already completed — day-bin movements cannot reference shift production entry #'.$entryId.' because it is no longer in progress.']);
+        $this->assertSame(
+            'Segment already completed — day-bin movements cannot reference shift production entry #'.$entryId.' because it is no longer in progress.',
+            $this->refusedDayBinWrite(fn () => $this->returnDayBin([
+                'work_center_id' => $machine->id, 'item_id' => $resin->id,
+                'quantity_kg' => '1', 'shift_production_entry_id' => $entryId,
+            ])),
+        );
     }
 
     // -----------------------------------------------------------------
@@ -182,11 +186,16 @@ class DayBinAttackRefusalsTest extends TestCase
         ], $user->id);
         $entryId = $this->startBatch($shift->id, $machine->id, $bottle->id, $warehouse->id);
 
+        // The retired door's FormRequest refused these with a `quantity_kg`
+        // validation error; the guard that actually matters is the one in
+        // TraceabilityService::loadBagToDayBin, which refuses any quantity
+        // that is not strictly positive — so nothing weakened when the door
+        // closed. The surviving scan door keeps its own `gt:0` rule too.
         foreach (['0', '-5'] as $badQuantity) {
-            $this->postJson('/api/v1/production/day-bin/load', [
+            $this->refusedDayBinWrite(fn () => $this->loadDayBin([
                 'barcode' => $lot->bags->first()->barcode, 'work_center_id' => $machine->id,
                 'shift_production_entry_id' => $entryId, 'quantity_kg' => $badQuantity,
-            ])->assertStatus(422)->assertJsonValidationErrors(['quantity_kg']);
+            ]));
         }
 
         $this->assertSame('25.0000', (string) $lot->bags->first()->fresh()->remaining_kg);
@@ -205,10 +214,10 @@ class DayBinAttackRefusalsTest extends TestCase
         $entryId = $this->startBatch($shift->id, $machine->id, $bottle->id, $warehouse->id);
 
         // Fully consume the bag with one full-bag scan (no quantity_kg).
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->loadDayBin([
             'barcode' => $bag->barcode, 'work_center_id' => $machine->id,
             'shift_production_entry_id' => $entryId,
-        ])->assertSuccessful();
+        ]);
 
         $bag->refresh();
         $this->assertSame('0.0000', (string) $bag->remaining_kg);
@@ -216,10 +225,10 @@ class DayBinAttackRefusalsTest extends TestCase
 
         // Scanning the same, now-empty bag again must be refused, not
         // silently accepted as a zero-kg load.
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->refusedDayBinWrite(fn () => $this->loadDayBin([
             'barcode' => $bag->barcode, 'work_center_id' => $machine->id,
             'shift_production_entry_id' => $entryId,
-        ])->assertStatus(422);
+        ]));
     }
 
     // -----------------------------------------------------------------
@@ -249,16 +258,16 @@ class DayBinAttackRefusalsTest extends TestCase
 
         $entryA = $this->startBatch($shift->id, $machineA->id, $bottle->id, $warehouse->id);
 
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->loadDayBin([
             'barcode' => $bag->barcode, 'work_center_id' => $machineA->id,
             'shift_production_entry_id' => $entryA, 'quantity_kg' => '12',
-        ])->assertSuccessful();
+        ]);
 
         // The rest of the SAME bag is carried to machine B and poured in.
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->loadDayBin([
             'barcode' => $bag->barcode, 'work_center_id' => $machineB->id,
             'quantity_kg' => '8',
-        ])->assertSuccessful();
+        ]);
 
         $bag->refresh();
         $this->assertSame('0.0000', (string) $bag->remaining_kg, 'The bag is now fully poured out, split across two machines.');

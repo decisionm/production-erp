@@ -5,6 +5,8 @@ namespace App\Modules\Production\Services;
 use App\Modules\Core\Services\AppSettingService;
 use App\Modules\Inventory\Models\StockBalance;
 use App\Modules\Inventory\Models\Warehouse;
+use App\Modules\Inventory\Services\ProductionWipLocationResolver;
+use App\Modules\Inventory\Services\StoreIssueService;
 use App\Modules\Inventory\Services\WarehouseService;
 use Illuminate\Validation\ValidationException;
 
@@ -70,6 +72,15 @@ class FactoryWarehouseResolver
         private readonly AppSettingService $settings,
         private readonly WarehouseService $warehouses,
         private readonly FactoryDayBinService $dayBinService,
+        // WHERE MATERIAL ISSUED TO PRODUCTION IS STANDING
+        // (DEC-20260817-001). Read, never written, from here: this
+        // class only needs to know which row it is, and the resolver
+        // deliberately does not filter is_active for it — see its own
+        // docblock for why a deactivated row must still be findable.
+        private readonly ProductionWipLocationResolver $productionWip,
+        // Whether the STORE actually issued this material into Production/WIP
+        // — read through Inventory's own service, never its tables.
+        private readonly StoreIssueService $storeIssues,
     ) {}
 
     /**
@@ -163,6 +174,33 @@ class FactoryWarehouseResolver
      */
     public function consumptionSource(int $itemId): ?Warehouse
     {
+        // PRODUCTION/WIP FIRST (Phase 7.5, DEC-20260817-001). Once the store
+        // has ISSUED this material to production, the kilograms are standing
+        // in Production/WIP and that is where the batch consumes them from —
+        // anywhere else would issue stock out of a location that no longer
+        // holds it and strand the issued material where nothing can draw it.
+        //
+        // TWO CONDITIONS, NOT ONE, and the second is the important one.
+        // The stock balance decides where the material is — never a name or
+        // a person's answer, same as the day-bin branch below. But the WIP
+        // row is OLDER THAN THIS PHASE and already carries balances from the
+        // rehearsal data, so "WIP holds some" alone would fire on material
+        // no store issue ever put there and quietly redirect the first
+        // completion after deploy. A STORE ISSUE has to have put it there.
+        //
+        // With both satisfied, a location holding SOME but not enough still
+        // wins — that is the real shortage the completion is meant to
+        // report, not a signal to issue from somewhere the material never
+        // was. A factory that has issued nothing sees no change at all.
+        $wip = $this->productionWip->warehouse();
+
+        if ($wip !== null
+            && $this->holdsStock($wip, $itemId)
+            && $this->storeIssues->hasIssuedIntoProduction($itemId, $wip->id)
+        ) {
+            return $wip;
+        }
+
         $bin = $this->dayBin();
 
         if ($bin !== null && $this->holdsStock($bin, $itemId)) {

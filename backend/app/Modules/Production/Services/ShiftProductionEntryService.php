@@ -1563,6 +1563,16 @@ class ShiftProductionEntryService
      * same way any count does, because it IS a count row — that is the only
      * movement type the ledger has for an absolute observation.
      *
+     * HISTORICAL-ONLY BASIS (Phase 7.5, WS-C). This opening arithmetic is
+     * NOT migrated to the store-issue ledger, for the reason written on
+     * DayBinLedgerService: every term is per (machine, item, segment), and a
+     * resin issue names no machine (DEC-20260807-006 / FC-01) and no issue
+     * names a batch. The one writer this basis actually depends on —
+     * recordClosingDayBin, below — is untouched by the phase, so handover
+     * keeps working exactly as it does today: the outgoing segment's closing
+     * becomes the incoming one's opening, weighed where the floor weighed it
+     * and derived where it did not.
+     *
      * A WEIGHED COUNT ALWAYS WINS. The test is closingFor() === null, not
      * "was this item in the payload", so a count recorded mid-shift from the
      * floor screen counts as weighed too — nothing derived ever overwrites a
@@ -2728,6 +2738,17 @@ class ShiftProductionEntryService
             // Day-bin movements are never reversed here. The day bin is a
             // physical place on the floor — resin that left it did leave it,
             // and no status change puts it back in the bin.
+            //
+            // HISTORICAL-ONLY BLOCKER (Phase 7.5, WS-C), and it has no twin
+            // on the new side because there is nothing to build one from: a
+            // material request carries a shift and, for a consumable, a work
+            // centre — never a batch — and a store issue carries no batch
+            // either (FC-01, the trace stops at the issue). So no store issue
+            // can be attributed to THIS entry, and none is claimed to be.
+            // The reasoning survives the move anyway: material issued to
+            // Production/WIP is real stock standing in a real location, and
+            // cancelling a batch does not walk it back to the store — a
+            // RETURN does, and that is the store's own action.
             if ($locked->dayBinMovements()->exists()) {
                 $blockers[] = 'it has day-bin movements, which cancelling cannot put back';
             }

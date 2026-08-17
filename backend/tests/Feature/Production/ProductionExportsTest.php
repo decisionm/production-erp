@@ -434,11 +434,19 @@ class ProductionExportsTest extends TestCase
 
         $csv = $this->csv($this->postJson('/api/v1/exports/traceability_report', ['date_from' => '2026-07-01', 'date_to' => '2026-07-31'])->assertOk());
         $this->assertSame(
-            ['lot_id', 'supplier_lot_no', 'item_sku', 'item_name', 'received_date', 'bag_count', 'total_received_kg', 'bag_id', 'bag_barcode', 'bag_status', 'bag_original_kg', 'bag_remaining_kg', 'machine', 'machine_name', 'batch_number', 'loaded_kg', 'loads'],
+            // The last three are Phase 7.5's store-issue half (WS-C): a bag's
+            // handover to production, summarised on the bag row. They name no
+            // machine and no batch — an issue names neither (FC-01) — and
+            // they are blank throughout this fixture, which only ever moved
+            // material under the old day-bin flow.
+            ['lot_id', 'supplier_lot_no', 'item_sku', 'item_name', 'received_date', 'bag_count', 'total_received_kg', 'bag_id', 'bag_barcode', 'bag_status', 'bag_original_kg', 'bag_remaining_kg', 'machine', 'machine_name', 'batch_number', 'loaded_kg', 'loads', 'issued_kg', 'issue_numbers', 'issued_to_production_at'],
             $csv['headers'],
         );
         $this->assertCount(3, $csv['rows']);
         [$fedA, $fedB, $unloaded] = $csv['rows'];
+        foreach ($csv['rows'] as $row) {
+            $this->assertSame(['0.0000', '', ''], [$row['issued_kg'], $row['issue_numbers'], $row['issued_to_production_at']]);
+        }
         $this->assertSame(['RIL-2026-0714', 'RM-PET', 'PET Resin', '2026-07-20', '2'], [$fedA['supplier_lot_no'], $fedA['item_sku'], $fedA['item_name'], $fedA['received_date'], $fedA['bag_count']]);
         $this->assertSame([$bag1->barcode, 'consumed', '0.0000', 'MC-01', 'Machine 1', '20260728-M01-001', '25.0000', '1'], [$fedA['bag_barcode'], $fedA['bag_status'], $fedA['bag_remaining_kg'], $fedA['machine'], $fedA['machine_name'], $fedA['batch_number'], $fedA['loaded_kg'], $fedA['loads']]);
         $this->assertSame([$bag2->barcode, 'in_store', '17.5000', 'MC-02', '', '7.5000'], [$fedB['bag_barcode'], $fedB['bag_status'], $fedB['bag_remaining_kg'], $fedB['machine'], $fedB['batch_number'], $fedB['loaded_kg']]);

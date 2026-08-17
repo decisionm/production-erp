@@ -4,9 +4,6 @@ namespace App\Modules\Production\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Inventory\Services\TraceabilityService;
-use App\Modules\Production\Http\Requests\CountDayBinRequest;
-use App\Modules\Production\Http\Requests\LoadDayBinRequest;
-use App\Modules\Production\Http\Requests\ReturnDayBinRequest;
 use App\Modules\Production\Http\Resources\DayBinMovementResource;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\WorkCenter;
@@ -16,10 +13,24 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 /**
- * The machine day-bin surface (Phase 6). Bag-touching actions (load,
- * return) go through Inventory's TraceabilityService — bag state is that
- * module's; ledger-only reads and counts use this module's
- * DayBinLedgerService directly.
+ * The machine day-bin surface (Phase 6), now READ ONLY (Phase 7.5, WS-C).
+ *
+ * The three write actions this controller used to expose — load, return and
+ * count — are retired. Each had zero UI callers: `day-bin/load` was the
+ * machine-stamped load path DEC-20260807-006 retired (the floor's one load
+ * flow is the common input's bag scan, which names no machine), and
+ * DEC-20260807-007 records that the bin is never weighed, so no count will
+ * ever be taken. DEC-20260817-001 then removed the Day Bin from the
+ * factory's logical inventory locations entirely.
+ *
+ * NOTHING under the doors was deleted. `day_bin_movements` keeps every row,
+ * including the historical machine-stamped ones DEC-20260807-006 requires be
+ * preserved untouched; DayBinLedgerService and the writers behind the retired
+ * doors (TraceabilityService::loadBagToDayBin / returnFromDayBin /
+ * recordCount) all remain, and the reads below still serve that history.
+ * Closing counts are still written on completion and handover — that path is
+ * ShiftProductionEntryService::recordClosingDayBin, which calls the ledger
+ * directly and never went through these routes.
  */
 class DayBinController extends Controller
 {
@@ -34,29 +45,6 @@ class DayBinController extends Controller
             $request->query('work_center_id') ? (int) $request->query('work_center_id') : null,
             $request->query('item_id') ? (int) $request->query('item_id') : null,
         ));
-    }
-
-    public function load(LoadDayBinRequest $request): DayBinMovementResource
-    {
-        return DayBinMovementResource::make(
-            $this->traceability->loadBagToDayBin($request->validated(), $request->user()?->id)
-                ->load(['item', 'materialBag.lot']),
-        );
-    }
-
-    public function returnMaterial(ReturnDayBinRequest $request): DayBinMovementResource
-    {
-        return DayBinMovementResource::make(
-            $this->traceability->returnFromDayBin($request->validated(), $request->user()?->id)
-                ->load(['item', 'materialBag.lot']),
-        );
-    }
-
-    public function count(CountDayBinRequest $request): DayBinMovementResource
-    {
-        return DayBinMovementResource::make(
-            $this->traceability->recordCount($request->validated(), $request->user()?->id),
-        );
     }
 
     /**

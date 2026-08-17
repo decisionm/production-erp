@@ -75,6 +75,10 @@ const allNavItems: NavGroup[] = [
             { key: '/inventory/material-lots', label: 'Material Receipts & Bag Labels' },
             { key: '/inventory/batches', label: 'Batches' },
             { key: '/inventory/serial-numbers', label: 'Serial Numbers' },
+            // The STORE's queue (Phase 7.5): what production has asked for,
+            // fulfilled — in part or in full — here. Issuing is not
+            // consuming: it moves stock into Production/WIP.
+            { key: '/inventory/store-issue-queue', label: 'Store Issue Queue' },
         ],
     },
     {
@@ -89,6 +93,11 @@ const allNavItems: NavGroup[] = [
             // Day Bin is the factory's single central balance, fed by an
             // ordinary transfer or the Shift Floor's Load Material scan.
             { key: '/production/day-bin', label: 'Day Bin' },
+            // The floor's half of the Phase 7.5 material flow: raise a
+            // request, then watch what the store has actually issued. The
+            // store's half is under Inventory, because the two halves have
+            // two different readers and this group is gated on production.
+            { key: '/production/material-requests', label: 'Material Requests' },
             // Bin Bay Loading is GONE, not just unlinked (DEC-20260807-006):
             // the floor's only load flow is the Shift Floor's central Load
             // Material scan into the common resin input.

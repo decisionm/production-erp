@@ -22,6 +22,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
+use Tests\Concerns\RecordsDayBinHistory;
 use Tests\TestCase;
 
 /**
@@ -38,7 +39,7 @@ use Tests\TestCase;
  */
 class CanonicalProductionFlowTest extends TestCase
 {
-    use RefreshDatabase;
+    use RecordsDayBinHistory, RefreshDatabase;
 
     private Item $bottle;
 
@@ -150,12 +151,12 @@ class CanonicalProductionFlowTest extends TestCase
         ])->assertOk()->json('data.id');
 
         // ---- 3. Scan-load 5 kg of the 100 kg bag ----------------------
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->loadDayBin([
             'barcode' => $bag->barcode,
             'work_center_id' => $this->machine->id,
             'shift_production_entry_id' => $entryId,
             'quantity_kg' => '5',
-        ])->assertSuccessful();
+        ]);
 
         // The bag keeps its remaining 95 kg and stays in the store — a
         // partial load pours off the weighed quantity.
@@ -268,10 +269,11 @@ class CanonicalProductionFlowTest extends TestCase
         $this->actAs();
         $entryId = $this->startBatch();
 
-        $this->postJson('/api/v1/production/day-bin/load', [
+        // Asserted on the floor's LIVE scan door. The retired day-bin/load
+        // carried this sentence in its own FormRequest; LoadFactoryDayBinBagRequest
+        // carries it verbatim, so the refusal moved with the door.
+        $this->postJson('/api/v1/production/day-bin/load-bag', [
             'barcode' => 'NO-SUCH-BAG',
-            'work_center_id' => $this->machine->id,
-            'shift_production_entry_id' => $entryId,
             'quantity_kg' => '5',
         ])->assertStatus(422)
             ->assertJsonPath('errors.barcode.0', 'Unknown bag barcode — no registered bag carries this code.');
@@ -295,12 +297,12 @@ class CanonicalProductionFlowTest extends TestCase
         $lot = $this->receiveLot(bags: 1, kgPerBag: '100');
         $entryId = $this->startBatch();
 
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->refusedDayBinWrite(fn () => $this->loadDayBin([
             'barcode' => $lot->bags->first()->barcode,
             'work_center_id' => $this->machine->id,
             'shift_production_entry_id' => $entryId,
             'quantity_kg' => '150',
-        ])->assertStatus(422);
+        ]));
 
         // The bag is untouched — a refused load must not consume anything.
         $this->assertSame('100.0000', (string) $lot->bags->first()->fresh()->remaining_kg);
@@ -318,13 +320,13 @@ class CanonicalProductionFlowTest extends TestCase
         $entryId = $this->startBatch();
 
         foreach ($lot->bags as $index => $bag) {
-            $this->postJson('/api/v1/production/day-bin/load', [
+            $this->loadDayBin([
                 'barcode' => $bag->barcode,
                 'work_center_id' => $this->machine->id,
                 'shift_production_entry_id' => $entryId,
                 'quantity_kg' => $index === 0 ? '5' : '3',
                 'override_fifo' => true,
-            ])->assertSuccessful();
+            ]);
         }
 
         $state = $this->getJson("/api/v1/production/work-centers/{$this->machine->id}/day-bin")->assertOk();
@@ -339,12 +341,12 @@ class CanonicalProductionFlowTest extends TestCase
         $lot = $this->receiveLot(bags: 1);
         $entryId = $this->startBatch();
 
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->loadDayBin([
             'barcode' => $lot->bags->first()->barcode,
             'work_center_id' => $this->machine->id,
             'shift_production_entry_id' => $entryId,
             'quantity_kg' => '5',
-        ])->assertSuccessful();
+        ]);
 
         // Completing WITHOUT a closing count.
         $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/complete", [
@@ -366,12 +368,12 @@ class CanonicalProductionFlowTest extends TestCase
         $lot = $this->receiveLot(bags: 1);
         $entryId = $this->startBatch();
 
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->loadDayBin([
             'barcode' => $lot->bags->first()->barcode,
             'work_center_id' => $this->machine->id,
             'shift_production_entry_id' => $entryId,
             'quantity_kg' => '5',
-        ])->assertSuccessful();
+        ]);
 
         // Claiming 50 kg still in the bin when only 5 kg was ever loaded.
         $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/complete", [

@@ -14,10 +14,12 @@ use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\WorkCenter;
+use App\Modules\Production\Services\DayBinLedgerService;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Tests\Concerns\RecordsDayBinHistory;
 use Tests\TestCase;
 
 /**
@@ -29,7 +31,7 @@ use Tests\TestCase;
  */
 class TraceabilityTest extends TestCase
 {
-    use RefreshDatabase;
+    use RecordsDayBinHistory, RefreshDatabase;
 
     private function actingAsUserWithPermissions(string ...$permissions): User
     {
@@ -93,14 +95,39 @@ class TraceabilityTest extends TestCase
         $this->getJson('/api/v1/inventory/material-bags')->assertNotFound();
         $this->getJson('/api/v1/inventory/material-bags/pick-list?item_id='.$resin->id)->assertNotFound();
         $this->getJson('/api/v1/production/day-bin/movements')->assertNotFound();
-        $this->postJson('/api/v1/production/day-bin/load', [
-            'barcode' => 'X', 'work_center_id' => $machine->id,
-        ])->assertNotFound();
-        $this->postJson('/api/v1/production/day-bin/return', [])->assertNotFound();
-        $this->postJson('/api/v1/production/day-bin/count', [])->assertNotFound();
+        $this->postJson('/api/v1/production/day-bin/load-bag', ['barcode' => 'X'])->assertNotFound();
         $this->getJson('/api/v1/production/day-bin/consumption?shift_production_entry_id=1&item_id=1')->assertNotFound();
+        // The three machine-stamped WRITE doors are not listed here any
+        // more: they no longer exist at all (Phase 7.5, WS-C), with or
+        // without the flag. test_the_three_retired_day_bin_write_doors_are_gone
+        // pins that separately, with traceability ON.
 
         $this->assertSame(0, MaterialLot::count());
+    }
+
+    /**
+     * The three machine-stamped day-bin WRITE doors are gone (Phase 7.5,
+     * WS-C) — the same treatment, and for the same reason, that removed
+     * bin-bay/load and bin-bay/history in 57c3726. None of the three had a
+     * UI caller: day-bin/load was the machine-stamped load path
+     * DEC-20260807-006 retired, and DEC-20260807-007 records that the bin is
+     * never weighed, so day-bin/count would never be used. DEC-20260817-001
+     * then removed the Day Bin from the factory's logical locations.
+     *
+     * Everything UNDER the doors survives, and the assertions below say so:
+     * the reads still answer, and the ledger still holds its rows.
+     */
+    public function test_the_three_retired_day_bin_write_doors_are_gone(): void
+    {
+        $this->enableTraceability();
+        $this->actingAsUserWithPermissions('production.manage');
+
+        $this->postJson('/api/v1/production/day-bin/load', ['barcode' => 'X', 'work_center_id' => 1])->assertNotFound();
+        $this->postJson('/api/v1/production/day-bin/return', [])->assertNotFound();
+        $this->postJson('/api/v1/production/day-bin/count', [])->assertNotFound();
+
+        // The historical reads are untouched — the table and its readers stay.
+        $this->getJson('/api/v1/production/day-bin/movements')->assertSuccessful();
     }
 
     public function test_creating_a_lot_fans_out_n_bags_with_generated_unique_barcodes(): void
@@ -200,34 +227,34 @@ class TraceabilityTest extends TestCase
         [$bag1, $bag2] = $lot->bags->sortBy('id')->values();
 
         // Over-load: 30 kg out of a 25 kg bag can never happen.
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->refusedDayBinWrite(fn () => $this->loadDayBin([
             'barcode' => $bag1->barcode, 'work_center_id' => $machine->id, 'quantity_kg' => '30',
-        ])->assertStatus(422);
+        ]));
         $this->assertSame('25.0000', $bag1->fresh()->remaining_kg);
 
         // Full-bag scan (no quantity): whole remaining_kg goes to the bin —
         // the emptied bag is Consumed, tracked at the machine it went to.
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->loadDayBin([
             'barcode' => $bag1->barcode, 'work_center_id' => $machine->id,
-        ])->assertSuccessful();
+        ]);
         $bag1 = $bag1->fresh();
         $this->assertSame('0.0000', $bag1->remaining_kg);
         $this->assertSame(MaterialBagStatus::Consumed, $bag1->status);
         $this->assertSame($machine->id, $bag1->day_bin_work_center_id);
 
         // Partial (weighed) load: bag decrements and stays in the store.
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->loadDayBin([
             'material_bag_id' => $bag2->id, 'work_center_id' => $machine->id, 'quantity_kg' => '7.5',
-        ])->assertSuccessful();
+        ]);
         $bag2 = $bag2->fresh();
         $this->assertSame('17.5000', $bag2->remaining_kg);
         $this->assertSame(MaterialBagStatus::InStore, $bag2->status);
 
         $this->assertSame(2, DayBinMovement::query()->where('type', 'load')->count());
         // An exhausted bag cannot be loaded again.
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->refusedDayBinWrite(fn () => $this->loadDayBin([
             'barcode' => $bag1->barcode, 'work_center_id' => $machine->id,
-        ])->assertStatus(422);
+        ]));
     }
 
     public function test_consumption_formula_on_the_multi_bag_partial_fixture(): void
@@ -248,23 +275,23 @@ class TraceabilityTest extends TestCase
         ], $user->id);
         [$bag1, $bag2] = $lot->bags->sortBy('id')->values();
 
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->loadDayBin([
             'barcode' => $bag1->barcode, 'work_center_id' => $machine->id,
             'shift_production_entry_id' => $entry->id,
-        ])->assertSuccessful();
-        $this->postJson('/api/v1/production/day-bin/load', [
+        ]);
+        $this->loadDayBin([
             'barcode' => $bag2->barcode, 'work_center_id' => $machine->id,
             'quantity_kg' => '7.5', 'shift_production_entry_id' => $entry->id,
-        ])->assertSuccessful();
-        $this->postJson('/api/v1/production/day-bin/return', [
+        ]);
+        $this->returnDayBin([
             'work_center_id' => $machine->id, 'item_id' => $resin->id,
             'quantity_kg' => '1.3', 'material_bag_id' => $bag2->id,
             'shift_production_entry_id' => $entry->id,
-        ])->assertSuccessful();
-        $this->postJson('/api/v1/production/day-bin/count', [
+        ]);
+        $this->countDayBin([
             'work_center_id' => $machine->id, 'item_id' => $resin->id,
             'quantity_kg' => '4.2', 'shift_production_entry_id' => $entry->id,
-        ])->assertSuccessful();
+        ]);
 
         // Returned kg flowed back into the bag.
         $this->assertSame('18.8000', $bag2->fresh()->remaining_kg);
@@ -306,28 +333,28 @@ class TraceabilityTest extends TestCase
             ->assertJsonPath('data.1.barcode', $newerBag->barcode);
 
         // Scanning the newer bag while the older stays open: refused.
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->refusedDayBinWrite(fn () => $this->loadDayBin([
             'barcode' => $newerBag->barcode, 'work_center_id' => $machine->id,
-        ])->assertStatus(422);
+        ]));
 
         // Even with the permission, the override must be explicit.
         $user->givePermissionTo(Permission::findOrCreate('production.override-fifo', 'web'));
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->refusedDayBinWrite(fn () => $this->loadDayBin([
             'barcode' => $newerBag->barcode, 'work_center_id' => $machine->id,
-        ])->assertStatus(422);
+        ]));
 
         // Permission + explicit override: allowed, and recorded_by says who.
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->loadDayBin([
             'barcode' => $newerBag->barcode, 'work_center_id' => $machine->id, 'override_fifo' => true,
-        ])->assertSuccessful();
+        ]);
         $movement = DayBinMovement::query()->latest('id')->first();
         $this->assertSame($newerBag->id, $movement->material_bag_id);
         $this->assertSame($user->id, $movement->getRawOriginal('recorded_by'));
 
         // The FIFO head itself always loads without any permission.
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->loadDayBin([
             'barcode' => $olderBag->barcode, 'work_center_id' => $machine->id,
-        ])->assertSuccessful();
+        ]);
     }
 
     public function test_override_without_the_permission_is_refused_and_fifo_can_be_configured_off(): void
@@ -347,16 +374,19 @@ class TraceabilityTest extends TestCase
         ], $user->id);
 
         // override_fifo without holding the permission: still refused.
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->refusedDayBinWrite(fn () => $this->loadDayBin([
             'barcode' => $newer->bags->first()->barcode,
             'work_center_id' => $machine->id, 'override_fifo' => true,
-        ])->assertStatus(422);
+        ]));
 
         // Vincent Q3 absorbed by config: FIFO as preference, not mandate.
         config(['production.traceability.fifo_enforced' => false]);
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $movement = $this->loadDayBin([
             'barcode' => $newer->bags->first()->barcode, 'work_center_id' => $machine->id,
-        ])->assertSuccessful();
+        ]);
+
+        $this->assertSame('25.0000', (string) $movement->quantity_kg);
+        $this->assertSame('0.0000', (string) $newer->bags->first()->fresh()->remaining_kg);
     }
 
     public function test_no_negative_balances_returns_and_counts_are_capped(): void
@@ -370,26 +400,32 @@ class TraceabilityTest extends TestCase
             'bag_count' => 1, 'bag_weight_kg' => '25', 'total_received_kg' => '25',
         ], $user->id);
 
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->loadDayBin([
             'barcode' => $lot->bags->first()->barcode, 'work_center_id' => $machine->id, 'quantity_kg' => '5',
-        ])->assertSuccessful();
+        ]);
 
         // Returning 10 from a bin holding 5: refused.
-        $this->postJson('/api/v1/production/day-bin/return', [
+        $this->refusedDayBinWrite(fn () => $this->returnDayBin([
             'work_center_id' => $machine->id, 'item_id' => $resin->id, 'quantity_kg' => '10',
-        ])->assertStatus(422);
+        ]));
 
         // Counting 50 in a bin that only ever received 5: refused.
-        $this->postJson('/api/v1/production/day-bin/count', [
+        $this->refusedDayBinWrite(fn () => $this->countDayBin([
             'work_center_id' => $machine->id, 'item_id' => $resin->id, 'quantity_kg' => '50',
-        ])->assertStatus(422);
+        ]));
 
-        // The honest figures pass.
-        $this->postJson('/api/v1/production/day-bin/return', [
+        // The honest figures pass, and the ledger lands where the arithmetic
+        // says: 5 loaded − 2 returned, then re-anchored by a count of 3.
+        $this->returnDayBin([
             'work_center_id' => $machine->id, 'item_id' => $resin->id, 'quantity_kg' => '2',
-        ])->assertSuccessful();
-        $this->postJson('/api/v1/production/day-bin/count', [
+        ]);
+        $this->countDayBin([
             'work_center_id' => $machine->id, 'item_id' => $resin->id, 'quantity_kg' => '3',
-        ])->assertSuccessful();
+        ]);
+
+        $this->assertSame(
+            '3.0000',
+            app(DayBinLedgerService::class)->balanceFor($machine->id, $resin->id),
+        );
     }
 }

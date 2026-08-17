@@ -280,6 +280,8 @@ class ApiSurfaceSmokeTest extends TestCase
             'api/v1/crm/quotations/{quotation}/pdf' => "/api/v1/crm/quotations/{$fx['quotation']->id}/pdf",
             'api/v1/inventory/batches/{batch}/ledger' => "/api/v1/inventory/batches/{$fx['batch']->id}/ledger",
             'api/v1/inventory/items/{item}' => "/api/v1/inventory/items/{$fx['bottle']->id}",
+            'api/v1/inventory/material-requests/{material_request}' => "/api/v1/inventory/material-requests/{$fx['materialRequest']->id}",
+            'api/v1/inventory/store-issues/{store_issue}' => "/api/v1/inventory/store-issues/{$fx['storeIssue']->id}",
             'api/v1/inventory/material-lots/{lot}/cost-versions' => "/api/v1/inventory/material-lots/{$fx['lot']->id}/cost-versions",
             'api/v1/inventory/material-lots/{material_lot}' => "/api/v1/inventory/material-lots/{$fx['lot']->id}",
             'api/v1/inventory/serial-numbers/{serial_number}/history' => "/api/v1/inventory/serial-numbers/{$fx['serial']->id}/history",
