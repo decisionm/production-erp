@@ -227,14 +227,39 @@ class AcceptanceFixtureSeeder extends Seeder
                 'password' => Hash::make(self::PASSWORD),
                 'is_active' => true,
             ]);
-            // The supervisor desk NEVER holds the internal carton trace
-            // (DEC-20260810-001: Owner/PM/Accounts only). Filtered here so
-            // the local fixture states the same truth as the live grants —
-            // a supervisor login that could open the rate tier locally
-            // would make every manual walkthrough of the gate a false pass.
+            // Two tiers the supervisor desk NEVER holds, filtered here so the
+            // local fixture states the same truth as the live grants — a
+            // supervisor login that could open either one would make every
+            // manual walkthrough of that gate a false pass:
+            //   carton-trace.*        the internal carton trace, Owner/PM/
+            //                         Accounts only (DEC-20260810-001).
+            //   configuration-delete.* the hard-delete tier, elevated desks
+            //                         only (DEC-20260817-002 §3). The fixture
+            //                         has no Owner desk, so the Plant Manager
+            //                         stands in for it; the point of the
+            //                         filter is that an ordinary desk cannot
+            //                         reach a hard delete, which is what the
+            //                         acceptance walk has to demonstrate.
+            //   finance.*             the FC-06 tier. AgentIdentity::
+            //                         mayReadPurchaseDetails() opens purchase
+            //                         rates AND supplier identity to anyone
+            //                         holding finance.view/finance.manage, so
+            //                         a supervisor granted them reads a
+            //                         Receipt Note's vendor and rates — the
+            //                         exact thing FC-06 reserves to Owner and
+            //                         Accounts. Caught by the 18-Aug browser
+            //                         walk: the fixture supervisor saw the
+            //                         supplier on a Procurement Receipt Note,
+            //                         so the FC-06 half of the walk had been
+            //                         passing for the wrong reason. The
+            //                         Accounts desk keeps them; the floor
+            //                         never had them on live.
+            $withheldFromSupervisor = ['carton-trace.', 'configuration-delete.', 'finance.'];
+
             $user->syncPermissions(
                 $role === null
-                    ? $permissions->reject(fn (Permission $permission) => str_starts_with($permission->name, 'carton-trace.'))
+                    ? $permissions->reject(fn (Permission $permission) => collect($withheldFromSupervisor)
+                        ->contains(fn (string $prefix) => str_starts_with($permission->name, $prefix)))
                     : $permissions,
             );
             if ($role !== null) {
