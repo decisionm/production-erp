@@ -23,6 +23,14 @@ dispatched in page context. Two consequences:
 A visible tab was attempted once (`tabs_create_mcp`); the new tab was also hidden, so the method
 above stands.
 
+**Data-shape caveat, which is the other half.** This walk ran against `migrate:fresh --seed`
+plus `AcceptanceFixtureSeeder` on **sqlite**. Nothing here that depends on data shape,
+collation, or volume is proven for live by this walk — and the duplicate-code finding below
+is the proof that the caveat is not theoretical: a behaviour that looked like a live P0 in
+the browser turned out to be an artefact of the dev driver, and only measuring MySQL
+separately established that. Treat every PASS below as "the screen and the server behave
+correctly on fixture data", not as a statement about live.
+
 ## Results
 
 | # | What | Result | Evidence |

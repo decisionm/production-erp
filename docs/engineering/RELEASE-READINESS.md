@@ -63,7 +63,10 @@ ITEMS`, not unconditional PRODUCT READY**, while those two remain.
    material configuration gap the lead named as a Phase 8 blocker.
 3. ~~**Run the acceptance chains on the MySQL leg.**~~ — **DONE.** A MySQL 8.0 container was
    stood up locally (matching CI's service image) and the WHOLE backend suite run against
-   it: **2,113 tests · 2,111 passed · 1 skipped by design · 1 error** (that run predates the last three commits; the tip figure is in the checklist below). The single error was
+   it: **one error**, and that is the part worth keeping. The count from that run is deliberately
+   NOT quoted: it was measured while a reviewer's 78-test scratch file was in the tree
+   mid-edit, so it is not reproducible by anyone. The authoritative MySQL evidence is CI's
+   own **`Backend tests on MySQL 8` leg, which passed on `95faab3` in 7m29s**. The single error was
    in the new D-WIRING work and was a real driver divergence — `MoldLifecycleTest` seeded a
    bare `'08:00'` into a `dateTime` column, which sqlite stores and MySQL rejects. Fixed in
    `fa35b83`; 13/13 on both drivers afterwards. This is the third time the MySQL leg has
@@ -109,7 +112,7 @@ ITEMS`, not unconditional PRODUCT READY**, while those two remain.
 | No P0 | ✅ none open |
 | No unresolved P1 data-integrity issue | ✅ every P1 raised by a gate was fixed and re-gated |
 | Migrations accounted for and reversible | ✅ each phase's listed in DEPLOYMENT-RUNBOOK |
-| All suites green | ✅ at the branch tip: **2,051 tests / 2,050 passed / 1 skipped by design / 18,668 assertions** on sqlite; MySQL 8.0 run at 2,113/2,111 before the last three commits, and CI's app-mysql leg re-runs it on push |
+| All suites green | ✅ at the branch tip `95faab3`: **2,051 tests / 2,050 passed / 1 skipped by design / 18,668 assertions** on sqlite, and **CI's `Backend tests on MySQL 8` leg PASSED on that same commit** (7m29s). Configuration + Acceptance also run locally on MySQL 8.0 after the fixes: 268/268 |
 | Production build passes | ✅ |
 | Browser smoke | ⚠️ **performed** (20 screens, `E2E-BROWSER-WALK-2026-08-18.md`) — genuine but **not mouse-level**; overlay/z-index class untested |
 | Sync dry-run | ✅ reconciliation dry run exercised in chain B2 |

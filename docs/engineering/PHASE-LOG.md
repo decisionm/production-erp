@@ -2011,3 +2011,25 @@ NOT MERGED, AND NOT DEPLOYED — deliberately. The reasoning, in full:
   So: everything is committed, pushed, CI-verified and ready to merge; the
   merge and the single deploy are the owner's to start. Live remains 9a9cbe3.
 ```
+
+```
+POSTSCRIPT — the QA reviewer's "unexplained discrepancy" reconciles exactly.
+It measured 2,040 where it expected 2,039+5 and, correctly, did not chase a
+moving target. The arithmetic: 2,039 at 55ab682, +1 for the guard-test method
+added in 7e37261, = 2,040 once 3f2d351 removed the 78-test scratch file —
+which is what it saw; then +11 census data sets in 3df98bb = 2,051 at the tip.
+The discrepancy was the scratch file it had been sharing the worktree with,
+not a mystery in the suite.
+
+MYSQL EVIDENCE, corrected. The local 2,113/2,111 figure is NOT quoted as
+authority anywhere: it was measured while that same scratch file sat in the
+tree mid-edit, so nobody can reproduce it. What stands is (a) the divergence
+it caught, which was real and is fixed, and (b) CI's own "Backend tests on
+MySQL 8" leg passing on 95faab3 in 7m29s.
+
+CI ON #193 @ 95faab3: all four checks PASS —
+  Backend tests on MySQL 8      pass  7m29s
+  Frontend build + backend tests pass  2m46s
+  Factory knowledge validation   pass  30s
+  Tally sync agent typecheck     pass  15s
+```
