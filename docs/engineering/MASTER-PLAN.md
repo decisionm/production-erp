@@ -25,7 +25,7 @@ PHASE 4.5 Download / Export Center             PASS WITH DEFERRED · PR #185 (st
 ──────────────────────────── OPERATIONAL WORKFLOW (rev 3) ────────────────────────────
 PHASE 5   Product / SKU configuration          PASS WITH DEFERRED · PR #186 (stacked on #185) · Q45 · mapping values stay the owner's (Q33/Q43)
 PHASE 5.5 Shift Floor → Complete → Today       PASS WITH DEFERRED · PR #187 (stacked on #186) · v3 estimation, legacy pinned · Q46
-PHASE 5.7 Shift Summary + CEC infrastructure   history/A-B-C/all reconcile with completed production · CEC format BLOCKED, everything around it built
+PHASE 5.7 Shift Summary + CEC infrastructure   PASS WITH DEFERRED · PR (stacked on #187) · report contract + honesty keys · CEC data endpoint + golden harness · format BLOCKED · Q47
 PHASE 6   Purchase → GRN → lot → inventory → consumption; then PO→Tally staged, flag-off (Q35 gates the live write)
 PHASE 7   Regression + reporting honesty + hardening (MySQL leg; deferred items)
 PHASE 8   END-TO-END ACCEPTANCE: operator workflow, then accounting traceability, purchase chain, sales visibility + downloads
@@ -241,7 +241,7 @@ record, Completed Today listing every completed batch of the day.
 |---|---|
 | **P5.7-01** Shift Summary tests (§4.18): historical dates, Shift A/B/C, All Shifts; totals reconcile with completed production (`Σ completed batches == summary actual`), the two non-computed KPI inputs labelled honestly | `ShiftSummaryService::report()` contract tests + browser proof for a past date |
 | **P5.7-02** CEC: **format BLOCKED — SOURCE DOCUMENT REQUIRED** stays until the owner's sample exists (HELD); everything around it is built: the CEC data endpoint (date · shift · all) returning the same figures Shift Summary shows, the export slot (Phase 4.5) wired to it, and the golden-file test harness that will assert `Completed Production == Shift Summary == CEC` the day a sample lands | endpoint + harness + the slot's reason verbatim |
-| **P5.7-03** Reporting honesty sweep on Production reports (production / reconciliation / traceability): server-side, filters honoured, exports through the Center | tests |
+| **P5.7-03** Reporting honesty sweep on Production reports (production / reconciliation / traceability): server-side, filters honoured, exports through the Center — **carried to Phase 7 (P7-05)**; not done in 5.7 | tests |
 
 **Acceptance:** Shift Summary for any past date and any shift equals the completed
 production of that date/shift; CEC infrastructure complete with the format visibly
