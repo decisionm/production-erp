@@ -1946,3 +1946,68 @@ GATE:               Sonnet independent QA + Opus adversarial safety review on
                     the D-WIRING delta. The first Opus reviewer died on a 529
                     after retries and was relaunched.
 ```
+
+────────────────────────────────────────────────────────────────────────────
+The gate on D-WIRING, and why nothing was merged — 18 Aug 2026 (02:30–03:00)
+────────────────────────────────────────────────────────────────────────────
+```
+GATE:
+  Sonnet independent QA   PASS WITH DEFERRED. Wrote its own route-level tests
+                          for all eleven masters sharing no harness with the
+                          builder's, and reproduced every claim.
+  Opus adversarial safety FAIL → fixed in 3df98bb. Migrated all 175
+                          migrations into a scratch DB and diffed all 277
+                          foreign keys against the eleven declarations.
+                          Headline NEGATIVE worth recording: zero uncovered
+                          FK columns across all 91 inbound columns, for every
+                          delete rule. The hole was one level down.
+
+  The first Opus reviewer died on API 529 after retries and was relaunched
+  outside the workflow.
+
+FIXED (3df98bb) — a hole this branch created, not one it inherited:
+  DependencyCheck::count() excludes soft-deleted children unless the check
+  says includeTrashed(). D-WIRING's OWN migration gave
+  production_standard_packagings a deleted_at for the first time, which turned
+  Item's existing, correct-looking check blind. The column is SET NULL, so an
+  Item named only by an ARCHIVED pack variant read as CLEAR, was hard-deleted,
+  and left the variant unable to say which product it packed. The sibling line
+  above it already had includeTrashed() — an oversight, not a judgement.
+  Same fault on employees.manager_id.
+  Structural half, which matters more: the assertion that should have caught
+  it was called by 4 of 11 masters and Item — 43 inbound FK columns, the
+  largest declaration in the repo — was not one of them; and the assertion had
+  no notion of trashed rows anyway. It now reads soft-deletion from the SCHEMA
+  and demands includeTrashed, and a census test runs it across all eleven from
+  one visible list. Red-before proved.
+
+VERIFIED AT THE TIP (not at an earlier commit, which the docs had been citing):
+  backend 2,051 / 2,050 passed / 1 skipped by design / 18,668 assertions
+  pint clean · typecheck clean · vitest 515/515 · build clean
+
+PROCESS DEFECT, raised against me by the QA reviewer and upheld:
+  I committed in the same worktree the reviewer was working in, and a broad
+  `git add -A` swept its untracked scratch test into 7e37261 in a mid-edit,
+  2-red state, then moved HEAD twice more under it. Removed in 3f2d351;
+  history not rewritten. Its FINAL 78/78 version was never captured — a real
+  loss, stated rather than glossed. ONE WORKTREE, ONE WRITER.
+
+NOT MERGED, AND NOT DEPLOYED — deliberately. The reasoning, in full:
+  deploy.yml fires on every push to main, with concurrency group
+  deploy-production and cancel-in-progress:false. The stack is fifteen
+  linear PRs. Merging them in dependency order therefore opens up to fifteen
+  `artisan down` maintenance windows on a live factory — and by this repo's
+  own deploy skill, EVERY failure after the app closes leaves it closed. It
+  is 02:30 IST; the night shift (22:00–06:00) is on the floor.
+  The mitigation — suppress the deploy trigger, merge, then take exactly ONE
+  manual deploy — needed `gh workflow disable`, which the environment's
+  policy classifier blocked. I did not work around it.
+  That leaves the choice between fifteen unattended windows on a running
+  shift and stopping. The lead's own instruction settles it: "If a deployment
+  or migration creates a genuine production-integrity risk, stop that
+  specific release action, preserve the evidence, and continue any
+  independent safe work. Do not force a deployment merely to say it
+  completed."
+  So: everything is committed, pushed, CI-verified and ready to merge; the
+  merge and the single deploy are the owner's to start. Live remains 9a9cbe3.
+```

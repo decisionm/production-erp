@@ -63,7 +63,7 @@ ITEMS`, not unconditional PRODUCT READY**, while those two remain.
    material configuration gap the lead named as a Phase 8 blocker.
 3. ~~**Run the acceptance chains on the MySQL leg.**~~ — **DONE.** A MySQL 8.0 container was
    stood up locally (matching CI's service image) and the WHOLE backend suite run against
-   it: **2,113 tests · 2,111 passed · 1 skipped by design · 1 error**. The single error was
+   it: **2,113 tests · 2,111 passed · 1 skipped by design · 1 error** (that run predates the last three commits; the tip figure is in the checklist below). The single error was
    in the new D-WIRING work and was a real driver divergence — `MoldLifecycleTest` seeded a
    bare `'08:00'` into a `dateTime` column, which sqlite stores and MySQL rejects. Fixed in
    `fa35b83`; 13/13 on both drivers afterwards. This is the third time the MySQL leg has
@@ -109,7 +109,7 @@ ITEMS`, not unconditional PRODUCT READY**, while those two remain.
 | No P0 | ✅ none open |
 | No unresolved P1 data-integrity issue | ✅ every P1 raised by a gate was fixed and re-gated |
 | Migrations accounted for and reversible | ✅ each phase's listed in DEPLOYMENT-RUNBOOK |
-| All suites green | ✅ sqlite; and MySQL 8.0 at 2,111 passed / 1 skipped |
+| All suites green | ✅ at the branch tip: **2,051 tests / 2,050 passed / 1 skipped by design / 18,668 assertions** on sqlite; MySQL 8.0 run at 2,113/2,111 before the last three commits, and CI's app-mysql leg re-runs it on push |
 | Production build passes | ✅ |
 | Browser smoke | ⚠️ **performed** (20 screens, `E2E-BROWSER-WALK-2026-08-18.md`) — genuine but **not mouse-level**; overlay/z-index class untested |
 | Sync dry-run | ✅ reconciliation dry run exercised in chain B2 |
@@ -162,3 +162,57 @@ Nothing in this programme has been merged. Live remains at `9a9cbe3`.
   backend lifecycle is covered by `MoldLifecycleTest` on both drivers.
 - **Duplicate-posting / retry was not exercised in the browser** — the fixture contains no
   failed or retryable Tally entry to retry. Covered by the backend contract suite only.
+
+### The gate on the D-WIRING delta
+
+Two independent reviewers, both on the delta rather than on the whole branch.
+
+**Sonnet independent QA — PASS WITH DEFERRED.** Wrote its own route-level tests for all
+eleven masters, deliberately sharing no harness with the builder's, and reproduced every
+claim: referenced-delete refused with an integer `blocking[].count` and
+`alternative: 'archive'`; unused-delete succeeding and freeing the business code;
+archive→activate round-tripping (including the two BackedEnum-status masters and the two
+with no active flag at all, whose archive is a real soft delete); the audit row actually
+written to `activity_log` with the right subject and causer; and the hard-delete tier
+refusing a module manager who lacks it while still allowing archive — checked across BOTH
+permission-check implementations and across WorkCenter's split permission groups.
+
+**Opus adversarial safety review — FAIL, now fixed.** Migrated all 175 migrations into a
+scratch database and diffed all 277 foreign keys against what the eleven services declare.
+Its headline negative is worth recording: **zero uncovered foreign-key columns** across all
+91 inbound FK columns, for every delete rule, not just CASCADE. The hole it found was one
+level down — whether the covering check can SEE a soft-deleted child — and it is fixed in
+`3df98bb`, together with the structural gap that let it through.
+
+Its remaining P2s are recorded, not fixed: two authority classes name the same permission
+string (`HardDeleteAuthority` and `ConfigurationDeleteTier`) and should be collapsed now
+that the catalogue entry has landed; `activity_log` rows are orphaned by a hard delete
+(nothing declares them, and id reuse is theoretically possible); the TOCTOU lock closes the
+race for every FK-constrained child but not for the settings keys, the colour map, the
+config snapshot or the Tally link; and six masters bind implicitly, so a trashed row 404s
+where the mechanism documents that it should be found.
+
+### P1 — Archive does not yet stop NEW work for Item and WorkCenter
+
+`StartBatchRequest` scopes `shift_id` and `warehouse_id` with
+`Rule::exists(...)->where('is_active', true)` but leaves `work_center_id` and `item_id` as
+bare `exists:`. The readiness gate that would otherwise catch it ships in watch-only mode —
+`PROD_READINESS_ENFORCED` defaults to false — so `item_active` and `machine_active` are
+downgraded from blocking findings to warnings. A batch naming an archived item or a retired
+machine is therefore ACCEPTED today.
+
+**Severity is bounded by the picker, and this is the sentence that matters:** the Shift
+Floor calls `listWorkCenters(true)`, so a supervisor cannot select a retired machine from
+the dropdown. The gap is reachable by direct API call, or by a client holding a stale list —
+not from the screen.
+
+**Deliberately not fixed unattended.** Adding `is_active` scoping to those two rules would
+begin REFUSING batch starts, and refusing a batch start stops the floor; there is a night
+shift on it as this is written, and whether live holds an inactive machine or item that is
+still in use is a read-only query nobody has run. It is also not really a new defect: making
+archived-exclusion bite is the **readiness-gate rollout decision from 29 July**, which is the
+owner's call and is already recorded as open. The two-line fix is named above for whenever
+that call is made.
+
+Until then, the Archive confirmation's wording — "stops being offered for new work" — is
+accurate for the other nine masters and **aspirational for Item and WorkCenter**.
