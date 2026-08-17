@@ -2,6 +2,7 @@ import type { TallySyncEntry } from '../../cloudApi';
 import { buildDeliveryNoteXml, type DeliveryNotePayload } from './deliveryNote';
 import { buildJournalEntryXml, type JournalEntryPayload } from './journalEntry';
 import { buildManufacturingJournalXml, type ManufacturingJournalPayload } from './manufacturingJournal';
+import { buildPurchaseOrderXml, type PurchaseOrderPayload } from './purchaseOrder';
 import { buildReceiptNoteXml, type ReceiptNotePayload } from './receiptNote';
 import { buildSalesInvoiceXml, type SalesInvoicePayload } from './salesInvoice';
 import { buildStockJournalXml, type StockJournalPayload } from './stockJournal';
@@ -24,6 +25,15 @@ export function buildVoucherXml(entry: TallySyncEntry, companyName: string): str
             return buildDeliveryNoteXml(entry.payload as unknown as DeliveryNotePayload, companyName);
         case 'Manufacturing Journal':
             return buildManufacturingJournalXml(entry.payload as unknown as ManufacturingJournalPayload, companyName);
+        case 'Purchase Order':
+            // Phase 6 (0.3.9): the ERP-raised purchase order as a Tally ORDER
+            // voucher (DEC-20260812-002) — staged on the cloud behind
+            // tally-sync.purchase_orders_enabled, which is OFF until the owner
+            // opens the gate (Q35), so no entry of this type reaches an agent
+            // today. The builder is complete and tested regardless; an agent
+            // < 0.3.9 would fail such an entry with the "No XML builder" error
+            // below, which is the honest outcome, never a silent post.
+            return buildPurchaseOrderXml(entry.payload as unknown as PurchaseOrderPayload, companyName);
         case 'Stock Journal':
             // The consolidated shift voucher's own label (DEC-20260807-010).
             // The server ALREADY sends it: TallySyncService::enqueue... writes

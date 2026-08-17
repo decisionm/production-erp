@@ -86,6 +86,22 @@ class TallyGodownResolver
         return $this->resolve($warehouse)?->name ?? $warehouse->name;
     }
 
+    /**
+     * The godown NAME for a voucher that has NO warehouse of its own — an
+     * ERP-raised Purchase Order names no receiving store until its GRN,
+     * yet Tally's order allocations (BATCHALLOCATIONS / ORDERDUEDATE) sit
+     * under a godown. Rule 3 above, applied without a warehouse: when the
+     * system has EXACTLY ONE Tally-linked warehouse it is that one (this
+     * factory's reality: one company godown); otherwise null — a
+     * multi-godown system has nothing to choose by, so nothing is guessed
+     * and the caller refuses to stage. Additive (Phase 6, WS-C); the
+     * warehouse-bearing paths above are untouched.
+     */
+    public function soleTallyGodownName(): ?string
+    {
+        return $this->soleLinkedWarehouse()?->name;
+    }
+
     private function soleLinkedWarehouse(): ?Warehouse
     {
         if (! $this->soleLinkedLookedUp) {

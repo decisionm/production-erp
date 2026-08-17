@@ -4,6 +4,7 @@ namespace App\Modules\TallySync\Services;
 
 use App\Modules\Finance\Models\JournalEntry;
 use App\Modules\Procurement\Models\GoodsReceiptNote;
+use App\Modules\Procurement\Models\PurchaseOrder;
 use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Sales\Models\Delivery;
@@ -29,6 +30,7 @@ use App\Modules\TallySync\Models\TallySyncEntry;
  *   Sales            enqueueSalesInvoice()      voucher_date · voucher_number · party_ledger · lines[{item, quantity, rate, amount}]
  *   Journal          enqueueJournalEntry()      voucher_date · voucher_number · lines[{ledger, debit, credit, memo}]   (no party, no item)
  *   Receipt Note     enqueueGoodsReceiptNote()  voucher_date · voucher_number · party_ledger · lines[{item, quantity, rate, amount}]
+ *   Purchase Order   enqueuePurchaseOrder()     voucher_date · voucher_number · party_ledger · purchase_ledger · godown · lines[{item, quantity, rate, amount, schedules[{due_date, quantity, amount}]}]
  *   Delivery Note    enqueueDelivery()          voucher_date · voucher_number · party_ledger · lines[{item, quantity}]
  *   Manufacturing J. buildBatchVoucherPayload() voucher_date · voucher_number · produced[{item, quantity}] · consumed[{item, quantity, godown}]   (no party)
  *   Stock Journal    shiftVoucherPayload()      voucher_date · voucher_number · shift · produced[{item, quantity, godown}] · consumed[{item, quantity, godown}]   (no party)
@@ -71,6 +73,8 @@ class TransactionClassifier
             TallyTransactionCategory::SalesInvoice->value => [['Sales', (new Invoice)->getMorphClass()]],
             TallyTransactionCategory::DeliveryNote->value => [['Delivery Note', (new Delivery)->getMorphClass()]],
             TallyTransactionCategory::ReceiptNote->value => [['Receipt Note', (new GoodsReceiptNote)->getMorphClass()]],
+            // Phase 6: the staged Purchase Order voucher (DEC-20260812-002).
+            TallyTransactionCategory::PurchaseOrder->value => [['Purchase Order', (new PurchaseOrder)->getMorphClass()]],
             TallyTransactionCategory::Journal->value => [['Journal', (new JournalEntry)->getMorphClass()]],
         ];
     }
@@ -111,7 +115,7 @@ class TransactionClassifier
         return $this->payloadString($entry, 'voucher_date');
     }
 
-    /** The document number staff search for — "SPE-12", "SJ-20260723-S1", "GRN-7". */
+    /** The document number staff search for — "SPE-12", "SJ-20260723-S1", "GRN-7", "PO-3". */
     public function documentNumber(TallySyncEntry $entry): ?string
     {
         return $this->payloadString($entry, 'voucher_number');

@@ -317,6 +317,25 @@ class StockMovementService
     }
 
     /**
+     * Every RECEIPT movement stamped with one reference — the cross-module
+     * read Procurement's purchase-order trace uses to show the ledger line
+     * a goods receipt wrote (Phase 6). The ledger carries no GRN foreign
+     * key: a receipt is matched by the reference GoodsReceiptService stamped
+     * (the receipt's own `reference`, else "GRN for PO #{id}"), and the
+     * caller narrows further by item and warehouse. Additive; reads only.
+     *
+     * @return Collection<int, StockMovement>
+     */
+    public function receiptsForReference(string $reference): Collection
+    {
+        return StockMovement::query()
+            ->where('reference', $reference)
+            ->where('type', StockMovementType::Receipt)
+            ->orderBy('id')
+            ->get();
+    }
+
+    /**
      * Every transfer INTO one warehouse on one calendar date, newest first,
      * with item and the acting user loaded — the "today's loads into the
      * factory day bin" read. Filtered on type+warehouse+date, never on the

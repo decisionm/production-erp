@@ -10,6 +10,15 @@ use Illuminate\Http\Resources\Json\JsonResource;
 class PurchaseOrderLineResource extends JsonResource
 {
     /**
+     * The note that stands where a rate would, for a reader showsCost()
+     * turns away — on the trace (PurchaseOrderTraceService) and on an amend
+     * revision (PurchaseOrderRevisionResource), where a nested shape has no
+     * resource of its own to omit the key silently. The live line below
+     * keeps the omit-not-null rule (no note): its readers know the gate.
+     */
+    public const RATE_WITHHELD = 'The purchase rate is withheld — Owner/Accounts only (FC-06).';
+
+    /**
      * Whether THIS reader is served the purchase rate (`unit_price`). The
      * purchase rate is Owner/Accounts data (FC-06): same gate, same
      * omit-not-null rule as MaterialLotResource — see its class note. The

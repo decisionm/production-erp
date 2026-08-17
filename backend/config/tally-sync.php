@@ -83,4 +83,42 @@ return [
 
     'snapshot_retention_days' => (int) env('TALLY_SYNC_SNAPSHOT_RETENTION_DAYS', 90),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Purchase Order → Tally (Phase 6, STAGED — OFF by default)
+    |--------------------------------------------------------------------------
+    |
+    | Whether sending an ERP-raised purchase order enqueues a Tally 'Purchase
+    | Order' voucher (DEC-20260812-002: POs are raised in the ERP and sent to
+    | Tally as ORDER vouchers). OFF until the owner answers Q35(d) (the first
+    | live PO write to real Tally is an OWNER GATE — it never happens
+    | unattended, and no test, seeder, command or workflow flips this),
+    | Q35(e) (which ledgers a PO voucher names — tax/rounding) and Q39 (one
+    | purchase ledger or one per rate).
+    |
+    | What flipping it does: PurchaseOrderService::send() fires
+    | PurchaseOrderSent; the TallySync listener calls
+    | TallySyncService::enqueuePurchaseOrder(), which writes ONE
+    | tally_sync_entries row (voucher type 'Purchase Order') and NOTHING
+    | else — no stock movement, no balance, no lot, no journal
+    | (PurchaseOrderTallyStagingTest counts them). The agent (≥ 0.3.9) then
+    | builds an ORDER voucher — VCHTYPE 'Purchase Order', ISINVOICE No —
+    | which Tally posts to neither accounts nor stock BECAUSE OF ITS TYPE,
+    | not because any ledger block is left out (they are present, as in
+    | every real export). While OFF, send() records tally_staging
+    | {state: 'disabled'} on the PO and enqueues nothing; the PO's Tally link
+    | is null and the resource says so honestly.
+    |
+    | The purchase ledger is NOT an env key: it is TallyLedgerRole::Purchase
+    | via TallyLedgerMappingService (Settings → Ledger Mappings), one role for
+    | now (Q39 pending). Unmapped → the enqueue REFUSES with a named reason;
+    | nothing is defaulted, nothing is guessed. Same for the vendor's ledger
+    | (vendors.tally_ledger_name) and each line's item (Tally-sourced items
+    | only). Refusals are recorded on the PO (tally_staging.state 'refused'),
+    | never thrown out of send().
+    |
+    */
+
+    'purchase_orders_enabled' => (bool) env('TALLY_SYNC_PURCHASE_ORDERS_ENABLED', false),
+
 ];

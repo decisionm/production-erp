@@ -182,12 +182,16 @@ class SyncSummaryTest extends TestCase
         $this->assertSame(1, $counts['delivery_note']);
         $this->assertSame(1, $counts['receipt_note']);
         $this->assertSame(1, $counts['journal']);
+        // Purchase Order (Phase 6): ERP-built and STAGED, flag off — this
+        // queue staged none, so the count is an honest, measured 0 (never a
+        // null: the row is the ERP's own, not the accountant's 92).
+        $this->assertSame(0, $counts['purchase_order']);
         // Rows the table cannot place are real rows too — measured (none here).
         $this->assertSame(0, $counts['unknown']);
 
         // Tally-only and absent: NULL, never 0. Nothing was measured
         // because nothing is mirrored; a zero would claim the books were read.
-        foreach (['purchase', 'purchase_order', 'payment', 'receipt', 'contra', 'credit_note', 'debit_note', 'sales_order'] as $key) {
+        foreach (['purchase', 'payment', 'receipt', 'contra', 'credit_note', 'debit_note', 'sales_order'] as $key) {
             $this->assertNull($counts[$key], $key);
             $this->assertArrayHasKey($key, $counts->all(), $key);
         }
@@ -199,12 +203,14 @@ class SyncSummaryTest extends TestCase
         $this->assertSame('Purchase', $purchase['wire_voucher_type']);
         $this->assertSame('Purchase (lives in Tally)', $purchase['label']);
 
-        // Purchase Order: in the books (source tally) AND the ERP version is
-        // planned (erp_build) — two axes, one row, still an honest null.
+        // Purchase Order (Phase 6): the ERP builds and stages it (source erp,
+        // erp_build built) — the 92 accountant-keyed orders in the books are
+        // NOT this row's; its count is the ERP's own staged rows, 0 here.
         $purchaseOrder = $rows->firstWhere('key', 'purchase_order');
-        $this->assertSame('tally', $purchaseOrder['source']);
-        $this->assertSame('planned', $purchaseOrder['erp_build']);
-        $this->assertNull($purchaseOrder['count']);
+        $this->assertSame('erp', $purchaseOrder['source']);
+        $this->assertSame('built', $purchaseOrder['erp_build']);
+        $this->assertSame('Purchase Order', $purchaseOrder['wire_voucher_type']);
+        $this->assertSame(0, $purchaseOrder['count']);
 
         // Sales Order: no such voucher type in the books at all — absent,
         // and null because there was nothing to measure, not because

@@ -1,0 +1,93 @@
+<ENVELOPE>
+  <HEADER>
+    <TALLYREQUEST>Import Data</TALLYREQUEST>
+  </HEADER>
+  <BODY>
+    <IMPORTDATA>
+      <REQUESTDESC>
+        <REPORTNAME>Vouchers</REPORTNAME>
+        <STATICVARIABLES>
+          <SVCURRENTCOMPANY>Company Alpha</SVCURRENTCOMPANY>
+        </STATICVARIABLES>
+      </REQUESTDESC>
+      <REQUESTDATA>
+        <TALLYMESSAGE xmlns:UDF="TallyUDF">
+          <VOUCHER VCHTYPE="Purchase Order" ACTION="Create" OBJVIEW="Invoice Voucher View">
+            <DATE>20260820</DATE>
+            <PARTYGSTIN>00AAAAA0000A0Z0</PARTYGSTIN>
+            <VOUCHERTYPENAME>Purchase Order</VOUCHERTYPENAME>
+            <PARTYNAME>Vendor Alpha</PARTYNAME>
+            <PARTYLEDGERNAME>Vendor Alpha</PARTYLEDGERNAME>
+            <VOUCHERNUMBER>PO-7</VOUCHERNUMBER>
+            <REFERENCE>PO-7</REFERENCE>
+            <BASICBASEPARTYNAME>Vendor Alpha</BASICBASEPARTYNAME>
+            <NARRATION>Synthetic golden &#8212; Phase 6</NARRATION>
+            <PERSISTEDVIEW>Invoice Voucher View</PERSISTEDVIEW>
+            <EFFECTIVEDATE>20260820</EFFECTIVEDATE>
+            <ISCANCELLED>No</ISCANCELLED>
+            <USETRACKINGNUMBER>No</USETRACKINGNUMBER>
+            <ISINVOICE>No</ISINVOICE>
+            <ALLINVENTORYENTRIES.LIST>
+              <STOCKITEMNAME>ITEM_A</STOCKITEMNAME>
+              <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+              <RATE>1.0000</RATE>
+              <AMOUNT>-100.0000</AMOUNT>
+              <ACTUALQTY>100.0000</ACTUALQTY>
+              <BILLEDQTY>100.0000</BILLEDQTY>
+              <BATCHALLOCATIONS.LIST>
+                <GODOWNNAME>Godown Alpha</GODOWNNAME>
+                <BATCHNAME>Primary Batch</BATCHNAME>
+                <ORDERNO>PO-7</ORDERNO>
+                <AMOUNT>-60.0000</AMOUNT>
+                <ACTUALQTY>60.0000</ACTUALQTY>
+                <BILLEDQTY>60.0000</BILLEDQTY>
+                <ORDERDUEDATE JD="46265" P="1-Sep-26">1-Sep-26</ORDERDUEDATE>
+              </BATCHALLOCATIONS.LIST>
+              <BATCHALLOCATIONS.LIST>
+                <GODOWNNAME>Godown Alpha</GODOWNNAME>
+                <BATCHNAME>Primary Batch</BATCHNAME>
+                <ORDERNO>PO-7</ORDERNO>
+                <AMOUNT>-40.0000</AMOUNT>
+                <ACTUALQTY>40.0000</ACTUALQTY>
+                <BILLEDQTY>40.0000</BILLEDQTY>
+                <ORDERDUEDATE JD="46279" P="15-Sep-26">15-Sep-26</ORDERDUEDATE>
+              </BATCHALLOCATIONS.LIST>
+              <ACCOUNTINGALLOCATIONS.LIST>
+                <LEDGERNAME>Purchase Ledger Alpha</LEDGERNAME>
+                <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+                <AMOUNT>-100.0000</AMOUNT>
+              </ACCOUNTINGALLOCATIONS.LIST>
+            </ALLINVENTORYENTRIES.LIST>
+            <ALLINVENTORYENTRIES.LIST>
+              <STOCKITEMNAME>ITEM_B</STOCKITEMNAME>
+              <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+              <RATE>2.0000</RATE>
+              <AMOUNT>-50.0000</AMOUNT>
+              <ACTUALQTY>25.0000</ACTUALQTY>
+              <BILLEDQTY>25.0000</BILLEDQTY>
+              <BATCHALLOCATIONS.LIST>
+                <GODOWNNAME>Godown Alpha</GODOWNNAME>
+                <BATCHNAME>Primary Batch</BATCHNAME>
+                <ORDERNO>PO-7</ORDERNO>
+                <AMOUNT>-50.0000</AMOUNT>
+                <ACTUALQTY>25.0000</ACTUALQTY>
+                <BILLEDQTY>25.0000</BILLEDQTY>
+              </BATCHALLOCATIONS.LIST>
+              <ACCOUNTINGALLOCATIONS.LIST>
+                <LEDGERNAME>Purchase Ledger Alpha</LEDGERNAME>
+                <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+                <AMOUNT>-50.0000</AMOUNT>
+              </ACCOUNTINGALLOCATIONS.LIST>
+            </ALLINVENTORYENTRIES.LIST>
+            <LEDGERENTRIES.LIST>
+              <LEDGERNAME>Vendor Alpha</LEDGERNAME>
+              <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+              <ISPARTYLEDGER>Yes</ISPARTYLEDGER>
+              <AMOUNT>150.0000</AMOUNT>
+            </LEDGERENTRIES.LIST>
+          </VOUCHER>
+        </TALLYMESSAGE>
+      </REQUESTDATA>
+    </IMPORTDATA>
+  </BODY>
+</ENVELOPE>

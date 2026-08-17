@@ -202,10 +202,23 @@ Route::prefix('v1')->group(function () {
             Route::post('purchase-requisitions/{purchase_requisition}/approve', [PurchaseRequisitionController::class, 'approve']);
             Route::post('purchase-requisitions/{purchase_requisition}/reject', [PurchaseRequisitionController::class, 'reject']);
 
-            Route::apiResource('purchase-orders', PurchaseOrderController::class)->only(['index', 'store']);
+            // Phase 6: show carries lines, schedules, revisions, the receipts
+            // summary and the Tally link; trace is the chain behind the order
+            // (PO → GRNs → lots → bags → loads → consuming batches). The
+            // lifecycle is append-only POST actions — never PUT/DELETE:
+            //   send    Draft → Sent (announces PurchaseOrderSent after commit)
+            //   amend   Draft only — replaces lines, keeps the prior ones as a revision
+            //   close   Sent | PartiallyReceived → Closed, with a reason
+            //   cancel  Draft | Sent with zero receipts → Cancelled, with a reason
+            // A Tally-originated mirror refuses amend/close/cancel (422).
+            Route::apiResource('purchase-orders', PurchaseOrderController::class)->only(['index', 'store', 'show']);
+            Route::get('purchase-orders/{purchase_order}/trace', [PurchaseOrderController::class, 'trace']);
             Route::post('purchase-orders/{purchase_order}/send', [PurchaseOrderController::class, 'send']);
+            Route::post('purchase-orders/{purchase_order}/amend', [PurchaseOrderController::class, 'amend']);
+            Route::post('purchase-orders/{purchase_order}/close', [PurchaseOrderController::class, 'close']);
+            Route::post('purchase-orders/{purchase_order}/cancel', [PurchaseOrderController::class, 'cancel']);
 
-            Route::apiResource('goods-receipts', GoodsReceiptController::class)->only(['index', 'store']);
+            Route::apiResource('goods-receipts', GoodsReceiptController::class)->only(['index', 'store', 'show']);
         });
 
         Route::prefix('sales')->middleware('module:sales')->group(function () {

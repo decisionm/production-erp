@@ -41,6 +41,7 @@
              with config() themselves. -->
         <env name="PROD_TRACEABILITY" value="false"/>
         <env name="PROD_READINESS_ENFORCED" value="false"/>
+        <env name="TALLY_SYNC_PURCHASE_ORDERS_ENABLED" value="false"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>

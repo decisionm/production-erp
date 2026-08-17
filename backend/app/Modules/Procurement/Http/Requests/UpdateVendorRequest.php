@@ -25,6 +25,8 @@ class UpdateVendorRequest extends FormRequest
             'gstin' => ['nullable', 'string', 'size:15', 'regex:/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/'],
             'state_code' => ['nullable', 'string', 'regex:/^[0-9]{2}$/'],
             'is_active' => ['boolean'],
+            // The vendor's Tally ledger name (Phase 6) — typed by Accounts, never pulled.
+            'tally_ledger_name' => ['nullable', 'string', 'max:255'],
         ];
     }
 }

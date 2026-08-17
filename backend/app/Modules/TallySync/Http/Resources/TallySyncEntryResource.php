@@ -21,12 +21,14 @@ use Illuminate\Http\Resources\Json\JsonResource;
  * every surface this resource emits, so no reader can be told two things:
  *
  *   RATES (every category — the keys are the same on the same resource)
- *     payload.lines[].rate / amount / debit / credit, payload.total_amount
+ *     payload.lines[].rate / amount / debit / credit, payload.total_amount,
+ *     and payload.lines[].schedules[].amount (a Purchase Order's due-date
+ *     allocations, Phase 6)
  *       → OMITTED for a reader who may not (LINE_RATE_KEYS / TOTAL_RATE_KEYS)
  *     summary / timeline / flags / mappings
  *       → never carry money for ANY reader (EntryPresenter, EntryMappingSurface)
  *
- *   SUPPLIER IDENTITY (categories whose partyIsSupplier() — Receipt Note today)
+ *   SUPPLIER IDENTITY (categories whose partyIsSupplier() — Receipt Note, Purchase Order)
  *     root `party`                → null for a reader who may not (list and show alike)
  *     payload.party_ledger / party_gstin
  *                                 → OMITTED for a reader who may not (SUPPLIER_IDENTITY_KEYS)
@@ -46,7 +48,10 @@ class TallySyncEntryResource extends JsonResource
      * The payload keys that carry a price. On a Receipt Note they ARE the
      * GRN's purchase rate per line and the bill total — FC-06, Owner/Accounts
      * only, the very numbers GoodsReceiptNoteLineResource gates on
-     * finance.view/finance.manage. On a Sales invoice the same keys are
+     * finance.view/finance.manage; on a Purchase Order (Phase 6) the ordered
+     * rate per line, and each due-date allocation's share of it
+     * (lines[].schedules[].amount — the same keys one level down, stripped
+     * by the same rule). On a Sales invoice the same keys are
      * selling prices, not FC-06 — but they are the SAME keys on the SAME
      * resource, and one resource whose `rate` is secret on one row and open
      * on the next is a gate nobody can reason about, so they are gated
@@ -63,7 +68,9 @@ class TallySyncEntryResource extends JsonResource
     /**
      * The payload keys that name the supplier on a supplier-party voucher
      * (TallyTransactionCategory::partyIsSupplier) — the vendor's name and
-     * GSTIN, as enqueueGoodsReceiptNote() writes them. FC-06's second half;
+     * GSTIN, as enqueueGoodsReceiptNote() and enqueuePurchaseOrder() write
+     * them (the latter: the vendor's Tally LEDGER name, which is the vendor
+     * by another spelling). FC-06's second half;
      * OMITTED, like the rates, for a reader who may not. Left in place on
      * every other category (a customer is not FC-06).
      */
@@ -276,12 +283,36 @@ class TallySyncEntryResource extends JsonResource
 
         if (is_array($payload['lines'] ?? null)) {
             $payload['lines'] = array_map(
-                fn ($line) => is_array($line) ? array_diff_key($line, array_flip(self::LINE_RATE_KEYS)) : $line,
+                fn ($line) => is_array($line) ? $this->lineWithoutRates($line) : $line,
                 $payload['lines'],
             );
         }
 
         return $payload;
+    }
+
+    /**
+     * One line with its rate keys removed — and, when the line carries
+     * due-date allocations (a Purchase Order's schedules[]), each
+     * allocation's rate keys too: the allocation's `amount` is the line's
+     * rate × its quantity, and a strip that stopped one level up would hand
+     * a procurement reader the figure by another road.
+     *
+     * @param  array<string, mixed>  $line
+     * @return array<string, mixed>
+     */
+    private function lineWithoutRates(array $line): array
+    {
+        $line = array_diff_key($line, array_flip(self::LINE_RATE_KEYS));
+
+        if (is_array($line['schedules'] ?? null)) {
+            $line['schedules'] = array_map(
+                fn ($schedule) => is_array($schedule) ? array_diff_key($schedule, array_flip(self::LINE_RATE_KEYS)) : $schedule,
+                $line['schedules'],
+            );
+        }
+
+        return $line;
     }
 
     /**

@@ -5,16 +5,21 @@ namespace App\Modules\TallySync\Providers;
 use App\Modules\Finance\Models\Enums\JournalEntryStatus;
 use App\Modules\Finance\Models\JournalEntry;
 use App\Modules\Procurement\Events\GoodsReceiptNoteReceived;
+use App\Modules\Procurement\Events\PurchaseOrderSent;
+use App\Modules\Procurement\Models\PurchaseOrder;
+use App\Modules\Procurement\Services\PurchaseOrderService;
 use App\Modules\Production\Events\ShiftProductionEntryApproved;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Services\ShiftProductionEntryService;
 use App\Modules\Sales\Events\DeliveryDispatched;
 use App\Modules\Sales\Models\Enums\InvoiceStatus;
 use App\Modules\Sales\Models\Invoice;
+use App\Modules\TallySync\Exceptions\PurchaseOrderNotPostable;
 use App\Modules\TallySync\Models\Enums\TallySyncStatus;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Services\TallySyncService;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
 
 /**
@@ -50,6 +55,20 @@ class TallySyncEventServiceProvider extends ServiceProvider
 
         Event::listen(DeliveryDispatched::class, function (DeliveryDispatched $event) {
             $this->app->make(TallySyncService::class)->enqueueDelivery($event->delivery);
+        });
+
+        // A purchase order sent to its vendor → Tally Purchase Order voucher,
+        // STAGED and OWNER-GATED (Phase 6, DEC-20260812-002, Q35). Unlike its
+        // neighbours this listener never lets an exception out of send():
+        // the order IS sent whether or not Tally can be staged, and what
+        // Tally-staging concluded is RECORDED on the order (tally_staging —
+        // PurchaseOrderService::recordTallyStaging, the only writer):
+        //   flag off  → {state: 'disabled'} — nothing enqueued, one debug line
+        //   flag on   → enqueuePurchaseOrder(): {state: 'enqueued', entry_id}
+        //               or, refused with named reasons, {state: 'refused',
+        //               reasons} — a missing Tally name is never guessed.
+        Event::listen(PurchaseOrderSent::class, function (PurchaseOrderSent $event) {
+            $this->stagePurchaseOrder($event->order);
         });
 
         Event::listen(ShiftProductionEntryApproved::class, function (ShiftProductionEntryApproved $event) {
@@ -108,5 +127,79 @@ class TallySyncEventServiceProvider extends ServiceProvider
                 default => null,
             };
         });
+    }
+
+    /**
+     * The PurchaseOrderSent listener's body — see the Event::listen above.
+     * Every branch ends in ONE recordTallyStaging() call with the state the
+     * order should show; the enqueue itself never touches the order.
+     */
+    private function stagePurchaseOrder(PurchaseOrder $order): void
+    {
+        $at = now()->toIso8601String();
+
+        if (! config('tally-sync.purchase_orders_enabled')) {
+            Log::debug('Purchase order sent; Tally staging disabled (tally-sync.purchase_orders_enabled = false, owner gate Q35).', [
+                'purchase_order_id' => $order->id,
+            ]);
+            $this->recordTallyStaging($order, [
+                'state' => 'disabled',
+                'reasons' => [[
+                    'code' => 'purchase_orders_disabled',
+                    'detail' => 'PO posting to Tally is disabled (owner gate Q35) — nothing was staged.',
+                ]],
+                'at' => $at,
+            ]);
+
+            return;
+        }
+
+        try {
+            $entry = $this->app->make(TallySyncService::class)->enqueuePurchaseOrder($order);
+        } catch (PurchaseOrderNotPostable $refusal) {
+            Log::info('Purchase order not staged for Tally — refused with named reasons.', [
+                'purchase_order_id' => $order->id,
+                'reasons' => $refusal->codes(),
+            ]);
+            $this->recordTallyStaging($order, [
+                'state' => 'refused',
+                'reasons' => $refusal->reasons,
+                'at' => $at,
+            ]);
+
+            return;
+        }
+
+        $this->recordTallyStaging($order, [
+            'state' => 'enqueued',
+            'reasons' => [],
+            'entry_id' => $entry->id,
+            'at' => $at,
+        ]);
+    }
+
+    /**
+     * Cross-module write through Procurement's SERVICE, never its model
+     * (CLAUDE.md). PurchaseOrderService::recordTallyStaging() is WS-A's
+     * (Phase 6, additive `purchase_orders.tally_staging` JSON); until it
+     * lands, the outcome is logged and nothing is written — the enqueue /
+     * refusal above has already happened either way.
+     *
+     * @param  array{state: string, reasons: list<array{code: string, detail: string}>, entry_id?: int, at: string}  $staging
+     */
+    private function recordTallyStaging(PurchaseOrder $order, array $staging): void
+    {
+        $service = $this->app->make(PurchaseOrderService::class);
+
+        if (! method_exists($service, 'recordTallyStaging')) {
+            Log::warning('PurchaseOrderService::recordTallyStaging() is not available — Tally staging outcome not recorded on the order.', [
+                'purchase_order_id' => $order->id,
+                'state' => $staging['state'],
+            ]);
+
+            return;
+        }
+
+        $service->recordTallyStaging($order, $staging);
     }
 }

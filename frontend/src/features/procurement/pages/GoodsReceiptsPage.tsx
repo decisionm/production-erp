@@ -14,6 +14,7 @@ import { listAllWarehouses } from '@/features/inventory/api';
 import { createGoodsReceipt, listGoodsReceipts, listPurchaseOrders } from '@/features/procurement/api';
 import type { GoodsReceiptNote, GoodsReceiptNoteLine, PurchaseOrderSchedule } from '@/features/procurement/types';
 import { useProductionSettings } from '@/features/production/packing';
+import { TallyLinkCell } from '@/features/sales/SalesDocumentDrawer';
 import { formatDateTime } from '@/lib/datetime';
 import { itemLabel } from '@/lib/itemLabel';
 
@@ -689,9 +690,18 @@ export default function GoodsReceiptsPage() {
                     <>
                         <Descriptions column={1} size="small" bordered>
                             <Descriptions.Item label="Purchase Order">
-                                <Link to={`/procurement/purchase-orders?po=${detailReceipt.purchase_order_id}`}>
-                                    PO #{detailReceipt.purchase_order_id}
-                                </Link>
+                                <Space size={8} wrap>
+                                    <Link to={`/procurement/purchase-orders?po=${detailReceipt.purchase_order_id}`}>
+                                        PO #{detailReceipt.purchase_order_id}
+                                    </Link>
+                                    {/* The whole chain this receipt sits in —
+                                        order → receipts → lots → movements →
+                                        consumption — on the order's trace
+                                        drawer (Phase 6). */}
+                                    <Link to={`/procurement/purchase-orders?po=${detailReceipt.purchase_order_id}&view=trace`}>
+                                        Trace the chain
+                                    </Link>
+                                </Space>
                             </Descriptions.Item>
                             <Descriptions.Item label="Warehouse">
                                 {detailReceipt.warehouse.code} — {detailReceipt.warehouse.name}
@@ -701,6 +711,13 @@ export default function GoodsReceiptsPage() {
                             </Descriptions.Item>
                             <Descriptions.Item label="Reference">{detailReceipt.reference ?? '—'}</Descriptions.Item>
                             <Descriptions.Item label="Notes">{detailReceipt.notes ?? '—'}</Descriptions.Item>
+                            {/* The Receipt Note's queue entry — the same cell
+                                the Sales pages render (status + link only). */}
+                            {detailReceipt.tally !== undefined && (
+                                <Descriptions.Item label="Tally">
+                                    <TallyLinkCell link={detailReceipt.tally} />
+                                </Descriptions.Item>
+                            )}
                         </Descriptions>
 
                         <Typography.Title level={5} style={{ marginTop: 24 }}>
