@@ -1781,7 +1781,7 @@ Deferred items:
     own non-negative decrement still protects the ledger (one wins, one 422s).
   • A backdated issue would be charged consumption it predates — the bound is
     inclusive and conservative (a refusal, never a wrong reversal).
-PR:                 stacked on #191 (base: feat/phase-7.6-configuration-lifecycle)
-Deployment state:   not deployed; stack #179 → … → #191 → this PR
+PR:                 #192 (base: feat/phase-7.6-configuration-lifecycle → #191 → … → #179)
+Deployment state:   not deployed; stack #179 → … → #191 → #192
 Next phase:         8 — end-to-end acceptance
 ```
