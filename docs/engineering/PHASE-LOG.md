@@ -794,7 +794,7 @@ Deferred items:
     the screen (a question, listed).
 
 Owner-gated items:  CEC sample/format authority (HELD) — the slot ships blocked.
-PR:                 (recorded on open)
-Deployment state:   not deployed; stack #179 → … → #184 → this PR
+PR:                 #185 (base: feat/phase-4-agent-xml-snapshot → #184 → … → #179)
+Deployment state:   not deployed; stack #179 → … → #184 → #185
 Next phase:         5 — Product / SKU configuration (operator workflow, first slice)
 ```
