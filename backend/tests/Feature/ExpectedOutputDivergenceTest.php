@@ -46,6 +46,15 @@ use Tests\TestCase;
  * screen and an accountant reading "6 boxes expected" off the Approval
  * screen for the identical run have grounds to distrust the app, and no
  * code path told either of them why the two disagree.
+ *
+ * RESOLUTION (Phase 5.5, P5.5-03): production_v3_unified. Every entry
+ * started after the change is stamped v3 and its metrics read the SAME
+ * engine call the preview does (UnifiedEntryMetrics) — the v3 arms below
+ * show the two screens agreeing for the identical run. The legacy arms
+ * are KEPT, unchanged: the fixtures here carry no stamp (as every entry
+ * approved before the change does), and those read the inline WB2 figure
+ * forever (LegacyEntryMetrics). This file therefore now pins BOTH the
+ * defect as history and its cure as the present.
  */
 class ExpectedOutputDivergenceTest extends TestCase
 {
@@ -100,6 +109,26 @@ class ExpectedOutputDivergenceTest extends TestCase
             $metrics['expected_boxes'],
             'Start Batch (5) and Approval (6) disagree on the target box count for one unchanged run.'
         );
+
+        // ---- v3 arm: the SAME run stamped production_v3_unified. ---------
+        // The metrics read the engine — the identical targetPieces() the
+        // preview called — so Start Batch and Approval now say one number.
+        $unified = new ShiftProductionEntry([
+            'calculation_version' => ProductionCalculationEngine::VERSION_UNIFIED,
+            'standard_cycle_time' => '100.5',
+            'active_cavities' => 8,
+            'running_hours' => '1',
+            'batch_status' => BatchStatus::Completed,
+        ]);
+        $unified->setRelation('item', $item);
+        $unified->setRelation('materialConsumptions', collect());
+        $unified->setRelation('scraps', collect());
+
+        $unifiedMetrics = app(ShiftProductionEntryService::class)->productionMetrics($unified);
+        $this->assertSame('280.00', $unifiedMetrics['expected_pieces']);
+        $this->assertSame($estimate['expected_pieces'], (int) $unifiedMetrics['expected_pieces']);
+        $this->assertSame($estimate['expected_boxes'], $unifiedMetrics['expected_boxes'], 'v3: 5 boxes on both screens.');
+        $this->assertSame($estimate['calculation_version'], $unifiedMetrics['calculation_version']);
     }
 
     /**
@@ -139,6 +168,11 @@ class ExpectedOutputDivergenceTest extends TestCase
         // this boundary the way the engine's own targetPieces() does.
         $this->assertNotSame('0.00', $metrics['expected_pieces']);
         $this->assertGreaterThan(0.0, (float) $metrics['expected_pieces']);
+
+        // ---- v3 arm: stamped production_v3_unified, the same run reads
+        // the engine's honest zero — not one shot completes.
+        $entry->calculation_version = ProductionCalculationEngine::VERSION_UNIFIED;
+        $this->assertSame('0.00', app(ShiftProductionEntryService::class)->productionMetrics($entry)['expected_pieces']);
     }
 
     /**
@@ -183,5 +217,10 @@ class ExpectedOutputDivergenceTest extends TestCase
             $metrics['expected_pieces'],
             'productionMetrics() treats zero hours as unknown, contradicting the engine it otherwise mirrors.'
         );
+
+        // ---- v3 arm: stamped production_v3_unified, zero hours is the
+        // engine's KNOWN zero on the Approval side too.
+        $entry->calculation_version = ProductionCalculationEngine::VERSION_UNIFIED;
+        $this->assertSame('0.00', app(ShiftProductionEntryService::class)->productionMetrics($entry)['expected_pieces']);
     }
 }

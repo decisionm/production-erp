@@ -8,10 +8,10 @@ use App\Modules\Production\Http\Requests\CancelShiftProductionEntryRequest;
 use App\Modules\Production\Http\Requests\CompleteBatchRequest;
 use App\Modules\Production\Http\Requests\HandoverRequest;
 use App\Modules\Production\Http\Requests\IngestShiftPageRequest;
+use App\Modules\Production\Http\Requests\ListShiftProductionEntriesRequest;
 use App\Modules\Production\Http\Requests\RejectShiftProductionEntryRequest;
 use App\Modules\Production\Http\Requests\StartBatchRequest;
 use App\Modules\Production\Http\Resources\ShiftProductionEntryResource;
-use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Services\ShiftPageEntryService;
 use App\Modules\Production\Services\ShiftProductionEntryService;
@@ -23,13 +23,24 @@ class ShiftProductionEntryController extends Controller
 {
     public function __construct(private readonly ShiftProductionEntryService $entries) {}
 
-    public function index(Request $request): AnonymousResourceCollection
+    /**
+     * The one list, filtered — Completed Today, the approval queue and the
+     * dashboard are all this endpoint with different query strings
+     * (ListShiftProductionEntriesRequest names them). Every filter is
+     * optional; bare, it answers exactly as it always has.
+     */
+    public function index(ListShiftProductionEntriesRequest $request): AnonymousResourceCollection
     {
-        $status = $request->query('status')
-            ? ShiftProductionEntryStatus::from($request->query('status'))
-            : null;
-
-        return ShiftProductionEntryResource::collection($this->entries->paginate(status: $status));
+        return ShiftProductionEntryResource::collection($this->entries->paginate(
+            perPage: $request->perPage(),
+            status: $request->status(),
+            productionDate: $request->dayFilter('production_date'),
+            dateFrom: $request->dayFilter('date_from'),
+            dateTo: $request->dayFilter('date_to'),
+            workCenterId: $request->idFilter('work_center_id'),
+            shiftId: $request->idFilter('shift_id'),
+            batchStatus: $request->batchStatus(),
+        ));
     }
 
     /**

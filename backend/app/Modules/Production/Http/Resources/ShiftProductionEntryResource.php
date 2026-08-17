@@ -7,14 +7,49 @@ use App\Modules\HRMS\Http\Resources\EmployeeResource;
 use App\Modules\Inventory\Http\Resources\ItemResource;
 use App\Modules\Inventory\Http\Resources\WarehouseResource;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
+use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Services\BagCostAllocationService;
+use App\Modules\Production\Services\CompletionDefaultsService;
 use App\Modules\Production\Services\ShiftProductionEntryService;
+use App\Modules\TallySync\Services\TallySyncLinkService;
 use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Collection;
 
 class ShiftProductionEntryResource extends JsonResource
 {
+    /**
+     * The page's TallyLinks, keyed by entry id, resolved ONCE for the whole
+     * collection (see collection() below) — null on a resource made on its
+     * own, which looks its single link up itself. Not a wire field.
+     *
+     * @var array<int, array<string, mixed>|null>|null
+     */
+    private ?array $pageTallyLinks = null;
+
+    /**
+     * A page of entries resolves its Tally links in a constant number of
+     * queries — TallySyncLinkService::forMany / forEntryIds over the whole
+     * page — instead of one lookup per row, then hands each row its own
+     * answer. Everything else about the collection is the framework's.
+     */
+    public static function collection($resource): AnonymousResourceCollection
+    {
+        return tap(parent::collection($resource), function (AnonymousResourceCollection $collection): void {
+            if (! $collection->collection instanceof Collection) {
+                return;
+            }
+
+            $rows = $collection->collection->filter(fn ($row) => $row instanceof self);
+            $links = self::tallyLinksFor($rows->map(fn (self $row) => $row->resource));
+            $rows->each(function (self $row) use ($links): void {
+                $row->pageTallyLinks = $links;
+            });
+        });
+    }
+
     public function toArray(Request $request): array
     {
         // Priced ONCE and shared by the two keys that need it below.
@@ -136,6 +171,23 @@ class ShiftProductionEntryResource extends JsonResource
             // that typed none, and for every batch completed before the
             // table existed. Same whenLoaded rule as the lines above.
             'packing_lines' => ShiftProductionEntryPackingLineResource::collection($this->whenLoaded('packingLines')),
+            // WHAT THE COMPLETION DRAWER IS PRE-FILLED WITH (Phase 5.5,
+            // WS-B): the five pack counts through the ONE reader
+            // (PackQuantityResolver::forEntry — typed entry columns, else
+            // the run's frozen packaging row, else the item master), each
+            // labelled with the rung that answered. Before completion these
+            // are the frozen configuration's counts; after it, what was
+            // recorded, so the amend drawer opens on the record. Always
+            // present; a figure no rung holds is null, never invented.
+            'packing_defaults' => app(CompletionDefaultsService::class)->packingDefaults($this->resource),
+            // WHAT THE RUN'S CONFIGURATION WAS STILL MISSING, in the one
+            // vocabulary every configuration surface repeats
+            // (ProductVariantService::MISSING_VOCABULARY, in that order) —
+            // judged for THIS run's frozen standard and packaging, not the
+            // standard's union. `source` says whether it was frozen at
+            // Start ('snapshot') or computed now from the frozen ids
+            // ('live'); Completed Today's "config incomplete" tag reads it.
+            'configuration_gaps' => app(CompletionDefaultsService::class)->configurationGaps($this->resource),
             // Downtime logged against this batch — planned at Start plus
             // the completion-time lines whose minutes net out of running
             // hours in metrics.downtime_minutes_total below.
@@ -261,6 +313,19 @@ class ShiftProductionEntryResource extends JsonResource
                 $this->status === ShiftProductionEntryStatus::Failed && $this->relationLoaded('tallySyncEntries'),
                 fn () => $this->tallySyncEntries->first()?->error_message,
             ),
+            // WHERE THIS BATCH STANDS IN TALLY — a TallyLink (status ·
+            // voucher_number · synced_at · flags · deep link; never the
+            // payload) for the voucher that CARRIES the entry, or null when
+            // none exists yet. Under shift granularity that is the Stock
+            // Journal the entry was stamped onto (tally_sync_entry_id — the
+            // voucher's syncable is the Shift, not this entry); under batch
+            // granularity, and for history from before the flip, it is the
+            // entry's own voucher through the morph. The shift voucher wins
+            // when both exist: it is the one whose lines the entry is in
+            // now. Cross-module through TallySync's TallySyncLinkService,
+            // one read per page (see collection()) — so approval state and
+            // Tally state can sit in one column on Completed Today.
+            'tally' => $this->tallyLink(),
             'status' => $this->status->value,
             'rejection_reason' => $this->rejection_reason,
             'plant_manager_signed_by' => UserResource::make($this->whenLoaded('plantManagerSignedBy')),
@@ -281,6 +346,55 @@ class ShiftProductionEntryResource extends JsonResource
             'notes' => $this->notes,
             'created_at' => $this->created_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * This entry's TallyLink: the page's precomputed answer when this
+     * resource was made as part of a collection, else looked up for the one
+     * entry (two small reads — a single-entry response is store/complete/
+     * approve, never a list).
+     *
+     * @return array<string, mixed>|null
+     */
+    private function tallyLink(): ?array
+    {
+        if ($this->pageTallyLinks !== null) {
+            return $this->pageTallyLinks[(int) $this->id] ?? null;
+        }
+
+        return self::tallyLinksFor(new Collection([$this->resource]))[(int) $this->id] ?? null;
+    }
+
+    /**
+     * The TallyLinks for a set of entries, keyed by entry id, in a constant
+     * number of queries: one over tally_sync_entries by the shift-voucher
+     * ids the entries carry (tally_sync_entry_id), one over the entries'
+     * own morph. Entries with no voucher of either kind map to null.
+     *
+     * @param  Collection<int, ShiftProductionEntry>  $entries
+     * @return array<int, array<string, mixed>|null>
+     */
+    private static function tallyLinksFor(Collection $entries): array
+    {
+        if ($entries->isEmpty()) {
+            return [];
+        }
+
+        $links = app(TallySyncLinkService::class);
+
+        $shiftVoucherIds = $entries->pluck('tally_sync_entry_id')->filter()->map(fn ($id) => (int) $id)->unique()->values()->all();
+        $byShiftVoucher = $shiftVoucherIds === [] ? [] : $links->forEntryIds($shiftVoucherIds);
+        $byEntry = $links->forMany((new ShiftProductionEntry)->getMorphClass(), $entries->pluck('id')->all());
+
+        $out = [];
+        foreach ($entries as $entry) {
+            $shiftVoucherId = $entry->tally_sync_entry_id === null ? null : (int) $entry->tally_sync_entry_id;
+            $out[(int) $entry->id] = ($shiftVoucherId !== null ? ($byShiftVoucher[$shiftVoucherId] ?? null) : null)
+                ?? $byEntry[(int) $entry->id]
+                ?? null;
+        }
+
+        return $out;
     }
 
     /**

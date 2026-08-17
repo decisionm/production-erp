@@ -353,11 +353,17 @@ class ExpectedOutputEngineTest extends TestCase
             ->assertJsonPath('data.running_hours', '8.00')
             ->assertJsonPath('data.qc_rejection_kg', '3.1600')
             // The engine runs on the snapshot: CT 10.6 × 4 active cavities.
-            // 3600/10.6 × 4 × 8 = 10867.9245… → 10867.92; /840 = 12.937 → 13.
-            ->assertJsonPath('data.metrics.expected_pieces', '10867.92')
+            // A batch started NOW is stamped production_v3_unified (P5.5-03),
+            // so the metrics floor the cycles exactly as the Start Batch
+            // preview did: FLOOR(28800/10.6)=2716 × 4 = 10864; /840 = 12.93
+            // → 13. (The in-memory, unstamped fixtures above stay on the
+            // inline WB2 figure — 3600/10.6 × 4 × 8 = 10867.92 — which is
+            // what every entry approved before the change still reads.)
+            ->assertJsonPath('data.calculation_version', 'production_v3_unified')
+            ->assertJsonPath('data.metrics.expected_pieces', '10864.00')
             ->assertJsonPath('data.metrics.expected_boxes', 13)
             ->assertJsonPath('data.metrics.actual_boxes', 7)
-            // Piece-grain: 5880/10867.9245 × 100 = 54.103… → 54.1.
+            // Piece-grain: 5880/10864 × 100 = 54.123… → 54.1.
             ->assertJsonPath('data.metrics.efficiency_pct', 54.1);
 
         $this->assertDatabaseHas('shift_production_entries', [

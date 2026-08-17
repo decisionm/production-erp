@@ -9,14 +9,61 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
+/**
+ * THE COMPLETION PAYLOAD — what the floor records when a batch ends. Every
+ * field is named here for what it IS, because the same words are read by
+ * the completion drawer, the amend drawer (AmendBatchRequest inherits every
+ * rule), the metrics and the Tally voucher, and a field understood two ways
+ * on one screen is how a 490/box run came to be measured against 520.
+ *
+ *   quantity_produced   the PIECES this run produced — the count every
+ *                       ledger, kg conversion (at the run's frozen unit
+ *                       weight) and voucher line reads. Not cartons, not kg.
+ *   quantity_scrap      pieces rejected on the floor (converted to kg the
+ *                       same way); qc_rejection_kg is quality's own figure.
+ *   nos_per_box         the pieces in the carton ACTUALLY PACKED on this
+ *                       run — what the supervisor packed at, which is the
+ *                       standard's count on an ordinary run and a
+ *                       different one when a run packs short or to a
+ *                       customer's carton. Recorded, never inferred, so the
+ *                       metrics measure the run at the count it was packed
+ *                       at (PackQuantityResolver reads it first).
+ *   no_of_box           the cartons packed on this run — the OUTER package
+ *                       in every mode; equal to the packing lines' carton
+ *                       total when lines are sent.
+ *   nos_per_tray /      the inner containers, per the mode the run packed
+ *   no_of_trays,        in: pieces per tray and trays packed, pieces per
+ *   nos_per_pouch /     pouch and pouches packed. Absent for a mode the
+ *   no_of_pouches       run did not use.
+ *   loose_pieces        pieces left in no container at all — batch-level,
+ *                       because a stray piece belongs to no packing mode.
+ *   packing_lines       how the pieces were packed, one line per mode (see
+ *                       the rules below); stored line for line.
+ *   actual_cycle_time / the run's own figures — a completion may correct
+ *   active_cavities     what Start recorded (an absent key keeps it, an
+ *                       explicit null clears it). standard_* are Start
+ *                       Batch snapshots and are NOT accepted here.
+ *   running_hours       hours the machine actually ran (≤ 24); the
+ *                       expected-output engine's denominator, net of the
+ *                       downtime_events recorded below.
+ *   material_consumptions / closing_day_bin / scraps / downtime_events —
+ *                       what the run consumed, what the bin held at close,
+ *                       what was scrapped, what stopped the machine.
+ *
+ * The RULES are the contract every existing completion was validated
+ * against and are unchanged by this naming (PackingLinesTest,
+ * PackingLinesPersistTest); attributes() below is only the name a refusal
+ * calls each field by.
+ */
 class CompleteBatchRequest extends FormRequest
 {
     use ValidatesDowntimeEvents;
 
     /**
      * How much two piece counts may differ and still be called equal.
-     * quantity_produced arrives as a numeric string ("420", "420.0") while
-     * line pieces are integers — a strict comparison would fail on the
+     * quantity_produced — the pieces produced — arrives as a numeric string
+     * (the drawer sends the count as typed, with or without a decimal part)
+     * while line pieces are integers; a strict comparison would fail on the
      * representation rather than on the arithmetic.
      */
     private const PIECE_EPSILON = 0.001;
@@ -30,9 +77,12 @@ class CompleteBatchRequest extends FormRequest
     {
         return [
             'batch_number' => ['nullable', 'string', 'max:64'],
+            // Pieces produced — see the class docblock for every count's meaning.
             'quantity_produced' => ['required', 'numeric', 'gt:0'],
             'quantity_scrap' => ['nullable', 'numeric', 'gte:0'],
             'scrap_reason_id' => ['nullable', 'integer', 'exists:scrap_reasons,id'],
+            // The pack counts THIS run packed at, and how many of each were
+            // packed. nos_per_box is the carton actually packed on this run.
             'nos_per_tray' => ['nullable', 'integer', 'min:0'],
             'no_of_trays' => ['nullable', 'integer', 'min:0'],
             'nos_per_box' => ['nullable', 'integer', 'min:0'],
@@ -119,6 +169,38 @@ class CompleteBatchRequest extends FormRequest
             // (a short box, a miscount) — but then it needs a reason.
             'packing_lines.*.actual_pieces' => ['required', 'integer', 'min:0'],
             'packing_lines.*.override_reason' => ['nullable', 'string', 'max:255'],
+        ];
+    }
+
+    /**
+     * The name a refusal calls each field by — what the field IS, so a 422
+     * reads "the pieces produced must be greater than 0", never a column
+     * name a supervisor has to decode. Names only: no rule changes here.
+     *
+     * @return array<string, string>
+     */
+    public function attributes(): array
+    {
+        return [
+            'quantity_produced' => 'pieces produced',
+            'quantity_scrap' => 'pieces rejected',
+            'nos_per_box' => 'pieces per box actually packed',
+            'no_of_box' => 'cartons packed',
+            'nos_per_tray' => 'pieces per tray',
+            'no_of_trays' => 'trays packed',
+            'nos_per_pouch' => 'pieces per pouch',
+            'no_of_pouches' => 'pouches packed',
+            'loose_pieces' => 'loose pieces',
+            'actual_cycle_time' => 'actual cycle time',
+            'active_cavities' => 'active cavities',
+            'running_hours' => 'running hours',
+            'qc_rejection_kg' => 'QC rejection kg',
+            'packing_lines.*.boxes' => 'cartons on this line',
+            'packing_lines.*.nos_per_box' => 'pieces per box on this line',
+            'packing_lines.*.loose_inner' => 'loose inner containers on this line',
+            'packing_lines.*.nos_per_inner' => 'pieces per inner container on this line',
+            'packing_lines.*.derived_pieces' => 'derived pieces on this line',
+            'packing_lines.*.actual_pieces' => 'counted pieces on this line',
         ];
     }
 

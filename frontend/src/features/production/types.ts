@@ -1,6 +1,7 @@
 import type { Employee } from '@/features/hrms/types';
 import type { Item, Warehouse } from '@/features/inventory/types';
 import type { Vendor } from '@/features/procurement/types';
+import type { TallyLink } from '@/features/sales/types';
 
 export interface WorkCenter {
     id: number;
@@ -736,6 +737,8 @@ export function batchCostSourceLabel(source: string | null | undefined): string 
 }
 
 export interface ShiftProductionEntry {
+    /** The expected-output formula this batch was started under (production_v3_unified since Phase 5.5; production_v2_floor / null before). The server's metrics and the page's pre-submit mirror both read it. */
+    calculation_version?: string | null;
     id: number;
     shift: Shift;
     work_center: WorkCenter;
@@ -883,6 +886,24 @@ export interface ShiftProductionEntry {
     batch_cost?: BatchCost | null;
     /** Latest Tally sync error — present only when status is "failed". */
     sync_error?: string | null;
+    /**
+     * WHERE THIS BATCH STANDS IN TALLY (Phase 5.5, WS-C) — the TallyLink of
+     * the voucher that CARRIES the entry: under shift granularity the Stock
+     * Journal it was stamped onto (the voucher's syncable is the Shift, the
+     * entry hangs off tally_sync_entry_id), else its own per-entry voucher.
+     * Status + voucher number + deep link, never the payload; null means NO
+     * voucher exists yet, which is a different fact from "pending" and is
+     * rendered as a dash, never as a state. Optional only for a backend
+     * that predates the key.
+     */
+    tally?: TallyLink | null;
+    /**
+     * The Tally identity this batch's finished goods post as
+     * (DEC-20260810-003) — frozen at completion when the selected packaging
+     * carries its own item; null means the product's item. Optional only for
+     * a backend that predates the key.
+     */
+    finished_item?: { id: number; name: string } | null;
     status: ShiftProductionEntryStatus;
     rejection_reason: string | null;
     plant_manager_signed_by?: { id: number; name: string } | null;
@@ -1712,6 +1733,13 @@ export interface BatchPreview {
         default_cavities: number | null;
         unit_weight_grams: string | null;
         colour: string | null;
+        /**
+         * The mould this configuration runs (Phase 5.5, P5.5-01) — read
+         * from the resolved configuration's own mould, so Start Batch can
+         * say it. Null when the configuration names no mould; optional
+         * because a backend that predates the key sends nothing.
+         */
+        mould?: { id: number; code: string | null; name: string | null } | null;
     } | null;
     warnings: StandardWarning[];
 }

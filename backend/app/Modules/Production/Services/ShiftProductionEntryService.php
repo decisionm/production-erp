@@ -9,6 +9,7 @@ use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Inventory\Services\ScrapItemResolver;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Production\Events\ShiftProductionEntryApproved;
+use App\Modules\Production\Events\ShiftProductionEntryCompleted;
 use App\Modules\Production\Exceptions\MachineBusyException;
 use App\Modules\Production\Exceptions\ProductNotReadyException;
 use App\Modules\Production\Models\Bom;
@@ -76,10 +77,45 @@ class ShiftProductionEntryService
         // path below reads through it, so it can never again measure a
         // 490/box tray run against the master's 520.
         private readonly PackQuantityResolver $packQuantities,
+        // The two expected-output formulas productionMetrics() selects
+        // between BY THE ENTRY'S calculation_version stamp (P5.5-03):
+        // production_v3_unified reads the engine — the same targetPieces()
+        // as the Start Batch preview; every earlier stamp, and null, keeps
+        // the inline WB2 computation it was approved under, byte-for-byte.
+        private readonly UnifiedEntryMetrics $unifiedMetrics,
+        private readonly LegacyEntryMetrics $legacyMetrics,
     ) {}
 
-    public function paginate(int $perPage = 20, ?ShiftProductionEntryStatus $status = null, bool $includeCancelled = false): LengthAwarePaginator
-    {
+    /**
+     * The one paginated list of entries — the approval queue, the dashboard,
+     * and (Phase 5.5, WS-C) Completed Today, which reads it as
+     * production_date = today · batch_status = completed · per_page 100.
+     *
+     * The three positional arguments are the ones every older caller passes
+     * and mean what they always did; every filter after them is optional and
+     * additive — a null is "no filter", never a match on null. The day
+     * filters compare on the stored production_date column exactly as the
+     * entry was filed (the night shift's 02:00 batch carries the day it
+     * started), inclusive at both ends of a range.
+     *
+     * `batch_status = cancelled` implies include-cancelled: asking for the
+     * withdrawn batches by name IS asking to see them, and the default
+     * predicate below would otherwise contradict the filter into an empty
+     * page. Any other batch_status leaves the default alone.
+     */
+    public function paginate(
+        int $perPage = 20,
+        ?ShiftProductionEntryStatus $status = null,
+        bool $includeCancelled = false,
+        ?string $productionDate = null,
+        ?string $dateFrom = null,
+        ?string $dateTo = null,
+        ?int $workCenterId = null,
+        ?int $shiftId = null,
+        ?BatchStatus $batchStatus = null,
+    ): LengthAwarePaginator {
+        $includeCancelled = $includeCancelled || $batchStatus === BatchStatus::Cancelled;
+
         return ShiftProductionEntry::query()
             ->with([
                 'shift', 'workCenter', 'item', 'warehouse', 'scrapReason', 'operator',
@@ -128,6 +164,12 @@ class ShiftProductionEntryService
                 // shows a batch that's still running.
                 $query->where('status', $status->value)->where('batch_status', BatchStatus::Completed->value);
             })
+            ->when($batchStatus, fn ($query) => $query->where('batch_status', $batchStatus->value))
+            ->when($productionDate, fn ($query) => $query->whereDate('production_date', $productionDate))
+            ->when($dateFrom, fn ($query) => $query->whereDate('production_date', '>=', $dateFrom))
+            ->when($dateTo, fn ($query) => $query->whereDate('production_date', '<=', $dateTo))
+            ->when($workCenterId, fn ($query) => $query->where('work_center_id', $workCenterId))
+            ->when($shiftId, fn ($query) => $query->where('shift_id', $shiftId))
             ->orderByDesc('production_date')
             ->orderByDesc('id')
             ->paginate($perPage);
@@ -371,8 +413,11 @@ class ShiftProductionEntryService
                     ? $createdBy : null,
                 'scheduled_hours' => $scheduledHours,
                 'planned_downtime_minutes' => $plannedMinutes,
-                // Which formula set produced this entry's figures. Stamped
-                // once, never recalculated — see ProductionCalculationEngine.
+                // Which formula set produces this entry's figures. Stamped
+                // once, never recalculated — productionMetrics() selects its
+                // formula by this stamp, so a later engine version leaves
+                // this run's numbers exactly where they were. See
+                // ProductionCalculationEngine.
                 'calculation_version' => ProductionCalculationEngine::VERSION_CURRENT,
                 'config_snapshot' => [
                     'configuration_id' => $configuration?->id,
@@ -742,7 +787,7 @@ class ShiftProductionEntryService
                 purpose: StockMovementPurpose::Output,
             );
 
-            return $entry->fresh([
+            $completed = $entry->fresh([
                 'shift', 'workCenter', 'item', 'warehouse', 'scrapReason', 'operator',
                 'materialConsumptions.item' => fn ($query) => $query->withTrashed(),
                 // The line's OWN warehouse — which day bin or store the
@@ -753,6 +798,18 @@ class ShiftProductionEntryService
                 'packingLines',
                 'downtimeEvents.reason',
             ]);
+
+            // THE COMPLETION AS A DOMAIN EVENT, raised only once the write
+            // above has actually landed. afterCommit rather than a dispatch
+            // after this closure returns, because this method also runs
+            // INSIDE amendCompletion's and handover's transactions — a
+            // dispatch at the inner return would announce a completion the
+            // outer transaction may still roll back; the callback is dropped
+            // with the transaction if it does. It is not a Tally trigger
+            // (see the event class): the approval event stays the only one.
+            DB::afterCommit(fn () => event(new ShiftProductionEntryCompleted($completed)));
+
+            return $completed;
         });
     }
 
@@ -2831,20 +2888,40 @@ class ShiftProductionEntryService
      * formula for the live running screen; this backend figure is the
      * authoritative one post-completion).
      *
+     * WHICH FORMULA — selected by the entry's calculation_version stamp
+     * (P5.5-03), never by "the current engine":
+     *
+     *   production_v3_unified          → UnifiedEntryMetrics: the engine's
+     *       targets() — the SAME targetPieces() the Start Batch preview
+     *       calls, fed running hours net of the completion-recorded
+     *       downtime, cycles floored before cavities multiply. Preview and
+     *       completion agree to the piece for a run with no downtime.
+     *   production_v2_floor / legacy_v1 / null → LegacyEntryMetrics: the
+     *       inline WB2 computation (unfloored, half-up boxes) those entries
+     *       were approved under, byte-for-byte. History is never recomputed
+     *       under a new formula — that is what the stamp is FOR.
+     *
+     * Everything below the expected-output block — rejection, lumps, issued
+     * kg, the reconciliation, the bands, the approval gate — is version-
+     * independent and is what the Tally scrap line reads; none of it moves.
+     *
      * Null-safety rule: any output whose inputs are missing or zero is null,
      * never a fake number — an efficiency computed against a guessed
      * expectation would be worse than no efficiency at all.
      *
      * Rounding rule (two regimes, deliberately different): expected_boxes is
-     * the WB2 col W workbook formula and STAYS half-up ROUND — it must keep
-     * matching the sheet cell-for-cell, so config('production.packing_rounding')
-     * never touches it. That config governs only packing SUGGESTIONS and
-     * "vs standard" notes — expected_pouches here and the frontend's packing
-     * prefills — where ceil (default) reflects that a part-filled container
-     * still needs packing.
+     * the workbook's EST BOX and rounds to NEAREST (half-up in the legacy
+     * inline; production.est_box_rounding, default 'round', through the
+     * engine under v3) — config('production.packing_rounding') never touches
+     * it. That config governs only packing SUGGESTIONS and "vs standard"
+     * notes — expected_pouches here and the frontend's packing prefills —
+     * where ceil (default) reflects that a part-filled container still
+     * needs packing.
      *
      * @return array{
-     *     expected_pieces: ?string, expected_boxes: ?int, expected_pouches: ?int,
+     *     calculation_version: ?string, downtime_netted: bool,
+     *     expected_pieces: ?string, expected_pieces_gross: ?int, downtime_impact_pieces: ?int,
+     *     expected_boxes: ?int, expected_pouches: ?int,
      *     actual_boxes: ?int, actual_pouches: ?int,
      *     actual_pieces: ?string, efficiency_pct: ?float, efficiency_band: ?string,
      *     downtime_minutes_total: string, net_running_hours: ?string,
@@ -2876,45 +2953,27 @@ class ShiftProductionEntryService
             'downtimeEvents.reason',
         ]);
 
-        // Expected pieces = 3600/CT × active cavities × running hours (WB2's
-        // EST BOX numerator, always at the STANDARD cycle time — the snapshot
-        // taken at Start Batch). Computed as one division at 8dp: chaining
-        // 4dp bc truncations loses the second decimal (144000/10.6 must
-        // round to 13584.91, not 13584.90).
+        // Expected output at the STANDARD cycle time (the snapshot taken at
+        // Start Batch) over the running hours typed at completion, net of
+        // the downtime logged with the completion. WHICH arithmetic is the
+        // entry's stamp's to say — see the method docblock.
         $cycleTime = $entry->standard_cycle_time !== null ? (string) $entry->standard_cycle_time : null;
         $cavities = $entry->active_cavities;
         $hours = $entry->running_hours !== null ? (string) $entry->running_hours : null;
 
-        // Downtime logged AT COMPLETION nets out of the hours before the
-        // WB2 formula (owner's rule, 30-Jul: a power cut or mould change
-        // must not count against efficiency — the paper report nets B/D
-        // time out of the day the same way). Only completion-recorded
-        // events count (known_before_start = false): planned downtime
-        // attached at Start already shaped that screen's adjusted target,
-        // and netting it here too would double-count it. Reasons flagged
-        // reduces_runtime = false are excluded, mirroring
-        // ProductionDowntimeService::hoursFor(). With no such events the
-        // hours string is left completely untouched, so a batch without
-        // downtime lines computes byte-identically to before this existed.
+        // Downtime logged AT COMPLETION nets out of the hours (owner's rule,
+        // 30-Jul: a power cut or mould change must not count against
+        // efficiency — the paper report nets B/D time out of the day the
+        // same way). Only completion-recorded events count
+        // (known_before_start = false): planned downtime attached at Start
+        // already shaped that screen's adjusted target, and netting it here
+        // too would double-count it. Reasons flagged reduces_runtime = false
+        // are excluded, mirroring ProductionDowntimeService::hoursFor().
+        // Both formulas net the SAME minutes; only the arithmetic after
+        // differs.
         $downtimeMinutes = $this->completionDowntimeMinutes($entry);
-        $netHours = $hours;
-        if ($hours !== null && bccomp($downtimeMinutes, '0', 2) === 1) {
-            $netHours = bcsub($hours, bcdiv($downtimeMinutes, '60', 6), 6);
-            if (bccomp($netHours, '0', 6) === -1) {
-                // Floored at zero — expected output goes honest-null; the
-                // raw typed figure stays on running_hours untouched.
-                $netHours = '0';
-            }
-        }
 
-        $expectedPiecesRaw = null;
-        if ($cycleTime !== null && bccomp($cycleTime, '0', 4) === 1
-            && $cavities !== null && $cavities > 0
-            && $netHours !== null && bccomp($netHours, '0', 4) === 1) {
-            $expectedPiecesRaw = bcdiv(bcmul(bcmul('3600', (string) $cavities, 4), $netHours, 4), $cycleTime, 8);
-        }
-
-        // Expected boxes = ROUND(expected_pieces / pack, 0) — WB2 col W.
+        // The pack counts the expected boxes/pouches are measured against.
         // The entry's own pack size wins (a run packed at a non-standard
         // count must not be measured against the master's), and history
         // never rewrites itself when the master changes later. Read through
@@ -2922,23 +2981,6 @@ class ShiftProductionEntryService
         // the item master. Until then this read `entry ?? item` and skipped
         // the packaging the run was started against (§4.14).
         $pack = $this->packQuantities->forEntry($entry);
-        $nosPerBox = $pack->nos_per_box;
-        $expectedBoxes = null;
-        if ($expectedPiecesRaw !== null && $nosPerBox !== null && $nosPerBox > 0) {
-            $expectedBoxes = (int) $this->bcRoundHalfUp(bcdiv($expectedPiecesRaw, (string) $nosPerBox, 8), 0);
-        }
-
-        // Expected pouches = expected_pieces / pouch standard — a packing
-        // suggestion, not a workbook figure, so it rounds per
-        // production.packing_rounding (see method docblock). Same resolver,
-        // same precedence: the entry's typed pouch size, else the run's
-        // packaging row (a pouch packaging's own nos_per_pouch — the rung
-        // the old reader skipped), else the item master.
-        $nosPerPouch = $pack->nos_per_pouch;
-        $expectedPouches = null;
-        if ($expectedPiecesRaw !== null && $nosPerPouch !== null && $nosPerPouch > 0) {
-            $expectedPouches = (int) $this->applyPackingRounding(bcdiv($expectedPiecesRaw, (string) $nosPerPouch, 8), 0);
-        }
 
         // Efficiency = actual PIECES / expected pieces × 100 — piece-grain,
         // not the WB2 col Y box ratio it used to be. The owner's live batch
@@ -2947,13 +2989,15 @@ class ShiftProductionEntryService
         // — displayed as "Efficiency 75%" because 3 full boxes were divided
         // by 4 expected, throwing away 5,208 loose pieces and compounding
         // two roundings. Boxes are still reported alongside; only the ratio
-        // moved to the honest grain.
+        // moved to the honest grain. Piece grain in BOTH formulas.
         $actualBoxes = $entry->no_of_box;
         $actualPieces = $entry->quantity_produced !== null ? (string) $entry->quantity_produced : null;
-        $efficiency = null;
-        if ($expectedPiecesRaw !== null && bccomp($expectedPiecesRaw, '0', 8) === 1 && $actualPieces !== null) {
-            $efficiency = round((float) bcmul(bcdiv($actualPieces, $expectedPiecesRaw, 8), '100', 8), 1);
-        }
+
+        $formula = $entry->calculation_version === ProductionCalculationEngine::VERSION_UNIFIED
+            ? $this->unifiedMetrics
+            : $this->legacyMetrics;
+        $expected = $formula->compute($cycleTime, $cavities, $hours, $downtimeMinutes, $pack, $actualPieces);
+        $efficiency = $expected['efficiency_pct'];
 
         // Rejection: production-side calculated kg vs QC's weighed kg (WB2
         // P/Q/R). When QC weighed it, QC wins as the confirmed figure —
@@ -3024,9 +3068,23 @@ class ShiftProductionEntryService
             && abs((float) $unaccounted) >= $blocking;
 
         return [
-            'expected_pieces' => $expectedPiecesRaw !== null ? $this->bcRoundHalfUp($expectedPiecesRaw, 2) : null,
-            'expected_boxes' => $expectedBoxes,
-            'expected_pouches' => $expectedPouches,
+            // Which formula set produced the expected_* figures below — the
+            // entry's own stamp, echoed so a row read on its own (a report
+            // line, the Results card) can say so. Null on entries started
+            // before stamping existed; those read as legacy.
+            'calculation_version' => $entry->calculation_version,
+            // The completion metrics ALWAYS net the completion-recorded
+            // downtime, under either formula; the Start Batch preview says
+            // false for the same key because it cannot know it yet.
+            'downtime_netted' => true,
+            'expected_pieces' => $expected['expected_pieces'],
+            // v3 only (the engine's targets()): the target before downtime,
+            // and what the recorded stoppages cost in whole shots' worth.
+            // Null under the legacy formula — never computed retroactively.
+            'expected_pieces_gross' => $expected['expected_pieces_gross'],
+            'downtime_impact_pieces' => $expected['downtime_impact_pieces'],
+            'expected_boxes' => $expected['expected_boxes'],
+            'expected_pouches' => $expected['expected_pouches'],
             // The pack counts the two figures above were measured against,
             // and the rung each came from — so a screen can say "5 boxes
             // expected at 490/box (this run's packaging)" instead of leaving
@@ -3043,7 +3101,7 @@ class ShiftProductionEntryService
             // above; net hours is what fed the formula (floored at zero) —
             // the raw typed figure stays on running_hours.
             'downtime_minutes_total' => $downtimeMinutes,
-            'net_running_hours' => $netHours !== null ? $this->bcRoundHalfUp($netHours, 2) : null,
+            'net_running_hours' => $expected['net_running_hours'],
             'rejection_kg_production' => $rejectionProduction,
             'rejection_kg_qc' => $rejectionQc,
             'rejection_diff_kg' => $rejectionProduction !== null && $rejectionQc !== null
@@ -3125,52 +3183,6 @@ class ShiftProductionEntryService
         }
 
         return $total;
-    }
-
-    /**
-     * The configurable rounding for packing suggestions and "vs standard"
-     * notes — production.packing_rounding: ceil (default, a part-filled
-     * container still needs packing), round (half-up, same as
-     * bcRoundHalfUp), or floor. bcmath-safe on the non-negative quantities
-     * this engine deals in. Public because it's the single rounding
-     * authority for every packing suggestion any caller derives — the WB2
-     * expected-boxes formula deliberately does NOT go through here (see
-     * productionMetrics()).
-     */
-    public function applyPackingRounding(string $value, int $scale = 0): string
-    {
-        $mode = (string) config('production.packing_rounding', 'ceil');
-
-        if ($mode === 'round') {
-            return $this->bcRoundHalfUp($value, $scale);
-        }
-
-        // bcmath's own behaviour at $scale is truncation — which IS floor
-        // for the non-negative quantities packing deals in.
-        $truncated = bcadd($value, '0', $scale);
-
-        // Compare at the value's full precision so ceil only bumps when a
-        // real remainder was dropped (an exact 136.000 must stay 136).
-        $dot = strpos($value, '.');
-        $precision = max($scale, $dot === false ? 0 : strlen($value) - $dot - 1);
-
-        if ($mode === 'floor' || bccomp($value, $truncated, $precision) === 0) {
-            return $truncated;
-        }
-
-        return bcadd($truncated, bcdiv('1', bcpow('10', (string) $scale, 0), $scale), $scale);
-    }
-
-    /**
-     * bcmath truncates; the workbook formulas ROUND. Half-up on the
-     * non-negative quantities this engine deals in: add 5 at the first
-     * dropped digit, then truncate.
-     */
-    private function bcRoundHalfUp(string $value, int $scale): string
-    {
-        $offset = bcdiv('5', bcpow('10', (string) ($scale + 1), 0), $scale + 1);
-
-        return bcadd($value, $offset, $scale);
     }
 
     /**

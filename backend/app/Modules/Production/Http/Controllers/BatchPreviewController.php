@@ -179,6 +179,16 @@ class BatchPreviewController extends Controller
                     'default_cavities' => $configuration->default_cavities,
                     'unit_weight_grams' => $configuration->unit_weight_grams,
                     'colour' => $configuration->colour,
+                    // The mould this configuration runs (Phase 5.5, P5.5-01),
+                    // so Start Batch can SAY it rather than ask or leave it
+                    // unsaid. Read from the same resolved row whose figures
+                    // are quoted above (`mold` is eager-loaded by resolve());
+                    // null when the configuration names no mould.
+                    'mould' => $configuration->mold === null ? null : [
+                        'id' => $configuration->mold->id,
+                        'code' => $configuration->mold->code,
+                        'name' => $configuration->mold->name,
+                    ],
                 ],
                 'standard' => $standard === null ? null : [
                     'id' => $standard->id,

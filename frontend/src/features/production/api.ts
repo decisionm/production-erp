@@ -11,6 +11,7 @@ import type {
     StandardPackagingMode,
     BalanceAckReason,
     BatchPreview,
+    BatchStatus,
     BinBayAvailabilityResponse,
     CartonInternalTrace,
     FinishedCarton,
@@ -351,11 +352,57 @@ export async function createShift(payload: CreateShiftPayload): Promise<Shift> {
     return data.data;
 }
 
-export async function listShiftProductionEntries(status?: ShiftProductionEntryStatus): Promise<Paginated<ShiftProductionEntry>> {
+/**
+ * The entries list's query string (Phase 5.5, WS-C —
+ * ListShiftProductionEntriesRequest). Every key optional; the day filters
+ * are FACTORY DAYS (Y-m-d) compared on the stored production_date, so the
+ * night shift's 02:00 batch is found under the day it started; per_page is
+ * 1..100 (default 20). There is deliberately no completed-today endpoint —
+ * Completed Today is this list read as
+ * `{ production_date: today, batch_status: 'completed', per_page: 100 }`.
+ */
+export interface ShiftProductionEntryFilters {
+    status?: ShiftProductionEntryStatus;
+    production_date?: string;
+    date_from?: string;
+    date_to?: string;
+    work_center_id?: number;
+    shift_id?: number;
+    batch_status?: BatchStatus;
+    per_page?: number;
+    page?: number;
+}
+
+/**
+ * One page of entries. A bare status string still works exactly as it always
+ * did (`listShiftProductionEntries('pending')` — the approval queue, the
+ * dashboard, the live monitor); a filters object reaches the rest of the
+ * server's filters. Undefined keys are not sent.
+ */
+export async function listShiftProductionEntries(
+    filters?: ShiftProductionEntryStatus | ShiftProductionEntryFilters,
+): Promise<Paginated<ShiftProductionEntry>> {
+    const params = typeof filters === 'string' ? { status: filters } : filters;
     const { data } = await api.get<Paginated<ShiftProductionEntry>>('/production/shift-production-entries', {
-        params: status ? { status } : undefined,
+        params: params && Object.keys(params).length > 0 ? params : undefined,
     });
     return data;
+}
+
+/**
+ * Completed Today, server-side: every batch COMPLETED on one factory day, in
+ * one read of up to 100 rows (the server's page ceiling — a ten-machine
+ * three-shift floor completes a few dozen a day). `productionDate` is the
+ * shift-aware factory day (`productionDateFor` in shiftClock.ts), so at
+ * 02:00 on the Night shift it is yesterday and the whole night reads
+ * together — the same day the batches were filed under.
+ *
+ * Replaces the client-side `page 1 of 20 → filter → slice(0,15)` read: that
+ * one silently dropped the day's earlier batches once the floor had done
+ * more than twenty, and the fifteen it kept were the newest, not the day's.
+ */
+export async function listCompletedEntriesForDay(productionDate: string): Promise<Paginated<ShiftProductionEntry>> {
+    return listShiftProductionEntries({ production_date: productionDate, batch_status: 'completed', per_page: 100 });
 }
 
 /**

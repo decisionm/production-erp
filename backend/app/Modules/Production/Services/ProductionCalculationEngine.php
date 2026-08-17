@@ -5,26 +5,41 @@ namespace App\Modules\Production\Services;
 /**
  * The one authoritative production calculation engine.
  *
- * Versioned deliberately. Two formula sets exist in this factory's history
+ * Versioned deliberately. Three formula sets exist in this factory's history
  * and they disagree, so which one produced a number is part of the number's
  * meaning:
  *
- *   legacy_v1          — 3600 × cavities × hours ÷ CT, NOT floored, with
- *                        half-up ROUND for boxes. Pinned cell-for-cell to
- *                        the older WB2 workbook the accountant reconciles
- *                        against. HISTORICAL ONLY: entries approved under
- *                        it keep their figures forever.
+ *   legacy_v1           — 3600 × cavities × hours ÷ CT, NOT floored, with
+ *                         half-up ROUND for boxes. Pinned cell-for-cell to
+ *                         the older WB2 workbook the accountant reconciles
+ *                         against. HISTORICAL ONLY: entries approved under
+ *                         it keep their figures forever.
  *   production_v2_floor — FLOOR(hours × 3600 ÷ CT) × cavities, per the
- *                        29-Jul factory master workbook. Authoritative for
- *                        every new configurable-production batch. A machine
- *                        cannot complete a partial shot, so the cycle count
- *                        floors before cavities multiply.
+ *                         29-Jul factory master workbook, but applied to the
+ *                         Start Batch PREVIEW only: an entry stamped v2 had
+ *                         its completion metrics computed by the unfloored
+ *                         WB2 inline formula (LegacyEntryMetrics), net of
+ *                         completion downtime — the two screens disagreed by
+ *                         up to a box for one unchanged run
+ *                         (ExpectedOutputDivergenceTest). HISTORICAL ONLY,
+ *                         and read exactly that way: a v2 entry's metrics
+ *                         stay the inline figure it was approved against.
+ *   production_v3_unified — the SAME targetPieces() call for both screens.
+ *                         The preview feeds it planned hours (downtime not
+ *                         yet known); the completion metrics feed it running
+ *                         hours net of the completion-recorded downtime,
+ *                         through targets(). Cycles floor before cavities
+ *                         multiply on both sides, so with no downtime the
+ *                         two agree to the piece. Authoritative for every
+ *                         entry started after Phase 5.5 (P5.5-03).
  *
  * An entry stamps its version at Start and is never recalculated by a later
- * engine change. That is the whole point of versioning rather than
- * migrating: an approved figure that silently moves destroys the factory's
- * trust in the parallel paper run far faster than a wrong figure they can
- * see and query.
+ * engine change: ShiftProductionEntryService::productionMetrics() selects
+ * its formula BY THE STAMP (UnifiedEntryMetrics for v3, LegacyEntryMetrics
+ * for everything earlier and for null). That is the whole point of
+ * versioning rather than migrating: an approved figure that silently moves
+ * destroys the factory's trust in the parallel paper run far faster than a
+ * wrong figure they can see and query.
  *
  * Precision: bcmath throughout, 8dp internally, rounded only at the
  * presentation boundaries named in each method. Percentages are returned as
@@ -34,7 +49,12 @@ class ProductionCalculationEngine
 {
     public const VERSION_LEGACY = 'legacy_v1';
 
-    public const VERSION_CURRENT = 'production_v2_floor';
+    public const VERSION_FLOOR = 'production_v2_floor';
+
+    public const VERSION_UNIFIED = 'production_v3_unified';
+
+    /** The stamp every entry started now carries. */
+    public const VERSION_CURRENT = self::VERSION_UNIFIED;
 
     /**
      * Target pieces for a span of running time.
@@ -67,6 +87,8 @@ class ProductionCalculationEngine
         }
 
         // A partial shot produces nothing — floor the cycles, then multiply.
+        // v2 and v3 share this arithmetic: v3 changed WHERE the formula is
+        // applied (both screens), not the formula.
         $cycles = (int) bcdiv($seconds, $cycleTime, 0);
 
         return $cycles * $cavities;
@@ -82,6 +104,11 @@ class ProductionCalculationEngine
      * The two impact figures are the point of the exercise: they separate
      * "we planned to lose this" from "we lost this unexpectedly", so a
      * supervisor is not judged on a scheduled mould change.
+     *
+     * Wired (P5.5-03): UnifiedEntryMetrics feeds it running hours as
+     * scheduled, the completion-recorded downtime as unplanned, and reads
+     * runtime_target as the entry's expected pieces — the same
+     * targetPieces() the Start Batch preview calls with planned hours.
      *
      * @return array{
      *     full_target: ?int, adjusted_target: ?int, runtime_target: ?int,
@@ -154,6 +181,34 @@ class ProductionCalculationEngine
                 ? bcadd(bcdiv($exact, '1', 0), '1', 0)
                 : bcdiv($exact, '1', 0),
             default => $this->roundHalfUp($exact),
+        };
+    }
+
+    /**
+     * Containers needed to PACK a piece count — trays, pouches — the
+     * factory's packing SUGGESTION, as distinct from expectedBoxes() above,
+     * which is the TARGET a shift is measured against.
+     *
+     * A part-filled container still needs packing, so the default is ceil;
+     * the policy is production.packing_rounding (ceil | round | floor).
+     * Whole-number arithmetic throughout — no float division inside the
+     * engine. Zero pieces is a known zero: it needs zero containers.
+     *
+     * THE ONE implementation (P5.5-03): the Start Batch preview's
+     * expected_trays / expected_pouches and the completion metrics'
+     * expected_pouches both read it, so the two screens cannot suggest
+     * different pouch counts for the same run.
+     */
+    public function packingContainers(?int $pieces, ?int $perContainer, ?string $policy = null): ?int
+    {
+        if ($pieces === null || $perContainer === null || $perContainer <= 0 || $pieces < 0) {
+            return null;
+        }
+
+        return match ($policy ?? config('production.packing_rounding', 'ceil')) {
+            'floor' => intdiv($pieces, $perContainer),
+            'round' => intdiv(2 * $pieces + $perContainer, 2 * $perContainer),
+            default => intdiv($pieces + $perContainer - 1, $perContainer),
         };
     }
 
@@ -389,17 +444,23 @@ class ProductionCalculationEngine
      *   adjusted   — did we make what we planned after known downtime?
      *   running    — how well did the machine run while it was running?
      *
-     * Returned as percentages at 2dp for display. Null when the target is
-     * null or zero — never a fabricated 0% or 100%.
+     * Returned as percentages at 2dp for display (the entry metrics ask for
+     * 1dp — the grain every completion screen and report already prints).
+     * Null when the target is null or zero — never a fabricated 0% or 100%.
+     *
+     * Wired (P5.5-03): UnifiedEntryMetrics reads running_efficiency_pct as
+     * the entry's piece-grain efficiency — actual pieces over the
+     * downtime-netted target. Good pieces may arrive as the entry's decimal
+     * string (quantity_produced is decimal(15,4)); bcmath reads it as is.
      *
      * @return array{shift_attainment_pct: ?float, adjusted_efficiency_pct: ?float, running_efficiency_pct: ?float}
      */
-    public function efficiencies(?int $goodPieces, ?int $fullTarget, ?int $adjustedTarget, ?int $runtimeTarget): array
+    public function efficiencies(int|string|null $goodPieces, ?int $fullTarget, ?int $adjustedTarget, ?int $runtimeTarget, int $decimals = 2): array
     {
         return [
-            'shift_attainment_pct' => $this->pct($goodPieces, $fullTarget),
-            'adjusted_efficiency_pct' => $this->pct($goodPieces, $adjustedTarget),
-            'running_efficiency_pct' => $this->pct($goodPieces, $runtimeTarget),
+            'shift_attainment_pct' => $this->pct($goodPieces, $fullTarget, $decimals),
+            'adjusted_efficiency_pct' => $this->pct($goodPieces, $adjustedTarget, $decimals),
+            'running_efficiency_pct' => $this->pct($goodPieces, $runtimeTarget, $decimals),
         ];
     }
 
@@ -437,13 +498,13 @@ class ProductionCalculationEngine
         return ['pieces' => $pieces, 'basis' => $basis, 'per_unit' => $basis === 'pieces' ? 1 : $per];
     }
 
-    private function pct(?int $actual, ?int $target): ?float
+    private function pct(int|string|null $actual, ?int $target, int $decimals = 2): ?float
     {
         if ($actual === null || $target === null || $target <= 0) {
             return null;
         }
 
-        return round((float) bcmul(bcdiv((string) $actual, (string) $target, 8), '100', 8), 2);
+        return round((float) bcmul(bcdiv((string) $actual, (string) $target, 8), '100', 8), $decimals);
     }
 
     /** Downtime cannot push a span below zero — that would invent capacity. */

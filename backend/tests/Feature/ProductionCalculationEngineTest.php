@@ -199,6 +199,47 @@ class ProductionCalculationEngineTest extends TestCase
         $this->assertSame(13585, $legacy);
         $this->assertSame(13580, $current);
         $this->assertNotSame($legacy, $current);
+
+        // v3 arm (P5.5-03): production_v3_unified floors exactly as
+        // production_v2_floor did — the third version changed WHERE the
+        // formula applies (both screens), not the arithmetic. It IS the
+        // current stamp.
+        $this->assertSame(13580, $this->engine->targetPieces('8', '10.6', 5, ProductionCalculationEngine::VERSION_UNIFIED));
+        $this->assertSame(13580, $this->engine->targetPieces('8', '10.6', 5, ProductionCalculationEngine::VERSION_FLOOR));
+        $this->assertSame(ProductionCalculationEngine::VERSION_UNIFIED, ProductionCalculationEngine::VERSION_CURRENT);
+    }
+
+    public function test_packing_containers_are_whole_number_suggestions_under_the_configured_policy(): void
+    {
+        // 12000 pieces at 7 per container = 1714.2857… — a part-filled
+        // container still needs packing, so ceil by default.
+        $this->assertSame(1715, $this->engine->packingContainers(12000, 7));
+        $this->assertSame(1714, $this->engine->packingContainers(12000, 7, 'floor'));
+        $this->assertSame(1714, $this->engine->packingContainers(12000, 7, 'round'));
+        // Exact division stays exact under every policy.
+        $this->assertSame(300, $this->engine->packingContainers(12000, 40));
+        $this->assertSame(300, $this->engine->packingContainers(12000, 40, 'round'));
+        // Half rounds up under 'round', matching the workbook's ROUND.
+        $this->assertSame(3, $this->engine->packingContainers(250, 100, 'round'));
+        // Zero pieces is a known zero — zero containers, never null.
+        $this->assertSame(0, $this->engine->packingContainers(0, 40));
+        // Missing or invalid inputs: null, never a fabricated count.
+        $this->assertNull($this->engine->packingContainers(null, 40));
+        $this->assertNull($this->engine->packingContainers(12000, null));
+        $this->assertNull($this->engine->packingContainers(12000, 0));
+    }
+
+    public function test_efficiencies_read_the_entry_grain_when_asked(): void
+    {
+        // The completion metrics hand over quantity_produced as the decimal
+        // string the column stores and ask for 1dp — the grain every
+        // completion screen prints. 10400/11250 = 92.444… → 92.4.
+        $eff = $this->engine->efficiencies('10400', 12000, 12000, 11250, decimals: 1);
+
+        $this->assertSame(86.7, $eff['shift_attainment_pct']);
+        $this->assertSame(92.4, $eff['running_efficiency_pct']);
+        // The workbook fixture is unchanged at the default 2dp.
+        $this->assertSame(74.25, $this->engine->efficiencies(8910, 12000, 10500, 9000)['shift_attainment_pct']);
     }
 
     public function test_downtime_longer_than_the_shift_cannot_invent_capacity(): void
