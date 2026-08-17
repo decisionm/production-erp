@@ -19,7 +19,7 @@ ERP transaction ──► voucher type ──► master mappings ──► relea
 | **Master mappings** | item → `items.tally_stock_item_guid`; godown → `warehouses.tally_guid` via `TallyGodownResolver`; ledger → `tally_ledger_mappings` (only `sales` role read); packaging identity → `production_standard_packagings.item_id` frozen into `shift_production_entries.finished_item_id` | NOT on the entry — resolved at build time; the payload carries only **names** (`item`, `godown`, `party_ledger`, `sales_ledger`) |
 | **Release state** | `ShiftVoucherReleaseGate::hold()` — computed from `status`, `delivered_at`, `released_at`, `syncable_type = Shift`, `payload.voucher_date` + `shifts.end_time`, `last_merged_at` + idle minutes. **Not stored.** | resource `hold {phase, shift_ends_at, last_merged_at, releasable_at}` |
 | **Agent payload** | `tally_sync_entries.payload` (JSON, XML-agnostic). Every type carries `voucher_date`, `voucher_number`; four of five carry `party_ledger`; production carries `batch_number`, `shift`, `consumed[]`, `produced[]`, `withheld[]`, `resolution_log[]` | resource `payload` (raw) |
-| **Agent result** | `POST /entries/{id}/ack` (no body) → `markSynced()`; `POST /entries/{id}/fail {error_message}` → `markFailed()`. **Agent identity is on the request** (Sanctum token name) but stored nowhere. Tally's raw response never leaves the factory PC | resource `status`, `synced_at`, `error_message`, `attempts` |
+| **Agent result** | `POST /entries/{id}/ack` (no body) → `markSynced()`; `POST /entries/{id}/fail {error_message}` → `markFailed()`. **Agent identity is on the request** (Sanctum token name) but stored nowhere. Tally's raw response never left the factory PC — until Phase 4: `POST /entries/{id}/snapshot` now keeps the XML sent + Tally's answer in `tally_sync_snapshots` (§3 "Does not") | resource `status`, `synced_at`, `error_message`, `attempts`; show-only `snapshots[]` |
 | **Status / history** | `status` ∈ `pending / synced / failed / dismissed`; timestamps `created_at`, `delivered_at`, `synced_at`, `released_at`, `last_merged_at`; `attempts` counter; `payload.resolution_log[]` | resource fields; `resolution_log` |
 
 Direction: **every row in `tally_sync_entries` is ERP→Tally.** The Tally→ERP flows
@@ -133,6 +133,27 @@ a heartbeat poll that delivers nothing records no event).
   types the keys it reads and an extra key is ignored, not refused; the resource's
   own comment says so rather than claiming the prior shape is untouched. `flags`
   is always an object (`{}` when nothing is raised), never a list.
+  **A second recorded deviation (Phase 4):** the agent's `/pending` rows carry
+  `payload_hash` (`PayloadHash::of` the stored payload) — the AGENT's branch only,
+  additive, ignored by older agents.
+- **The cloud still never builds the voucher XML and never contacts Tally — but
+  since Phase 4 it HOLDS a copy of the XML the agent sent, and Tally's answer.**
+  After each post the on-prem agent (≥ 0.3.8) uploads a snapshot —
+  `POST /tally-sync/entries/{id}/snapshot` {xml, sha256, tally {success, created,
+  errors, message, raw}, attempt, agent_version, payload_hash} — into
+  `tally_sync_snapshots`, fire-and-forget: an upload that never arrives changes
+  nothing about the post, the ack, the fail, the status or the attempt count, and
+  nothing reads a snapshot to decide what reaches Tally. The XML is generated on the
+  factory PC exactly as before; the cloud is a RECORD of it, so the Control Center
+  drawer can show "what the agent sent / what Tally answered" (`GET
+  /tally-sync/entries/{id}` → `snapshots`, newest first). Reader-gated by FC-06
+  (`TallySyncSnapshotResource`): the whole XML for finance / the agent / anyone on a
+  Stock Journal (rate-free and party-free by construction), withheld whole with a
+  note for every other voucher type — no partial redaction of XML text; Tally's
+  message follows the same rule as `error_message`. Never edited; pruned on write
+  after `tally-sync.snapshot_retention_days` (default 90; the `snapshot.stored`
+  event outlives the body). Idempotent-ish: the same (entry, sha256, attempt) within
+  60 s is the same upload.
 - **No UI redesign** — the existing page gets the filter bar and header counts
   wired to the new endpoints; the detail drawer and per-type views are Phase 3.
 
@@ -149,8 +170,10 @@ or a second `tally_sync_entries` lock ahead of the member lock in the merge with
 re-doing this analysis.
 
 **`tally_sync_events.details` is not finance-gated — so nothing may write a rate
-into it.** All twelve `record()` call sites today write counts, ids, voucher
-numbers, error messages and flags; none writes `rate`, `amount`, `total_amount`,
+into it.** Every `record()` call site writes counts, ids, voucher
+numbers, error messages and flags — the Phase 4 `snapshot.stored` site writes the
+snapshot id, sha256, byte size, Tally's success flag and the payload verdict, never
+the XML or Tally's text; none writes `rate`, `amount`, `total_amount`,
 `unit_cost` or `average_cost`. That is a rule, not an accident: the events history
 is readable by anyone with `tally-sync.view`, and FC-06 applies to it. A recording
 site that needs a money figure must gate the resource, not put it in `details`.

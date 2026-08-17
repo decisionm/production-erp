@@ -6,6 +6,7 @@ use App\Modules\TallySync\Models\Enums\TallySyncStatus;
 use App\Modules\TallySync\Services\AgentIdentity;
 use App\Modules\TallySync\Services\EntryMappingSurface;
 use App\Modules\TallySync\Services\EntryPresenter;
+use App\Modules\TallySync\Services\PayloadHash;
 use App\Modules\TallySync\Services\ShiftVoucherReleaseGate;
 use App\Modules\TallySync\Services\TransactionClassifier;
 use Illuminate\Http\Request;
@@ -114,6 +115,20 @@ class TallySyncEntryResource extends JsonResource
             'payload' => $mayReadPurchaseDetails
                 ? $this->payload
                 : $this->payloadWithoutPurchaseDetails($this->payload, $withholdsSupplier),
+            // THE AGENT'S BRANCH ONLY (Phase 4): the sha256 of the payload as
+            // stored (PayloadHash::of), stamped on the rows /pending hands
+            // out. The agent echoes it back on its post-Tally snapshot and
+            // the cloud judges `payload_matches` against the payload it
+            // holds THEN — so a snapshot can say whether the XML was built
+            // from the payload a reader sees today. Additive: an older agent
+            // ignores the key (its TallySyncEntry interface types what it
+            // reads). Not emitted to any other reader — finance included —
+            // there is nothing for them to echo, and the same key on the
+            // list would invite a client to compare hashes over a payload
+            // the resource strips per reader (SyncPayloadRateVisibilityTest).
+            ...(AgentIdentity::isAgent($request->user()) && is_array($this->payload)
+                ? ['payload_hash' => PayloadHash::of($this->payload)]
+                : []),
             'status' => $this->status->value,
             'attempts' => $this->attempts,
             // Tally's rejection text arrives verbatim from the agent, and for
@@ -179,6 +194,19 @@ class TallySyncEntryResource extends JsonResource
             'history' => $this->when(
                 $this->relationLoaded('events'),
                 fn () => TallySyncEventResource::collectionWithholding($this->events, $withholdsSupplier),
+            ),
+            // What the agent SENT to Tally and what Tally ANSWERED — one row
+            // per post attempt, newest first (tally_sync_snapshots; Phase 4)
+            // — ONLY when the caller seated them, which is the show endpoint
+            // (TallySyncQueryService::show) and nothing else: an XML body
+            // can run to 2 MB and the list must stay as light as it was.
+            // Reader-gated INSIDE each row from this row's category and
+            // this reader's FC-06 verdict (TallySyncSnapshotResource): the
+            // XML body for finance / the agent / any reader on a Stock
+            // Journal, Tally's text for whoever may read error_message.
+            'snapshots' => $this->when(
+                $this->relationLoaded('snapshots'),
+                fn () => TallySyncSnapshotResource::collectionForCategory($this->snapshots, $category, $mayReadPurchaseDetails),
             ),
             // `mappings` + `mapping_summary` — for every NAME this voucher
             // hands Tally (each line's item and godown, the ledgers, the

@@ -7,17 +7,22 @@ use App\Modules\Core\Services\AppSettingService;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\TallySync\Http\Requests\FailTallySyncEntryRequest;
 use App\Modules\TallySync\Http\Requests\StockSummaryPreviewRequest;
+use App\Modules\TallySync\Http\Requests\StoreTallySyncSnapshotRequest;
 use App\Modules\TallySync\Http\Requests\SyncCompaniesRequest;
 use App\Modules\TallySync\Http\Requests\SyncMastersRequest;
 use App\Modules\TallySync\Http\Resources\TallySyncEntryResource;
+use App\Modules\TallySync\Http\Resources\TallySyncSnapshotResource;
 use App\Modules\TallySync\Models\Enums\TallySyncEventKind;
 use App\Modules\TallySync\Models\TallyStockSnapshot;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Models\TallySyncEvent;
+use App\Modules\TallySync\Services\AgentIdentity;
 use App\Modules\TallySync\Services\MasterSyncService;
 use App\Modules\TallySync\Services\StockSummaryPreviewService;
 use App\Modules\TallySync\Services\TallySyncEventRecorder;
 use App\Modules\TallySync\Services\TallySyncService;
+use App\Modules\TallySync\Services\TallySyncSnapshotService;
+use App\Modules\TallySync\Services\TransactionClassifier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -101,6 +106,58 @@ class TallySyncAgentController extends Controller
         ]);
 
         return TallySyncEntryResource::make($result);
+    }
+
+    /**
+     * The agent's post-Tally SNAPSHOT — the XML it sent and what Tally
+     * answered — for one entry (Phase 4; MASTER-PLAN P4-01..05). Same
+     * ability as ack/fail: it is a report about a post.
+     *
+     * A RECORD, NOT A REPORT ON STATUS: nothing here touches the entry — not
+     * its status, attempts, error_message or payload — and the agent uploads
+     * it fire-and-forget AFTER its ack/fail path has run, so a lost upload
+     * changes nothing about what reached Tally or what the cloud was told.
+     * 201 with the snapshot's public shape; 200 with the SAME row when the
+     * agent's client retried an upload whose response was lost (same entry
+     * + sha256 + attempt inside the service's window) — never a double.
+     * The agent reads back through the same reader gate as everyone else,
+     * and being the agent it reads what it sent (FC-06 predicate).
+     */
+    public function snapshot(
+        StoreTallySyncSnapshotRequest $request,
+        TallySyncEntry $tallySyncEntry,
+        TallySyncSnapshotService $snapshots,
+        TransactionClassifier $classifier,
+    ): JsonResponse {
+        abort_unless($request->user()?->tokenCan('tally-sync:report'), 403, 'Token missing the tally-sync:report ability.');
+
+        $snapshot = $snapshots->store($tallySyncEntry, $request->validated(), $request->user());
+
+        // Counts, ids and the hash only — never the XML or Tally's text
+        // (reader-gated on the snapshot; FC-06). `repeated` marks the
+        // idempotent replay so the file says the upload arrived twice.
+        $this->agentLog($request, 'snapshot.stored', [
+            'entry_id' => $tallySyncEntry->id,
+            'voucher_type' => $tallySyncEntry->tally_voucher_type,
+            'voucher_number' => $tallySyncEntry->payload['voucher_number'] ?? null,
+            'snapshot_id' => $snapshot->id,
+            'attempt' => $snapshot->attempt,
+            'xml_sha256' => $snapshot->xml_sha256,
+            'xml_bytes' => $snapshot->xml_bytes,
+            'has_body' => $snapshot->xml !== null,
+            'tally_success' => $snapshot->tally_success,
+            'tally_created' => $snapshot->tally_created,
+            'tally_errors' => $snapshot->tally_errors,
+            'agent_version' => $snapshot->agent_version,
+            'payload_matches' => $snapshot->payload_matches,
+            'repeated' => ! $snapshot->wasRecentlyCreated,
+        ]);
+
+        return TallySyncSnapshotResource::forCategory(
+            $snapshot,
+            $classifier->classify($tallySyncEntry),
+            AgentIdentity::mayReadPurchaseDetails($request->user()),
+        )->response()->setStatusCode($snapshot->wasRecentlyCreated ? 201 : 200);
     }
 
     /**

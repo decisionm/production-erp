@@ -314,6 +314,10 @@ Route::prefix('v1')->group(function () {
             Route::get('pending', [TallySyncAgentController::class, 'pending']);
             Route::post('entries/{tally_sync_entry}/ack', [TallySyncAgentController::class, 'acknowledge']);
             Route::post('entries/{tally_sync_entry}/fail', [TallySyncAgentController::class, 'fail']);
+            // The post-Tally snapshot — what the agent sent, what Tally
+            // answered — uploaded after each post, fire-and-forget (Phase 4).
+            // Same ability as ack/fail; touches nothing on the entry.
+            Route::post('entries/{tally_sync_entry}/snapshot', [TallySyncAgentController::class, 'snapshot']);
 
             // Inbound masters pull (agent → cloud): `masters` takes the full
             // pull (item groups, godowns, ledgers, items) — the only inbound

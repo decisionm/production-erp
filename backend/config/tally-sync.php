@@ -64,4 +64,23 @@ return [
 
     'factory_timezone' => env('FACTORY_TIMEZONE', 'Asia/Kolkata'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Post-Tally snapshot retention (Phase 4)
+    |--------------------------------------------------------------------------
+    |
+    | After each post the agent uploads a snapshot — the XML it sent, its
+    | sha256, and what Tally answered — kept in tally_sync_snapshots beside
+    | the entry so the Sync Control Center can show "what the agent sent /
+    | what Tally answered". The XML bodies are bulk, not history: snapshots
+    | older than this many days are deleted, for ANY entry, each time one is
+    | stored (there is no scheduler on the host, so the prune rides on the
+    | write). The history row (snapshot.stored on tally_sync_events, with the
+    | sha256 and counts) is never pruned. Zero or less: keep everything.
+    | Engineering default, not a factory decision.
+    |
+    */
+
+    'snapshot_retention_days' => (int) env('TALLY_SYNC_SNAPSHOT_RETENTION_DAYS', 90),
+
 ];

@@ -60,4 +60,14 @@ class TallySyncEntry extends Model
     {
         return $this->hasMany(TallySyncEvent::class, 'tally_sync_entry_id')->orderBy('id');
     }
+
+    /**
+     * What the agent sent to Tally and what Tally answered, one row per
+     * post report (Phase 4), newest first. Read-only from here — writes go
+     * through TallySyncSnapshotService::store(). Loaded on show only.
+     */
+    public function snapshots(): HasMany
+    {
+        return $this->hasMany(TallySyncSnapshot::class, 'tally_sync_entry_id')->orderByDesc('id');
+    }
 }
