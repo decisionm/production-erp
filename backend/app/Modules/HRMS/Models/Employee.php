@@ -20,6 +20,16 @@ class Employee extends Model
     use RecordsConfigurationAudit;
     use SoftDeletes;
 
+    /**
+     * The Configuration Lifecycle Contract's `can`, stamped by the
+     * controller so EmployeeResource never re-derives eligibility. A plain
+     * public property, NOT an Eloquent attribute — the PurchaseOrder
+     * pattern — so it can never be written back to the row.
+     *
+     * @var array{edit: bool, activate: bool, archive: bool, delete: bool|null}|null
+     */
+    public ?array $can = null;
+
     protected function casts(): array
     {
         return [

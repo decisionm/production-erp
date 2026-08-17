@@ -48,8 +48,14 @@ export interface ReasonedChange {
     reason: string;
 }
 
-/** `show` returns the authoritative `can`; `index` rows carry `delete: null`. */
-const abilitiesOf = (payload: unknown): ConfigurationAbilities | null => {
+/**
+ * `show` returns the authoritative `can`; `index` rows carry `delete: null`.
+ *
+ * Exported because the row actions read the SAME reader over a list row that
+ * the confirm reads over a `show` envelope — two readers would be two chances
+ * for one of them to turn a missing flag into permission.
+ */
+export const abilitiesOf = (payload: unknown): ConfigurationAbilities | null => {
     const root = payload !== null && typeof payload === 'object' ? (payload as Record<string, unknown>) : {};
     const record = root.data !== null && typeof root.data === 'object' ? (root.data as Record<string, unknown>) : root;
     const can = record.can;

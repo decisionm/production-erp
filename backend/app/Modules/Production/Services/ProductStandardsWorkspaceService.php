@@ -51,6 +51,7 @@ class ProductStandardsWorkspaceService
         private readonly ProductReadinessService $readiness,
         private readonly ProductionStandardResolver $resolver,
         private readonly ProductionConfigurationService $configurations,
+        private readonly ProductionStandardService $standards,
     ) {}
 
     /**
@@ -154,6 +155,12 @@ class ProductStandardsWorkspaceService
             // the standard's own columns, its item, its packagings — is still
             // there byte for byte and the workspace keys are additions.
             return $standard->toArray() + [
+                // The Configuration Lifecycle Contract's `can` on every row.
+                // resolveDelete FALSE on a list, so `delete` is null —
+                // undetermined, ask show() — rather than three COUNTs a row
+                // for an answer the confirm dialog re-fetches anyway.
+                'can' => $this->standards->abilities($standard, resolveDelete: false),
+                'is_archived' => $standard->trashed(),
                 'gaps' => $gaps,
                 'ready' => $gaps === [],
                 'resolved_packaging_id' => $packaging?->id,

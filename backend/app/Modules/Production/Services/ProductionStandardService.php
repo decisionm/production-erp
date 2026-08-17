@@ -6,6 +6,12 @@ use App\Models\User;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Production\Models\ProductionStandard;
 use App\Modules\Production\Models\ProductionStandardPackaging;
+use App\Support\Configuration\ActiveFlag;
+use App\Support\Configuration\DependencyCheck;
+use App\Support\Configuration\HardDeleteAuthority;
+use App\Support\Configuration\ManagesConfigurationLifecycle;
+use Closure;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -23,7 +29,95 @@ use Illuminate\Validation\ValidationException;
  */
 class ProductionStandardService
 {
+    use ManagesConfigurationLifecycle;
+
     public function __construct(private readonly ProductionStandardImportService $import) {}
+
+    protected function configurationLabel(): string
+    {
+        return 'production standard';
+    }
+
+    /**
+     * A standard has NO in-service flag of its own, so Archive is the soft
+     * delete and Activate is the restore.
+     *
+     * `status` (draft | approved | unresolved) is deliberately NOT declared
+     * here. It is the module's REVIEW axis — has a person settled this row's
+     * ambiguity — not the lifecycle's in-service axis, and it carries no
+     * "withdrawn" case to write. Mapping Archive onto it would have to invent
+     * one, and `unresolved` would then read as retired, which is the opposite
+     * of what it means: an unresolved row is work still to do.
+     */
+    protected function configurationActiveColumn(): ActiveFlag|string|null
+    {
+        return null;
+    }
+
+    /** A refusal names the row the way the standards page does. */
+    protected function configurationNameUsing(): ?Closure
+    {
+        return static fn (ProductionStandard $standard): string => trim(
+            $standard->source_product_name.' · '.$standard->variantLabel()
+        );
+    }
+
+    protected function configurationHardDeleteAuthorisation(): ?Closure
+    {
+        return HardDeleteAuthority::callback();
+    }
+
+    /**
+     * EVERYTHING THAT MAY REFER TO A PRODUCT STANDARD.
+     *
+     * The schema's own answer, read on 18-Aug-2026 (pragma foreign_key_list
+     * over every table / information_schema on MySQL):
+     *
+     *   production_standard_packagings.production_standard_id   CASCADE
+     *   shift_production_entries.production_standard_id         SET NULL
+     *
+     * ONLY THE FIRST HAS A BACKSTOP. `SchemaCascades` reads CASCADE keys and
+     * nothing else, which is correct — a cascade destroys a child — but it
+     * means the SET NULL column is invisible to it. A hard delete would
+     * silently blank `production_standard_id` on every shift entry that ran
+     * to this standard: the row survives, and the fact of WHICH standard the
+     * factory was measuring that run against does not. That is a rewrite of a
+     * posted production document, so it is declared here by hand and blocks
+     * exactly like a cascade.
+     *
+     * THE THIRD CHECK HAS NO FOREIGN KEY AT ALL. Start Batch freezes the
+     * resolved standard into `shift_production_entries.config_snapshot`
+     * (ShiftProductionEntryService, `'production_standard_id' => $standard?->id`).
+     * A JSON key is not a constraint, so no database mechanism anywhere would
+     * notice it; an entry whose FK column was later nulled by some other route
+     * still names this standard in its snapshot, and that snapshot is what the
+     * reports read. Counted deliberately.
+     *
+     * CHECKED NEGATIVES, so a later reader knows they were looked at and not
+     * forgotten: `packing_material_mappings` keys on (spec_kind, spec_value)
+     * and an item — never on a standard id, even though its seed migration
+     * READ the standards table to derive rows; `app_settings` and
+     * `factory_settings` carry no standard id (the masterbatch colour map
+     * names item ids); nothing matches a standard by name.
+     *
+     * @return list<DependencyCheck>
+     */
+    protected function dependencyChecks(): array
+    {
+        return [
+            DependencyCheck::table('production_standard_packagings', 'production_standard_id')
+                ->label('packaging variant')
+                ->cascadeSide(),
+
+            DependencyCheck::table('shift_production_entries', 'production_standard_id')
+                ->label('shift production entry'),
+
+            DependencyCheck::callable(
+                static fn (Model $standard): int => ConfigSnapshotReference::count('production_standard_id', $standard->getKey()),
+                'shift_config_snapshots',
+            )->label('frozen run snapshot'),
+        ];
+    }
 
     /**
      * Attach a Tally item to a standard that has none.

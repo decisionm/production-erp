@@ -19,6 +19,11 @@ class DowntimeReasonResource extends JsonResource
             'selectable_at_start' => $this->selectable_at_start,
             'is_active' => $this->is_active,
             'confirmation_status' => $this->confirmation_status,
+            // The Configuration Lifecycle Contract's `can` block — stamped
+            // by the controller (ManagesConfigurationRecords), never
+            // re-derived here and never re-derived by the frontend. NULL
+            // when nobody stamped it: undetermined, ask `show`.
+            'can' => $this->resource->can ?? null,
         ];
     }
 }

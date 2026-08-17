@@ -1,10 +1,11 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, Input, Modal, Space, Switch, Table, Typography } from 'antd';
+import { Button, Form, Input, Modal, Space, Table, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { createScrapReason, listScrapReasons } from '@/features/production/api';
+import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/configuration';
+import { createScrapReason, listScrapReasons, updateScrapReason } from '@/features/production/api';
 import type { ScrapReason } from '@/features/production/types';
 
 const scrapReasonSchema = z.object({
@@ -15,6 +16,7 @@ type ScrapReasonFormValues = z.infer<typeof scrapReasonSchema>;
 
 export default function ScrapReasonsPage() {
     const [modalOpen, setModalOpen] = useState(false);
+    const [editing, setEditing] = useState<ScrapReason | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['production', 'scrap-reasons'], queryFn: listScrapReasons });
@@ -35,6 +37,30 @@ export default function ScrapReasonsPage() {
         },
     });
 
+    const {
+        control: editControl,
+        handleSubmit: handleEditSubmit,
+        reset: resetEdit,
+        formState: { errors: editErrors },
+    } = useForm<ScrapReasonFormValues>({ resolver: zodResolver(scrapReasonSchema) });
+
+    /**
+     * Edit — the act this master was missing entirely. It carries the code and
+     * the name and nothing else: withdrawing a reason is Archive, which counts
+     * what already uses it and takes a reason, and the FormRequest refuses the
+     * flag here in any case.
+     */
+    const editMutation = useMutation({
+        mutationFn: ({ id, ...payload }: { id: number } & ScrapReasonFormValues) => updateScrapReason(id, payload),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['production', 'scrap-reasons'] });
+            setEditing(null);
+        },
+        onError: (error: any) => {
+            Modal.error({ title: 'Could not update scrap reason', content: error?.response?.data?.message ?? 'Unknown error' });
+        },
+    });
+
     return (
         <>
             <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
@@ -52,9 +78,31 @@ export default function ScrapReasonsPage() {
                     { title: 'Code', dataIndex: 'code' },
                     { title: 'Name', dataIndex: 'name' },
                     {
-                        title: 'Active',
+                        // One vocabulary: Active / Retired, the same two words
+                        // on every master. The old control was a permanently
+                        // disabled Switch, which said the state was a setting
+                        // and then refused to let anyone change it.
+                        title: 'Status',
                         dataIndex: 'is_active',
-                        render: (active: boolean) => <Switch checked={active} disabled size="small" />,
+                        render: (_: boolean, row) => <ConfigurationStatusTag entity="scrap-reason" row={row} />,
+                    },
+                    {
+                        title: 'Actions',
+                        render: (_, row) => {
+                            const edit = () => {
+                                setEditing(row);
+                                resetEdit({ code: row.code, name: row.name });
+                            };
+                            return (
+                                <ConfigurationActionsCell
+                                    entity="scrap-reason"
+                                    id={row.id}
+                                    can={row.can}
+                                    recordName={`${row.code} — ${row.name}`}
+                                    onEdit={edit}
+                                />
+                            );
+                        },
                     },
                 ]}
             />
@@ -74,6 +122,27 @@ export default function ScrapReasonsPage() {
                     </Form.Item>
                     <Form.Item label="Name" validateStatus={errors.name ? 'error' : ''} help={errors.name?.message}>
                         <Controller name="name" control={control} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                </Form>
+            </Modal>
+
+            <Modal
+                maskClosable={false}
+                title={`Edit "${editing?.name ?? ''}"`}
+                open={editing !== null}
+                onCancel={() => setEditing(null)}
+                onOk={handleEditSubmit((values) => {
+                    if (editing) editMutation.mutate({ id: editing.id, ...values });
+                })}
+                confirmLoading={editMutation.isPending}
+                destroyOnHidden
+            >
+                <Form layout="vertical">
+                    <Form.Item label="Code" validateStatus={editErrors.code ? 'error' : ''} help={editErrors.code?.message}>
+                        <Controller name="code" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item label="Name" validateStatus={editErrors.name ? 'error' : ''} help={editErrors.name?.message}>
+                        <Controller name="name" control={editControl} render={({ field }) => <Input {...field} />} />
                     </Form.Item>
                 </Form>
             </Modal>

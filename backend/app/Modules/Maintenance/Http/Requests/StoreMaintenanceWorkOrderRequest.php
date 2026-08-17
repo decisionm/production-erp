@@ -2,6 +2,7 @@
 
 namespace App\Modules\Maintenance\Http\Requests;
 
+use App\Modules\HRMS\Http\Requests\Rules\SelectableEmployee;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -21,7 +22,7 @@ class StoreMaintenanceWorkOrderRequest extends FormRequest
             'type' => ['required', Rule::in(['preventive', 'corrective'])],
             'description' => ['nullable', 'string'],
             'reported_date' => ['nullable', 'date'],
-            'assigned_to' => ['nullable', 'integer', 'exists:employees,id'],
+            'assigned_to' => ['nullable', 'integer', SelectableEmployee::rule()],
         ];
     }
 }

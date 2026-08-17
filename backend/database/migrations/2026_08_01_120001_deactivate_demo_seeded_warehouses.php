@@ -1,9 +1,7 @@
 <?php
 
-use App\Modules\Core\Models\AppSetting;
 use App\Modules\Inventory\Models\Warehouse;
-use App\Modules\Production\Services\FactoryDayBinService;
-use App\Modules\Production\Services\FactoryWarehouseResolver;
+use App\Modules\Inventory\Services\WarehouseService;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\Log;
 
@@ -97,27 +95,26 @@ return new class extends Migration
     }
 
     /**
-     * Warehouse ids any production warehouse setting currently names. Read
-     * straight from app_settings rather than through the services so this
-     * migration does not depend on the container being bootable at the point
-     * it runs.
+     * Warehouse ids any production warehouse setting currently names.
+     *
+     * LIFTED (17-Aug-2026) into WarehouseService::idsNamedBySettings(), which
+     * is now the one implementation: the configuration delete guard needs the
+     * same set for the mirror-image reason — a warehouse a production setting
+     * still names must not be DESTROYED, just as it must not be retired here
+     * — and two copies of a list of keys is how the two drift apart. Still
+     * static and model-only there, so this migration keeps its independence
+     * from the container.
+     *
+     * The lifted list carries FIVE keys where this file listed three: the
+     * packing-material store and the Production/WIP location were both added
+     * after 01-Aug. That only ever protects MORE rows from being retired,
+     * which is the safe direction, and on a fresh database neither key is set
+     * at the point this runs.
      *
      * @return list<int>
      */
     private function warehouseIdsNamedBySettings(): array
     {
-        $keys = [
-            FactoryDayBinService::SETTING_KEY,
-            FactoryWarehouseResolver::SETTING_FINISHED_GOODS,
-            FactoryWarehouseResolver::SETTING_RAW_MATERIAL,
-        ];
-
-        return AppSetting::query()
-            ->whereIn('key', $keys)
-            ->pluck('value')
-            ->filter(fn ($value) => is_numeric($value))
-            ->map(fn ($value) => (int) $value)
-            ->values()
-            ->all();
+        return WarehouseService::idsNamedBySettings();
     }
 };

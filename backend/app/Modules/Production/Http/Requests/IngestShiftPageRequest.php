@@ -2,6 +2,7 @@
 
 namespace App\Modules\Production\Http\Requests;
 
+use App\Modules\HRMS\Http\Requests\Rules\SelectableEmployee;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -40,7 +41,7 @@ class IngestShiftPageRequest extends FormRequest
             'rows.*.item_id' => ['required', 'integer', 'exists:items,id'],
             'rows.*.quantity_produced' => ['required', 'numeric', 'gte:0'],
 
-            'rows.*.operator_id' => ['sometimes', 'nullable', 'integer', 'exists:employees,id'],
+            'rows.*.operator_id' => ['sometimes', 'nullable', 'integer', SelectableEmployee::rule()],
             'rows.*.production_standard_id' => ['sometimes', 'nullable', 'integer', 'exists:production_standards,id'],
             'rows.*.production_standard_packaging_id' => ['sometimes', 'nullable', 'integer', 'exists:production_standard_packagings,id'],
             'rows.*.active_cavities' => ['sometimes', 'nullable', 'integer', 'min:1'],

@@ -3,9 +3,11 @@
 namespace App\Modules\Production\Models;
 
 use App\Modules\Inventory\Models\Item;
+use App\Support\Configuration\Concerns\RecordsConfigurationAudit;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable([
     'production_standard_id', 'mode', 'nos_per_pouch', 'pouches_per_box',
@@ -17,6 +19,27 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 ])]
 class ProductionStandardPackaging extends Model
 {
+    // Archive for a pack variant IS the soft delete: this table carries no
+    // `is_active`, and a withdrawn variant must stay readable because a past
+    // shift's prefill was derived from it. Deleting it outright is the
+    // contract's other verb, reserved for a variant nothing ever used.
+    use RecordsConfigurationAudit;
+    use SoftDeletes;
+
+    /**
+     * The Configuration Lifecycle Contract's `can`, stamped by the
+     * controller so describe() prints it rather than asking again.
+     *
+     * A declared PUBLIC PROPERTY, not an Eloquent attribute, and that is the
+     * point: `$model->can = [...]` on a model without this declaration lands
+     * in `$attributes`, where a later save() would try to write a column that
+     * does not exist and every toArray() would carry it. The
+     * PurchaseOrder pattern declares it for exactly that reason.
+     *
+     * @var array{edit: bool, activate: bool, archive: bool, delete: bool|null}|null
+     */
+    public ?array $can = null;
+
     /**
      * Serialized on every payload so each surface showing a packaging row —
      * the Start Batch picker, the standards workspace — can say whether it

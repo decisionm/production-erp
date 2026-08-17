@@ -12,6 +12,7 @@ use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Support\Configuration\ConfigurationInUseException;
 use App\Support\Configuration\ConfigurationLifecycle;
 use App\Support\Configuration\DependencyCheck;
+use App\Support\Configuration\HardDeleteAuthority;
 use App\Support\Configuration\SchemaCascades;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -21,8 +22,6 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 use LogicException;
-use RecursiveDirectoryIterator;
-use RecursiveIteratorIterator;
 use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
 
@@ -134,6 +133,24 @@ class ConfigurationLifecycleChainTest extends TestCase
         }
 
         Sanctum::actingAs($user);
+
+        return $user;
+    }
+
+    /**
+     * A configuration administrator: the module's own manage grant PLUS the
+     * Super-Admin hard-delete tier (DEC-20260817-002 §3). Both are needed —
+     * the module grant opens create/edit/archive, and the tier alone opens
+     * Delete, which is the point of the tier existing.
+     */
+    private function actingAsConfigurationAdministrator(): User
+    {
+        $user = $this->actingAsConfigurationUser('D-wiring administrator');
+
+        Permission::findOrCreate(HardDeleteAuthority::PERMISSION, 'web');
+        $user->givePermissionTo(HardDeleteAuthority::PERMISSION);
+
+        Sanctum::actingAs($user->fresh());
 
         return $user;
     }
@@ -698,73 +715,92 @@ class ConfigurationLifecycleChainTest extends TestCase
     }
 
     // =========================================================================
-    // THE WIRING LINK — NOT TESTED, and this is the fact that makes it so
+    // THE WIRING LINK — now WALKED, through a wired entity's own routes
     // =========================================================================
 
     /**
-     * Chain D's entity links cannot be walked through routes because no
-     * module declares a lifecycle and no lifecycle route exists. That is
-     * recorded here as a checked FACT rather than a claim in a report, so
-     * the day it changes this test fails and the chain is re-walked at the
-     * route layer it then deserves.
+     * D-WIRING. Until the wiring wave, chain D could only be walked at the
+     * service layer and this slot held a guard asserting that NO module
+     * declared a lifecycle — so the day one did, the guard failed and said
+     * "re-walk me". It did, and this is the re-walk.
+     *
+     * The walk is deliberately through HTTP, on a master the factory really
+     * keeps, because the point of D-WIRING is precisely that the contract is
+     * reachable from outside the service: routes, permissions, resource and
+     * refusal shape all included.
      */
-    public function test_dw_no_module_declares_a_configuration_lifecycle_yet_so_the_entity_links_are_not_testable(): void
+    public function test_dw_the_contract_is_reachable_through_a_wired_entitys_own_routes(): void
     {
-        $declaring = [];
+        $this->actingAsConfigurationAdministrator();
 
-        $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(app_path('Modules')));
+        // CREATE
+        $created = $this->postJson('/api/v1/inventory/warehouses', [
+            'code' => 'ACC-DW-1',
+            'name' => 'D-wiring store',
+            'is_active' => true,
+        ])->assertSuccessful()->json('data');
 
-        foreach ($files as $file) {
-            if (! $file->isFile() || $file->getExtension() !== 'php') {
-                continue;
-            }
+        $id = $created['id'];
 
-            if (str_contains((string) file_get_contents($file->getPathname()), 'ManagesConfigurationLifecycle')) {
-                $declaring[] = $file->getPathname();
-            }
-        }
-
+        // The `can` block is SERVED, and the UI never has to derive it.
+        $shown = $this->getJson("/api/v1/inventory/warehouses/{$id}")->assertOk()->json('data');
+        $this->assertArrayHasKey('can', $shown, 'a wired resource serves its abilities');
         $this->assertSame(
-            [],
-            $declaring,
-            'a module now declares a configuration lifecycle: chain D must be re-walked through that entity\'s routes',
+            ['edit', 'activate', 'archive', 'delete'],
+            array_keys($shown['can']),
+            'exactly the four acts of the contract',
         );
 
-        // ...and the ONE lifecycle-shaped route the app serves predates the
-        // contract and does not go through it: ProductionConfigurationService
-        // ::deactivate() writes `status = inactive` itself, with no ability
-        // check, no dependency report and no `reason`. It is the module's own
-        // workflow step, not the contract's Archive — which is why the
-        // Deactivate link above is walked on the mechanism instead.
-        $uris = collect(app('router')->getRoutes()->getRoutes())
-            ->map(fn ($route): string => $route->methods()[0].' '.$route->uri())
-            ->filter(fn (string $uri): bool => str_contains($uri, 'archive')
-                || str_contains($uri, 'activate')
-                || str_contains($uri, 'deactivate'))
-            ->values()
-            ->all();
+        // ARCHIVE -> the state word changes and the row survives.
+        $this->postJson("/api/v1/inventory/warehouses/{$id}/archive", ['reason' => 'acceptance walk'])
+            ->assertSuccessful();
+        $this->assertFalse(
+            (bool) Warehouse::withTrashed()->findOrFail($id)->is_active,
+            'archive retires the row rather than removing it',
+        );
 
+        // ACTIVATE -> reversible, as the contract promises.
+        $this->postJson("/api/v1/inventory/warehouses/{$id}/activate")->assertSuccessful();
+        $this->assertTrue((bool) Warehouse::findOrFail($id)->is_active);
+
+        // DELETE, unused -> really gone, and the code is free again.
+        $this->deleteJson("/api/v1/inventory/warehouses/{$id}")->assertSuccessful();
+        $this->assertNull(
+            Warehouse::withTrashed()->find($id),
+            'a proven-unused master is destroyed for real (DEC-20260817-002 §1)',
+        );
+        $this->postJson('/api/v1/inventory/warehouses', [
+            'code' => 'ACC-DW-1',
+            'name' => 'the code was released',
+            'is_active' => true,
+        ])->assertSuccessful();
+    }
+
+    /**
+     * The half that matters most: a REFERENCED master is refused through the
+     * route, with the counts the operator needs, and its cascade-side child
+     * survives the attempt untouched.
+     */
+    public function test_dw_a_referenced_master_is_refused_through_the_route_with_counts(): void
+    {
+        $this->actingAsConfigurationAdministrator();
+
+        $store = Warehouse::create(['code' => 'ACC-DW-2', 'name' => 'Referenced store', 'is_active' => true]);
+        $item = Item::create(['sku' => 'ACC-DW-ITEM', 'name' => 'Walked item', 'uom' => 'Nos', 'is_active' => true]);
+        StockBalance::create(['item_id' => $item->id, 'warehouse_id' => $store->id, 'quantity' => '7']);
+
+        $response = $this->deleteJson("/api/v1/inventory/warehouses/{$store->id}")->assertStatus(422);
+
+        $this->assertSame('configuration_in_use', $response->json('code'));
+        $this->assertNotEmpty($response->json('blocking'), 'the refusal names what uses it');
+        $this->assertIsInt($response->json('blocking.0.count'), 'with a COUNT the UI can print');
+        $this->assertSame('archive', $response->json('alternative'), 'and offers the way out');
+
+        $this->assertNotNull(Warehouse::withTrashed()->find($store->id), 'the master survives');
         $this->assertSame(
-            ['POST api/v1/production/configurations/{production_configuration}/deactivate'],
-            $uris,
-            'a NEW lifecycle route now exists: chain D must be re-walked through it',
-        );
-        $this->assertStringNotContainsString(
-            'ManagesConfigurationLifecycle',
-            (string) file_get_contents(app_path('Modules/Production/Services/ProductionConfigurationService.php')),
-            'that deactivate route now runs through the shared mechanism: walk it as the contract Archive',
-        );
-
-        // The record the resource does NOT carry: `can`, the block the shared
-        // frontend reads instead of re-deriving eligibility.
-        $warehouse = $this->createWarehouseThroughTheRoute('ACC-CFG-CAN', 'ACC Configuration Can');
-        $shown = $this->getJson('/api/v1/inventory/warehouses')->json('data');
-        $row = collect($shown)->firstWhere('id', $warehouse->id);
-
-        $this->assertArrayNotHasKey(
-            'can',
-            $row,
-            'a resource now serves the `can` block: chain D\'s eligibility link becomes walkable and must be walked',
+            1,
+            StockBalance::query()->where('warehouse_id', $store->id)->count(),
+            'and so does the cascade-side child the guard exists to protect',
         );
     }
 }

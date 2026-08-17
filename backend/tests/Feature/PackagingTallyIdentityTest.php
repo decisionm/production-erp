@@ -374,7 +374,13 @@ class PackagingTallyIdentityTest extends TestCase
         // The 07-Aug paper's packing, missing from configuration. The
         // migration must create it exactly once, identity UNSET (Q33 —
         // the owner answers it in the edit UI, nobody hardcodes it).
-        $this->trayPacking->delete();
+        // forceDelete, not delete: `production_standard_packagings` now
+        // soft-deletes (the Configuration Lifecycle Contract's Archive needed
+        // somewhere to go), and an ARCHIVED variant still holds its slot — so
+        // the data patch correctly declines to add a second copy behind it.
+        // This case is "the row was never created at all", which is what the
+        // migration is for.
+        $this->trayPacking->forceDelete();
 
         $migration = require base_path('database/migrations/2026_08_10_191000_add_200ml_ra_490_tray_packaging.php');
 

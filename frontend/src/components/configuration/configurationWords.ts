@@ -317,3 +317,17 @@ export const ARCHIVE_INSTEAD_LABEL = 'Deactivate instead';
  */
 export const REASON_LABEL = 'Reason';
 export const REASON_REQUIRED = 'Say why this is being archived.';
+
+/**
+ * Reactivating asks too, and for the same reason archiving does: it is an
+ * explainable act on a live master. It gets its own sentence because
+ * "Say why this is being archived." over a Reactivate box is the kind of
+ * mismatched prompt that teaches people not to read prompts.
+ */
+export const REASON_REQUIRED_ACTIVATE = 'Say why this is being brought back into service.';
+
+/** The title of the reason prompt, per act. */
+export const REASON_MODAL_TITLE: Record<'archive' | 'activate', string> = {
+    archive: 'Archive this record',
+    activate: 'Bring this record back into service',
+};

@@ -15,6 +15,11 @@ class ShiftResource extends JsonResource
             'start_time' => $this->start_time,
             'end_time' => $this->end_time,
             'is_active' => $this->is_active,
+            // The Configuration Lifecycle Contract's `can` block — stamped
+            // by the controller (ManagesConfigurationRecords), never
+            // re-derived here and never re-derived by the frontend. NULL
+            // when nobody stamped it: undetermined, ask `show`.
+            'can' => $this->resource->can ?? null,
         ];
     }
 }

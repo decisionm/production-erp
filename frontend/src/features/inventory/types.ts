@@ -1,3 +1,5 @@
+import type { ConfigurationAbilities } from '@/components/configuration';
+
 export type ItemTrackingType = 'none' | 'batch' | 'serial';
 
 export interface Item {
@@ -37,6 +39,19 @@ export interface Item {
      * the owner's).
      */
     sku_provisional?: boolean;
+    /**
+     * Archived-by-soft-delete, ISO. Nothing archives these this way today
+     * (Archive clears `is_active`), but a Tally pull can restore a trashed
+     * row — so the screen is told rather than guessing.
+     */
+    archived_at?: string | null;
+    /**
+     * The Configuration Lifecycle Contract's `can` block (DEC-20260817-002).
+     * Optional: absent on a backend that predates the wiring, and the row
+     * actions then offer nothing rather than invent permission. `delete:
+     * null` on an index row means UNDETERMINED — the confirm asks.
+     */
+    can?: ConfigurationAbilities | null;
     is_active: boolean;
     created_at: string;
 }
@@ -48,6 +63,19 @@ export interface Warehouse {
     is_active: boolean;
     /** Set only for godowns pulled from Tally — a safe voucher godown. */
     tally_guid: string | null;
+    /**
+     * Archived-by-soft-delete, ISO. Nothing archives these this way today
+     * (Archive clears `is_active`), but a Tally pull can restore a trashed
+     * row — so the screen is told rather than guessing.
+     */
+    archived_at?: string | null;
+    /**
+     * The Configuration Lifecycle Contract's `can` block (DEC-20260817-002).
+     * Optional: absent on a backend that predates the wiring, and the row
+     * actions then offer nothing rather than invent permission. `delete:
+     * null` on an index row means UNDETERMINED — the confirm asks.
+     */
+    can?: ConfigurationAbilities | null;
     created_at: string;
 }
 

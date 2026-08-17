@@ -1,11 +1,12 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, Input, Modal, Space, Switch, Table, Tag, TimePicker, Typography } from 'antd';
+import { Button, Form, Input, Modal, Space, Table, TimePicker, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { createShift, listShifts } from '@/features/production/api';
+import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/configuration';
+import { createShift, listShifts, updateShift } from '@/features/production/api';
 import type { Shift } from '@/features/production/types';
 
 const shiftSchema = z.object({
@@ -17,6 +18,7 @@ type ShiftFormValues = z.infer<typeof shiftSchema>;
 
 export default function ShiftsPage() {
     const [modalOpen, setModalOpen] = useState(false);
+    const [editing, setEditing] = useState<Shift | null>(null);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['production', 'shifts'], queryFn: () => listShifts() });
@@ -41,6 +43,29 @@ export default function ShiftsPage() {
         },
         onError: (error: any) => {
             Modal.error({ title: 'Could not create shift', content: error?.response?.data?.message ?? 'Unknown error' });
+        },
+    });
+
+    const {
+        control: editControl,
+        handleSubmit: handleEditSubmit,
+        reset: resetEdit,
+        formState: { errors: editErrors },
+    } = useForm<ShiftFormValues>({ resolver: zodResolver(shiftSchema) });
+
+    /**
+     * Edit — name and the two clock times, nothing else. Retiring a shift is
+     * Archive: past entries point at the record, so the act that withdraws it
+     * has to be the one that counts them first.
+     */
+    const editMutation = useMutation({
+        mutationFn: ({ id, ...payload }: { id: number } & ShiftFormValues) => updateShift(id, payload),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['production', 'shifts'] });
+            setEditing(null);
+        },
+        onError: (error: any) => {
+            Modal.error({ title: 'Could not update shift', content: error?.response?.data?.message ?? 'Unknown error' });
         },
     });
 
@@ -74,14 +99,32 @@ export default function ShiftsPage() {
                     { title: 'Start Time', dataIndex: 'start_time' },
                     { title: 'End Time', dataIndex: 'end_time' },
                     {
-                        title: 'Active',
-                        dataIndex: 'is_active',
                         // The tag says the word. A switch that is merely off does not
-                        // tell a supervisor whether the shift is gone or just paused.
-                        render: (active: boolean) =>
-                            active
-                                ? <Switch checked disabled size="small" />
-                                : <Tag>Retired</Tag>,
+                        // tell a supervisor whether the shift is gone or just paused —
+                        // and the two halves of that answer used to be rendered by two
+                        // different controls on the one column. Now it is the one tag
+                        // every master uses.
+                        title: 'Status',
+                        dataIndex: 'is_active',
+                        render: (_: boolean, row) => <ConfigurationStatusTag entity="shift" row={row} />,
+                    },
+                    {
+                        title: 'Actions',
+                        render: (_, row) => {
+                            const edit = () => {
+                                setEditing(row);
+                                resetEdit({ name: row.name, start_time: row.start_time, end_time: row.end_time });
+                            };
+                            return (
+                                <ConfigurationActionsCell
+                                    entity="shift"
+                                    id={row.id}
+                                    can={row.can}
+                                    recordName={row.name}
+                                    onEdit={edit}
+                                />
+                            );
+                        },
                     },
                 ]}
             />
@@ -129,6 +172,60 @@ export default function ShiftsPage() {
                         <Controller
                             name="end_time"
                             control={control}
+                            render={({ field }) => (
+                                <TimePicker
+                                    style={{ width: '100%' }}
+                                    format="HH:mm"
+                                    value={field.value ? dayjs(field.value, 'HH:mm') : undefined}
+                                    onChange={(value) => field.onChange(value ? value.format('HH:mm') : undefined)}
+                                />
+                            )}
+                        />
+                    </Form.Item>
+                </Form>
+            </Modal>
+
+            <Modal
+                maskClosable={false}
+                title={`Edit "${editing?.name ?? ''}"`}
+                open={editing !== null}
+                onCancel={() => setEditing(null)}
+                onOk={handleEditSubmit((values) => {
+                    if (editing) editMutation.mutate({ id: editing.id, ...values });
+                })}
+                confirmLoading={editMutation.isPending}
+                destroyOnHidden
+            >
+                <Form layout="vertical">
+                    <Form.Item label="Name" validateStatus={editErrors.name ? 'error' : ''} help={editErrors.name?.message}>
+                        <Controller name="name" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item
+                        label="Start Time"
+                        validateStatus={editErrors.start_time ? 'error' : ''}
+                        help={editErrors.start_time?.message}
+                    >
+                        <Controller
+                            name="start_time"
+                            control={editControl}
+                            render={({ field }) => (
+                                <TimePicker
+                                    style={{ width: '100%' }}
+                                    format="HH:mm"
+                                    value={field.value ? dayjs(field.value, 'HH:mm') : undefined}
+                                    onChange={(value) => field.onChange(value ? value.format('HH:mm') : undefined)}
+                                />
+                            )}
+                        />
+                    </Form.Item>
+                    <Form.Item
+                        label="End Time"
+                        validateStatus={editErrors.end_time ? 'error' : ''}
+                        help={editErrors.end_time?.message}
+                    >
+                        <Controller
+                            name="end_time"
+                            control={editControl}
                             render={({ field }) => (
                                 <TimePicker
                                     style={{ width: '100%' }}

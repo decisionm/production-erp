@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+    ARCHIVE_INSTEAD_LABEL,
+    REASON_MODAL_TITLE,
+    REASON_REQUIRED,
+    REASON_REQUIRED_ACTIVATE,
     blockingLine,
     blockingSentence,
     canOfferArchive,
@@ -357,5 +361,39 @@ describe('a cascade gap is a visible refusal, never an empty modal', () => {
 
         expect(inUse!.blocking).toHaveLength(3);
         expect(inUse!.blocking.map((b) => b.count)).toEqual([3, null, null]);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// The reason prompt — one act per sentence
+// ---------------------------------------------------------------------------
+
+describe('the reason prompt words', () => {
+    it('asks the question that matches the act, in both directions', () => {
+        // The archive prompt over a Reactivate box is the kind of mismatched
+        // prompt that teaches people to stop reading prompts.
+        expect(REASON_REQUIRED).toMatch(/archiv/i);
+        expect(REASON_REQUIRED_ACTIVATE).not.toMatch(/archiv/i);
+        expect(REASON_REQUIRED_ACTIVATE).toMatch(/service/i);
+    });
+
+    it('titles each prompt with the act it is about', () => {
+        expect(REASON_MODAL_TITLE.archive).toMatch(/archive/i);
+        expect(REASON_MODAL_TITLE.activate).toMatch(/back into service/i);
+    });
+
+    it('promises nothing about the reason being kept — no column stores it yet', () => {
+        for (const words of [REASON_REQUIRED, REASON_REQUIRED_ACTIVATE]) {
+            expect(words).not.toMatch(/kept|saved|stored|recorded with/i);
+        }
+    });
+
+    /**
+     * The offer under a refusal says "Deactivate instead" to match the
+     * server's own sentence; the ACT is still called Archive everywhere else.
+     * Both words are deliberate, and neither may quietly become the other.
+     */
+    it('keeps the refusal offer worded the way the server sentence ends', () => {
+        expect(ARCHIVE_INSTEAD_LABEL).toBe('Deactivate instead');
     });
 });

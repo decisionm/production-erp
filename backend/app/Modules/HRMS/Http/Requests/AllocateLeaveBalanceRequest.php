@@ -2,6 +2,7 @@
 
 namespace App\Modules\HRMS\Http\Requests;
 
+use App\Modules\HRMS\Http\Requests\Rules\SelectableEmployee;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -15,7 +16,7 @@ class AllocateLeaveBalanceRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'employee_id' => ['required', 'integer', 'exists:employees,id'],
+            'employee_id' => ['required', 'integer', SelectableEmployee::rule()],
             // WS-B: a withdrawn leave type takes no new allocation.
             'leave_type_id' => ['required', 'integer', Rule::exists('leave_types', 'id')->where('is_active', true)],
             'year' => [

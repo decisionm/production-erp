@@ -20,6 +20,7 @@ import {
 } from 'antd';
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/configuration';
 import { listAllWarehouses } from '@/features/inventory/api';
 import PackingMaterialsTab from '@/features/production/components/PackingMaterialsTab';
 import ProductStandardsPage from '@/features/production/pages/ProductStandardsPage';
@@ -327,21 +328,26 @@ function MachinesTab() {
             render: (_: unknown, row: WorkCenter) => stated(row.capacity_hours_per_day),
         },
         {
-            title: 'State',
+            // "In service" was this screen's own word for the state every other
+            // master calls Active. One vocabulary, product-wide, is the point.
+            title: 'Status',
             width: 110,
-            render: (_: unknown, row: WorkCenter) =>
-                row.is_active ? <Tag color="success">In service</Tag> : <Tag>Retired</Tag>,
+            render: (_: unknown, row: WorkCenter) => <ConfigurationStatusTag entity="work-center" row={row} />,
         },
         ...(canManage
             ? [
                   {
                       title: '',
-                      width: 80,
+                      width: 190,
                       fixed: 'right' as const,
                       render: (_: unknown, row: WorkCenter) => (
-                          <Button size="small" onClick={() => open(row)}>
-                              Edit
-                          </Button>
+                          <ConfigurationActionsCell
+                              entity="work-center"
+                              id={row.id}
+                              can={row.can}
+                              recordName={`${row.code} — ${row.name}`}
+                              onEdit={() => open(row)}
+                          />
                       ),
                   },
               ]
@@ -483,13 +489,19 @@ function MachinesTab() {
                             </Form.Item>
                         </Col>
                     </Row>
+                    {/* Shown, not set. The field stays in the form so a save
+                        carries the machine's CURRENT state through untouched —
+                        dropping it would make every edit of a retired machine
+                        quietly put it back in service. Changing the state is
+                        Archive / Reactivate on the row, which counts what uses
+                        the machine first and takes a reason. */}
                     <Form.Item
                         name="is_active"
                         label="In service"
                         valuePropName="checked"
-                        extra="Retired machines cannot be picked for a new run, and stay listed here with their history intact."
+                        extra="Changed with Archive / Reactivate on the row — that path checks what already uses the machine and records why. Retired machines cannot be picked for a new run, and stay listed here with their history intact."
                     >
-                        <Switch />
+                        <Switch disabled />
                     </Form.Item>
                 </Form>
             </Modal>
@@ -557,19 +569,36 @@ function DowntimeReasonsTab() {
                             ),
                         },
                         {
-                            title: 'Active',
+                            // The state is READ here and CHANGED by Archive /
+                            // Reactivate below. The Switch this replaces PUT
+                            // `is_active` straight onto the reason — no
+                            // dependency report, no reason recorded, and this
+                            // master cascades to `production_downtime_events`.
+                            title: 'Status',
                             render: (_: unknown, row: DowntimeReason) => (
-                                <Switch
-                                    size="small"
-                                    checked={row.is_active}
-                                    onChange={(v) => mutation.mutate({ row, patch: { is_active: v } })}
-                                />
+                                <ConfigurationStatusTag entity="downtime-reason" row={row} />
                             ),
                         },
                         {
-                            title: 'Status',
+                            // The factory's own wording, shown verbatim — a
+                            // different column from the lifecycle state, and
+                            // kept apart from it on purpose.
+                            title: 'Confirmation',
                             render: (_: unknown, row: DowntimeReason) =>
                                 row.confirmation_status ? <Tag>{row.confirmation_status}</Tag> : '—',
+                        },
+                        {
+                            title: 'Actions',
+                            // The row edits itself in place (Type, At Start), so
+                            // there is no separate Edit to offer.
+                            render: (_: unknown, row: DowntimeReason) => (
+                                <ConfigurationActionsCell
+                                    entity="downtime-reason"
+                                    id={row.id}
+                                    can={row.can}
+                                    recordName={`${row.code} — ${row.description}`}
+                                />
+                            ),
                         },
                     ] as never
                 }

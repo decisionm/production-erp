@@ -1,9 +1,10 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, Form, Input, InputNumber, Modal, Select, Space, Table, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
+import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/configuration';
 import { createMold, listMolds, updateMold } from '@/features/production/api';
 import type { Mold, MoldStatus } from '@/features/production/types';
 
@@ -16,12 +17,25 @@ const moldSchema = z.object({
 });
 type MoldFormValues = z.infer<typeof moldSchema>;
 
-const statusOptions: { value: MoldStatus; label: string }[] = [
+/**
+ * The statuses the EDIT FORM may set.
+ *
+ * `under_repair` belongs here: it is an operational fact about the tool, and
+ * it is the case `ActiveFlag` keeps deliberately separate — a mould under
+ * repair is neither active nor retired, so neither Archive nor Reactivate
+ * expresses it.
+ *
+ * `retired` does NOT belong here, and stays listed only so a mould that is
+ * already retired shows what it is instead of an empty box. Retiring is
+ * Archive on the row: that path counts what uses the mould first, takes a
+ * reason, and is reversible. A status dropdown writing `retired` straight
+ * onto the record would be the same act with none of those.
+ */
+const statusOptions: { value: MoldStatus; label: string; disabled?: boolean }[] = [
     { value: 'active', label: 'Active' },
     { value: 'under_repair', label: 'Under Repair' },
-    { value: 'retired', label: 'Retired' },
+    { value: 'retired', label: 'Retired', disabled: true },
 ];
-const statusColor: Record<MoldStatus, string> = { active: 'success', under_repair: 'warning', retired: 'default' };
 
 export default function MoldsPage() {
     const [modalOpen, setModalOpen] = useState(false);
@@ -92,27 +106,34 @@ export default function MoldsPage() {
                     {
                         title: 'Status',
                         dataIndex: 'status',
-                        render: (status: MoldStatus) => <Tag color={statusColor[status]}>{statusOptions.find((o) => o.value === status)?.label}</Tag>,
+                        // Active / Retired in the product's two words, and
+                        // "Under repair" in the factory's own — the middle case
+                        // the mechanism keeps reachable in both directions.
+                        render: (_: MoldStatus, row) => <ConfigurationStatusTag entity="mold" row={row} />,
                     },
                     {
                         title: 'Actions',
-                        render: (_, row) => (
-                            <Button
-                                size="small"
-                                onClick={() => {
-                                    setEditingMold(row);
-                                    resetEdit({
-                                        code: row.code,
-                                        name: row.name,
-                                        cavity_count: row.cavity_count ?? undefined,
-                                        status: row.status,
-                                        notes: row.notes ?? '',
-                                    });
-                                }}
-                            >
-                                Edit
-                            </Button>
-                        ),
+                        render: (_, row) => {
+                            const edit = () => {
+                                setEditingMold(row);
+                                resetEdit({
+                                    code: row.code,
+                                    name: row.name,
+                                    cavity_count: row.cavity_count ?? undefined,
+                                    status: row.status,
+                                    notes: row.notes ?? '',
+                                });
+                            };
+                            return (
+                                <ConfigurationActionsCell
+                                    entity="mold"
+                                    id={row.id}
+                                    can={row.can}
+                                    recordName={`${row.code} — ${row.name}`}
+                                    onEdit={edit}
+                                />
+                            );
+                        },
                     },
                 ]}
             />
@@ -171,7 +192,10 @@ export default function MoldsPage() {
                             render={({ field }) => <InputNumber {...field} min={1} style={{ width: '100%' }} />}
                         />
                     </Form.Item>
-                    <Form.Item label="Status">
+                    <Form.Item
+                        label="Status"
+                        extra="Retiring a mould is done with Archive on the row — that path counts what already uses it, takes a reason, and can be undone."
+                    >
                         <Controller
                             name="status"
                             control={editControl}

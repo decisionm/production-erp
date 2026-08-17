@@ -28,6 +28,15 @@ class ProductionStandard extends Model
     use RecordsConfigurationAudit;
     use SoftDeletes;
 
+    /**
+     * The Configuration Lifecycle Contract's `can`, stamped by whichever
+     * surface answers for this row so no screen re-derives eligibility. A
+     * plain public property, not an Eloquent attribute.
+     *
+     * @var array{edit: bool, activate: bool, archive: bool, delete: bool|null}|null
+     */
+    public ?array $can = null;
+
     /** A standard added by hand in the app, not read out of the factory workbook. */
     public const SOURCE_MANUAL = 'MANUAL';
 

@@ -1,3 +1,4 @@
+import type { ConfigurationAbilities } from '@/components/configuration';
 import type { Employee } from '@/features/hrms/types';
 import type { Item, Warehouse } from '@/features/inventory/types';
 import type { Vendor } from '@/features/procurement/types';
@@ -20,6 +21,13 @@ export interface WorkCenter {
     permitted_cavities?: number[] | null;
     cycle_time_min?: string | null;
     cycle_time_max?: string | null;
+    /**
+     * The Configuration Lifecycle Contract's `can` block (DEC-20260817-002).
+     * Optional: absent on a backend that predates the wiring, and the row
+     * actions then offer nothing rather than invent permission. `delete:
+     * null` on an index row means UNDETERMINED — the confirm asks.
+     */
+    can?: ConfigurationAbilities | null;
     default_shift_hours?: string | null;
     confirmation_status?: string | null;
 }
@@ -72,6 +80,8 @@ export interface ScrapReason {
     name: string;
     is_active: boolean;
     created_at: string;
+    /** The lifecycle `can` block (DEC-20260817-002); absent = not wired yet. */
+    can?: ConfigurationAbilities | null;
 }
 
 export interface Shift {
@@ -80,6 +90,8 @@ export interface Shift {
     start_time: string;
     end_time: string;
     is_active: boolean;
+    /** The lifecycle `can` block (DEC-20260817-002); absent = not wired yet. */
+    can?: ConfigurationAbilities | null;
 }
 
 /**
@@ -1041,6 +1053,8 @@ export interface Mold {
     status: MoldStatus;
     notes: string | null;
     created_at: string;
+    /** The lifecycle `can` block (DEC-20260817-002); absent = not wired yet. */
+    can?: ConfigurationAbilities | null;
 }
 
 export interface MoldChangeLog {
@@ -2069,6 +2083,15 @@ export interface ProductionConfiguration {
     source: string | null;
     source_reference: string | null;
     /** The factory's own wording, e.g. "To Confirm" — shown, never acted on. */
+    /** TRUE once archived (soft-deleted). Optional — absent = not serialised. */
+    is_archived?: boolean;
+    /**
+     * The Configuration Lifecycle Contract's `can` block (DEC-20260817-002).
+     * Optional: absent on a backend that predates the wiring, and the row
+     * actions then offer nothing rather than invent permission. `delete:
+     * null` on an index row means UNDETERMINED — the confirm asks.
+     */
+    can?: ConfigurationAbilities | null;
     confirmation_status: string | null;
     notes: string | null;
 }
@@ -2084,6 +2107,8 @@ export interface DowntimeReason {
     selectable_at_start: boolean;
     is_active: boolean;
     confirmation_status: string | null;
+    /** The lifecycle `can` block (DEC-20260817-002); absent = not wired yet. */
+    can?: ConfigurationAbilities | null;
 }
 
 /**
@@ -2174,6 +2199,10 @@ export interface StandardPackaging {
      * (see productStandardsConfig.ts `packagingState`).
      */
     configuration_status?: ConfigurationCompleteness | null;
+    /** TRUE once archived (soft-deleted). Optional — absent = not serialised. */
+    is_archived?: boolean;
+    /** The lifecycle `can` block (DEC-20260817-002); absent = not wired yet. */
+    can?: ConfigurationAbilities | null;
 }
 
 /**
@@ -2368,6 +2397,16 @@ export interface ProductionStandardRow {
      * the relation is eager-loaded — hence the union. The page shows a NAME or
      * nothing: "attached by 7" is worse than silence.
      */
+    /**
+     * TRUE when the standard has been ARCHIVED. It has no active flag of its
+     * own — the model carries SoftDeletes and nothing else, so archiving IS
+     * the soft delete, and the resource reports the fact rather than leaking
+     * `deleted_at`. Optional: absent on a backend that does not serialise it,
+     * and the status tag then says nothing rather than calling every row live.
+     */
+    is_archived?: boolean;
+    /** The lifecycle `can` block (DEC-20260817-002); absent = not wired yet. */
+    can?: ConfigurationAbilities | null;
     item_attached_by?: number | { id: number; name?: string | null } | null;
     item_attached_at?: string | null;
 }
@@ -2517,6 +2556,8 @@ export interface StandardMachineException {
     default_cycle_time: string | null;
     default_cavities: number | null;
     unit_weight_grams: string | null;
+    /** The lifecycle `can` block (DEC-20260817-002); absent = not wired yet. */
+    can?: ConfigurationAbilities | null;
 }
 
 /**

@@ -69,6 +69,34 @@ class TallySyncLinkService
     }
 
     /**
+     * HOW MANY queue rows name this syncable — every one of them, including
+     * dismissed and superseded rows, because the question this answers is
+     * not "which voucher speaks for the document" but "has this record ever
+     * been in the Tally chain at all".
+     *
+     * Added for the Configuration Lifecycle Contract's dependency report: a
+     * shift-granularity Stock Journal names the SHIFT as its syncable
+     * through `syncable_type` + `syncable_id`, which is a plain pair of
+     * columns with no foreign key and no cascade behind it, so nothing in
+     * the schema would stop a shift being deleted out from under a posted
+     * voucher. A module asks THIS, rather than reading tally_sync_entries
+     * itself, and gets a COUNT — never a payload, never a rate, never a
+     * party (the FC-06 gate lives on TallySyncEntryResource and this is not
+     * a way around it).
+     *
+     * Read-only. Touches no Tally, writes no row, changes no status.
+     *
+     * @param  string  $morphClass  the syncable's morph class (Model::getMorphClass())
+     */
+    public function countFor(string $morphClass, int|string $syncableId): int
+    {
+        return (int) TallySyncEntry::query()
+            ->where('syncable_type', $morphClass)
+            ->where('syncable_id', $syncableId)
+            ->count();
+    }
+
+    /**
      * The links for a whole page in ONE query, keyed by syncable_id. Ids
      * with no entry are simply absent from the result.
      *

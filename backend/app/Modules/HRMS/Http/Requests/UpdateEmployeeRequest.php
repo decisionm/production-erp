@@ -2,6 +2,7 @@
 
 namespace App\Modules\HRMS\Http\Requests;
 
+use App\Modules\HRMS\Http\Requests\Rules\SelectableEmployee;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -26,7 +27,7 @@ class UpdateEmployeeRequest extends FormRequest
             'designation' => ['nullable', 'string', 'max:255'],
             'department' => ['nullable', 'string', 'max:255'],
             'status' => ['sometimes', Rule::in(['active', 'inactive', 'terminated'])],
-            'manager_id' => ['nullable', 'integer', 'exists:employees,id'],
+            'manager_id' => ['nullable', 'integer', SelectableEmployee::rule()],
         ];
     }
 }

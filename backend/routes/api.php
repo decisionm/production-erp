@@ -153,10 +153,43 @@ Route::prefix('v1')->group(function () {
         });
 
         Route::prefix('inventory')->middleware('module:inventory')->group(function () {
-            // `show` exists so an item's own page can load that one item by id
-            // instead of hunting for it in the first page of the index list.
-            Route::apiResource('items', ItemController::class)->only(['index', 'store', 'update', 'show']);
-            Route::apiResource('warehouses', WarehouseController::class)->only(['index', 'store', 'update']);
+            /*
+             * THE CONFIGURATION LIFECYCLE ROUTE PATTERN (DEC-20260817-002) —
+             * established here on Item and Warehouse and copied verbatim by
+             * every other configuration master. The rules, and why this shape
+             * rather than another, are in
+             * docs/engineering/CONFIGURATION-LIFECYCLE-WIRING.md.
+             *
+             *   GET    <resource>                 index  — can.delete is null (ask)
+             *   GET    <resource>/{id}            show   — can.delete authoritative
+             *   POST   <resource>                 store
+             *   PUT    <resource>/{id}            update
+             *   DELETE <resource>/{id}            hard delete, never a cascade
+             *   POST   <resource>/{id}/archive    reversible, reason optional
+             *   POST   <resource>/{id}/activate   reversible, reason optional
+             *
+             * EnsureModulePermission treats DELETE and POST identically (both
+             * need `inventory.manage`), so the hard-delete TIER is not
+             * expressed here: it is the lifecycle's canHardDelete seam, read
+             * from `configuration-delete.manage`. Deliberate — putting it in
+             * this group's middleware would 403 archive and activate with it,
+             * and those are ordinary module RBAC.
+             *
+             * The two POST actions are registered BEFORE the apiResource so
+             * neither "archive" nor "activate" can be read as an id.
+             *
+             * `show` exists so an item's own page can load that one item by id
+             * instead of hunting for it in the first page of the index list —
+             * and now so the delete confirm dialog has an authoritative answer
+             * to fetch before it offers the button.
+             */
+            Route::post('items/{item}/archive', [ItemController::class, 'archive']);
+            Route::post('items/{item}/activate', [ItemController::class, 'activate']);
+            Route::apiResource('items', ItemController::class)->only(['index', 'store', 'update', 'show', 'destroy']);
+
+            Route::post('warehouses/{warehouse}/archive', [WarehouseController::class, 'archive']);
+            Route::post('warehouses/{warehouse}/activate', [WarehouseController::class, 'activate']);
+            Route::apiResource('warehouses', WarehouseController::class)->only(['index', 'store', 'update', 'show', 'destroy']);
 
             Route::get('stock-balances', [StockBalanceController::class, 'index']);
 
@@ -441,6 +474,16 @@ Route::prefix('v1')->group(function () {
 
         Route::prefix('hrms')->middleware('module:hrms')->group(function () {
             Route::apiResource('employees', EmployeeController::class)->only(['index', 'store', 'update']);
+            // The Configuration Lifecycle Contract (DEC-20260817-002) on the
+            // employee master. `show` before the lifecycle POSTs so no literal
+            // segment is ever read as an id; DELETE is the hard delete and is
+            // additionally gated on the Owner-level configuration-delete
+            // permission inside EmployeeService — module:hrms alone is not
+            // enough for it, while archive/activate need only the module.
+            Route::get('employees/{employee}', [EmployeeController::class, 'show']);
+            Route::post('employees/{employee}/archive', [EmployeeController::class, 'archive']);
+            Route::post('employees/{employee}/activate', [EmployeeController::class, 'activate']);
+            Route::delete('employees/{employee}', [EmployeeController::class, 'destroy']);
 
             Route::apiResource('leave-types', LeaveTypeController::class)->only(['index', 'store', 'update']);
 
@@ -552,7 +595,7 @@ Route::prefix('v1')->group(function () {
             // bin all resolve a machine through it, so a supervisor who
             // cannot read it cannot start a shift. WRITING a machine lives in
             // its own module:machine-master group below.
-            Route::apiResource('work-centers', WorkCenterController::class)->only(['index']);
+            Route::apiResource('work-centers', WorkCenterController::class)->only(['index', 'show']);
 
             Route::apiResource('boms', BomController::class)->only(['index', 'store']);
 
@@ -570,9 +613,26 @@ Route::prefix('v1')->group(function () {
             Route::post('subcontract-orders/{subcontract_order}/send-materials', [SubcontractOrderController::class, 'sendMaterials']);
             Route::post('subcontract-orders/{subcontract_order}/receive', [SubcontractOrderController::class, 'receive']);
 
-            Route::apiResource('scrap-reasons', ScrapReasonController::class)->only(['index', 'store']);
+            /*
+             * SCRAP REASONS — the Configuration Lifecycle Contract's full
+             * row (DEC-20260817-002): create, view, edit, archive/activate,
+             * and a hard delete that only a Super Admin / Owner may reach
+             * and only for a reason proven never used. Archive is POST
+             * because it is reversible and carries a reason; the delete is
+             * DELETE because it is neither (audit 17-Aug-2026 §2).
+             */
+            Route::apiResource('scrap-reasons', ScrapReasonController::class)->only(['index', 'show', 'store', 'update', 'destroy']);
+            Route::post('scrap-reasons/{scrap_reason}/archive', [ScrapReasonController::class, 'archive']);
+            Route::post('scrap-reasons/{scrap_reason}/activate', [ScrapReasonController::class, 'activate']);
 
-            Route::apiResource('shifts', ShiftController::class)->only(['index', 'store']);
+            // SHIFTS — same lifecycle row. Archiving a shift is what the
+            // rename-era Morning/Afternoon/Night rows on live are, and it
+            // touches no Tally voucher (DEC-20260817-002 §4); the hard
+            // delete is refused while any batch, summary, log or Tally
+            // Stock Journal still names it.
+            Route::apiResource('shifts', ShiftController::class)->only(['index', 'show', 'store', 'update', 'destroy']);
+            Route::post('shifts/{shift}/archive', [ShiftController::class, 'archive']);
+            Route::post('shifts/{shift}/activate', [ShiftController::class, 'activate']);
 
             // "store" starts a batch (machine + item, quantities unknown
             // yet); "complete" fills in the finished numbers once the batch
@@ -588,6 +648,16 @@ Route::prefix('v1')->group(function () {
             Route::post('configurations/{production_configuration}/copy', [ProductionConfigurationController::class, 'copy']);
             Route::get('work-centers/{work_center}/configurations', [ProductionConfigurationController::class, 'forMachine']);
             Route::post('configurations/import', [ProductionConfigurationController::class, 'importRows']);
+            // The Configuration Lifecycle Contract on the machine-product
+            // configuration. `archive` is the same act the existing
+            // `deactivate` above performs — one service method behind both —
+            // and `activate` re-runs the approval gates before a withdrawn
+            // configuration may govern production again. Declared after
+            // configurations/import so the literal segment is never shadowed.
+            Route::get('configurations/{production_configuration}', [ProductionConfigurationController::class, 'show']);
+            Route::post('configurations/{production_configuration}/archive', [ProductionConfigurationController::class, 'archive']);
+            Route::post('configurations/{production_configuration}/activate', [ProductionConfigurationController::class, 'activate']);
+            Route::delete('configurations/{production_configuration}', [ProductionConfigurationController::class, 'destroy']);
 
             // Factory product-level standards (ERPPRO master import).
             Route::get('standards', [ProductionStandardController::class, 'index']);
@@ -623,6 +693,21 @@ Route::prefix('v1')->group(function () {
             // the sheet stated it (Phase 5 fix P1-a). production.manage via
             // the group, like the PUT above.
             Route::patch('standards/{standard}/packagings/{packaging}/identity', [ProductionStandardPackagingController::class, 'identity']);
+            // The Configuration Lifecycle Contract on the packing variant.
+            // Every one of these resolves the variant THROUGH its standard
+            // (ProductionStandardPackagingService::resolveFor), so a guessed
+            // id can never reach a sibling product's variant.
+            Route::get('standards/{standard}/packagings/{packaging}', [ProductionStandardPackagingController::class, 'show']);
+            Route::post('standards/{standard}/packagings/{packaging}/archive', [ProductionStandardPackagingController::class, 'archive']);
+            Route::post('standards/{standard}/packagings/{packaging}/activate', [ProductionStandardPackagingController::class, 'activate']);
+            Route::delete('standards/{standard}/packagings/{packaging}', [ProductionStandardPackagingController::class, 'destroy']);
+            // ...and on the standard itself. `standards/{standard}` is
+            // declared AFTER every literal sibling above (coverage, import)
+            // so none of those words is ever bound as an id.
+            Route::get('standards/{standard}', [ProductionStandardController::class, 'show']);
+            Route::post('standards/{standard}/archive', [ProductionStandardController::class, 'archive']);
+            Route::post('standards/{standard}/activate', [ProductionStandardController::class, 'activate']);
+            Route::delete('standards/{standard}', [ProductionStandardController::class, 'destroy']);
             // One product's variant tree — item → standards → packagings,
             // each packaging with its Tally identity (sku · name · guid) and
             // a configuration_status whose `missing` words the screens
@@ -640,8 +725,16 @@ Route::prefix('v1')->group(function () {
             Route::get('configuration/review', ConfigurationReviewController::class);
 
             Route::get('downtime-reasons', [DowntimeReasonController::class, 'index']);
+            Route::get('downtime-reasons/{downtime_reason}', [DowntimeReasonController::class, 'show']);
             Route::post('downtime-reasons', [DowntimeReasonController::class, 'store']);
             Route::put('downtime-reasons/{downtime_reason}', [DowntimeReasonController::class, 'update']);
+            // Archive/activate/delete — the lifecycle row. `downtime_reasons`
+            // has an is_active flag and no deleted_at, which is the right
+            // shape: archive() takes the active-flag branch and never the
+            // soft-delete one.
+            Route::post('downtime-reasons/{downtime_reason}/archive', [DowntimeReasonController::class, 'archive']);
+            Route::post('downtime-reasons/{downtime_reason}/activate', [DowntimeReasonController::class, 'activate']);
+            Route::delete('downtime-reasons/{downtime_reason}', [DowntimeReasonController::class, 'destroy']);
 
             // Typed settings a factory changes without a deploy. One of them
             // is load-bearing for the completion screen and easy to miss, so
@@ -735,7 +828,12 @@ Route::prefix('v1')->group(function () {
             Route::post('machine-downtime-logs', [MachineDowntimeLogController::class, 'open']);
             Route::post('machine-downtime-logs/{machine_downtime_log}/close', [MachineDowntimeLogController::class, 'close']);
 
-            Route::apiResource('molds', MoldController::class)->only(['index', 'store', 'update']);
+            // MOULDS — the lifecycle row on a three-case status enum:
+            // archive writes `retired`, activate writes `active`, and a
+            // mould `under_repair` is offered BOTH because it is neither.
+            Route::apiResource('molds', MoldController::class)->only(['index', 'show', 'store', 'update', 'destroy']);
+            Route::post('molds/{mold}/archive', [MoldController::class, 'archive']);
+            Route::post('molds/{mold}/activate', [MoldController::class, 'activate']);
 
             Route::get('mold-change-logs', [MoldChangeLogController::class, 'index']);
             Route::post('mold-change-logs', [MoldChangeLogController::class, 'open']);
@@ -822,7 +920,15 @@ Route::prefix('v1')->group(function () {
          * unique-code-ignoring rule are untouched by the move.
          */
         Route::prefix('production')->middleware('module:machine-master')->group(function () {
-            Route::apiResource('work-centers', WorkCenterController::class)->only(['store', 'update']);
+            Route::apiResource('work-centers', WorkCenterController::class)->only(['store', 'update', 'destroy']);
+            // Taking a machine out of service and putting it back are
+            // WRITES, so they belong on this side of the split with store
+            // and update — not beside the index, which every supervisor
+            // reads. The hard delete needs machine-master.manage to reach
+            // the route AND the Super Admin / Owner tier to get past
+            // ConfigurationLifecycle (DEC-20260817-002 §3).
+            Route::post('work-centers/{work_center}/archive', [WorkCenterController::class, 'archive']);
+            Route::post('work-centers/{work_center}/activate', [WorkCenterController::class, 'activate']);
         });
 
         /*

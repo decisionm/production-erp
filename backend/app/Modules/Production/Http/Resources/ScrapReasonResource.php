@@ -15,6 +15,11 @@ class ScrapReasonResource extends JsonResource
             'name' => $this->name,
             'is_active' => $this->is_active,
             'created_at' => $this->created_at?->toIso8601String(),
+            // The Configuration Lifecycle Contract's `can` block — stamped
+            // by the controller (ManagesConfigurationRecords), never
+            // re-derived here and never re-derived by the frontend. NULL
+            // when nobody stamped it: undetermined, ask `show`.
+            'can' => $this->resource->can ?? null,
         ];
     }
 }
