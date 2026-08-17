@@ -1,6 +1,19 @@
 <?php
 
+use App\Modules\Procurement\Exports\GoodsReceiptLinesExport;
+use App\Modules\Procurement\Exports\GoodsReceiptsExport;
+use App\Modules\Procurement\Exports\PurchaseOrderLinesExport;
+use App\Modules\Procurement\Exports\PurchaseOrdersExport;
+use App\Modules\Production\Exports\CecExport;
+use App\Modules\Production\Exports\ProductionReportExport;
+use App\Modules\Production\Exports\ReconciliationReportExport;
+use App\Modules\Production\Exports\ShiftSummaryExport;
+use App\Modules\Production\Exports\TraceabilityReportExport;
+use App\Modules\Sales\Exports\DeliveriesExport;
+use App\Modules\Sales\Exports\InvoicesExport;
+use App\Modules\Sales\Exports\SalesOrdersExport;
 use App\Modules\TallySync\Exports\TallySyncEntriesExport;
+use App\Modules\TallySync\Exports\TallySyncHistoryExport;
 
 /*
  * The Download / Export Center (MASTER-PLAN Phase 4.5).
@@ -57,6 +70,19 @@ return [
 
     'kinds' => [
         TallySyncEntriesExport::class,
+        ShiftSummaryExport::class,
+        ProductionReportExport::class,
+        ReconciliationReportExport::class,
+        TraceabilityReportExport::class,
+        CecExport::class,
+        TallySyncHistoryExport::class,
+        SalesOrdersExport::class,
+        DeliveriesExport::class,
+        InvoicesExport::class,
+        PurchaseOrdersExport::class,
+        PurchaseOrderLinesExport::class,
+        GoodsReceiptsExport::class,
+        GoodsReceiptLinesExport::class,
     ],
 
 ];

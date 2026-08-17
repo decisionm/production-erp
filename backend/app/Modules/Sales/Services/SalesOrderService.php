@@ -9,11 +9,15 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\LazyCollection;
 
 class SalesOrderService
 {
     /** Loaded on every order the service hands back, so the resource never lazy-loads. */
     private const WITH = ['customer', 'lines.item'];
+
+    /** How many orders cursor() reads per query — a page of the export, never the whole file. */
+    private const EXPORT_CHUNK = 500;
 
     public function __construct(
         private readonly SalesDocumentQuery $query,
@@ -30,15 +34,37 @@ class SalesOrderService
      */
     public function paginate(int $perPage = 20, array $filters = []): LengthAwarePaginator
     {
-        $query = $this->withAggregates(SalesOrder::query()->with(self::WITH));
-
-        $this->applyFilters($query, $filters);
-        $this->query->applySort($query, $filters['sort'] ?? null, ['order_date', 'expected_date']);
-
         // withQueryString(): the paginator's own links carry the request's
         // query string (as typed — unknown keys are reflected too, harmlessly),
         // so an API client walking links.next stays on the same query.
-        return $query->paginate($perPage)->withQueryString();
+        return $this->listQuery($filters)->paginate($perPage)->withQueryString();
+    }
+
+    /**
+     * Every matching order, in the list's order, one at a time — the Export
+     * Center's read (SalesOrdersExport, Phase 4.5): the SAME filters and the
+     * SAME ordering as paginate(), off the same builder, so a file can never
+     * carry rows the screen would not, nor in another order. Read a chunk
+     * per query (Builder::lazy — Builder::cursor() would skip the eager
+     * loads the resource prints), never the whole result.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return LazyCollection<int, SalesOrder>
+     */
+    public function cursor(array $filters = []): LazyCollection
+    {
+        return $this->listQuery($filters)->lazy(self::EXPORT_CHUNK);
+    }
+
+    /**
+     * How many orders the list would carry — one COUNT over the filtered
+     * query (the export's cap check; also the list's meta.total).
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    public function count(array $filters = []): int
+    {
+        return $this->filtered($filters)->count();
     }
 
     /**
@@ -167,6 +193,35 @@ class SalesOrderService
     }
 
     // ---- internals --------------------------------------------------------------
+
+    /**
+     * The list's builder: every filter applied, the relations and aggregates
+     * the resource prints, then the list's order — what paginate() pages
+     * and cursor() streams.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function listQuery(array $filters): Builder
+    {
+        $query = $this->withAggregates($this->filtered($filters)->with(self::WITH));
+        $this->query->applySort($query, $filters['sort'] ?? null, ['order_date', 'expected_date']);
+
+        return $query;
+    }
+
+    /**
+     * The filtered orders, nothing loaded and nothing ordered — the one
+     * builder listQuery() and count() both start from.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function filtered(array $filters): Builder
+    {
+        $query = SalesOrder::query();
+        $this->applyFilters($query, $filters);
+
+        return $query;
+    }
 
     /**
      * Every filter of ListSalesOrdersRequest. `q` matches the order number

@@ -5,18 +5,77 @@ namespace App\Modules\Procurement\Services;
 use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Procurement\Models\Enums\PurchaseOrderStatus;
 use App\Modules\Procurement\Models\PurchaseOrder;
+use App\Modules\Procurement\Models\PurchaseOrderLine;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\LazyCollection;
 
 class PurchaseOrderService
 {
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    /** Loaded on every order the list hands back, so the resource never lazy-loads. */
+    private const WITH = ['vendor', 'lines.item', 'lines.schedules'];
+
+    /** How many orders cursor() reads per query — a page of the export, never the whole file. */
+    private const EXPORT_CHUNK = 500;
+
+    public function __construct(private readonly ProcurementDocumentQuery $query) {}
+
+    /**
+     * The list, filtered (Phase 4.5, mirroring Sales' Phase 3.5 lists).
+     * $filters is the validated ListPurchaseOrdersRequest input; an empty
+     * array is the unfiltered list every earlier caller still gets — newest
+     * first, same page size.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    public function paginate(int $perPage = 20, array $filters = []): LengthAwarePaginator
     {
-        return PurchaseOrder::query()
-            ->with(['vendor', 'lines.item', 'lines.schedules'])
-            ->orderByDesc('id')
-            ->paginate($perPage);
+        // withQueryString(): the paginator's own links carry the request's
+        // query string, so an API client walking links.next stays on the
+        // same query (as the Sales lists do).
+        return $this->listQuery($filters)->paginate($perPage)->withQueryString();
+    }
+
+    /**
+     * Every matching order, in the list's order, one at a time — the Export
+     * Center's read (PurchaseOrdersExport / PurchaseOrderLinesExport): the
+     * SAME filters and the SAME ordering as paginate(), off the same
+     * builder, so a file can never carry rows the screen would not, nor in
+     * another order. Builder::lazy, not Builder::cursor(): cursor() skips
+     * the eager loads the resource prints.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return LazyCollection<int, PurchaseOrder>
+     */
+    public function cursor(array $filters = []): LazyCollection
+    {
+        return $this->listQuery($filters)->lazy(self::EXPORT_CHUNK);
+    }
+
+    /**
+     * How many orders the list would carry — one COUNT over the filtered
+     * query (the export's cap check; also the list's meta.total).
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    public function count(array $filters = []): int
+    {
+        return $this->filtered($filters)->count();
+    }
+
+    /**
+     * How many LINES the matching orders carry between them — one COUNT
+     * with the filtered orders as a subquery (the line export's cap check).
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    public function linesCount(array $filters = []): int
+    {
+        return PurchaseOrderLine::query()
+            ->whereIn('purchase_order_id', $this->filtered($filters)->select('purchase_orders.id'))
+            ->count();
     }
 
     /**
@@ -122,5 +181,72 @@ class PurchaseOrderService
         $order->update(['status' => PurchaseOrderStatus::Sent]);
 
         return $order;
+    }
+
+    // ---- internals --------------------------------------------------------------
+
+    /**
+     * The list's builder: every filter applied, the relations the resource
+     * prints, then the list's order — what paginate() pages and cursor()
+     * streams.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function listQuery(array $filters): Builder
+    {
+        $query = $this->filtered($filters)->with(self::WITH);
+        $this->query->applySort($query, $filters['sort'] ?? null, ['order_date', 'expected_date']);
+
+        return $query;
+    }
+
+    /**
+     * The filtered orders, nothing loaded and nothing ordered — the one
+     * builder listQuery(), count() and linesCount() all start from.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function filtered(array $filters): Builder
+    {
+        $query = PurchaseOrder::query();
+        $this->applyFilters($query, $filters);
+
+        return $query;
+    }
+
+    /**
+     * Every filter of ListPurchaseOrdersRequest. `q` matches the order
+     * number in any spelling ("PO-12", "po 12", "12") or the vendor's name
+     * or code — never notes. The date range is on order_date, a plain date.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function applyFilters(Builder $query, array $filters): void
+    {
+        if (! empty($filters['vendor_id'])) {
+            $query->where('vendor_id', (int) $filters['vendor_id']);
+        }
+
+        if (! empty($filters['status'])) {
+            $query->where('status', $filters['status']);
+        }
+
+        $this->query->applyDateRange($query, 'order_date', $filters['from'] ?? null, $filters['to'] ?? null);
+
+        if (! empty($filters['item_id'])) {
+            $query->whereHas('lines', fn (Builder $lines) => $lines->where('item_id', (int) $filters['item_id']));
+        }
+
+        if (isset($filters['q']) && trim((string) $filters['q']) !== '') {
+            $term = trim((string) $filters['q']);
+            $id = $this->query->documentId($term, 'PO');
+
+            $query->where(function (Builder $any) use ($term, $id) {
+                if ($id !== null) {
+                    $any->orWhere('purchase_orders.id', $id);
+                }
+                $any->orWhereHas('vendor', fn (Builder $vendor) => $this->query->whereVendorMatches($vendor, $term));
+            });
+        }
     }
 }

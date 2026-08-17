@@ -10,11 +10,14 @@ use App\Modules\Procurement\Events\GoodsReceiptNoteReceived;
 use App\Modules\Procurement\Exceptions\OverReceiptException;
 use App\Modules\Procurement\Models\Enums\PurchaseOrderStatus;
 use App\Modules\Procurement\Models\GoodsReceiptNote;
+use App\Modules\Procurement\Models\GoodsReceiptNoteLine;
 use App\Modules\Procurement\Models\PurchaseOrder;
 use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\LazyCollection;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -25,27 +28,153 @@ use Illuminate\Validation\ValidationException;
  */
 class GoodsReceiptService
 {
+    /** Loaded on every receipt the list hands back, so the resource never lazy-loads. */
+    private const WITH = [
+        'lines.item',
+        'lines.materialLots.item',
+        'lines.materialLots.bags',
+        'lines.materialLots.costVersions',
+        'materialLots.item',
+        'materialLots.bags',
+        'materialLots.costVersions',
+        'warehouse',
+        'purchaseOrder.vendor',
+    ];
+
+    /** How many receipts cursor() reads per query — a page of the export, never the whole file. */
+    private const EXPORT_CHUNK = 500;
+
     public function __construct(
         private readonly StockMovementService $stock,
         private readonly TraceabilityService $traceability,
+        private readonly ProcurementDocumentQuery $query,
     ) {}
 
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    /**
+     * The list, filtered (Phase 4.5, mirroring Sales' Phase 3.5 lists).
+     * $filters is the validated ListGoodsReceiptsRequest input; an empty
+     * array is the unfiltered list every earlier caller still gets — newest
+     * first, same page size.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    public function paginate(int $perPage = 20, array $filters = []): LengthAwarePaginator
     {
-        return GoodsReceiptNote::query()
-            ->with([
-                'lines.item',
-                'lines.materialLots.item',
-                'lines.materialLots.bags',
-                'lines.materialLots.costVersions',
-                'materialLots.item',
-                'materialLots.bags',
-                'materialLots.costVersions',
-                'warehouse',
-                'purchaseOrder.vendor',
-            ])
-            ->orderByDesc('id')
-            ->paginate($perPage);
+        // withQueryString(): the paginator's own links carry the request's
+        // query string, so an API client walking links.next stays on the
+        // same query (as the Sales lists do).
+        return $this->listQuery($filters)->paginate($perPage)->withQueryString();
+    }
+
+    /**
+     * Every matching receipt, in the list's order, one at a time — the
+     * Export Center's read (GoodsReceiptsExport / GoodsReceiptLinesExport):
+     * the SAME filters and the SAME ordering as paginate(), off the same
+     * builder, so a file can never carry rows the screen would not, nor in
+     * another order. Builder::lazy, not Builder::cursor(): cursor() skips
+     * the eager loads the resource prints.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return LazyCollection<int, GoodsReceiptNote>
+     */
+    public function cursor(array $filters = []): LazyCollection
+    {
+        return $this->listQuery($filters)->lazy(self::EXPORT_CHUNK);
+    }
+
+    /**
+     * How many receipts the list would carry — one COUNT over the filtered
+     * query (the export's cap check; also the list's meta.total).
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    public function count(array $filters = []): int
+    {
+        return $this->filtered($filters)->count();
+    }
+
+    /**
+     * How many LINES the matching receipts carry between them — one COUNT
+     * with the filtered receipts as a subquery (the line export's cap check).
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    public function linesCount(array $filters = []): int
+    {
+        return GoodsReceiptNoteLine::query()
+            ->whereIn('goods_receipt_note_id', $this->filtered($filters)->select('goods_receipt_notes.id'))
+            ->count();
+    }
+
+    // ---- the list's query ---------------------------------------------------------
+
+    /**
+     * The list's builder: every filter applied, the relations the resource
+     * prints, then the list's order — what paginate() pages and cursor()
+     * streams.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function listQuery(array $filters): Builder
+    {
+        $query = $this->filtered($filters)->with(self::WITH);
+        $this->query->applySort($query, $filters['sort'] ?? null, ['received_date']);
+
+        return $query;
+    }
+
+    /**
+     * The filtered receipts, nothing loaded and nothing ordered — the one
+     * builder listQuery(), count() and linesCount() all start from.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function filtered(array $filters): Builder
+    {
+        $query = GoodsReceiptNote::query();
+        $this->applyFilters($query, $filters);
+
+        return $query;
+    }
+
+    /**
+     * Every filter of ListGoodsReceiptsRequest. The vendor is the ORDER's
+     * vendor (a receipt names no vendor of its own). `q` matches the
+     * receipt number in any spelling ("GRN-7", "grn 7", "7"), the receipt's
+     * reference (as a delivery's is matched), or the order's vendor by name
+     * or code — never notes. The date range is FACTORY days on
+     * received_date (a datetime), exactly as a delivery's delivered_date.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function applyFilters(Builder $query, array $filters): void
+    {
+        if (! empty($filters['vendor_id'])) {
+            $query->whereHas('purchaseOrder', fn (Builder $order) => $order->where('vendor_id', (int) $filters['vendor_id']));
+        }
+
+        if (! empty($filters['purchase_order_id'])) {
+            $query->where('purchase_order_id', (int) $filters['purchase_order_id']);
+        }
+
+        $this->query->applyFactoryDayRange($query, 'received_date', $filters['from'] ?? null, $filters['to'] ?? null);
+
+        if (! empty($filters['item_id'])) {
+            $query->whereHas('lines', fn (Builder $lines) => $lines->where('item_id', (int) $filters['item_id']));
+        }
+
+        if (isset($filters['q']) && trim((string) $filters['q']) !== '') {
+            $term = trim((string) $filters['q']);
+            $id = $this->query->documentId($term, 'GRN');
+
+            $query->where(function (Builder $any) use ($term, $id) {
+                if ($id !== null) {
+                    $any->orWhere('goods_receipt_notes.id', $id);
+                }
+                $any->orWhere(fn (Builder $reference) => $this->query->whereLike($reference, 'reference', $term));
+                $any->orWhereHas('purchaseOrder.vendor', fn (Builder $vendor) => $this->query->whereVendorMatches($vendor, $term));
+            });
+        }
     }
 
     /**

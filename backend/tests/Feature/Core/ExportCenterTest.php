@@ -43,6 +43,11 @@ class ExportCenterTest extends TestCase
     {
         parent::setUp();
 
+        // Only the stubs below: the registry is filled lazily from
+        // config('exports.kinds') on first resolution, and the modules' real
+        // kinds (production's own `cec` among them) would otherwise sit
+        // beside these and answer for them.
+        config(['exports.kinds' => []]);
         $registry = app(ExportRegistry::class);
         $registry->register($this->stubKind('widgets', 'production', ['production.view', 'production.manage'], [
             ['id' => 1, 'name' => 'Cap, 28mm', 'note' => '=SUM(A1)', 'delta' => -0.4, 'meta' => ['group' => 'PET']],

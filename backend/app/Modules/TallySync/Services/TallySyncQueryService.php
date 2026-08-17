@@ -103,6 +103,41 @@ class TallySyncQueryService
     }
 
     /**
+     * Every matching entry WITH its history seated (`events`, oldest
+     * first — the relation's own order), in the list's order, a page of
+     * models at a time — the Export Center's history read
+     * (TallySyncHistoryExport): the SAME filters and the SAME ordering as
+     * paginate(), off the same builder, so a history file can never carry
+     * an entry the screen would not. lazy() rather than cursor() because
+     * cursor() cannot eager-load, and one events query per page beats one
+     * per entry.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return LazyCollection<int, TallySyncEntry>
+     */
+    public function historyCursor(array $filters, ?Authenticatable $reader = null): LazyCollection
+    {
+        return $this->listQuery($filters, $reader)->with('events')->lazy(200);
+    }
+
+    /**
+     * How many EVENTS the matching entries carry between them — one COUNT
+     * over tally_sync_events against the filtered entry query (the history
+     * export's cap check).
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    public function historyCount(array $filters, ?Authenticatable $reader = null): int
+    {
+        return TallySyncEvent::query()
+            ->whereIn(
+                'tally_sync_entry_id',
+                $this->apply(TallySyncEntry::query()->select('id'), $filters, null, $reader),
+            )
+            ->count();
+    }
+
+    /**
      * The list's builder: every filter applied, then the list's order.
      *
      * @param  array<string, mixed>  $filters
