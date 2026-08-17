@@ -628,8 +628,8 @@ Deferred items:
 
 Owner-gated items:  publishing agent 0.3.8 to the factory floor (manual,
                     lead/owner; not part of this phase).
-PR:                 (recorded on open)
-Deployment state:   not deployed; stack #179 → … → #183 → this PR; the
+PR:                 #184 (base: feat/phase-3.5-sales-visibility → #183 → #182 → #181 → #180 → #179)
+Deployment state:   not deployed; stack #179 → … → #183 → #184; the
                     migration lands with the deploy; the agent needs its
                     own release for snapshots to start arriving.
 Next phase:         4.5 — Download / Export Center (CEC slot BLOCKED)
