@@ -1066,9 +1066,17 @@ export async function getShiftKpiReport(shiftId: number | undefined, productionD
  *
  * The 25-page cap is the same second bound listPendingEntries carries — a
  * malformed meta cannot spin the loop; 2,500 completed batches on one date
- * is not a factory day.
+ * is not a factory day. If the cap, not the last page, ends the walk the
+ * result says `truncated: true` so the reconcile line never calls a partial
+ * sum a difference.
  */
-export async function listCompletedEntriesFor(productionDate: string, shiftId?: number): Promise<ShiftProductionEntry[]> {
+export interface CompletedEntriesWalk {
+    entries: ShiftProductionEntry[];
+    /** true when the 25-page bound — not meta.last_page — stopped the walk; the sum is then partial and says so. */
+    truncated: boolean;
+}
+
+export async function listCompletedEntriesFor(productionDate: string, shiftId?: number): Promise<CompletedEntriesWalk> {
     const all: ShiftProductionEntry[] = [];
     let page = 1;
     let lastPage = 1;
@@ -1086,7 +1094,7 @@ export async function listCompletedEntriesFor(productionDate: string, shiftId?: 
         page += 1;
     } while (page <= lastPage && page <= 25);
 
-    return all;
+    return { entries: all, truncated: page <= lastPage };
 }
 
 /**

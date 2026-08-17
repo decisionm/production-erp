@@ -28,6 +28,8 @@ export interface CecPreviewPanelProps {
     productionDate: string;
     /** Omitted — the day-wide read, every shift that ran the date. */
     shiftId?: number;
+    /** false while the page is still resolving its shift — the day-wide read is the heaviest and must not fire first. */
+    enabled?: boolean;
 }
 
 const tabular = { fontVariantNumeric: 'tabular-nums' } as const;
@@ -100,11 +102,12 @@ function SummaryLine({ summary, title }: { summary: ShiftKpiReport | null | unde
     return <ItemsLine items={cecSummaryItems(summary)} title={title} />;
 }
 
-export default function CecPreviewPanel({ productionDate, shiftId }: CecPreviewPanelProps) {
+export default function CecPreviewPanel({ productionDate, shiftId, enabled = true }: CecPreviewPanelProps) {
     const { data: report, isLoading, error } = useQuery({
         queryKey: ['production', 'cec', shiftId ?? 'day', productionDate],
         queryFn: () => getCecReport(productionDate, shiftId),
         retry: false,
+        enabled,
     });
 
     const sections = cecShiftSections(report);

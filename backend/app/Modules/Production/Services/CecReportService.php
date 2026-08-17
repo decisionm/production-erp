@@ -286,7 +286,9 @@ class CecReportService
             $out[$key] = $sum;
         }
 
-        $out['skipped_nulls'] = $skipped;
+        // Always a JSON object — `{}` when nothing was skipped, never `[]`:
+        // one shape for one key, whoever reads it (the golden guide, TS).
+        $out['skipped_nulls'] = (object) $skipped;
         $out['basis'] = self::SUMS_BASIS;
 
         return $out;

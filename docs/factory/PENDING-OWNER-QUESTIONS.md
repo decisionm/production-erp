@@ -35,7 +35,7 @@ the ERP). Q38-Q41 are claimed by the 12-Aug Tally
 evidence set and the purchase/tax configuration design. Q42 is claimed by the SKU scheme
 design. Q43 is claimed by the Phase 3 sync fix loop (duplicate master names).
 Q46 is claimed by the Phase 5.5 fix loop (paper-page ingest and the
-estimation version). New questions continue from Q47.
+estimation version). New questions continue from Q48.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 DEC-20260809-002/-003 landed with PR #155 (the finance-pull discovery
@@ -777,4 +777,21 @@ is "the current engine stamps every new row, whatever date it records";
 `EstimationUnifiedTest::test_every_creation_path_in_app_stamps_a_calculation_version`
 enumerates the doors. **Blocks:** nothing — pages ingest today; the choice
 only decides which arithmetic a back-dated page's expected figure follows.
+*Open since 2026-08-17.*
+
+## Q47 · Which rejection figure does the CEC sheet carry — production-side, QC-weighed, or confirmed?
+
+A completed batch carries three rejection readings in the ERP: the
+production-side `quantity_rejection_kg` the operator records at completion
+(what the Shift Summary sums as `rejection_kg` today), QC's weighed kg from
+the quality return, and the `confirmed_rejection_kg` the approval path uses
+(QC wins where it exists — it is the one that reaches the Tally scrap line).
+Phase 5.7's CEC data endpoint (`GET production/cec`) exposes the production-
+side figure as `rejection_kg` (so the CEC reconciles with the Shift Summary
+field for field) and QC's beside it as `rejection_kg_qc`; it invents nothing
+and adds no arithmetic. When the owner's CEC sample arrives (the format is
+still BLOCKED — SOURCE DOCUMENT REQUIRED), the reading guide will name which
+column the sheet's "reject" is, and that is the owner's call, not the
+composer's. **Blocks:** nothing today — the CEC has no format to fill; it
+decides which of the two exposed figures the golden guide maps.
 *Open since 2026-08-17.*

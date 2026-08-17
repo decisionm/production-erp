@@ -77,12 +77,15 @@ export default function ShiftSummaryPage() {
     // walked to the last page), summed at 4 dp and set beside the report's
     // actual_production_kg. Two server reads of the same entries — this line
     // says whether they agree, and names the difference when they do not.
-    const { data: completedEntries, isLoading: completedLoading, error: completedError } = useQuery({
+    const { data: completedWalk, isLoading: completedLoading, error: completedError } = useQuery({
         queryKey: ['production', 'shift-summary-reconcile', queryShiftId ?? 'day', productionDate],
         queryFn: () => listCompletedEntriesFor(productionDate, queryShiftId),
         enabled: scope === 'day' || effectiveShiftId !== undefined,
     });
-    const reconcile = report && completedEntries ? reconcileShiftSummary(report.actual_production_kg, completedEntries) : null;
+    // A walk the 25-page bound cut short is not a verdict — say so instead.
+    const completedTruncated = completedWalk?.truncated === true;
+    const reconcile =
+        report && completedWalk && !completedTruncated ? reconcileShiftSummary(report.actual_production_kg, completedWalk.entries) : null;
     // Phase 5.7 names the two live counts for what they are; a backend that
     // predates the rename sends only the old keys, which mean the same thing.
     const machinesRunningNow = report?.machines_running_now ?? report?.machines_running;
@@ -226,7 +229,7 @@ export default function ShiftSummaryPage() {
                             Machines Running and Machines Down are counted <strong>now</strong> — batches in progress and
                             breakdowns still open at this moment, filed under this date — not what the machines were doing
                             during the shift; on a past date they read 0 unless something is still open. Shift Efficiency
-                            is measured against the supervisor-typed target and is blank until one is typed. The two idle-time
+                            is measured against the supervisor-typed target and is blank until a non-zero target is typed. The two idle-time
                             figures are kept separate on purpose — one machine breaking down isn&apos;t the same as the whole
                             floor losing power at once.
                         </Typography.Paragraph>
@@ -236,6 +239,11 @@ export default function ShiftSummaryPage() {
                                 <Typography.Text type="secondary">could not read the completed batches for this date.</Typography.Text>
                             ) : completedLoading || reportLoading ? (
                                 <Typography.Text type="secondary">reading…</Typography.Text>
+                            ) : completedTruncated ? (
+                                <Typography.Text type="warning">
+                                    not compared — the completed-batches read stopped at its 25-page bound (2,500 entries) before the
+                                    last page; the summary&apos;s figure stands on its own
+                                </Typography.Text>
                             ) : reconcile === null ? (
                                 <Typography.Text type="secondary">—</Typography.Text>
                             ) : reconcile.equal ? (
@@ -369,7 +377,11 @@ export default function ShiftSummaryPage() {
                 )}
 
                 <Col xs={24}>
-                    <CecPreviewPanel productionDate={productionDate} shiftId={queryShiftId} />
+                    <CecPreviewPanel
+                        productionDate={productionDate}
+                        shiftId={queryShiftId}
+                        enabled={scope === 'day' || effectiveShiftId !== undefined}
+                    />
                 </Col>
             </Row>
         </>

@@ -53,6 +53,16 @@ class CecGoldenTest extends TestCase
         $samples = glob(base_path(self::FIXTURES.'/*.golden.csv')) ?: [];
         sort($samples);
 
+        // Anything dropped into the fixture directory that is not README.md
+        // or one of the recognised triples is the owner's sample under the
+        // wrong name — a call to name it, never something to skip past.
+        $strays = array_values(array_filter(
+            glob(base_path(self::FIXTURES.'/*')) ?: [],
+            fn (string $path): bool => basename($path) !== 'README.md'
+                && ! preg_match('/\.(golden\.csv|golden\.json|seed\.php)$/', $path),
+        ));
+        $this->assertSame([], array_map('basename', $strays), 'unrecognised file(s) in tests/fixtures/cec — name the owner\'s sample <name>.golden.csv and write its reading guide <name>.golden.json (tests/fixtures/cec/README.md)');
+
         if ($samples === []) {
             $this->markTestSkipped(self::SKIP_MESSAGE);
         }

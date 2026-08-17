@@ -317,13 +317,4 @@ is **not called complete** while a BLOCKED link remains.
 | Finance / CRM surfaces | DEC-20260812-001 |
 | ERP sales-document lifecycle defaults | Q44 |
 
----|---|
-| Sales lifecycle in ERP | New decision superseding DEC-20260809-003 |
-| CEC export | A sample + format authority; none exists. **The Download Center ships CEC's slot visibly BLOCKED** (Phase 4.5) — never an invented layout |
-| ERP↔Tally reconciliation by reading Tally | Q36; and a decision that a deliberate read is wanted |
-| SKU format programme | Format confirmation; agent HSN fetch first (does not exist) |
-| 490/box variant | Q33 |
-| Committing XML/exports to the repo | Q31, Q38 |
-| Finance / CRM surfaces | DEC-20260812-001 |
-
 ---
