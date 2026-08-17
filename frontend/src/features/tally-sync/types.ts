@@ -174,6 +174,61 @@ export interface EntryMappings {
 /** How many names landed in each counted state (`none` is not a mapping outcome and `withheld` was not shown, so neither is counted). */
 export type MappingSummary = Record<Exclude<MappingState, 'none' | 'withheld'>, number>;
 
+/**
+ * Tally's answer to ONE post, as the agent summarised it (tally/client.ts
+ * TallyImportResult): the CREATED / ERRORS counts and whether the agent
+ * judged the import a success. `message` is Tally's own text (a LINEERROR,
+ * or the agent's one-liner) — it can NAME a supplier ledger, so on a
+ * supplier-party voucher a reader without finance standing gets it null
+ * with `message_withheld` saying why (FC-06, second half — the same rule
+ * error_message follows). `raw` is the response body as received, present
+ * only when the server chose to send it. Every field is null when the
+ * agent had no answer to report (the inconclusive-timeout path).
+ */
+export interface TallySnapshotAnswer {
+    success: boolean | null;
+    created: number | null;
+    errors: number | null;
+    message: string | null;
+    message_withheld?: string;
+    raw?: string | null;
+}
+
+/**
+ * What the agent SENT to Tally and what Tally ANSWERED, for one post
+ * attempt (Phase 4 — MASTER-PLAN P4-01..05). Uploaded by the agent after
+ * each post, fire-and-forget; stored on the cloud; never edited — a new
+ * attempt is a new row. Only on GET /tally-sync/entries/{id}, newest first.
+ *
+ * `xml` is the exact XML the agent built locally (the cloud never builds
+ * it), shown only to a reader with finance standing — or to anyone for a
+ * Stock Journal / Manufacturing Journal, which carries no rate and no
+ * party by construction. Otherwise it is null and `xml_withheld` says why
+ * (FC-06, fail-closed: no partial redaction of XML text is attempted).
+ * `xml_sha256` and `xml_bytes` are always sent — they let anyone check
+ * that what the agent posted is what a finance reader sees. `xml` is also
+ * null with no note when the agent uploaded no body (over the 2 MB cap).
+ *
+ * `payload_matches` compares the payload_hash the agent echoed with the
+ * hash of the payload the cloud holds NOW: false means the payload was
+ * regenerated (a Resync) after this XML was built. Null when the agent
+ * echoed no hash.
+ */
+export interface TallySyncSnapshot {
+    id: number;
+    /** The entry's `attempts` as the agent saw it at report time. */
+    attempt: number | null;
+    created_at: string | null;
+    agent_version: string | null;
+    xml_sha256: string;
+    /** UTF-8 byte length of the XML the agent sent — null when neither a body nor a size arrived. */
+    xml_bytes: number | null;
+    payload_matches: boolean | null;
+    tally: TallySnapshotAnswer | null;
+    xml: string | null;
+    xml_withheld: string | null;
+}
+
 export interface TallySyncEntry {
     id: number;
     syncable_type: string;
@@ -252,6 +307,14 @@ export interface TallySyncEntry {
     mappings?: EntryMappings;
     /** Counts per mapping state over every name judged — only on GET /tally-sync/entries/{id}. */
     mapping_summary?: MappingSummary;
+    /**
+     * What the agent sent to Tally and what Tally answered, one row per post
+     * attempt, newest first — only on GET /tally-sync/entries/{id}. Empty
+     * until an agent ≥ 0.3.8 has posted this voucher at least once.
+     */
+    snapshots?: TallySyncSnapshot[];
+    /** How many snapshots exist — the list may carry this so a count can show without a fetch; absent otherwise. */
+    snapshot_count?: number;
 }
 
 /**
