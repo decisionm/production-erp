@@ -2,6 +2,7 @@
 
 namespace App\Modules\Production\Models;
 
+use App\Support\Configuration\Concerns\RecordsConfigurationAudit;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -10,6 +11,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 #[Fillable(['name', 'start_time', 'end_time', 'is_active'])]
 class Shift extends Model
 {
+    use RecordsConfigurationAudit;
     use SoftDeletes;
 
     protected function casts(): array

@@ -96,7 +96,11 @@ class StartBatchRequest extends FormRequest
             // Configurable-production fields. mold/colour narrow which
             // approved configuration governs the run; the *_override pair
             // is the bounded, reasoned deviation from it.
-            'mold_id' => ['sometimes', 'nullable', 'integer', 'exists:molds,id'],
+            // WS-B (audit 17-Aug-2026): a RETIRED mould was selectable on the
+            // floor. Only `retired` is refused — whether a mould `under_repair`
+            // may be scheduled is a factory question nobody has answered, and
+            // this rule does not answer it.
+            'mold_id' => ['sometimes', 'nullable', 'integer', Rule::exists('molds', 'id')->whereNot('status', 'retired')],
             // Which product standard variant and packaging this run uses —
             // asked only when the product genuinely offers a choice.
             'production_standard_id' => ['sometimes', 'nullable', 'integer', 'exists:production_standards,id'],

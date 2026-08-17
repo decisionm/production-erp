@@ -15,7 +15,9 @@ class StoreSubcontractOrderRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'vendor_id' => ['required', 'integer', 'exists:vendors,id'],
+            // WS-B: a vendor the factory has retired can no longer be given
+            // new work — the flag was set and filtered nowhere.
+            'vendor_id' => ['required', 'integer', Rule::exists('vendors', 'id')->where('is_active', true)],
             'item_id' => ['required', 'integer', 'exists:items,id'],
             'bom_id' => [
                 'nullable', 'integer',

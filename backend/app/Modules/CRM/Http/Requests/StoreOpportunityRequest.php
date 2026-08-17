@@ -16,7 +16,8 @@ class StoreOpportunityRequest extends FormRequest
     {
         return [
             'name' => ['required', 'string', 'max:255'],
-            'customer_id' => ['required', 'integer', 'exists:customers,id'],
+            // WS-B: no new opportunity against a retired customer.
+            'customer_id' => ['required', 'integer', Rule::exists('customers', 'id')->where('is_active', true)],
             'lead_id' => ['nullable', 'integer', 'exists:leads,id'],
             'stage' => ['nullable', Rule::in(['prospecting', 'qualification', 'proposal', 'negotiation', 'won', 'lost'])],
             'estimated_value' => ['nullable', 'numeric', 'min:0'],

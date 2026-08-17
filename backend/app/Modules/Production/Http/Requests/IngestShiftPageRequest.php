@@ -52,7 +52,9 @@ class IngestShiftPageRequest extends FormRequest
             // it arrives as its own field and becomes its own scrap line.
             'rows.*.lumps_kg' => ['sometimes', 'nullable', 'numeric', 'gte:0'],
             'rows.*.running_hours' => ['sometimes', 'nullable', 'numeric', 'gt:0', 'max:24'],
-            'rows.*.scrap_reason_id' => ['sometimes', 'nullable', 'integer', 'exists:scrap_reasons,id'],
+            // WS-B: a page row cannot introduce a withdrawn scrap reason
+            // either — same contract as the completion drawer.
+            'rows.*.scrap_reason_id' => ['sometimes', 'nullable', 'integer', Rule::exists('scrap_reasons', 'id')->where('is_active', true)],
             'rows.*.notes' => ['sometimes', 'nullable', 'string', 'max:1000'],
 
             'rows.*.nos_per_tray' => ['sometimes', 'nullable', 'integer', 'min:1'],

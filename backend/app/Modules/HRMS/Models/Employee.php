@@ -4,6 +4,7 @@ namespace App\Modules\HRMS\Models;
 
 use App\Models\User;
 use App\Modules\HRMS\Models\Enums\EmployeeStatus;
+use App\Support\Configuration\Concerns\RecordsConfigurationAudit;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -16,6 +17,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 ])]
 class Employee extends Model
 {
+    use RecordsConfigurationAudit;
     use SoftDeletes;
 
     protected function casts(): array

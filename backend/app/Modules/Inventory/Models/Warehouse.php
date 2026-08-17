@@ -2,6 +2,7 @@
 
 namespace App\Modules\Inventory\Models;
 
+use App\Support\Configuration\Concerns\RecordsConfigurationAudit;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -11,6 +12,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 #[Fillable(['code', 'name', 'is_active', 'tally_guid', 'tally_company', 'tally_parent_name', 'parent_id'])]
 class Warehouse extends Model
 {
+    use RecordsConfigurationAudit;
     use SoftDeletes;
 
     protected function casts(): array

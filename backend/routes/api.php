@@ -189,7 +189,18 @@ Route::prefix('v1')->group(function () {
         // than a nested one: route-group middleware accumulates, so putting
         // these inside the inventory group above would demand BOTH
         // permissions and lock Accounts out of their own data.
-        // Append-only: there is no PUT and no DELETE here or anywhere.
+        // Append-only, and this cost-version ledger is the strict case: no PUT,
+        // no PATCH, no DELETE — a recorded cost is history, and history is added
+        // to, never edited (MaterialLotCostVersionTest pins the 405s).
+        //
+        // The rule scoped honestly, because the old wording said "anywhere" and
+        // that was never true of this file: TRANSACTIONS AND LEDGERS are
+        // append-only. CONFIGURATION MASTERS carry a lifecycle — create, edit,
+        // archive/activate, and a hard delete permitted ONLY where the backend
+        // has proved the record was never used and nothing depends on it
+        // (DEC-20260817-002; the guard is App\Support\Configuration\
+        // ConfigurationLifecycle, and it refuses with counts rather than
+        // cascading).
         Route::prefix('inventory')->middleware('module:finance')->group(function () {
             Route::get('material-lots/{lot}/cost-versions', [MaterialLotCostVersionController::class, 'index']);
             Route::post('material-lots/{lot}/cost-versions', [MaterialLotCostVersionController::class, 'store']);

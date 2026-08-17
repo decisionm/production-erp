@@ -3,6 +3,7 @@
 namespace App\Modules\Production\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreProductionConfigurationRequest extends FormRequest
 {
@@ -25,7 +26,9 @@ class StoreProductionConfigurationRequest extends FormRequest
         return [
             'work_center_id' => ['required', 'integer', 'exists:work_centers,id'],
             'item_id' => ['required', 'integer', 'exists:items,id'],
-            'mold_id' => ['nullable', 'integer', 'exists:molds,id'],
+            // WS-B: a retired mould cannot govern a NEW configuration.
+            // Existing configurations keep (and still display) theirs.
+            'mold_id' => ['nullable', 'integer', Rule::exists('molds', 'id')->whereNot('status', 'retired')],
             'colour' => ['nullable', 'string', 'max:64'],
             'unit_weight_grams' => ['nullable', 'numeric', 'gt:0'],
             'default_cycle_time' => ['nullable', 'numeric', 'gt:0', 'max:9999.99'],

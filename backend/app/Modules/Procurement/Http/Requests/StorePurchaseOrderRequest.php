@@ -3,6 +3,7 @@
 namespace App\Modules\Procurement\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StorePurchaseOrderRequest extends FormRequest
 {
@@ -14,7 +15,19 @@ class StorePurchaseOrderRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'vendor_id' => ['required', 'integer', 'exists:vendors,id'],
+            // WS-B (audit 17-Aug-2026 §1): a vendor the factory has retired
+            // can no longer be given NEW work.
+            //
+            // SCOPED TO ERP-ENTERED ORDERS ON PURPOSE. A `source: tally` row
+            // is a read-only MIRROR of an order that already exists in Tally,
+            // which is the PO source of truth (PurchaseOrderService's class
+            // docblock). Refusing to mirror an order Tally already holds
+            // would make the ERP argue with the book it only reflects, so the
+            // mirror keeps the bare existence check. Whether a retired vendor
+            // should also block the mirror is an owner question, not ours.
+            'vendor_id' => $this->input('source') === 'tally'
+                ? ['required', 'integer', 'exists:vendors,id']
+                : ['required', 'integer', Rule::exists('vendors', 'id')->where('is_active', true)],
             'purchase_requisition_id' => ['nullable', 'integer', 'exists:purchase_requisitions,id'],
             'order_date' => ['required', 'date'],
             'expected_date' => ['nullable', 'date', 'after_or_equal:order_date'],

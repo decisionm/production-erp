@@ -20,7 +20,8 @@ class StoreGoodsReceiptRequest extends FormRequest
             // stock while the new frontend rolls out.
             'receipt_key' => ['sometimes', 'nullable', 'string', 'max:100'],
             'purchase_order_id' => ['required', 'integer', 'exists:purchase_orders,id'],
-            'warehouse_id' => ['required', 'integer', 'exists:warehouses,id'],
+            // WS-B: an arrival cannot be booked into a retired store.
+            'warehouse_id' => ['required', 'integer', Rule::exists('warehouses', 'id')->where('is_active', true)],
             'reference' => ['nullable', 'string', 'max:255'],
             'received_date' => ['nullable', 'date'],
             'notes' => ['nullable', 'string'],

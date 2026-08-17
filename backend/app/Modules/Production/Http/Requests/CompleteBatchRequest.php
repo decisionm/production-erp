@@ -80,7 +80,10 @@ class CompleteBatchRequest extends FormRequest
             // Pieces produced — see the class docblock for every count's meaning.
             'quantity_produced' => ['required', 'numeric', 'gt:0'],
             'quantity_scrap' => ['nullable', 'numeric', 'gte:0'],
-            'scrap_reason_id' => ['nullable', 'integer', 'exists:scrap_reasons,id'],
+            // WS-B (audit 17-Aug-2026): a WITHDRAWN scrap reason was
+            // selectable on the floor — the completion path used a bare
+            // `exists:`. Completed batches keep the reason they recorded.
+            'scrap_reason_id' => ['nullable', 'integer', Rule::exists('scrap_reasons', 'id')->where('is_active', true)],
             // The pack counts THIS run packed at, and how many of each were
             // packed. nos_per_box is the carton actually packed on this run.
             'nos_per_tray' => ['nullable', 'integer', 'min:0'],
@@ -128,7 +131,7 @@ class CompleteBatchRequest extends FormRequest
             'scraps.*.type' => ['required', Rule::in(['rejected_finished_good', 'lumps'])],
             'scraps.*.quantity_nos' => ['nullable', 'numeric', 'gte:0'],
             'scraps.*.quantity_kg' => ['nullable', 'numeric', 'gte:0'],
-            'scraps.*.scrap_reason_id' => ['nullable', 'integer', 'exists:scrap_reasons,id'],
+            'scraps.*.scrap_reason_id' => ['nullable', 'integer', Rule::exists('scrap_reasons', 'id')->where('is_active', true)],
 
             // Downtime logged with the completion (owner, 30-Jul: "power
             // outage and mold change they need add with timing … i want to

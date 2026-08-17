@@ -5,6 +5,7 @@ namespace App\Modules\Payroll\Http\Requests;
 use App\Modules\Payroll\Models\Enums\SalaryCalculationType;
 use App\Modules\Payroll\Models\SalaryComponent;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
 class StoreSalaryStructureRequest extends FormRequest
@@ -20,7 +21,9 @@ class StoreSalaryStructureRequest extends FormRequest
             'employee_id' => ['required', 'integer', 'exists:employees,id'],
             'effective_from' => ['required', 'date'],
             'lines' => ['required', 'array', 'min:1'],
-            'lines.*.salary_component_id' => ['required', 'integer', 'distinct', 'exists:salary_components,id'],
+            // WS-B: a withdrawn component joins no NEW structure; structures
+            // already carrying it keep it (payroll history is never rewritten).
+            'lines.*.salary_component_id' => ['required', 'integer', 'distinct', Rule::exists('salary_components', 'id')->where('is_active', true)],
             'lines.*.amount' => ['nullable', 'numeric', 'min:0'],
         ];
     }

@@ -3,6 +3,7 @@
 namespace App\Modules\Inventory\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreStockReceiptRequest extends FormRequest
 {
@@ -14,8 +15,12 @@ class StoreStockReceiptRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'item_id' => ['required', 'integer', 'exists:items,id'],
-            'warehouse_id' => ['required', 'integer', 'exists:warehouses,id'],
+            // WS-B (audit 17-Aug-2026 §1): Item and Warehouse were unfiltered
+            // on every stock path even though production filters them. A
+            // retired item or store takes no NEW movement; the movements
+            // already recorded against it are untouched and still read back.
+            'item_id' => ['required', 'integer', Rule::exists('items', 'id')->where('is_active', true)],
+            'warehouse_id' => ['required', 'integer', Rule::exists('warehouses', 'id')->where('is_active', true)],
             'quantity' => ['required', 'numeric', 'gt:0'],
             'unit_cost' => ['required', 'numeric', 'min:0'],
             'batch_id' => ['nullable', 'integer', 'exists:batches,id'],

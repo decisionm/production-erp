@@ -16,7 +16,8 @@ class AllocateLeaveBalanceRequest extends FormRequest
     {
         return [
             'employee_id' => ['required', 'integer', 'exists:employees,id'],
-            'leave_type_id' => ['required', 'integer', 'exists:leave_types,id'],
+            // WS-B: a withdrawn leave type takes no new allocation.
+            'leave_type_id' => ['required', 'integer', Rule::exists('leave_types', 'id')->where('is_active', true)],
             'year' => [
                 'required', 'integer', 'min:2000', 'max:2100',
                 // Composite uniqueness (employee_id, leave_type_id, year) —

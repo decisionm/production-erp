@@ -3,6 +3,7 @@
 namespace App\Modules\Production\Models;
 
 use App\Modules\Production\Models\Enums\DowntimePlanningType;
+use App\Support\Configuration\Concerns\RecordsConfigurationAudit;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 
@@ -12,6 +13,8 @@ use Illuminate\Database\Eloquent\Model;
 ])]
 class DowntimeReason extends Model
 {
+    use RecordsConfigurationAudit;
+
     protected function casts(): array
     {
         return [
