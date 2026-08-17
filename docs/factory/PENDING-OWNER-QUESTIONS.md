@@ -35,7 +35,7 @@ the ERP). Q38-Q41 are claimed by the 12-Aug Tally
 evidence set and the purchase/tax configuration design. Q42 is claimed by the SKU scheme
 design. Q43 is claimed by the Phase 3 sync fix loop (duplicate master names).
 Q46 is claimed by the Phase 5.5 fix loop (paper-page ingest and the
-estimation version). New questions continue from Q52.
+estimation version). New questions continue from Q53.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 DEC-20260809-002/-003 landed with PR #155 (the finance-pull discovery
@@ -941,3 +941,39 @@ What is needed from the owner and the accountant:
 Nothing else — the ERP runs fine with the duplicates, it merely cannot tidy them
 safely without this. **Nothing has been merged, deleted or deactivated.**
 *Open since 2026-08-17.*
+
+## Q52 · Configuration lifecycle — five things the contract cannot decide for the factory
+
+The lead has formalised a product-wide Configuration Lifecycle Contract (17-Aug-2026):
+every master supports Create → View → Edit → Activate/Deactivate → Safe Delete → Audit,
+with delete refused by the backend once anything references the record. The audit is
+`docs/engineering/AUDIT-CONFIGURATION-LIFECYCLE-2026-08-17.md`. Five points in it are
+the factory's call, not engineering's:
+
+(a) **May a configuration record ever be HARD-deleted at all, or is Archive always the
+    answer?** The contract says hard delete when genuinely unused, and that is what is
+    being built. But a code freed by a hard delete becomes reusable, and a factory that
+    reads its own history by code could find one code meaning two things across time.
+
+(b) **When a master is archived, should it keep occupying its business code?** Today it
+    does: item SKUs, warehouse codes and vendor codes are unique INCLUDING soft-deleted
+    rows, so a retired `ASB-8` blocks a new `ASB-8` for ever. Intended, or should a
+    retired code be reusable? (Overlaps Q43 — not decided here.)
+
+(c) **Who may DELETE configuration, as opposed to edit it?** Today one permission per
+    module covers every write, so anyone who can edit a machine could delete one. Should
+    delete be a narrower grant, the way carton-trace was carved out?
+
+(d) **Does archiving in the ERP mean anything on the Tally side?** An ERP item carrying a
+    Tally stock-item id that the factory retires here still exists in Tally. The build
+    assumes the ERP flag is purely local and refuses to hard-delete any Tally-linked row
+    — an assumption, stated, not a decision.
+
+(e) **A maintenance schedule has no link to the work orders it generated**, so "has this
+    schedule ever been used?" cannot be answered from the data. Add the link (a schema
+    change on a live table), or make the schedule simply never deletable? Until then the
+    dependency report says *cannot prove unused* and refuses — it never guesses.
+
+**Blocks:** nothing immediately — the mechanism is built to refuse rather than guess, and
+Archive is always available. (a) and (b) decide how much of the contract's Delete half is
+ever switched on. *Open since 2026-08-17.*

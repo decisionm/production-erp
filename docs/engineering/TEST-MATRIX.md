@@ -287,3 +287,46 @@ The MySQL leg itself (the longest-standing gap) · two published figures that di
 
 ### Still open (from the baseline list)
 CRM · Finance · the Phase 7 gate itself. **New (recorded):** Q49 (the paper-page screen); the `app-mysql` check needs adding to branch protection by the repo owner.
+
+## The Configuration Lifecycle Contract — baseline matrix (P7.6-01, audited 2026-08-17)
+
+Full audit: `docs/engineering/AUDIT-CONFIGURATION-LIFECYCLE-2026-08-17.md`. 35 configuration
+entities in scope; transactions and documents are N/A. PARTIAL counts as GAP for P8-08.
+
+| Column | PASS | PARTIAL | GAP | N/A |
+|---|---:|---:|---:|---:|
+| Create | 31 | 1 | 0 | 3 |
+| Edit | 20 | 1 | **9** | 5 |
+| Active/Inactive | 10 | 4 | **11** | 10 |
+| Delete-unused | 4 | 0 | **20** | 11 |
+| **Dependency guard** | **1** | 0 | **22** | 12 |
+| Duplicate guard (code) | 26 | 0 | 3 | 6 |
+| **Duplicate guard (name)** | **0** | 0 | **all** | — |
+| **Audit trail** | **1** | 4 | **30** | 0 |
+| Full lifecycle tests | **1** | 10 | 24 | — |
+
+The one PASS row is `Role` — a hard delete guarded by a dependency count, already shipped
+and tested; it is the model the shared mechanism generalises.
+
+**Two live-facing findings that need no delete to matter:** eleven `is_active`/`status`
+flags are set but filtered nowhere — *a retired mould and a withdrawn scrap reason are
+selectable on the floor today* — and Item/Warehouse are unfiltered on eight stock/GRN
+paths. Closing these widens the refusal set on live data, so each carries its own test.
+
+**The safety fact that governs the implementation:** soft delete never fires an FK
+cascade, so nothing has been bitten yet; a real hard delete does. Eight parents cascade to
+children with **no database backstop** — most seriously `employees` → attendance, leave and
+salary history, and `items` → stock balances and every machine configuration. For those,
+the application guard is the only thing there is, so a cascade-side count > 0 is a refusal
+and never a cleanup.
+
+### Test matrix to add (T1–T17)
+create · edit unused · delete unused · direct API delete unused · delete referenced →
+refused · direct API delete referenced → refused (asserting the cascade children SURVIVE)
+· deactivate referenced · inactive excluded from new selection · historical transactions
+still display the archived record · reactivate · duplicate code refused (including the
+soft-deleted case) · likely duplicate name handled (warning channel; block-vs-warn is
+Q43) · authorization · audit trail (zero activity-log assertions exist today) ·
+Tally-linked safety · **T16** the append-only surfaces still answer 405/404 after the
+convention change · **T17** the error contract itself (`code`, `blocking[].count`,
+`alternative`).
