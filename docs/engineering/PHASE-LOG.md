@@ -1671,7 +1671,7 @@ Deferred items:
   • payload()['alternative'] is hardcoded 'archive' even for a master that can
     neither flag nor soft-delete; DependencyCheck's soft-delete-column cache
     has no flush counterpart.
-PR:                 stacked on #190 (base: feat/phase-7-regression-hardening)
-Deployment state:   not deployed; stack #179 → … → #190 → this PR
+PR:                 #191 (base: feat/phase-7-regression-hardening → #190 → … → #179)
+Deployment state:   not deployed; stack #179 → … → #190 → #191
 Next phase:         7.5 (material flow) then 8 (end-to-end acceptance)
 ```
