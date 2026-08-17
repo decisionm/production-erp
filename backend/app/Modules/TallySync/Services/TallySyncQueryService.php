@@ -62,7 +62,6 @@ class TallySyncQueryService
     public function __construct(
         private readonly TransactionClassifier $classifier,
         private readonly ShiftVoucherReleaseGate $releaseGate,
-        private readonly TallySyncSnapshotService $snapshots,
     ) {}
 
     /**

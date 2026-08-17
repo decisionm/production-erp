@@ -18,7 +18,8 @@ use Illuminate\Validation\Validator;
  *                 own body is not a record of anything
  *   xml_bytes     the agent's own byte count — read ONLY when no body came
  *                 (with a body the server measures); optional
- *   attempt       the entry's attempts as the agent saw it; null → the cloud's
+ *   attempt       the 1-based ordinal of THIS post as the agent counted it
+ *                 (attempts at hand-out + 1); null → stored as 0, "not counted"
  *   tally         Tally's answer {success, created, errors, message?, raw?} —
  *                 null when nothing came back (inconclusive timeout)
  *   agent_version the agent's package.json version
@@ -49,7 +50,7 @@ class StoreTallySyncSnapshotRequest extends FormRequest
         return [
             'xml' => ['nullable', 'string', 'max:'.self::XML_MAX_CHARS],
             'xml_sha256' => ['required', 'string', 'size:64', 'regex:'.self::SHA256_HEX],
-            'xml_bytes' => ['nullable', 'integer', 'min:0'],
+            'xml_bytes' => ['nullable', 'integer', 'min:0', 'max:4294967295'],
             'attempt' => ['nullable', 'integer', 'min:0', 'max:65535'],
             'tally' => ['nullable', 'array'],
             'tally.success' => ['required_with:tally', 'boolean'],

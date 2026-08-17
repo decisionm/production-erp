@@ -216,7 +216,7 @@ export interface TallySnapshotAnswer {
  */
 export interface TallySyncSnapshot {
     id: number;
-    /** The entry's `attempts` as the agent saw it at report time. */
+    /** The 1-based ordinal of THIS post as the agent counted it (attempts at hand-out + 1); 0 = the agent sent none. */
     attempt: number | null;
     created_at: string | null;
     agent_version: string | null;
@@ -314,7 +314,6 @@ export interface TallySyncEntry {
      */
     snapshots?: TallySyncSnapshot[];
     /** How many snapshots exist — the list may carry this so a count can show without a fetch; absent otherwise. */
-    snapshot_count?: number;
 }
 
 /**

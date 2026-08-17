@@ -47,8 +47,10 @@ return new class extends Migration
             $table->id();
             $table->foreignId('tally_sync_entry_id')
                 ->constrained('tally_sync_entries')->cascadeOnDelete();
-            // The entry's `attempts` as the agent saw it at report time —
-            // or the cloud's current count when the agent sent none.
+            // The 1-based ordinal of THIS post as the agent counted it
+            // (attempts at hand-out + 1 — equals voucher.failed's `attempt`
+            // after a rejection). 0 = the agent sent none (an agent below
+            // 0.3.8); the cloud does not guess one.
             $table->unsignedSmallInteger('attempt')->default(0);
             // 'post' — one row per post report. Kept as a column so a
             // future 'read' (a Tally-side read the agent might one day

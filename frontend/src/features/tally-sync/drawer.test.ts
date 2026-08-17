@@ -276,6 +276,10 @@ describe('showsFixedAfterFailures', () => {
 // ---- snapshots (Phase 4: what the agent sent / what Tally answered) --------
 
 describe('formatXml', () => {
+    it('keeps a ">" inside a quoted attribute value inside the tag', () => {
+        expect(formatXml('<A B="x>y"><C>1</C></A>').split('\n')).toEqual(['<A B="x>y">', '  <C>1</C>', '</A>']);
+    });
+
     it('indents by tag depth and keeps a text-only element on one line', () => {
         const xml = '<ENVELOPE><HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER><BODY><DESC><STATICVARIABLES><SVCURRENTCOMPANY>X</SVCURRENTCOMPANY></STATICVARIABLES></DESC></BODY></ENVELOPE>';
         expect(formatXml(xml)).toBe([
@@ -367,7 +371,7 @@ describe('snapshotHeadline', () => {
             instant('2026-08-16T04:34:00+00:00'),
             'sha256 3f2a9c1b7d0e',
             '1842 bytes',
-            'payload matches',
+            'payload matched at upload',
         ]);
     });
 
@@ -377,8 +381,8 @@ describe('snapshotHeadline', () => {
     });
 
     it('says the payload changed since when the cloud regenerated it after this XML was built', () => {
-        expect(snapshotHeadline(snapshot({ payload_matches: false }))).toContain('payload changed since');
-        expect(snapshotHeadline(snapshot({ payload_matches: false }))).not.toContain('payload matches');
+        expect(snapshotHeadline(snapshot({ payload_matches: false }))).toContain('payload had changed before upload');
+        expect(snapshotHeadline(snapshot({ payload_matches: false }))).not.toContain('matched at upload');
     });
 
     it('does not invent what the snapshot cannot say — unknown attempt, version, time or comparison read as unknown', () => {

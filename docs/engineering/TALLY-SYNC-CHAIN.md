@@ -151,7 +151,7 @@ a heartbeat poll that delivers nothing records no event).
   Stock Journal (rate-free and party-free by construction), withheld whole with a
   note for every other voucher type — no partial redaction of XML text; Tally's
   message follows the same rule as `error_message`. Never edited; pruned on write
-  after `tally-sync.snapshot_retention_days` (default 90; the `snapshot.stored`
+  after `tally-sync.snapshot_retention_days` (default 90 — an engineering default, not an owner decision; the `snapshot.stored`
   event outlives the body). Idempotent-ish: the same (entry, sha256, attempt) within
   60 s is the same upload.
 - **No UI redesign** — the existing page gets the filter bar and header counts

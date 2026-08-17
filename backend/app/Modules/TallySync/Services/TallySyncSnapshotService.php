@@ -7,7 +7,6 @@ use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Models\TallySyncEvent;
 use App\Modules\TallySync\Models\TallySyncSnapshot;
 use Illuminate\Contracts\Auth\Authenticatable;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -65,11 +64,17 @@ class TallySyncSnapshotService
     {
         $xml = is_string($data['xml'] ?? null) ? $data['xml'] : null;
         $sha = strtolower((string) $data['xml_sha256']);
-        // The entry's attempts as the agent saw it, or the cloud's now. An
-        // explicit 0 is a value ("first post"), so isset, not ??-on-truthy.
-        $attempt = isset($data['attempt']) ? (int) $data['attempt'] : (int) $entry->attempts;
+        // The 1-based ordinal of THIS post as the AGENT counted it (attempts
+        // at hand-out + 1). When the agent sent none (below 0.3.8) it is
+        // stored as 0 — "not counted" — never guessed from the entry's own
+        // counter, which markFailed increments and markSynced does not, so
+        // it would name a different number for the same post depending on
+        // whether Tally accepted it. isset, not ??: 0 is a value.
+        $attempt = isset($data['attempt']) ? (int) $data['attempt'] : 0;
 
-        $existing = $this->recentDuplicate($entry, $sha, $attempt);
+        $tally = is_array($data['tally'] ?? null) ? $data['tally'] : null;
+
+        $existing = $this->recentDuplicate($entry, $sha, $attempt, $tally !== null);
         if ($existing !== null) {
             return $existing;
         }
@@ -78,8 +83,6 @@ class TallySyncSnapshotService
         $matches = $echoedHash !== null && is_array($entry->payload)
             ? hash_equals(PayloadHash::of($entry->payload), $echoedHash)
             : null;
-
-        $tally = is_array($data['tally'] ?? null) ? $data['tally'] : null;
 
         return DB::transaction(function () use ($entry, $actor, $data, $xml, $sha, $attempt, $echoedHash, $matches, $tally) {
             $snapshot = TallySyncSnapshot::query()->create([
@@ -123,27 +126,18 @@ class TallySyncSnapshotService
         });
     }
 
-    /**
-     * Every snapshot of one entry, newest first — the show endpoint's read.
-     *
-     * @return Collection<int, TallySyncSnapshot>
-     */
-    public function forEntry(TallySyncEntry $entry): Collection
-    {
-        return TallySyncSnapshot::query()
-            ->where('tally_sync_entry_id', $entry->id)
-            ->orderByDesc('created_at')
-            ->orderByDesc('id')
-            ->get();
-    }
-
     /** The row a retried upload already landed on, if any (class docblock). */
-    private function recentDuplicate(TallySyncEntry $entry, string $sha, int $attempt): ?TallySyncSnapshot
+    private function recentDuplicate(TallySyncEntry $entry, string $sha, int $attempt, bool $answered): ?TallySyncSnapshot
     {
         return TallySyncSnapshot::query()
             ->where('tally_sync_entry_id', $entry->id)
             ->where('xml_sha256', $sha)
             ->where('attempt', $attempt)
+            // A timed-out post (no answer) followed within the window by the
+            // same XML re-posted and ANSWERED is two posts, not one retried
+            // upload — the answered one must land.
+            ->when($answered, fn ($query) => $query->whereNotNull('tally_success'))
+            ->when(! $answered, fn ($query) => $query->whereNull('tally_success'))
             ->where('created_at', '>=', now()->subSeconds(self::IDEMPOTENCY_WINDOW_SECONDS))
             ->orderByDesc('id')
             ->first();

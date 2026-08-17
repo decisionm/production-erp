@@ -105,13 +105,50 @@ class SnapshotStoreTest extends TestCase
         $this->assertNull($fresh->error_message);
     }
 
-    public function test_the_attempt_defaults_to_the_entrys_own_count_when_the_agent_sends_none(): void
+    public function test_an_attempt_the_agent_did_not_count_is_stored_as_zero_never_guessed_from_the_entry(): void
     {
+        // The entry's own counter is not the ordinal of a post: markFailed
+        // increments it, markSynced does not, so guessing from it would name
+        // a different number for the same post depending on Tally's answer.
+        // An agent below 0.3.8 sends none → 0, "not counted".
         $entry = $this->stockJournal(['attempts' => 3]);
 
         $this->asAgent()->postJson("/api/v1/tally-sync/entries/{$entry->id}/snapshot", $this->body($entry, ['attempt' => null]))
             ->assertCreated()
-            ->assertJsonPath('data.attempt', 3);
+            ->assertJsonPath('data.attempt', 0);
+    }
+
+    public function test_an_unanswered_post_and_an_answered_one_within_the_window_are_two_snapshots(): void
+    {
+        // A timed-out post (tally null) followed inside the idempotency
+        // window by the SAME XML re-posted and answered is two posts — the
+        // answered record must land, not be swallowed as a retried upload.
+        $entry = $this->stockJournal(['attempts' => 0]);
+        Carbon::setTestNow('2026-08-17 10:00:00');
+
+        $unanswered = $this->asAgent()->postJson("/api/v1/tally-sync/entries/{$entry->id}/snapshot", $this->body($entry, ['attempt' => 1, 'tally' => null]))
+            ->assertCreated()->json('data.id');
+        Carbon::setTestNow('2026-08-17 10:00:20');
+        $answered = $this->asAgent()->postJson("/api/v1/tally-sync/entries/{$entry->id}/snapshot", $this->body($entry, ['attempt' => 1]))
+            ->assertCreated()->json('data.id');
+
+        $this->assertNotSame($unanswered, $answered);
+        $this->assertSame(2, TallySyncSnapshot::query()->where('tally_sync_entry_id', $entry->id)->count());
+        // …while the same answered upload again IS the retry.
+        $this->asAgent()->postJson("/api/v1/tally-sync/entries/{$entry->id}/snapshot", $this->body($entry, ['attempt' => 1]))
+            ->assertOk()->assertJsonPath('data.id', $answered);
+        Carbon::setTestNow();
+    }
+
+    public function test_the_xml_is_kept_byte_exact_at_the_edges_a_trailing_newline_survives_and_still_hashes(): void
+    {
+        $entry = $this->stockJournal();
+        $xml = self::XML."\n";
+
+        $this->asAgent()->postJson("/api/v1/tally-sync/entries/{$entry->id}/snapshot", $this->body($entry, ['xml' => $xml, 'xml_sha256' => hash('sha256', $xml)]))
+            ->assertCreated();
+
+        $this->assertSame($xml, TallySyncSnapshot::query()->latest('id')->firstOrFail()->xml);
     }
 
     // ---- the sha is recomputed --------------------------------------------------
@@ -238,6 +275,37 @@ class SnapshotStoreTest extends TestCase
         $this->withoutToken()->postJson("/api/v1/tally-sync/entries/{$entry->id}/snapshot", $this->body($entry))->assertUnauthorized();
 
         $this->assertSame(0, TallySyncSnapshot::query()->count());
+    }
+
+    /**
+     * A browser session is not the agent. Its TransientToken answers
+     * tokenCan() TRUE for every ability, and until Phase 4 that was the whole
+     * gate on the agent's report endpoints; the snapshot endpoint made the
+     * gap load-bearing — payload_matches is a comparison oracle, and the row
+     * is shown to readers as the agent's own record. So a staff session, even
+     * one holding tally-sync.manage AND finance.view, is refused on snapshot,
+     * and — the same predicate, the same reason — on ack and fail: only the
+     * agent may say what Tally took. People act through retry/dismiss/release.
+     */
+    public function test_a_browser_session_is_not_the_agent_however_senior_on_snapshot_ack_and_fail(): void
+    {
+        $entry = $this->stockJournal();
+        $staff = User::factory()->create(['is_active' => true]);
+        foreach (['tally-sync.view', 'tally-sync.manage', 'finance.view'] as $permission) {
+            Permission::findOrCreate($permission, 'web');
+        }
+        $staff->givePermissionTo(['tally-sync.view', 'tally-sync.manage', 'finance.view']);
+
+        $this->app['auth']->forgetGuards();
+        $this->withoutToken()->actingAs($staff, 'web');
+
+        $this->postJson("/api/v1/tally-sync/entries/{$entry->id}/snapshot", $this->body($entry))->assertForbidden();
+        $this->postJson("/api/v1/tally-sync/entries/{$entry->id}/ack")->assertForbidden();
+        $this->postJson("/api/v1/tally-sync/entries/{$entry->id}/fail", ['error_message' => 'not from Tally'])->assertForbidden();
+        $this->getJson('/api/v1/tally-sync/pending')->assertForbidden();
+
+        $this->assertSame(0, TallySyncSnapshot::query()->count());
+        $this->assertSame('pending', $entry->fresh()->status->value);
     }
 
     // ---- idempotency ------------------------------------------------------------------

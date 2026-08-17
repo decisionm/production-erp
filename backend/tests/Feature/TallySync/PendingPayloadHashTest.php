@@ -115,15 +115,12 @@ class PendingPayloadHashTest extends TestCase
         // web session (actingAs on the web guard, which Sanctum's guard
         // turns into a TransientToken; Sanctum::actingAs would mock a
         // PersonalAccessToken instead, which is not what a browser carries):
-        // the transient token answers tokenCan() TRUE, so the poll is
-        // allowed — but a session is not the agent (AgentIdentity), so no hash.
+        // the transient token answers tokenCan() TRUE, but a session is not
+        // the agent (AgentIdentity) — since Phase 4 the poll itself is
+        // refused, so a hash cannot leak this way either.
         $this->app['auth']->forgetGuards();
         $this->actingAs($this->staff(['tally-sync.view', 'tally-sync.manage']), 'web');
-        $polled = collect($this->getJson('/api/v1/tally-sync/pending')->assertOk()->json('data'));
-        $this->assertNotEmpty($polled);
-        foreach ($polled as $row) {
-            $this->assertArrayNotHasKey('payload_hash', $row);
-        }
+        $this->getJson('/api/v1/tally-sync/pending')->assertForbidden();
 
         // A person's token without the agent's abilities is a person with
         // a token (CLAUDE.md #3), not the factory PC.

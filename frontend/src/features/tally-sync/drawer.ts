@@ -341,9 +341,11 @@ const XML_INDENT = '  ';
  * One token of an XML string: a declaration / processing instruction, a
  * comment, a CDATA section, a tag (open, close or self-closing), or the
  * text between tags. Order matters — the special forms are tried before
- * the generic tag so a `>` inside a comment or CDATA cannot cut it short.
+ * the generic tag so a `>` inside a comment or CDATA cannot cut it short;
+ * the tag itself is quote-aware, so a `>` inside a quoted attribute value
+ * cannot either.
  */
-const XML_TOKEN = /<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<[^>]*>|[^<]+/g;
+const XML_TOKEN = /<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<(?:[^>"']|"[^"]*"|'[^']*')*>|[^<]+/g;
 
 function xmlTagName(tag: string): string {
     const match = /^<\/?\s*([^\s/>]+)/.exec(tag);
@@ -437,10 +439,12 @@ export function snapshotHeadline(snapshot: TallySyncSnapshot): string {
         : snapshot.xml_bytes === 1
             ? '1 byte'
             : `${snapshot.xml_bytes} bytes`;
+    // A STORE-TIME verdict — judged once, when the cloud took the snapshot,
+    // against the payload it held then; a later Resync does not re-judge it.
     const payload = snapshot.payload_matches === true
-        ? 'payload matches'
+        ? 'payload matched at upload'
         : snapshot.payload_matches === false
-            ? 'payload changed since'
+            ? 'payload had changed before upload'
             : 'payload not compared';
 
     return [

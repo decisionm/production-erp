@@ -55,7 +55,7 @@ class TallySyncAgentController extends Controller
 
     public function pending(Request $request): AnonymousResourceCollection
     {
-        abort_unless($request->user()?->tokenCan('tally-sync:poll'), 403, 'Token missing the tally-sync:poll ability.');
+        abort_unless(AgentIdentity::isAgent($request->user()) && $request->user()?->tokenCan('tally-sync:poll'), 403, 'Only the sync agent, by its own token with the tally-sync:poll ability, may collect vouchers.');
 
         // The polling agent is the actor on each 'pending.delivered' row.
         $entries = $this->sync->pending($request->user());
@@ -74,7 +74,7 @@ class TallySyncAgentController extends Controller
 
     public function acknowledge(Request $request, TallySyncEntry $tallySyncEntry): TallySyncEntryResource
     {
-        abort_unless($request->user()?->tokenCan('tally-sync:report'), 403, 'Token missing the tally-sync:report ability.');
+        abort_unless(AgentIdentity::isAgent($request->user()) && $request->user()?->tokenCan('tally-sync:report'), 403, 'Only the sync agent, by its own token with the tally-sync:report ability, may report on a voucher.');
 
         $this->agentLog($request, 'voucher.synced', [
             'entry_id' => $tallySyncEntry->id,
@@ -87,7 +87,7 @@ class TallySyncAgentController extends Controller
 
     public function fail(FailTallySyncEntryRequest $request, TallySyncEntry $tallySyncEntry): TallySyncEntryResource
     {
-        abort_unless($request->user()?->tokenCan('tally-sync:report'), 403, 'Token missing the tally-sync:report ability.');
+        abort_unless(AgentIdentity::isAgent($request->user()) && $request->user()?->tokenCan('tally-sync:report'), 403, 'Only the sync agent, by its own token with the tally-sync:report ability, may report on a voucher.');
 
         $error = $request->validated()['error_message'];
 
@@ -129,7 +129,17 @@ class TallySyncAgentController extends Controller
         TallySyncSnapshotService $snapshots,
         TransactionClassifier $classifier,
     ): JsonResponse {
-        abort_unless($request->user()?->tokenCan('tally-sync:report'), 403, 'Token missing the tally-sync:report ability.');
+        // A REAL agent token with the report ability — not tokenCan() alone,
+        // which a browser session's TransientToken answers true for. Two
+        // things ride on this that ack/fail never had: payload_matches is a
+        // comparison oracle (a session guessing payload hashes could recover
+        // a withheld rate one bit at a time), and the row is shown to
+        // readers as the agent's own record. Only the agent may author it.
+        abort_unless(
+            AgentIdentity::isAgent($request->user()) && $request->user()?->tokenCan('tally-sync:report'),
+            403,
+            'Only the sync agent, by its own token with the tally-sync:report ability, may upload a snapshot.',
+        );
 
         $snapshot = $snapshots->store($tallySyncEntry, $request->validated(), $request->user());
 

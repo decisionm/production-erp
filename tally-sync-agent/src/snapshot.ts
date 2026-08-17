@@ -158,11 +158,17 @@ export async function sendSnapshot(input: SnapshotInput, deps: SnapshotDeps): Pr
     try {
         body = buildSnapshotBody(input);
         await deps.upload(entryId, body);
-        deps.info?.(`Snapshot uploaded for entry #${entryId}`, {
-            sha256: body.xml_sha256.slice(0, 12),
-            xmlBytes: body.xml === undefined ? null : Buffer.byteLength(body.xml, 'utf8'),
-            tallySuccess: body.tally?.success ?? null,
-        });
+        // A logger fault after a SUCCESSFUL upload must not read as a failed
+        // one — the info line gets its own guard, like warn already has.
+        try {
+            deps.info?.(`Snapshot uploaded for entry #${entryId}`, {
+                sha256: body.xml_sha256.slice(0, 12),
+                xmlBytes: body.xml === undefined ? null : Buffer.byteLength(body.xml, 'utf8'),
+                tallySuccess: body.tally?.success ?? null,
+            });
+        } catch {
+            // ignore — the upload landed; the log line did not
+        }
 
         return true;
     } catch (err) {

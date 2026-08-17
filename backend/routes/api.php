@@ -304,13 +304,15 @@ Route::prefix('v1')->group(function () {
                 Route::put('settings/ledger-mappings', [TallySettingsController::class, 'updateLedgerMappings']);
             });
 
-            // Local agent endpoints — see TECHNICAL-DOCS.md §6. Gated by
-            // Sanctum token abilities inside the controller, not by
-            // module:tally-sync, since a real deployment issues the agent a
-            // token scoped to exactly these two abilities (and a session-
-            // authenticated staff member's tokenCan() always passes, so
-            // staff can still exercise these from the browser regardless of
-            // their tally-sync role — same dual-auth story as before RBAC).
+            // Local agent endpoints — see TECHNICAL-DOCS.md §6. Gated inside
+            // the controller on a REAL agent token (AgentIdentity::isAgent —
+            // a personal access token carrying the poll/report abilities),
+            // not by module:tally-sync and not by tokenCan() alone: a
+            // browser session's TransientToken answers tokenCan() true, and
+            // until Phase 4 that let any logged-in staff member collect, ack
+            // or fail a voucher from the browser regardless of role. Only the
+            // agent may say what Tally took; people act through the
+            // module:tally-sync routes above (retry, dismiss, release).
             Route::get('pending', [TallySyncAgentController::class, 'pending']);
             Route::post('entries/{tally_sync_entry}/ack', [TallySyncAgentController::class, 'acknowledge']);
             Route::post('entries/{tally_sync_entry}/fail', [TallySyncAgentController::class, 'fail']);
