@@ -1190,7 +1190,7 @@ Deferred items:
 
 Owner-gated items:  none new (cycle times, cavities, weights, pack counts and
                     the est-box / packing rounding policies stay as decided).
-PR:                 (recorded on open)
-Deployment state:   not deployed; stack #179 → … → #186 → this PR
+PR:                 #187 (base: feat/phase-5-product-sku-configuration → #186 → … → #179)
+Deployment state:   not deployed; stack #179 → … → #186 → #187
 Next phase:         5.7 — Shift Summary + CEC infrastructure
 ```
