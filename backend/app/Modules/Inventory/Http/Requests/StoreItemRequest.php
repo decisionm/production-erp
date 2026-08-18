@@ -34,6 +34,9 @@ class StoreItemRequest extends FormRequest
             'standard_cavities' => ['sometimes', 'nullable', 'integer', 'min:1'],
             'tracking_type' => ['nullable', Rule::in(['none', 'batch', 'serial'])],
             'is_active' => ['boolean'],
+            // The owner's switch for "the floor may request this". Nothing
+            // infers it from a name, an SKU or a unit of measure.
+            'is_production_input' => ['boolean'],
         ];
     }
 

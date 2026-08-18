@@ -297,6 +297,18 @@ Route::prefix('v1')->group(function () {
             // Either side may withdraw one, with a reason: the floor when
             // the run is pulled, the store when it cannot fulfil.
             Route::post('material-requests/{material_request}/cancel', [MaterialRequestController::class, 'cancel']);
+
+            // THE REQUESTABLE MATERIALS. Deliberately here and NOT on
+            // /inventory/items: that resource is gated `module:inventory`
+            // alone, while raising a request is `module:production`, so a
+            // production-only login reading the picker from there gets a 403
+            // and an EMPTY dropdown. This group is the one both desks can
+            // read, which is exactly the audience the picker has.
+            //
+            // It also replaces a `GET /inventory/items?per_page=1000` — the
+            // WHOLE item master, finished goods included, capped at 1000 rows
+            // and therefore silently truncating once the master outgrows it.
+            Route::get('requestable-materials', [MaterialRequestController::class, 'requestableMaterials']);
         });
 
         // Raising and submitting are the FLOOR's act — production.manage.

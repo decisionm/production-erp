@@ -2,7 +2,10 @@
 
 namespace App\Modules\Inventory\Http\Requests;
 
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 /**
  * Raising a store issue — the handover of material to production.
@@ -15,6 +18,23 @@ use Illuminate\Foundation\Http\FormRequest;
  * workstream of the same phase, and `exists:` needs no namespace. Both are
  * nullable — the store may also record a handover made against a verbal ask,
  * and refusing that only pushes the record back off the system.
+ *
+ * ELIGIBILITY IS NOT APPLIED THE SAME WAY ON BOTH SIDES, and the asymmetry is
+ * the point. The REQUEST side gates a NEW ask: may the floor ask for this at
+ * all? The ISSUE side fulfils an ask that was ALREADY accepted. Re-gating the
+ * fulfilment would mean that switching a material off — which Q56 explicitly
+ * invites the owner to do while pruning the deliberately over-broad backfill —
+ * would refuse a handover for material that is already on the trolley, with
+ * the request open and nothing wrong with it. History must stay ISSUABLE, not
+ * merely readable.
+ *
+ * So: a line that names a request line is checked against THAT LINE — it must
+ * name the same item. A line that names none is a fresh handover and carries
+ * the full eligibility rule, because there is no earlier decision to honour.
+ *
+ * Matching the item to the request line also closes a hole that predates this
+ * class: nothing cross-checked them, so an issue could name item X against a
+ * request line for item Y and the request's fulfilment would credit Y.
  */
 class StoreStoreIssueRequest extends FormRequest
 {
@@ -34,11 +54,115 @@ class StoreStoreIssueRequest extends FormRequest
             'lines' => ['present', 'array'],
             'lines.*.material_request_line_id' => ['nullable', 'integer'],
             'lines.*.quantity_requested' => ['nullable', 'numeric', 'gt:0'],
-            'lines.*.item_id' => ['required', 'integer', 'exists:items,id'],
+            // The floor of the rule, applied to EVERY line. It was a bare
+            // `exists:items,id`, which carried neither the soft-delete guard
+            // the request side has always had nor anything else. A deleted
+            // item is never issuable, whatever it is being issued against.
+            'lines.*.item_id' => ['required', 'integer', Rule::exists('items', 'id')->whereNull('deleted_at')],
             'lines.*.from_warehouse_id' => ['nullable', 'integer', 'exists:warehouses,id'],
             'lines.*.quantity' => ['required', 'numeric'],
             'lines.*.uom' => ['nullable', 'string', 'max:16'],
             'lines.*.notes' => ['nullable', 'string', 'max:500'],
         ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            foreach ((array) $this->input('lines', []) as $index => $line) {
+                $itemId = isset($line['item_id']) ? (int) $line['item_id'] : null;
+
+                if ($itemId === null || $itemId <= 0) {
+                    continue; // the base rules already said so
+                }
+
+                $requestLineId = isset($line['material_request_line_id']) && $line['material_request_line_id'] !== null
+                    ? (int) $line['material_request_line_id']
+                    : null;
+
+                if ($requestLineId !== null) {
+                    // FULFILLING AN ACCEPTED ASK. The only question is whether
+                    // this is the material that was asked for.
+                    $asked = DB::table('material_request_lines as l')
+                        ->join('material_requests as r', 'r.id', '=', 'l.material_request_id')
+                        ->where('l.id', $requestLineId)
+                        ->first(['l.item_id', 'l.material_request_id', 'r.status']);
+
+                    // A LINE THAT NAMES NOTHING IS NOT AN EXEMPTION. Skipping
+                    // eligibility is justified only by an earlier decision
+                    // that actually exists — without this, quoting any
+                    // made-up request line id would have waved a finished
+                    // good straight past the rule, because the branch below
+                    // ends in `continue`. `material_request_line_id` carries
+                    // no `exists:` of its own (the request tables were built
+                    // by a parallel workstream), so it is checked here.
+                    if ($asked === null) {
+                        $validator->errors()->add(
+                            "lines.{$index}.material_request_line_id",
+                            'This line names a request line that does not exist.',
+                        );
+
+                        continue;
+                    }
+
+                    // A WITHDRAWN ASK IS NOT AN EARLIER DECISION TO HONOUR.
+                    // "History stays issuable" is right for a request the
+                    // store still owes; a cancelled one is not owed, and
+                    // letting it exempt its item would leave a permanent
+                    // loophole attached to a dead row.
+                    if ((string) $asked->status === 'cancelled') {
+                        $validator->errors()->add(
+                            "lines.{$index}.material_request_line_id",
+                            'This request was cancelled, so it cannot be issued against.',
+                        );
+
+                        continue;
+                    }
+
+                    // THE LINE MUST BELONG TO THE REQUEST THIS ISSUE IS FOR.
+                    // Without this, a line could name a real request line
+                    // while the header named a different request or none at
+                    // all — and requestBehind() then returns null, so
+                    // applyIssuedQuantities never runs: stock moves, the
+                    // pointer is stored, and the request goes on showing the
+                    // full quantity owed for ever, against work already done.
+                    $header = $this->input('material_request_id');
+
+                    if ($header === null || (int) $header !== (int) $asked->material_request_id) {
+                        $validator->errors()->add(
+                            "lines.{$index}.material_request_line_id",
+                            'This line belongs to a different material request from the one this issue names.',
+                        );
+
+                        continue;
+                    }
+
+                    if ((int) $asked->item_id !== $itemId) {
+                        $validator->errors()->add(
+                            "lines.{$index}.item_id",
+                            'This line hands over a different material from the one the request asked for.',
+                        );
+                    }
+
+                    continue;
+                }
+
+                // A FRESH HANDOVER against no request. Nothing decided this
+                // earlier, so the full eligibility rule applies.
+                $eligible = DB::table('items')
+                    ->where('id', $itemId)
+                    ->whereNull('deleted_at')
+                    ->where('is_active', true)
+                    ->where('is_production_input', true)
+                    ->exists();
+
+                if (! $eligible) {
+                    $validator->errors()->add(
+                        "lines.{$index}.item_id",
+                        'This item is not configured as a material that may be issued to production.',
+                    );
+                }
+            }
+        });
     }
 }

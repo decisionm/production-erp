@@ -90,9 +90,22 @@ const allNavItems: NavGroup[] = [
             // Floor-first ordering: the daily-use pages a supervisor actually
             // touches come first, setup/reference pages after.
             { key: '/production/shift-production', label: 'Shift Floor' },
-            // Day Bin is the factory's single central balance, fed by an
-            // ordinary transfer or the Shift Floor's Load Material scan.
-            { key: '/production/day-bin', label: 'Day Bin' },
+            // NO Day Bin entry. DEC-20260817-001 settles the inventory
+            // locations as RM Store -> Production/WIP -> FG Store, and a
+            // first-class nav entry presented the Day Bin as a place the
+            // factory still keeps stock in. This nav item is what the owner
+            // was still seeing on 18-Aug, on EVERY route (it renders in the
+            // layout, so `/production/configuration?tab=products` showed it
+            // too).
+            //
+            // The ROUTE is deliberately left mounted, reachable by URL. The
+            // page is not dead: it still hosts the only writer of the day-bin
+            // warehouse setting, and the bag scan it performs is currently the
+            // sole inflow that prices resin (FactoryDayBinService::loadBag is
+            // the only caller of ResinPoolService::fold). Hiding a mechanism
+            // that still runs is worse than naming it, so the entry goes and
+            // the machinery stays until its successor exists. The floor is
+            // unaffected: it scans from the Shift Floor page, not from here.
             // The floor's half of the Phase 7.5 material flow: raise a
             // request, then watch what the store has actually issued. The
             // store's half is under Inventory, because the two halves have

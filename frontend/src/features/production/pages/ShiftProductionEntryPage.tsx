@@ -890,8 +890,11 @@ function ResultRow({ label, value, formula, danger }: { label: string; value: Re
     );
 }
 
+// 'Day Bin' is deliberately NOT offered: a count may not be filed against a
+// location the factory no longer keeps (DEC-20260817-001). Rows already
+// carrying that label keep it — this list governs NEW counts only.
 const locationLabelOptions = [
-    'Hoppers', 'Day Bin', 'Loose Bag', 'Store',
+    'Hoppers', 'Loose Bag', 'Store',
     'MB-Clear', 'MB-Blue', 'MB-Amber', 'MB-White', 'MB-Green', 'MB-Orange', 'MB-Black',
 ].map((label) => ({ value: label, label }));
 

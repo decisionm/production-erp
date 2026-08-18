@@ -17,7 +17,7 @@ use Illuminate\Support\Facades\Log;
     'nominal_weight_grams', 'nos_per_tray', 'trays_per_box', 'nos_per_box',
     'nos_per_pouch', 'pouches_per_box',
     'colour', 'standard_cycle_time', 'standard_cavities',
-    'tracking_type', 'is_active', 'is_local_fixture',
+    'tracking_type', 'is_active', 'is_local_fixture', 'is_production_input',
     'tally_stock_item_guid', 'tally_company', 'tally_alter_id', 'tally_synced_at', 'item_group_id',
 ])]
 class Item extends Model
@@ -54,6 +54,29 @@ class Item extends Model
      * database has today for "raw material" (resin, masterbatch), since no
      * item-group classification is read anywhere yet.
      */
+    /**
+     * Items the factory may issue to production.
+     *
+     * THE COLUMN DECIDES. This is the authoritative eligibility rule for
+     * Store -> Production issue, and it exists because there was no such rule:
+     * the picker used to offer the WHOLE item master, so a finished good was
+     * offered as a requestable input (the owner reported exactly that on
+     * 18-Aug-2026, naming BTL-PET-1000).
+     *
+     * Do NOT reach for scopeKgUom() for this question. It answers a different
+     * one — "is this measured in kilograms" — and it is wrong in both
+     * directions here: caps are `Nos.` and ARE inputs; packing film is kg and
+     * is not resin. Eligibility is configuration, and this is where it lives.
+     *
+     * Activeness is deliberately NOT folded in: callers that offer NEW work
+     * add ->where('is_active', true), while a screen rendering HISTORY must
+     * still be able to resolve an input that has since been archived.
+     */
+    public function scopeProductionInput(Builder $query): Builder
+    {
+        return $query->where('is_production_input', true);
+    }
+
     public function scopeKgUom(Builder $query): Builder
     {
         return $query->whereIn(DB::raw('LOWER(TRIM(uom))'), self::KG_UOM_VARIANTS);
@@ -125,6 +148,7 @@ class Item extends Model
             'standard_cavities' => 'integer',
             'tracking_type' => ItemTrackingType::class,
             'is_active' => 'boolean',
+            'is_production_input' => 'boolean',
             'is_local_fixture' => 'boolean',
             // "This SKU was seeded from the Tally name, not chosen" — set by
             // the masters pull's create path, cleared by a manual SKU edit

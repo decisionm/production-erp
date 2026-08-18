@@ -1109,3 +1109,97 @@ return) proceeds either way. (a) decides whether a machine field ever appears on
 masterbatch request; (d) decides one sentence on one internal screen; (b), (c) and
 (e) decide what the floor and the store see, not whether the material is tracked.
 *Open since 2026-08-17.*
+
+## Q55 · Retiring the Day Bin — two things the code cannot decide, and one that must be built first
+
+DEC-20260817-001 settled the inventory locations: **RM Store → Production/WIP → FG Store,
+and there is no Day Bin.** A full audit of every remaining Day Bin reference (18-Aug-2026)
+found that the *target workflow* is indeed free of it, but the *running system* is not: the
+Day Bin is still load-bearing in two places, and one of them prices every batch.
+
+What was removed straight away, because nothing computed depends on it: the left-nav
+**"Day Bin"** entry (this is what was still visible on `/production/configuration`, because
+the nav renders on every route), the Factory Rules help text that said the raw-material store
+is "where material issues from *when the day bin cannot supply it*" — which inverted this very
+decision — and **"Day Bin" as a selectable location on a new stock count**. Historical rows,
+columns and ledgers were left untouched.
+
+The rest cannot be removed without a ruling.
+
+(a) **Is `production_day_bin_warehouse_id` SET on the live instance?**
+    `FactoryWarehouseResolver::consumptionSource()` takes a day-bin branch that decides which
+    warehouse a completed batch decrements. When the setting is UNSET the branch is a
+    behavioural no-op (both sides fall through to the same sole-Tally-linked warehouse) and
+    the branch can simply be deleted behind a test. When it names a DISTINCT warehouse,
+    deleting it **moves which warehouse new completions decrement, and therefore the godown
+    lineage of new vouchers.** Nobody has read the live value; it is written by exactly one
+    endpoint and by no seeder or migration, so it is probably unset — but "probably" is not
+    the standard for a change that moves stock. One read settles it:
+    `SELECT value FROM app_settings WHERE key = 'production_day_bin_warehouse_id'`.
+
+(b) **The resin cost pool has ONE inflow, and it is the Day Bin scan.**
+    `FactoryDayBinService::loadBag()` is the only caller of `ResinPoolService::fold()` in the
+    entire codebase, and `completeBatch()` prices every batch's resin out of that pool.
+    **The Phase 7.5 store-issue flow prices nothing** — `StoreIssueService` and
+    `MaterialRequestService` contain no pool call at all. So retiring the Day Bin scan today
+    would not crash anything, which is exactly what makes it dangerous: every batch would
+    silently drop from pool-priced to average-fallback or unpriced, and the first sign would
+    be costing that quietly stopped meaning what it used to. **A store-issue-side inflow must
+    be built BEFORE the scan is retired.** That is engineering work, not a question — but
+    whether it is done now or the Day Bin scan stays until it is, is the owner's call.
+
+(c) **Which of the Day Bin's refusals should survive its retirement?** The old refusal set is
+    the contract, and a refactor that "adds no new gate" is no defence if the old code already
+    refused something. Still live today: the 422 when no bin is configured; the balance
+    acknowledgement gate above `machine_balance_ack_kg` (25 kg); the return/count balance
+    guards; the block on cancelling a batch that has day-bin movements; and the deliberate
+    `null`-not-zero consumption when no closing count exists. Each must either survive in the
+    store-issue flow or be consciously dropped.
+
+**Blocks:** the *sighting* is fixed and the target workflow is what the screens now describe.
+What is blocked is calling the Day Bin GONE. Until (a) is read and (b) is built, the honest
+statement is that Day Bin is retired from the workflow and the UI, and still runs underneath
+as the resin costing inflow. No column was dropped and no historical row was touched, so
+nothing here is urgent — but batch costing depends on it, so it should not drift unowned.
+*Open since 2026-08-18.*
+
+## Q56 · Which items are production materials — the residue the evidence could not answer
+
+The Material Request picker now offers only items configured as production inputs
+(`items.is_production_input`), enforced in the API and not merely in the dropdown. The
+backfill that set that column derived it from EVIDENCE, never from names: the BOM component
+register, the packing-material register, the colourant register, a kg-family unit as a seed,
+and — the half that catches consumables no register covers — what the factory has actually
+requested, issued and consumed in the past.
+
+Two things follow that only the owner can settle.
+
+(a) **The residue.** Anything in none of those sources is left INELIGIBLE, because guessing
+    is the one thing this rule must not do. On the development master that residue included
+    **CARTON-24**, which is a perfectly ordinary production input — it simply has no BOM line,
+    no packing-register row, and has never been requested or issued in that database. The live
+    residue has not been measured and will differ.
+
+    **This is the failure mode that matters**, because it is the one that stops work: a
+    material the store needs to hand over that the floor cannot ask for. It is a switch on the
+    item, not a code change — but somebody has to look at the list and flip the ones that
+    belong. **Please run through the item master once and confirm which items are production
+    materials.** Until that happens, the honest statement is that the picker offers what the
+    factory has demonstrably used before, and nothing else.
+
+(b) **`BTL-PET-1000 — 1 Litre PET Bottle` is DEMO RESIDUE, and it is still on live.** It comes
+    from `BottleManufacturingDemoSeeder` (`uom: 'pcs'`, no Tally stock-item GUID) — a
+    never-cleaned-up demo row, which is why it was the example that caught the owner's eye. The
+    eligibility rule now hides it from the picker, but **the row is still there** and will keep
+    appearing in other item lists. There is precedent for the cleanup and a discipline to copy:
+    migration `2026_08_01_120001` exists solely to retire the demo WAREHOUSES, by id and code,
+    never by name pattern, and never by deleting anything with history.
+
+    Whether the demo ITEMS should be retired the same way is the owner's call. They must not be
+    deleted if anything references them.
+
+**Blocks:** nothing today — the reported defect is fixed and the floor can request everything
+the factory has previously used. (a) decides whether any material still needs switching on
+before someone finds it missing at the store window; (b) decides whether demo rows stop
+appearing in every other item list too.
+*Open since 2026-08-18.*

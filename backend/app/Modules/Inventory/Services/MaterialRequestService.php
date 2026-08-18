@@ -10,6 +10,7 @@ use App\Modules\Inventory\Models\MaterialRequest;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -94,6 +95,44 @@ class MaterialRequestService
      *
      * @param  array{shift_id?: int|null, work_center_id?: int|null, notes?: string|null, lines: list<array{item_id: int, quantity: string, notes?: string|null}>}  $data
      */
+    /**
+     * The materials the floor may ask the store for.
+     *
+     * ELIGIBILITY IS A COLUMN (`items.is_production_input`), not a heuristic.
+     * Before this existed the picker was fed the WHOLE item master, so a
+     * finished good was offered as a requestable input — the owner reported
+     * exactly that, naming a 1 Litre PET Bottle. Excluded here by construction:
+     * finished goods and saleable products, archived and inactive items,
+     * services, and any Tally item the factory has not configured as an input.
+     *
+     * `is_active` is applied HERE and not in the scope, because this list
+     * offers NEW work. A screen rendering an old request still resolves its
+     * material by id through the relation, so a material archived later keeps
+     * showing on the requests that already name it.
+     *
+     * @return Collection<int, Item>
+     */
+    public function requestableMaterials()
+    {
+        return Item::query()
+            ->productionInput()
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get();
+    }
+
+    /**
+     * Is this item one the floor may request at all?
+     *
+     * The single predicate both the FormRequest and the service refuse on, so
+     * the API cannot be talked into accepting by hand what the picker does not
+     * offer. Filtering the dropdown alone would not have fixed the defect.
+     */
+    public function isRequestable(int $itemId): bool
+    {
+        return Item::query()->whereKey($itemId)->productionInput()->where('is_active', true)->exists();
+    }
+
     public function create(array $data, ?int $requestedBy): MaterialRequest
     {
         $workCenterId = $data['work_center_id'] ?? null;

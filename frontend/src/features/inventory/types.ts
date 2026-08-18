@@ -53,6 +53,11 @@ export interface Item {
      */
     can?: ConfigurationAbilities | null;
     is_active: boolean;
+    /**
+     * Whether the floor may ask the store for this item. Configuration the
+     * owner controls — never inferred from a name, an SKU or a unit.
+     */
+    is_production_input: boolean;
     created_at: string;
 }
 

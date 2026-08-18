@@ -12,7 +12,6 @@ import {
     submitMaterialRequest,
 } from '../api';
 import RequestLinesTable from '../components/RequestLinesTable';
-import ThreeStatesLegend from '../components/ThreeStatesLegend';
 import type { CreateMaterialRequestLinePayload, MaterialFlowMaterial, MaterialRequest } from '../types';
 import {
     ISSUE_IS_NOT_CONSUMPTION,
@@ -165,7 +164,6 @@ export default function MaterialRequestsPage() {
             </Space>
 
             <Alert type="info" showIcon style={{ marginBottom: 16 }} message={ISSUE_IS_NOT_CONSUMPTION} />
-            <ThreeStatesLegend />
 
             <Table<MaterialRequest>
                 rowKey="id"

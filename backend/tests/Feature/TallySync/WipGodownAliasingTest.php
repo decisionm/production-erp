@@ -75,7 +75,7 @@ class WipGodownAliasingTest extends TestCase
 
         $this->resin = Item::create([
             'sku' => 'PET-RESIN', 'name' => 'PET Polyster Chips', 'uom' => 'Kgs',
-            'is_active' => true, 'tally_stock_item_guid' => 'itm-resin',
+            'is_active' => true, 'is_production_input' => true, 'tally_stock_item_guid' => 'itm-resin',
         ]);
         $this->bottle = Item::create([
             'sku' => 'BTL-500', 'name' => '500ml PET Bottle', 'uom' => 'Nos',

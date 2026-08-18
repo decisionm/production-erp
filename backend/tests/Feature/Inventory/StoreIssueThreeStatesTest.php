@@ -11,6 +11,7 @@ use App\Modules\Inventory\Models\StockBalance;
 use App\Modules\Inventory\Models\StockMovement;
 use App\Modules\Inventory\Models\StoreIssue;
 use App\Modules\Inventory\Models\Warehouse;
+use App\Modules\Inventory\Services\MaterialRequestService;
 use App\Modules\Inventory\Services\ProductionWipLocationResolver;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Production\Models\Shift;
@@ -79,7 +80,7 @@ class StoreIssueThreeStatesTest extends TestCase
         $this->wip = Warehouse::create(['code' => 'WIP', 'name' => 'Work In Progress', 'is_active' => false]);
         $this->fg = Warehouse::create(['code' => 'FG-STORE', 'name' => 'Finished Goods Store', 'is_active' => true]);
 
-        $this->resin = Item::create(['sku' => 'PET-RESIN', 'name' => 'PET Resin', 'uom' => 'KGS']);
+        $this->resin = Item::create(['sku' => 'PET-RESIN', 'name' => 'PET Resin', 'uom' => 'KGS', 'is_production_input' => true]);
         $this->bottle = Item::create(['sku' => 'BTL-500', 'name' => '500ml Bottle', 'uom' => 'Nos']);
 
         // Seeded through the LEDGER, not straight into a balance row: the
@@ -229,12 +230,30 @@ class StoreIssueThreeStatesTest extends TestCase
 
     public function test_a_partial_issue_leaves_a_remaining_quantity_and_a_second_issue_closes_it(): void
     {
+        // A REAL request line, not a made-up id. Both issues below have to
+        // name the SAME line for the remaining-quantity bookkeeping to mean
+        // anything, and the store-issue request now refuses a line that names
+        // a request line which does not exist — quoting an invented id was how
+        // a caller could otherwise skip the material-eligibility rule
+        // altogether.
+        // The issue must also NAME the request it fulfils: a line pointing at a
+        // request line while the header names a different request (or none)
+        // moves stock without ever crediting the request, which would leave it
+        // owing the full quantity for ever against work already done.
+        $materialRequest = app(MaterialRequestService::class)
+            ->create(['lines' => [['item_id' => $this->resin->id, 'quantity' => '500']]], null);
+        $requestLineId = $materialRequest->lines()->value('id');
+        // ...and SUBMITTED, because only a request the store can actually see
+        // in its queue may be fulfilled (MaterialRequestLifecycleException).
+        app(MaterialRequestService::class)->submit($materialRequest);
+
         $first = $this->postJson('/api/v1/inventory/store-issues', [
             'received_by' => $this->supervisor->id,
+            'material_request_id' => $materialRequest->id,
             'lines' => [[
                 'item_id' => $this->resin->id,
                 'quantity' => '200',
-                'material_request_line_id' => 41,
+                'material_request_line_id' => $requestLineId,
                 'quantity_requested' => '500',
             ]],
         ])->assertCreated()->json('data');
@@ -243,10 +262,11 @@ class StoreIssueThreeStatesTest extends TestCase
 
         $second = $this->postJson('/api/v1/inventory/store-issues', [
             'received_by' => $this->supervisor->id,
+            'material_request_id' => $materialRequest->id,
             'lines' => [[
                 'item_id' => $this->resin->id,
                 'quantity' => '300',
-                'material_request_line_id' => 41,
+                'material_request_line_id' => $requestLineId,
                 'quantity_requested' => '500',
             ]],
         ])->assertCreated()->json('data');

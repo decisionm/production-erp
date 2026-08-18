@@ -46,7 +46,7 @@ class MaterialRequestLifecycleTest extends TestCase
     {
         parent::setUp();
 
-        $this->carton = Item::create(['sku' => 'PKG-CTN', 'name' => 'Carton 500ml', 'uom' => 'Nos']);
+        $this->carton = Item::create(['sku' => 'PKG-CTN', 'name' => 'Carton 500ml', 'uom' => 'Nos', 'is_production_input' => true]);
         $this->shift = Shift::create(['name' => 'A', 'start_time' => '06:00:00', 'end_time' => '14:00:00', 'is_active' => true]);
         $this->machine = WorkCenter::create(['code' => 'M-01', 'name' => 'Machine 1', 'is_active' => true]);
     }
