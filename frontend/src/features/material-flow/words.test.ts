@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as words from './words';
 import {
+    permitsFractions,
     queueEmptyText,
     queueStatusFilter,
     ISSUE_IS_NOT_CONSUMPTION,
@@ -268,5 +269,28 @@ describe('the store queue status filter', () => {
     it('says something different when the emptiness is the reader’s own filtering', () => {
         expect(queueEmptyText('cancelled')).toBe('No requests match these filters.');
         expect(queueEmptyText(undefined)).toBe('No requests match these filters.');
+    });
+});
+
+describe('whether a unit may carry a fraction', () => {
+    it('refuses a fraction for the units the factory counts in', () => {
+        // Tally writes `Nos.` with the dot; the seeders have used `pcs`.
+        for (const uom of ['Nos.', 'nos', 'NOS', 'Pcs.', 'pcs', 'each']) {
+            expect(permitsFractions(uom)).toBe(false);
+        }
+    });
+
+    it('permits a fraction for weight — packing film genuinely arrives as 14.700 kg', () => {
+        for (const uom of ['Kgs.', 'kg', 'Kilograms']) {
+            expect(permitsFractions(uom)).toBe(true);
+        }
+    });
+
+    it('permits a fraction for a unit nobody has classified, rather than guessing', () => {
+        // The same choice the backend enum makes: Unknown never collapses to
+        // weight, and never blocks real work on a guess.
+        for (const uom of ['Roll', 'Mtr', '', null, undefined]) {
+            expect(permitsFractions(uom)).toBe(true);
+        }
     });
 });

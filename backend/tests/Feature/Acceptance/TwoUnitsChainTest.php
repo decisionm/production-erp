@@ -160,6 +160,116 @@ class TwoUnitsChainTest extends TestCase
         ])->assertStatus(422)->assertJsonValidationErrors('lines.0.uom');
     }
 
+    /**
+     * THE PATH THE STORE'S SCREEN ACTUALLY USES.
+     *
+     * The guards above were written, tested and shipped-ready while sitting
+     * BELOW the accepted-ask branch — every arm of which ends in `continue`.
+     * So they fired only on a fresh handover, the verbal-ask path, and were
+     * unreachable on the one path the store issue queue posts on: a line that
+     * names the request line it fulfils.
+     *
+     * 12.5 trays reached Production/WIP through it, 201 Created, and the
+     * store's own InputNumber had no precision to stop it being typed.
+     * A fully green suite missed it because every assertion in this file
+     * posted WITHOUT a request line id.
+     */
+    public function test_the_unit_rules_survive_the_accepted_ask_path(): void
+    {
+        $tray = $this->material('PKG-TRAY-60', '60 Ml Tray', 'Nos.');
+        $this->receive($tray, '5000', 'tu-ask');
+
+        $ask = $this->submittedRequest($tray, '100');
+
+        // Half a tray, filed against a real accepted line.
+        $this->postJson('/api/v1/inventory/store-issues', [
+            'material_request_id' => $ask['id'],
+            'lines' => [[
+                'material_request_line_id' => $ask['line_id'],
+                'item_id' => $tray->id,
+                'quantity' => '12.5',
+            ]],
+        ])->assertStatus(422)->assertJsonValidationErrors('lines.0.quantity');
+
+        // A foreign unit, filed against a real accepted line. This one also
+        // PERSISTED — store_issue_lines.uom held 'Kgs.' on a Nos. item and the
+        // read path preferred it over the item's own.
+        $this->postJson('/api/v1/inventory/store-issues', [
+            'material_request_id' => $ask['id'],
+            'lines' => [[
+                'material_request_line_id' => $ask['line_id'],
+                'item_id' => $tray->id,
+                'quantity' => '100',
+                'uom' => 'Kgs.',
+            ]],
+        ])->assertStatus(422)->assertJsonValidationErrors('lines.0.uom');
+
+        $this->assertSame(0, bccomp($this->balance($tray, $this->wip), '0', 4), 'neither refusal moved stock');
+    }
+
+    /**
+     * AND THE ACCEPTED ASK IS STILL FULFILLABLE.
+     *
+     * The guard belongs above the branch because a UNIT is a property of the
+     * handover happening now. ELIGIBILITY is not — it was settled when the ask
+     * was accepted, and stays settled. Tightening the issue side to match the
+     * request side is a regression this codebase has already paid for once, so
+     * this is the assertion that proves it was not repeated.
+     */
+    public function test_a_whole_number_against_an_accepted_ask_still_goes_through(): void
+    {
+        $tray = $this->material('PKG-TRAY-60', '60 Ml Tray', 'Nos.');
+        $this->receive($tray, '5000', 'tu-ok');
+
+        $ask = $this->submittedRequest($tray, '100');
+
+        // The material is switched off AFTER the ask was accepted. History
+        // stays issuable — that is the asymmetry the branch exists for.
+        $tray->update(['is_production_input' => false]);
+
+        $this->postJson('/api/v1/inventory/store-issues', [
+            'material_request_id' => $ask['id'],
+            'lines' => [[
+                'material_request_line_id' => $ask['line_id'],
+                'item_id' => $tray->id,
+                'quantity' => '100',
+            ]],
+        ])->assertCreated();
+
+        $this->assertSame(0, bccomp($this->balance($tray, $this->wip), '100', 4));
+    }
+
+    /** A quantity is written the way a storekeeper writes one. */
+    public function test_an_exotic_number_is_a_refusal_not_a_500(): void
+    {
+        $resin = $this->material('RM-RELPET', 'Relpet PET Resin', 'Kgs.');
+        $this->receive($resin, '100', 'tu-exotic');
+
+        // `numeric` accepts these; bcmath threw a ValueError on them, so the
+        // quantity guard answered a malformed figure with a 500.
+        foreach (['1e3', '0x1A', 'INF'] as $spelling) {
+            $this->postJson('/api/v1/inventory/store-issues', [
+                'lines' => [['item_id' => $resin->id, 'quantity' => $spelling]],
+            ])->assertStatus(422);
+        }
+    }
+
+    /** An issue may not be filed against a request that does not exist. */
+    public function test_a_ghost_header_is_refused_rather_than_stored(): void
+    {
+        $resin = $this->material('RM-RELPET', 'Relpet PET Resin', 'Kgs.');
+        $this->receive($resin, '100', 'tu-ghost');
+
+        // Stock moved and `store_issues.material_request_id` was persisted as
+        // 999999999 — a pointer nothing on either side could ever resolve.
+        $this->postJson('/api/v1/inventory/store-issues', [
+            'material_request_id' => 999999999,
+            'lines' => [['item_id' => $resin->id, 'quantity' => '10']],
+        ])->assertStatus(422)->assertJsonValidationErrors('material_request_id');
+
+        $this->assertSame(0, bccomp($this->balance($resin, $this->wip), '0', 4));
+    }
+
     /* ------------------------------ helpers ------------------------------ */
 
     private function material(string $sku, string $name, string $uom): Item
@@ -191,6 +301,18 @@ class TwoUnitsChainTest extends TestCase
             'received_date' => '2026-08-18',
             'lines' => [['purchase_order_line_id' => $lineId, 'quantity' => $quantity]],
         ])->assertCreated();
+    }
+
+    /** An accepted ask, submitted and waiting — not yet issued against. */
+    private function submittedRequest(Item $item, string $quantity): array
+    {
+        $request = $this->postJson('/api/v1/inventory/material-requests', [
+            'lines' => [['item_id' => $item->id, 'quantity' => $quantity]],
+        ])->assertCreated()->json('data');
+
+        $this->postJson("/api/v1/inventory/material-requests/{$request['id']}/submit")->assertOk();
+
+        return ['id' => $request['id'], 'line_id' => $request['lines'][0]['id']];
     }
 
     private function requestAndIssue(Item $item, string $quantity): void

@@ -229,3 +229,99 @@ that call is made.
 
 Until then, the Archive confirmation's wording — "stops being offered for new work" — is
 accurate for the other nine masters and **aspirational for Item and WorkCenter**.
+
+---
+
+# Re-gate of PR #196 — what two independent reviewers broke, 18 Aug 2026
+
+The branch was green: 2,092 backend tests, 530 frontend, all four CI legs including
+MySQL. Two reviewers were then asked to **reproduce the earlier exploits rather than read
+the new code**. They found five things the green suite did not, and the two worst were in
+the surfaces this PR was written to close.
+
+## P0 — the unit guards were unreachable on the one path the store actually uses
+
+`StoreStoreIssueRequest::withValidator()` checked `material_request_line_id` first, and
+**every arm of that branch ends in `continue`**. The fraction and unit guards sat below it.
+So they fired only on a fresh handover — the verbal-ask path — and never on a line that
+names the request line it fulfils, which is what the Store Issue Queue posts on every time.
+
+Reproduced, independently, by both reviewers:
+
+| probe | before | after |
+|---|---|---|
+| `Nos.` item, `quantity: "12.5"`, against a real accepted line | **201**, 12.5 trays in Production/WIP | **422** |
+| `Nos.` item, `uom: "Kgs."`, against a real accepted line | **201**, `'Kgs.'` persisted and read back in place of the item's | **422** |
+
+The second is precisely the FC-03 failure the UOM audit claimed closed — "a tape figure in
+metres filed as Nos is a different number about a different thing, and that reached live
+once". The store's own `InputNumber` carried no `precision`, so 12.5 was typable.
+
+**The lesson is about the test, not the code.** `TwoUnitsChainTest` passed throughout,
+because every assertion in it posted without a request line id. A guard is only proven on
+the paths the tests actually walk, and the path they skipped was the only one in daily use.
+
+**Fixed** by hoisting the unit block above the branch — and *only* the unit block.
+Eligibility stays below it, deliberately: whether a material may be asked for was settled
+when the ask was accepted, so history stays issuable. What unit a handover is in was never
+settled by anything. Proved by mutation: restoring the old ordering fails exactly the new
+test, with exactly the old 201.
+
+## P1 — the store could read AND CANCEL production's unsent working paper
+
+The `submitted_at` closure went into `queue()` only. `show` and `cancel` are route-model-
+bound in the group both desks read, and neither asked. Request numbers are sequential.
+
+- store-only login → `GET /material-requests/{draft_id}` → **200**, full body
+- store-only login → `POST /material-requests/{draft_id}/cancel` → **200**, *cancelled*
+
+`cancel`'s only guard is the lifecycle one (`! isFinal()`), and a draft is not final. The
+write is the worse half: production's paper could be torn up before the floor ever sent it.
+
+**Fixed** with one shared gate on both actions, using the same permission constant as the
+queue, answering **404 rather than 403** — a 403 confirms the row exists, which is the thing
+being kept private.
+
+## P2 — a ghost header, and a ghost scan pointer
+
+`material_request_id` carried no `exists`. An issue could be filed against request
+`999999999`: stock moved and the pointer persisted, resolvable by nothing, for ever. The
+bag-scan endpoint had the identical hole on `material_request_line_id`. Both now
+`exists`-checked. Two test fixtures were themselves passing magic numbers (`77`, `512`) and
+now build a real accepted ask.
+
+## P2 — Esc discarded the scans the dialog existed to protect
+
+On the "unfinished receipt" prompt, the destructive choice is the *cancel* role, and antd
+routes Esc and a mask click straight to `onCancel` → `clearAllDrafts()`. The most reflexive
+keystroke on a modal silently destroyed every saved supplier barcode. `keyboard: false`,
+`maskClosable: false`. Discarding is a choice you make, not one you fall into.
+
+## P3 — fixed
+
+`quantity: "1e3"` passed `numeric` and reached bcmath, which answered a **500**; now a 422.
+And a test of mine was dead: it compared a `MaterialRequestStatus` enum instance `===` the
+string `'draft'`, which is never true, so the fixture it claimed to fix never once did the
+thing it described. That file is about filter mechanics and now holds no draft at all.
+
+## P3 — known, bounded, NOT fixed
+
+- **`StoreIssueService::issue()` has no unit guard of its own.** A direct PHP call persisted
+  `3.25` and `'Litres'` on a `Nos.` item. There is exactly one HTTP write path into store
+  issues and it goes through the FormRequest, so this is reachable only by writing new
+  server code — defence in depth, not an open door. Left alone rather than changed on the
+  eve of a deploy.
+- **The GRN draft-restore machinery has no test.** `vite.config.ts` declares no DOM
+  environment, so `restoringDraft`, `pendingDraftKey()` and `loadDraft()` are unreachable
+  from the suite; only the pure `lotScanState` is covered. Verified by inspection only.
+- **The pre-existing kg-detecting copies elsewhere in the frontend are untouched** (class 3
+  in the UOM audit). `permitsFractions()` in `material-flow/words.ts` is the canonical one
+  to converge on when that is scoped.
+
+## What held up
+
+Everything else the reviewers attacked: the bogus request-line bypass, the cancelled-request
+exemption, the header/line mismatch, the queue's own draft filter across every filter,
+paging, search and flag combination, partial-GRN scan discard, the timezone stamp, negative
+WIP visibility, the meta plumbing, `MeasurementType` itself, and — proved by mutation —
+`TwoUnitsChainTest` being non-vacuous. FC-01, FC-03 and FC-06 all hold on the delta.

@@ -450,3 +450,24 @@ export function queueEmptyText(status: MaterialRequestStatus[] | MaterialRequest
         ? 'Nothing is still to issue. Requests the store has already finished are under "Fully issued" — or "All requests" to see everything.'
         : 'No requests match these filters.';
 }
+
+/**
+ * MAY A QUANTITY IN THIS UNIT HAVE A FRACTIONAL PART?
+ *
+ * The browser-side mirror of the backend's MeasurementType. The server is the
+ * authority and refuses a fractional count outright — this only keeps the
+ * storekeeper from typing a figure that is going to be rejected, and from
+ * believing 12.5 trays is a thing the store can hand over.
+ *
+ * Unknown units permit fractions, exactly as the backend does: refusing a
+ * decimal on a unit nobody has classified would block real work on a guess.
+ * Kept deliberately narrow — the several older kg-detecting copies elsewhere
+ * in this app are pre-existing and are not converged here on purpose.
+ */
+const COUNT_UNITS = ['nos', 'no', 'pcs', 'pc', 'piece', 'pieces', 'each', 'ea'];
+
+export function permitsFractions(uom: string | null | undefined): boolean {
+    const normalised = (uom ?? '').trim().toLowerCase().replace(/\.$/, '');
+
+    return !COUNT_UNITS.includes(normalised);
+}

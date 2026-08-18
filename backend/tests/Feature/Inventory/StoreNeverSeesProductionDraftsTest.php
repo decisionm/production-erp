@@ -169,6 +169,64 @@ class StoreNeverSeesProductionDraftsTest extends TestCase
 
     /* ------------------------------ helpers ------------------------------ */
 
+    /**
+     * THE QUEUE'S FILTER WAS ONLY HALF THE RULE.
+     *
+     * `show` and `cancel` are route-model-bound in the group BOTH desks read,
+     * and neither asked about `submitted_at` — the closure lived in queue()
+     * alone. Request numbers are sequential, so a store-only login did not even
+     * need to guess: it could read a draft in full, and CANCEL it, killing
+     * production's working paper before the floor had ever sent it. `cancel`'s
+     * only guard is the lifecycle one (`! isFinal()`), and a draft is not
+     * final.
+     *
+     * 404 rather than 403 — a 403 would confirm the row is there, which is the
+     * thing being kept private.
+     */
+    public function test_the_store_can_neither_read_nor_cancel_a_draft_by_its_id(): void
+    {
+        $draft = $this->raise();
+
+        $this->actAs($this->storekeeper);
+
+        $this->getJson("/api/v1/inventory/material-requests/{$draft['id']}")->assertStatus(404);
+
+        $this->postJson("/api/v1/inventory/material-requests/{$draft['id']}/cancel", [
+            'reason' => 'not my paper to tear up',
+        ])->assertStatus(404);
+
+        $this->assertSame(
+            'draft',
+            MaterialRequest::query()->whereKey($draft['id'])->value('status')->value,
+            'the draft survived the refusal',
+        );
+    }
+
+    /** ...while the floor keeps full control of its own paper. */
+    public function test_the_floor_can_read_and_cancel_its_own_draft(): void
+    {
+        $draft = $this->raise();
+
+        $this->getJson("/api/v1/inventory/material-requests/{$draft['id']}")->assertOk();
+
+        $this->postJson("/api/v1/inventory/material-requests/{$draft['id']}/cancel", [
+            'reason' => 'run pulled',
+        ])->assertOk();
+    }
+
+    /** And once it IS sent, it is the store's business in the ordinary way. */
+    public function test_a_submitted_request_is_readable_and_cancellable_by_the_store(): void
+    {
+        $sent = $this->submitted();
+
+        $this->actAs($this->storekeeper);
+
+        $this->getJson("/api/v1/inventory/material-requests/{$sent['id']}")->assertOk();
+        $this->postJson("/api/v1/inventory/material-requests/{$sent['id']}/cancel", [
+            'reason' => 'cannot fulfil',
+        ])->assertOk();
+    }
+
     private function raise(): array
     {
         $this->actAs($this->floor);

@@ -30,6 +30,7 @@ import {
     TRANSITION_HELP,
     TRANSITION_LABEL,
     formatQuantity,
+    permitsFractions,
     OPEN_REQUEST_STATUSES,
     queueEmptyText,
     queueStatusFilter,
@@ -371,6 +372,13 @@ export default function StoreIssueQueuePage() {
                                             render: (_, line) => (
                                                 <InputNumber
                                                     min={0}
+                                                    // A COUNTED MATERIAL CANNOT BE TYPED IN HALVES.
+                                                    // The server refuses it either way; this stops
+                                                    // the storekeeper writing 12.5 trays in the
+                                                    // first place. 26 of the factory's 43 stock
+                                                    // items are counted, not weighed.
+                                                    precision={permitsFractions(line.uom) ? undefined : 0}
+                                                    step={permitsFractions(line.uom) ? undefined : 1}
                                                     style={{ width: 140 }}
                                                     placeholder={line.uom}
                                                     value={issueQuantities[line.id] ?? null}

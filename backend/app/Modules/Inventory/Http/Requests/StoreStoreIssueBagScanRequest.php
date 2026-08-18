@@ -3,6 +3,7 @@
 namespace App\Modules\Inventory\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 /**
  * One bag scanned at the handover.
@@ -27,7 +28,10 @@ class StoreStoreIssueBagScanRequest extends FormRequest
             'barcode' => ['required', 'string', 'max:255'],
             'quantity_kg' => ['nullable', 'numeric'],
             'received_by' => ['nullable', 'integer', 'exists:users,id'],
-            'material_request_line_id' => ['nullable', 'integer'],
+            // THE SAME DANGLING-POINTER HOLE AS THE ISSUE HEADER. A scan may
+            // say which accepted line it satisfies; it may not name one that
+            // does not exist, because nothing downstream could ever resolve it.
+            'material_request_line_id' => ['nullable', 'integer', Rule::exists('material_request_lines', 'id')],
             'notes' => ['nullable', 'string', 'max:500'],
         ];
     }

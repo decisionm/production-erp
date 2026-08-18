@@ -746,6 +746,14 @@ export default function GoodsReceiptsPage() {
                 content: `A receipt left open has ${scans} bag barcode${scans === 1 ? '' : 's'} already scanned. Carry on with it, or start a new one and discard those scans.`,
                 okText: 'Carry on',
                 cancelText: 'Start a new receipt',
+                // ESC MUST NOT THROW THE SCANS AWAY. On a confirm dialog the
+                // cancel role is the destructive one here, and antd routes Esc
+                // and a mask click straight to onCancel — so the most reflexive
+                // keystroke on a modal would have silently discarded the very
+                // supplier barcodes this dialog exists to protect. Discarding
+                // is a choice you make, not one you fall into.
+                keyboard: false,
+                maskClosable: false,
                 onOk: () => {
                     restoringDraft.current = true;
                     setReceiptKey(unfinished);

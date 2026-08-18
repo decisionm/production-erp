@@ -12,6 +12,7 @@ use App\Modules\Inventory\Models\MaterialRequest;
 use App\Modules\Inventory\Services\MaterialRequestService;
 use App\Modules\Inventory\Services\ProductionFloorStockService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 /**
@@ -25,6 +26,15 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
  */
 class MaterialRequestController extends Controller
 {
+    /**
+     * WHO MAY SEE PRODUCTION'S WORKING PAPERS. One list, used by every read
+     * and write that can reach an unsubmitted request — the queue, the single
+     * record and the cancel. Kept as a constant because the same authority
+     * question asked in three places with three copies is exactly the drift
+     * MeasurementType was written to undo.
+     */
+    private const PRODUCTION_EYES = ['production.view', 'production.manage'];
+
     public function __construct(private readonly MaterialRequestService $requests) {}
 
     /** THE STORE'S QUEUE — filtered server-side; see the FormRequest. */
@@ -38,7 +48,7 @@ class MaterialRequestController extends Controller
         // store login could not obtain them even by asking, because the flag is
         // granted by PERMISSION rather than taken from the query string.
         $maySeeDrafts = $request->boolean('include_unsubmitted')
-            && $request->user()?->hasAnyPermission(['production.view', 'production.manage']) === true;
+            && $request->user()?->hasAnyPermission(self::PRODUCTION_EYES) === true;
 
         return MaterialRequestResource::collection($this->requests->queue($filters, $maySeeDrafts));
     }
@@ -71,8 +81,10 @@ class MaterialRequestController extends Controller
         ]);
     }
 
-    public function show(MaterialRequest $materialRequest): MaterialRequestResource
+    public function show(Request $request, MaterialRequest $materialRequest): MaterialRequestResource
     {
+        $this->refuseUnlessTheDraftIsTheirs($request, $materialRequest);
+
         return MaterialRequestResource::make($this->requests->show($materialRequest));
     }
 
@@ -90,8 +102,32 @@ class MaterialRequestController extends Controller
 
     public function cancel(CancelMaterialRequestRequest $request, MaterialRequest $materialRequest): MaterialRequestResource
     {
+        $this->refuseUnlessTheDraftIsTheirs($request, $materialRequest);
+
         return MaterialRequestResource::make(
             $this->requests->cancel($materialRequest, $request->validated()['reason'], $request->user()?->id),
+        );
+    }
+
+    /**
+     * AN UNSUBMITTED REQUEST DOES NOT EXIST TO THE STORE.
+     *
+     * The queue's own filter was only ever half the rule: both of these
+     * actions are route-model-bound in the group BOTH desks read, so a
+     * store-only login that guessed a sequential id could read a draft in
+     * full — and, worse, CANCEL it, killing production's working paper before
+     * the floor had ever sent it. `cancel` is guarded by lifecycle alone
+     * (`! isFinal()`), and a draft is not final.
+     *
+     * 404 rather than 403: a 403 confirms the row is there, which is itself
+     * the thing being kept private.
+     */
+    private function refuseUnlessTheDraftIsTheirs(Request $request, MaterialRequest $materialRequest): void
+    {
+        abort_if(
+            $materialRequest->submitted_at === null
+                && $request->user()?->hasAnyPermission(self::PRODUCTION_EYES) !== true,
+            404,
         );
     }
 }

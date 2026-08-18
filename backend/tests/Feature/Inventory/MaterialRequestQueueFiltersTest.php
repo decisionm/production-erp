@@ -69,8 +69,8 @@ class MaterialRequestQueueFiltersTest extends TestCase
 
         // resin  · no machine (FC-01) · shift A · 10-Aug · submitted
         $this->requests['resin'] = $this->request(MaterialRequestStatus::Submitted, $this->shiftA, null, '2026-08-10 07:00:00', $this->resin, '500');
-        // carton · machine 1 · shift A · 11-Aug · draft
-        $this->requests['carton'] = $this->request(MaterialRequestStatus::Draft, $this->shiftA, $this->m1, '2026-08-11 07:00:00', $this->carton, '40');
+        // carton · machine 1 · shift A · 11-Aug · fully issued
+        $this->requests['carton'] = $this->request(MaterialRequestStatus::Issued, $this->shiftA, $this->m1, '2026-08-11 07:00:00', $this->carton, '40');
         // tape   · machine 2 · shift B · 12-Aug · partially issued
         $this->requests['tape'] = $this->request(MaterialRequestStatus::PartiallyIssued, $this->shiftB, $this->m2, '2026-08-12 15:00:00', $this->tape, '12');
         // carton · machine 1 · shift B · 13-Aug · cancelled
@@ -87,7 +87,7 @@ class MaterialRequestQueueFiltersTest extends TestCase
 
     public function test_status_takes_one_value_or_a_list(): void
     {
-        $this->assertIds(['carton'], $this->queue(['status' => 'draft']));
+        $this->assertIds(['carton'], $this->queue(['status' => 'issued']));
         $this->assertIds(
             ['tape', 'resin'],
             $this->queue(['status' => ['submitted', 'partially_issued']]),
@@ -189,7 +189,7 @@ class MaterialRequestQueueFiltersTest extends TestCase
         $this->assertIds(
             ['carton'],
             $this->queue([
-                'status' => 'draft',
+                'status' => 'issued',
                 'shift_id' => $this->shiftA->id,
                 'work_center_id' => $this->m1->id,
                 'item_id' => $this->carton->id,
@@ -217,7 +217,7 @@ class MaterialRequestQueueFiltersTest extends TestCase
         // per_page=1 returns ONE row; a total of 1 can only come from a
         // COUNT the database ran with the same WHERE clauses.
         $response = $this->queue([
-            'status' => 'draft',
+            'status' => 'issued',
             'shift_id' => $this->shiftA->id,
             'work_center_id' => $this->m1->id,
             'item_id' => $this->carton->id,
@@ -232,7 +232,7 @@ class MaterialRequestQueueFiltersTest extends TestCase
         // And the clauses themselves are in the statement the database ran.
         DB::enableQueryLog();
         $this->queue([
-            'status' => 'draft',
+            'status' => 'issued',
             'shift_id' => $this->shiftA->id,
             'work_center_id' => $this->m1->id,
             'item_id' => $this->carton->id,
@@ -285,11 +285,18 @@ class MaterialRequestQueueFiltersTest extends TestCase
             'work_center_id' => $workCenter?->id,
             'requested_at' => $requestedAt,
             // A request in the STORE'S QUEUE has by definition been submitted —
-            // that is what puts it there. The fixture used to leave this null
-            // while setting a post-draft status, which is a state the flow
-            // cannot produce, and the queue now (correctly) refuses to show an
-            // unsubmitted request to the store.
-            'submitted_at' => $status === MaterialRequestStatus::Draft->value ? null : $requestedAt,
+            // that is what puts it there. Unconditionally, because THERE IS NO
+            // DRAFT IN THIS FIXTURE ANY MORE: this file is about filter
+            // mechanics, and a draft belongs to production until it is sent.
+            // Whether the store can reach one is a different question with its
+            // own file, StoreNeverSeesProductionDraftsTest.
+            //
+            // The line this replaces read `$status === MaterialRequestStatus::
+            // Draft->value ? null : $requestedAt` — an enum instance compared
+            // to a string, so ALWAYS false. It was written to keep this test
+            // green against the new queue filter and it did, by never once
+            // doing the thing it described.
+            'submitted_at' => $requestedAt,
         ]);
 
         $request->lines()->create([
