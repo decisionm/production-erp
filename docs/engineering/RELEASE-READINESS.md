@@ -120,7 +120,17 @@ ITEMS`, not unconditional PRODUCT READY**, while those two remain.
 | MySQL leg on the acceptance chains | ✅ whole suite on MySQL 8.0 — 2,111 passed / 1 skipped; the 1 error it found is fixed (`fa35b83`) |
 | `DEVELOPMENT-PLAN.md` current or superseded | ⚠️ superseded in practice by MASTER-PLAN rev 3; say so explicitly before release |
 
-Nothing in this programme has been merged. Live remains at `9a9cbe3`.
+**DEPLOYED 18-Aug-2026 07:44 IST.** All fifteen PRs (#179–#193) merged in dependency order;
+live is now **`b92f04d`**, whose tree is byte-identical to the commit CI validated. One
+deploy window of **15 seconds** (the `deploy-production` concurrency group cancelled seven
+superseded runs). 16 migrations DONE after an automatic database backup. Verified from
+evidence: the migrate step's own output · the site up (200/200/401, new routes 401 not 404)
+· the Tally queue empty (0 pending, 0 failed — so the issue-#168 signature cannot exist) ·
+no server-log error newer than the deploy. Full record in `PHASE-LOG.md`.
+
+The two owner gates are UNCHANGED by the deploy: the CEC format is still BLOCKED, and the
+first PO → Tally live write still has not happened (flag off, Q35(d)). The verdict therefore
+remains **PASS WITH OWNER-GATED ITEMS** — deployed is not the same as unconditionally ready.
 
 
 ---

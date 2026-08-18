@@ -2033,3 +2033,89 @@ CI ON #193 @ 95faab3: all four checks PASS —
   Factory knowledge validation   pass  30s
   Tally sync agent typecheck     pass  15s
 ```
+
+────────────────────────────────────────────────────────────────────────────
+DEPLOYED — the whole Phase 0–8 programme reaches live, 18 Aug 2026 07:44 IST
+────────────────────────────────────────────────────────────────────────────
+```
+Owner instruction at 07:28 IST: "merge the stack and deploy now." The night
+shift had ended and the owner was present — the condition the deploy skill
+actually asks for ("do not start one you are not present to finish").
+
+MERGE — all fifteen, in dependency order:
+  #179 … #193 merged into main.  Final main: b92f04d
+  ONE MISTAKE, caught and repaired immediately: merging #179 with
+  --delete-branch deleted the base branch of #180, which GitHub responded to
+  by CLOSING #180. Recovered by recreating the ref at its original tip
+  (6bda58a), reopening #180 and retargeting it to main. Every later PR was
+  retargeted to main BEFORE its parent merged, and --delete-branch was not
+  used again. No commits were lost; nothing was force-pushed.
+
+  THE CHECK THAT MATTERS: main's tree is byte-identical to 4bb5c53, the
+  commit CI had validated —
+    main tree 1713d6fd3a61ec28a31413705617cd3c5f31fd21
+    p8   tree 1713d6fd3a61ec28a31413705617cd3c5f31fd21
+  so the fifteen merges produced exactly the tested state, not an
+  approximation of it.
+
+DEPLOY — one window, not fifteen. The worry that held this back overnight was
+that deploy.yml fires on every push to main. It does — but `concurrency:
+deploy-production` CANCELS a superseded PENDING run, so merging back-to-back
+collapsed the queue: seven intermediate deploys were cancelled and exactly ONE
+ran, on the final main.
+  run 32090845502 · b92f04d · success
+  maintenance mode 02:13:59Z → "Application is now live" 02:14:14Z
+  THE WINDOW WAS 15 SECONDS.
+
+MIGRATIONS — 16, every one DONE, after a database backup
+(erp-db-20260818-021407.sql) taken by the script before it began:
+  add_audit_stamps_to_configuration_tables · create_tally_sync_snapshots_table
+  create_export_runs_table · replace_packaging_mode_unique_with_variant_unique
+  create_shift_production_entry_packing_lines_table
+  add_sku_provisional_to_items_table · add_purpose_to_stock_movements_table
+  backfill_stock_movement_purpose
+  add_lifecycle_columns_to_production_standard_packagings
+  create_purchase_order_revisions_table
+  add_purchase_orders_close_cancel_and_tally_staging
+  add_stock_movement_id_to_goods_receipt_note_lines
+  widen_quality_scrap_note_on_shift_production_entries
+  create_material_requests_table · create_material_request_lines_table
+  create_store_issues_tables
+
+VERIFIED AFTER, in the skill's order and from evidence rather than the tick:
+  1. The migrate step's own output — the 16 above, each DONE.
+  2. The site loads — /login 200, / 200, /api/v1/auth/me 401 (alive and
+     enforcing auth; not 500, not 503, so maintenance mode is off).
+     New route families all answer 401 rather than 404, which is what proves
+     the NEW backend is running: inventory/material-requests,
+     inventory/store-issues, procurement/purchase-orders, exports,
+     tally-sync/entries, production/molds. A deliberately bogus route still
+     404s, so the 401s mean something.
+     The login screen was also opened in a browser and renders. NOT signed
+     into: that needs real credentials, which an agent does not handle.
+  3. The Tally queue — pending 0 · failed 0 · synced 8 · dismissed 3.
+     "VERDICT: queue empty — nothing waiting, nothing failed."
+     The issue-#168 signature (pending WITH delivered_at set, refused for ever
+     and invisible in the failed list) cannot exist at pending 0. Last sync
+     activity was 2026-08-10, so no cycle overlapped the window either.
+  4. The server log — newest entry is [2026-08-17 13:46:10], a transient
+     "Operation not permitted" reading `sessions`. That is ~18 hours BEFORE
+     this deploy. NO error newer than the deploy.
+  5. Nothing already-posted was rewritten — the queue is untouched, no new
+     failures, no entry stuck.
+
+THE SSH BAN, met and respected. The first tally-sync-status attempt, 11
+minutes after the deploy's own SSH session, hit Hostinger's brute-force
+protection: "The host returned no SSH host key", failing BEFORE touching
+anything. It is a ban, not a flake, and retrying inside the window extends it
+— so it was left alone for ~14 minutes and then succeeded first time. The
+server-log read was spaced another ~10 minutes after that. Two SSH sessions,
+no hammering, no extension.
+
+STILL TRUE AFTER THE DEPLOY, and unchanged by it:
+  · The PO → Tally live write has NOT happened. Flag off, owner gate Q35(d).
+  · The CEC format is still BLOCKED — no authoritative sample exists.
+  · No Tally reads were reintroduced.
+  · FG / FG-STORE / RM / RM-STORE were not merged, deleted or altered.
+  · RM Store → Production/WIP → FG Store, with no Day Bin, is what shipped.
+```
