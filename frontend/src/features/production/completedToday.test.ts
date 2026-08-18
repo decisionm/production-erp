@@ -71,6 +71,22 @@ describe('completedTodayRow — every figure is the resource\'s own, never recom
         // The product name rides as secondary text; itemLabel's rule (no
         // "X — X" duplication) is honoured by delegating to it.
         expect(row.product).toBe('500ML KIDNEY — 500ml Kidney Bottle');
+        // THE UNIT EVERY FIGURE ON THIS ROW IS IN, off the item master rather
+        // than assumed. The table prints it once per row ("quantities in Nos"),
+        // and it is what the mixed-unit branch on the Shift Floor redirects the
+        // supervisor to when the day's batches cannot share one total.
+        expect(row.uom).toBe('Nos');
+    });
+
+    it('leaves the unit null rather than guessing when the item master carries none', () => {
+        // A product with no UOM cannot start a batch (ProductReadinessService
+        // fails the `uom` check), so a blank here means unconfigured — the
+        // table then prints no unit line at all rather than inventing one.
+        const noUom = completedTodayRow(entry({ item: { id: 9, sku: 'X', name: 'X', uom: null } as never }));
+        expect(noUom.uom).toBeNull();
+
+        const noItem = completedTodayRow(entry({ item: undefined as unknown as ShiftProductionEntry['item'] }));
+        expect(noItem.uom).toBeNull();
     });
 
     it('names the batch by id when it has no number, and never breaks on a missing item', () => {

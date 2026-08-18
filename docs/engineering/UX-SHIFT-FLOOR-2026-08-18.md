@@ -412,6 +412,22 @@ The shared dev SQLite fixture is **behind the migrations**: creating a mold fail
 A local `php artisan migrate` on the disposable copy fixed it. Anyone else working from
 that fixture will hit the same wall.
 
+### 9.5b CI coverage of this branch is uneven — read this before trusting "CI green"
+
+- `425f8cf` and `0a2da94` **were** CI-verified, all four checks green including MySQL 8.
+- `0476279` (and the test added after it) has **no CI at all** — GitHub refused to start
+  any job for billing reasons. That is the highest-churn commit in the branch: it carries
+  `createdWithinShiftWindow`, the inverted copy guard, the `Day bin:` copy fix, the
+  `CompletedTodayTable` unit line and the `completedToday.ts` row-shape change. It is
+  covered by local gates only.
+
+The backend suite was run locally to stand in: **2039/2065 passing, 25 failing**, all in
+`MaterialRequest*` / `StoreIssueBagScan*`. Those failures were reproduced on **`main`**
+in a scratch worktree with the identical `.env` and the same three assertions failed, so
+they are **not caused by this branch** — which changes no backend file. Note the precise
+claim: pre-existing on main with this env. The local environment's cause was not
+root-caused, and main's own CI passes these.
+
 ### 9.6 The review chain could not be completed
 
 `AGENTS.md` requires Builder → **Cursor review** → **Codex verification** → **owner**.
