@@ -1,7 +1,7 @@
 import { PrinterOutlined } from '@ant-design/icons';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Checkbox, Col, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, type InputRef, message, Modal, Radio, Row, Select, Space, Table, Tag, TimePicker, Tooltip, Typography } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, type InputRef, message, Modal, Radio, Row, Segmented, Select, Space, Table, Tag, TimePicker, Tooltip, Typography } from 'antd';
 import dayjs from 'dayjs';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -81,6 +81,13 @@ import {
 } from '@/features/production/types';
 import { currentShift, justEndedShift, productionDateFor } from '@/features/production/shiftClock';
 import { correctionLists } from '@/features/production/correctionReads';
+import {
+    completedTodaySummary,
+    floorStatusCounts,
+    isRunningForOtherShift,
+    machineFloorState,
+    type MachineFloorState,
+} from '@/features/production/shiftFloorSummary';
 import { packagingForCompletion } from '@/features/production/productStandardsConfig';
 import { cavityPrefill } from '@/features/production/startBatchCavities';
 import { chosenStartVariant, mouldLabel, startBatchChoices, startBatchTallyIdentity } from '@/features/production/startBatchChoices';
@@ -1232,6 +1239,139 @@ const approvalColor: Record<ShiftProductionEntryStatus, string> = {
     failed: 'error',
 };
 
+/* ---------------------------------------------------------------------------
+ * FLOOR PRESENTATION (UX-SHIFT-FLOOR-2026-08-18)
+ *
+ * Pure presentation only. Nothing below decides what an action does, what a
+ * figure is, or who may press anything — those all stay where they were.
+ * ------------------------------------------------------------------------ */
+
+/**
+ * One palette for the five machine states, used by BOTH the card's status rail
+ * and the floor-status tiles, so a colour means one thing on this screen.
+ * The hexes are the ones the cards already carried; only where they are spent
+ * has changed.
+ */
+const STATE_STYLE: Record<MachineFloorState, { accent: string; wash: string; label: string }> = {
+    down: { accent: '#ff4d4f', wash: '#fff1f0', label: 'Down' },
+    mold_change: { accent: '#faad14', wash: '#fffbe6', label: 'Mold change' },
+    // A run that belongs to another shift takes its own muted gold, deliberately
+    // a different tone from the mold-change amber it sits beside in the grid.
+    running_other_shift: { accent: '#d48806', wash: '#fffbe6', label: 'Not handed over' },
+    running: { accent: '#52c41a', wash: '#f6ffed', label: 'Running' },
+    idle: { accent: '#bfbfbf', wash: '#fafafa', label: 'Idle' },
+};
+
+const tabularNums = { fontVariantNumeric: 'tabular-nums' } as const;
+
+/**
+ * A floor-status tile: one big count, one small word. Deliberately NOT
+ * clickable — every figure on this strip is a statement about the grid below,
+ * and a tile that filtered the grid would be a second, competing way to answer
+ * "what is on this machine".
+ */
+function FloorStatTile({ count, label, accent, muted }: { count: number; label: string; accent: string; muted?: boolean }) {
+    return (
+        <div
+            style={{
+                flex: '1 1 92px',
+                minWidth: 92,
+                padding: '10px 12px',
+                borderRadius: 8,
+                border: '1px solid #f0f0f0',
+                borderInlineStart: `3px solid ${accent}`,
+            }}
+        >
+            <div
+                style={{
+                    fontSize: 24,
+                    lineHeight: 1.15,
+                    fontWeight: 600,
+                    // Zero is a fact, not a warning: an empty bucket goes grey so
+                    // the colour on this strip only ever means "there are some".
+                    color: muted || count === 0 ? undefined : accent,
+                    ...tabularNums,
+                }}
+            >
+                {count}
+            </div>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {label}
+            </Typography.Text>
+        </div>
+    );
+}
+
+/**
+ * A figure tile for Completed Today. `value` is already a formatted string —
+ * this places and sizes it, it never computes one.
+ */
+function FigureTile({ label, value, suffix, hint }: { label: string; value: string; suffix?: string; hint?: string }) {
+    const body = (
+        <div style={{ flex: '1 1 120px', minWidth: 120, padding: '10px 12px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
+            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
+                {label}
+            </Typography.Text>
+            <div style={{ fontSize: 20, lineHeight: 1.3, fontWeight: 600, ...tabularNums }}>
+                {value}
+                {suffix ? <Typography.Text type="secondary" style={{ fontSize: 13, fontWeight: 400 }}> {suffix}</Typography.Text> : null}
+            </div>
+        </div>
+    );
+    return hint ? <Tooltip title={hint}>{body}</Tooltip> : body;
+}
+
+/** A section's heading line — title on the left, whatever the section counts on the right. */
+function SectionHeading({ title, extra, id }: { title: string; extra?: ReactNode; id?: string }) {
+    return (
+        <div
+            id={id}
+            style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                justifyContent: 'space-between',
+                gap: 12,
+                flexWrap: 'wrap',
+                marginBottom: 12,
+                paddingBottom: 8,
+                borderBottom: '1px solid #f0f0f0',
+            }}
+        >
+            <Typography.Title level={5} style={{ margin: 0 }}>
+                {title}
+            </Typography.Title>
+            {extra}
+        </div>
+    );
+}
+
+/**
+ * WHEN THIS BATCH WAS STARTED — and only when that can be said honestly.
+ *
+ * There is no `started_at` column on shift_production_entries; `created_at` is
+ * the row-creation instant. A BACK-DATED batch (Start Batch's date picker, or a
+ * Configure-Recipe round trip that crosses a boundary) is created this morning
+ * and filed under last night, so `created_at` would name the wrong evening.
+ *
+ * The gate is the page's own shift clock, not a plain calendar-date match: an
+ * entry created at 02:00 on a Night shift correctly files under YESTERDAY, and
+ * comparing raw dates would hide the start time for every night batch after
+ * midnight. `productionDateFor` already encodes that rule, so it decides here
+ * too. When the two disagree the time is simply not shown — the Carryover tag
+ * already states the date and shift for exactly those runs.
+ *
+ * `created_at` is a genuine server instant (not a stored wall-clock field), so
+ * it is rendered through the browser's local zone — the convention
+ * `lib/datetime.ts` sets out for instants.
+ */
+function startedAtLabel(entry: ShiftProductionEntry): string | null {
+    if (!entry.created_at || !entry.production_date) return null;
+    const created = dayjs(entry.created_at);
+    if (!created.isValid()) return null;
+    if (productionDateFor(entry.shift, created.toDate()) !== entry.production_date) return null;
+    return created.format('HH:mm');
+}
+
 // Every "stopwatch" log (downtime open/close, mold change open/close)
 // defaults to stamping the current time — the common case of logging it
 // live. This is the shared override for the other real case: a supervisor
@@ -1916,6 +2056,50 @@ export default function ShiftProductionEntryPage() {
     // Batch's bin-bay read is gated on it too, and the bin-bay routes 404
     // with the flag off.
     const traceabilityEnabled = settings?.traceability_enabled === true;
+
+    /**
+     * THE FLOOR AT A GLANCE (UX-SHIFT-FLOOR-2026-08-18).
+     *
+     * The machines the grid renders, and the state each one is in, derived ONCE
+     * through the same pure functions the cards read — so the status tiles and
+     * the grid can never disagree about how many machines are running. The
+     * server already returns active-only; the filter stays as defence in depth
+     * for a cached response from before the active flag existed, and lives here
+     * now so the tiles count exactly the cards that are drawn.
+     */
+    const activeWorkCenters = useMemo(
+        () => (workCenters?.data ?? []).filter((w) => w.is_active),
+        [workCenters],
+    );
+    const floorCounts = useMemo(
+        () =>
+            floorStatusCounts(
+                activeWorkCenters.map((wc) => {
+                    const running = runningByMachine.get(wc.id);
+                    return machineFloorState({
+                        down: openDowntimeByMachine.has(wc.id),
+                        moldChange: openMoldChangeByMachine.has(wc.id),
+                        running: running !== undefined,
+                        runningForOtherShift: isRunningForOtherShift({
+                            runningShiftId: running?.shift?.id,
+                            effectiveShiftId,
+                            shiftTabIds,
+                            hasRunning: running !== undefined,
+                        }),
+                    });
+                }),
+            ),
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- shiftTabIds is rebuilt each render from shiftOptions; its CONTENT is what matters.
+        [activeWorkCenters, runningByMachine, openDowntimeByMachine, openMoldChangeByMachine, effectiveShiftId, shiftOptions],
+    );
+    /**
+     * Completed Today's totals, over EXACTLY the rows the table below renders.
+     * Production-date scoped like the read itself, so it is labelled "today"
+     * and never "this shift".
+     */
+    const completedSummary = useMemo(() => completedTodaySummary(completedToday), [completedToday]);
+    /** Batches somebody has to act on — quality's returns plus the floor's own still-correctable ones. */
+    const needsAttentionCount = awaitingCorrection.length + correctableEarlier.length;
 
     const startForm = useForm<StartBatchFormValues>({ resolver: zodResolver(startBatchSchema) });
     // The picked item's master record — drives the read-only "Product
@@ -4879,11 +5063,51 @@ export default function ShiftProductionEntryPage() {
 
     return (
         <>
-            <Typography.Title level={3} style={{ marginBottom: 4 }}>Shift Floor</Typography.Title>
-            <Typography.Paragraph type="secondary">
-                Tap a machine to start or complete a batch, close a breakdown, or finish a mold change. One machine
-                can run several items in a shift — complete the current item, change the mold, then start the next.
-            </Typography.Paragraph>
+            {/* DATE · SHIFT — the first thing on the screen, because it is the
+                first thing that can be wrong.
+
+                The production date was computed and used by every read on this
+                page (Completed Today, power interruptions, Start Batch) and
+                printed nowhere. On the Night shift at 02:00 it is YESTERDAY,
+                which is the single most confusing fact here — so it is now
+                stated, beside the shift it belongs to.
+
+                It is DISPLAYED, never picked: the date is derived from the shift
+                clock (productionDateFor), and making it selectable would change
+                which day every read and every Start Batch files under. */}
+            <div
+                style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    alignItems: 'flex-end',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    marginBottom: 16,
+                }}
+            >
+                <div>
+                    <Typography.Title level={3} style={{ marginBottom: 2 }}>
+                        Shift Floor
+                    </Typography.Title>
+                    <Typography.Text type="secondary" style={{ ...tabularNums }}>
+                        Production day {today}
+                        {effectiveShift ? ` · ${effectiveShift.name} ${effectiveShift.start_time.slice(0, 5)}–${effectiveShift.end_time.slice(0, 5)}` : ''}
+                    </Typography.Text>
+                </div>
+                {shiftOptions.length > 0 && (
+                    // Compact and responsive, replacing a size="large" solid
+                    // Radio.Group in a stray Form.Item with no form around it.
+                    // Same value in, same setSelectedShiftId out.
+                    <Segmented
+                        value={effectiveShiftId}
+                        onChange={(value) => setSelectedShiftId(value as number)}
+                        options={shiftOptions}
+                        size={isNarrow ? 'middle' : 'large'}
+                        block={isNarrow}
+                        style={isNarrow ? { width: '100%' } : undefined}
+                    />
+                )}
+            </div>
 
             {showGraceBanner && (
                 <Alert
@@ -4901,103 +5125,80 @@ export default function ShiftProductionEntryPage() {
                 />
             )}
 
-            <Form.Item label="Shift" style={{ maxWidth: 480 }}>
-                <Radio.Group
-                    value={effectiveShiftId}
-                    onChange={(e) => setSelectedShiftId(e.target.value)}
-                    optionType="button"
-                    buttonStyle="solid"
-                    size="large"
-                    options={shiftOptions}
-                />
-            </Form.Item>
+            {/* THE FLOOR IN ONE LINE — the question "how many machines are
+                running, and is anything down?" used to be answered only by
+                counting ten cards by eye, every time. Every count here comes
+                from the same pure derivation the cards below use, so a tile can
+                never disagree with the grid.
 
-            {/* SENT BACK BY QUALITY — above the machine grid, because it is the
-                only list on this screen that is somebody's job right now and
-                ten machine cards of scrolling on a phone is the same as hiding
-                it. Rendered only when there is one: an empty amber panel
-                standing on the page every day is how a real one stops being
-                read. */}
-            {awaitingCorrection.length > 0 && (
-                <div style={{ marginBottom: 24 }}>
-                    <Typography.Title level={5} style={{ color: '#ad6800', marginBottom: 8 }}>
-                        Sent back by quality — correct and re-submit ({awaitingCorrection.length})
-                    </Typography.Title>
-                    <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                        {awaitingCorrection.map((entry) => (
-                            <Card
-                                key={entry.id}
-                                size="small"
-                                style={{ borderColor: '#faad14', background: '#fffbe6' }}
-                            >
-                                <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                                    <div>
-                                        <Typography.Text strong>
-                                            {entry.batch_number ?? `Batch #${entry.id}`}
-                                        </Typography.Text>{' '}
-                                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                            {entry.work_center.name} · {itemLabel(entry.item)} ·{' '}
-                                            {entry.production_date} {entry.shift.name}
-                                        </Typography.Text>
-                                    </div>
-                                    {/* The reason IS the instruction. It is the only
-                                        thing quality tells the floor, so it is set in
-                                        the panel's own colour and never truncated. */}
-                                    <Typography.Text style={{ color: '#ad6800' }}>
-                                        {readReturnReason(entry) ?? 'No reason was recorded with this return.'}
-                                    </Typography.Text>
-                                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                        Recorded: {fmtPieces(entry.quantity_produced)} pcs ·{' '}
-                                        {fmtNum(toNum(entry.quantity_produced_kg))} kg
-                                    </Typography.Text>
-                                    <Button type="primary" onClick={() => openAmendDrawer(entry)}>
-                                        Correct this batch
-                                    </Button>
-                                </Space>
-                            </Card>
-                        ))}
-                    </Space>
-                </div>
-            )}
+                Deliberately not clickable: these are statements about the grid
+                immediately below, not a second way to act on a machine. */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+                <FloorStatTile count={floorCounts.running} label="Running" accent={STATE_STYLE.running.accent} />
+                <FloorStatTile count={floorCounts.idle} label="Idle" accent={STATE_STYLE.idle.accent} muted />
+                <FloorStatTile count={floorCounts.down} label="Down" accent={STATE_STYLE.down.accent} />
+                <FloorStatTile count={floorCounts.moldChange} label="Mold change" accent={STATE_STYLE.mold_change.accent} />
+                {/* Only when there is one — a permanent zero here would train
+                    the eye to skip the row that matters on the day it is not. */}
+                {floorCounts.runningOtherShift > 0 && (
+                    <FloorStatTile
+                        count={floorCounts.runningOtherShift}
+                        label="Not handed over"
+                        accent={STATE_STYLE.running_other_shift.accent}
+                    />
+                )}
+                {/* THE ANSWER TO MOVING "SENT BACK BY QUALITY" TO THE BOTTOM.
+                    The old panel sat above the grid with a comment saying that
+                    ten machine cards of scrolling is the same as hiding it —
+                    a real concern. The full section now lives under the day's
+                    work where the required hierarchy puts it, and this chip
+                    announces it above the fold and jumps straight to it. */}
+                {needsAttentionCount > 0 && (
+                    <a
+                        href="#needs-attention"
+                        onClick={(e) => {
+                            e.preventDefault();
+                            document.getElementById('needs-attention')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }}
+                        style={{ flex: '1 1 148px', minWidth: 148, textDecoration: 'none' }}
+                    >
+                        <div
+                            style={{
+                                padding: '10px 12px',
+                                borderRadius: 8,
+                                border: '1px solid #ffe58f',
+                                borderInlineStart: '3px solid #faad14',
+                                background: '#fffbe6',
+                                height: '100%',
+                            }}
+                        >
+                            <div style={{ fontSize: 24, lineHeight: 1.15, fontWeight: 600, color: '#ad6800', ...tabularNums }}>
+                                {needsAttentionCount}
+                            </div>
+                            <Typography.Text style={{ fontSize: 12, color: '#ad6800' }}>Needs attention →</Typography.Text>
+                        </div>
+                    </a>
+                )}
+            </div>
 
-            <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
-                {/* Server already returns active-only; this filter stays as
-                    defence in depth for a cached response from before the
-                    active flag existed. */}
-                {(workCenters?.data ?? []).filter((w) => w.is_active).map((wc) => {
+            <Row gutter={[12, 12]} style={{ marginBottom: 24 }}>
+                {activeWorkCenters.map((wc) => {
                     const running = runningByMachine.get(wc.id);
                     const down = openDowntimeByMachine.get(wc.id);
                     const moldChange = openMoldChangeByMachine.get(wc.id);
                     // WHOSE MACHINE IS THIS — the question the shift tabs exist
                     // to answer once one shift's run keeps going into the next.
-                    //
-                    // A running batch belongs to the shift it is FILED under:
-                    // the shift that started it, or — after a handover, which
-                    // completes the outgoing segment and opens a new one under
-                    // the incoming shift — the shift that took it over. So
-                    // viewing shift S: a batch filed under S is ours and reads
-                    // normally; a batch still filed under another shift has not
-                    // been handed over yet and must not read as ours.
-                    //
-                    // Deliberately shift-only, NOT shift-and-date: a batch left
-                    // running since yesterday's Morning is still Morning's to
-                    // complete, and gating on the date as well would leave it
-                    // completable from no tab at all. The date is stated
-                    // instead — by the Carryover tag, and inside the header
-                    // line below.
-                    //
-                    // Every unknown (no shift on the payload, no shift picked
-                    // yet, a batch filed under a shift that has no tab here)
-                    // falls through to "ours", which is exactly today's
-                    // behaviour: a machine must never become uncompletable
-                    // because this page could not work out whose it is.
+                    // The rule (and the reasons it is shift-only, and why every
+                    // unknown falls through to "ours") now lives once, in
+                    // shiftFloorSummary.isRunningForOtherShift, so the status
+                    // tiles above count exactly what these cards paint.
                     const runningShiftId = running?.shift?.id;
-                    const runningForOtherShift =
-                        running !== undefined &&
-                        typeof runningShiftId === 'number' &&
-                        effectiveShiftId !== undefined &&
-                        runningShiftId !== effectiveShiftId &&
-                        shiftTabIds.has(runningShiftId);
+                    const runningForOtherShift = isRunningForOtherShift({
+                        runningShiftId,
+                        effectiveShiftId,
+                        shiftTabIds,
+                        hasRunning: running !== undefined,
+                    });
                     // Named off the tab list, not off the entry — "complete it
                     // from the Morning tab" must name the word actually printed
                     // on the tab the supervisor has to press. The lookup always
@@ -5024,18 +5225,38 @@ export default function ShiftProductionEntryPage() {
                     // surface — a breakdown or an in-progress mold change
                     // takes precedence over "Running", since those are the
                     // states that need someone's attention next. A run that
-                    // belongs to another shift takes its own muted amber,
+                    // belongs to another shift takes its own muted gold,
                     // deliberately a different tone from the mold-change amber
-                    // above it.
-                    const cardColor = down
-                        ? '#ff4d4f'
-                        : moldChange
-                          ? '#faad14'
-                          : running
-                            ? runningForOtherShift
-                                ? '#d48806'
-                                : '#52c41a'
-                            : undefined;
+                    // above it. The order (and the palette) live once now:
+                    // machineFloorState + STATE_STYLE, shared with the tiles.
+                    const state = machineFloorState({
+                        down: down !== undefined,
+                        moldChange: moldChange !== undefined,
+                        running: running !== undefined,
+                        runningForOtherShift,
+                    });
+                    const style = STATE_STYLE[state];
+                    // A carryover run — started under an earlier shift/date than
+                    // the clock's own context. Named here so the card can say it
+                    // once, in the header, instead of twice.
+                    const isCarryover =
+                        running !== undefined &&
+                        !runningForOtherShift &&
+                        (running.production_date !== clockProductionDate ||
+                            (detectedShift !== undefined && running.shift.id !== detectedShift.id));
+                    const startedAt = running ? startedAtLabel(running) : null;
+                    // THE ONE PRIMARY ACTION FOR THIS STATE, said in words. All
+                    // four used to be an unlabelled click on the card body.
+                    const primaryLabel =
+                        state === 'down'
+                            ? 'Close Breakdown'
+                            : state === 'mold_change'
+                              ? 'Finish Mold Change'
+                              : state === 'idle'
+                                ? 'Start Batch'
+                                : state === 'running_other_shift'
+                                  ? null
+                                  : 'Complete Batch';
                     // Live expected output for the running card — the contract
                     // formula at the STANDARD cycle time snapshot, active
                     // cavities, and planned hours = the shift's full length.
@@ -5144,7 +5365,7 @@ export default function ShiftProductionEntryPage() {
                     };
 
                     return (
-                        <Col key={wc.id} xs={12} sm={8} md={6} lg={4}>
+                        <Col key={wc.id} xs={24} sm={12} md={8} lg={6} xxl={4}>
                             {/* Hover says where completion happens; the tap says
                                 the same thing, because on the floor it is a
                                 thumb. Title is undefined on every other card,
@@ -5157,114 +5378,243 @@ export default function ShiftProductionEntryPage() {
                                     hoverable={!runningForOtherShift}
                                     size="small"
                                     onClick={primaryClick}
-                                    style={
-                                        runningForOtherShift
-                                            ? { borderColor: cardColor, background: '#fffbe6' }
-                                            : cardColor
-                                              ? { borderColor: cardColor }
-                                              : undefined
-                                    }
+                                    // THE STATUS RAIL. Idle / Running / Down /
+                                    // Mold Change / Carryover are told apart by a
+                                    // coloured edge before a single word is read
+                                    // — the old card said it only in a tag that
+                                    // sat in the same slot for all five states.
+                                    style={{
+                                        height: '100%',
+                                        borderInlineStart: `4px solid ${style.accent}`,
+                                        background: runningForOtherShift ? style.wash : undefined,
+                                    }}
+                                    styles={{ body: { padding: 12, display: 'flex', flexDirection: 'column', gap: 8 } }}
                                 >
-                                    {/* THE CODE, NOT THE NAME, because this is a
-                                        floor screen and the code is what the
-                                        floor calls the machine.
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                                        {/* THE CODE, NOT THE NAME, because this is a
+                                            floor screen and the code is what the
+                                            floor calls the machine.
 
-                                        Their handwritten production report has a
-                                        column headed M/C NO. and every row of it
-                                        reads ASB-1 to ASB-10. The codes were
-                                        renamed to match on 6 August — and the card
-                                        went on showing `name`, which is still
-                                        "Machine 1". So the rename changed nothing
-                                        a supervisor could see, and the owner said
-                                        exactly that: "nothing seems to reflect in
-                                        the application."
+                                            Their handwritten production report has a
+                                            column headed M/C NO. and every row of it
+                                            reads ASB-1 to ASB-10. The codes were
+                                            renamed to match on 6 August — and the card
+                                            went on showing `name`, which is still
+                                            "Machine 1". So the rename changed nothing
+                                            a supervisor could see, and the owner said
+                                            exactly that: "nothing seems to reflect in
+                                            the application."
 
-                                        The name is left alone rather than renamed
-                                        because one thing still resolves machines
-                                        by it (ImportMachineConfigurations reads
-                                        the workbook's machine column and looks up
-                                        "Machine 3"), and because the office
-                                        vocabulary is worth keeping where the
-                                        office reads it. This is not that place. */}
-                                    <Typography.Text strong>{wc.code}</Typography.Text>
-                                    <div style={{ marginTop: 4, marginBottom: 6 }}>
-                                        {down && <Tag color="error">Down — {down.nature_of_problem}</Tag>}
-                                        {!down && moldChange && <Tag color="warning">Mold Change</Tag>}
-                                        {!down && !moldChange && running && (
-                                            // Same words, another shift's colour — gold, not the
-                                            // mold-change amber it sits beside in the grid.
-                                            <Tag color={runningForOtherShift ? 'gold' : 'success'}>
-                                                Running — {running.item.sku}
-                                            </Tag>
-                                        )}
-                                        {!down && !moldChange && !running && <Tag>Idle</Tag>}
+                                            The name is left alone rather than renamed
+                                            because one thing still resolves machines
+                                            by it (ImportMachineConfigurations reads
+                                            the workbook's machine column and looks up
+                                            "Machine 3"), and because the office
+                                            vocabulary is worth keeping where the
+                                            office reads it. This is not that place. */}
+                                        <Typography.Text strong style={{ fontSize: 16 }}>
+                                            {wc.code}
+                                        </Typography.Text>
+                                        <Tag
+                                            color={
+                                                state === 'down'
+                                                    ? 'error'
+                                                    : state === 'mold_change'
+                                                      ? 'warning'
+                                                      : state === 'running_other_shift'
+                                                        ? 'gold'
+                                                        : state === 'running'
+                                                          ? 'success'
+                                                          : undefined
+                                            }
+                                            style={{ marginInlineEnd: 0 }}
+                                        >
+                                            {style.label}
+                                        </Tag>
                                     </div>
-                                    {running?.batch_number && (
-                                        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
-                                            Batch {running.batch_number}
+
+                                    {/* WHAT IS ON THIS MACHINE — the production
+                                        information the card exists to carry, one
+                                        block per state. */}
+                                    {down && (
+                                        <div>
+                                            <Typography.Text style={{ color: '#a8071a', display: 'block', wordBreak: 'break-word' }}>
+                                                {down.nature_of_problem}
+                                            </Typography.Text>
+                                            <Typography.Text type="secondary" style={{ fontSize: 12, ...tabularNums }}>
+                                                Since {dayjs(down.from_time).format('HH:mm')}
+                                            </Typography.Text>
+                                        </div>
+                                    )}
+
+                                    {!down && moldChange && (
+                                        <div>
+                                            <Typography.Text style={{ display: 'block', wordBreak: 'break-word' }}>
+                                                {moldChange.changed_from_item ? `${itemLabel(moldChange.changed_from_item)} → ` : '→ '}
+                                                {itemLabel(moldChange.changed_to_item)}
+                                            </Typography.Text>
+                                            <Typography.Text type="secondary" style={{ fontSize: 12, ...tabularNums }}>
+                                                Since {dayjs(moldChange.from_time).format('HH:mm')}
+                                            </Typography.Text>
+                                        </div>
+                                    )}
+
+                                    {!down && !moldChange && running && (
+                                        <div>
+                                            {/* SKU first — it is what the floor calls the
+                                                product — with the full name under it. The
+                                                old card had the SKU inside the status tag
+                                                and no product name at all. */}
+                                            <Typography.Text strong style={{ display: 'block', wordBreak: 'break-word' }}>
+                                                {running.item.sku}
+                                            </Typography.Text>
+                                            {running.item.name && running.item.name !== running.item.sku && (
+                                                <Typography.Text
+                                                    type="secondary"
+                                                    style={{ fontSize: 12, display: 'block', wordBreak: 'break-word' }}
+                                                >
+                                                    {running.item.name}
+                                                </Typography.Text>
+                                            )}
+                                            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', ...tabularNums }}>
+                                                {running.batch_number ? `Batch ${running.batch_number}` : `Batch #${running.id}`}
+                                                {/* Start time only when it can be said
+                                                    honestly — see startedAtLabel: there is
+                                                    no started_at column and a back-dated
+                                                    batch would name the wrong evening. */}
+                                                {startedAt ? ` · started ${startedAt}` : ''}
+                                            </Typography.Text>
+                                        </div>
+                                    )}
+
+                                    {!down && !moldChange && !running && (
+                                        // A real empty state instead of a bare "Idle"
+                                        // tag over a red button.
+                                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                            No batch running.
                                         </Typography.Text>
                                     )}
+
                                     {runningForOtherShift ? (
                                         // The header line the whole card turns on: whose shift
                                         // this run is filed under, and that nobody has handed it
                                         // over yet. It replaces the Carryover tag rather than
                                         // joining it — on this card both would be true, gold,
                                         // and saying overlapping things.
-                                        <Typography.Text
-                                            style={{ color: '#ad6800', fontSize: 12, display: 'block', marginBottom: 6 }}
-                                        >
+                                        <Typography.Text style={{ color: '#ad6800', fontSize: 12 }}>
                                             {`Running for ${owningShiftName} shift${otherShiftDateSuffix} — not handed over`}
                                         </Typography.Text>
                                     ) : (
-                                        running &&
-                                        (running.production_date !== clockProductionDate ||
-                                            (detectedShift !== undefined && running.shift.id !== detectedShift.id)) && (
+                                        isCarryover && running && (
                                             // A batch left running from an earlier shift/date — flag it so
                                             // it's obvious why the machine can't start a new one and needs
                                             // completing or handing over. Compared against the clock's
                                             // current context, so switching the shift tab never mislabels
                                             // a genuinely-current batch.
-                                            <Tag color="gold" style={{ marginBottom: 6 }}>
-                                                Carryover · {running.production_date} {running.shift.name}
-                                            </Tag>
+                                            <div>
+                                                <Tag color="gold" style={{ marginInlineEnd: 0 }}>
+                                                    Carryover · {running.production_date} {running.shift.name}
+                                                </Tag>
+                                            </div>
                                         )
                                     )}
+
+                                    {/* EXPECTED OUTPUT — the frozen standard's projection,
+                                        unchanged. There is deliberately NO actual, progress
+                                        or efficiency beside it: the server returns no
+                                        metrics for an in-progress batch (productionMetrics()
+                                        is null until completion) and deriving one here would
+                                        put an invented factory quantity in the same slot as
+                                        real ones. See UX-SHIFT-FLOOR-2026-08-18 §4.1. */}
                                     {liveExpected && running && (
-                                        <div style={{ marginBottom: 6 }}>
-                                            <Typography.Text strong style={{ fontSize: 12 }}>
+                                        <div
+                                            style={{
+                                                padding: '6px 8px',
+                                                borderRadius: 6,
+                                                background: '#fafafa',
+                                            }}
+                                        >
+                                            <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
+                                                Expected this shift
+                                            </Typography.Text>
+                                            <Typography.Text strong style={{ fontSize: 13, ...tabularNums }}>
                                                 ≈ {Math.round(liveExpected.pieces).toLocaleString('en-IN')} pcs
                                                 {liveExpected.pouches !== null ? ` · ${liveExpected.pouches} pouches` : ''}
                                                 {liveExpected.boxes !== null ? ` · ${liveExpected.boxes} boxes` : ''}
                                             </Typography.Text>
-                                            <Typography.Text type="secondary" style={{ display: 'block', fontSize: 11 }}>
+                                            <Typography.Text type="secondary" style={{ display: 'block', fontSize: 11, ...tabularNums }}>
                                                 {fmtNum(toNum(running.standard_cycle_time))} s × {running.active_cavities ?? running.standard_cavities} cav ×{' '}
                                                 {fmtNum(shiftLengthHours(running.shift))} h
                                             </Typography.Text>
                                         </div>
                                     )}
+
+                                    {/* THE ONE PRIMARY ACTION, NAMED. Start Batch,
+                                        Complete Batch, Close Breakdown and Finish Mold
+                                        Change were all the same unlabelled click on the
+                                        card background. They still are — this button
+                                        calls the very same primaryClick — but the
+                                        supervisor can now read which one it is.
+
+                                        stopPropagation is essential: the Card itself
+                                        carries onClick={primaryClick}, so without it a
+                                        tap would run the handler twice (and on a
+                                        not-ours card raise the same toast twice). */}
+                                    {primaryLabel && (
+                                        <Button
+                                            block
+                                            type="primary"
+                                            danger={state === 'down'}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                primaryClick();
+                                            }}
+                                        >
+                                            {primaryLabel}
+                                        </Button>
+                                    )}
+
                                     {!down && !moldChange && (
-                                        // Stacked full-width buttons: side-by-side small
-                                        // buttons overlapped on a phone-width card and
-                                        // were too small to hit with a thumb.
-                                        <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                                            {/* A breakdown is a fact about the MACHINE, not
-                                                about whose batch is on it — the supervisor
-                                                standing in front of it reports it whichever
-                                                shift the run is filed under. */}
-                                            <Button
-                                                block
-                                                danger
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setReportingDownMachine(wc);
-                                                    reportDownForm.reset();
-                                                }}
-                                            >
-                                                Report Down
-                                            </Button>
+                                        <div
+                                            style={{
+                                                display: 'flex',
+                                                flexWrap: 'wrap',
+                                                alignItems: 'center',
+                                                gap: 4,
+                                                marginTop: 'auto',
+                                                paddingTop: 4,
+                                                borderTop: '1px solid #f5f5f5',
+                                            }}
+                                        >
+                                            {/* Phase 6 traceability actions — invisible unless the
+                                                backend flag is on, so with it off this card is
+                                                exactly the pre-traceability UI. */}
+                                            {/* No "Materials" button on a machine card: resin
+                                                enters ONE common input serving the whole factory,
+                                                never a machine, so it lives on its own page
+                                                and is loaded from the one Load Material button
+                                                in Floor actions below the grid. */}
+                                            {running && traceabilityEnabled && (
+                                                <Button
+                                                    size="small"
+                                                    // On a not-ours card this is the one
+                                                    // action left worth taking — the way the
+                                                    // machine becomes this shift's, so it
+                                                    // keeps primary weight there and only
+                                                    // there.
+                                                    type={runningForOtherShift ? 'primary' : 'text'}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setHandoverEntry(running);
+                                                    }}
+                                                >
+                                                    Hand Over Shift
+                                                </Button>
+                                            )}
                                             {!running && (
                                                 <Button
-                                                    block
+                                                    size="small"
+                                                    type="text"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
                                                         setStartingMoldChangeMachine(wc);
@@ -5272,29 +5622,6 @@ export default function ShiftProductionEntryPage() {
                                                     }}
                                                 >
                                                     Mold Change
-                                                </Button>
-                                            )}
-                                            {/* Phase 6 traceability actions — invisible unless the
-                                                backend flag is on, so with it off this card is
-                                                exactly the pre-traceability UI. */}
-                                            {/* No "Materials" button on a machine card: resin
-                                                enters ONE common input serving the whole factory,
-                                                never a machine, so it lives on its own page
-                                                (/production/day-bin) and is loaded from the one
-                                                Load Material button below the grid. */}
-                                            {running && traceabilityEnabled && (
-                                                <Button
-                                                    block
-                                                    // On a not-ours card this is the one
-                                                    // action left worth taking — the way the
-                                                    // machine becomes this shift's.
-                                                    type={runningForOtherShift ? 'primary' : undefined}
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setHandoverEntry(running);
-                                                    }}
-                                                >
-                                                    Hand Over Shift
                                                 </Button>
                                             )}
                                             {/* STOPPING A RUN STARTED BY MISTAKE, from the
@@ -5313,10 +5640,15 @@ export default function ShiftProductionEntryPage() {
                                                 that a second person has certified the figures
                                                 and the batch stops being withdrawable, which
                                                 is the same rule the approval queue applies and
-                                                the server enforces regardless. */}
+                                                the server enforces regardless.
+
+                                                Left VISIBLE rather than folded into an
+                                                overflow menu: showing and hiding it is how
+                                                this screen states that rule. */}
                                             {running && !running.quality?.checked && running.status === 'pending' && (
                                                 <Button
-                                                    block
+                                                    size="small"
+                                                    type="text"
                                                     danger
                                                     onClick={(e) => {
                                                         e.stopPropagation();
@@ -5327,7 +5659,36 @@ export default function ShiftProductionEntryPage() {
                                                     Cancel Batch
                                                 </Button>
                                             )}
-                                        </Space>
+                                            {/* REPORT DOWN, DEMOTED.
+
+                                                It used to render as a full-width red button on
+                                                every healthy machine — so a factory with
+                                                nothing wrong showed one per card, and on an
+                                                idle machine it was the ONLY button while Start
+                                                Batch was not a button at all. Red is this
+                                                screen's scarcest signal; it is now spent on
+                                                machines that are actually down.
+
+                                                Still the same action, the same modal, the same
+                                                reset, and still present on every non-down
+                                                card: a breakdown is a fact about the MACHINE,
+                                                not about whose batch is on it, so the
+                                                supervisor standing in front of it reports it
+                                                whichever shift the run is filed under. */}
+                                            <Button
+                                                size="small"
+                                                type="text"
+                                                danger
+                                                style={{ marginInlineStart: 'auto' }}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setReportingDownMachine(wc);
+                                                    reportDownForm.reset();
+                                                }}
+                                            >
+                                                Report Down
+                                            </Button>
+                                        </div>
                                     )}
                                 </Card>
                             </Tooltip>
@@ -5336,24 +5697,76 @@ export default function ShiftProductionEntryPage() {
                 })}
             </Row>
 
-            <Space style={{ marginBottom: 32 }}>
-                {traceabilityEnabled && (
-                    // Page-level, and the only level there is: one door for
-                    // the whole floor, because the factory has one resin
-                    // input point. Ten identical buttons on ten cards would
-                    // be ten doors to one room, and would suggest the room
-                    // was ten rooms.
-                    <Button type="primary" onClick={() => openLoadMaterial()}>
-                        Load Material
+            {/* FLOOR ACTIONS — the three things done to the FLOOR rather than to
+                one machine, grouped and named. They used to be three loose
+                buttons in a bare <Space>, floating between the grid and the
+                table with nothing to say they belonged together or what they
+                applied to. */}
+            <Card size="small" style={{ marginBottom: 32, background: '#fafafa' }} styles={{ body: { padding: 12 } }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+                    <Typography.Text type="secondary" style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.6, marginInlineEnd: 4 }}>
+                        Floor actions
+                    </Typography.Text>
+                    {traceabilityEnabled && (
+                        // Page-level, and the only level there is: one door for
+                        // the whole floor, because the factory has one resin
+                        // input point. Ten identical buttons on ten cards would
+                        // be ten doors to one room, and would suggest the room
+                        // was ten rooms.
+                        <Button type="primary" onClick={() => openLoadMaterial()}>
+                            Load Material
+                        </Button>
+                    )}
+                    <Button onClick={() => setPowerInterruptionOpen(true)}>
+                        Log Power Interruption{powerInterruptionsToday.length > 0 ? ` (${powerInterruptionsToday.length} today)` : ''}
                     </Button>
-                )}
-                <Button onClick={() => setPowerInterruptionOpen(true)}>
-                    Log Power Interruption{powerInterruptionsToday.length > 0 ? ` (${powerInterruptionsToday.length} today)` : ''}
-                </Button>
-                <Button onClick={() => setStockCountOpen(true)}>Log Stock Count</Button>
-            </Space>
+                    <Button onClick={() => setStockCountOpen(true)}>Log Stock Count</Button>
+                </div>
+            </Card>
 
-            <Typography.Title level={5}>Completed Today</Typography.Title>
+            <SectionHeading
+                title="Completed Today"
+                extra={
+                    <Typography.Text type="secondary" style={{ fontSize: 12, ...tabularNums }}>
+                        Production day {today} · all shifts
+                    </Typography.Text>
+                }
+            />
+            {/* THE DAY IN FIGURES, above the rows they come from.
+                Every number is a SUM of figures the server already sent for the
+                rows in the table below — nothing is estimated here. The ratio is
+                labelled "output vs expected", not "efficiency": the server rules
+                efficiency per entry against the deployment's tolerance, and an
+                average of ratios is not a ratio of sums. Rows with no expected
+                figure are excluded from BOTH sides and counted out loud. */}
+            {completedSummary.batches > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                    <FigureTile label="Batches" value={String(completedSummary.batches)} />
+                    <FigureTile label="Good" value={fmtPieces(completedSummary.goodPieces)} suffix="pcs" />
+                    <FigureTile label="Expected" value={fmtPieces(completedSummary.expectedPieces)} suffix="pcs" />
+                    <FigureTile
+                        label="Output vs expected"
+                        value={completedSummary.outputVsExpectedPct === null ? '—' : `${completedSummary.outputVsExpectedPct}%`}
+                        hint={
+                            completedSummary.outputVsExpectedPct === null
+                                ? 'No completed batch today carries an expected figure.'
+                                : completedSummary.withoutExpected > 0
+                                  ? `Good ÷ expected, over the batches that have an expected figure. ${completedSummary.withoutExpected} batch${completedSummary.withoutExpected === 1 ? '' : 'es'} left out — no standard to measure against. Not the per-batch efficiency, which the approvers' screen bands individually.`
+                                  : "Good ÷ expected across today's completed batches. Not the per-batch efficiency, which the approvers' screen bands individually."
+                        }
+                    />
+                    <FigureTile
+                        label="Reject"
+                        value={fmtPieces(completedSummary.rejectPieces)}
+                        suffix="pcs"
+                        hint={
+                            completedSummary.qcRejectedPieces !== null && completedSummary.qcRejectedPieces > 0
+                                ? `Rejected at completion. A further ${completedSummary.qcRejectedPieces.toLocaleString('en-IN')} pcs were rejected by quality.`
+                                : 'Rejected at completion.'
+                        }
+                    />
+                </div>
+            )}
             {/* The day's completed batches as the server answers them, in the
                 extracted CompletedTodayTable (machine · shift · SKU · expected ·
                 actual · good · reject · efficiency · approval/Tally). Every figure
@@ -5363,6 +5776,7 @@ export default function ShiftProductionEntryPage() {
                 entries={completedToday}
                 loading={completedTodayLoading}
                 narrow={isNarrow}
+                emptyText="No batch has been completed on this production day yet. Completing one from a machine card above adds it here."
                 controlsFor={(row) => (
                     <>
                         {cartonLabelControlFor(row)}
@@ -5371,52 +5785,122 @@ export default function ShiftProductionEntryPage() {
                 )}
             />
 
-            {/* STILL THEIRS TO CORRECT, just not on today's list. The night
-                shift's batches file under yesterday's date and the clock rolls
-                to Day at 06:00 — without this the Edit door closed on the very
-                people still doing the paperwork, while the server went on
-                accepting their correction. Same control, same rule, said in one
-                quiet line rather than a second table. */}
-            {correctableEarlier.length > 0 && (
-                <div style={{ marginTop: 16 }}>
-                    <Typography.Text type="secondary">
-                        Completed earlier and still correctable — quality has not checked these yet.
-                    </Typography.Text>
-                    <Space direction="vertical" size={6} style={{ width: '100%', marginTop: 8 }}>
-                        {correctableEarlier.map((entry) => (
-                            <Card key={entry.id} size="small">
-                                <div
-                                    style={{
-                                        display: 'flex',
-                                        flexWrap: 'wrap',
-                                        justifyContent: 'space-between',
-                                        alignItems: 'center',
-                                        gap: 8,
-                                    }}
-                                >
-                                    <div style={{ minWidth: 0 }}>
-                                        <Typography.Text strong>
-                                            {entry.batch_number ?? `Batch #${entry.id}`}
-                                        </Typography.Text>
-                                        <Typography.Text
-                                            type="secondary"
-                                            style={{ display: 'block', fontSize: 12, wordBreak: 'break-word' }}
+            {/* NEEDS ATTENTION · CORRECTIONS REQUIRED — the two correction
+                lists, which used to sit at opposite ends of the page in two
+                unrelated treatments, in one named section under the day's work.
+
+                MOVING THE AMBER PANEL DOWN HERE REVERSES A PRIOR DECISION and
+                does so deliberately. It sat above the machine grid with the
+                comment "ten machine cards of scrolling on a phone is the same
+                as hiding it" — a real concern, and the reason the count chip in
+                the floor-status strip exists: the work is announced above the
+                fold and jumps straight here. Still rendered only when there is
+                something in it, for the reason that comment gives: an empty
+                amber panel standing on the page every day is how a real one
+                stops being read. */}
+            {needsAttentionCount > 0 && (
+                <div id="needs-attention" style={{ marginTop: 32, scrollMarginTop: 16 }}>
+                    <SectionHeading
+                        title="Needs Attention · Corrections Required"
+                        extra={
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                {needsAttentionCount} batch{needsAttentionCount === 1 ? '' : 'es'} waiting on the floor
+                            </Typography.Text>
+                        }
+                    />
+
+                    {awaitingCorrection.length > 0 && (
+                        <div style={{ marginBottom: 16 }}>
+                            <Typography.Text strong style={{ color: '#ad6800', display: 'block', marginBottom: 8 }}>
+                                Sent back by quality — correct and re-submit ({awaitingCorrection.length})
+                            </Typography.Text>
+                            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                                {awaitingCorrection.map((entry) => (
+                                    <Card
+                                        key={entry.id}
+                                        size="small"
+                                        style={{ borderColor: '#faad14', background: '#fffbe6' }}
+                                    >
+                                        <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                                            <div>
+                                                <Typography.Text strong>
+                                                    {entry.batch_number ?? `Batch #${entry.id}`}
+                                                </Typography.Text>{' '}
+                                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                                    {entry.work_center.name} · {itemLabel(entry.item)} ·{' '}
+                                                    {entry.production_date} {entry.shift.name}
+                                                </Typography.Text>
+                                            </div>
+                                            {/* The reason IS the instruction. It is the only
+                                                thing quality tells the floor, so it is set in
+                                                the panel's own colour and never truncated. */}
+                                            <Typography.Text style={{ color: '#ad6800' }}>
+                                                {readReturnReason(entry) ?? 'No reason was recorded with this return.'}
+                                            </Typography.Text>
+                                            <Typography.Text type="secondary" style={{ fontSize: 12, ...tabularNums }}>
+                                                Recorded: {fmtPieces(entry.quantity_produced)} pcs ·{' '}
+                                                {fmtNum(toNum(entry.quantity_produced_kg))} kg
+                                            </Typography.Text>
+                                            <Button type="primary" onClick={() => openAmendDrawer(entry)}>
+                                                Correct this batch
+                                            </Button>
+                                        </Space>
+                                    </Card>
+                                ))}
+                            </Space>
+                        </div>
+                    )}
+
+                    {/* STILL THEIRS TO CORRECT, just not on today's list. The night
+                        shift's batches file under yesterday's date and the clock rolls
+                        to Day at 06:00 — without this the Edit door closed on the very
+                        people still doing the paperwork, while the server went on
+                        accepting their correction. Same control, same rule. */}
+                    {correctableEarlier.length > 0 && (
+                        <div>
+                            <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
+                                Completed earlier and still correctable ({correctableEarlier.length})
+                            </Typography.Text>
+                            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+                                Quality has not checked these yet.
+                            </Typography.Text>
+                            <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                                {correctableEarlier.map((entry) => (
+                                    <Card key={entry.id} size="small">
+                                        <div
+                                            style={{
+                                                display: 'flex',
+                                                flexWrap: 'wrap',
+                                                justifyContent: 'space-between',
+                                                alignItems: 'center',
+                                                gap: 8,
+                                            }}
                                         >
-                                            {entry.work_center.name} · {itemLabel(entry.item)} ·{' '}
-                                            {entry.production_date} {entry.shift.name} ·{' '}
-                                            <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                                                {fmtPieces(entry.quantity_produced)} pcs
-                                            </span>
-                                        </Typography.Text>
-                                    </div>
-                                    <Space size={4} wrap>
-                                        {cartonLabelControlFor(entry)}
-                                        {correctionControlFor(entry)}
-                                    </Space>
-                                </div>
-                            </Card>
-                        ))}
-                    </Space>
+                                            <div style={{ minWidth: 0 }}>
+                                                <Typography.Text strong>
+                                                    {entry.batch_number ?? `Batch #${entry.id}`}
+                                                </Typography.Text>
+                                                <Typography.Text
+                                                    type="secondary"
+                                                    style={{ display: 'block', fontSize: 12, wordBreak: 'break-word' }}
+                                                >
+                                                    {entry.work_center.name} · {itemLabel(entry.item)} ·{' '}
+                                                    {entry.production_date} {entry.shift.name} ·{' '}
+                                                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                                        {fmtPieces(entry.quantity_produced)} pcs
+                                                    </span>
+                                                </Typography.Text>
+                                            </div>
+                                            <Space size={4} wrap>
+                                                {cartonLabelControlFor(entry)}
+                                                {correctionControlFor(entry)}
+                                            </Space>
+                                        </div>
+                                    </Card>
+                                ))}
+                            </Space>
+                        </div>
+                    )}
                 </div>
             )}
 
