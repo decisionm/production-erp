@@ -47,7 +47,7 @@ class StoreGoodsReceiptRequest extends FormRequest
             'lines.*.lots' => ['sometimes', 'array', 'min:1'],
             'lines.*.lots.*.supplier_lot_no' => ['nullable', 'string', 'max:100'],
             'lines.*.lots.*.bag_count' => ['required_with:lines.*.lots', 'integer', 'min:1', 'max:2000'],
-            'lines.*.lots.*.bag_weight_kg' => ['nullable', 'numeric', 'gt:0', 'max:99999999999', new PlainDecimal],
+            'lines.*.lots.*.bag_weight_kg' => ['nullable', 'numeric', 'gt:0', 'max:99999999', new PlainDecimal],
             'lines.*.lots.*.total_received_kg' => ['nullable', 'numeric', 'gt:0', 'max:99999999999', new PlainDecimal],
             'lines.*.lots.*.barcodes' => ['nullable', 'array'],
             'lines.*.lots.*.barcodes.*' => [
@@ -57,7 +57,7 @@ class StoreGoodsReceiptRequest extends FormRequest
                 'distinct',
             ],
             'lines.*.lots.*.bag_weights' => ['nullable', 'array'],
-            'lines.*.lots.*.bag_weights.*' => ['required', 'numeric', 'gt:0', 'max:99999999999', new PlainDecimal],
+            'lines.*.lots.*.bag_weights.*' => ['required', 'numeric', 'gt:0', 'max:99999999', new PlainDecimal],
             'lines.*.lots.*.notes' => ['nullable', 'string'],
         ];
     }

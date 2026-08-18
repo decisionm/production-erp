@@ -711,3 +711,40 @@ Two of the owner's four deployment conditions therefore cannot be met: **CI cann
 maintenance window, the backup and the migrate-step evidence — the protections that exist
 because a deploy once left the floor serving new code on an unmigrated schema. It was not
 done. The account needs Settings → Billing & plans.
+
+## The frozen release candidate
+
+Both halves of the final verification returned **PASS** on `81c57fd`. Two concrete,
+reproduced defects were found in that commit's own unreviewed work, and only those two were
+corrected — the owner's freeze rule is that the SHA which passes is the SHA which merges, so
+nothing else was touched.
+
+**Five bounds were three orders of magnitude too loose.** `max:99999999999` is the
+`decimal(15,4)` edge and was applied uniformly, but `material_lots.bag_weight_kg`,
+`material_bags.original_kg`/`remaining_kg` (reached through both the lot and the GRN door)
+and `day_bin_movements.quantity_kg` are `decimal(12,4)` — eight integer digits. A nine-digit
+bag weight returned **201** and stored `999999999.0000`; live MySQL runs strict, so that is
+an error rather than a rounded value. Now `max:99999999`, proved at the edge: nine digits
+**422**, eight digits **201**, an ordinary 25.5 kg bag **201**.
+
+Worth being exact about what this was: **not a regression.** Those five fields carried no
+bound at all before the previous commit, so it was an improvement that had not gone far
+enough.
+
+**The FC-06 pin had been narrowed while being de-flaked.** Trading substring matching for
+equality lost `vendor_name`, `avg_rate` and `cost_per_kg` — mutation-proved. The original was
+right to match substrings; its mistake was scanning the whole encoded document, **values
+included**, and a Faker person really is named "Monserrate Fields" (reproduced
+deterministically by the QA half). Containment is back, on **keys only**. Keys are ours,
+values are the world's.
+
+**Deliberately not fixed, and recorded instead:** the structural test's regex cannot see a
+rule array containing a semicolon (an inline comment, or a closure rule). It is latent — all
+fifteen classes were proved fully visible — and widening that regex risks false positives,
+which on this branch has repeatedly been the worse trade.
+
+Final state: backend **2,121 / 2,120 passed / 1 skipped by design / 19,269 assertions**,
+Pint clean, typecheck clean, vitest 535/535, build clean, factory knowledge sound.
+
+**This candidate cannot merge or deploy until GitHub Actions billing is restored** — CI
+cannot run, and the deploy is itself an Actions workflow.

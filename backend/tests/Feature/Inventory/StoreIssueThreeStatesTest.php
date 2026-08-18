@@ -615,8 +615,15 @@ class StoreIssueThreeStatesTest extends TestCase
         $values = [];
         $walk($shown);
 
-        foreach (['unit_cost', 'average_cost', 'rate', 'rate_per_kg', 'amount', 'vendor', 'vendor_id', 'supplier_name'] as $forbidden) {
-            $this->assertNotContains($forbidden, $keys, "FC-06: a \"{$forbidden}\" field must not reach a store reader.");
+        foreach (['cost', 'rate', 'price', 'amount', 'vendor', 'supplier'] as $forbidden) {
+            // CONTAINMENT on the key, so `vendor_name`, `avg_rate` and
+            // `cost_per_kg` are caught too. The original pin matched substrings
+            // and was right to; its mistake was scanning the whole encoded
+            // document, VALUES included — and a Faker person really is named
+            // "Monserrate". Keys are ours, values are the world's.
+            $leaked = array_values(array_filter($keys, fn (string $key) => str_contains($key, $forbidden)));
+
+            $this->assertSame([], $leaked, "FC-06: no \"{$forbidden}\" field may reach a store reader.");
         }
 
         // ...and the purchase rate itself, as a VALUE, wherever it were hidden.

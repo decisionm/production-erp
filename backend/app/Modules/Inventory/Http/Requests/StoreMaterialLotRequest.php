@@ -28,7 +28,7 @@ class StoreMaterialLotRequest extends FormRequest
             'supplier_lot_no' => ['nullable', 'string', 'max:100'],
             'received_date' => ['required', 'date'],
             'bag_count' => ['required', 'integer', 'min:1', 'max:2000'],
-            'bag_weight_kg' => ['nullable', 'numeric', 'gt:0', 'max:99999999999', new PlainDecimal],
+            'bag_weight_kg' => ['nullable', 'numeric', 'gt:0', 'max:99999999', new PlainDecimal],
             'total_received_kg' => ['required', 'numeric', 'gt:0', 'max:99999999999', new PlainDecimal],
             'warehouse_id' => ['nullable', 'required_with:grn_id', 'integer', Rule::exists('warehouses', 'id')->where('is_active', true)],
             'notes' => ['nullable', 'string'],
@@ -41,7 +41,7 @@ class StoreMaterialLotRequest extends FormRequest
             // Individually weighed bags; omitted = nominal bag_weight_kg,
             // else total/count.
             'bag_weights' => ['nullable', 'array', 'size:'.$bagCount],
-            'bag_weights.*' => ['required', 'numeric', 'gt:0', 'max:99999999999', new PlainDecimal],
+            'bag_weights.*' => ['required', 'numeric', 'gt:0', 'max:99999999', new PlainDecimal],
         ];
     }
 
