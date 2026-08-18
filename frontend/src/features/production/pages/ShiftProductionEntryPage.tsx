@@ -5655,10 +5655,19 @@ export default function ShiftProductionEntryPage() {
                                             block
                                             // 40px, from the design system's own
                                             // large size rather than a hand-set
-                                            // height. This is pressed with a
-                                            // gloved thumb on a tablet clamped to
-                                            // a machine, and 32px is a desk
-                                            // target.
+                                            // height. This is the action taken at
+                                            // speed, with a gloved thumb on a
+                                            // tablet clamped to a machine.
+                                            //
+                                            // The secondary row below deliberately
+                                            // stays at the default 32px: two large
+                                            // text buttons do not fit one card
+                                            // width and wrapped onto separate
+                                            // lines, which cost more in scanning
+                                            // than the extra 8px bought in
+                                            // targeting. 32px clears WCAG 2.2
+                                            // AA's 24px minimum, and none of
+                                            // those four is pressed in a hurry.
                                             size="large"
                                             type="primary"
                                             danger={state === 'down'}
@@ -5683,6 +5692,16 @@ export default function ShiftProductionEntryPage() {
                                                 borderTop: '1px solid #f5f5f5',
                                             }}
                                         >
+                                            {/* A text button's default 15px of
+                                                side padding is drawn for a
+                                                toolbar, not for two of them inside
+                                                a card 235px wide at three-per-row
+                                                — which is exactly where they
+                                                wrapped onto two lines. Trimmed to
+                                                8 so Mold Change and Report Down
+                                                sit on ONE line from phone to
+                                                desktop; the label is the target,
+                                                the padding was whitespace. */}
                                             {/* Phase 6 traceability actions — invisible unless the
                                                 backend flag is on, so with it off this card is
                                                 exactly the pre-traceability UI. */}
@@ -5693,12 +5712,12 @@ export default function ShiftProductionEntryPage() {
                                                 in Floor actions below the grid. */}
                                             {running && traceabilityEnabled && (
                                                 <Button
+                                                    style={{ paddingInline: 8 }}
                                                     // On a not-ours card this is the one
                                                     // action left worth taking — the way the
                                                     // machine becomes this shift's, so it
                                                     // keeps primary weight there and only
                                                     // there.
-                                                    size="large"
                                                     type={runningForOtherShift ? 'primary' : 'text'}
                                                     onClick={(e) => {
                                                         e.stopPropagation();
@@ -5710,7 +5729,7 @@ export default function ShiftProductionEntryPage() {
                                             )}
                                             {!running && (
                                                 <Button
-                                                    size="large"
+                                                    style={{ paddingInline: 8 }}
                                                     type="text"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
@@ -5744,7 +5763,7 @@ export default function ShiftProductionEntryPage() {
                                                 this screen states that rule. */}
                                             {running && !running.quality?.checked && running.status === 'pending' && (
                                                 <Button
-                                                    size="large"
+                                                    style={{ paddingInline: 8 }}
                                                     type="text"
                                                     danger
                                                     onClick={(e) => {
@@ -5773,10 +5792,9 @@ export default function ShiftProductionEntryPage() {
                                                 supervisor standing in front of it reports it
                                                 whichever shift the run is filed under. */}
                                             <Button
-                                                size="large"
                                                 type="text"
                                                 danger
-                                                style={{ marginInlineStart: 'auto' }}
+                                                style={{ marginInlineStart: 'auto', paddingInline: 8 }}
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     setReportingDownMachine(wc);

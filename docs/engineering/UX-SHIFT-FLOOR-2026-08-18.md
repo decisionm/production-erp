@@ -193,7 +193,50 @@ worktree's build, so it could never have shown these changes).
 | Responsive | 1440×1000 (4 cards/row) and 390×844 (full-width cards, tiles wrapped, `Segmented` in `block` mode) both read correctly. |
 | Console | No new errors. One pre-existing service-worker scope warning from the PWA build. |
 
-`npm run typecheck`, `npm run test` (533 passing, 26 files) and `npm run build` are clean.
+`npm run typecheck`, `npm run test` and `npm run build` are clean — 541 tests over
+27 files after the second pass below.
+
+### 7.1 Second pass (same day) — the UOM, exception-list and accessibility work
+
+Same method, same isolation: `php artisan serve` on `:8012` from this worktree, over a
+**copy** of the dev SQLite fixture. Screenshots are committed under
+`docs/engineering/ux-shift-floor/`.
+
+| Check | Result | Evidence |
+|---|---|---|
+| **Before**, from a build under my own control (main's page, built and served on the same port) | No production date, no counts, a `size="large"` radio bar, and a red-outlined `Report Down` as the FIRST button on all eleven cards — **no Start Batch button at all**. Every claim in §1–§2 confirmed against a render, not from reading. | `before-desktop.jpg` |
+| After — desktop 1440, all Idle | Date + shift stated; tiles 0 / 11 / 0 / 0; one labelled `Start Batch` per card; `Mold Change` and `Report Down` secondary, on one line. | `after-desktop-all-idle.jpg` |
+| After — desktop, mixed Idle + Down | Reported a breakdown on MC-02 → red rail, `⚠ Down` tag, problem text, `Since 17:00`, `Close Breakdown` as a red primary, `Report Down` correctly absent. Tiles moved 0/11/0/0 → 0/10/**1**/0, tracking the grid exactly. Breakdown closed again afterwards; the fixture ends where it started. | `after-desktop-mixed-state.jpg` |
+| Tablet 834 (wide branch — the breakpoint is 767) | 3 cards per row, tiles in one row, the table kept. The secondary row wrapped onto two lines at this width, which is why the buttons' side padding was trimmed to 8; re-verified on one line after. | `after-tablet-834.jpg` |
+| Narrow branch | `Segmented` in `block` mode, tiles wrapped, one card per row, secondary row on one line. **At 500px, not 390** — this OS refuses to size a Chrome window below 500. 500 is well inside the `max-width: 767px` branch, so the branch is exercised; the exact 390 layout is not separately proven. | `after-mobile-narrow.jpg` |
+| Keyboard — reach | Tabbing from the shift `Segmented` walks into the grid and reaches `Start Batch`, `Mold Change` and `Report Down` in DOM order. | `after-desktop-keyboard-focus.jpg` |
+| Keyboard — visible focus | `:focus-visible` matches on the focused control and the ring is visible in the screenshot. | same |
+| Keyboard — activation | `Enter` on a focused `Start Batch` opened **exactly one** modal (`Start Batch — Machine 1`) — the card's own `onClick` did not also fire. | asserted in-page |
+| Modal focus restoration | `Esc` closed it and returned focus to MC-01's `Start Batch`, still `:focus-visible`. AntD's own behaviour, confirmed rather than assumed. | asserted in-page |
+| Zero visible Day Bin | `document.body.innerText` scanned: **no line matches `/day\s*bin/i`** across 123 lines of rendered text. Pinned statically as well by `shiftFloorCopy.test.ts`. | asserted in-page |
+| Console | No messages captured on a fresh load. | — |
+
+**Not verified visually, and why** — unchanged from §7, and now stated as a list of
+what a reviewer should NOT read as covered:
+
+- **Running and Mold Change cards.** The fixture holds no in-progress batch and no
+  molds. Producing a Running card means **creating a production batch**, which
+  `AGENTS.md` forbids without exception — the rule is not qualified by "unless the
+  database is a local copy", and this PR already carries that refusal in writing. Both
+  are covered by wireframe (`UX-SHIFT-FLOOR-WIREFRAMES.md` §2.2) and by the shared pure
+  functions, not by a screenshot.
+- **Completed Today, populated**, and therefore the figure tiles, the mixed-UOM
+  withholding branch, the "Open" control and the two correction sections. All require
+  completed batches. Covered by wireframe (§2.3) and by unit tests over
+  `completedTodaySummary` / `completedTodayUnits`, which is where the arithmetic and
+  the unit decision actually live.
+- **`prefers-reduced-motion`.** The CSS block and the `scrollIntoView` guard are in
+  place and reviewable, but the OS-level setting was not toggled, so the guard is not
+  proven by observation.
+- **Permission variants.** Verified as one role (Fixture Supervisor). Nothing in this
+  pass touches a permission check — every gate (`traceabilityEnabled`,
+  `canAmendCompletion`, the `Cancel Batch` predicate) is preserved verbatim — but the
+  other roles were not walked through.
 
 **Not verified visually, and why:** the **Running** and **Mold Change** cards. The fixture
 database holds no in-progress batch and no molds. Producing a Running card would have
