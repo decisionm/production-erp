@@ -1274,8 +1274,11 @@ function FloorStatTile({ count, label, accent, muted }: { count: number; label: 
     return (
         <div
             style={{
+                // Grows to fill a phone's width, but capped so four tiles do not
+                // stretch into four near-empty panels on a desktop.
                 flex: '1 1 92px',
                 minWidth: 92,
+                maxWidth: 180,
                 padding: '10px 12px',
                 borderRadius: 8,
                 border: '1px solid #f0f0f0',
@@ -1308,7 +1311,7 @@ function FloorStatTile({ count, label, accent, muted }: { count: number; label: 
  */
 function FigureTile({ label, value, suffix, hint }: { label: string; value: string; suffix?: string; hint?: string }) {
     const body = (
-        <div style={{ flex: '1 1 120px', minWidth: 120, padding: '10px 12px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
+        <div style={{ flex: '1 1 120px', minWidth: 120, maxWidth: 220, padding: '10px 12px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
             <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
                 {label}
             </Typography.Text>
