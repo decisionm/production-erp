@@ -19,7 +19,7 @@ class StorePurchaseRequisitionRequest extends FormRequest
             'notes' => ['nullable', 'string'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.item_id' => ['required', 'integer', 'exists:items,id'],
-            'lines.*.quantity' => ['required', 'numeric', 'gt:0', new PlainDecimal],
+            'lines.*.quantity' => ['required', 'numeric', 'gt:0', 'max:99999999999', new PlainDecimal],
             'lines.*.notes' => ['nullable', 'string'],
         ];
     }

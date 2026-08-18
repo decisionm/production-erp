@@ -16,7 +16,7 @@ class MrpNetRequirementsRequest extends FormRequest
     {
         return [
             'item_id' => ['required', 'integer', 'exists:items,id'],
-            'quantity' => ['required', 'numeric', 'gt:0', new PlainDecimal],
+            'quantity' => ['required', 'numeric', 'gt:0', 'max:99999999999', new PlainDecimal],
         ];
     }
 }

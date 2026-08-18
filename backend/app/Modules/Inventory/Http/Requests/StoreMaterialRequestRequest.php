@@ -53,7 +53,7 @@ class StoreMaterialRequestRequest extends FormRequest
                 ->whereNull('deleted_at')->where('is_active', true)->where('is_production_input', true)],
             // Stock quantities are decimal everywhere in this codebase, and
             // an ask of zero is not an ask.
-            'lines.*.quantity' => ['required', 'numeric', 'gt:0', 'decimal:0,4'],
+            'lines.*.quantity' => ['required', 'numeric', 'gt:0', 'decimal:0,4', 'max:99999999999'],
             'lines.*.notes' => ['sometimes', 'nullable', 'string', 'max:500'],
         ];
     }

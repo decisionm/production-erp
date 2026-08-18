@@ -44,6 +44,13 @@ class NoDoorInThisWorkflowTakesAnUnguardedNumberTest extends TestCase
         'Modules/Procurement/Http/Requests/AmendPurchaseOrderRequest.php',
         'Modules/Procurement/Http/Requests/StorePurchaseRequisitionRequest.php',
         'Modules/Procurement/Http/Requests/StoreGoodsReceiptRequest.php',
+        // Both of these were GUARDED by the commit that wrote this test and
+        // left OUT of this list — so stripping their guards left the test
+        // green. The same "false as written" failure the test exists to
+        // prevent, in the test itself. Every request class a change touches
+        // belongs here the moment it is touched.
+        'Modules/Production/Http/Requests/MrpNetRequirementsRequest.php',
+        'Modules/Production/Http/Requests/LoadFactoryDayBinBagRequest.php',
     ];
 
     public function test_every_numeric_field_on_this_workflow_names_the_shape_it_accepts(): void
@@ -56,32 +63,51 @@ class NoDoorInThisWorkflowTakesAnUnguardedNumberTest extends TestCase
 
             $source = file_get_contents($path);
 
-            preg_match_all("/'([A-Za-z0-9_.*]+)'\s*=>\s*\[([^\]]*)\]/", $source, $matches, PREG_SET_ORDER);
+            // Array rules AND pipe-string rules. The first version read only
+            // `=> [ ... ]`, so `'x' => 'required|numeric'` was invisible to it.
+            preg_match_all("/'([A-Za-z0-9_.*]+)'\s*=>\s*(\[[^;]*?\]|'[^']*')\s*,/", $source, $matches, PREG_SET_ORDER);
 
             foreach ($matches as [, $field, $rules]) {
-                if (! str_contains($rules, "'numeric'")) {
+                if (! str_contains($rules, 'numeric')) {
                     continue;
                 }
 
                 // Any of the three is a real guard: PlainDecimal, an integer
                 // rule, or Laravel's own `decimal:` which rejects the same
                 // exotic spellings.
-                if (str_contains($rules, 'PlainDecimal')
-                    || str_contains($rules, "'integer'")
-                    || str_contains($rules, 'decimal:')) {
+                $spelled = str_contains($rules, 'PlainDecimal')
+                    || str_contains($rules, 'integer')
+                    || str_contains($rules, 'decimal:');
+
+                // A SPELLING GUARD IS HALF THE ANSWER. `PlainDecimal` refuses
+                // `1e3` and `INF`; it says nothing about MAGNITUDE. A 14-digit
+                // quantity — what a held-down key on a number input produces —
+                // clears it and lands in a `decimal(15,4)` column that holds
+                // eleven integer digits. Live MySQL runs in strict mode, so
+                // that is an error rather than a rounded value; and a figure
+                // the column cannot hold is wrong whatever the driver does
+                // about it.
+                $bounded = str_contains($rules, 'max:')
+                    || str_contains($rules, 'lte:')
+                    || str_contains($rules, 'lt:')
+                    || str_contains($rules, 'integer');
+
+                if ($spelled && $bounded) {
                     continue;
                 }
 
-                $unguarded[] = basename($relative).' :: '.$field;
+                $unguarded[] = basename($relative).' :: '.$field
+                    .' ('.(! $spelled ? 'no shape guard' : 'no magnitude bound').')';
             }
         }
 
         $this->assertSame(
             [],
             $unguarded,
-            'These fields validate with `numeric` alone. `numeric` accepts 1e3, 0x1A, INF and NAN; '
-                .'bcmath and the decimal casts accept none of them, so the door answers a 500 or '
-                ."stores a number nobody typed. Add `new PlainDecimal`:\n  ".implode("\n  ", $unguarded),
+            'Every numeric field on these doors needs BOTH guards. `new PlainDecimal` for the SHAPE '
+                .'— `numeric` accepts 1e3, 0x1A, INF and NAN and bcmath accepts none of them. And '
+                .'`max:` for the MAGNITUDE — a figure wider than the column cannot be stored at '
+                ."all, and live MySQL is strict about saying so:\n  ".implode("\n  ", $unguarded),
         );
     }
 }

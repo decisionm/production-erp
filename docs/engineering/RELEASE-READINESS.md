@@ -645,3 +645,69 @@ consumption rows: **0**. FC-01 and FC-06 hold; FC-03 now holds on the return doo
   one of those doors.
 - No service-layer unit guard; no DOM in the frontend suite, so the GRN draft-restore
   machinery remains inspection-only.
+
+## The eighth round — two PASSes, and the follow-ups closed anyway
+
+**Both halves PASS.** The first double-PASS of the series, and the evidence is the kind that
+is hard to argue with rather than the kind that is merely green.
+
+The escape hatch — the riskiest thing round seven added, because "exactly equals the
+outstanding balance" is a comparison and comparisons at four decimal places are where abuse
+lives — held against every attack: rounding at 4dp **truncated** rather than over-moving,
+off-by-one refused, negative outstanding refused twice over, duplicate line ids rolled the
+whole transaction back, zero and malformed spellings refused with no 500s. The reason it
+holds is worth keeping: `StoreIssueService` re-reads `quantityOutstanding()` under
+`lockForUpdate()` with **the same `bcsub(issued, returned, 4)` arithmetic the validator
+uses**, so there is no second definition to drift — which is the failure mode that produced
+five of this branch's eight blocking findings.
+
+The both-units matrix is clean across 28 probes; the gate is clean across 7 logins × 3 verbs
+× 3 targets with byte-identical bodies and the draft surviving every refusal; and rounds one
+to seven were re-probed rather than re-read.
+
+### The follow-ups they named, all closed
+
+- **The structural test was "false as written" AGAIN.** Two classes the same commit guarded
+  — `MrpNetRequirementsRequest` and `LoadFactoryDayBinBagRequest` — were not in its `DOORS`
+  list, so stripping their guards left it green. The same defect the test exists to prevent,
+  inside the test. Both added; the regex now also sees pipe-string rules and arrays holding
+  a `Rule::` object.
+- **The magnitude class.** `PlainDecimal` closes the SHAPE (`1e3`, `INF`) and says nothing
+  about SIZE. A 14-digit quantity — what a held-down key on a number input produces, well
+  below the 1e21 where `JSON.stringify` switches to exponent form — cleared every guarded
+  door with a 201 and landed in a `decimal(15,4)` column that holds eleven integer digits.
+  Live MySQL runs strict, so that is an error rather than a rounded value; and **a figure
+  the column cannot hold is wrong whatever the driver does about it**, which is why this was
+  fixed on reasoning that does not depend on the MySQL leg the reviewer could not run. 26
+  fields bounded, and the test now demands BOTH guards — it immediately caught a
+  material-request field that had a shape guard and no bound.
+- **A flaky FC-06 pin.** `test_the_issue_never_shows_a_rate_or_an_amount_to_a_store_reader`
+  searched the encoded JSON for the substring `rate`, which matches a Faker-generated name —
+  "Monserrate". It reads keys and values now. **A guard that fails at random is worse than
+  no guard**: it teaches people to re-run it rather than read it.
+- **The return modal rounded its input to a whole number**, which made the escape hatch
+  untypable in exactly the case it exists for — a legacy fractional quantity standing on the
+  floor against a counted line. It now takes decimals when the outstanding balance is
+  itself fractional.
+
+### Still recorded, still not fixed
+
+The ~100 unguarded numeric fields outside this workflow; `SubstituteBindings` running before
+`EnsureModulePermission` repo-wide (every `module:`-gated bound route is an existence oracle
+for any authenticated user — a global middleware-priority change and an owner-visible
+decision); `PlainDecimal` refusing a JSON float that stringifies to exponent form; the
+boolean-id coercion the framework applies to every id field; no service-layer unit guard; and
+no DOM in the frontend suite, so the GRN draft-restore machinery stays inspection-only.
+
+## Deployment is blocked, and not by the code
+
+GitHub Actions is **billing-blocked** on the repository account: every job on `0e55c06`
+failed in three seconds, on two attempts, with `The job was not started because recent
+account payments have failed or your spending limit needs to be increased`. The previous
+commit's MySQL leg passed in 7m28s, so this began between the two.
+
+Two of the owner's four deployment conditions therefore cannot be met: **CI cannot run**, and
+**the deploy itself is a GitHub Actions workflow**. Deploying by hand over SSH would skip the
+maintenance window, the backup and the migrate-step evidence — the protections that exist
+because a deploy once left the floor serving new code on an unmigrated schema. It was not
+done. The account needs Settings → Billing & plans.

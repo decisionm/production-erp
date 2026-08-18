@@ -35,7 +35,7 @@ class StoreStoreIssueReturnRequest extends FormRequest
             'notes' => ['nullable', 'string', 'max:500'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.store_issue_line_id' => ['required', 'integer', 'exists:store_issue_lines,id'],
-            'lines.*.quantity' => ['required', 'numeric', new PlainDecimal],
+            'lines.*.quantity' => ['required', 'numeric', 'max:99999999999', new PlainDecimal],
         ];
     }
 

@@ -28,7 +28,7 @@ class StoreStoreIssueBagScanRequest extends FormRequest
     {
         return [
             'barcode' => ['required', 'string', 'max:255'],
-            'quantity_kg' => ['nullable', 'numeric', new PlainDecimal],
+            'quantity_kg' => ['nullable', 'numeric', 'max:99999999999', new PlainDecimal],
             'received_by' => ['nullable', 'integer', 'exists:users,id'],
             // NO `exists:` HERE, deliberately — the ownership check below
             // subsumes it and answers with ONE body. When both ran, a

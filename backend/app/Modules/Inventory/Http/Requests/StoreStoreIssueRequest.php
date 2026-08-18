@@ -78,7 +78,7 @@ class StoreStoreIssueRequest extends FormRequest
             // THREE LINES ABOVE THE ONE THAT CONVERGED, and it kept the old
             // spelling: `1e400` reached the decimal cast as a 500. The whole
             // point of PlainDecimal is that there is no second definition.
-            'lines.*.quantity_requested' => ['nullable', 'numeric', 'gt:0', new PlainDecimal],
+            'lines.*.quantity_requested' => ['nullable', 'numeric', 'gt:0', 'max:99999999999', new PlainDecimal],
             // The floor of the rule, applied to EVERY line. It was a bare
             // `exists:items,id`, which carried neither the soft-delete guard
             // the request side has always had nor anything else. A deleted
@@ -91,7 +91,7 @@ class StoreStoreIssueRequest extends FormRequest
             // attempt at this narrowed the rule to `-?\d+(\.\d+)?` and started
             // refusing three spellings the old code took happily. Widening a
             // refusal by accident is the failure mode here, not the 500.
-            'lines.*.quantity' => ['required', 'numeric', new PlainDecimal],
+            'lines.*.quantity' => ['required', 'numeric', 'max:99999999999', new PlainDecimal],
             'lines.*.uom' => ['nullable', 'string', 'max:16'],
             'lines.*.notes' => ['nullable', 'string', 'max:500'],
         ];

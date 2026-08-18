@@ -61,15 +61,15 @@ class StorePurchaseOrderRequest extends FormRequest
             'notes' => ['nullable', 'string'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.item_id' => ['required', 'integer', 'exists:items,id'],
-            'lines.*.quantity' => ['required', 'numeric', 'gt:0', new PlainDecimal],
-            'lines.*.unit_price' => ['required', 'numeric', 'min:0', new PlainDecimal],
+            'lines.*.quantity' => ['required', 'numeric', 'gt:0', 'max:99999999999', new PlainDecimal],
+            'lines.*.unit_price' => ['required', 'numeric', 'min:0', 'max:99999999999', new PlainDecimal],
             // A Tally-mirror order: Tally is the PO/schedule source of truth,
             // this row is its read-only reflection with the exact identities.
             'source' => ['sometimes', 'in:erp,tally'],
             'tally_order_no' => ['nullable', 'string', 'max:64', 'required_if:source,tally'],
             'lines.*.schedules' => ['sometimes', 'array'],
             'lines.*.schedules.*.due_date' => ['required_with:lines.*.schedules', 'date'],
-            'lines.*.schedules.*.quantity' => ['required_with:lines.*.schedules', 'numeric', 'gt:0', new PlainDecimal],
+            'lines.*.schedules.*.quantity' => ['required_with:lines.*.schedules', 'numeric', 'gt:0', 'max:99999999999', new PlainDecimal],
             'lines.*.schedules.*.tally_reference' => ['nullable', 'string', 'max:64'],
         ];
     }
