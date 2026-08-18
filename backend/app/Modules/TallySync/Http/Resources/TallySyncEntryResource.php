@@ -111,6 +111,13 @@ class TallySyncEntryResource extends JsonResource
             'business_date' => $classifier->businessDate($this->resource),
             'document_number' => $classifier->documentNumber($this->resource),
             'party' => $withholdsSupplier ? null : $classifier->party($this->resource),
+            // A withheld party says so beside the null — a bare null would
+            // read as "no party" (a production voucher has none; a Receipt
+            // Note has one this reader may not see). Files and clients key
+            // off this note, never off the null.
+            ...($withholdsSupplier && $classifier->party($this->resource) !== null ? [
+                'party_withheld' => 'The supplier\'s identity is withheld on this voucher — supplier identity is Owner/Accounts only (FC-06).',
+            ] : []),
             'item_summary' => $classifier->itemSummary($this->resource),
             'payload' => $mayReadPurchaseDetails
                 ? $this->payload

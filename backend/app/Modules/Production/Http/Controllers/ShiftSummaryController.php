@@ -3,11 +3,11 @@
 namespace App\Modules\Production\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Production\Http\Requests\ShiftSummaryReportRequest;
 use App\Modules\Production\Http\Requests\StoreShiftSummaryRequest;
 use App\Modules\Production\Http\Resources\ShiftSummaryResource;
 use App\Modules\Production\Services\ShiftSummaryService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 
 class ShiftSummaryController extends Controller
 {
@@ -20,15 +20,9 @@ class ShiftSummaryController extends Controller
         );
     }
 
-    public function report(Request $request): JsonResponse
+    public function report(ShiftSummaryReportRequest $request): JsonResponse
     {
-        $request->validate([
-            // Omitted shift_id means "every shift that ran this date" —
-            // the day-wide rollup.
-            'shift_id' => ['nullable', 'integer', 'exists:shifts,id'],
-            'production_date' => ['required', 'date'],
-        ]);
-
+        // Validated by the ONE grammar the shift_summary export shares.
         $shiftId = $request->query('shift_id') ? (int) $request->query('shift_id') : null;
 
         return response()->json([

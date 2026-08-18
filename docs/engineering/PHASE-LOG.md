@@ -634,3 +634,168 @@ Deployment state:   not deployed; stack #179 → … → #183 → #184; the
                     own release for snapshots to start arriving.
 Next phase:         4.5 — Download / Export Center (CEC slot BLOCKED)
 ```
+
+## PHASE 4.5 — Download / Export Center (first-class)
+
+```
+Phase:    4.5 — Download / Export Center (MASTER-PLAN P4.5-01..06)
+Status:   PASS WITH DEFERRED ITEMS
+Branch:   feat/phase-4.5-export-center (stacked on Phase 4 PR #184 → … → #179)
+Dates:    2026-08-17
+
+Goal:
+  One server-side export subsystem: every download is the SAME query the
+  list/report runs, with the SAME filters, for the SAME reader — never the
+  rows rendered in the browser; FC-06 on the file exactly as on the screen;
+  no silent caps; CEC visibly BLOCKED with the reason, never an invented
+  layout; every ask audited.
+
+What changed:
+  • Core/Exports: ExportKind (key · label · module · permissionAny ·
+    filterRules delegated to the list's own request · rowCap · status/
+    blockedReason · columns(reader) · rows(filters, reader) built THROUGH the
+    module's Resource · count), ExportRegistry (permission-filtered catalogue,
+    blocked kinds listed with their reason, filter schema derived from the
+    rules), CsvStreamer (BOM, CRLF, RFC 4180, the SAME formula guard as
+    frontend/src/lib/csv.ts, one row at a time, sha256 accumulated), ExportRun
+    (one row per POST — success, cap refusal, blocked), GET /exports · POST
+    /exports/{kind} · GET /exports/runs (own runs).
+  • DEVIATION FROM THE PLAN'S SHAPE, deliberate and stated: exports are
+    SYNCHRONOUS streamed CSV with a STATED row cap ("N rows match; the cap is
+    C — narrow the range", 422) because no queue worker or scheduler runs on
+    the host (QUEUE_CONNECTION=database exists, nothing consumes it; TECHNICAL-
+    DOCS §8 defers hosting). The enqueue/status/download shape stays the
+    target once a worker exists.
+  • Fourteen kinds: tally_sync_entries, tally_sync_history (details never
+    carry Tally's text), shift_summary (one row per shift with records + the
+    day), production_report (+ day_total as the screen), reconciliation_report,
+    traceability_report (blocked with its reason when the flag is off), cec
+    (BLOCKED — "CEC FORMAT = BLOCKED — SOURCE DOCUMENT REQUIRED"),
+    purchase_orders / purchase_order_lines / goods_receipts /
+    goods_receipt_lines (rates on the LINE kinds iff the line resource's own
+    showsCost() says so — the same static both call), sales_orders /
+    deliveries / invoices (off the same builders as their lists). PO and GRN
+    lists gained the Sales filter grammar (backward compatible).
+  • FC-06 on files: columns are the same for every reader; where the screen
+    withholds a cell the file reads "withheld (FC-06)" (the resource now says
+    party_withheld beside the null as it did for error_withheld); a column
+    whose key the resource omits for this reader (rate) is ABSENT from the
+    file; production reports carry no rate/cost/amount/party (pinned).
+  • Frontend: /exports "Downloads" (any authenticated user; the catalogue
+    filters), cards per kind from the catalogue with a form generated from the
+    server's filter schema, Download → POST → blob saved under the server's
+    filename, the CEC card disabled with the reason verbatim, Recent downloads,
+    the server's own sentence on cap/blocked/403; the three client-side CSV
+    buttons on the production Reports page now POST the report's own filters
+    to the Center; the client-side CSV builder is gone.
+
+Files/modules:
+  Core (Exports/*, Models/ExportRun, Services/ExportService, Providers/
+  ExportServiceProvider, Http Export*), config/exports.php, migration
+  2026_08_17_120000_create_export_runs_table · TallySync/Exports ×2 +
+  QueryService cursor/count/history · Production/Exports ×6 + ShiftSummary
+  Service::shiftsWithRecordsOn · Procurement (Exports ×4, List*Requests,
+  ProcurementDocumentQuery, services paginate/cursor/count, controllers,
+  *LineResource::showsCost) · Sales/Exports ×3 + services cursor/count ·
+  frontend features/exports/*, lib/csv.ts, production/pages/ReportsPage.tsx,
+  App.tsx, AppLayout.tsx · phpunit.xml memory_limit 512M · tests: Core/
+  ExportCenterTest, Unit/Core/CsvStreamerTest, TallySync/TallySyncEntries
+  ExportTest + TallySyncHistoryExportTest, Production/ProductionExportsTest,
+  Procurement/ProcurementListFiltersTest + ProcurementExportsTest,
+  Sales/SalesExportsTest, frontend exports/filters.test.ts
+
+Migrations:       2026_08_17_120000_create_export_runs_table (additive)
+Tests before:     1,276 / 9,429 (backend) · 127 (frontend)
+Tests after:      1,352 / 11,879 (backend, +76) · 143 (frontend, +16)
+                  agent untouched · pint/typecheck/build clean · knowledge sound
+
+Sonnet first gate:   PASS_WITH_DEFERRED (P2: a reviewer's scratch tests in the
+                     working tree — removed; P3s: report-button label wording,
+                     double report compute, amount rounding vs the screen,
+                     boolean form control tri-state, questions not in the Q list)
+Findings (adversarial: Opus FC-06/rules PASS_WITH_DEFERRED · Fable correctness
+PASS; no P1):
+  P2  (Opus) shift_summary hand-copied its filter grammar (the ONE kind of 14
+      that did) — "never a second grammar" unguarded. FIXED: a
+      ShiftSummaryReportRequest read by BOTH ShiftSummaryController::report and
+      the export kind.
+  P2  (Opus) the Phase 4.5 log entry tripped scripts/factory-knowledge/check.sh:
+      "RFC 4180" written with a hyphen matched the validator's unanchored FC
+      pattern as a phantom constitution reference (the digits 41). FIXED both
+      ways — "RFC 4180" in the docs/tests and a word-anchored regex in
+      validate.py; check.sh exit 0.
+  P3  a blocked kind was validated before it was refused (a bad body → 422,
+      not the 409 reason) → blocked kinds now answer their reason first
+      (ExportRequest::rules() → [] when blocked; test updated).
+  P3  the report kinds computed the report twice (count + rows) → memoised per
+      run (ExportService clones the kind per run so the memo dies with it).
+  P3  CsvStreamer docblocks cited the deleted client-side csv.ts as the
+      byte-for-byte authority → reworded: ported from the retired builder;
+      CsvStreamerTest is the authority.
+  P3  traceability export 409-with-reason vs the route's 404 when the flag is
+      off → recorded as deliberate in the class docblock.
+  P3  kinds order on the page (Tally first) → Production, Tally, Sales,
+      Procurement.
+  P3  (recorded) 403/404 write no ExportRun — right ("every AUTHORISED POST is
+      audited"); mid-stream abort leaves completed=false/null reason and the
+      page says "Not completed" — a trailer line in the file is a later touch;
+      GRN export eager-load set is the list's (bounded by cap and per_page
+      1000) — a lighter export profile is a later touch; instants in files
+      are the resource's UTC ISO strings while the filename is factory time —
+      documented, a rendering decision for later; PO/GRN per_page now 422
+      outside 1..1000 (was clamped) — no frontend caller affected, external
+      clients note; line `amount` bcmath half-up vs the screen's float
+      toFixed(2) — the implementers' listed rounding question stands.
+Fixes:               on the branch after the gate (this commit); suites re-run
+                     green: 1,352 / 11,879 · 143 vitest · knowledge exit 0.
+Sonnet final gate:   not re-run — no P1 was raised; the P2s are a grammar
+                     delegation and a docs regex, both verified by the suite
+                     and check.sh (recorded honestly here).
+Independent review:  Opus PASS_WITH_DEFERRED · Fable PASS.
+
+API proof (dev API, Administrator):
+  GET /exports → 14 kinds with module/status/cap/filter schema; cec status
+  blocked with the exact reason. As the tally-sync-only login the catalogue is
+  [tally_sync_entries, tally_sync_history] only. POST sales_orders → 200
+  text/csv, filename sales_orders-20260817-1101.csv (factory clock), header
+  id,document_number,status,customer_code,… 2 rows; purchase_order_lines →
+  unit_price + amount present for the Administrator (finance standing);
+  goods_receipt_lines → unit_cost + amount; shift_summary(2026-08-01) → the
+  day row; production_report → header only (no rows that day); tally_sync_
+  history → 10 event rows, details JSON without error text; cec → 409
+  {"message":"CEC FORMAT = BLOCKED — SOURCE DOCUMENT REQUIRED","kind":"cec"};
+  unknown kind → 404; GET /exports/runs → the caller's runs incl. the CEC
+  refusal (completed false, reason) and each success (row_count, file_name).
+
+Browser proof (Chrome MCP, vite dev, Administrator):
+  /exports renders "Downloads" with the honesty line, cards grouped by
+  module with generated forms (screenshot-1786944733970-17.jpg); the CEC card
+  shows the warning "CEC FORMAT = BLOCKED — SOURCE DOCUMENT REQUIRED" with a
+  DISABLED Download button (screenshot-1786944756026-18.jpg); clicking
+  Download on Sales orders POSTs and saves sales_orders-20260817-1103.csv
+  (captured anchor download name); Recent downloads refreshes to show the
+  completed run (2 rows) beside the CEC refusal with its reason.
+
+Data/transaction proof:
+  Read-only everywhere except export_runs (audit rows). Nothing that reaches
+  Tally changed. No stock change. Migration additive.
+
+Security proof:
+  Catalogue permission-filtered (tests); 403 on POST without the kind's
+  permission; runs are the caller's own; FC-06 per reader on tally, PO/GRN
+  line and production files (tests); no hardcoded server sentence in the
+  frontend.
+
+Deferred items:
+  • Shift KPI sub-tables (items manufactured, downtime, mould changes, power
+    cuts, stock counts) as their own kinds; an all-zero row for a shift with
+    nothing recorded (a question, listed).
+  • The plan's enqueue/status shape once a worker exists.
+  • traceability_report supplier_lot_no for production.view readers inherits
+    the screen (a question, listed).
+
+Owner-gated items:  CEC sample/format authority (HELD) — the slot ships blocked.
+PR:                 #185 (base: feat/phase-4-agent-xml-snapshot → #184 → … → #179)
+Deployment state:   not deployed; stack #179 → … → #184 → #185
+Next phase:         5 — Product / SKU configuration (operator workflow, first slice)
+```

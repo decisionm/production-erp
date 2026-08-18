@@ -11,6 +11,7 @@ use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\ShiftStockCount;
 use App\Modules\Production\Models\ShiftSummary;
+use Illuminate\Database\Eloquent\Collection;
 
 /**
  * The Shift KPI Summary is a computed rollup of the Production Report and
@@ -62,6 +63,49 @@ class ShiftSummaryService
             ->where('shift_id', $shiftId)
             ->whereDate('production_date', $productionDate)
             ->first();
+    }
+
+    /**
+     * The shifts with ANYTHING recorded on this production date — a summary
+     * row, a batch, a downtime / mold-change / power-interruption log or a
+     * stock count: the same six tables report() reads — in the shift
+     * picker's order (start_time, then id), deactivated and deleted shifts
+     * included: an old date's records sit on the shifts that ran it, and
+     * report($shiftId, $date) answers for any of them. The Export Center's
+     * shift_summary kind reads this to break the day-wide rollup out one
+     * shift at a time (ShiftSummaryExport); nothing on a screen calls it.
+     * A shift with nothing recorded is not listed — its report would be
+     * all zeros, and the day row already says the day.
+     *
+     * @return Collection<int, Shift>
+     */
+    public function shiftsWithRecordsOn(string $productionDate): Collection
+    {
+        $ids = collect([
+            ShiftSummary::class,
+            ShiftProductionEntry::class,
+            MachineDowntimeLog::class,
+            MoldChangeLog::class,
+            PowerInterruptionLog::class,
+            ShiftStockCount::class,
+        ])
+            ->flatMap(fn (string $model) => $model::query()
+                ->whereDate('production_date', $productionDate)
+                ->distinct()
+                ->pluck('shift_id'))
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($ids->isEmpty()) {
+            return new Collection;
+        }
+
+        return Shift::withTrashed()
+            ->whereIn('id', $ids)
+            ->orderBy('start_time')
+            ->orderBy('id')
+            ->get();
     }
 
     /**

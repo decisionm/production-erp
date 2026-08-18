@@ -6,6 +6,7 @@ use App\Modules\Compliance\Http\Controllers\GstRegistrationController;
 use App\Modules\Compliance\Http\Controllers\GstReportController;
 use App\Modules\Core\Http\Controllers\AuthController;
 use App\Modules\Core\Http\Controllers\DashboardController;
+use App\Modules\Core\Http\Controllers\ExportController;
 use App\Modules\Core\Http\Controllers\PermissionController;
 use App\Modules\Core\Http\Controllers\RoleController;
 use App\Modules\Core\Http\Controllers\UserController;
@@ -126,6 +127,15 @@ Route::prefix('v1')->group(function () {
         Route::post('/auth/change-password', [AuthController::class, 'changePassword']);
 
         Route::get('dashboard/summary', [DashboardController::class, 'summary']);
+
+        // The Download / Export Center (Phase 4.5). No module: middleware —
+        // any authenticated user may ask; each KIND carries its own
+        // permissionAny(), judged by the catalogue and by ExportRequest.
+        // `runs` is registered ahead of `{kind}` so the literal segment can
+        // never be read as a kind.
+        Route::get('exports', [ExportController::class, 'catalogue']);
+        Route::get('exports/runs', [ExportController::class, 'runs']);
+        Route::post('exports/{kind}', [ExportController::class, 'run']);
 
         Route::middleware('module:users')->group(function () {
             Route::apiResource('users', UserController::class)->only(['index', 'store', 'update']);

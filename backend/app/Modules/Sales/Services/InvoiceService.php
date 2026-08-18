@@ -11,6 +11,7 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\LazyCollection;
 
 /**
  * `InvoiceStatus::Paid` is deliberately NOT wired anywhere in this service:
@@ -23,6 +24,9 @@ class InvoiceService
 {
     /** Loaded on every invoice the service hands back, so the resource never lazy-loads. */
     private const WITH = ['lines.item', 'customer', 'salesOrder'];
+
+    /** How many invoices cursor() reads — and decorates — per query. */
+    private const EXPORT_CHUNK = 500;
 
     public function __construct(
         private readonly SalesDocumentQuery $query,
@@ -39,15 +43,44 @@ class InvoiceService
      */
     public function paginate(int $perPage = 20, array $filters = []): LengthAwarePaginator
     {
-        $query = Invoice::query()->with(self::WITH);
-
-        $this->applyFilters($query, $filters);
-        $this->query->applySort($query, $filters['sort'] ?? null, ['invoice_date']);
-
-        $page = $query->paginate($perPage)->withQueryString();
+        $page = $this->listQuery($filters)->paginate($perPage)->withQueryString();
         $this->trace->decorateInvoices($page->getCollection());
 
         return $page;
+    }
+
+    /**
+     * Every matching invoice, in the list's order, one at a time — the
+     * Export Center's read (InvoicesExport, Phase 4.5): the SAME filters and
+     * the SAME ordering as paginate(), off the same builder, each chunk
+     * stamped with its Sales TallyLink exactly as a page is (one query per
+     * chunk, never per row). Builder::lazy, not Builder::cursor(): cursor()
+     * skips the eager loads the resource prints.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return LazyCollection<int, Invoice>
+     */
+    public function cursor(array $filters = []): LazyCollection
+    {
+        return $this->listQuery($filters)
+            ->lazy(self::EXPORT_CHUNK)
+            ->chunk(self::EXPORT_CHUNK)
+            ->flatMap(function (LazyCollection $chunk): LazyCollection {
+                $this->trace->decorateInvoices($chunk);
+
+                return $chunk;
+            });
+    }
+
+    /**
+     * How many invoices the list would carry — one COUNT over the filtered
+     * query (the export's cap check; also the list's meta.total).
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    public function count(array $filters = []): int
+    {
+        return $this->filtered($filters)->count();
     }
 
     /**
@@ -151,6 +184,35 @@ class InvoiceService
         // Decorated like a list row: the Sales entry the model event just
         // queued (TallySyncEventServiceProvider) is already on the response.
         return $this->decorate($invoice);
+    }
+
+    /**
+     * The list's builder: every filter applied, the relations the resource
+     * prints, then the list's order — what paginate() pages and cursor()
+     * streams (both decorate afterwards).
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function listQuery(array $filters): Builder
+    {
+        $query = $this->filtered($filters)->with(self::WITH);
+        $this->query->applySort($query, $filters['sort'] ?? null, ['invoice_date']);
+
+        return $query;
+    }
+
+    /**
+     * The filtered invoices, nothing loaded and nothing ordered — the one
+     * builder listQuery() and count() both start from.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function filtered(array $filters): Builder
+    {
+        $query = Invoice::query();
+        $this->applyFilters($query, $filters);
+
+        return $query;
     }
 
     /**

@@ -14,6 +14,7 @@ use App\Modules\Sales\Models\SalesOrder;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\LazyCollection;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -26,6 +27,9 @@ class DeliveryService
 {
     /** Loaded on every delivery the service hands back, so the resource never lazy-loads. */
     private const WITH = ['lines.item', 'warehouse', 'salesOrder.customer'];
+
+    /** How many deliveries cursor() reads — and decorates — per query. */
+    private const EXPORT_CHUNK = 500;
 
     public function __construct(
         private readonly StockMovementService $stock,
@@ -44,15 +48,44 @@ class DeliveryService
      */
     public function paginate(int $perPage = 20, array $filters = []): LengthAwarePaginator
     {
-        $query = Delivery::query()->with(self::WITH);
-
-        $this->applyFilters($query, $filters);
-        $this->query->applySort($query, $filters['sort'] ?? null, ['delivered_date']);
-
-        $page = $query->paginate($perPage)->withQueryString();
+        $page = $this->listQuery($filters)->paginate($perPage)->withQueryString();
         $this->trace->decorateDeliveries($page->getCollection());
 
         return $page;
+    }
+
+    /**
+     * Every matching delivery, in the list's order, one at a time — the
+     * Export Center's read (DeliveriesExport, Phase 4.5): the SAME filters
+     * and the SAME ordering as paginate(), off the same builder, each chunk
+     * stamped with its Delivery Note TallyLink and carton count exactly as
+     * a page is (two queries per chunk, never per row). Builder::lazy, not
+     * Builder::cursor(): cursor() skips the eager loads the resource prints.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return LazyCollection<int, Delivery>
+     */
+    public function cursor(array $filters = []): LazyCollection
+    {
+        return $this->listQuery($filters)
+            ->lazy(self::EXPORT_CHUNK)
+            ->chunk(self::EXPORT_CHUNK)
+            ->flatMap(function (LazyCollection $chunk): LazyCollection {
+                $this->trace->decorateDeliveries($chunk);
+
+                return $chunk;
+            });
+    }
+
+    /**
+     * How many deliveries the list would carry — one COUNT over the
+     * filtered query (the export's cap check; also the list's meta.total).
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    public function count(array $filters = []): int
+    {
+        return $this->filtered($filters)->count();
     }
 
     /**
@@ -153,6 +186,35 @@ class DeliveryService
             // queued is already visible on the dispatch response.
             return $this->decorate($delivery);
         });
+    }
+
+    /**
+     * The list's builder: every filter applied, the relations the resource
+     * prints, then the list's order — what paginate() pages and cursor()
+     * streams (both decorate afterwards).
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function listQuery(array $filters): Builder
+    {
+        $query = $this->filtered($filters)->with(self::WITH);
+        $this->query->applySort($query, $filters['sort'] ?? null, ['delivered_date']);
+
+        return $query;
+    }
+
+    /**
+     * The filtered deliveries, nothing loaded and nothing ordered — the one
+     * builder listQuery() and count() both start from.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function filtered(array $filters): Builder
+    {
+        $query = Delivery::query();
+        $this->applyFilters($query, $filters);
+
+        return $query;
     }
 
     /**

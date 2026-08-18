@@ -18,6 +18,14 @@
         </include>
     </source>
     <php>
+        <!-- The suite boots ~1,300 Laravel apps in one process and peaks at
+             ~120 MB real (~129 MB allocated) — right at PHP's default 128M,
+             where a run dies with "Allowed memory size exhausted" in whichever
+             test happens to boot next (seen twice at 1,318 tests, 17-Aug-2026).
+             Raised so the whole suite is one deterministic run; the growth
+             itself is the ordinary per-app-boot retention, not a leak in any
+             one module. -->
+        <ini name="memory_limit" value="512M"/>
         <env name="APP_ENV" value="testing"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>

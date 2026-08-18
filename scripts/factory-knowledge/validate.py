@@ -321,7 +321,8 @@ def validate_prose_references(root: Path, decisions: dict[str, dict], errors: li
         for rid in set(re.findall(r"DEC-\d{8}-\d{3}", text)):
             if rid not in known_dec:
                 errors.append(f"{path.name}: references {rid}, which does not exist in decisions/")
-        for fc in set(re.findall(r"FC-\d{2}", text)):
+        # Word-anchored: "RFC-4180" is not a reference to FC-41.
+        for fc in set(re.findall(r"\bFC-\d{2}", text)):
             if fc not in known_fc:
                 errors.append(f"{path.name}: references {fc}, which is not a heading in "
                               "FACTORY-CONSTITUTION.md")
