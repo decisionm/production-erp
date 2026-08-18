@@ -207,7 +207,7 @@ Same method, same isolation: `php artisan serve` on `:8012` from this worktree, 
 | **Before**, from a build under my own control (main's page, built and served on the same port) | No production date, no counts, a `size="large"` radio bar, and a red-outlined `Report Down` as the FIRST button on all eleven cards — **no Start Batch button at all**. Every claim in §1–§2 confirmed against a render, not from reading. | `before-desktop.jpg` |
 | After — desktop 1440, all Idle | Date + shift stated; tiles 0 / 11 / 0 / 0; one labelled `Start Batch` per card; `Mold Change` and `Report Down` secondary, on one line. | `after-desktop-all-idle.jpg` |
 | After — desktop, mixed Idle + Down | Reported a breakdown on MC-02 → red rail, `⚠ Down` tag, problem text, `Since 17:00`, `Close Breakdown` as a red primary, `Report Down` correctly absent. Tiles moved 0/11/0/0 → 0/10/**1**/0, tracking the grid exactly. Breakdown closed again afterwards; the fixture ends where it started. | `after-desktop-mixed-state.jpg` |
-| Tablet 834 (wide branch — the breakpoint is 767) | 3 cards per row, tiles in one row, the table kept. The secondary row wrapped onto two lines at this width, which is why the buttons' side padding was trimmed to 8; re-verified on one line after. | `after-tablet-834.jpg` |
+| Tablet 834 (wide branch — the breakpoint is 767) | 3 cards per row, tiles in one row, the table kept. The secondary row wrapped onto two lines at this width, which is why the buttons' side padding was trimmed to 8. **Re-shot against the final build** — tablet is the only width that discriminates the padding change, since 1440 fitted one line either way. | `after-tablet-834.jpg` |
 | Narrow branch | `Segmented` in `block` mode, tiles wrapped, one card per row, secondary row on one line. **At 500px, not 390** — this OS refuses to size a Chrome window below 500. 500 is well inside the `max-width: 767px` branch, so the branch is exercised; the exact 390 layout is not separately proven. | `after-mobile-narrow.jpg` |
 | Keyboard — reach | Tabbing from the shift `Segmented` walks into the grid and reaches `Start Batch`, `Mold Change` and `Report Down` in DOM order. | `after-desktop-keyboard-focus.jpg` |
 | Keyboard — visible focus | `:focus-visible` matches on the focused control and the ring is visible in the screenshot. | same |
@@ -237,6 +237,23 @@ what a reviewer should NOT read as covered:
   pass touches a permission check — every gate (`traceabilityEnabled`,
   `canAmendCompletion`, the `Cancel Batch` predicate) is preserved verbatim — but the
   other roles were not walked through.
+- **The `Tooltip` now wrapping the ordinary `Open` control.** It renders inside a
+  `Table` cell and inside the earlier-correctable cards, neither of which this fixture
+  can produce. Low risk, and stated rather than assumed.
+
+### 7.2 The one change that reaches outside Shift Production
+
+Everything else in this PR is confined to `ShiftProductionEntryPage.tsx` and modules
+only it imports. **`frontend/src/index.css` is app-global**, and gains two rules:
+
+- `.floor-attention-chip:focus-visible` — scoped by class to this page's one bare
+  anchor, so it can affect nothing else.
+- `@media (prefers-reduced-motion: reduce)` — sets `scroll-behavior: auto` on `html`
+  and removes the transition from `.ant-card-hoverable`. **This applies to every
+  hoverable card in the application, not only the floor.** That is deliberate — a
+  device asking for less motion is asking globally, and honouring it on one page only
+  would be the odd behaviour — but it is the single edit here a reviewer should weigh
+  outside the scope of Shift Production, so it is named rather than left to be found.
 
 **Not verified visually, and why:** the **Running** and **Mold Change** cards. The fixture
 database holds no in-progress batch and no molds. Producing a Running card would have
