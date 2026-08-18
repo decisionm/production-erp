@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, Drawer, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
@@ -18,6 +18,7 @@ const itemSchema = z.object({
     reorder_level: z.number().min(0).optional(),
     nominal_weight_grams: z.number().gt(0).optional(),
     tracking_type: z.enum(['none', 'batch', 'serial']).optional(),
+    is_production_input: z.boolean().optional(),
 });
 
 type ItemFormValues = z.infer<typeof itemSchema>;
@@ -54,7 +55,7 @@ export default function ItemsPage() {
     const { control, handleSubmit, reset, formState: { errors } } = useForm<ItemFormValues>({
         resolver: zodResolver(itemSchema),
         defaultValues: {
-            sku: '', name: '', uom: 'PCS', hsn_sac_code: '', reorder_level: 0, nominal_weight_grams: undefined, tracking_type: 'none',
+            sku: '', name: '', uom: 'PCS', hsn_sac_code: '', reorder_level: 0, nominal_weight_grams: undefined, tracking_type: 'none', is_production_input: false,
         },
     });
 
@@ -135,6 +136,19 @@ export default function ItemsPage() {
                         render: (_: boolean, row) => <ConfigurationStatusTag entity="item" row={row} />,
                     },
                     {
+                        // The owner's switch, made visible. The eligibility
+                        // rule is backfilled from what the factory has
+                        // configured and actually used, and anything it could
+                        // not infer is left OFF rather than guessed at — so
+                        // the residue has to be readable and correctable here,
+                        // or "just switch it on" would not be true (Q56).
+                        title: 'Requestable',
+                        dataIndex: 'is_production_input',
+                        render: (yes: boolean) => (yes
+                            ? <Tag color="blue">Production material</Tag>
+                            : <Tag>Not requestable</Tag>),
+                    },
+                    {
                         title: 'Actions',
                         render: (_, row) => {
                             const edit = () => {
@@ -147,6 +161,7 @@ export default function ItemsPage() {
                                     reorder_level: Number(row.reorder_level),
                                     nominal_weight_grams: row.nominal_weight_grams ? Number(row.nominal_weight_grams) : undefined,
                                     tracking_type: row.tracking_type,
+                                    is_production_input: row.is_production_input,
                                 });
                             };
                             return (
@@ -285,6 +300,18 @@ export default function ItemsPage() {
                             name="tracking_type"
                             control={editControl}
                             render={({ field }) => <Select {...field} options={trackingTypeOptions} />}
+                        />
+                    </Form.Item>
+                    <Form.Item
+                        label="Requestable as a production material"
+                        help="When on, the floor may ask the store to issue this item. Finished goods and saleable products stay off."
+                    >
+                        <Controller
+                            name="is_production_input"
+                            control={editControl}
+                            render={({ field }) => (
+                                <Switch checked={field.value ?? false} onChange={field.onChange} />
+                            )}
                         />
                     </Form.Item>
                 </Form>

@@ -44,6 +44,11 @@ class ItemResource extends JsonResource
             'standard_cavities' => $this->standard_cavities,
             'tracking_type' => $this->tracking_type->value,
             'is_active' => $this->is_active,
+            // Whether the floor may ask the store for this item. It is a
+            // CONFIGURATION the owner controls, so it has to be visible and
+            // editable here — the eligibility rule is only honest if the
+            // residue it cannot infer can be corrected without a code change.
+            'is_production_input' => (bool) $this->is_production_input,
             // Tally provenance — the UI uses tally_stock_item_guid to mark
             // sku/name read-only for Tally-sourced items (§3 split-ownership).
             'tally_stock_item_guid' => $this->tally_stock_item_guid,

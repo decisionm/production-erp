@@ -81,9 +81,17 @@ return new class extends Migration
             return;
         }
 
-        foreach (array_chunk($ids, 500) as $chunk) {
-            DB::table('items')->whereIn('id', $chunk)->update(['is_production_input' => true]);
-        }
+        // ALL OR NOTHING. MySQL cannot roll back the ALTER TABLE in the
+        // migration before this one, but this one is pure DML and must not be
+        // able to leave HALF the master flagged: the request and issue paths
+        // both refuse on this column, so a partial backfill is a store that
+        // can hand over some materials and not others, with no way to tell
+        // which from the outside.
+        DB::transaction(function () use ($ids) {
+            foreach (array_chunk($ids, 500) as $chunk) {
+                DB::table('items')->whereIn('id', $chunk)->update(['is_production_input' => true]);
+            }
+        });
     }
 
     /**
