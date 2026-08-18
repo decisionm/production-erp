@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
     completedTodaySummary,
+    completedTodayUnits,
     floorStatusCounts,
     isRunningForOtherShift,
     machineFloorState,
@@ -171,5 +172,66 @@ describe('completedTodaySummary — sums of the server\'s own figures', () => {
 
         expect(summary.goodPieces).toBeNull();
         expect(summary.rejectPieces).toBeNull();
+    });
+});
+
+describe('floorStatusCounts — the KPI strip can never disagree with the grid', () => {
+    /**
+     * THE SANITY RULE THE WHOLE STRIP RESTS ON: every machine drawn as a card
+     * is counted into exactly one tile, and no machine is counted twice. If
+     * this ever fails, the tiles are telling the supervisor a different story
+     * about the same floor — which is worse than showing no tiles at all.
+     */
+    it('puts every machine in exactly one bucket, for every mix of states', () => {
+        const states: MachineFloorState[] = ['down', 'mold_change', 'running_other_shift', 'running', 'idle'];
+        // Every floor of up to three machines, over all five states.
+        const floors: MachineFloorState[][] = [[]];
+        for (let size = 1; size <= 3; size += 1) {
+            const previous = floors.filter((f) => f.length === size - 1);
+            for (const floor of previous) for (const state of states) floors.push([...floor, state]);
+        }
+
+        for (const floor of floors) {
+            const counts = floorStatusCounts(floor);
+            expect(counts.total).toBe(floor.length);
+            expect(counts.running + counts.idle + counts.down + counts.moldChange + counts.runningOtherShift).toBe(counts.total);
+        }
+    });
+});
+
+describe('completedTodayUnits — the unit is read off the rows, never assumed', () => {
+    /** The item master's own spelling, not a word this screen chose. */
+    const inUom = (uom: string | null) => entry({ item: { uom } } as never);
+
+    it('states the unit when every batch agrees on it', () => {
+        expect(completedTodayUnits([inUom('Nos.'), inUom('Nos.')])).toEqual({
+            uom: 'Nos.',
+            mixed: false,
+            uoms: ['Nos.'],
+        });
+    });
+
+    it('treats a spelling that differs only by case or padding as the same unit', () => {
+        const units = completedTodayUnits([inUom('Nos.'), inUom('  nos.  ')]);
+        expect(units.mixed).toBe(false);
+        // The FIRST spelling survives — it is how the item master writes it.
+        expect(units.uom).toBe('Nos.');
+    });
+
+    it('refuses to name one unit when the batches genuinely disagree', () => {
+        // `Nos.` and `pcs` may well be one unit to this factory, but that is
+        // the owner's call to record, not a display function's to assume. Two
+        // spellings read as two units, which withholds the total rather than
+        // labelling it with one row's word.
+        const units = completedTodayUnits([inUom('Nos.'), inUom('kg')]);
+        expect(units.mixed).toBe(true);
+        expect(units.uom).toBeNull();
+        expect(units.uoms).toEqual(['Nos.', 'kg']);
+    });
+
+    it('says nothing at all rather than guessing when no row carries a unit', () => {
+        for (const rows of [[], undefined, null, [inUom(null), inUom('   ')]]) {
+            expect(completedTodayUnits(rows)).toEqual({ uom: null, mixed: false, uoms: [] });
+        }
     });
 });

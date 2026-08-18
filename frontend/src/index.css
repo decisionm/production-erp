@@ -19,3 +19,33 @@ body,
         padding: 12px !important;
     }
 }
+
+/* Shift Floor (UX-SHIFT-FLOOR-2026-08-18).
+
+   The floor status strip's "Needs attention" chip is the one bare anchor on
+   that screen — every other control is an AntD component that brings its own
+   focus ring. A supervisor tabbing the page must be able to see where they
+   are, so it gets the same ring the design system draws, in the same token
+   colour, rather than relying on the browser's default outline which the CSS
+   reset flattens on a styled anchor.
+
+   :focus-visible, not :focus — a thumb tap must not leave a ring behind on a
+   shop-floor tablet. */
+.floor-attention-chip:focus-visible {
+    outline: 2px solid #1677ff;
+    outline-offset: 2px;
+    border-radius: 8px;
+}
+
+/* The card's own hover lift is the only other motion on the floor screen.
+   Honour a device that has asked for less of it — the scroll the chip starts
+   is guarded in the component, this covers the CSS half. */
+@media (prefers-reduced-motion: reduce) {
+    html {
+        scroll-behavior: auto;
+    }
+
+    .ant-card-hoverable {
+        transition: none;
+    }
+}

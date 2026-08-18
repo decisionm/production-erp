@@ -1,4 +1,11 @@
-import { PrinterOutlined } from '@ant-design/icons';
+import {
+    ExclamationCircleFilled,
+    MinusCircleOutlined,
+    PlayCircleFilled,
+    PrinterOutlined,
+    RetweetOutlined,
+    SwapOutlined,
+} from '@ant-design/icons';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Checkbox, Col, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, type InputRef, message, Modal, Radio, Row, Segmented, Select, Space, Table, Tag, TimePicker, Tooltip, Typography } from 'antd';
@@ -83,6 +90,7 @@ import { currentShift, justEndedShift, productionDateFor } from '@/features/prod
 import { correctionLists } from '@/features/production/correctionReads';
 import {
     completedTodaySummary,
+    completedTodayUnits,
     floorStatusCounts,
     isRunningForOtherShift,
     machineFloorState,
@@ -93,7 +101,7 @@ import { cavityPrefill } from '@/features/production/startBatchCavities';
 import { chosenStartVariant, mouldLabel, startBatchChoices, startBatchTallyIdentity } from '@/features/production/startBatchChoices';
 import { expectedOutput, netRunningHours } from '@/features/production/expectedOutput';
 import { roundPer, useProductionSettings } from '@/features/production/packing';
-import { itemLabel } from '@/lib/itemLabel';
+import { itemLabel, uomOf } from '@/lib/itemLabel';
 import { apiErrorParts } from '@/lib/apiError';
 import { showApiError } from '@/lib/showApiError';
 import {
@@ -1252,14 +1260,14 @@ const approvalColor: Record<ShiftProductionEntryStatus, string> = {
  * The hexes are the ones the cards already carried; only where they are spent
  * has changed.
  */
-const STATE_STYLE: Record<MachineFloorState, { accent: string; wash: string; label: string }> = {
-    down: { accent: '#ff4d4f', wash: '#fff1f0', label: 'Down' },
-    mold_change: { accent: '#faad14', wash: '#fffbe6', label: 'Mold change' },
+const STATE_STYLE: Record<MachineFloorState, { accent: string; wash: string; label: string; icon: ReactNode }> = {
+    down: { accent: '#ff4d4f', wash: '#fff1f0', label: 'Down', icon: <ExclamationCircleFilled /> },
+    mold_change: { accent: '#faad14', wash: '#fffbe6', label: 'Mold change', icon: <SwapOutlined /> },
     // A run that belongs to another shift takes its own muted gold, deliberately
     // a different tone from the mold-change amber it sits beside in the grid.
-    running_other_shift: { accent: '#d48806', wash: '#fffbe6', label: 'Not handed over' },
-    running: { accent: '#52c41a', wash: '#f6ffed', label: 'Running' },
-    idle: { accent: '#bfbfbf', wash: '#fafafa', label: 'Idle' },
+    running_other_shift: { accent: '#d48806', wash: '#fffbe6', label: 'Not handed over', icon: <RetweetOutlined /> },
+    running: { accent: '#52c41a', wash: '#f6ffed', label: 'Running', icon: <PlayCircleFilled /> },
+    idle: { accent: '#bfbfbf', wash: '#fafafa', label: 'Idle', icon: <MinusCircleOutlined /> },
 };
 
 const tabularNums = { fontVariantNumeric: 'tabular-nums' } as const;
@@ -1270,7 +1278,19 @@ const tabularNums = { fontVariantNumeric: 'tabular-nums' } as const;
  * and a tile that filtered the grid would be a second, competing way to answer
  * "what is on this machine".
  */
-function FloorStatTile({ count, label, accent, muted }: { count: number; label: string; accent: string; muted?: boolean }) {
+function FloorStatTile({
+    count,
+    label,
+    accent,
+    icon,
+    muted,
+}: {
+    count: number;
+    label: string;
+    accent: string;
+    icon?: ReactNode;
+    muted?: boolean;
+}) {
     return (
         <div
             style={{
@@ -1298,7 +1318,11 @@ function FloorStatTile({ count, label, accent, muted }: { count: number; label: 
             >
                 {count}
             </div>
+            {/* ICON + WORD + COLOUR, never colour alone: the rail on this tile
+                and the rail on the card share one accent, and a supervisor who
+                cannot separate the greens still reads the same state twice. */}
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {icon ? <span style={{ marginInlineEnd: 4 }}>{icon}</span> : null}
                 {label}
             </Typography.Text>
         </div>
@@ -2101,8 +2125,26 @@ export default function ShiftProductionEntryPage() {
      * and never "this shift".
      */
     const completedSummary = useMemo(() => completedTodaySummary(completedToday), [completedToday]);
-    /** Batches somebody has to act on — quality's returns plus the floor's own still-correctable ones. */
-    const needsAttentionCount = awaitingCorrection.length + correctableEarlier.length;
+    /**
+     * WHAT UNIT THOSE TOTALS ARE IN — read off the rows, never assumed. A total
+     * is labelled only when every batch in it agrees; when they do not, the
+     * quantity tiles are withheld rather than stated in a unit that is wrong for
+     * some of the rows they sum. See shiftFloorSummary.completedTodayUnits.
+     */
+    const completedUnits = useMemo(() => completedTodayUnits(completedToday), [completedToday]);
+    /**
+     * NEEDS ATTENTION IS AN EXCEPTION LIST, and only the server can prove an
+     * exception. This counts ONLY the batches quality has actually sent back —
+     * `isAwaitingCorrection` reads `correction.awaiting_correction` off the
+     * payload, so every entry here is a recorded server fact.
+     *
+     * The floor's own still-correctable batches deliberately do NOT count. They
+     * are ordinary history: nothing is wrong with them, nobody has asked for
+     * anything, and they are editable purely because quality has not signed yet.
+     * Filing them under "needs attention" is how an exception list stops meaning
+     * anything — so they sit under the day's work with an Open door instead.
+     */
+    const needsAttentionCount = awaitingCorrection.length;
 
     const startForm = useForm<StartBatchFormValues>({ resolver: zodResolver(startBatchSchema) });
     // The picked item's master record — drives the read-only "Product
@@ -2882,8 +2924,8 @@ export default function ShiftProductionEntryPage() {
             const material = items?.data.find((candidate) => candidate.id === itemId);
             return (
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    The day bin has no {material ? material.name : 'stock of this material'} recorded — load it in{' '}
-                    <Link to="/production/day-bin">Day Bin (factory)</Link> before completing.
+                    The common input has no {material ? material.name : 'stock of this material'} recorded — load it in{' '}
+                    <Link to="/production/day-bin">Common resin input</Link> before completing.
                 </Typography.Text>
             );
         }
@@ -3305,7 +3347,7 @@ export default function ShiftProductionEntryPage() {
         const fromRecipe = recipeItemIdsMatching(isResinItem);
         if (fromRecipe.length === 1) return { itemId: fromRecipe[0], reason: "from the product's recipe" };
         const inBin = binItemIdsMatching(isResinItem);
-        if (inBin.length === 1) return { itemId: inBin[0], reason: 'the only resin in the day bin' };
+        if (inBin.length === 1) return { itemId: inBin[0], reason: 'the only resin in the common input' };
         if (resinOptions.length === 1) return { itemId: resinOptions[0].value, reason: 'the only resin in the catalogue' };
         return NO_PICK;
     }, [resinSuggestion, recipeItemIdsMatching, binItemIdsMatching, resinOptions]);
@@ -3321,7 +3363,7 @@ export default function ShiftProductionEntryPage() {
         const byColour = suggestMasterbatchByColour(items?.data, completingColour);
         if (byColour.itemId !== null || byColour.reason !== null) return byColour;
         const inBin = binItemIdsMatching(isMasterbatchItem);
-        if (inBin.length === 1) return { itemId: inBin[0], reason: 'the only masterbatch in the day bin' };
+        if (inBin.length === 1) return { itemId: inBin[0], reason: 'the only masterbatch in the common input' };
         if (mbOptions.length === 1) return { itemId: mbOptions[0].value, reason: 'the only masterbatch in the catalogue' };
         return NO_PICK;
     }, [completingEntry, completingColour, mbSuggestion, items, binItemIdsMatching, mbOptions]);
@@ -3943,7 +3985,7 @@ export default function ShiftProductionEntryPage() {
     ): string | null => {
         if (!traceabilityEnabled || !entryDayBin?.has_movements || selectedItemId == null) return null;
         const other = entryDayBin.materials.find((m) => family(m.item) && m.item.id !== selectedItemId);
-        return other ? `the day bin also recorded ${other.item.name} on this batch — check what actually went in` : null;
+        return other ? `the common input also recorded ${other.item.name} on this batch — check what actually went in` : null;
     };
 
     const rowNote = (arithmetic: string | null, materialName: string | null, reason: string | null, mismatch: string | null): string | null => {
@@ -4363,16 +4405,26 @@ export default function ShiftProductionEntryPage() {
      */
     const correctionControlFor = (row: ShiftProductionEntry): ReactNode => {
         if (canAmendCompletion(row)) {
+            // ONE GATE, TWO FRAMINGS. `canAmendCompletion` is unchanged and is
+            // still the only thing that decides whether a door is offered — the
+            // server decides whether it opens. What changed is what the door
+            // SAYS: a batch quality sent back is an exception and keeps its
+            // primary/danger weight, while an ordinary editable batch is simply
+            // opened. "Edit figures" read like an instruction on every
+            // completed row; "Open" is the neutral door the brief asks for, and
+            // it leaves alarm colour for the rows that earned it.
             const sentBack = isAwaitingCorrection(row);
             return (
-                <Button
-                    size="small"
-                    type={sentBack ? 'primary' : 'default'}
-                    danger={sentBack}
-                    onClick={() => openAmendDrawer(row)}
-                >
-                    {sentBack ? 'Correct — sent back' : 'Edit figures'}
-                </Button>
+                <Tooltip title={sentBack ? undefined : 'Open this batch to correct its recorded figures.'}>
+                    <Button
+                        size="small"
+                        type={sentBack ? 'primary' : 'default'}
+                        danger={sentBack}
+                        onClick={() => openAmendDrawer(row)}
+                    >
+                        {sentBack ? 'Correct — sent back' : 'Open'}
+                    </Button>
+                </Tooltip>
             );
         }
 
@@ -5137,10 +5189,15 @@ export default function ShiftProductionEntryPage() {
                 Deliberately not clickable: these are statements about the grid
                 immediately below, not a second way to act on a machine. */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-                <FloorStatTile count={floorCounts.running} label="Running" accent={STATE_STYLE.running.accent} />
-                <FloorStatTile count={floorCounts.idle} label="Idle" accent={STATE_STYLE.idle.accent} muted />
-                <FloorStatTile count={floorCounts.down} label="Down" accent={STATE_STYLE.down.accent} />
-                <FloorStatTile count={floorCounts.moldChange} label="Mold change" accent={STATE_STYLE.mold_change.accent} />
+                <FloorStatTile count={floorCounts.running} label="Running" accent={STATE_STYLE.running.accent} icon={STATE_STYLE.running.icon} />
+                <FloorStatTile count={floorCounts.idle} label="Idle" accent={STATE_STYLE.idle.accent} icon={STATE_STYLE.idle.icon} muted />
+                <FloorStatTile count={floorCounts.down} label="Down" accent={STATE_STYLE.down.accent} icon={STATE_STYLE.down.icon} />
+                <FloorStatTile
+                    count={floorCounts.moldChange}
+                    label="Mold change"
+                    accent={STATE_STYLE.mold_change.accent}
+                    icon={STATE_STYLE.mold_change.icon}
+                />
                 {/* Only when there is one — a permanent zero here would train
                     the eye to skip the row that matters on the day it is not. */}
                 {floorCounts.runningOtherShift > 0 && (
@@ -5148,6 +5205,7 @@ export default function ShiftProductionEntryPage() {
                         count={floorCounts.runningOtherShift}
                         label="Not handed over"
                         accent={STATE_STYLE.running_other_shift.accent}
+                        icon={STATE_STYLE.running_other_shift.icon}
                     />
                 )}
                 {/* THE ANSWER TO MOVING "SENT BACK BY QUALITY" TO THE BOTTOM.
@@ -5159,9 +5217,22 @@ export default function ShiftProductionEntryPage() {
                 {needsAttentionCount > 0 && (
                     <a
                         href="#needs-attention"
+                        className="floor-attention-chip"
                         onClick={(e) => {
                             e.preventDefault();
-                            document.getElementById('needs-attention')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            document.getElementById('needs-attention')?.scrollIntoView({
+                                // The only motion this screen starts. A supervisor
+                                // who has asked their device for less of it gets a
+                                // jump instead of a glide; the destination is
+                                // identical either way.
+                                behavior:
+                                    typeof window !== 'undefined'
+                                    && typeof window.matchMedia === 'function'
+                                    && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+                                        ? 'auto'
+                                        : 'smooth',
+                                block: 'start',
+                            });
                         }}
                         style={{ flex: '1 1 148px', minWidth: 148, textDecoration: 'none' }}
                     >
@@ -5440,6 +5511,7 @@ export default function ShiftProductionEntryPage() {
                                                           ? 'success'
                                                           : undefined
                                             }
+                                            icon={style.icon}
                                             style={{ marginInlineEnd: 0 }}
                                         >
                                             {style.label}
@@ -5551,7 +5623,12 @@ export default function ShiftProductionEntryPage() {
                                                 Expected this shift
                                             </Typography.Text>
                                             <Typography.Text strong style={{ fontSize: 13, ...tabularNums }}>
-                                                ≈ {Math.round(liveExpected.pieces).toLocaleString('en-IN')} pcs
+                                                {/* The unit is the ITEM'S, read off its master
+                                                    record — this line used to print the literal
+                                                    "pcs" beside a figure the item master calls
+                                                    "Nos.". */}
+                                                ≈ {Math.round(liveExpected.pieces).toLocaleString('en-IN')}
+                                                {uomOf(running.item) ? ` ${uomOf(running.item)}` : ''}
                                                 {liveExpected.pouches !== null ? ` · ${liveExpected.pouches} pouches` : ''}
                                                 {liveExpected.boxes !== null ? ` · ${liveExpected.boxes} boxes` : ''}
                                             </Typography.Text>
@@ -5576,6 +5653,13 @@ export default function ShiftProductionEntryPage() {
                                     {primaryLabel && (
                                         <Button
                                             block
+                                            // 40px, from the design system's own
+                                            // large size rather than a hand-set
+                                            // height. This is pressed with a
+                                            // gloved thumb on a tablet clamped to
+                                            // a machine, and 32px is a desk
+                                            // target.
+                                            size="large"
                                             type="primary"
                                             danger={state === 'down'}
                                             onClick={(e) => {
@@ -5614,6 +5698,7 @@ export default function ShiftProductionEntryPage() {
                                                     // machine becomes this shift's, so it
                                                     // keeps primary weight there and only
                                                     // there.
+                                                    size="large"
                                                     type={runningForOtherShift ? 'primary' : 'text'}
                                                     onClick={(e) => {
                                                         e.stopPropagation();
@@ -5625,6 +5710,7 @@ export default function ShiftProductionEntryPage() {
                                             )}
                                             {!running && (
                                                 <Button
+                                                    size="large"
                                                     type="text"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
@@ -5658,6 +5744,7 @@ export default function ShiftProductionEntryPage() {
                                                 this screen states that rule. */}
                                             {running && !running.quality?.checked && running.status === 'pending' && (
                                                 <Button
+                                                    size="large"
                                                     type="text"
                                                     danger
                                                     onClick={(e) => {
@@ -5686,6 +5773,7 @@ export default function ShiftProductionEntryPage() {
                                                 supervisor standing in front of it reports it
                                                 whichever shift the run is filed under. */}
                                             <Button
+                                                size="large"
                                                 type="text"
                                                 danger
                                                 style={{ marginInlineStart: 'auto' }}
@@ -5722,14 +5810,16 @@ export default function ShiftProductionEntryPage() {
                         // input point. Ten identical buttons on ten cards would
                         // be ten doors to one room, and would suggest the room
                         // was ten rooms.
-                        <Button type="primary" onClick={() => openLoadMaterial()}>
+                        <Button size="large" type="primary" onClick={() => openLoadMaterial()}>
                             Load Material
                         </Button>
                     )}
-                    <Button onClick={() => setPowerInterruptionOpen(true)}>
+                    <Button size="large" onClick={() => setPowerInterruptionOpen(true)}>
                         Log Power Interruption{powerInterruptionsToday.length > 0 ? ` (${powerInterruptionsToday.length} today)` : ''}
                     </Button>
-                    <Button onClick={() => setStockCountOpen(true)}>Log Stock Count</Button>
+                    <Button size="large" onClick={() => setStockCountOpen(true)}>
+                        Log Stock Count
+                    </Button>
                 </div>
             </Card>
 
@@ -5751,8 +5841,43 @@ export default function ShiftProductionEntryPage() {
             {completedSummary.batches > 0 && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
                     <FigureTile label="Batches" value={String(completedSummary.batches)} />
-                    <FigureTile label="Good" value={fmtPieces(completedSummary.goodPieces)} suffix="pcs" />
-                    <FigureTile label="Expected" value={fmtPieces(completedSummary.expectedPieces)} suffix="pcs" />
+                    {/* THE UNIT IS READ, NOT ASSUMED. These tiles sum
+                        `quantity_produced` across every product completed today,
+                        and that column is denominated in each finished item's own
+                        UOM — the completion posts it to stock unconverted. This
+                        factory's items say `Nos.`; the screen used to print the
+                        literal `pcs`. Harmless there, wrong the day a product is
+                        denominated in anything else, and a total is the one place
+                        a wrong unit cannot be spotted from the number.
+
+                        So when the day's batches disagree about their unit, the
+                        quantity tiles are WITHHELD rather than labelled with one
+                        row's unit or with none: an unlabelled sum of two units is
+                        a wrong figure wearing a careful face. The batch count and
+                        the table below survive, and the table states each row's
+                        own unit. */}
+                    {completedUnits.mixed ? (
+                        <div
+                            style={{
+                                flex: '1 1 260px',
+                                minWidth: 260,
+                                padding: '10px 12px',
+                                border: '1px solid #f0f0f0',
+                                borderRadius: 8,
+                            }}
+                        >
+                            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
+                                Day totals
+                            </Typography.Text>
+                            <Typography.Text style={{ fontSize: 13 }}>
+                                Not totalled — today's batches are measured in{' '}
+                                {completedUnits.uoms.join(' and ')}. Per-batch figures are in the table below.
+                            </Typography.Text>
+                        </div>
+                    ) : (
+                    <>
+                    <FigureTile label="Good" value={fmtPieces(completedSummary.goodPieces)} suffix={completedUnits.uom ?? undefined} />
+                    <FigureTile label="Expected" value={fmtPieces(completedSummary.expectedPieces)} suffix={completedUnits.uom ?? undefined} />
                     <FigureTile
                         label="Output vs expected"
                         value={completedSummary.outputVsExpectedPct === null ? '—' : `${completedSummary.outputVsExpectedPct}%`}
@@ -5767,13 +5892,15 @@ export default function ShiftProductionEntryPage() {
                     <FigureTile
                         label="Reject"
                         value={fmtPieces(completedSummary.rejectPieces)}
-                        suffix="pcs"
+                        suffix={completedUnits.uom ?? undefined}
                         hint={
                             completedSummary.qcRejectedPieces !== null && completedSummary.qcRejectedPieces > 0
-                                ? `Rejected at completion. A further ${completedSummary.qcRejectedPieces.toLocaleString('en-IN')} pcs were rejected by quality.`
+                                ? `Rejected at completion. A further ${completedSummary.qcRejectedPieces.toLocaleString('en-IN')}${completedUnits.uom ? ` ${completedUnits.uom}` : ''} were rejected by quality.`
                                 : 'Rejected at completion.'
                         }
                     />
+                    </>
+                    )}
                 </div>
             )}
             {/* The day's completed batches as the server answers them, in the
@@ -5794,6 +5921,71 @@ export default function ShiftProductionEntryPage() {
                 )}
             />
 
+            {/* EARLIER BATCHES — STILL CORRECTABLE. Ordinary history, and
+                deliberately NOT under Needs Attention.
+
+                The night shift's batches file under yesterday's date and the
+                clock rolls to Day at 06:00, so the people still doing last
+                night's paperwork drop off today's list while the server goes on
+                accepting their correction. That is a door that must stay open —
+                but nothing is WRONG with these batches. Nobody has asked for
+                anything; they are editable purely because quality has not signed
+                them yet, which is true of every batch for a while.
+
+                Filing them under "needs attention" put ordinary work in an
+                exception list, and an exception list that is never empty is one
+                nobody reads on the day it matters. They sit under the day's work
+                instead, with the same eligibility gate (canAmendCompletion) and
+                the same drawer — only the framing changed. */}
+            {correctableEarlier.length > 0 && (
+                <div style={{ marginTop: 32 }}>
+                    <SectionHeading
+                        title="Earlier batches — still correctable"
+                        extra={
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                {correctableEarlier.length} batch{correctableEarlier.length === 1 ? '' : 'es'} · quality has not checked these yet
+                            </Typography.Text>
+                        }
+                    />
+                    <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                        {correctableEarlier.map((entry) => (
+                            <Card key={entry.id} size="small">
+                                <div
+                                    style={{
+                                        display: 'flex',
+                                        flexWrap: 'wrap',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        gap: 8,
+                                    }}
+                                >
+                                    <div style={{ minWidth: 0 }}>
+                                        <Typography.Text strong>
+                                            {entry.batch_number ?? `Batch #${entry.id}`}
+                                        </Typography.Text>
+                                        <Typography.Text
+                                            type="secondary"
+                                            style={{ display: 'block', fontSize: 12, wordBreak: 'break-word' }}
+                                        >
+                                            {entry.work_center.name} · {itemLabel(entry.item)} ·{' '}
+                                            {entry.production_date} {entry.shift.name} ·{' '}
+                                            <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                                {fmtPieces(entry.quantity_produced)}
+                                                {uomOf(entry.item) ? ` ${uomOf(entry.item)}` : ''}
+                                            </span>
+                                        </Typography.Text>
+                                    </div>
+                                    <Space size={4} wrap>
+                                        {cartonLabelControlFor(entry)}
+                                        {correctionControlFor(entry)}
+                                    </Space>
+                                </div>
+                            </Card>
+                        ))}
+                    </Space>
+                </div>
+            )}
+
             {/* NEEDS ATTENTION · CORRECTIONS REQUIRED — the two correction
                 lists, which used to sit at opposite ends of the page in two
                 unrelated treatments, in one named section under the day's work.
@@ -5813,7 +6005,7 @@ export default function ShiftProductionEntryPage() {
                         title="Needs Attention · Corrections Required"
                         extra={
                             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                {needsAttentionCount} batch{needsAttentionCount === 1 ? '' : 'es'} waiting on the floor
+                                {needsAttentionCount} batch{needsAttentionCount === 1 ? '' : 'es'} sent back by quality
                             </Typography.Text>
                         }
                     />
@@ -5847,7 +6039,8 @@ export default function ShiftProductionEntryPage() {
                                                 {readReturnReason(entry) ?? 'No reason was recorded with this return.'}
                                             </Typography.Text>
                                             <Typography.Text type="secondary" style={{ fontSize: 12, ...tabularNums }}>
-                                                Recorded: {fmtPieces(entry.quantity_produced)} pcs ·{' '}
+                                                Recorded: {fmtPieces(entry.quantity_produced)}
+                                                {uomOf(entry.item) ? ` ${uomOf(entry.item)}` : ''} ·{' '}
                                                 {fmtNum(toNum(entry.quantity_produced_kg))} kg
                                             </Typography.Text>
                                             <Button type="primary" onClick={() => openAmendDrawer(entry)}>
@@ -5860,56 +6053,6 @@ export default function ShiftProductionEntryPage() {
                         </div>
                     )}
 
-                    {/* STILL THEIRS TO CORRECT, just not on today's list. The night
-                        shift's batches file under yesterday's date and the clock rolls
-                        to Day at 06:00 — without this the Edit door closed on the very
-                        people still doing the paperwork, while the server went on
-                        accepting their correction. Same control, same rule. */}
-                    {correctableEarlier.length > 0 && (
-                        <div>
-                            <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
-                                Completed earlier and still correctable ({correctableEarlier.length})
-                            </Typography.Text>
-                            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
-                                Quality has not checked these yet.
-                            </Typography.Text>
-                            <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                                {correctableEarlier.map((entry) => (
-                                    <Card key={entry.id} size="small">
-                                        <div
-                                            style={{
-                                                display: 'flex',
-                                                flexWrap: 'wrap',
-                                                justifyContent: 'space-between',
-                                                alignItems: 'center',
-                                                gap: 8,
-                                            }}
-                                        >
-                                            <div style={{ minWidth: 0 }}>
-                                                <Typography.Text strong>
-                                                    {entry.batch_number ?? `Batch #${entry.id}`}
-                                                </Typography.Text>
-                                                <Typography.Text
-                                                    type="secondary"
-                                                    style={{ display: 'block', fontSize: 12, wordBreak: 'break-word' }}
-                                                >
-                                                    {entry.work_center.name} · {itemLabel(entry.item)} ·{' '}
-                                                    {entry.production_date} {entry.shift.name} ·{' '}
-                                                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                                                        {fmtPieces(entry.quantity_produced)} pcs
-                                                    </span>
-                                                </Typography.Text>
-                                            </div>
-                                            <Space size={4} wrap>
-                                                {cartonLabelControlFor(entry)}
-                                                {correctionControlFor(entry)}
-                                            </Space>
-                                        </div>
-                                    </Card>
-                                ))}
-                            </Space>
-                        </div>
-                    )}
                 </div>
             )}
 
@@ -7772,13 +7915,13 @@ export default function ShiftProductionEntryPage() {
                         place that is, with somewhere to change it. */}
                     {dayBinWarehouseId === null ? (
                         <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
-                            No factory day bin chosen yet, so each line still asks where its material came from.{' '}
-                            <Link to="/production/day-bin">Choose one in Day Bin (factory)</Link> and it stops asking.
+                            No common input chosen yet, so each line still asks where its material came from.{' '}
+                            <Link to="/production/day-bin">Choose one in Common resin input</Link> and it stops asking.
                         </Typography.Text>
                     ) : (
                         <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
-                            Issued from the factory day bin — {factoryDayBin?.warehouse?.name ?? 'the day bin'}.{' '}
-                            <Link to="/production/day-bin">Change it in Day Bin (factory)</Link>.
+                            Issued from the common resin input — {factoryDayBin?.warehouse?.name ?? 'the common input'}.{' '}
+                            <Link to="/production/day-bin">Change it in Common resin input</Link>.
                         </Typography.Text>
                     )}
 
@@ -9022,7 +9165,7 @@ export default function ShiftProductionEntryPage() {
                                 message={loadBagError.text}
                                 description={
                                     loadBagError.needsWarehouse ? (
-                                        <Link to="/production/day-bin">Open the Day Bin page to choose the warehouse</Link>
+                                        <Link to="/production/day-bin">Open Common resin input to choose the warehouse</Link>
                                     ) : undefined
                                 }
                             />

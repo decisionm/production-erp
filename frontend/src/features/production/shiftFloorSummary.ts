@@ -190,3 +190,46 @@ export function completedTodaySummary(entries: readonly ShiftProductionEntry[] |
 
     return summary;
 }
+
+/**
+ * WHAT UNIT TODAY'S FIGURES ARE IN.
+ *
+ * `quantity_produced` is NOT a piece count by definition — it is denominated in
+ * the finished item's own unit of measure. The completion posts it straight to
+ * stock (`recordReceipt(quantity: quantity_produced)`), so whatever the item
+ * master calls that unit is what the number means. On this factory's data that
+ * is `Nos.` for 77 items — while this screen printed the literal `pcs`. Two
+ * spellings of one thing here, but the same literal on a `kg`-denominated
+ * product would be a wrong unit stated with confidence, which is the class of
+ * error that gets a figure withdrawn.
+ *
+ * So the unit is READ, never assumed, and it is only ever stated when every row
+ * agrees on it. Spellings are compared case-folded and trimmed and NOTHING
+ * else: `Nos.` and `pcs` may well be the same unit to the factory, but deciding
+ * that is the owner's call and not a display function's — they read as
+ * different here, which withholds the total rather than mislabelling it.
+ */
+export interface CompletedTodayUnits {
+    /** The unit every row shares, spelled as the item master spells it. Null when they disagree, or when no row says. */
+    uom: string | null;
+    /** The rows disagree — there is no one unit these sums can be labelled with. */
+    mixed: boolean;
+    /** Every distinct spelling seen, in first-seen order. */
+    uoms: string[];
+}
+
+export function completedTodayUnits(entries: readonly ShiftProductionEntry[] | null | undefined): CompletedTodayUnits {
+    const seen = new Map<string, string>();
+    for (const entry of entries ?? []) {
+        const raw = (entry.item?.uom ?? '').trim();
+        if (raw === '') continue;
+        const key = raw.toLowerCase();
+        if (!seen.has(key)) seen.set(key, raw);
+    }
+    const uoms = [...seen.values()];
+    return {
+        uom: uoms.length === 1 ? uoms[0] : null,
+        mixed: uoms.length > 1,
+        uoms,
+    };
+}

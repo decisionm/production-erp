@@ -42,3 +42,23 @@ export function itemLabel(item: { sku?: string | null; name?: string | null } | 
 
     return bare(sku) === bare(name) ? name : `${sku} — ${name}`;
 }
+
+/**
+ * THE UNIT AN ITEM'S QUANTITIES ARE IN, as its own master record spells it.
+ *
+ * A produced quantity is denominated in the finished item's UOM — the
+ * completion posts `quantity_produced` to stock unconverted — so the item
+ * master is the only authority on what the number means. Screens that printed
+ * a literal unit beside it were stating a unit they had not read: this
+ * catalogue says `Nos.` on 77 items, `pcs` on 7 and `kg` on 4, and the same
+ * hard-coded word is harmless on the first two and wrong on the third.
+ *
+ * Null rather than a fallback when the master carries no unit. A product with
+ * no UOM cannot start a batch at all (ProductReadinessService fails the `uom`
+ * check), so a blank here means an unconfigured product — it is not a licence
+ * to assume pieces.
+ */
+export function uomOf(item: { uom?: string | null } | null | undefined): string | null {
+    const raw = (item?.uom ?? '').trim();
+    return raw === '' ? null : raw;
+}
