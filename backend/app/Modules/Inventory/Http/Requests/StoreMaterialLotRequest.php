@@ -3,8 +3,8 @@
 namespace App\Modules\Inventory\Http\Requests;
 
 use App\Modules\Inventory\Models\MaterialLot;
-use App\Modules\Inventory\Rules\PlainDecimal;
 use App\Modules\Procurement\Models\GoodsReceiptNoteLine;
+use App\Rules\PlainDecimal;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;

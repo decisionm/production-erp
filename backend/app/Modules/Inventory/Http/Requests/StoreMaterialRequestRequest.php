@@ -3,7 +3,7 @@
 namespace App\Modules\Inventory\Http\Requests;
 
 use App\Modules\Inventory\Models\Enums\MeasurementType;
-use App\Modules\Inventory\Rules\PlainDecimal;
+use App\Rules\PlainDecimal;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\DB;

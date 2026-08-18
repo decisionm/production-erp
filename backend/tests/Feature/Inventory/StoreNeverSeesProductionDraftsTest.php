@@ -297,6 +297,58 @@ class StoreNeverSeesProductionDraftsTest extends TestCase
         return str_replace((string) $id, '{id}', (string) $response->json('message'));
     }
 
+    /**
+     * SUBMIT WAS THE THIRD DOOR, AND IT DEFEATED THE OTHER TWO.
+     *
+     * The gate went on `show` and `cancel`. `submit` is the only other route
+     * carrying a `{material_request}`, and it sat in a production-only group —
+     * where Laravel runs SubstituteBindings AHEAD of the unprioritised `module`
+     * alias. So binding answered 404 for an id that does not exist while the
+     * permission check answered 403 for one that does, and a store login walked
+     * the id space one ordinary POST at a time and found production's drafts.
+     *
+     * Closing two doors out of three closes nothing: it is the same bit about
+     * the same rows at the same cost.
+     */
+    public function test_submit_does_not_tell_the_store_which_ids_exist(): void
+    {
+        $draft = $this->raise();
+        $sent = $this->submitted();
+        $ghostId = $sent['id'] + 9_999;
+
+        $this->actAs($this->storekeeper);
+
+        $onDraft = $this->postJson("/api/v1/inventory/material-requests/{$draft['id']}/submit");
+        $onGhost = $this->postJson("/api/v1/inventory/material-requests/{$ghostId}/submit");
+
+        $onDraft->assertStatus(404);
+        $onGhost->assertStatus(404);
+        $this->assertSame(
+            $this->refusal($onGhost, $ghostId),
+            $this->refusal($onDraft, $draft['id']),
+            'a draft must not be tellable from an id that is not there',
+        );
+
+        // A SUBMITTED request may answer 403 — the store already sees it in its
+        // own queue, so "it exists" is not a disclosure.
+        $this->postJson("/api/v1/inventory/material-requests/{$sent['id']}/submit")->assertStatus(403);
+
+        $this->assertNull(
+            MaterialRequest::query()->whereKey($draft['id'])->value('submitted_at'),
+            'and nothing was submitted on production\'s behalf',
+        );
+    }
+
+    /** ...while the floor still submits its own, which is the whole point. */
+    public function test_the_floor_still_submits_its_own_draft(): void
+    {
+        $draft = $this->raise();
+
+        $this->postJson("/api/v1/inventory/material-requests/{$draft['id']}/submit")->assertOk();
+
+        $this->assertNotNull(MaterialRequest::query()->whereKey($draft['id'])->value('submitted_at'));
+    }
+
     /* ------------------------------ helpers ------------------------------ */
 
     /**

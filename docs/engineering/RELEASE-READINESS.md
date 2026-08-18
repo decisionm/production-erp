@@ -518,3 +518,59 @@ movements 2→2 and bag scans 0→0, 23 flag spellings, partial→full walking
 `submitted → partially_issued → issued`. Browser/server unit mirror: 77 strings, zero
 disagreements. Resin chain: `{receipt: 2, transfer_in: 2, transfer_out: 2}`, **consumption
 rows: 0**. FC-01, FC-03, FC-06 hold.
+
+## The sixth round — two doors out of three is no doors
+
+Both halves found the same hole independently, which is the strongest signal in the series.
+
+**`POST /material-requests/{id}/submit` was the third route carrying a `{material_request}`,
+and leaving it out of the gate defeated the gate.** Laravel runs `SubstituteBindings` ahead
+of the unprioritised `module` alias, so route-model binding answered **404 for an id that
+does not exist** while the permission check answered **403 for one that does**. A store-only
+login enumerated production's unsubmitted drafts with one ordinary POST per id — the same
+bit, about the same rows, at the same cost as round five's finding.
+
+The obvious fix does not work, and that is worth recording: appending `own-draft` to a route
+inside `module:production` never runs, because the group aborts first. `submit` now sits in
+the group both desks may enter, with `own-draft` first and the production-only check after,
+so a 403 is reached only for a request the caller already sees in their own queue.
+Mutation-proved both ways.
+
+**Seven quantity fields still reached bcmath with `numeric` alone — and one is reachable
+from a live screen.** The three stock-movement doors, purchase requisitions and purchase
+orders. `1e+21` is what `JSON.stringify` emits for any JavaScript number at or above 1e21,
+and the stock page posts straight from an antd `InputNumber`, so a storekeeper holding a key
+down reaches the exponent spelling without ever typing an `e`. Probed: `1e+21` was a **500**
+on the receipt door and a clean 422 on the `PlainDecimal`-guarded one.
+
+That is the predicate's **fifth** drift on this branch. `PlainDecimal` has moved to
+`App\Rules` (it now spans two modules) and `EveryQuantityDoorRefusesAMalformedNumberTest`
+names the **doors** rather than the rules, so a new door added without it fails there
+instead of in production. Its mutant reproduces the reviewer's exact 500s — and a purchase
+order silently ACCEPTING `1e3` as a 201.
+
+**The return guard read the wrong unit.** The modal reads `line.uom`, the unit the handover
+was recorded in; the server read `items.uom`, the master's value now. An item's unit is
+editable, so after an edit the two disagreed in both directions — including the one this
+branch itself named dangerous, the browser blocking a figure the server would take.
+
+### Recorded, not fixed
+
+`SubstituteBindings` beating `EnsureModulePermission` is **repo-wide**: every `module:`-gated
+route with a bound model is an existence oracle for any authenticated user (`GET
+/inventory/items/1` → 403, `/999999` → 404). The root fix is a global middleware-priority
+change, which is not a thing to do unattended on a deploy eve. The `submit` instance was in
+scope because **this branch declared drafts private**; nobody has declared item ids private,
+so the general case is a separate, owner-visible decision.
+
+Also recorded: a boolean `material_request_id` coerces to `1` (framework-standard for every
+id field in the codebase, no screen sends one).
+
+Everything else held. Sixteen probe shapes × {draft, ghost} on `show`/`cancel` — including
+HEAD, OPTIONS, form-encoded, malformed JSON, and thirteen odd id spellings — **every pair
+identical in status and body**, with the gate failing closed when the permission rows are
+absent entirely. Read doors: 41 malformed queries, zero 500s. Bag-scan oracle: seven cases,
+one body. Unit mirror: 75 strings, zero disagreements. All six owner proofs re-proven with
+balances; 94 invalid-id posts across seven doors left movements 2→2, issues 0→0, bag scans
+0→0. Resin chain `{receipt: 1, transfer_in: 2, transfer_out: 2}`, **consumption rows: 0**.
+FC-01, FC-03, FC-06 hold.

@@ -2,6 +2,7 @@
 
 namespace App\Modules\Procurement\Http\Requests;
 
+use App\Rules\PlainDecimal;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -60,8 +61,8 @@ class StorePurchaseOrderRequest extends FormRequest
             'notes' => ['nullable', 'string'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.item_id' => ['required', 'integer', 'exists:items,id'],
-            'lines.*.quantity' => ['required', 'numeric', 'gt:0'],
-            'lines.*.unit_price' => ['required', 'numeric', 'min:0'],
+            'lines.*.quantity' => ['required', 'numeric', 'gt:0', new PlainDecimal],
+            'lines.*.unit_price' => ['required', 'numeric', 'min:0', new PlainDecimal],
             // A Tally-mirror order: Tally is the PO/schedule source of truth,
             // this row is its read-only reflection with the exact identities.
             'source' => ['sometimes', 'in:erp,tally'],

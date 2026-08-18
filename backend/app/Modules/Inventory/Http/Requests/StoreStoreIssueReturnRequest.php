@@ -3,7 +3,7 @@
 namespace App\Modules\Inventory\Http\Requests;
 
 use App\Modules\Inventory\Models\Enums\MeasurementType;
-use App\Modules\Inventory\Rules\PlainDecimal;
+use App\Rules\PlainDecimal;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\DB;
@@ -62,12 +62,22 @@ class StoreStoreIssueReturnRequest extends FormRequest
                 // from main. It is closed here because leaving it open would
                 // make the unit contract true of two doors out of three, which
                 // is not a contract.
-                $uom = DB::table('store_issue_lines as l')
+                // THE UNIT THE HANDOVER WAS RECORDED IN, falling back to the
+                // master's. The screen reads `line.uom` and this read the
+                // master's `items.uom`, and an item's unit is editable — so
+                // after an edit the two disagreed in BOTH directions,
+                // including the one this branch named dangerous (the browser
+                // blocking a figure the server would have taken).
+                $line = DB::table('store_issue_lines as l')
                     ->join('items as i', 'i.id', '=', 'l.item_id')
                     ->where('l.id', $lineId)
-                    ->value('i.uom');
+                    ->first(['l.uom as line_uom', 'i.uom as item_uom']);
 
-                if ($uom === null) {
+                $uom = $line === null
+                    ? null
+                    : (trim((string) $line->line_uom) !== '' ? $line->line_uom : $line->item_uom);
+
+                if ($line === null) {
                     continue; // the base `exists` rule already said so
                 }
 

@@ -326,7 +326,24 @@ Route::prefix('v1')->group(function () {
         // The store fulfils requests; it does not write them for the floor.
         Route::prefix('inventory')->middleware('module:production')->group(function () {
             Route::post('material-requests', [MaterialRequestController::class, 'store']);
-            Route::post('material-requests/{material_request}/submit', [MaterialRequestController::class, 'submit']);
+        });
+
+        // SUBMIT IS THE THIRD ROUTE THAT REACHES AN UNSUBMITTED REQUEST, and
+        // leaving it out of the gate left the whole gate defeated: Laravel runs
+        // SubstituteBindings ahead of the unprioritised `module` alias, so
+        // binding answered 404 for an id that does not exist while the
+        // permission check answered 403 for one that does. One ordinary POST
+        // per id and a store login had enumerated production's drafts — the
+        // exact disclosure EnsureDraftIsProductionsOwn exists to deny.
+        //
+        // It sits in the group BOTH desks may enter, with `own-draft` first and
+        // the production-only check after, because the obvious fix does not
+        // work: appending `own-draft` to a route inside `module:production`
+        // never runs, the group aborts first. The permission answer is now
+        // reached only for a request the caller can already see.
+        Route::prefix('inventory')->middleware('module:production,inventory')->group(function () {
+            Route::post('material-requests/{material_request}/submit', [MaterialRequestController::class, 'submit'])
+                ->middleware(['own-draft', 'module:production']);
         });
 
         Route::prefix('procurement')->middleware('module:procurement')->group(function () {
