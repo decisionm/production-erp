@@ -5,6 +5,10 @@ namespace Tests\Feature\Inventory;
 use App\Models\User;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\MaterialRequest;
+use App\Modules\Inventory\Models\Warehouse;
+use App\Modules\Inventory\Services\ProductionWipLocationResolver;
+use App\Modules\Inventory\Services\StockMovementService;
+use App\Modules\Production\Services\FactoryWarehouseResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
@@ -89,6 +93,22 @@ class RequestableMaterialEligibilityTest extends TestCase
             'sku' => 'SVC-FREIGHT', 'name' => 'Outward Freight', 'uom' => 'Nos.',
             'is_active' => true,
         ]);
+
+        // The two locations a handover moves between, named rather than
+        // guessed at, plus opening stock seeded THROUGH THE LEDGER so the
+        // balance/movement invariant is not broken before a test starts.
+        $store = Warehouse::create(['code' => 'EL-RM', 'name' => 'EL Raw Material Store', 'is_active' => true, 'tally_guid' => 'el-gd']);
+        $wip = Warehouse::create(['code' => 'EL-WIP', 'name' => 'EL Production WIP', 'is_active' => false]);
+        app(ProductionWipLocationResolver::class)->setWarehouseId($wip->id);
+        app(FactoryWarehouseResolver::class)->setRawMaterialWarehouseId($store->id);
+
+        app(StockMovementService::class)->recordReceipt(
+            itemId: $this->cap->id,
+            warehouseId: $store->id,
+            quantity: '5000',
+            unitCost: '1.00',
+            reference: 'EL opening',
+        );
     }
 
     private function actingWith(array $permissions): User
@@ -198,6 +218,70 @@ class RequestableMaterialEligibilityTest extends TestCase
         // ...and it is genuinely off the offer list now, so the two behaviours
         // are proved to be independent rather than both merely passing.
         $this->assertNotContains('RM-PET', $this->offered());
+    }
+
+    /**
+     * THE REGRESSION AN ADVERSARIAL REVIEW CAUGHT, and the reason the two
+     * sides of the flow are gated differently.
+     *
+     * The request side gates a NEW ask. The issue side FULFILS one that was
+     * already accepted. If the issue side re-gated eligibility, then switching
+     * a material off — which Q56 explicitly invites the owner to do while
+     * pruning the over-broad backfill — would refuse a handover for material
+     * that is already on the trolley against an open, perfectly good request.
+     * The store would be stuck at the window with no way to record what it
+     * just handed over.
+     *
+     * History must stay ISSUABLE, not merely readable. The previous version of
+     * this file tested only that such a request still RENDERS.
+     */
+    public function test_a_handover_against_an_accepted_request_survives_the_material_being_switched_off(): void
+    {
+        $request = $this->postJson('/api/v1/inventory/material-requests', [
+            'lines' => [['item_id' => $this->cap->id, 'quantity' => '500']],
+        ])->assertStatus(201)->json('data');
+
+        $this->postJson("/api/v1/inventory/material-requests/{$request['id']}/submit")->assertOk();
+
+        // The owner prunes the eligible list AFTER the floor asked.
+        $this->cap->update(['is_production_input' => false]);
+
+        // The store can still record the handover it actually made.
+        $this->postJson('/api/v1/inventory/store-issues', [
+            'material_request_id' => $request['id'],
+            'lines' => [[
+                'material_request_line_id' => $request['lines'][0]['id'],
+                'item_id' => $this->cap->id,
+                'quantity' => '500',
+            ]],
+        ])->assertStatus(201);
+    }
+
+    /**
+     * The other half of the same rule: honouring the earlier decision does not
+     * mean accepting anything at all. A line that names a request line must
+     * hand over the material THAT LINE asked for.
+     *
+     * This also closes a hole that predates the eligibility work — nothing
+     * cross-checked the two, so an issue could name item X against a request
+     * line for item Y and the fulfilment would credit Y.
+     */
+    public function test_a_handover_may_not_swap_the_material_the_request_asked_for(): void
+    {
+        $request = $this->postJson('/api/v1/inventory/material-requests', [
+            'lines' => [['item_id' => $this->cap->id, 'quantity' => '500']],
+        ])->assertStatus(201)->json('data');
+
+        $this->postJson("/api/v1/inventory/material-requests/{$request['id']}/submit")->assertOk();
+
+        $this->postJson('/api/v1/inventory/store-issues', [
+            'material_request_id' => $request['id'],
+            'lines' => [[
+                'material_request_line_id' => $request['lines'][0]['id'],
+                'item_id' => $this->resin->id, // NOT what was asked for
+                'quantity' => '500',
+            ]],
+        ])->assertStatus(422)->assertJsonValidationErrors('lines.0.item_id');
     }
 
     public function test_the_store_issue_side_refuses_the_same_ineligible_material(): void

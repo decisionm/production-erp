@@ -95,12 +95,24 @@ return new class extends Migration
     }
 
     /**
-     * Reversible by returning every row to the column's own default. This does
-     * not restore a hand-curated list — there is none yet — so it is honest:
-     * down() undoes the backfill, and the column's default takes over again.
+     * DELIBERATELY A NO-OP, and this is the safer choice rather than the lazy
+     * one.
+     *
+     * The obvious `down()` — set every row back to false — is a ONE-COMMAND
+     * FACTORY STOP. The column stays, both the request and the issue path keep
+     * refusing on it, and `php artisan migrate:rollback` (the command an
+     * operator reaches for under pressure, usually while something else is
+     * already wrong) would leave a factory where nothing can be requested and
+     * nothing can be issued. It would also destroy the owner's hand-curation
+     * the moment Q56(a) is answered, which no rollback of a BACKFILL should be
+     * able to do.
+     *
+     * Reversing the backfill means reversing what it was FOR, and that is the
+     * migration before this one: dropping the column takes the enforcement
+     * with it, because both rules reference it. Roll back both, or neither.
      */
     public function down(): void
     {
-        DB::table('items')->update(['is_production_input' => false]);
+        // Intentionally empty. See the docblock.
     }
 };

@@ -302,8 +302,15 @@ class MaterialFlowChainTest extends TestCase
             'fg' => $this->balance($this->fg, $this->bottle),
             // The whole point of the distinction: how much has actually been
             // BOOKED as production use at this moment.
+            // Scoped to THE RESIN, the material the three balance columns
+            // track. Summing every consumption movement repo-wide happened to
+            // be identical on this walk, but the column is headed CONSUMED
+            // next to three resin balances and would have quietly started
+            // meaning something else the moment a second material was
+            // consumed.
             'consumed' => bcadd((string) (StockMovement::query()
                 ->where('purpose', StockMovementPurpose::Consumption->value)
+                ->where('item_id', $this->resin->id)
                 ->sum('quantity') ?: '0'), '0', 4),
         ];
 

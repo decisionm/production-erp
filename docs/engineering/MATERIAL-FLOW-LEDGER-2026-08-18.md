@@ -10,7 +10,7 @@ Produced by `MaterialFlowChainTest` itself, not by a separate script that could 
 | B2-2 the store issue | 700.0000 | 300.0000 | 0.0000 | **0.0000** |
 | B2-3 the bag scans | 650.0000 | 350.0000 | 0.0000 | **0.0000** |
 | B2-4 the production receipt | 650.0000 | 350.0000 | 0.0000 | **0.0000** |
-| B2-7a reconcile, issue still open | 650.0000 | 350.0000 | 0.0000 | 0.0000 |
+| B2-7a the reconcile with an issue open | 650.0000 | 350.0000 | 0.0000 | 0.0000 |
 | B2-5 the batch consumption | 650.0000 | 230.0000 | 8000.0000 | **120.0000** |
 | B2-6 the return | 730.0000 | 150.0000 | 8000.0000 | 120.0000 |
 | B2-6b the refused return | 730.0000 | 150.0000 | 8000.0000 | 120.0000 |

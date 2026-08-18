@@ -238,6 +238,20 @@ export default function ItemsPage() {
                             render={({ field }) => <Select {...field} options={trackingTypeOptions} />}
                         />
                     </Form.Item>
+                    <Form.Item
+                        label="Requestable as a production material"
+                        help="When on, the floor may ask the store to issue this item. Finished goods and saleable products stay off."
+                    >
+                        {/* On the CREATE form too, not only on edit: a new
+                            material would otherwise always arrive
+                            non-requestable and need a second trip through the
+                            edit modal before the store could issue it. */}
+                        <Controller
+                            name="is_production_input"
+                            control={control}
+                            render={({ field }) => <Switch checked={field.value ?? false} onChange={field.onChange} />}
+                        />
+                    </Form.Item>
                 </Form>
             </Modal>
 

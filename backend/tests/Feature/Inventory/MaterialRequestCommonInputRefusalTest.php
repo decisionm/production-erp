@@ -75,16 +75,29 @@ class MaterialRequestCommonInputRefusalTest extends TestCase
         foreach (['Kgs', 'Kgs.', 'KGS', 'kg', 'kg.'] as $index => $spelling) {
             $item = Item::create(['sku' => "RM-SPELL-{$index}", 'name' => "Raw {$spelling}", 'uom' => $spelling, 'is_production_input' => true]);
 
-            $this->postJson('/api/v1/inventory/material-requests', [
+            // The MESSAGE, not merely the status. Eligibility now refuses on
+            // the same field with the same 422, so a bare status assertion
+            // could not tell the two refusals apart — and this test would keep
+            // passing, under a name claiming it proves FC-01, if a later edit
+            // dropped is_production_input from the fixture above.
+            $response = $this->postJson('/api/v1/inventory/material-requests', [
                 'work_center_id' => $this->machine->id,
                 'lines' => [['item_id' => $item->id, 'quantity' => '10']],
             ])->assertStatus(422);
+
+            $message = (string) $response->json('message');
+            $this->assertStringContainsString('FC-01', $message);
+            $this->assertStringContainsString("Raw {$spelling}", $message);
         }
 
-        $this->postJson('/api/v1/inventory/material-requests', [
+        $mb = $this->postJson('/api/v1/inventory/material-requests', [
             'work_center_id' => $this->machine->id,
             'lines' => [['item_id' => $this->masterbatch->id, 'quantity' => '5']],
         ])->assertStatus(422);
+
+        $mbMessage = (string) $mb->json('message');
+        $this->assertStringContainsString('FC-01', $mbMessage);
+        $this->assertStringContainsString('Blue Masterbatch', $mbMessage);
 
         $this->assertSame(0, MaterialRequest::query()->count());
     }
