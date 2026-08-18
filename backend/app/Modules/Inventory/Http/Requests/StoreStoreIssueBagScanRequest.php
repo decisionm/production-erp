@@ -2,6 +2,7 @@
 
 namespace App\Modules\Inventory\Http\Requests;
 
+use App\Modules\Inventory\Rules\PlainDecimal;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\DB;
@@ -28,7 +29,7 @@ class StoreStoreIssueBagScanRequest extends FormRequest
     {
         return [
             'barcode' => ['required', 'string', 'max:255'],
-            'quantity_kg' => ['nullable', 'numeric'],
+            'quantity_kg' => ['nullable', 'numeric', new PlainDecimal],
             'received_by' => ['nullable', 'integer', 'exists:users,id'],
             // THE SAME DANGLING-POINTER HOLE AS THE ISSUE HEADER. A scan may
             // say which accepted line it satisfies; it may not name one that

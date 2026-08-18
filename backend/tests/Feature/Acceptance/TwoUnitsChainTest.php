@@ -396,6 +396,72 @@ class TwoUnitsChainTest extends TestCase
         ])->assertCreated();
     }
 
+    /**
+     * THE THIRD DOOR. Half a tray does not come back either.
+     *
+     * The request door and the issue door both refuse a fractional count. The
+     * RETURN door did not, and it is the same stock — so returning 0.5 of a
+     * counted material put fractional trays in BOTH locations at once, which
+     * is not a state the factory can be in. Pre-existing rather than a
+     * regression, closed here because a unit contract true of two doors out of
+     * three is not a contract.
+     */
+    public function test_a_counted_material_cannot_come_back_in_halves(): void
+    {
+        $tray = $this->material('PKG-TRAY-60', '60 Ml Tray', 'Nos.');
+        $this->receive($tray, '500', 'tu-ret');
+
+        $issue = $this->postJson('/api/v1/inventory/store-issues', [
+            'lines' => [['item_id' => $tray->id, 'quantity' => '40']],
+        ])->assertCreated()->json('data');
+
+        $this->postJson("/api/v1/inventory/store-issues/{$issue['id']}/returns", [
+            'lines' => [['store_issue_line_id' => $issue['lines'][0]['id'], 'quantity' => '0.5']],
+        ])->assertStatus(422)->assertJsonValidationErrors('lines.0.quantity');
+
+        $this->assertSame(0, bccomp($this->balance($tray, $this->store), '460', 4), 'nothing came back');
+        $this->assertSame(0, bccomp($this->balance($tray, $this->wip), '40', 4));
+
+        // A whole number still comes back.
+        $this->postJson("/api/v1/inventory/store-issues/{$issue['id']}/returns", [
+            'lines' => [['store_issue_line_id' => $issue['lines'][0]['id'], 'quantity' => '10']],
+        ])->assertOk();
+
+        $this->assertSame(0, bccomp($this->balance($tray, $this->wip), '30', 4));
+    }
+
+    /**
+     * ...and an exotic figure is a refusal on EVERY door, not a 500 on some.
+     *
+     * `is_numeric('1e3')` is true and bccomp() is not, so the material-request
+     * side answered a malformed figure with a 500 — for counted items only,
+     * because a weight item short-circuits before reaching it. One predicate
+     * now guards all four doors.
+     */
+    public function test_an_exotic_number_is_a_refusal_on_every_door(): void
+    {
+        $tray = $this->material('PKG-TRAY-60', '60 Ml Tray', 'Nos.');
+        $this->receive($tray, '500', 'tu-exotic2');
+
+        foreach (['1e3', '0x1A', 'INF', 'NAN'] as $spelling) {
+            $this->postJson('/api/v1/inventory/material-requests', [
+                'lines' => [['item_id' => $tray->id, 'quantity' => $spelling]],
+            ])->assertStatus(422);
+
+            $this->postJson('/api/v1/inventory/store-issues', [
+                'lines' => [['item_id' => $tray->id, 'quantity' => $spelling]],
+            ])->assertStatus(422);
+        }
+
+        $issue = $this->postJson('/api/v1/inventory/store-issues', [
+            'lines' => [['item_id' => $tray->id, 'quantity' => '40']],
+        ])->assertCreated()->json('data');
+
+        $this->postJson("/api/v1/inventory/store-issues/{$issue['id']}/returns", [
+            'lines' => [['store_issue_line_id' => $issue['lines'][0]['id'], 'quantity' => '1e3']],
+        ])->assertStatus(422);
+    }
+
     /* ------------------------------ helpers ------------------------------ */
 
     private function material(string $sku, string $name, string $uom): Item

@@ -2,7 +2,11 @@
 
 namespace App\Modules\Inventory\Http\Requests;
 
+use App\Modules\Inventory\Models\Enums\MeasurementType;
+use App\Modules\Inventory\Rules\PlainDecimal;
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Unused material coming back from production to the store.
@@ -31,7 +35,52 @@ class StoreStoreIssueReturnRequest extends FormRequest
             'notes' => ['nullable', 'string', 'max:500'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.store_issue_line_id' => ['required', 'integer', 'exists:store_issue_lines,id'],
-            'lines.*.quantity' => ['required', 'numeric'],
+            'lines.*.quantity' => ['required', 'numeric', new PlainDecimal],
         ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            foreach ((array) $this->input('lines', []) as $index => $line) {
+                $lineId = isset($line['store_issue_line_id']) ? (int) $line['store_issue_line_id'] : 0;
+                $quantity = $line['quantity'] ?? null;
+
+                if ($lineId <= 0 || $quantity === null || ! PlainDecimal::matches($quantity)) {
+                    continue;
+                }
+
+                // HALF A TRAY DOES NOT COME BACK EITHER.
+                //
+                // The request door and the issue door both refuse a fractional
+                // count; this one did not, and it is the same stock. Returning
+                // 0.5 of a counted material put fractional trays in BOTH
+                // locations at once — 484.5 in the store and 15.5 on the floor
+                // — which is not a state the factory can be in.
+                //
+                // Pre-existing rather than a regression: this door is unchanged
+                // from main. It is closed here because leaving it open would
+                // make the unit contract true of two doors out of three, which
+                // is not a contract.
+                $uom = DB::table('store_issue_lines as l')
+                    ->join('items as i', 'i.id', '=', 'l.item_id')
+                    ->where('l.id', $lineId)
+                    ->value('i.uom');
+
+                if ($uom === null) {
+                    continue; // the base `exists` rule already said so
+                }
+
+                $type = MeasurementType::forUom($uom);
+
+                if (! $type->permitsFractions()
+                    && bccomp((string) $quantity, bcadd((string) (int) $quantity, '0', 4), 4) !== 0) {
+                    $validator->errors()->add(
+                        "lines.{$index}.quantity",
+                        "This material is measured in {$uom} — {$type->label()}. Return a whole number.",
+                    );
+                }
+            }
+        });
     }
 }

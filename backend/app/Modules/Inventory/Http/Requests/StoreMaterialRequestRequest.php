@@ -3,6 +3,7 @@
 namespace App\Modules\Inventory\Http\Requests;
 
 use App\Modules\Inventory\Models\Enums\MeasurementType;
+use App\Modules\Inventory\Rules\PlainDecimal;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\DB;
@@ -72,7 +73,13 @@ class StoreMaterialRequestRequest extends FormRequest
                 $itemId = isset($line['item_id']) ? (int) $line['item_id'] : 0;
                 $quantity = $line['quantity'] ?? null;
 
-                if ($itemId <= 0 || $quantity === null || ! is_numeric($quantity)) {
+                // PlainDecimal, not is_numeric: `is_numeric('1e3')` is true
+                // and bccomp() below then threw a ValueError — a 500 answering
+                // a malformed figure, on the request side, for counted items
+                // only (a weight item short-circuits before it). The rule
+                // above refuses the spelling too; this keeps the guard and the
+                // rule agreeing, which is the whole lesson of this branch.
+                if ($itemId <= 0 || $quantity === null || ! PlainDecimal::matches($quantity)) {
                     continue;
                 }
 

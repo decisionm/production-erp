@@ -3,6 +3,7 @@
 namespace App\Modules\Inventory\Http\Requests;
 
 use App\Modules\Inventory\Models\Enums\MeasurementType;
+use App\Modules\Inventory\Rules\PlainDecimal;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\DB;
@@ -39,24 +40,6 @@ use Illuminate\Validation\Rule;
  */
 class StoreStoreIssueRequest extends FormRequest
 {
-    /**
-     * A NUMBER A STOREKEEPER WRITES — exactly what bcmath accepts, and the
-     * ONLY definition of it. `numeric` alone lets `1e3`, `0x1A` and `INF`
-     * through to bcmath, which answered a 500 rather than a 422.
-     *
-     * ONE constant, because two copies of it is precisely how this broke. The
-     * validation rule was widened to admit `.5`, `1.` and `+5` — spellings
-     * bcmath takes and the older code took happily — while the private guard
-     * below kept the narrower one. So `+12.5` and `.5` cleared the rule, did
-     * NOT match the guard's own pattern, and skipped the whole-number check
-     * entirely: fractional trays landed in Production/WIP with a 201, on both
-     * paths, reopening the exact defect the previous commit had closed.
-     *
-     * The new test that should have caught it asserted against a `Kgs.` item,
-     * which permits fractions — so it passed for the wrong reason.
-     */
-    private const PLAIN_DECIMAL = '/^[+-]?(\d+(\.\d*)?|\.\d+)$/';
-
     public function authorize(): bool
     {
         return true;
@@ -105,7 +88,7 @@ class StoreStoreIssueRequest extends FormRequest
             // attempt at this narrowed the rule to `-?\d+(\.\d+)?` and started
             // refusing three spellings the old code took happily. Widening a
             // refusal by accident is the failure mode here, not the 500.
-            'lines.*.quantity' => ['required', 'numeric', 'regex:'.self::PLAIN_DECIMAL],
+            'lines.*.quantity' => ['required', 'numeric', new PlainDecimal],
             'lines.*.uom' => ['nullable', 'string', 'max:16'],
             'lines.*.notes' => ['nullable', 'string', 'max:500'],
         ];
@@ -150,7 +133,7 @@ class StoreStoreIssueRequest extends FormRequest
                     $type = MeasurementType::forUom($item->uom);
                     $quantity = $line['quantity'] ?? null;
 
-                    if ($quantity !== null && $this->isPlainDecimal($quantity)
+                    if ($quantity !== null && PlainDecimal::matches($quantity)
                         && ! $type->permitsFractions()
                         && bccomp((string) $quantity, bcadd((string) (int) $quantity, '0', 4), 4) !== 0) {
                         $validator->errors()->add(
@@ -239,7 +222,12 @@ class StoreStoreIssueRequest extends FormRequest
                     if ($header === null || (int) $header !== (int) $asked->material_request_id) {
                         $validator->errors()->add(
                             "lines.{$index}.material_request_line_id",
-                            'This line belongs to a different material request from the one this issue names.',
+                            // THE SAME BODY as "does not exist", deliberately.
+                            // Distinguishing them told a caller that a given
+                            // line id is real and whose it is — the header
+                            // oracle was closed to byte-identity and this one
+                            // was left answering the same question.
+                            'This line names a request line that does not exist.',
                         );
 
                         continue;
@@ -272,10 +260,5 @@ class StoreStoreIssueRequest extends FormRequest
                 }
             }
         });
-    }
-
-    private function isPlainDecimal(mixed $value): bool
-    {
-        return is_scalar($value) && preg_match(self::PLAIN_DECIMAL, (string) $value) === 1;
     }
 }

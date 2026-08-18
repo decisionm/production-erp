@@ -187,6 +187,55 @@ class StoreNeverSeesProductionDraftsTest extends TestCase
         $this->assertNotContains($draft['request_number'], $seen, 'the default is closed for everyone');
     }
 
+    /**
+     * THE FLAG AS A BROWSER ACTUALLY SPELLS IT.
+     *
+     * `include_unsubmitted` was validated with Laravel's `boolean` rule, which
+     * takes `1`, `0`, `"1"` and `"0"` and NOT `"true"` — which is exactly what
+     * axios puts on the wire for a JS `true`, and exactly what the floor's own
+     * Material Requests page was sending. The page asked for its drafts, got a
+     * 422, rendered an empty table with no error surfaced, and because Submit
+     * is a ROW ACTION on that table a raised request could never be sent to
+     * the store at all.
+     *
+     * Three verification rounds missed it because every test built its query
+     * with `http_build_query()`, which encodes PHP `true` as `"1"` — the one
+     * spelling that worked. So this test writes the query string BY HAND. A
+     * test that cannot send what the browser sends cannot see what the browser
+     * sees.
+     */
+    public function test_the_include_unsubmitted_flag_accepts_every_spelling_a_caller_uses(): void
+    {
+        $draft = $this->raise();
+        $this->actAs($this->floor);
+
+        foreach (['true', '1', 'TRUE'] as $spelling) {
+            $seen = collect($this->getJson("/api/v1/inventory/material-requests?include_unsubmitted={$spelling}")
+                ->assertOk("spelling: {$spelling}")->json('data'))->pluck('request_number')->all();
+
+            $this->assertContains($draft['request_number'], $seen, "spelling: {$spelling}");
+        }
+
+        foreach (['false', '0'] as $spelling) {
+            $seen = collect($this->getJson("/api/v1/inventory/material-requests?include_unsubmitted={$spelling}")
+                ->assertOk("spelling: {$spelling}")->json('data'))->pluck('request_number')->all();
+
+            $this->assertNotContains($draft['request_number'], $seen, "spelling: {$spelling}");
+        }
+    }
+
+    /** ...and the string spelling still buys the store nothing. */
+    public function test_the_string_spelling_does_not_let_the_store_in(): void
+    {
+        $draft = $this->raise();
+        $this->actAs($this->storekeeper);
+
+        $seen = collect($this->getJson('/api/v1/inventory/material-requests?include_unsubmitted=true')
+            ->assertOk()->json('data'))->pluck('request_number')->all();
+
+        $this->assertNotContains($draft['request_number'], $seen);
+    }
+
     /* ------------------------------ helpers ------------------------------ */
 
     /**

@@ -83,8 +83,8 @@ export default function MaterialRequestsPage() {
         queryFn: () =>
             listMaterialRequests(
                 statusFilter === 'all'
-                    ? { include_unsubmitted: true }
-                    : { status: statusFilter, include_unsubmitted: true },
+                    ? { include_unsubmitted: 1 }
+                    : { status: statusFilter, include_unsubmitted: 1 },
             ),
     });
     // Live Production/WIP stock — the second half of the page.

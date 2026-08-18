@@ -412,3 +412,57 @@ byte-identical to the one a nonexistent id returns, so the existence oracle is c
 rather than merely narrowed. A full resin chain walked end to end: RM Store 100 → 40,
 Production/WIP 0 → 60, three transfer pairs, **zero consumption rows**. FC-01, FC-03 and
 FC-06 all hold.
+
+## The fourth round — a P0 that three rounds of testing could not see
+
+The final gate returned one PASS and one **FAIL**. The blocking finding was not in any of
+the logic the previous rounds had been attacking:
+
+**The floor's Material Requests page was dead.** `include_unsubmitted` is validated with
+Laravel's `boolean` rule, which accepts `1`, `0`, `"1"` and `"0"` — and **not** `"true"`,
+which is exactly what axios puts on the wire for a JS `true`, and exactly what the page was
+sending. So the floor asked for its own drafts and got a 422. No error surfaced (the only
+axios interceptor handles 401), the table rendered "No data", and because **Submit is a row
+action on that table**, a request raised through the still-working modal could never be
+sent to the store at all. Work stoppage, not a display bug.
+
+**Why three verification rounds missed it, and this is the part worth keeping:** every
+backend test built its query with `http_build_query()`, which encodes PHP `true` as `"1"` —
+the one spelling that worked. The tests could not send what the browser sends, so they
+could not see what the browser sees. The regression test now writes the query string by
+hand and asserts `true`, `TRUE`, `1`, `false` and `0` all behave; mutation-proved against
+the exact 422 the reviewer reported.
+
+**And the repo already knew.** `frontend/src/features/production/api.ts` carries a docblock
+stating this trap verbatim, ending "Typing the literal makes that mistake a compile error
+instead of a blank page" — and the new call site typed the flag `boolean` anyway. Both
+halves are fixed: the server coerces (the API is a product surface, and a flag that means
+the same thing spelled two ways should not answer one spelling with a dead page), and the
+type is now the literal `1`, so the next call site gets a compile error.
+
+### The predicate, written down once, at last
+
+The same drift caused four separate defects on this branch — four call sites classifying a
+unit three ways, a rule and its guard spelled differently, a flag validated one way and read
+another. `PlainDecimal` is now a single rule class used by **all four quantity doors**:
+material request, store issue, return, and bag scan. Consolidating it closed three more
+findings at once:
+
+- **P1, the third door.** A fractional return of a counted material succeeded — 484.5 trays
+  in the store and 15.5 on the floor simultaneously. Pre-existing and unchanged from main,
+  so not a regression; closed because a unit contract true of two doors out of three is not
+  a contract.
+- **P2.** `1e3` on the material-request side was a **500**, not a 422 — `is_numeric('1e3')`
+  is true and `bccomp()` is not. It fired only for counted items, because a weight item
+  short-circuits before reaching it. Same defect on the return and bag-scan doors,
+  pre-existing.
+- **P3.** The request-LINE id was still an existence oracle: a nonexistent line and a real
+  line belonging to someone else's request answered differently. The header oracle had been
+  closed to byte-identity; this one had not. Both now answer the same body.
+
+Everything the adversarial half checked in the logic held: all six of the owner's required
+proofs PROVEN with balances before and after (34 fractional spellings × 2 paths, 14 invalid
+id shapes, 26 draft-visibility combinations), `PLAIN_DECIMAL` confirmed the only definition
+by mutation, zero 500s across an aggressive sweep, 109 strings agreeing between the browser
+mirror and the server classifier with no disagreement in either direction, and a full resin
+chain with **zero consumption rows**. FC-01, FC-03, FC-06 hold.

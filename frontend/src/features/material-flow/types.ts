@@ -169,7 +169,15 @@ export interface MaterialRequestFilters {
      * never sends it, and could not benefit if it did — the server grants it
      * by permission, not by query string.
      */
-    include_unsubmitted?: boolean;
+    /**
+     * Typed as the literal `1`, not `boolean`, and the reason is written down
+     * in `features/production/api.ts` already: Laravel's `boolean` rule takes
+     * `1`, `0`, `"1"` and `"0"` but NOT `"true"`, which is exactly what axios
+     * puts on the wire for a JS `true`. This flag was typed `boolean`, sent
+     * `true`, and answered the floor's own page with a 422 and a blank table.
+     * The literal makes that a compile error instead.
+     */
+    include_unsubmitted?: 1;
 }
 
 export interface CreateMaterialRequestLinePayload {
