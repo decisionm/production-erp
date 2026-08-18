@@ -51,3 +51,55 @@ The chain above is Request → Issue → bag scan → WIP → Start Batch → co
 FG. The **Shift Summary** and **Tally visibility** legs are covered by their own acceptance
 chains (chain A and the Tally voucher tests) rather than re-walked here; the Tally shift
 voucher is asserted to contain exactly the approved entries, by inclusion AND exclusion.
+
+---
+
+# Resin, from the purchase order to the production floor
+
+Produced by `ResinReceivingChainTest`, walked over HTTP:
+
+    MATERIAL_FLOW_LEDGER_REPORT=1 php artisan test --filter=ResinReceivingChain
+
+| Step | RM Store | Production/WIP | Bags |
+|---|---|---|---|
+| 0 · before anything | 0.0000 | 0.0000 | 0 |
+| 1 · purchase order raised and sent | 0.0000 | 0.0000 | 0 |
+| 2 · goods receipt — 4 bags scanned | **100.0000** | 0.0000 | **4** |
+| 3 · request raised and submitted | 100.0000 | 0.0000 | 4 |
+| 4 · store issue — 75 kg handed over | **25.0000** | **75.0000** | 4 |
+
+## What the chain proves
+
+1. **A purchase order must be SENT before goods can be received against it.** A draft is
+   refused — "Cannot transition purchase order from draft to received".
+2. **Receiving creates the lot and one identifiable bag record per physical bag.** Four
+   supplier barcodes were scanned (`RELPET-B1..B4`) and those are the bags' identities. Where
+   a supplier prints no barcode the server mints one per bag instead, so the count of bag
+   records always equals the count of physical bags.
+3. **Provenance is two hops, and both are asserted:** the lot names its goods receipt, and
+   that receipt names the purchase order — which names the supplier.
+4. **The receipt puts the resin in the Raw Material Store**, 4 × 25 kg = 100 kg.
+5. **Raising a request moves nothing.** Step 3 changes no balance.
+6. **A store issue is CUSTODY, NOT CONSUMPTION.** 75 kg moves RM Store → Production/WIP, and
+   the consumed total is asserted to still be **exactly zero**. The floor panel, read from the
+   Production/WIP balance, independently reports the same 75 kg.
+7. **FC-01 holds at the moment a bag is created:** every bag is asserted to name no machine.
+
+## The receiving screen
+
+The GRN form collects, per supplier lot: **supplier lot number · bag count · kg per bag**, with
+a running **bag total vs receipt line** check, and a **received date** on the receipt. Bag
+barcodes are scanned per lot, one after another, with the four figures the receiver watches on
+screen throughout:
+
+    Expected bags | Scanned | Remaining | Total weight
+
+Scanning is optional — leave it empty and the server generates a barcode per bag. What is not
+allowed is a HALF-finished scan: the server requires exactly one barcode per bag when any are
+supplied, so a partial list is submitted as none and every bag gets a generated barcode. The
+screen says so rather than letting it become a validation error with a trolley waiting.
+
+`/inventory/material-lots` is the resin traceability register — each lot with its GRN, its
+purchase order, its received date and time, the price paid and its bags.
+`/inventory/serial-numbers` is generic per-unit serial tracking and is **not** part of this
+chain; it lists only items configured as serial-tracked.

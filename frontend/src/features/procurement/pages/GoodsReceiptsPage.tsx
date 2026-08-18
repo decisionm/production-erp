@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, message, Modal, Select, Space, Table, Typography } from 'antd';
+import { Alert, Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, message, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Controller, useFieldArray, useForm, useWatch, type Control, type FieldPath } from 'react-hook-form';
@@ -90,6 +90,10 @@ const receiptSchema = z.object({
                             supplier_lot_no: z.string().min(1, 'Lot no required'),
                             bag_count: z.number({ error: 'Bags required' }).int().min(1, 'At least 1 bag'),
                             bag_weight_kg: z.number({ error: 'Kg/bag required' }).gt(0, 'Must be > 0'),
+                            // One scanned supplier barcode per physical bag.
+                            // Optional: leave it empty and the server mints a
+                            // barcode for every bag instead.
+                            barcodes: z.array(z.string().min(1)).optional(),
                         }),
                     )
                     .optional(),
@@ -164,6 +168,96 @@ function LineAllocationsEditor({ control, lineIndex }: { control: Control<Receip
     );
 }
 
+/**
+ * SCANNING THE BAGS OF ONE SUPPLIER LOT.
+ *
+ * A pallet of resin is many identical bags, and the receiving bay should not
+ * have to re-enter a line per bag. So one lot row holds one scan box: scan,
+ * scan, scan — each barcode is appended, the count goes up, and the four
+ * figures the receiver actually watches are on screen the whole time:
+ *
+ *     Expected bags | Scanned | Remaining | Total weight
+ *
+ * Scanning is OPTIONAL. Where the supplier prints no barcode, leave it empty
+ * and the server mints one per bag, so every physical bag still ends up with
+ * one identifiable record either way. What is NOT allowed is a half-finished
+ * scan: the server requires exactly one barcode per bag when any are supplied,
+ * so a partial list is submitted as none — said plainly here rather than
+ * discovered as a validation error with a trolley waiting.
+ */
+function LotBagScanner({
+    control,
+    lineIndex,
+    lotIndex,
+}: {
+    control: Control<ReceiptFormValues>;
+    lineIndex: number;
+    lotIndex: number;
+}) {
+    const lot = useWatch({ control, name: `lines.${lineIndex}.lots.${lotIndex}` });
+    const expected = Number(lot?.bag_count ?? 0);
+    const weightPerBag = Number(lot?.bag_weight_kg ?? 0);
+
+    return (
+        <Controller
+            name={`lines.${lineIndex}.lots.${lotIndex}.barcodes`}
+            control={control}
+            render={({ field }) => {
+                const scanned: string[] = field.value ?? [];
+                const remaining = Math.max(expected - scanned.length, 0);
+
+                const add = (raw: string) => {
+                    const code = raw.trim();
+                    if (code === '') return;
+                    // A double-scan of the same bag is the ordinary slip in a
+                    // receiving bay, and it must not silently become two bags.
+                    if (scanned.includes(code)) return;
+                    if (expected > 0 && scanned.length >= expected) return;
+                    field.onChange([...scanned, code]);
+                };
+
+                return (
+                    <div style={{ marginTop: 4 }}>
+                        <Space wrap align="baseline">
+                            <BarcodeScanInput
+                                autoFocus={false}
+                                placeholder={remaining > 0 ? `Scan bag ${scanned.length + 1} of ${expected || '?'}…` : 'All bags scanned'}
+                                onScan={add}
+                                style={{ width: 260 }}
+                            />
+                            <Typography.Text style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
+                                Expected <strong>{expected || '—'}</strong> · Scanned <strong>{scanned.length}</strong> ·
+                                Remaining <strong>{expected ? remaining : '—'}</strong> · Total{' '}
+                                <strong>{parseFloat((expected * weightPerBag).toFixed(4)) || 0} kg</strong>
+                            </Typography.Text>
+                        </Space>
+                        {scanned.length > 0 && (
+                            <div style={{ marginTop: 4 }}>
+                                {scanned.map((code) => (
+                                    <Tag
+                                        key={code}
+                                        closable
+                                        onClose={() => field.onChange(scanned.filter((c) => c !== code))}
+                                        style={{ marginBottom: 4 }}
+                                    >
+                                        {code}
+                                    </Tag>
+                                ))}
+                            </div>
+                        )}
+                        {scanned.length > 0 && expected > 0 && scanned.length < expected && (
+                            <Typography.Text type="warning" style={{ fontSize: 11 }}>
+                                {remaining} bag{remaining === 1 ? '' : 's'} still to scan. Finish the lot, or clear the
+                                scans and the server will generate a barcode for every bag.
+                            </Typography.Text>
+                        )}
+                    </div>
+                );
+            }}
+        />
+    );
+}
+
 function LineLotsSubForm({ control, lineIndex }: { control: Control<ReceiptFormValues>; lineIndex: number }) {
     const lots = useFieldArray({ control, name: `lines.${lineIndex}.lots` });
     const line = useWatch({ control, name: `lines.${lineIndex}` });
@@ -176,7 +270,8 @@ function LineLotsSubForm({ control, lineIndex }: { control: Control<ReceiptFormV
     return (
         <div style={{ margin: '4px 0 8px 16px' }}>
             {lots.fields.map((lotField, lotIndex) => (
-                <Space key={lotField.id} align="baseline" style={{ display: 'flex', marginTop: 4 }}>
+                <div key={lotField.id} style={{ marginTop: 8 }}>
+                    <Space align="baseline" style={{ display: 'flex' }}>
                     <Controller
                         name={`lines.${lineIndex}.lots.${lotIndex}.supplier_lot_no`}
                         control={control}
@@ -210,7 +305,9 @@ function LineLotsSubForm({ control, lineIndex }: { control: Control<ReceiptFormV
                     <Button size="small" danger onClick={() => lots.remove(lotIndex)}>
                         Remove
                     </Button>
-                </Space>
+                    </Space>
+                    <LotBagScanner control={control} lineIndex={lineIndex} lotIndex={lotIndex} />
+                </div>
             ))}
             <Button
                 size="small"
@@ -221,6 +318,7 @@ function LineLotsSubForm({ control, lineIndex }: { control: Control<ReceiptFormV
                         supplier_lot_no: '',
                         bag_count: undefined as unknown as number,
                         bag_weight_kg: undefined as unknown as number,
+                        barcodes: [],
                     })
                 }
             >
@@ -439,6 +537,16 @@ export default function GoodsReceiptsPage() {
                                   bag_count: lot.bag_count,
                                   bag_weight_kg: lot.bag_weight_kg,
                                   total_received_kg: Number((lot.bag_count * lot.bag_weight_kg).toFixed(4)),
+                                  // ALL OR NONE. The server requires exactly one
+                                  // barcode per bag when any are given, so a
+                                  // half-finished scan is sent as none and every
+                                  // bag gets a generated barcode instead — which
+                                  // is a complete, consistent receipt rather than
+                                  // a 422 in the receiving bay.
+                                  barcodes:
+                                      (lot.barcodes?.length ?? 0) === lot.bag_count && lot.bag_count > 0
+                                          ? lot.barcodes
+                                          : undefined,
                               }))
                             : undefined,
                 })),
