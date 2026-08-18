@@ -284,6 +284,25 @@ class RequestableMaterialEligibilityTest extends TestCase
         ])->assertStatus(422)->assertJsonValidationErrors('lines.0.item_id');
     }
 
+    /**
+     * THE BYPASS THE EXEMPTION CREATED, closed and pinned.
+     *
+     * Honouring an earlier decision means skipping the eligibility rule, and
+     * that skip is only justified if the earlier decision EXISTS. Quoting a
+     * made-up request line id would otherwise have waved a finished good
+     * straight past the rule — the exemption branch ends in `continue`.
+     */
+    public function test_an_invented_request_line_id_does_not_wave_an_ineligible_item_through(): void
+    {
+        $this->postJson('/api/v1/inventory/store-issues', [
+            'lines' => [[
+                'material_request_line_id' => 987654, // no such line
+                'item_id' => $this->finishedGood->id,
+                'quantity' => '5',
+            ]],
+        ])->assertStatus(422)->assertJsonValidationErrors('lines.0.material_request_line_id');
+    }
+
     public function test_the_store_issue_side_refuses_the_same_ineligible_material(): void
     {
         // The two halves of the flow must not disagree about what a material

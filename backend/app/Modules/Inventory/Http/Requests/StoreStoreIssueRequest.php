@@ -85,7 +85,24 @@ class StoreStoreIssueRequest extends FormRequest
                     // this is the material that was asked for.
                     $asked = DB::table('material_request_lines')->where('id', $requestLineId)->value('item_id');
 
-                    if ($asked !== null && (int) $asked !== $itemId) {
+                    // A LINE THAT NAMES NOTHING IS NOT AN EXEMPTION. Skipping
+                    // eligibility is justified only by an earlier decision
+                    // that actually exists — without this, quoting any
+                    // made-up request line id would have waved a finished
+                    // good straight past the rule, because the branch below
+                    // ends in `continue`. `material_request_line_id` carries
+                    // no `exists:` of its own (the request tables were built
+                    // by a parallel workstream), so it is checked here.
+                    if ($asked === null) {
+                        $validator->errors()->add(
+                            "lines.{$index}.material_request_line_id",
+                            'This line names a request line that does not exist.',
+                        );
+
+                        continue;
+                    }
+
+                    if ((int) $asked !== $itemId) {
                         $validator->errors()->add(
                             "lines.{$index}.item_id",
                             'This line hands over a different material from the one the request asked for.',

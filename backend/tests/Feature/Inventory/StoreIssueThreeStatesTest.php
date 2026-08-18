@@ -11,6 +11,7 @@ use App\Modules\Inventory\Models\StockBalance;
 use App\Modules\Inventory\Models\StockMovement;
 use App\Modules\Inventory\Models\StoreIssue;
 use App\Modules\Inventory\Models\Warehouse;
+use App\Modules\Inventory\Services\MaterialRequestService;
 use App\Modules\Inventory\Services\ProductionWipLocationResolver;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Production\Models\Shift;
@@ -229,12 +230,22 @@ class StoreIssueThreeStatesTest extends TestCase
 
     public function test_a_partial_issue_leaves_a_remaining_quantity_and_a_second_issue_closes_it(): void
     {
+        // A REAL request line, not a made-up id. Both issues below have to
+        // name the SAME line for the remaining-quantity bookkeeping to mean
+        // anything, and the store-issue request now refuses a line that names
+        // a request line which does not exist — quoting an invented id was how
+        // a caller could otherwise skip the material-eligibility rule
+        // altogether.
+        $requestLineId = app(MaterialRequestService::class)
+            ->create(['lines' => [['item_id' => $this->resin->id, 'quantity' => '500']]], null)
+            ->lines()->value('id');
+
         $first = $this->postJson('/api/v1/inventory/store-issues', [
             'received_by' => $this->supervisor->id,
             'lines' => [[
                 'item_id' => $this->resin->id,
                 'quantity' => '200',
-                'material_request_line_id' => 41,
+                'material_request_line_id' => $requestLineId,
                 'quantity_requested' => '500',
             ]],
         ])->assertCreated()->json('data');
@@ -246,7 +257,7 @@ class StoreIssueThreeStatesTest extends TestCase
             'lines' => [[
                 'item_id' => $this->resin->id,
                 'quantity' => '300',
-                'material_request_line_id' => 41,
+                'material_request_line_id' => $requestLineId,
                 'quantity_requested' => '500',
             ]],
         ])->assertCreated()->json('data');
