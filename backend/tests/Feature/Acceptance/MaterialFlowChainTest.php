@@ -225,6 +225,25 @@ class MaterialFlowChainTest extends TestCase
         $this->storekeeper = $this->userWith(['inventory.manage']);
     }
 
+    /**
+     * Opt-in so ordinary runs stay quiet:
+     *   MATERIAL_FLOW_LEDGER_REPORT=1 php artisan test --filter=MaterialFlowChain
+     */
+    protected function tearDown(): void
+    {
+        if ($this->ledgerReport !== [] && getenv('MATERIAL_FLOW_LEDGER_REPORT')) {
+            $w = fn (string $t, int $n) => str_pad($t, $n);
+            fwrite(STDERR, "\n".$w('STEP', 42).$w('RM STORE', 14).$w('PROD/WIP', 14).$w('FG STORE', 14)."CONSUMED\n");
+            fwrite(STDERR, str_repeat('-', 98)."\n");
+            foreach ($this->ledgerReport as $row) {
+                fwrite(STDERR, $w($row['step'], 42).$w($row['rm'], 14).$w($row['wip'], 14).$w($row['fg'], 14).$row['consumed']."\n");
+            }
+            fwrite(STDERR, "\n");
+        }
+
+        parent::tearDown();
+    }
+
     // ---- helpers ----------------------------------------------------------
 
     /** @param  list<string>  $permissions */
@@ -259,8 +278,35 @@ class MaterialFlowChainTest extends TestCase
      * THE PHASE 5 LEDGER INVARIANT, both directions, plus the read-only
      * command that guards it in production — asserted after EVERY step.
      */
+    /**
+     * Every step's three balances, in order, so the walk can be READ as well
+     * as asserted. The owner asked to see the before/after quantities for the
+     * three locations and, specifically, proof that a store issue is not a
+     * production consumption — this is that table, produced by the same walk
+     * the assertions run on rather than by a second script that might drift
+     * from it.
+     *
+     * @var list<array{step: string, rm: string, wip: string, fg: string, consumed: string}>
+     */
+    private array $ledgerReport = [];
+
     private function assertLedgerGreen(string $step): void
     {
+        // Recorded BEFORE the invariant is checked, so a failing step still
+        // leaves its figures in the table rather than vanishing with the
+        // exception.
+        $this->ledgerReport[] = [
+            'step' => $step,
+            'rm' => $this->balance($this->store),
+            'wip' => $this->balance($this->wip),
+            'fg' => $this->balance($this->fg, $this->bottle),
+            // The whole point of the distinction: how much has actually been
+            // BOOKED as production use at this moment.
+            'consumed' => bcadd((string) (StockMovement::query()
+                ->where('purpose', StockMovementPurpose::Consumption->value)
+                ->sum('quantity') ?: '0'), '0', 4),
+        ];
+
         $sums = [];
         foreach (StockMovement::query()->orderBy('id')->get() as $movement) {
             $sign = match ($movement->type) {
