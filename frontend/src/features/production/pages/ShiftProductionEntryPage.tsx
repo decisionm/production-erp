@@ -91,6 +91,7 @@ import { correctionLists } from '@/features/production/correctionReads';
 import {
     completedTodaySummary,
     completedTodayUnits,
+    createdWithinShiftWindow,
     floorStatusCounts,
     isRunningForOtherShift,
     machineFloorState,
@@ -1260,14 +1261,14 @@ const approvalColor: Record<ShiftProductionEntryStatus, string> = {
  * The hexes are the ones the cards already carried; only where they are spent
  * has changed.
  */
-const STATE_STYLE: Record<MachineFloorState, { accent: string; wash: string; label: string; icon: ReactNode }> = {
-    down: { accent: '#ff4d4f', wash: '#fff1f0', label: 'Down', icon: <ExclamationCircleFilled /> },
-    mold_change: { accent: '#faad14', wash: '#fffbe6', label: 'Mold change', icon: <SwapOutlined /> },
+const STATE_STYLE: Record<MachineFloorState, { accent: string; readable: string; wash: string; label: string; icon: ReactNode }> = {
+    down: { accent: '#ff4d4f', readable: '#cf1322', wash: '#fff1f0', label: 'Down', icon: <ExclamationCircleFilled /> },
+    mold_change: { accent: '#faad14', readable: '#ad6800', wash: '#fffbe6', label: 'Mold change', icon: <SwapOutlined /> },
     // A run that belongs to another shift takes its own muted gold, deliberately
     // a different tone from the mold-change amber it sits beside in the grid.
-    running_other_shift: { accent: '#d48806', wash: '#fffbe6', label: 'Not handed over', icon: <RetweetOutlined /> },
-    running: { accent: '#52c41a', wash: '#f6ffed', label: 'Running', icon: <PlayCircleFilled /> },
-    idle: { accent: '#bfbfbf', wash: '#fafafa', label: 'Idle', icon: <MinusCircleOutlined /> },
+    running_other_shift: { accent: '#d48806', readable: '#ad6800', wash: '#fffbe6', label: 'Not handed over', icon: <RetweetOutlined /> },
+    running: { accent: '#52c41a', readable: '#389e0d', wash: '#f6ffed', label: 'Running', icon: <PlayCircleFilled /> },
+    idle: { accent: '#bfbfbf', readable: '#595959', wash: '#fafafa', label: 'Idle', icon: <MinusCircleOutlined /> },
 };
 
 const tabularNums = { fontVariantNumeric: 'tabular-nums' } as const;
@@ -1282,12 +1283,21 @@ function FloorStatTile({
     count,
     label,
     accent,
+    readable,
     icon,
     muted,
 }: {
     count: number;
     label: string;
+    /** The rail colour — a 3px edge, where saturation reads as a signal. */
     accent: string;
+    /**
+     * The NUMERAL's colour. Deliberately a different, darker value: the palette
+     * accents are tuned for borders and tags, and #52c41a on white is ~2.3:1 —
+     * the loudest glyph on the strip was the one failing WCAG AA. The rail
+     * keeps the accent so the colour still means the same thing.
+     */
+    readable: string;
     icon?: ReactNode;
     muted?: boolean;
 }) {
@@ -1312,7 +1322,7 @@ function FloorStatTile({
                     fontWeight: 600,
                     // Zero is a fact, not a warning: an empty bucket goes grey so
                     // the colour on this strip only ever means "there are some".
-                    color: muted || count === 0 ? undefined : accent,
+                    color: muted || count === 0 ? undefined : readable,
                     ...tabularNums,
                 }}
             >
@@ -1380,22 +1390,33 @@ function SectionHeading({ title, extra, id }: { title: string; extra?: ReactNode
  * Configure-Recipe round trip that crosses a boundary) is created this morning
  * and filed under last night, so `created_at` would name the wrong evening.
  *
- * The gate is the page's own shift clock, not a plain calendar-date match: an
- * entry created at 02:00 on a Night shift correctly files under YESTERDAY, and
- * comparing raw dates would hide the start time for every night batch after
- * midnight. `productionDateFor` already encodes that rule, so it decides here
- * too. When the two disagree the time is simply not shown — the Carryover tag
- * already states the date and shift for exactly those runs.
+ * The gate asks whether the row was CREATED INSIDE the shift window it is filed
+ * under — see shiftFloorSummary.createdWithinShiftWindow, which owns the rule
+ * and is unit-tested against it. It is deliberately not a plain calendar-date
+ * match (that would hide the start time for every night batch after midnight),
+ * and no longer `productionDateFor`, which for an overnight shift maps EVERY
+ * time before the shift start back to the previous day and so let a batch
+ * created at 10:00 the next morning print "started 10:00" on a 22:00–06:00
+ * card. When the row falls outside its window the time is simply not shown —
+ * the Carryover tag already states the date and shift for those runs.
  *
  * `created_at` is a genuine server instant (not a stored wall-clock field), so
  * it is rendered through the browser's local zone — the convention
- * `lib/datetime.ts` sets out for instants.
+ * `lib/datetime.ts` sets out for instants — and compared in that same zone.
  */
 function startedAtLabel(entry: ShiftProductionEntry): string | null {
     if (!entry.created_at || !entry.production_date) return null;
     const created = dayjs(entry.created_at);
     if (!created.isValid()) return null;
-    if (productionDateFor(entry.shift, created.toDate()) !== entry.production_date) return null;
+    if (
+        !createdWithinShiftWindow({
+            createdAt: entry.created_at,
+            productionDate: entry.production_date,
+            shift: entry.shift,
+        })
+    ) {
+        return null;
+    }
     return created.format('HH:mm');
 }
 
@@ -2886,7 +2907,7 @@ export default function ShiftProductionEntryPage() {
 
 
     /**
-     * "Day bin: 1250.5 Kg" beside a consumption row, so the supervisor watches
+     * "Common input: 1250.5 Kg" beside a consumption row, so the supervisor watches
      * the balance fall as batches complete — plus a plain warning when they
      * are about to issue more than the bin holds (the backend would refuse
      * it). Never changes the typed figure.
@@ -2942,7 +2963,7 @@ export default function ShiftProductionEntryPage() {
 
         return (
             <Typography.Text type={short ? 'danger' : 'secondary'} style={{ fontSize: 12 }}>
-                Day bin: {fmtNum(held ?? 0, 4)}
+                Common input: {fmtNum(held ?? 0, 4)}
                 {ownIssue > 0 && ` + ${fmtNum(ownIssue, 4)} this batch already issued and gives back on saving`}
                 {short &&
                     (ownIssue > 0
@@ -5154,6 +5175,11 @@ export default function ShiftProductionEntryPage() {
                     // Radio.Group in a stray Form.Item with no form around it.
                     // Same value in, same setSelectedShiftId out.
                     <Segmented
+                        // The Radio.Group this replaced sat in a <Form.Item
+                        // label="Shift">. The header line names the current
+                        // shift for a sighted reader; a screen reader needs the
+                        // control group itself named.
+                        aria-label="Shift"
                         value={effectiveShiftId}
                         onChange={(value) => setSelectedShiftId(value as number)}
                         options={shiftOptions}
@@ -5189,13 +5215,33 @@ export default function ShiftProductionEntryPage() {
                 Deliberately not clickable: these are statements about the grid
                 immediately below, not a second way to act on a machine. */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-                <FloorStatTile count={floorCounts.running} label="Running" accent={STATE_STYLE.running.accent} icon={STATE_STYLE.running.icon} />
-                <FloorStatTile count={floorCounts.idle} label="Idle" accent={STATE_STYLE.idle.accent} icon={STATE_STYLE.idle.icon} muted />
-                <FloorStatTile count={floorCounts.down} label="Down" accent={STATE_STYLE.down.accent} icon={STATE_STYLE.down.icon} />
+                <FloorStatTile
+                    count={floorCounts.running}
+                    label="Running"
+                    accent={STATE_STYLE.running.accent}
+                    readable={STATE_STYLE.running.readable}
+                    icon={STATE_STYLE.running.icon}
+                />
+                <FloorStatTile
+                    count={floorCounts.idle}
+                    label="Idle"
+                    accent={STATE_STYLE.idle.accent}
+                    readable={STATE_STYLE.idle.readable}
+                    icon={STATE_STYLE.idle.icon}
+                    muted
+                />
+                <FloorStatTile
+                    count={floorCounts.down}
+                    label="Down"
+                    accent={STATE_STYLE.down.accent}
+                    readable={STATE_STYLE.down.readable}
+                    icon={STATE_STYLE.down.icon}
+                />
                 <FloorStatTile
                     count={floorCounts.moldChange}
                     label="Mold change"
                     accent={STATE_STYLE.mold_change.accent}
+                    readable={STATE_STYLE.mold_change.readable}
                     icon={STATE_STYLE.mold_change.icon}
                 />
                 {/* Only when there is one — a permanent zero here would train
@@ -5205,6 +5251,7 @@ export default function ShiftProductionEntryPage() {
                         count={floorCounts.runningOtherShift}
                         label="Not handed over"
                         accent={STATE_STYLE.running_other_shift.accent}
+                        readable={STATE_STYLE.running_other_shift.readable}
                         icon={STATE_STYLE.running_other_shift.icon}
                     />
                 )}
@@ -5889,7 +5936,8 @@ export default function ShiftProductionEntryPage() {
                             </Typography.Text>
                             <Typography.Text style={{ fontSize: 13 }}>
                                 Not totalled — today's batches are measured in{' '}
-                                {completedUnits.uoms.join(' and ')}. Per-batch figures are in the table below.
+                                {completedUnits.uoms.join(' and ')}, so one total would be wrong for some of them.
+                                Per-batch figures are in the table below, each in its own product's unit.
                             </Typography.Text>
                         </div>
                     ) : (

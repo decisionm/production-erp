@@ -170,7 +170,11 @@ export function completedTodaySummary(entries: readonly ShiftProductionEntry[] |
 
         summary.goodPieces = add(summary.goodPieces, good);
         summary.rejectPieces = add(summary.rejectPieces, num(entry.quantity_scrap));
-        if (quality?.checked) summary.qcRejectedPieces = add(summary.qcRejectedPieces, quality.rejected_nos ?? null);
+        // Through num() like every sibling sum. The type says number|null
+        // today, but every other quantity on this resource arrives as a decimal
+        // STRING — the day this one follows, a bare `add` would silently
+        // concatenate instead of adding.
+        if (quality?.checked) summary.qcRejectedPieces = add(summary.qcRejectedPieces, num(quality.rejected_nos));
 
         if (expected === null) {
             summary.withoutExpected += 1;
@@ -232,4 +236,77 @@ export function completedTodayUnits(entries: readonly ShiftProductionEntry[] | n
         mixed: uoms.length > 1,
         uoms,
     };
+}
+
+/**
+ * IS THIS ROW'S CREATION INSTANT ACTUALLY INSIDE THE SHIFT IT IS FILED UNDER?
+ *
+ * There is no `started_at` column on shift_production_entries — `created_at` is
+ * the row-creation instant — so a start time can only be shown when the two
+ * cannot disagree. A BACK-DATED batch (Start Batch's date picker, or a
+ * Configure-Recipe round trip that crosses a boundary) is created today and
+ * filed under an earlier shift, and printing its creation time would name a
+ * moment the machine was not running.
+ *
+ * THE GATE THIS REPLACES COMPARED `productionDateFor(shift, created)` AGAINST
+ * `production_date`, AND FOR AN OVERNIGHT SHIFT THAT IS ALMOST NO GATE AT ALL:
+ * `productionDateFor` maps EVERY clock time before an overnight shift's start
+ * back to the previous day — that is its documented job, so that a Night batch
+ * recorded at 02:00, at 06:10 in the grace window, or at 10:00 as late
+ * paperwork all file under yesterday. The consequence is that a Night batch
+ * filed under the 18th and created at 10:00 on the 19th passed the check and
+ * rendered "started 10:00" — a time outside the 22:00–06:00 window entirely,
+ * with no date beside it. Exactly the back-dating the gate exists to suppress.
+ *
+ * So the question asked here is the direct one: did this row come into
+ * existence DURING the shift window it claims? Start is the production date at
+ * the shift's start time; the window runs forward by the shift's own length, so
+ * an overnight shift ends on the following calendar day. A 24-hour or malformed
+ * span, an absent shift and an unparseable date all answer FALSE — the time is
+ * simply not shown, and the Carryover tag already states the date and shift for
+ * those runs.
+ *
+ * Compared in the browser's local zone, which is the zone the time is PRINTED
+ * in — comparing in one zone and rendering in another is how a correct check
+ * still shows a wrong number.
+ */
+export function createdWithinShiftWindow(args: {
+    createdAt: string | null | undefined;
+    productionDate: string | null | undefined;
+    shift: { start_time: string; end_time: string } | null | undefined;
+}): boolean {
+    const { createdAt, productionDate, shift } = args;
+    if (!createdAt || !productionDate || !shift) return false;
+
+    const created = new Date(createdAt);
+    if (Number.isNaN(created.getTime())) return false;
+
+    const minutes = (value: string): number | null => {
+        const match = /^(\d{1,2}):(\d{2})/.exec((value ?? '').trim());
+        if (!match) return null;
+        const h = Number(match[1]);
+        const m = Number(match[2]);
+        if (h > 23 || m > 59) return null;
+        return h * 60 + m;
+    };
+
+    const startMinutes = minutes(shift.start_time);
+    const endMinutes = minutes(shift.end_time);
+    if (startMinutes === null || endMinutes === null) return false;
+
+    // The shift's own length, rolling past midnight for an overnight window. A
+    // zero-length span (start === end) is not a window anybody ran a batch in.
+    const lengthMinutes = (endMinutes - startMinutes + 1440) % 1440;
+    if (lengthMinutes === 0) return false;
+
+    // Local midnight of the production date — built from parts rather than
+    // parsed, so it can never be read as UTC.
+    const [y, mo, d] = productionDate.split('-').map(Number);
+    if (!y || !mo || !d) return false;
+    const start = new Date(y, mo - 1, d, 0, 0, 0, 0);
+    if (Number.isNaN(start.getTime())) return false;
+    start.setMinutes(startMinutes);
+
+    const end = new Date(start.getTime() + lengthMinutes * 60_000);
+    return created >= start && created <= end;
 }

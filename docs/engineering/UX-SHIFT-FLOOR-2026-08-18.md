@@ -100,8 +100,21 @@ screen. That is precisely the class of error PR #128 was withdrawn for.
 migrations carry no start timestamp; `created_at` is the row-creation time. For a
 back-dated batch (`startDateChosen ?? startProductionDateOverride ?? today`) the record
 can be created this morning and filed under last night. Start time is therefore rendered
-**only when `created_at`'s date matches the entry's `production_date`**, and omitted
-otherwise — the Carryover tag already states the date and shift in that case.
+**only when the row was created INSIDE the shift window it is filed under**
+(`shiftFloorSummary.createdWithinShiftWindow`), and omitted otherwise — the Carryover
+tag already states the date and shift in that case.
+
+> **Corrected at re-gate.** The first implementation compared
+> `productionDateFor(shift, created_at)` against `production_date`, and this document
+> described it as a plain date match — two descriptions, neither matching the
+> behaviour. For an **overnight** shift it was very nearly no gate at all:
+> `productionDateFor` maps *every* clock time before the shift's start back to the
+> previous day (that is its documented job, so 02:00, the 06:10 grace window and
+> 10:00 late paperwork all file under yesterday). A Night batch filed under the 18th
+> but created at 10:00 on the 19th therefore passed, and the card printed
+> `started 10:00` — a time outside the 22:00–06:00 window entirely, with no date
+> beside it, which is exactly the back-dating the gate exists to suppress. The check
+> now asks the direct question and is unit-tested against that case.
 
 **4.3 Completed Today is production-date scoped, not shift scoped.**
 `listCompletedEntriesForDay(today)` filters on `production_date` + `batch_status` only,
@@ -154,9 +167,17 @@ summary) → **Needs Attention**.
    `traceabilityEnabled` gate.
 5. **Completed Today** — a KPI summary (batches · good · expected · output-vs-expected ·
    reject) above the existing table, and a real empty state instead of a bare sentence.
-6. **Needs Attention** — the amber "sent back by quality" panel and the "completed
-   earlier and still correctable" list are unified into one bottom section,
-   **Needs Attention · Corrections Required**.
+6. **Needs Attention** — the amber "sent back by quality" panel moves from above the
+   machine grid to its own bottom section, **Needs Attention · Corrections Required**.
+
+   > **Superseded, and left visible rather than rewritten.** This originally *unified*
+   > that panel with the "completed earlier and still correctable" list into one
+   > section. A later pass reversed the unification: the earlier-correctable batches
+   > are ordinary history — nothing is wrong with them, and an exception list that is
+   > never empty is one nobody reads on the day it matters. They now sit under the
+   > day's work as **Earlier batches — still correctable**, with the same
+   > `canAmendCompletion` gate and an `Open` door, and `needsAttentionCount` counts
+   > only what the server proves via `correction.awaiting_correction`.
 
    *This reverses a documented prior decision* — the amber panel sat above the grid with
    the comment *"ten machine cards of scrolling on a phone is the same as hiding it."*
@@ -270,10 +291,137 @@ Re-verified unchanged after the rework:
   branch that answers **before** the running branch.
 - `Cancel Batch` predicate `running && !running.quality?.checked && running.status === 'pending'`.
 - `traceabilityEnabled` gate on `Load Material` and `Hand Over Shift`.
-- `type={runningForOtherShift ? 'primary' : undefined}` on `Hand Over Shift` — handover is
-  the only action left on a not-ours card, and that is a business rule, not styling.
+- The `runningForOtherShift` weighting on `Hand Over Shift` — handover is the only
+  action left on a not-ours card, and that *is* a business rule, not styling. **The
+  business-relevant half is preserved, the line is not verbatim:**
+  `type={runningForOtherShift ? 'primary' : undefined}` became
+  `type={runningForOtherShift ? 'primary' : 'text'}`. Primary if and only if the run
+  has not been handed over is unchanged; the non-primary case moved from AntD's
+  default button to a text button, because it now sits in the card's secondary row.
 - `hoverable={!runningForOtherShift}` and the `completeElsewhere` tooltip/toast wording.
 - The `.filter((w) => w.is_active)` defence-in-depth on the work-centre list.
 - Every modal, drawer, mutation, schema and query in the file.
 - FC-01: no per-machine material button; resin still enters through the one
   `Load Material` door. DEC-20260817-001: no "Day Bin" wording introduced.
+
+
+---
+
+## 9. Independent re-gate (2026-08-18, after the head moved)
+
+Run because the head ref changed after the first review. **CI: all four checks green**,
+including the MySQL 8 leg. **Zero backend files changed** by this branch.
+
+### 9.1 What the re-gate found — and fixed
+
+Two P1s, no P0. Both were confirmed by reproduction before being fixed, not taken on
+trust.
+
+**P1-1 — the start-time gate was very nearly no gate at all on an overnight shift.**
+`startedAtLabel` compared `productionDateFor(shift, created_at)` against
+`production_date`. `productionDateFor` maps *every* clock time before an overnight
+shift's start back to the previous day — that is its documented job, so a Night batch
+recorded at 02:00, at 06:10 in the grace window, or at 10:00 as late paperwork all file
+under yesterday. The consequence: a Night batch filed under the 18th but **created at
+10:00 on the 19th passed the check**, and the card rendered `started 10:00` — a time
+outside the 22:00–06:00 window entirely, with no date beside it. Exactly the back-dating
+§4.2 says the gate exists to suppress.
+
+Fixed by asking the direct question — was the row created *inside* the shift window it
+is filed under — in a new pure `createdWithinShiftWindow`, unit-tested against the
+failing case and against the 02:00 case it must **not** suppress. `startedAtLabel` was
+the one piece of new display logic that had not been extracted and so had no test; that
+is why it shipped and why the extraction now covers it.
+
+**P1-2 — the Day Bin copy guard passed on the exact revert it existed to catch.**
+Restoring two of the real sentences this PR fixed left `shiftFloorCopy.test.ts` green.
+Reproduced directly: with `The day bin has no {material…} recorded` and `No factory day
+bin chosen yet…` put back, the suite passed. Neither is a quoted literal (JSX prose is
+not a string), and neither survives a `>([^<>{}\n]+)<` extractor — Prettier wraps prose
+onto its own lines and nearly every sentence here carries a `{expr}` or a `{' '}`. The
+guard reached link labels and missed paragraphs.
+
+Fixed by inverting it: scan the whole comment-stripped source for the phrase and
+**allow-list the machine identifiers** that legitimately keep the name (the route, the
+query keys, the API functions, the form field). The failure mode goes from silent-miss
+to noisy-and-fixable.
+
+**And the inverted guard immediately earned itself.** It found a user-visible leftover
+that the old guard, the DOM scan and both review passes had all missed:
+
+> `Day bin: {fmtNum(held ?? 0, 4)}` — the material-balance hint beside a consumption row
+> in the completion drawer.
+
+It never appeared in any DOM scan because that drawer cannot open without a batch. So
+the "no Day Bin wording" constraint was **not** actually met when it was first reported
+as met. It now reads `Common input:`.
+
+### 9.2 Also fixed at re-gate
+
+| | Fix |
+|---|---|
+| The KPI numerals failed WCAG AA | `#52c41a` on white is ~2.3:1 and `#faad14` ~1.9:1 — the loudest glyph on the strip was the one failing. The numeral now takes a separate darker `readable` tone (`#389e0d` / `#ad6800` / `#cf1322`) while the **rail keeps the accent**, so the colour still means one thing. Verified live: the Down numeral computes `rgb(207,19,34)` against a `rgb(255,77,79)` rail. |
+| The shift control lost its accessible name | The `Radio.Group` sat in a `<Form.Item label="Shift">`; the `Segmented` had none. `aria-label="Shift"` added — the tree now reports `radiogroup "Shift"`. |
+| The mixed-unit note pointed at a table that stated no unit | `CompletedTodayTable` rendered bare integers for Expected/Actual/Good/Reject. Each row now states its own unit once (`quantities in Nos.`), from `uomOf(item)` — so the withholding branch redirects somewhere that is actually denominated. |
+| `qcRejectedPieces` bypassed `num()` | The one sum that did. Safe today (the type says `number \| null`), a silent string-concatenation the day that resource follows its siblings into decimal strings. |
+
+### 9.3 States exercised in a browser this pass
+
+| State | Verified | How |
+|---|---|---|
+| **Idle** | yes | 11 cards, `Start Batch` primary, `Mold Change` + `Report Down` secondary on one line |
+| **Down** | yes | red rail, `⚠ Down` tag, problem text, `Since HH:MM`, `Close Breakdown` red primary, `Report Down` correctly absent |
+| **Mold Change** | **yes — new this pass** | a mold-change log needs an item and a mold, not a batch. Fixture mold created, change opened on MC-03: gold rail, `⇄ Mold change` tag, `→ ITEM` transition, `Since 17:20`, `Finish Mold Change` primary, no secondary row |
+| **Mixed** | yes | 9 Idle + 1 Down + 1 Mold change; tiles tracked the grid exactly through every transition, both directions |
+| **Running** | **NO** | needs an in-progress batch |
+| **Carryover** | **NO** | needs an in-progress batch filed under an earlier shift |
+
+**Running and Carryover remain unverified in a browser, and no attempt was made to
+change that.** Producing either means **creating a production batch**, which `AGENTS.md`
+forbids without exception. The fixture ends this pass with **0 production batches**, 0
+open downtime logs and 0 open mold changes — every state created for evidence was closed
+again. Both cards remain covered by wireframe and by the shared pure functions only.
+
+### 9.4 Also still unverified
+
+- **Completed Today populated** — and with it the figure tiles, the mixed-UOM withholding
+  branch, the `Open` control, the new per-row unit line and both correction sections.
+  Needs completed batches. Covered by unit tests over the pure functions.
+- **`prefers-reduced-motion` at OS level.** The rule ships in the built bundle
+  (confirmed in `backend/public/build/assets/*.css`, alongside a pre-existing
+  reduced-motion rule for the dashboard lamps, so the pattern is the app's own), and the
+  `scrollIntoView` guard is source-visible — but the OS setting was not toggled, and the
+  chip that starts the only animation cannot render without a returned batch.
+- **Roles beyond two.** Supervisor and Plant Manager both render an identical floor.
+  Nothing in this diff contains a permission check — the only matches for
+  `can(`/`permission`/`authorize`/`policy` across the whole diff are **comments**, and
+  `types.ts` (which owns `canAmendCompletion` and `isAwaitingCorrection`) has **zero**
+  changed lines.
+- **A mass-denominated finished good.** `uomOf` is applied to the expected-output
+  projection, which is a shot count (`cycles × cavities`) rather than a stock quantity.
+  The server already treats the two as commensurable (`efficiency_pct = actual_pieces ÷
+  expected_pieces`, where `actual_pieces` *is* `quantity_produced`), so this inherits an
+  existing backend assumption rather than introducing one. Whether any batch-startable
+  item is non-piece is a **live-data** question and per `AGENTS.md` must be counted on
+  the live instance, not inferred from a dev fixture. **Open until counted.**
+
+### 9.5 One incidental finding, not about this PR
+
+The shared dev SQLite fixture is **behind the migrations**: creating a mold failed with
+`table molds has no column named created_by`, added by the configuration-lifecycle work.
+A local `php artisan migrate` on the disposable copy fixed it. Anyone else working from
+that fixture will hit the same wall.
+
+### 9.6 The review chain could not be completed
+
+`AGENTS.md` requires Builder → **Cursor review** → **Codex verification** → **owner**.
+
+- **Codex verification: could not run.** The CLI is installed and was invoked directly
+  (`codex-companion adversarial-review`); it returned *"You've hit your usage limit …
+  try again at Aug 20th, 2026 9:14 AM."* No Codex findings exist for this head.
+- **Cursor review: not available to me.**
+- **Owner sign-off: outstanding by definition.**
+
+The two review passes recorded above are an independent code review and this author's
+own verification. They are **not** the Cursor and Codex links, and must not be counted
+as them.

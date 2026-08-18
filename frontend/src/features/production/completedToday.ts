@@ -1,5 +1,5 @@
 import type { TallySyncStatus } from '@/features/tally-sync/types';
-import { itemLabel } from '@/lib/itemLabel';
+import { itemLabel, uomOf } from '@/lib/itemLabel';
 import { missingWords } from './productStandardsConfig';
 import type { ProductionMetrics, ShiftProductionEntry, ShiftProductionEntryStatus } from './types';
 
@@ -39,6 +39,14 @@ export interface CompletedTodayRow {
      * null when it is the product itself or none was frozen.
      */
     finishedItemName: string | null;
+    /**
+     * THE UNIT EVERY QUANTITY IN THIS ROW IS IN, off the product's own item
+     * master. The columns carried no unit at all — `quantity_produced` is
+     * posted to stock unconverted, so what the number means is whatever the
+     * item master calls it, and a table of bare integers states that nowhere.
+     * Null when the master carries none.
+     */
+    uom: string | null;
     /** metrics.expected_pieces, grouped; "—" until the batch has metrics. */
     expectedPieces: string;
     /** The supervisor's count (gross before quality, else the produced count); "—" when none. */
@@ -158,6 +166,7 @@ export function completedTodayRow(entry: ShiftProductionEntry, ceiling: number =
         shift: entry.shift?.name ?? '—',
         sku: sku === '' ? '—' : sku,
         product: itemLabel(item),
+        uom: uomOf(item),
         finishedItemName:
             finished !== null && finishedName !== '' && finishedName.toLowerCase() !== productName.toLowerCase()
                 ? finishedName

@@ -156,6 +156,7 @@ export default function CompletedTodayTable({
                                 </Typography.Text>
                                 <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
                                     {row.machine} · {row.shift} · {row.batchNumber}
+                                    {row.uom ? ` · quantities in ${row.uom}` : ''}
                                 </Typography.Text>
                             </div>
                             <EfficiencyCell row={row} />
@@ -230,6 +231,15 @@ export default function CompletedTodayTable({
                                 {row.product}
                                 {row.finishedItemName ? ` · posts as ${row.finishedItemName}` : ''}
                             </Typography.Text>
+                            {/* The unit for every figure on this row, said ONCE
+                                rather than repeated on four columns. These
+                                quantities are denominated in the product's own
+                                UOM and the table stated it nowhere. */}
+                            {row.uom ? (
+                                <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                                    quantities in {row.uom}
+                                </Typography.Text>
+                            ) : null}
                         </>
                     ),
                 },

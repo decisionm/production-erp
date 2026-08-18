@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     completedTodaySummary,
     completedTodayUnits,
+    createdWithinShiftWindow,
     floorStatusCounts,
     isRunningForOtherShift,
     machineFloorState,
@@ -233,5 +234,80 @@ describe('completedTodayUnits — the unit is read off the rows, never assumed',
         for (const rows of [[], undefined, null, [inUom(null), inUom('   ')]]) {
             expect(completedTodayUnits(rows)).toEqual({ uom: null, mixed: false, uoms: [] });
         }
+    });
+});
+
+describe('createdWithinShiftWindow — a start time is shown only when it can be honest', () => {
+    const NIGHT = { start_time: '22:00', end_time: '06:00' };
+    const DAY = { start_time: '06:00', end_time: '14:00' };
+
+    /** A local-zone instant, written the way the browser will read it back. */
+    const at = (y: number, mo: number, d: number, h: number, mi: number) =>
+        new Date(y, mo - 1, d, h, mi, 0, 0).toISOString();
+
+    it('accepts a night batch recorded after midnight — the case the gate must NOT suppress', () => {
+        expect(createdWithinShiftWindow({
+            createdAt: at(2026, 8, 19, 2, 0),
+            productionDate: '2026-08-18',
+            shift: NIGHT,
+        })).toBe(true);
+    });
+
+    it('accepts a night batch recorded before midnight, on its own production date', () => {
+        expect(createdWithinShiftWindow({
+            createdAt: at(2026, 8, 18, 23, 30),
+            productionDate: '2026-08-18',
+            shift: NIGHT,
+        })).toBe(true);
+    });
+
+    /**
+     * THE BUG THIS FUNCTION EXISTS FOR. The previous gate compared
+     * `productionDateFor(shift, created)` against `production_date`, and
+     * `productionDateFor` maps EVERY clock time before an overnight shift's
+     * start back to the previous day. So 10:00 on the 19th "belonged to" the
+     * 18th, the check passed, and a 22:00–06:00 card printed "started 10:00".
+     */
+    it('refuses late paperwork typed the next morning for a night shift', () => {
+        expect(createdWithinShiftWindow({
+            createdAt: at(2026, 8, 19, 10, 0),
+            productionDate: '2026-08-18',
+            shift: NIGHT,
+        })).toBe(false);
+    });
+
+    it('refuses a batch back-dated to an earlier day', () => {
+        expect(createdWithinShiftWindow({
+            createdAt: at(2026, 8, 19, 9, 0),
+            productionDate: '2026-08-17',
+            shift: DAY,
+        })).toBe(false);
+    });
+
+    it('accepts a day batch inside its window and refuses one after it closed', () => {
+        expect(createdWithinShiftWindow({ createdAt: at(2026, 8, 18, 9, 0), productionDate: '2026-08-18', shift: DAY })).toBe(true);
+        // 14:00 is the boundary and counts; 14:01 is after the shift.
+        expect(createdWithinShiftWindow({ createdAt: at(2026, 8, 18, 14, 0), productionDate: '2026-08-18', shift: DAY })).toBe(true);
+        expect(createdWithinShiftWindow({ createdAt: at(2026, 8, 18, 14, 1), productionDate: '2026-08-18', shift: DAY })).toBe(false);
+    });
+
+    it('answers false for anything it cannot check, rather than guessing', () => {
+        const good = { createdAt: at(2026, 8, 18, 9, 0), productionDate: '2026-08-18', shift: DAY };
+        expect(createdWithinShiftWindow({ ...good, createdAt: null })).toBe(false);
+        expect(createdWithinShiftWindow({ ...good, createdAt: 'not-a-date' })).toBe(false);
+        expect(createdWithinShiftWindow({ ...good, productionDate: null })).toBe(false);
+        expect(createdWithinShiftWindow({ ...good, productionDate: 'nonsense' })).toBe(false);
+        expect(createdWithinShiftWindow({ ...good, shift: null })).toBe(false);
+        expect(createdWithinShiftWindow({ ...good, shift: { start_time: 'x', end_time: 'y' } })).toBe(false);
+        // A zero-length span is not a window anybody ran a batch in.
+        expect(createdWithinShiftWindow({ ...good, shift: { start_time: '06:00', end_time: '06:00' } })).toBe(false);
+    });
+
+    it('accepts seconds on the shift times, as the server sends them', () => {
+        expect(createdWithinShiftWindow({
+            createdAt: at(2026, 8, 18, 9, 0),
+            productionDate: '2026-08-18',
+            shift: { start_time: '06:00:00', end_time: '14:00:00' },
+        })).toBe(true);
     });
 });
