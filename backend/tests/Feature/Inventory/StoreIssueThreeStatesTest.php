@@ -236,12 +236,20 @@ class StoreIssueThreeStatesTest extends TestCase
         // a request line which does not exist — quoting an invented id was how
         // a caller could otherwise skip the material-eligibility rule
         // altogether.
-        $requestLineId = app(MaterialRequestService::class)
-            ->create(['lines' => [['item_id' => $this->resin->id, 'quantity' => '500']]], null)
-            ->lines()->value('id');
+        // The issue must also NAME the request it fulfils: a line pointing at a
+        // request line while the header names a different request (or none)
+        // moves stock without ever crediting the request, which would leave it
+        // owing the full quantity for ever against work already done.
+        $materialRequest = app(MaterialRequestService::class)
+            ->create(['lines' => [['item_id' => $this->resin->id, 'quantity' => '500']]], null);
+        $requestLineId = $materialRequest->lines()->value('id');
+        // ...and SUBMITTED, because only a request the store can actually see
+        // in its queue may be fulfilled (MaterialRequestLifecycleException).
+        app(MaterialRequestService::class)->submit($materialRequest);
 
         $first = $this->postJson('/api/v1/inventory/store-issues', [
             'received_by' => $this->supervisor->id,
+            'material_request_id' => $materialRequest->id,
             'lines' => [[
                 'item_id' => $this->resin->id,
                 'quantity' => '200',
@@ -254,6 +262,7 @@ class StoreIssueThreeStatesTest extends TestCase
 
         $second = $this->postJson('/api/v1/inventory/store-issues', [
             'received_by' => $this->supervisor->id,
+            'material_request_id' => $materialRequest->id,
             'lines' => [[
                 'item_id' => $this->resin->id,
                 'quantity' => '300',

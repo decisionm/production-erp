@@ -83,7 +83,10 @@ class StoreStoreIssueRequest extends FormRequest
                 if ($requestLineId !== null) {
                     // FULFILLING AN ACCEPTED ASK. The only question is whether
                     // this is the material that was asked for.
-                    $asked = DB::table('material_request_lines')->where('id', $requestLineId)->value('item_id');
+                    $asked = DB::table('material_request_lines as l')
+                        ->join('material_requests as r', 'r.id', '=', 'l.material_request_id')
+                        ->where('l.id', $requestLineId)
+                        ->first(['l.item_id', 'l.material_request_id', 'r.status']);
 
                     // A LINE THAT NAMES NOTHING IS NOT AN EXEMPTION. Skipping
                     // eligibility is justified only by an earlier decision
@@ -102,7 +105,39 @@ class StoreStoreIssueRequest extends FormRequest
                         continue;
                     }
 
-                    if ((int) $asked !== $itemId) {
+                    // A WITHDRAWN ASK IS NOT AN EARLIER DECISION TO HONOUR.
+                    // "History stays issuable" is right for a request the
+                    // store still owes; a cancelled one is not owed, and
+                    // letting it exempt its item would leave a permanent
+                    // loophole attached to a dead row.
+                    if ((string) $asked->status === 'cancelled') {
+                        $validator->errors()->add(
+                            "lines.{$index}.material_request_line_id",
+                            'This request was cancelled, so it cannot be issued against.',
+                        );
+
+                        continue;
+                    }
+
+                    // THE LINE MUST BELONG TO THE REQUEST THIS ISSUE IS FOR.
+                    // Without this, a line could name a real request line
+                    // while the header named a different request or none at
+                    // all — and requestBehind() then returns null, so
+                    // applyIssuedQuantities never runs: stock moves, the
+                    // pointer is stored, and the request goes on showing the
+                    // full quantity owed for ever, against work already done.
+                    $header = $this->input('material_request_id');
+
+                    if ($header === null || (int) $header !== (int) $asked->material_request_id) {
+                        $validator->errors()->add(
+                            "lines.{$index}.material_request_line_id",
+                            'This line belongs to a different material request from the one this issue names.',
+                        );
+
+                        continue;
+                    }
+
+                    if ((int) $asked->item_id !== $itemId) {
                         $validator->errors()->add(
                             "lines.{$index}.item_id",
                             'This line hands over a different material from the one the request asked for.',

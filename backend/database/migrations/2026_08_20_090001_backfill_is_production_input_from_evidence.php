@@ -107,9 +107,16 @@ return new class extends Migration
      * the moment Q56(a) is answered, which no rollback of a BACKFILL should be
      * able to do.
      *
-     * Reversing the backfill means reversing what it was FOR, and that is the
-     * migration before this one: dropping the column takes the enforcement
-     * with it, because both rules reference it. Roll back both, or neither.
+     * And rolling back the migration BEFORE this one is not a repair either —
+     * this is worth stating precisely, because the obvious reading is wrong.
+     * Dropping `items.is_production_input` does NOT remove the enforcement: the
+     * deployed code still names that column in StoreMaterialRequestRequest, in
+     * StoreStoreIssueRequest and in Item::scopeProductionInput, so every
+     * material request and every store issue would fail with SQLSTATE 42S22 —
+     * a 500, not a graceful fallback.
+     *
+     * The safe sequence is therefore: revert the CODE deploy, and roll back
+     * both migrations. Never the migrations alone.
      */
     public function down(): void
     {

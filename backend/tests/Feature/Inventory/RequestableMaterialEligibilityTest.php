@@ -303,6 +303,58 @@ class RequestableMaterialEligibilityTest extends TestCase
         ])->assertStatus(422)->assertJsonValidationErrors('lines.0.material_request_line_id');
     }
 
+    /**
+     * A WITHDRAWN ASK IS NOT AN EARLIER DECISION TO HONOUR. "History stays
+     * issuable" is right for a request the store still owes; a cancelled one
+     * is not owed, and letting it exempt its item would leave a permanent
+     * loophole attached to a dead row.
+     */
+    public function test_a_cancelled_request_cannot_be_issued_against(): void
+    {
+        $request = $this->postJson('/api/v1/inventory/material-requests', [
+            'lines' => [['item_id' => $this->cap->id, 'quantity' => '500']],
+        ])->assertStatus(201)->json('data');
+
+        $this->postJson("/api/v1/inventory/material-requests/{$request['id']}/cancel", [
+            'reason' => 'The run was pulled.',
+        ])->assertOk();
+
+        $this->postJson('/api/v1/inventory/store-issues', [
+            'material_request_id' => $request['id'],
+            'lines' => [[
+                'material_request_line_id' => $request['lines'][0]['id'],
+                'item_id' => $this->cap->id,
+                'quantity' => '500',
+            ]],
+        ])->assertStatus(422)->assertJsonValidationErrors('lines.0.material_request_line_id');
+    }
+
+    /**
+     * The line must belong to the request the issue names. Otherwise stock
+     * moves, the pointer is stored, and the request goes on showing the full
+     * quantity owed for ever — against work already done.
+     */
+    public function test_a_line_may_not_name_a_request_line_from_a_different_request(): void
+    {
+        $one = $this->postJson('/api/v1/inventory/material-requests', [
+            'lines' => [['item_id' => $this->cap->id, 'quantity' => '500']],
+        ])->assertStatus(201)->json('data');
+        $two = $this->postJson('/api/v1/inventory/material-requests', [
+            'lines' => [['item_id' => $this->cap->id, 'quantity' => '200']],
+        ])->assertStatus(201)->json('data');
+
+        $this->postJson("/api/v1/inventory/material-requests/{$one['id']}/submit")->assertOk();
+
+        $this->postJson('/api/v1/inventory/store-issues', [
+            'material_request_id' => $one['id'],
+            'lines' => [[
+                'material_request_line_id' => $two['lines'][0]['id'], // the OTHER request
+                'item_id' => $this->cap->id,
+                'quantity' => '200',
+            ]],
+        ])->assertStatus(422)->assertJsonValidationErrors('lines.0.material_request_line_id');
+    }
+
     public function test_the_store_issue_side_refuses_the_same_ineligible_material(): void
     {
         // The two halves of the flow must not disagree about what a material
