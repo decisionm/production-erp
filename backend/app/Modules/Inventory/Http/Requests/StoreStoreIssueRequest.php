@@ -2,6 +2,7 @@
 
 namespace App\Modules\Inventory\Http\Requests;
 
+use App\Modules\Inventory\Models\Enums\MeasurementType;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\DB;
@@ -145,6 +146,46 @@ class StoreStoreIssueRequest extends FormRequest
                     }
 
                     continue;
+                }
+
+                // THE UNIT IS THE ITEM'S, NOT THE CALLER'S, and a counted thing
+                // cannot be handed over in halves.
+                //
+                // 26 of the factory's 43 Tally stock items are counted, not
+                // weighed — trays, master boxes, caps, tape — and across 1,045
+                // observed quantities not one `Nos.` or `Pcs.` figure is
+                // fractional. Half a carton is not something the store hands
+                // over. Weight may carry decimals; packing film in kilograms
+                // genuinely arrives as 14.700.
+                $item = DB::table('items')->where('id', $itemId)->first(['uom']);
+
+                if ($item !== null) {
+                    $type = MeasurementType::forUom($item->uom);
+                    $quantity = $line['quantity'] ?? null;
+
+                    if ($quantity !== null && is_numeric($quantity)
+                        && ! $type->permitsFractions()
+                        && bccomp((string) $quantity, bcadd((string) (int) $quantity, '0', 4), 4) !== 0) {
+                        $validator->errors()->add(
+                            "lines.{$index}.quantity",
+                            "This material is measured in {$item->uom} — {$type->label()}. Issue a whole number.",
+                        );
+                    }
+
+                    // FC-03's lesson, applied to the issue side: "a tape figure
+                    // in metres filed as Nos is a different number about a
+                    // different thing, and that reached live once". The request
+                    // side already refuses a caller-supplied unit; this side
+                    // accepted and PERSISTED one.
+                    $given = $line['uom'] ?? null;
+
+                    if (is_string($given) && trim($given) !== ''
+                        && mb_strtolower(trim($given)) !== mb_strtolower(trim((string) $item->uom))) {
+                        $validator->errors()->add(
+                            "lines.{$index}.uom",
+                            "This material is kept in {$item->uom}. An issue may not name a different unit.",
+                        );
+                    }
                 }
 
                 // A FRESH HANDOVER against no request. Nothing decided this

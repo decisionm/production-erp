@@ -2,7 +2,10 @@
 
 namespace App\Modules\Inventory\Http\Requests;
 
+use App\Modules\Inventory\Models\Enums\MeasurementType;
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 /**
@@ -60,5 +63,40 @@ class StoreMaterialRequestRequest extends FormRequest
             'lines.required' => 'A material request has to name at least one material.',
             'lines.*.quantity.gt' => 'Ask for a quantity greater than zero.',
         ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            foreach ((array) $this->input('lines', []) as $index => $line) {
+                $itemId = isset($line['item_id']) ? (int) $line['item_id'] : 0;
+                $quantity = $line['quantity'] ?? null;
+
+                if ($itemId <= 0 || $quantity === null || ! is_numeric($quantity)) {
+                    continue;
+                }
+
+                // A COUNTED THING CANNOT BE ASKED FOR IN HALVES. 26 of the
+                // factory's 43 Tally stock items are counted rather than
+                // weighed, and across 1,045 observed quantities not one
+                // `Nos.` or `Pcs.` figure is fractional. Weight keeps its
+                // decimals — packing film really does arrive as 14.700 kg.
+                $item = DB::table('items')->where('id', $itemId)->first(['uom']);
+
+                if ($item === null) {
+                    continue;
+                }
+
+                $type = MeasurementType::forUom($item->uom);
+
+                if (! $type->permitsFractions()
+                    && bccomp((string) $quantity, bcadd((string) (int) $quantity, '0', 4), 4) !== 0) {
+                    $validator->errors()->add(
+                        "lines.{$index}.quantity",
+                        "This material is measured in {$item->uom} — {$type->label()}. Ask for a whole number.",
+                    );
+                }
+            }
+        });
     }
 }

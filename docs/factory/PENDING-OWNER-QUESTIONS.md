@@ -1258,3 +1258,57 @@ DEC-20260817-001 — the material has been handed over, not consumed. The enum v
 with the day-bin path and written into historical rows, so renaming it is a data decision
 rather than a code one. Worth settling alongside the above.
 *Open since 2026-08-18.*
+
+## Q58 · Units of measure — four things the Tally evidence shows but cannot settle
+
+The 12-Aug export set has been audited for units (`docs/engineering/AUDIT-UOM-2026-08-18.md`).
+It settled the big question — the factory measures **26 of its 43 stock items by count, not by
+weight**, so nothing may treat "material" as "kilogram" — and a canonical classifier plus
+fraction rules are now enforced. Four things remain the factory's to answer.
+
+(a) **The four conversion ratios seen on dual-unit purchase-order lines.** 28 of 382 lines
+    display an alternate unit inline: LDPE Cover (30x49x120G) as 1 Kg → 10 Nos, Poly Olefin
+    Pouch as 1 Kg → 12 Nos, 500ML IFF Tray as 1 Kg → 50 Nos, and Packing Tape Yellow as
+    1 Nos → 1 Pcs. **These are recorded as what the line displayed and have NOT been adopted
+    as conversion factors.** Q40 already rules that a conversion factor "would also have to
+    come from the factory and never be derived", and this is the same discipline as the bag
+    weight withdrawn in PR #128. Are these the factory's real ratios? The 1:1 tape case looks
+    much more like a redundant Tally alias than a conversion.
+
+(b) **Two near-identical masters carrying DIFFERENT units.** `500ML IFF Tray` is `Kgs.` and
+    `500ML Tray IFF` is `Nos.`. Either they are two genuinely different things, or one is a
+    master-data error — and only the factory can say which. Until then any code that resolves
+    a tray by name is resolving between two different measurement types.
+
+(c) **Which side governs a dual-unit line?** When a receipt is entered against a line that
+    displayed two units, which one is the stock-keeping quantity? This is Q40's question and
+    it stays open; the build carries the single unit and converts nothing.
+
+(d) **Should GRN lot/bag traceability exist for COUNTED materials?** Today it is refused
+    outright: "Bag lots are only supported for items measured in kg." A receipt of 5,000 trays
+    completes and lands in stock correctly, but there is **no lot or bag trace** behind it —
+    no supplier lot number, no per-carton identity, no link from a tray back to its delivery.
+    For resin that trace exists and is load-bearing. Whether the factory needs the same for
+    trays, boxes or caps — and what a "bag" would even mean for them — is an operations
+    question, not an engineering one.
+
+**An evidence gap worth closing, and it limits everything above.** This export set is
+purchase-order-side only: there is no GRN and no Stock Journal in it. So the units below are
+proven for what was ORDERED. That the same unit is the stock-keeping unit, and the unit that
+posts to Tally, is a reasonable reading but is **not proven by this evidence**. A Stock
+Journal / GRN export would settle it — and the UOM contract rests on exactly that claim.
+
+**Reinforces Q54(a) with proof rather than inference.** That question asks whether every kg
+material is a "common input" that must refuse a machine. The evidence now shows the concrete
+harm: **six packing-FILM masters are measured in `Kgs.`** (Hm Polythene Bags, three LDPE
+Cover variants, Poly Olefin Pouch, LDPE Cover 20X33X150). Because the only signal the data
+carries is the unit, all six are currently treated as common resin input — so a film request
+naming a machine is refused today, wrongly. Film is not resin. Engineering deliberately has
+NOT invented a rule to separate them; the factory has to say which materials are the common
+input.
+
+**Blocks:** nothing. Counted and weighed materials both walk the full chain in their own
+units, and the fraction rules are enforced. What is blocked is any conversion between units,
+any lot/bag trace for a counted material, and any correct handling of the film-vs-resin
+distinction.
+*Open since 2026-08-18.*
