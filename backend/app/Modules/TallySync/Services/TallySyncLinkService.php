@@ -86,6 +86,33 @@ class TallySyncLinkService
     }
 
     /**
+     * The links for queue rows a caller already knows BY ID, in one query,
+     * keyed by tally_sync_entries.id — for a document that carries its
+     * voucher's foreign key itself rather than being the voucher's syncable
+     * (a shift-granularity Stock Journal names the Shift as its syncable and
+     * its member entries hang off shift_production_entries.tally_sync_entry_id;
+     * the entry's own link IS that voucher's). Ids that name no row are
+     * simply absent. Same shape, same read-only stance as forMany().
+     *
+     * @param  list<int>  $entryIds
+     * @return array<int, array{entry_id: int, voucher_type: string, status: string, voucher_number: string, synced_at: ?string, flags: object, link: string}>
+     */
+    public function forEntryIds(array $entryIds): array
+    {
+        $entryIds = array_values(array_unique(array_map('intval', $entryIds)));
+        if ($entryIds === []) {
+            return [];
+        }
+
+        $links = [];
+        foreach (TallySyncEntry::query()->whereIn('id', $entryIds)->orderBy('id')->get() as $entry) {
+            $links[(int) $entry->id] = $this->link($entry);
+        }
+
+        return $links;
+    }
+
+    /**
      * @return array{entry_id: int, voucher_type: string, status: string, voucher_number: string, synced_at: ?string, flags: object, link: string}
      */
     private function link(TallySyncEntry $entry): array

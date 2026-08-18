@@ -34,7 +34,8 @@ run (DEC-20260812-001 HRMS/payroll adoption, DEC-20260812-002 PO raised in
 the ERP). Q38-Q41 are claimed by the 12-Aug Tally
 evidence set and the purchase/tax configuration design. Q42 is claimed by the SKU scheme
 design. Q43 is claimed by the Phase 3 sync fix loop (duplicate master names).
-New questions continue from Q46.
+Q46 is claimed by the Phase 5.5 fix loop (paper-page ingest and the
+estimation version). New questions continue from Q47.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 DEC-20260809-002/-003 landed with PR #155 (the finance-pull discovery
@@ -752,3 +753,28 @@ question: should a standard be REQUIRED to keep exactly one default (so the
 floor is never asked), or is asking the supervisor when there is a real choice
 the intended behaviour? **Blocks:** nothing — the floor is asked only when there
 is a real choice. *Open since 2026-08-17.*
+
+## Q46 · A paper shift page from before Phase 5.5 — which expected-output arithmetic should the ERP show for it?
+
+When a paper shift page from before Phase 5.5 is ingested, should the ERP's
+expected-output figure match the paper's WB2 arithmetic (legacy) or the
+current engine (v3)? Today the ingest path stamps the current engine.
+
+Phase 5.5 (P5.5-03) made one estimation formula, versioned: a batch is
+stamped `calculation_version` at Start and its expected output is computed
+under that stamp for ever — `production_v3_unified` floors the cycle count
+before the cavities multiply (the engine's rule); every earlier stamp keeps the
+inline WB2 workbook arithmetic, unfloored (13,584.91 against 13,580 for
+CT 10.6 × 5 cavities × 8 h). The paper-page ingest
+(`ShiftPageEntryService::recordRow`) composes the ordinary Start and Complete,
+so a page recording a shift that ALREADY RAN — possibly before Phase 5.5 —
+is stamped with the current engine, and the ERP's expected figure for that
+shift is the floored one, not the figure the paper's own arithmetic would
+give. Nothing owner-decided moves (cycle times, cavities, weights, pack
+counts are the workbook's); what differs is a few pieces per shift in the
+expected column and the efficiency it feeds. The engineering default in force
+is "the current engine stamps every new row, whatever date it records";
+`EstimationUnifiedTest::test_every_creation_path_in_app_stamps_a_calculation_version`
+enumerates the doors. **Blocks:** nothing — pages ingest today; the choice
+only decides which arithmetic a back-dated page's expected figure follows.
+*Open since 2026-08-17.*

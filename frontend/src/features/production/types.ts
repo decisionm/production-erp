@@ -1,6 +1,7 @@
 import type { Employee } from '@/features/hrms/types';
 import type { Item, Warehouse } from '@/features/inventory/types';
 import type { Vendor } from '@/features/procurement/types';
+import type { TallyLink } from '@/features/sales/types';
 
 export interface WorkCenter {
     id: number;
@@ -197,6 +198,20 @@ export interface ProductionMetrics {
     /** issued − good − confirmed_rejection − lumps; null if issued==0 or good null. */
     reconciliation_unaccounted_kg: string | null;
     unaccounted_band?: 'ok' | 'investigate' | null;
+    /**
+     * WHICH FORMULA produced this block (Phase 5.5, P5.5-03): the entry's own
+     * calculation_version stamp — production_v3_unified reads the engine
+     * (cycles floored before cavities multiply); production_v2_floor /
+     * legacy_v1 / null keep the inline WB2 figures they were signed against.
+     * Optional: absent on a backend that predates the stamp being reported.
+     */
+    calculation_version?: string | null;
+    /** True when expected_pieces is net of the completion-recorded downtime (both formulas net it; the key says so explicitly). */
+    downtime_netted?: boolean;
+    /** v3 only: the target BEFORE downtime (running hours as typed) — the engine's full_target. Null under the legacy formulas, which never had it. */
+    expected_pieces_gross?: number | null;
+    /** v3 only: expected_pieces_gross − expected_pieces — what the recorded stoppages cost, in whole shots' worth. Null under legacy. */
+    downtime_impact_pieces?: number | null;
     /** True when the configured hard gate refuses accountant approval. */
     blocks_approval?: boolean;
     /**
@@ -736,6 +751,8 @@ export function batchCostSourceLabel(source: string | null | undefined): string 
 }
 
 export interface ShiftProductionEntry {
+    /** The expected-output formula this batch was started under (production_v3_unified since Phase 5.5; production_v2_floor / null before). The server's metrics and the page's pre-submit mirror both read it. */
+    calculation_version?: string | null;
     id: number;
     shift: Shift;
     work_center: WorkCenter;
@@ -883,6 +900,46 @@ export interface ShiftProductionEntry {
     batch_cost?: BatchCost | null;
     /** Latest Tally sync error — present only when status is "failed". */
     sync_error?: string | null;
+    /**
+     * WHERE THIS BATCH STANDS IN TALLY (Phase 5.5, WS-C) — the TallyLink of
+     * the voucher that CARRIES the entry: under shift granularity the Stock
+     * Journal it was stamped onto (the voucher's syncable is the Shift, the
+     * entry hangs off tally_sync_entry_id), else its own per-entry voucher.
+     * Status + voucher number + deep link, never the payload; null means NO
+     * voucher exists yet, which is a different fact from "pending" and is
+     * rendered as a dash, never as a state. Optional only for a backend
+     * that predates the key.
+     */
+    tally?: TallyLink | null;
+    /**
+     * The Tally identity this batch's finished goods post as
+     * (DEC-20260810-003) — frozen at completion when the selected packaging
+     * carries its own item; null means the product's item. Optional only for
+     * a backend that predates the key.
+     */
+    finished_item?: { id: number; name: string } | null;
+    /**
+     * WHAT THE COMPLETION DRAWER IS PRE-FILLED WITH (Phase 5.5, WS-B): the
+     * five pack counts through the ONE reader (PackQuantityResolver::forEntry
+     * — the typed entry columns once there are any, else the run's frozen
+     * packaging row, else the item master), each figure labelled with the
+     * rung that answered it in `sources`; `source` is the rung the block as
+     * a whole came from. A figure no rung holds is null, never invented.
+     * Optional only for a backend that predates the key.
+     */
+    packing_defaults?: PackingDefaults | null;
+    /**
+     * WHAT THE RUN'S CONFIGURATION WAS STILL MISSING (Phase 5.5, WS-B), in
+     * the server's vocabulary (ProductVariantService::MISSING_VOCABULARY, in
+     * its order — worded on screen by missingWords()), judged for THIS run's
+     * frozen standard and packaging, not the standard's union. `source`
+     * says whether it was frozen at Start ('snapshot' — every batch started
+     * since the fix loop; a later master edit never restates it) or computed
+     * now from the frozen ids ('live' — a run from before the snapshot
+     * existed). Completed Today's "config incomplete" tag reads it. Optional
+     * only for a backend that predates the key.
+     */
+    configuration_gaps?: ConfigurationGaps | null;
     status: ShiftProductionEntryStatus;
     rejection_reason: string | null;
     plant_manager_signed_by?: { id: number; name: string } | null;
@@ -895,6 +952,29 @@ export interface ShiftProductionEntry {
     helper_name: string | null;
     notes: string | null;
     created_at: string;
+}
+
+/** Where a pre-filled pack count came from — the rung of PackQuantityResolver that answered. */
+export type PackingDefaultsSource = 'entry' | 'packaging' | 'item' | 'none';
+
+export interface PackingDefaults {
+    nos_per_box: number | null;
+    nos_per_tray: number | null;
+    trays_per_box: number | null;
+    nos_per_pouch: number | null;
+    pouches_per_box: number | null;
+    /** The rung the block as a whole came from. */
+    source: PackingDefaultsSource;
+    /** The rung per figure — a box count from the entry beside a tray count from the packaging row. */
+    sources: Record<'nos_per_box' | 'nos_per_tray' | 'trays_per_box' | 'nos_per_pouch' | 'pouches_per_box', PackingDefaultsSource>;
+}
+
+export interface ConfigurationGaps {
+    complete: boolean;
+    /** Server keys, in vocabulary order ("counts", "tally_identity", …) — word them with missingWords(). */
+    missing: string[];
+    /** 'snapshot' = frozen at Start; 'live' = computed now from the frozen ids (a run from before the snapshot existed). */
+    source: 'snapshot' | 'live';
 }
 
 export interface ShiftSummary {
@@ -1515,6 +1595,15 @@ export interface BatchEstimation {
     expected_materials: EstimatedMaterial[];
     recipe_source: string | null;
     packaging_mode?: string | null;
+    /**
+     * WHICH FORMULA this estimate is (Phase 5.5, P5.5-03) — the version a
+     * batch started from this preview will be stamped with
+     * (production_v3_unified: cycles floored before cavities multiply). Optional
+     * only for a backend that predates the key.
+     */
+    calculation_version?: string | null;
+    /** Always false here: the preview knows no downtime yet (planned hours straight in) and says so. */
+    downtime_netted?: boolean;
 }
 
 /**
@@ -1701,6 +1790,20 @@ export interface BatchPreview {
     variants: StandardVariant[];
     packaging: { id: number; mode: string; label: string; nos_per_box: number | null } | null;
     /**
+     * THE RUN'S OWN VERDICT (Phase 5.5 fix loop, P5.5-06): what a batch
+     * started from this preview, as it stands, would be missing —
+     * ProductVariantService::runStatus for the resolved standard and
+     * packaging, the SAME rule startBatch freezes into the entry's
+     * `configuration_gaps`, so the Start modal and Completed Today can never
+     * contradict each other about one run. `grain` says whose verdict it is
+     * ('run' once a packaging is resolved; 'standard' — the union — while
+     * the packaging is still to be chosen). Null while the STANDARD is still
+     * to be chosen (that question comes first). Optional only for a backend
+     * that predates the key; the per-variant statuses are unchanged beside
+     * it. startBatchChoices() reads this first.
+     */
+    configuration_status?: ConfigurationCompleteness | null;
+    /**
      * The APPROVED machine-product configuration governing this run, when the
      * chosen machine has one. Its figures outrank the product standard — the
      * estimation above is already computed from them; this block exists so the
@@ -1712,6 +1815,13 @@ export interface BatchPreview {
         default_cavities: number | null;
         unit_weight_grams: string | null;
         colour: string | null;
+        /**
+         * The mould this configuration runs (Phase 5.5, P5.5-01) — read
+         * from the resolved configuration's own mould, so Start Batch can
+         * say it. Null when the configuration names no mould; optional
+         * because a backend that predates the key sends nothing.
+         */
+        mould?: { id: number; code: string | null; name: string | null } | null;
     } | null;
     warnings: StandardWarning[];
 }
@@ -1957,6 +2067,15 @@ export interface ConfigurationCompleteness {
     state?: 'complete' | 'incomplete';
     missing: string[];
     ambiguity?: { shared_name_count: number } | null;
+    /**
+     * Whose verdict this is, on the preview's top-level block (Phase 5.5 fix
+     * loop): 'run' — the ONE packaging the run resolved to (or no standard
+     * to speak of), the same judgment startBatch freezes into the entry's
+     * configuration_gaps; 'standard' — the standard's union over every
+     * packaging, because the packaging is still to be chosen. Absent on the
+     * per-variant / per-packaging blocks.
+     */
+    grain?: 'run' | 'standard';
 }
 
 /**

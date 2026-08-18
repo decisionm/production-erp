@@ -14,6 +14,7 @@ import { listAllEmployees } from '@/features/hrms/api';
 import { listAllItems, listAllWarehouses } from '@/features/inventory/api';
 import type { Item } from '@/features/inventory/types';
 import CartonPrintModal from '@/features/production/components/CartonPrintModal';
+import CompletedTodayTable from '@/features/production/components/CompletedTodayTable';
 import HandoverModal from '@/features/production/components/HandoverModal';
 import {
     amendBatch,
@@ -37,8 +38,8 @@ import {
     listPowerInterruptionLogs,
     listAllScrapReasons,
     listActiveBatches,
+    listCompletedEntriesForDay,
     listStandardCoverage,
-    listShiftProductionEntries,
     listShifts,
     listWorkCenters,
     loadBagToFactoryDayBin,
@@ -77,8 +78,10 @@ import {
     readStockShortfalls,
 } from '@/features/production/types';
 import { currentShift, justEndedShift, productionDateFor } from '@/features/production/shiftClock';
-import { incompleteWordsFromServer, packagingForCompletion } from '@/features/production/productStandardsConfig';
+import { packagingForCompletion } from '@/features/production/productStandardsConfig';
 import { cavityPrefill } from '@/features/production/startBatchCavities';
+import { chosenStartVariant, mouldLabel, startBatchChoices, startBatchTallyIdentity } from '@/features/production/startBatchChoices';
+import { expectedOutput, netRunningHours } from '@/features/production/expectedOutput';
 import { roundPer, useProductionSettings } from '@/features/production/packing';
 import { itemLabel } from '@/lib/itemLabel';
 import {
@@ -221,21 +224,6 @@ function downtimeReasonCode(description: string): string {
  * (mirrors metrics.expected_pouches).
  * Null (show nothing — never 0 or NaN) when any input is missing or zero.
  */
-function expectedOutput(
-    cycleTimeSeconds: number | null,
-    cavities: number | null | undefined,
-    hours: number | null,
-    nosPerBox: number | null,
-    nosPerPouch: number | null,
-    mode?: import('@/features/production/packing').PackingRounding,
-): { pieces: number; boxes: number | null; pouches: number | null } | null {
-    if (!cycleTimeSeconds || cycleTimeSeconds <= 0 || !cavities || cavities <= 0 || !hours || hours <= 0) return null;
-    const pieces = Math.round((3600 / cycleTimeSeconds) * cavities * hours * 100) / 100;
-    const boxes = nosPerBox && nosPerBox >= 1 ? Math.round(pieces / nosPerBox) : null;
-    const pouches = nosPerPouch && nosPerPouch >= 1 ? roundPer(pieces / nosPerPouch, mode) : null;
-    return { pieces, boxes, pouches };
-}
-
 /** ">= 1" with null-safety — the shared test for "this packing standard exists". */
 function hasPackStd(v: number | null | undefined): boolean {
     return (v ?? 0) >= 1;
@@ -1497,26 +1485,20 @@ export default function ShiftProductionEntryPage() {
         queryFn: () => listDowntimeReasons(),
     });
     const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: listAllEmployees });
-    const { data: entries, isLoading: entriesLoading } = useQuery({
-        queryKey: ['production', 'shift-production-entries'],
-        queryFn: () => listShiftProductionEntries(),
-        // Several people can act on any of the floor's machines ad hoc, no
-        // fixed assignment — poll so one supervisor's screen reflects what
-        // another just did. See docs/archive/PRODUCTION-SUPERVISOR-UX-PLAN.md §2.
-        refetchInterval: 20000,
-    });
+    // Completed Today's read lives beside `today` below (it is a query on
+    // the factory day, which the shift clock decides) — Phase 5.5, WS-C.
     /**
      * The WHOLE pending list, on its own query and deliberately not filtered
      * to today.
      *
-     * `entries` above is page 1 of 20 of a newest-first list of everything —
-     * roughly one day's work on a ten-machine three-shift floor. Both of the
-     * things this page now has to say about a completed batch outlive that
-     * window: quality can send back a batch produced two nights ago, and the
+     * Completed Today (below) is exactly today's completed batches, and both
+     * of the things this page has to say about a completed batch outlive that
+     * day: quality can send back a batch produced two nights ago, and the
      * night shift's own batches file under yesterday's production date and are
      * still theirs to correct at 06:45 when the clock has already rolled to
-     * Day. Reading either off page 1 of today would hide exactly the batches
-     * somebody is standing there holding.
+     * Day. Reading either off today's list would hide exactly the batches
+     * somebody is standing there holding — so `awaitingCorrection` and
+     * `correctableEarlier` still read the whole approval backlog here.
      *
      * Polled more slowly than the floor state: these change when a person at a
      * desk decides something, not when a machine does.
@@ -1530,10 +1512,10 @@ export default function ShiftProductionEntryPage() {
         retry: false,
     });
     // Authoritative machine-running state — every in-progress batch across
-    // all shifts/dates, unpaginated. Distinct from `entries` (a paginated,
-    // today-scoped view for the completed list) so a batch left running from
-    // a past shift can never leave a machine looking idle while Start Batch
-    // is refused by the backend's global guard.
+    // all shifts/dates, unpaginated. Distinct from `completedToday` (the
+    // server's today-scoped, completed-only page below) so a batch left
+    // running from a past shift can never leave a machine looking idle while
+    // Start Batch is refused by the backend's global guard.
     const { data: activeBatches } = useQuery({
         queryKey: ['production', 'active-batches'],
         queryFn: listActiveBatches,
@@ -1811,15 +1793,29 @@ export default function ShiftProductionEntryPage() {
         return map;
     }, [moldChangeLogs]);
 
-    const completedToday = (entries?.data ?? [])
-        .filter((e) => e.batch_status === 'completed' && e.production_date === today)
-        .slice(0, 15);
+    // COMPLETED TODAY, SERVER-SIDE (Phase 5.5, WS-C). The server answers
+    // exactly today's completed batches — production_date = the shift-aware
+    // factory day (`today`), batch_status = completed, up to 100 rows — so
+    // the list no longer depends on the day's work fitting in page 1 of 20
+    // of everything, and the fifteenth row is no longer a cliff. Polled at
+    // the floor's cadence: several people act on any machine ad hoc, and one
+    // supervisor's screen must reflect what another just completed. Keyed
+    // under the same prefix `invalidate()` clears, and by the day, so the
+    // 06:00 roll to a new production date reads a fresh list.
+    const { data: completedTodayPage, isLoading: completedTodayLoading } = useQuery({
+        queryKey: ['production', 'shift-production-entries', 'completed-today', today],
+        queryFn: () => listCompletedEntriesForDay(today),
+        refetchInterval: 20000,
+    });
+    const completedToday = completedTodayPage?.data ?? [];
 
     const awaitingCorrection = (pendingEntries ?? []).filter(isAwaitingCorrection);
 
     /**
      * Completed batches the floor may still correct that Completed Today does
-     * not show — an earlier production date, or simply past the fifteenth row.
+     * not show — an earlier production date (the night shift's paperwork at
+     * 06:45 files under yesterday), so they still come off the whole pending
+     * list, not today's.
      *
      * The predicate is the entry's own state, so this list is exactly "what the
      * backend would still accept an amendment for" minus the ones already
@@ -3322,14 +3318,19 @@ export default function ShiftProductionEntryPage() {
         const cavities = activeCavitiesWatch ?? completingEntry.active_cavities ?? completingEntry.standard_cavities ?? null;
         // Downtime typed below comes off the hours BEFORE any expected-output
         // arithmetic — the paper report nets B/D and idle time out of the day
-        // the same way. Unrounded, floored at zero: mirrors the backend rule.
+        // the same way. Netted exactly as the server nets it (downtime hours
+        // truncated to 6 dp, then subtracted, floored at zero — see
+        // netRunningHours), so the card floors its cycles from the same
+        // figure the server will.
         const grossHours = runningHoursWatch ?? null;
-        const hours = grossHours !== null ? Math.max(grossHours - downtimeMinutes / 60, 0) : null;
+        const hours = netRunningHours(grossHours, downtimeMinutes);
         // Form's corrected pack size wins over the master (mirrors backend).
         const nosPerBox = nosPerBoxWatch ?? completingEntry.item.nos_per_box ?? null;
         // Pouch standard has no per-run correction field — always the master's.
         const nosPerPouch = completingEntry.item.nos_per_pouch ?? null;
-        const expected = expectedOutput(ct, cavities, hours, nosPerBox, nosPerPouch, settings?.packing_rounding);
+        // The ENTRY's formula version decides (v3 floors cycles; a batch
+        // started under v2 keeps its unfloored number, as on the server).
+        const expected = expectedOutput(completingEntry.calculation_version, ct, cavities, hours, nosPerBox, nosPerPouch, settings?.packing_rounding);
         // The grams these rows compute with are the grams the batch will POST
         // with — the supervisor's corrected box first, then the snapshot/master
         // norm; the same chain as effectiveResinGrams below. The panel once
@@ -5003,6 +5004,7 @@ export default function ShiftProductionEntryPage() {
                     const liveExpected =
                         !down && !moldChange && running
                             ? expectedOutput(
+                                  running.calculation_version,
                                   toNum(running.standard_cycle_time),
                                   running.active_cavities ?? running.standard_cavities,
                                   shiftLengthHours(running.shift),
@@ -5313,151 +5315,22 @@ export default function ShiftProductionEntryPage() {
             </Space>
 
             <Typography.Title level={5}>Completed Today</Typography.Title>
-            {/* TWO SHAPES, ONE SET OF FACTS. The desktop table carries the six
-                columns a supervisor actually reads across (batch, product,
-                machine, pieces, kg, approval) with the figures right-aligned
-                and tabular so they line up down the column; shift and rejected
-                ride as secondary text under the columns they belong to rather
-                than being dropped. Below `md` it becomes cards, because a
-                seven-column grid on a 390px phone is either a horizontal
-                scroll nobody discovers or a column nobody can read — and this
-                list is read standing at a machine. No `scroll={{x}}` on either:
-                the point is that nothing lives off the side of the screen. */}
-            {isNarrow ? (
-                <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                    {entriesLoading && <Card size="small" loading />}
-                    {!entriesLoading && completedToday.length === 0 && (
-                        <Typography.Text type="secondary">Nothing completed yet today.</Typography.Text>
-                    )}
-                    {completedToday.map((row) => (
-                        <Card key={row.id} size="small">
-                            <div
-                                style={{
-                                    display: 'flex',
-                                    justifyContent: 'space-between',
-                                    alignItems: 'flex-start',
-                                    gap: 8,
-                                }}
-                            >
-                                <div style={{ minWidth: 0 }}>
-                                    <Typography.Text strong style={{ wordBreak: 'break-word' }}>
-                                        {row.batch_number ?? `Batch #${row.id}`}
-                                    </Typography.Text>
-                                    <Typography.Text
-                                        type="secondary"
-                                        style={{ display: 'block', fontSize: 12, wordBreak: 'break-word' }}
-                                    >
-                                        {itemLabel(row.item)}
-                                    </Typography.Text>
-                                    <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
-                                        {row.work_center.name} · {row.shift.name}
-                                    </Typography.Text>
-                                </div>
-                                <Tag color={approvalColor[row.status]} style={{ marginInlineEnd: 0 }}>
-                                    {row.status}
-                                </Tag>
-                            </div>
-                            <div
-                                style={{
-                                    display: 'flex',
-                                    flexWrap: 'wrap',
-                                    gap: '4px 16px',
-                                    marginTop: 8,
-                                    fontVariantNumeric: 'tabular-nums',
-                                }}
-                            >
-                                <Typography.Text>
-                                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                        Produced{' '}
-                                    </Typography.Text>
-                                    <strong>{fmtPieces(row.quantity_produced)}</strong> pcs
-                                </Typography.Text>
-                                <Typography.Text>
-                                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                        Kg{' '}
-                                    </Typography.Text>
-                                    <strong>{fmtNum(toNum(row.quantity_produced_kg))}</strong>
-                                </Typography.Text>
-                                <Typography.Text>
-                                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                        Rejected{' '}
-                                    </Typography.Text>
-                                    <strong>{fmtPieces(row.quantity_scrap)}</strong>
-                                </Typography.Text>
-                            </div>
-                            <Space size={4} wrap style={{ marginTop: 8 }}>
-                                {cartonLabelControlFor(row)}
-                                {correctionControlFor(row)}
-                            </Space>
-                        </Card>
-                    ))}
-                </Space>
-            ) : (
-                <Table<ShiftProductionEntry>
-                    scroll={{ x: 'max-content' }}
-                    rowKey="id"
-                    size="small"
-                    loading={entriesLoading}
-                    pagination={false}
-                    dataSource={completedToday}
-                    locale={{ emptyText: 'Nothing completed yet today.' }}
-                    columns={[
-                        {
-                            title: 'Batch',
-                            render: (_, row) => (
-                                <>
-                                    <Typography.Text strong>{row.batch_number ?? `#${row.id}`}</Typography.Text>
-                                    <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
-                                        {row.shift.name}
-                                    </Typography.Text>
-                                </>
-                            ),
-                        },
-                        { title: 'Product', render: (_, row) => itemLabel(row.item) },
-                        { title: 'Machine', render: (_, row) => row.work_center.name },
-                        {
-                            title: 'Produced (pcs)',
-                            align: 'right',
-                            render: (_, row) => (
-                                <>
-                                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                                        {fmtPieces(row.quantity_produced)}
-                                    </span>
-                                    <Typography.Text
-                                        type="secondary"
-                                        style={{ display: 'block', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}
-                                    >
-                                        {fmtPieces(row.quantity_scrap)} rejected
-                                    </Typography.Text>
-                                </>
-                            ),
-                        },
-                        {
-                            title: 'Produced (kg)',
-                            align: 'right',
-                            render: (_, row) => (
-                                <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                                    {fmtNum(toNum(row.quantity_produced_kg))}
-                                </span>
-                            ),
-                        },
-                        {
-                            title: 'Approval',
-                            render: (_, row) => (
-                                <>
-                                    <Tag color={approvalColor[row.status]} style={{ marginInlineEnd: 0 }}>
-                                        {row.status}
-                                    </Tag>
-                                    <Space size={4} wrap style={{ marginTop: 4 }}>
-                                        {cartonLabelControlFor(row)}
-                                        {correctionControlFor(row)}
-                                    </Space>
-                                </>
-                            ),
-                        },
-                    ]}
-                />
-            )}
+            {/* The day's completed batches as the server answers them, in the
+                extracted CompletedTodayTable (machine · shift · SKU · expected ·
+                actual · good · reject · efficiency · approval/Tally). Every figure
+                is the resource's own; the carton-label and correction controls
+                stay this page's because it owns the modals they open. */}
+            <CompletedTodayTable
+                entries={completedToday}
+                loading={completedTodayLoading}
+                narrow={isNarrow}
+                controlsFor={(row) => (
+                    <>
+                        {cartonLabelControlFor(row)}
+                        {correctionControlFor(row)}
+                    </>
+                )}
+            />
 
             {/* STILL THEIRS TO CORRECT, just not on today's list. The night
                 shift's batches file under yesterday's date and the clock rolls
@@ -5720,8 +5593,12 @@ export default function ShiftProductionEntryPage() {
                     )}
                     {/* Variant picker — shown ONLY when the product genuinely has
                         more than one standard. One variant means no question is
-                        asked: configuration complexity must not reach the floor. */}
-                    {(batchPreview?.variants?.length ?? 0) > 1 && (
+                        asked: configuration complexity must not reach the floor.
+                        The condition is startBatchChoices().askStandard — the
+                        inline rule extracted verbatim and pinned by vitest
+                        (startBatchChoices.test.ts), so "ask only when there is
+                        a real choice" cannot drift here unnoticed. */}
+                    {startBatchChoices(batchPreview, selectedStandardId).askStandard && (
                         <Form.Item
                             label="Which standard is this run?"
                             // WAS FALSE for the commonest case, and said so
@@ -5752,47 +5629,96 @@ export default function ShiftProductionEntryPage() {
                         </Form.Item>
                     )}
 
-                    {/* Packaging choice — only when both pouch and tray exist. */}
+                    {/* Packaging choice — only when both pouch and tray exist.
+                        The condition (askPacking), the shown-not-offered rows
+                        and the words beside them (disabledPackagings) come
+                        from startBatchChoices() — the inline rule extracted
+                        verbatim and pinned by vitest. The same call names the
+                        configuration GAPS the modal states below the choice
+                        (P5.5-06): Start stays enabled — the batch may proceed
+                        with what is known — but nobody starts it unaware. */}
                     {(() => {
-                        const chosen = (batchPreview?.variants ?? []).find((v) => v.id === selectedStandardId)
-                            ?? (batchPreview?.variants?.length === 1 ? batchPreview.variants[0] : undefined);
-                        if (!chosen || chosen.packagings.length < 2) return null;
-                        const picked = chosen.packagings.find((p) => p.id === selectedPackagingId);
+                        const choices = startBatchChoices(batchPreview, selectedStandardId);
+                        const chosen = chosenStartVariant(batchPreview, selectedStandardId);
+                        const disabledWords = new Map(choices.disabledPackagings.map((d) => [d.id, d.words]));
+                        const picked = chosen?.packagings.find((p) => p.id === selectedPackagingId);
                         return (
-                            <Form.Item label="How is it packed?">
-                                <Radio.Group
-                                    value={selectedPackagingId}
-                                    onChange={(e) => setSelectedPackagingId(e.target.value)}
-                                    optionType="button"
-                                    buttonStyle="solid"
-                                    size="large"
-                                    // A half-stated workbook row is shown, not offered:
-                                    // the server refuses to resolve it, so a pickable
-                                    // button here would be a choice that silently
-                                    // doesn't take.
-                                    options={chosen.packagings.map((p) => ({
-                                        value: p.id,
-                                        // The server's own missing pieces when the
-                                        // preview carries them ("incomplete: counts
-                                        // missing"); the old wording otherwise.
-                                        label: p.is_complete
-                                            ? p.label
-                                            : `${p.label} — ${incompleteWordsFromServer(p) ?? 'incomplete in workbook'}`,
-                                        disabled: !p.is_complete,
-                                    }))}
-                                />
-                                {/* The choice's consequence, said where it is
-                                    made (DEC-20260810-003): which Tally item
-                                    this packing posts as. Only shown when a
-                                    packing carries its OWN identity — the
-                                    ordinary case posts as the product and
-                                    saying so on every batch would be noise. */}
-                                {picked?.tally_item?.name && (
-                                    <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
-                                        Packed this way, production posts to Tally as <b>{picked.tally_item.name}</b>.
-                                    </Typography.Text>
+                            <>
+                                {choices.askPacking && chosen && (
+                                    <Form.Item label="How is it packed?">
+                                        <Radio.Group
+                                            value={selectedPackagingId}
+                                            onChange={(e) => setSelectedPackagingId(e.target.value)}
+                                            optionType="button"
+                                            buttonStyle="solid"
+                                            size="large"
+                                            // A half-stated workbook row is shown, not offered:
+                                            // the server refuses to resolve it, so a pickable
+                                            // button here would be a choice that silently
+                                            // doesn't take. The words are the server's own
+                                            // missing pieces when the preview carries them
+                                            // ("incomplete: counts missing"); the old wording
+                                            // otherwise — both via the helper.
+                                            options={chosen.packagings.map((p) => ({
+                                                value: p.id,
+                                                label: disabledWords.has(p.id)
+                                                    ? `${p.label} — ${disabledWords.get(p.id)}`
+                                                    : p.label,
+                                                disabled: disabledWords.has(p.id),
+                                            }))}
+                                        />
+                                        {/* The choice's consequence, said where it is
+                                            made (DEC-20260810-003): which Tally item
+                                            this packing posts as. Only shown when a
+                                            packing carries its OWN identity — the
+                                            ordinary case posts as the product and
+                                            saying so on every batch would be noise. */}
+                                        {picked?.tally_item?.name && (
+                                            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                                                Packed this way, production posts to Tally as <b>{picked.tally_item.name}</b>.
+                                            </Typography.Text>
+                                        )}
+                                    </Form.Item>
                                 )}
-                            </Form.Item>
+                                {/* What the server says this run's configuration is
+                                    still missing, in the vocabulary the standards
+                                    workspace uses (counts, Tally identity, cycle
+                                    time…). Named, not enforced: the readiness gate
+                                    above is what refuses a start; this only makes
+                                    sure a batch started on a half-configured
+                                    product is started knowingly. The door to fix it
+                                    is offered here only when no readiness alert
+                                    already carries it — under one it would be the
+                                    same button twice, a few lines apart. */}
+                                {startItemId && choices.gaps.length > 0 && (
+                                    <Alert
+                                        type="warning"
+                                        showIcon
+                                        style={{ marginBottom: 16 }}
+                                        // "Can still start" only when nothing else refuses it:
+                                        // under a blocking readiness alert the same words
+                                        // would contradict the screen one alert up.
+                                        message={
+                                            batchPreview?.readiness.ready
+                                                ? 'Configuration incomplete — the batch can still start'
+                                                : 'Configuration incomplete'
+                                        }
+                                        description={
+                                            <>
+                                                <Typography.Paragraph style={{ marginBottom: 4 }}>
+                                                    Missing: <b>{choices.gaps.join(', ')}</b>. What is known will be
+                                                    used; what is missing stays a dash until it is configured — nothing
+                                                    is filled in.
+                                                </Typography.Paragraph>
+                                                {batchPreview?.readiness.ready
+                                                    && batchPreview.readiness.warnings.length === 0 && (
+                                                    <div style={{ marginTop: 8 }}>{configureItemAction}</div>
+                                                )}
+                                            </>
+                                        }
+                                    />
+                                )}
+                            </>
                         );
                     })()}
 
@@ -5879,6 +5805,38 @@ export default function ShiftProductionEntryPage() {
                                 style={{ marginBottom: 16 }}
                                 title={<Typography.Text strong>Product standards</Typography.Text>}
                             >
+                                {/* WHAT this run posts as (DEC-20260810-003) — the
+                                    packing's own Tally item when it has one, else the
+                                    product's item, said so. Read from the packaging the
+                                    server resolved (startBatchTallyIdentity); a dash while
+                                    a packing choice is still open — never guessed. Full
+                                    width: a Tally name is long, and it is the one line
+                                    the accountant will read back against the voucher. */}
+                                <Descriptions.Item label="Tally identity" span={2}>
+                                    {(() => {
+                                        const identity = startBatchTallyIdentity(batchPreview, startItem, selectedStandardId);
+                                        if (!identity.label) return '—';
+                                        return (
+                                            <>
+                                                <Typography.Text strong>{identity.label}</Typography.Text>
+                                                <Typography.Text type="secondary">
+                                                    {identity.source === 'product'
+                                                        ? " — posts as the product's item"
+                                                        : " — this packing's own item"}
+                                                </Typography.Text>
+                                            </>
+                                        );
+                                    })()}
+                                </Descriptions.Item>
+                                {/* The mould the approved machine configuration runs,
+                                    when it names one — read from the preview's
+                                    configuration block, never from the standard (a
+                                    product standard carries no mould). A dash when no
+                                    configuration governs this machine and product, or
+                                    the configuration names no mould. */}
+                                <Descriptions.Item label="Mould" span={2}>
+                                    {mouldLabel(batchPreview?.configuration?.mould) ?? '—'}
+                                </Descriptions.Item>
                                 {/* Same precedence the estimate and Start Batch already
                                     use: the factory product standard outranks the item
                                     master. Reading the item alone made this card show

@@ -196,9 +196,13 @@ class CompletionDowntimeTest extends TestCase
     public function test_efficiency_is_piece_grain_the_owners_batch_reads_107_not_75(): void
     {
         $this->actAs();
-        // CT 10.8 × 5 cavities × 8 h = 13,333.33 expected pieces; pack
-        // 3038 → 4 expected boxes. The floor counted 3 full boxes plus
-        // 5,208 loose pieces = 14,322 — the machine ran OVER standard.
+        // CT 10.8 × 5 cavities × 8 h: FLOOR(28800/10.8)=2666 × 5 = 13,330
+        // expected pieces under production_v3_unified — the stamp a batch
+        // started now carries (P5.5-03; the owner's own batch, stamped
+        // earlier, still reads its unfloored 13,333.33 — see
+        // EstimationUnifiedTest's boundary pins). Pack 3038 → 4 expected
+        // boxes. The floor counted 3 full boxes plus 5,208 loose pieces =
+        // 14,322 — the machine ran OVER standard.
         [$entry] = $this->runningBatch(cycleTime: '10.8', nosPerBox: 3038);
 
         $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/complete", [
@@ -208,10 +212,10 @@ class CompletionDowntimeTest extends TestCase
             'loose_pieces' => 5208,
             'running_hours' => '8',
         ])->assertOk()
-            ->assertJsonPath('data.metrics.expected_pieces', '13333.33')
+            ->assertJsonPath('data.metrics.expected_pieces', '13330.00')
             ->assertJsonPath('data.metrics.expected_boxes', 4)
             ->assertJsonPath('data.metrics.actual_boxes', 3)
-            // 14322 / 13333.333… × 100 = 107.415 → 107.4. The old box
+            // 14322 / 13330 × 100 = 107.442 → 107.4. The old box
             // ratio (3/4 = 75.0) threw the 5,208 loose pieces away and
             // told the owner an over-standard run was failing.
             ->assertJsonPath('data.metrics.efficiency_pct', 107.4)

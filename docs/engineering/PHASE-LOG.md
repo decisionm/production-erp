@@ -1002,3 +1002,195 @@ PR:                 #186 (base: feat/phase-4.5-export-center → #185 → … �
 Deployment state:   not deployed; stack #179 → … → #185 → #186
 Next phase:         5.5 — Shift Floor → Start → Estimation → Complete → Completed Today
 ```
+
+## PHASE 5.5 — Shift Floor → Start → Estimation → Complete → Completed Today
+
+```
+Phase:    5.5 — the operator's slice (MASTER-PLAN rev 3, P5.5-01..06)
+Status:   PASS WITH DEFERRED ITEMS
+Branch:   feat/phase-5.5-shift-floor (stacked on Phase 5 PR #186 → … → #179)
+Dates:    2026-08-17
+
+Goal:
+  Make each of the audit's already-true Shift Floor facts (§49–§53) a tested
+  contract and fix the real defects: two estimation formulas → one,
+  versioned; completion durable with an event and its packing defaults;
+  Completed Today served by the server (no client slice of page 1) with the
+  approval/Tally state; Start Batch asks nothing configuration already knows
+  and names what is missing. Owner-decided inputs untouched; historical
+  entries never recomputed.
+
+What changed:
+  • ONE estimation formula, versioned (P5.5-03): ProductionCalculationEngine
+    for both the preview and the entry metrics under production_v3_unified —
+    cycles floored before cavities multiply; the entry side nets recorded
+    downtime (engine targets(): running hours as scheduled, completion
+    downtime as unplanned); efficiency piece-grain 1 dp; entries stamped
+    production_v2_floor / legacy / null keep their previous inline computation
+    byte-for-byte (LegacyEntryMetrics, golden-pinned from the divergence
+    cases); new batches stamp v3 at start; the preview says calculation_
+    version + downtime_netted:false; metrics gain calculation_version,
+    downtime_netted, expected_pieces_gross, downtime_impact_pieces; the
+    engine's dead targets()/efficiencies() are WIRED; the client's pre-submit
+    mirror (features/production/expectedOutput.ts) follows the ENTRY's
+    version (13330 under v3 where the unfloored legacy read 13333.33).
+  • Completion durable (P5.5-02/04): ShiftProductionEntryCompleted raised
+    after the OUTER commit (once per completion/amend, never start/cancel,
+    dropped on rollback, no Tally listener — the approval event stays the
+    Tally trigger); the resource carries packing_defaults (PackQuantity
+    Resolver — the typed counts after completion) and configuration_gaps
+    (computed at read time from the frozen standard/packaging via
+    ProductVariantService::runStatus; a start-time snapshot outranks it when
+    written); CompleteBatchRequest docblocks and attributes() name each field
+    for what it is (nos_per_box = the carton actually packed on this run;
+    quantity_produced = pieces; the "420 example" replaced) — rules byte-
+    identical.
+  • Completed Today server-side (P5.5-05): ListShiftProductionEntriesRequest
+    (production_date · date_from/date_to · work_center_id · shift_id ·
+    batch_status · status · per_page ≤ 100; a bad status is a 422 where it
+    500'd; unknown keys ignored; the old positional paginate() still works);
+    the resource carries `tally` — the shift voucher the entry rides
+    (tally_sync_entry_id → TallySyncLinkService::forEntryIds) else its own
+    batch voucher (forMany), null when neither — three tally reads a page,
+    pinned; the page reads today's completed batches (production date of the
+    effective shift, batch_status=completed, per_page 100, refetch 20 s) into
+    CompletedTodayTable (machine · shift · SKU · expected · actual · good ·
+    reject(+QC) · efficiency · Approval·Tally with deep link · config-
+    incomplete tag) through a pure row mapper that recomputes nothing; the
+    `.slice(0,15)` and the unfiltered entries query are gone; the pending-all
+    loop remains for awaitingCorrection/correctableEarlier.
+  • Start Batch asks nothing already known (P5.5-01/06): startBatchChoices()
+    — one pure helper for the two radios, pinned against the PREVIOUS inline
+    conditions carried verbatim in the test (0/1/N variants × 0/1/N
+    packagings × complete/incomplete: "ask only when there is a real choice"
+    preserved); the modal's loaded-from-preview Descriptions gain "Tally
+    identity" (this packing's own item / posts as the product's item) and
+    "Mould" (the preview's new configuration.mould from the resolved
+    ProductionConfiguration; null when none); an incomplete configuration is
+    named in an Alert with the server's words — Start stays enabled.
+
+Files/modules:
+  Production (EntryExpectedOutput, LegacyEntryMetrics, UnifiedEntryMetrics,
+  ProductionCalculationEngine, BatchEstimationService, ShiftProductionEntry
+  Service [ctor · stamp · productionMetrics · completeBatch afterCommit ·
+  paginate], ShiftProductionEntryCompleted event, CompletionDefaultsService,
+  ListShiftProductionEntriesRequest, controller index, resource [tally ·
+  packing_defaults · configuration_gaps · calculation_version], Complete
+  BatchRequest docblocks, BatchPreviewController mould, ProductVariantService
+  runStatus) · TallySync/TallySyncLinkService::forEntryIds (additive) ·
+  frontend production (startBatchChoices.ts + test, expectedOutput.ts + test,
+  completedToday.ts + test, components/CompletedTodayTable.tsx, api.ts,
+  types.ts, ShiftProductionEntryPage.tsx — hunks only at the named ranges)
+  · tests: EstimationUnifiedTest, CompletionEventAndDefaultsTest,
+  EntriesIndexFiltersTest, BatchPreviewMouldTest, + v3 arms in
+  ExpectedOutputDivergenceTest / ProductionCalculationEngineTest /
+  ExpectedOutputEngineTest, CompletionDowntimeTest pin (a NEW batch is v3)
+
+Migrations:       none
+Tests before:     1,428 / 12,377 (backend) · 190 (frontend)
+Tests after:      1,502 / 13,167 (backend, +74) · 269 (frontend, +79)
+                  agent untouched · pint/typecheck/build clean · knowledge sound
+
+Sonnet first gate:   FAIL (its P1: the configuration_gaps N+1 on the list; P2
+                     the snapshot with no writer; P3s)
+Findings (adversarial: Opus formula/history NOT_READY · Fable correctness
+PASS_WITH_DEFERRED — the history claim HELD: Opus reconstructed the old
+inline arithmetic and compared LegacyEntryMetrics over 871,563 seeded cases,
+zero divergence; every changed expected value in the diff is a NEW batch
+(v3); Tally readers untouched; the radios' conditions verbatim):
+  P0  (Opus) handover() created the child segment WITHOUT calculation_version
+      — the second half of a run computed under the legacy formula while its
+      parent and its own preview computed under v3 (parent 13580.00 vs child
+      13584.91 for identical inputs): the exact preview-vs-completion split
+      this phase exists to close, on a routine three-shift flow. FIXED: the
+      child inherits the run's stamp; a guard test that every entry-creation
+      path stamps.
+  P1  (Sonnet/Fable) configuration_gaps on every list row cost +1 packagings
+      query per distinct standard (no frozen packaging) and +2 items queries
+      per row (identity + ambiguity lookups; the resolver's memo died with
+      each per-row service instance) — a 100-row page polled every 20 s.
+      FIXED: eager loads, a missing-only path for runStatus, and the snapshot
+      written at Start so new entries compute nothing; the query pin now
+      counts TOTAL queries per page.
+  P1  (Opus/Sonnet) configuration_gaps had a reader with no writer — every
+      read was 'live', so a finished batch's "config incomplete" tag would
+      restate itself when a master was edited later — the retroactive
+      restatement the version stamp exists to prevent. FIXED: startBatch
+      writes config_snapshot['configuration_gaps'] (runStatus over the frozen
+      standard/packaging); the handover child copies it; legacy entries stay
+      'live' and say so.
+  P1  (Opus) the client mirror's v3 floor used FLOAT division: CT 10.8 × 12 h
+      → 3999 cycles (19,995) where the server stores 4000 (20,000) — the
+      owner's own cycle time; and the page netted downtime as a float where
+      the server truncates downtime hours to 6 dp. FIXED: integer-scaled
+      cycle arithmetic and a netRunningHours mirror; vitest at CT 10.8 (6 h /
+      8 h / 12 h), 2.7, 5.4, the 1-minute-downtime case, the legacy branch.
+  P2  whereDate on the DATE column defeated spe_date_shift_wc_index → plain
+      where. · The Start modal named the STANDARD's union of gaps (every
+      sibling packaging) while the entry freezes the RUN's → the preview
+      emits a top-level configuration_status at the run's grain (standard's
+      verdict while a choice is open, `grain` stated). · efficiencyBandFor
+      hard-coded the 100 % ceiling where the approval screen reads
+      tolerances.efficiency_over → the ceiling is passed.
+  P3  tooltip printed raw vocabulary keys → worded · types for the new keys ·
+      stale comment · a handover-specific event test · paper-page ingest of a
+      shift that already ran now stamps v3 (the ERP's figure may differ from
+      the paper's WB2 arithmetic) → **Q46** recorded, behaviour unchanged.
+Fixes:               ed0675a — all of the above (P0 · 3×P1 · 3×P2 · P3s); Q46.
+Sonnet final gate:   re-gate PASS — the handover stamp mutation-tested (removed →
+                     three tests red, restored → green); the snapshot's
+                     `complete` derived from `missing`, never trusted from a
+                     stored key; the N+1 pin flat 2 vs 8 rows; the mirror
+                     probed live; agent untouched; knowledge exit 0. Two
+                     informational P3s: the client mirror returns null (not
+                     0) for zero hours (pre-existing guard) and its micro-unit
+                     arithmetic degrades only past 1e15 h (unreachable —
+                     running_hours ≤ 24 on the server).
+Independent review:  Opus NOT_READY → P0/P1s fixed · Fable PASS_WITH_DEFERRED →
+                     P2s fixed.
+
+API proof (dev API, Administrator):
+  GET shift-production-entries?batch_status=completed&per_page=100 → 200
+  (the dev DB holds no entries — rows 0, meta.total 0, honest); status=bogus
+  → 422 "The selected status is invalid."; per_page=101 → 422; unknown=1 →
+  200. Preview for item 15 (BTL-100-RND, two standards × two packagings):
+  estimation.calculation_version production_v3_unified, downtime_netted
+  false, expected_pieces 11705, expected_boxes 14; per-variant/packaging
+  configuration_status complete; configuration.mould null (no configuration
+  row on the dev seed — honest); the variants endpoint agrees (identity via
+  the product's GUID'd item).
+
+Browser proof:
+  The Chrome extension disconnected mid-session before the Start modal /
+  Completed Today screenshots; the behaviour is pinned instead by vitest —
+  startBatchChoices 27 cases including the previous inline conditions
+  carried verbatim, expectedOutput 5 (13330 / 13333.33 pair), completedToday
+  13 — and by 18 backend index tests. To be re-proven in Phase 8's chain walk.
+
+Data/transaction proof:
+  Nothing that reaches Tally changed (TallySyncService::producedScrapLine
+  reads confirmed_rejection_kg + lumps_kg only; TallySync suite green). No
+  migration. Historical entries keep their stamped formula (golden pins).
+  The one existing pin that moved — CompletionDowntimeTest 13333.33 → 13330
+  — is for a batch started NOW (v3), stated.
+
+Security proof:
+  Filters validated; the entries index stays under module:production; the
+  TallyLink on the entry carries status/flags/link only (Phase 3.5's shape).
+
+Deferred items:
+  • A start-time snapshot of configuration_gaps in config_snapshot (today
+    computed live from the frozen standard/packaging; a snapshot outranks it
+    when written) — one key in startBatch, later.
+  • The pending-all 25-page loop still feeds awaitingCorrection/
+    correctableEarlier — a server filter for those lists next.
+  • frontend BatchEstimation/ProductionMetrics types could name the new v3
+    keys (calculation_version, downtime_netted, expected_pieces_gross,
+    downtime_impact_pieces) — additive.
+
+Owner-gated items:  none new (cycle times, cavities, weights, pack counts and
+                    the est-box / packing rounding policies stay as decided).
+PR:                 #187 (base: feat/phase-5-product-sku-configuration → #186 → … → #179)
+Deployment state:   not deployed; stack #179 → … → #186 → #187
+Next phase:         5.7 — Shift Summary + CEC infrastructure
+```

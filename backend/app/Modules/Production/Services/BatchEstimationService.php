@@ -16,13 +16,18 @@ use Illuminate\Support\Carbon;
  * point of showing it up front is that the supervisor can compare it against
  * what they know the machine does and object before starting.
  *
- * Relationship to ShiftProductionEntryService::productionMetrics(): that one
- * is the post-completion, workbook-matching figure and deliberately keeps
- * WB2's formula (3600/CT × cavities × hours, no flooring) so it reconciles
- * cell-for-cell with Vincent's sheet. This one is a forward-looking plan and
- * floors the cycle count — a machine cannot complete a fractional shot. The
- * two therefore differ by at most one shot's worth of pieces, which is
- * intentional and documented rather than a discrepancy to chase.
+ * Relationship to ShiftProductionEntryService::productionMetrics(): ONE
+ * formula (P5.5-03, production_v3_unified). Both read
+ * ProductionCalculationEngine::targetPieces() — cycles floored before
+ * cavities multiply, because a machine cannot complete a fractional shot.
+ * This estimate feeds it the PLANNED hours, since no downtime is known
+ * before the run (`downtime_netted: false` says so on the response); the
+ * completion metrics feed it the running hours net of the downtime logged
+ * at completion. For a run with no downtime the two agree to the piece and
+ * to the box. (Before this phase the metrics inlined WB2's unfloored
+ * formula and the two could disagree by a whole box for one unchanged run
+ * — ExpectedOutputDivergenceTest; entries stamped before the change keep
+ * that figure, see LegacyEntryMetrics.)
  */
 class BatchEstimationService
 {
@@ -38,6 +43,7 @@ class BatchEstimationService
 
     /**
      * @return array{
+     *     calculation_version: string, downtime_netted: bool,
      *     planned_hours: ?string, standard_cycle_time: ?string,
      *     standard_cavities: ?int, active_cavities: ?int,
      *     expected_cycles: ?int, expected_pieces: ?int,
@@ -74,7 +80,9 @@ class BatchEstimationService
 
         // One floor implementation, in the engine — duplicating it here is
         // exactly how two screens end up disagreeing about the same shift.
-        $pieces = $this->engine->targetPieces($hours, $cycleTime, $cavities);
+        // The SAME call UnifiedEntryMetrics makes after completion (through
+        // the engine's targets()), under the version this preview names.
+        $pieces = $this->engine->targetPieces($hours, $cycleTime, $cavities, ProductionCalculationEngine::VERSION_UNIFIED);
         $cycles = ($pieces !== null && $cavities !== null && $cavities > 0)
             ? intdiv($pieces, $cavities)
             : null;
@@ -92,6 +100,13 @@ class BatchEstimationService
         $pack = $this->packQuantities->forSelection($packaging, $item);
 
         return [
+            // Which formula set produced expected_* — the stamp the batch
+            // will carry at Start, so the preview and the completed entry
+            // can be read against the same name.
+            'calculation_version' => ProductionCalculationEngine::VERSION_UNIFIED,
+            // Planned hours straight in: no downtime is known before the
+            // run. The completion metrics net what was logged and say true.
+            'downtime_netted' => false,
             'planned_hours' => $hours,
             'standard_cycle_time' => $cycleTime,
             'standard_cavities' => $item->standard_cavities,
@@ -106,8 +121,10 @@ class BatchEstimationService
             'packaging_mode' => $packaging?->mode,
             // Trays and pouches are packing SUGGESTIONS — how many
             // containers you need, so a part-filled one still counts (ceil).
-            'expected_trays' => $this->containers($pieces, $pack->nos_per_tray),
-            'expected_pouches' => $this->containers($pieces, $pack->nos_per_pouch),
+            // Through the engine's ONE implementation, which the completion
+            // metrics' expected_pouches reads too.
+            'expected_trays' => $this->engine->packingContainers($pieces, $pack->nos_per_tray),
+            'expected_pouches' => $this->engine->packingContainers($pieces, $pack->nos_per_pouch),
             // Boxes are the TARGET the shift is measured against, and the
             // factory's EST BOX column rounds to nearest. Using the packing
             // ceil here would inflate the target and understate efficiency.
@@ -179,22 +196,6 @@ class BatchEstimationService
         }
 
         return bcdiv((string) $start->diffInMinutes($end), '60', 4);
-    }
-
-    private function containers(?int $pieces, ?int $per): ?int
-    {
-        if ($pieces === null || $per === null || $per <= 0) {
-            return null;
-        }
-
-        // Packing SUGGESTIONS round per config (default ceil — a part-filled
-        // container still needs packing), consistent with the completion
-        // form's prefills.
-        return match (config('production.packing_rounding', 'ceil')) {
-            'floor' => intdiv($pieces, $per),
-            'round' => (int) round($pieces / $per),
-            default => (int) ceil($pieces / $per),
-        };
     }
 
     private function isMassUom(?string $uom): bool
