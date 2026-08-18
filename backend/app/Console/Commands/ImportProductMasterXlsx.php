@@ -153,12 +153,25 @@ class ImportProductMasterXlsx extends Command
             ['rows merged into an existing variant', $s['rows_merged']],
             ['duplicates refused', $s['duplicates_refused']],
             ['  of which conflicting figures', $s['packaging_conflicts']],
+            ['sheet packagings not written (standard holds >1 of the mode)', $s['packaging_warnings'] ?? 0],
             ['matched to an item', $s['matched']],
             ['unmatched', $s['unmatched']],
             ['LOCAL- fixture items'.($result['dry_run'] ? ' (would create)' : ' created'), $s['local_fixture_items']],
             ['importable', $s['importable']],
             ['skipped', $s['skipped']],
         ]);
+
+        $packagingWarnings = array_merge(...array_map(
+            fn ($v) => array_map(fn (string $w) => "  · {$w}", $v['packaging_warnings'] ?? []),
+            $result['variants'],
+        ));
+        if ($packagingWarnings !== []) {
+            $this->newLine();
+            $this->warn('Sheet packagings NOT written (the standard already holds more than one packing of that mode):');
+            foreach ($packagingWarnings as $line) {
+                $this->line($line);
+            }
+        }
 
         $unresolved = array_filter($result['variants'], fn ($v) => $v['status'] === 'unresolved');
         if ($unresolved !== []) {

@@ -47,6 +47,7 @@ use App\Modules\Production\Http\Controllers\BatchPreviewController;
 use App\Modules\Production\Http\Controllers\BinBayController;
 use App\Modules\Production\Http\Controllers\BomController;
 use App\Modules\Production\Http\Controllers\CapacityPlanController;
+use App\Modules\Production\Http\Controllers\ConfigurationReviewController;
 use App\Modules\Production\Http\Controllers\DayBinController;
 use App\Modules\Production\Http\Controllers\DowntimeReasonController;
 use App\Modules\Production\Http\Controllers\FactoryDayBinController;
@@ -64,6 +65,7 @@ use App\Modules\Production\Http\Controllers\ProductionReportController;
 use App\Modules\Production\Http\Controllers\ProductionSettingsController;
 use App\Modules\Production\Http\Controllers\ProductionStandardController;
 use App\Modules\Production\Http\Controllers\ProductionStandardPackagingController;
+use App\Modules\Production\Http\Controllers\ProductVariantController;
 use App\Modules\Production\Http\Controllers\ReworkOrderController;
 use App\Modules\Production\Http\Controllers\RoutingController;
 use App\Modules\Production\Http\Controllers\ScrapReasonController;
@@ -523,6 +525,27 @@ Route::prefix('v1')->group(function () {
             // Same group, so the POST and PUT need production.manage.
             Route::post('standards/{standard}/packagings', [ProductionStandardPackagingController::class, 'store']);
             Route::put('standards/{standard}/packagings/{packaging}', [ProductionStandardPackagingController::class, 'update']);
+            // Identity ONLY — item_id and its provenance, never a count. The
+            // review panel's Link uses this so that linking a Tally item can
+            // never re-derive a box count the importer deliberately left as
+            // the sheet stated it (Phase 5 fix P1-a). production.manage via
+            // the group, like the PUT above.
+            Route::patch('standards/{standard}/packagings/{packaging}/identity', [ProductionStandardPackagingController::class, 'identity']);
+            // One product's variant tree — item → standards → packagings,
+            // each packaging with its Tally identity (sku · name · guid) and
+            // a configuration_status whose `missing` words the screens
+            // repeat rather than re-derive (Phase 5, P5-02 / P5-06). Read
+            // only; the group's guard gives it production.view.
+            Route::get('products/{item}/variants', ProductVariantController::class);
+            // The configuration review: packagings/standards without a Tally
+            // identity, packagings whose Tally name is shared by more than
+            // one item, items still on their seeded SKU — each with the
+            // existing Tally items a person could LINK (P5-03). Read only;
+            // every fix goes through the packaging / attach-item / item
+            // endpoints that already exist. `configuration` (singular) is a
+            // sibling of the `configurations` machine-exception routes
+            // above, not a member of them.
+            Route::get('configuration/review', ConfigurationReviewController::class);
 
             Route::get('downtime-reasons', [DowntimeReasonController::class, 'index']);
             Route::post('downtime-reasons', [DowntimeReasonController::class, 'store']);

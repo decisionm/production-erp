@@ -176,3 +176,26 @@ Server-side exports equal to their lists/reports for the same filters and reader
 
 ### Still open (from the baseline list)
 `OverReceiptException` · CRM · Finance · `ShiftSummaryService::report()` (Phase 5.7) · second same-mode packaging (Phase 5 D1) · `stock_balances == Σ stock_movements` (Phase 5) — **Still:** MySQL CI leg (Phase 7).
+
+## Phase 5 (feat/phase-5-product-sku-configuration, gate closed 2026-08-17)
+
+| Suite | Result | Evidence |
+|---|---|---|
+| Pint (whole tree) | PASS | clean |
+| Backend PHPUnit | PASS | **1,428 / 12,377** (Phase 4.5 close 1,352 / 11,879; +76: PackagingVariantUniquenessTest · PackQuantityResolverTest · PackingLinesPersistTest · PackagingIdentityOnlyTest · ProductVariantsTest · ConfigurationReviewTest · ProvisionalSkuTest · StockLedgerInvariantTest · StockMovementPurposeTest · CheckStockLedgerCommandTest · ProductionStandardImportTest +2 · PackagingTallyIdentityTest +1) |
+| Frontend vitest | PASS | 143 → **190** (`production/productStandardsConfig.test.ts` 47: packaging state/vocabulary, identity labels, counts summary incl. mismatch wording, packagingForCompletion id-first) |
+| Typecheck · build | PASS | clean · built |
+| Agent | UNTOUCHED | — |
+| Factory-knowledge | PASS | exit 0 (Q45 added; preamble → Q46) |
+| Migrations | REVERSIBLE | 5 additive; up/down/up on sqlite by two reviewers; D1 index order keeps the FK covered on MySQL |
+| Red-before / green-after | PROVEN | D1 (old index refused a second tray); the metric reader ignored the packaging row for tray/pouch; packing lines discarded; identity-only link rewrote 520 → 525; completion by mode; importer overwrite; append-only guard; provisional SKU create path |
+| Sonnet independent QA | PASS_WITH_DEFERRED → fix loop → re-gate (see PHASE-LOG) | |
+| Adversarial review | Opus NOT_READY (P1) · Fable NOT_READY (2 P1 · P2) → all fixed | |
+| Browser proof | PASS | Product Standards workspace: "Needs review — 103 packing identities still waiting on a person" with the honest no-candidate cell; API: variants + review + ledger check clean |
+| API proof | PASS | variants tree, review rows, inventory:check-ledger clean exit 0 |
+
+### Coverage gaps closed this phase
+Two same-mode packagings on one standard (D1) · one pack-quantity reader with per-rung precedence · packing lines persisted/replaced · identity-only linking that touches no count · completion packaging by id · importer safe beside person-entered rows · configuration status vocabulary + review candidates (active, Tally-pulled, non-fixture) · provisional SKU flag · stock ledger invariant through the real paths + append-only + purpose backfill rule.
+
+### Still open (from the baseline list)
+`OverReceiptException` · CRM · Finance · `ShiftSummaryService::report()` (Phase 5.7) — **Closed here:** second same-mode packaging (D1) · `stock_balances == Σ stock_movements`. **Still:** MySQL CI leg (Phase 7).

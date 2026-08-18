@@ -21,6 +21,9 @@ class StockMovementResource extends JsonResource
         return [
             'id' => $this->id,
             'type' => $this->type->value,
+            // Why it moved (StockMovementPurpose) — 'unknown' when the writer
+            // did not say; null only on a row the backfill has not reached.
+            'purpose' => $this->purpose?->value,
             'item' => ItemResource::make($this->whenLoaded('item')),
             'warehouse' => WarehouseResource::make($this->whenLoaded('warehouse')),
             'batch' => BatchResource::make($this->whenLoaded('batch')),

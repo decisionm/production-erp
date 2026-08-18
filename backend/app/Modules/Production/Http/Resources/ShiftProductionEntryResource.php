@@ -72,6 +72,13 @@ class ShiftProductionEntryResource extends JsonResource
             // cannot show "default vs effective" without these.
             'production_standard_id' => $this->production_standard_id,
             'production_configuration_id' => $this->production_configuration_id,
+            // WHICH packaging row the run started against, frozen at Start.
+            // Two same-mode packings can coexist on one standard (Phase 5,
+            // D1 — a 490/box tray and a 520/box tray), so the mode below no
+            // longer names one row; the completion drawer seeds its packing
+            // line from this id first and falls back to the mode only for a
+            // batch started before the id was frozen.
+            'production_standard_packaging_id' => $this->production_standard_packaging_id,
             'packaging_mode' => $this->packaging_mode,
             // The Tally identity this batch's finished goods post as
             // (DEC-20260810-003) — frozen at completion when the selected
@@ -123,6 +130,12 @@ class ShiftProductionEntryResource extends JsonResource
             'calculation_version' => $this->calculation_version,
             'material_consumptions' => ShiftMaterialConsumptionResource::collection($this->whenLoaded('materialConsumptions')),
             'scraps' => ShiftScrapResource::collection($this->whenLoaded('scraps')),
+            // HOW THE BATCH WAS PACKED — the packing_lines the completion
+            // was validated against, stored line for line (Phase 5, §4.16
+            // closed) and replaced by an amendment. Empty for a completion
+            // that typed none, and for every batch completed before the
+            // table existed. Same whenLoaded rule as the lines above.
+            'packing_lines' => ShiftProductionEntryPackingLineResource::collection($this->whenLoaded('packingLines')),
             // Downtime logged against this batch — planned at Start plus
             // the completion-time lines whose minutes net out of running
             // hours in metrics.downtime_minutes_total below.

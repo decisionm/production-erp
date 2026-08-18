@@ -15,6 +15,7 @@ use App\Modules\Production\Services\PackingMaterialSuggestionService;
 use App\Modules\Production\Services\ProductionConfigurationService;
 use App\Modules\Production\Services\ProductionStandardResolver;
 use App\Modules\Production\Services\ProductReadinessService;
+use App\Modules\Production\Services\ProductVariantService;
 use App\Modules\Production\Services\RunMaterialSuggestionService;
 use Illuminate\Http\JsonResponse;
 
@@ -36,6 +37,7 @@ class BatchPreviewController extends Controller
         private readonly MasterbatchDosingService $masterbatchDosings,
         private readonly RunMaterialSuggestionService $materialSuggestions,
         private readonly PackingMaterialSuggestionService $packingSuggestions,
+        private readonly ProductVariantService $variantStatus,
     ) {}
 
     public function __invoke(BatchPreviewRequest $request): JsonResponse
@@ -203,6 +205,13 @@ class BatchPreviewController extends Controller
                     'unit_weight_grams' => $v->unit_weight_grams,
                     'cycle_time' => $v->cycle_time,
                     'status' => $v->status,
+                    // What this variant is still missing, in the words the
+                    // standards workspace and the variants endpoint use
+                    // (ProductVariantService, P5-02/P5-06) — additive, so
+                    // the picker can SAY "incomplete: counts missing"
+                    // instead of a bare disabled radio. Advisory here:
+                    // which option is offered or disabled is unchanged.
+                    'configuration_status' => $this->variantStatus->standardStatus($v, $item),
                     'packagings' => $v->packagings->map(fn ($p) => [
                         'id' => $p->id, 'mode' => $p->mode, 'label' => $p->label(),
                         'nos_per_pouch' => $p->nos_per_pouch, 'pouches_per_box' => $p->pouches_per_box,
@@ -215,11 +224,20 @@ class BatchPreviewController extends Controller
                         // The packing's own Tally identity (DEC-20260810-003),
                         // so the picker can say WHICH Tally item this choice
                         // posts as — null means "the product's own item", and
-                        // the screen says so rather than guessing.
+                        // the screen says so rather than guessing. sku and
+                        // guid ride beside id and name (additive, P5-02).
                         'tally_item' => $p->item_id === null ? null : [
                             'id' => (int) $p->item_id,
+                            'sku' => (string) $p->tallyItem?->sku,
                             'name' => (string) $p->tallyItem?->name,
+                            'guid' => $p->tallyItem?->tally_stock_item_guid,
                         ],
+                        // The same status the variants endpoint gives this
+                        // row — state, missing[], ambiguity — so the Shift
+                        // Floor's words and the workspace's are one set.
+                        // `is_complete` above stays the runnable flag the
+                        // picker disables on; this adds the reason.
+                        'configuration_status' => $this->variantStatus->packagingStatus($p, $v, $item),
                     ])->values(),
                 ])->values(),
                 'packaging' => $packaging === null ? null : [

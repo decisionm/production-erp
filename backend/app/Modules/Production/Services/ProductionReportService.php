@@ -311,7 +311,10 @@ class ProductionReportService
     private function completedEntries(callable $scope): Collection
     {
         return ShiftProductionEntry::query()
-            ->with(['shift', 'workCenter', 'item', 'materialConsumptions', 'scraps'])
+            // standardPackaging: productionMetrics' pack-quantity resolver
+            // (P5-04) reads the run's packaging row per entry — loaded here
+            // so a report over hundreds of entries costs one query for it.
+            ->with(['shift', 'workCenter', 'item', 'materialConsumptions', 'scraps', 'standardPackaging'])
             ->where('batch_status', BatchStatus::Completed->value)
             ->tap(fn (Builder $query) => $scope($query))
             ->orderBy('work_center_id')

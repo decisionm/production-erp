@@ -23,7 +23,7 @@ PHASE 3.5 Sales visibility (first-class)       PASS WITH DEFERRED · PR #183 (st
 PHASE 4   Agent XML/response snapshot          PASS WITH DEFERRED · PR #184 (stacked on #183) · agent 0.3.8 built, NOT published
 PHASE 4.5 Download / Export Center             PASS WITH DEFERRED · PR #185 (stacked on #184) · CEC slot BLOCKED (exact reason) · synchronous, stated cap
 ──────────────────────────── OPERATIONAL WORKFLOW (rev 3) ────────────────────────────
-PHASE 5   Product / SKU configuration          variant model · SKU→Tally identity · multi-match review · pack qty in config
+PHASE 5   Product / SKU configuration          PASS WITH DEFERRED · PR #186 (stacked on #185) · Q45 · mapping values stay the owner's (Q33/Q43)
 PHASE 5.5 Shift Floor → Complete → Today       select SKU once · estimation verified · completion durable · Completed Today server-side
 PHASE 5.7 Shift Summary + CEC infrastructure   history/A-B-C/all reconcile with completed production · CEC format BLOCKED, everything around it built
 PHASE 6   Purchase → GRN → lot → inventory → consumption; then PO→Tally staged, flag-off (Q35 gates the live write)

@@ -29,6 +29,14 @@ export interface Item {
      * still run and only the voucher waits — the "Tally mapping pending" state.
      */
     tally_stock_item_guid: string | null;
+    /**
+     * Phase 5 (P5-02): TRUE while the SKU is the name-derived one the Tally
+     * pull seeded and no person has set it; a manual SKU edit clears it.
+     * Optional — absent on a backend that predates the column. Marks the
+     * row; never says what the SKU should be (the SKU format programme is
+     * the owner's).
+     */
+    sku_provisional?: boolean;
     is_active: boolean;
     created_at: string;
 }

@@ -3,6 +3,7 @@
 namespace App\Modules\Production\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
+use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Inventory\Services\ScrapItemResolver;
@@ -70,6 +71,11 @@ class ShiftProductionEntryService
         // line so the ERP's own scrap receipt and the voucher can never name
         // different scrap items.
         private readonly ScrapItemResolver $scrapItems,
+        // THE ONE reader of pack quantities (Phase 5, P5-04): frozen entry
+        // columns → the run's packaging row → the item master. The metric
+        // path below reads through it, so it can never again measure a
+        // 490/box tray run against the master's 520.
+        private readonly PackQuantityResolver $packQuantities,
     ) {}
 
     public function paginate(int $perPage = 20, ?ShiftProductionEntryStatus $status = null, bool $includeCancelled = false): LengthAwarePaginator
@@ -86,10 +92,14 @@ class ShiftProductionEntryService
                 // same reason as the item above: a godown retired after the
                 // batch ran must still be nameable in that batch's history.
                 'materialConsumptions.warehouse' => fn ($query) => $query->withTrashed(),
-                'scraps.scrapReason', 'approvedBy',
+                'scraps.scrapReason', 'packingLines', 'approvedBy',
                 // Loaded so the resource can name all three figure sources
                 // apart — workbook, machine exception, and the run's own.
                 'productionStandard', 'productionConfiguration', 'cancelledBy',
+                // The run's packaging row — the metrics' pack-quantity
+                // resolver reads it per entry (P5-04); loaded here so a
+                // 20-row page costs one query for it, not twenty.
+                'standardPackaging',
                 'downtimeEvents.reason',
                 'tallySyncEntries',
                 // The quality queue and the approval queue are the same list
@@ -134,7 +144,9 @@ class ShiftProductionEntryService
     public function activeBatches(): Collection
     {
         return ShiftProductionEntry::query()
-            ->with(['shift', 'workCenter', 'item'])
+            // standardPackaging for the same reason paginate() loads it: the
+            // pack-quantity resolver reads the run's packaging row per entry.
+            ->with(['shift', 'workCenter', 'item', 'standardPackaging'])
             ->where('batch_status', BatchStatus::InProgress->value)
             ->orderByDesc('id')
             ->get();
@@ -606,6 +618,7 @@ class ShiftProductionEntryService
                     createdBy: $completedBy,
                     allowNegative: $allowNegative,
                     shortfallKg: $shortfallKg,
+                    purpose: StockMovementPurpose::Consumption,
                 );
 
                 if ($shortfallKg !== null) {
@@ -677,6 +690,20 @@ class ShiftProductionEntryService
                 ]);
             }
 
+            // HOW THE BATCH WAS PACKED, line for line (Phase 5, §4.16
+            // closed). CompleteBatchRequest validated these in full — one
+            // line per mode, derived pieces recomputed, cartons and pieces
+            // forced to add up — and until now they were thrown away here.
+            // Stored exactly as validated, in the order typed, inside this
+            // transaction: a refused completion leaves no line behind. An
+            // amendment deletes the wrong completion's set first
+            // (reverseCompletionEffects), so one batch carries ONE standing
+            // set — never the old lines beside the corrected ones. Nothing
+            // downstream computes from these rows: quantity_produced and
+            // no_of_box above stay the figures every ledger and voucher
+            // reads; this is the record of how those figures were arrived at.
+            $this->storePackingLines($entry, $data['packing_lines'] ?? []);
+
             // Downtime logged with the completion — power cuts, mould
             // changes, breakdowns the supervisor reports alongside the
             // counts (owner, 30-Jul: "…i want to do this for efficiency").
@@ -712,6 +739,7 @@ class ShiftProductionEntryService
                 unitCost: $unitCost,
                 reference: "SPE #{$entry->id}",
                 createdBy: $completedBy,
+                purpose: StockMovementPurpose::Output,
             );
 
             return $entry->fresh([
@@ -722,6 +750,7 @@ class ShiftProductionEntryService
                 // relation makes the resource drop the key entirely.
                 'materialConsumptions.warehouse' => fn ($query) => $query->withTrashed(),
                 'scraps.scrapReason',
+                'packingLines',
                 'downtimeEvents.reason',
             ]);
         });
@@ -1166,12 +1195,49 @@ class ShiftProductionEntryService
             );
         }
 
-        // Scrap lines and the downtime the supervisor logged WITH the
-        // completion go with it; planned downtime attached at Start Batch
-        // (known_before_start) belongs to the run, not to the completion, and
-        // stays.
+        // Scrap lines, packing lines and the downtime the supervisor logged
+        // WITH the completion go with it; planned downtime attached at Start
+        // Batch (known_before_start) belongs to the run, not to the
+        // completion, and stays.
         $entry->scraps()->delete();
+        $entry->packingLines()->delete();
         $entry->downtimeEvents()->where('known_before_start', false)->delete();
+    }
+
+    /**
+     * The validated packing lines of one completion, written figure for
+     * figure. Positions are the payload's own order (0-based) so the read
+     * comes back as typed. Absent keys store null — "not stated" is a fact
+     * about the line (a direct-box line has no inner container), never a 0.
+     *
+     * @param  array<int, array<string, mixed>>  $lines
+     */
+    private function storePackingLines(ShiftProductionEntry $entry, array $lines): void
+    {
+        // A run with NO standard has no packaging rows of its own, so a
+        // packaging id on its lines can only name another product's packing
+        // — CompleteBatchRequest's ownership check is skipped when there is
+        // no standard to own against, so the id is dropped here rather than
+        // stored as a claim the entry cannot back. The counts on the line
+        // are the supervisor's and are kept as typed.
+        $hasStandard = $entry->production_standard_id !== null;
+
+        foreach (array_values($lines) as $position => $line) {
+            $entry->packingLines()->create([
+                'production_standard_packaging_id' => $hasStandard ? ($line['production_standard_packaging_id'] ?? null) : null,
+                'position' => $position,
+                'mode' => (string) $line['mode'],
+                'boxes' => (int) ($line['boxes'] ?? 0),
+                'nos_per_box' => (int) $line['nos_per_box'],
+                'loose_inner' => isset($line['loose_inner']) ? (int) $line['loose_inner'] : null,
+                'nos_per_inner' => isset($line['nos_per_inner']) ? (int) $line['nos_per_inner'] : null,
+                'derived_pieces' => (int) $line['derived_pieces'],
+                'actual_pieces' => (int) $line['actual_pieces'],
+                'override_reason' => trim((string) ($line['override_reason'] ?? '')) !== ''
+                    ? trim((string) $line['override_reason'])
+                    : null,
+            ]);
+        }
     }
 
     /**
@@ -1764,6 +1830,7 @@ class ShiftProductionEntryService
                 'materialConsumptions.item' => fn ($query) => $query->withTrashed(),
                 'materialConsumptions.warehouse' => fn ($query) => $query->withTrashed(),
                 'scraps.scrapReason',
+                'packingLines',
                 'downtimeEvents.reason',
                 'qualityCheckedBy',
             ]);
@@ -1890,6 +1957,7 @@ class ShiftProductionEntryService
                 'materialConsumptions.item' => fn ($query) => $query->withTrashed(),
                 'materialConsumptions.warehouse' => fn ($query) => $query->withTrashed(),
                 'scraps.scrapReason',
+                'packingLines',
                 'downtimeEvents.reason',
             ]);
         });
@@ -2788,6 +2856,9 @@ class ShiftProductionEntryService
      *     stock_shortfalls: list<array{item_id: ?int, item_name: ?string,
      *         warehouse_id: ?int, warehouse_name: ?string, short_kg: string,
      *         item_uom: ?string}>,
+     *     pack_quantities: array{nos_per_box: ?int, nos_per_tray: ?int,
+     *         trays_per_box: ?int, nos_per_pouch: ?int, pouches_per_box: ?int,
+     *         source: string, sources: array<string, string>},
      * }|null
      */
     public function productionMetrics(ShiftProductionEntry $entry): ?array
@@ -2846,8 +2917,12 @@ class ShiftProductionEntryService
         // Expected boxes = ROUND(expected_pieces / pack, 0) — WB2 col W.
         // The entry's own pack size wins (a run packed at a non-standard
         // count must not be measured against the master's), and history
-        // never rewrites itself when the master changes later.
-        $nosPerBox = $entry->nos_per_box ?? $entry->item?->nos_per_box;
+        // never rewrites itself when the master changes later. Read through
+        // the ONE resolver (P5-04): entry column → the run's packaging row →
+        // the item master. Until then this read `entry ?? item` and skipped
+        // the packaging the run was started against (§4.14).
+        $pack = $this->packQuantities->forEntry($entry);
+        $nosPerBox = $pack->nos_per_box;
         $expectedBoxes = null;
         if ($expectedPiecesRaw !== null && $nosPerBox !== null && $nosPerBox > 0) {
             $expectedBoxes = (int) $this->bcRoundHalfUp(bcdiv($expectedPiecesRaw, (string) $nosPerBox, 8), 0);
@@ -2855,11 +2930,11 @@ class ShiftProductionEntryService
 
         // Expected pouches = expected_pieces / pouch standard — a packing
         // suggestion, not a workbook figure, so it rounds per
-        // production.packing_rounding (see method docblock). The pouch
-        // standard lives only on the item master — the entry carries pouch
-        // COUNTS, not a per-entry pouch pack size.
-        // Entry snapshot wins — same invariant as nos_per_box above.
-        $nosPerPouch = $entry->nos_per_pouch ?? $entry->item?->nos_per_pouch;
+        // production.packing_rounding (see method docblock). Same resolver,
+        // same precedence: the entry's typed pouch size, else the run's
+        // packaging row (a pouch packaging's own nos_per_pouch — the rung
+        // the old reader skipped), else the item master.
+        $nosPerPouch = $pack->nos_per_pouch;
         $expectedPouches = null;
         if ($expectedPiecesRaw !== null && $nosPerPouch !== null && $nosPerPouch > 0) {
             $expectedPouches = (int) $this->applyPackingRounding(bcdiv($expectedPiecesRaw, (string) $nosPerPouch, 8), 0);
@@ -2952,6 +3027,11 @@ class ShiftProductionEntryService
             'expected_pieces' => $expectedPiecesRaw !== null ? $this->bcRoundHalfUp($expectedPiecesRaw, 2) : null,
             'expected_boxes' => $expectedBoxes,
             'expected_pouches' => $expectedPouches,
+            // The pack counts the two figures above were measured against,
+            // and the rung each came from — so a screen can say "5 boxes
+            // expected at 490/box (this run's packaging)" instead of leaving
+            // the reader to guess which master the divisor came out of.
+            'pack_quantities' => $pack->toArray(),
             'actual_boxes' => $actualBoxes,
             'actual_pouches' => $entry->no_of_pouches,
             'actual_pieces' => $actualPieces,

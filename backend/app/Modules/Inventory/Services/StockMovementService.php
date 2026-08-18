@@ -4,6 +4,7 @@ namespace App\Modules\Inventory\Services;
 
 use App\Modules\Inventory\Exceptions\InsufficientStockException;
 use App\Modules\Inventory\Models\Enums\SerialNumberStatus;
+use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Models\Enums\StockMovementType;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\SerialNumber;
@@ -33,6 +34,14 @@ use Illuminate\Validation\ValidationException;
  * sync as a side effect (its status/warehouse reflects the last movement
  * against it) since, unlike a batch, a serial number's current location
  * is exactly what it's for.
+ *
+ * $purpose (StockMovementPurpose) is WHY the movement happened, beside the
+ * type that says which way it went. OPTIONAL on every writer, and null means
+ * 'unknown' — never a guess — so every caller that predates the column keeps
+ * writing exactly what it wrote before, plus one honest word. The writers
+ * that know their intent name it: a GRN says receipt, a batch says
+ * consumption and output, a delivery says dispatch, the Tally opening and
+ * reconcile services say opening and reconcile.
  */
 class StockMovementService
 {
@@ -47,8 +56,9 @@ class StockMovementService
         ?int $createdBy = null,
         ?int $batchId = null,
         ?int $serialNumberId = null,
+        ?StockMovementPurpose $purpose = null,
     ): StockMovement {
-        return DB::transaction(function () use ($itemId, $warehouseId, $quantity, $unitCost, $reference, $movementDate, $notes, $createdBy, $batchId, $serialNumberId) {
+        return DB::transaction(function () use ($itemId, $warehouseId, $quantity, $unitCost, $reference, $movementDate, $notes, $createdBy, $batchId, $serialNumberId, $purpose) {
             $this->incrementBalance($itemId, $warehouseId, $quantity, $unitCost);
 
             if ($serialNumberId !== null) {
@@ -64,6 +74,7 @@ class StockMovementService
                 'batch_id' => $batchId,
                 'serial_number_id' => $serialNumberId,
                 'type' => StockMovementType::Receipt,
+                'purpose' => $purpose ?? StockMovementPurpose::Unknown,
                 'quantity' => $quantity,
                 'unit_cost' => $unitCost,
                 'reference' => $reference,
@@ -103,10 +114,11 @@ class StockMovementService
         ?int $serialNumberId = null,
         bool $allowNegative = false,
         ?string &$shortfallKg = null,
+        ?StockMovementPurpose $purpose = null,
     ): StockMovement {
         $shortfallKg = null;
 
-        return DB::transaction(function () use ($itemId, $warehouseId, $quantity, $reference, $movementDate, $notes, $createdBy, $batchId, $serialNumberId, $allowNegative, &$shortfallKg) {
+        return DB::transaction(function () use ($itemId, $warehouseId, $quantity, $reference, $movementDate, $notes, $createdBy, $batchId, $serialNumberId, $allowNegative, &$shortfallKg, $purpose) {
             [$costAtIssue, $shortfallKg] = $this->decrementBalance($itemId, $warehouseId, $quantity, $allowNegative);
 
             if ($serialNumberId !== null) {
@@ -122,6 +134,7 @@ class StockMovementService
                 'batch_id' => $batchId,
                 'serial_number_id' => $serialNumberId,
                 'type' => StockMovementType::Issue,
+                'purpose' => $purpose ?? StockMovementPurpose::Unknown,
                 'quantity' => $quantity,
                 'unit_cost' => $costAtIssue,
                 'reference' => $reference,
@@ -146,6 +159,7 @@ class StockMovementService
         ?int $createdBy = null,
         ?int $batchId = null,
         ?int $serialNumberId = null,
+        ?StockMovementPurpose $purpose = null,
     ): array {
         // A TRANSFER TO THE PLACE IT ALREADY IS, IS NOT A TRANSFER.
         //
@@ -162,7 +176,7 @@ class StockMovementService
             ]);
         }
 
-        return DB::transaction(function () use ($itemId, $fromWarehouseId, $toWarehouseId, $quantity, $reference, $movementDate, $notes, $createdBy, $batchId, $serialNumberId) {
+        return DB::transaction(function () use ($itemId, $fromWarehouseId, $toWarehouseId, $quantity, $reference, $movementDate, $notes, $createdBy, $batchId, $serialNumberId, $purpose) {
             // A transfer never runs negative: moving material you do not
             // have is not a truth about the floor, it is a typo.
             [$costAtTransfer] = $this->decrementBalance($itemId, $fromWarehouseId, $quantity);
@@ -181,6 +195,7 @@ class StockMovementService
                 'batch_id' => $batchId,
                 'serial_number_id' => $serialNumberId,
                 'type' => StockMovementType::TransferOut,
+                'purpose' => $purpose ?? StockMovementPurpose::Unknown,
                 'quantity' => $quantity,
                 'unit_cost' => $costAtTransfer,
                 'reference' => $reference,
@@ -196,6 +211,7 @@ class StockMovementService
                 'batch_id' => $batchId,
                 'serial_number_id' => $serialNumberId,
                 'type' => StockMovementType::TransferIn,
+                'purpose' => $purpose ?? StockMovementPurpose::Unknown,
                 'quantity' => $quantity,
                 'unit_cost' => $costAtTransfer,
                 'reference' => $reference,

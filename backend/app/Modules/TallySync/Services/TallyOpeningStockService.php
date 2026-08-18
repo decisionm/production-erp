@@ -2,6 +2,7 @@
 
 namespace App\Modules\TallySync\Services;
 
+use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Models\StockMovement;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\TallySync\Models\TallyStockSnapshot;
@@ -128,6 +129,7 @@ class TallyOpeningStockService
                     movementDate: $locked->as_of->toDateString(),
                     notes: 'Opening balance read from Tally stock summary.',
                     createdBy: $userId,
+                    purpose: StockMovementPurpose::Opening,
                 );
 
                 $applied++;

@@ -215,9 +215,16 @@ class PackingLinesTest extends TestCase
             // Numeric compare, not string: the decimal column comes back
             // "6872.0000" on MySQL and 6872 on the local sqlite.
             ->assertJsonPath('data.quantity_produced', fn ($v) => (float) $v === 6872.0)
-            ->assertJsonPath('data.no_of_box', 5);
+            ->assertJsonPath('data.no_of_box', 5)
+            // Phase 5 (§4.16 closed): the lines are STORED, not only summed
+            // and discarded — the full line-for-line contract is
+            // Production/PackingLinesPersistTest.
+            ->assertJsonCount(2, 'data.packing_lines')
+            ->assertJsonPath('data.packing_lines.0.mode', 'pouch')
+            ->assertJsonPath('data.packing_lines.1.mode', 'tray');
 
         $this->assertSame(6872.0, (float) $entry->fresh()->quantity_produced);
+        $this->assertSame(2, $entry->fresh()->packingLines()->count());
     }
 
     public function test_a_total_that_does_not_match_the_lines_is_refused(): void
