@@ -267,6 +267,12 @@ Route::prefix('v1')->group(function () {
         Route::prefix('tally-sync')->group(function () {
             Route::middleware('module:tally-sync')->group(function () {
                 Route::get('entries', [TallySyncController::class, 'index']);
+                // The Control Center's header counts. Registered ahead of the
+                // parameterised entry routes so no literal segment can ever be
+                // read as an entry id.
+                Route::get('summary', [TallySyncController::class, 'summary']);
+                // One voucher with its full history (TALLY-SYNC-CHAIN.md §3).
+                Route::get('entries/{tally_sync_entry}', [TallySyncController::class, 'show']);
                 Route::post('entries/{tally_sync_entry}/retry', [TallySyncController::class, 'retry']);
                 Route::post('entries/{tally_sync_entry}/dismiss', [TallySyncController::class, 'dismiss']);
                 Route::post('entries/{tally_sync_entry}/release', [TallySyncController::class, 'release']);

@@ -1,0 +1,57 @@
+<?php
+
+namespace App\Modules\TallySync\Models\Enums;
+
+/**
+ * The closed vocabulary of tally_sync_events.event.
+ *
+ * Where the agent file log (TallySyncAgentController::agentLog) already had
+ * a name for something, that name is reused verbatim, so a reader can lay
+ * the 30-day file beside the table and see the same words. The names that
+ * are new here are the entry-side mutations that never had a trace beyond
+ * the columns they overwrite.
+ */
+enum TallySyncEventKind: string
+{
+    /** A voucher entered the queue — batch mode, or a NEW shift voucher (including a -2/-3 follow-up). */
+    case VoucherEnqueued = 'voucher.enqueued';
+
+    /** Later approvals joined an existing, still-open shift voucher and its payload was rebuilt. */
+    case VoucherMerged = 'voucher.merged';
+
+    /** A payload rebuild (merge or retry) left members off the lines — recorded ONLY when something was excluded. */
+    case VoucherRebuilt = 'voucher.rebuilt';
+
+    /** Handed to the agent for the first time (delivered_at stamped) — the file log's own name. */
+    case PendingDelivered = 'pending.delivered';
+
+    /** The agent reported Tally accepted it. */
+    case VoucherSynced = 'voucher.synced';
+
+    /** The agent reported Tally rejected it. */
+    case VoucherFailed = 'voucher.failed';
+
+    /** The agent reported a failure for a voucher already in Tally; the service refused to mark it. */
+    case VoucherFailureRefused = 'voucher.failure_refused';
+
+    /** A person re-queued it (payload regenerated where a rebuilder exists). */
+    case VoucherRetried = 'voucher.retried';
+
+    /** A person wrote it off — it will never be sent to Tally. */
+    case VoucherDismissed = 'voucher.dismissed';
+
+    /** A person released a held shift voucher ahead of the gate. */
+    case VoucherReleased = 'voucher.released';
+
+    /** Tally → ERP: a masters pull landed. */
+    case MastersReceived = 'masters.received';
+
+    /** Tally → ERP: the instance bound itself to a Tally company (trust-on-first-use). */
+    case CompanyBound = 'company.bound';
+
+    /** Tally → ERP: the agent reported the companies it found. */
+    case CompaniesReceived = 'companies.received';
+
+    /** Tally → ERP: a godown-wise stock summary was previewed and kept as a snapshot. */
+    case StockSummaryPreviewed = 'stock-summary.previewed';
+}

@@ -1,14 +1,23 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Modal, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { Alert, Button, Checkbox, DatePicker, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import dayjs from 'dayjs';
 import { Link } from 'react-router-dom';
 import {
     dismissTallySyncEntry,
+    getTallySyncSummary,
     listAllTallySyncEntries,
     releaseTallySyncEntry,
     retryTallySyncEntry,
 } from '@/features/tally-sync/api';
-import type { TallySyncEntry, TallySyncStatus } from '@/features/tally-sync/types';
+import {
+    catalogueNote,
+    categoryFilterOptions,
+    categoryLabel,
+    hasActiveFilters,
+    unclassifiedCount,
+} from '@/features/tally-sync/filters';
+import type { TallySyncEntry, TallySyncEntryFilters, TallySyncStatus } from '@/features/tally-sync/types';
 
 const statusColor: Record<TallySyncStatus, string> = {
     pending: 'default',
@@ -26,14 +35,11 @@ const statusLabel: Record<TallySyncStatus, string> = {
     dismissed: 'Dismissed — never sent',
 };
 
-/**
- * Failed first, always. Everything else on this page — the count in the red
- * strip, what "Resync all failed" picks up — reads the same order, so a
- * rejection can never be pushed below the fold by a day of successful posts.
- * Dismissed sinks BELOW synced: a written-off voucher is the one kind of row
- * on this page that nobody will ever act on.
- */
-const statusRank: Record<TallySyncStatus, number> = { failed: 0, pending: 1, synced: 2, dismissed: 3 };
+/** The status filter's choices — the same words the Status column uses. */
+const statusOptions = (Object.keys(statusLabel) as TallySyncStatus[]).map((status) => ({
+    value: status,
+    label: statusLabel[status],
+}));
 
 /** One stock line of a production voucher, as the payload carries it. */
 type VoucherStockLine = { item: string; quantity: string; godown?: string | null };
@@ -126,10 +132,44 @@ interface ResyncOutcome {
 export default function TallySyncPage() {
     const queryClient = useQueryClient();
 
+    // The filter bar's state IS the query key: change a filter, the server
+    // is asked again. Nothing here filters client-side, so the truncation
+    // honesty below compares against the server's count for the SAME filters.
+    const [filters, setFilters] = useState<TallySyncEntryFilters>({});
+    const filtersActive = hasActiveFilters(filters);
+
     const { data, isLoading, isError, isFetching, refetch } = useQuery({
-        queryKey: ['tally-sync', 'entries', 'all'],
-        queryFn: () => listAllTallySyncEntries(),
+        queryKey: ['tally-sync', 'entries', 'all', filters],
+        queryFn: () => listAllTallySyncEntries(filters),
     });
+
+    // Today's counts, the catalogue and last agent contact — UNFILTERED on
+    // purpose: "today: 1 failed" is a fact about today, not about the rows
+    // the table is narrowed to. Keyed under ['tally-sync', 'entries', …] so
+    // the existing invalidations after Resync / Dismiss / Release refresh
+    // it too, without touching those actions.
+    const {
+        data: summary,
+        isError: summaryError,
+        refetch: refetchSummary,
+    } = useQuery({
+        queryKey: ['tally-sync', 'entries', 'summary'],
+        queryFn: () => getTallySyncSummary(),
+    });
+
+    // The search box's text as typed; it only becomes the `q` filter on
+    // Enter / the search button, so a half-typed voucher number does not
+    // fire a request per keystroke at the factory box.
+    const [qDraft, setQDraft] = useState('');
+
+    function setFilter<K extends keyof TallySyncEntryFilters>(key: K, value: TallySyncEntryFilters[K]) {
+        setFilters((prev) => ({ ...prev, [key]: value }));
+    }
+
+    function clearFilters() {
+        setFilters({});
+        setQDraft('');
+    }
 
     // Keyed by entry id so the answer stays on screen next to the row it
     // belongs to — a toast that vanishes in three seconds is no use to
@@ -142,24 +182,62 @@ export default function TallySyncPage() {
     const [report, setReport] = useState<{ id: number; voucher: string; ok: boolean; message: string }[] | null>(null);
     const [viewing, setViewing] = useState<TallySyncEntry | null>(null);
 
-    const entries = useMemo(
-        () => [...(data?.entries ?? [])].sort(
-            (a, b) => statusRank[a.status] - statusRank[b.status] || b.id - a.id,
-        ),
-        [data],
-    );
+    // Failed first, always. Everything on this page — the count in the red
+    // strip, what "Resync all failed" picks up — reads the same order, so a
+    // rejection can never be pushed below the fold by a day of successful
+    // posts; dismissed sinks BELOW synced, being the one kind of row nobody
+    // will ever act on. That order is the SERVER's (`sort=status_rank`, asked
+    // for by listAllTallySyncEntries) and is deliberately not re-sorted here:
+    // with server-side filters the rows are whatever the server matched, and
+    // two sorts — one each side — is how the table and the counts drift apart.
+    const entries = useMemo(() => data?.entries ?? [], [data]);
 
     const failed = useMemo(() => entries.filter((entry) => entry.status === 'failed'), [entries]);
     const pendingCount = entries.filter((entry) => entry.status === 'pending').length;
 
-    const lastSynced = useMemo(() => latest(entries.map((entry) => entry.synced_at)), [entries]);
-    const lastCollected = useMemo(() => latest(entries.map((entry) => entry.delivered_at)), [entries]);
+    // From the summary when it answers (it sees every entry regardless of
+    // the filter bar); derived from the rows only when the summary is not
+    // available AND the rows are unfiltered — a filtered subset's newest
+    // synced_at is not "the last voucher Tally accepted", it is the last one
+    // that happened to match.
+    const rowsSpeakForAll = !filtersActive;
+    const lastSynced = useMemo(
+        () => summary?.last_synced_at ?? (rowsSpeakForAll ? latest(entries.map((entry) => entry.synced_at)) : null),
+        [summary, rowsSpeakForAll, entries],
+    );
+    const lastCollected = useMemo(
+        () => summary?.agent.last_action_at
+            ?? (rowsSpeakForAll ? latest(entries.map((entry) => entry.delivered_at)) : null),
+        [summary, rowsSpeakForAll, entries],
+    );
 
-    // The honesty line. If we are holding fewer rows than the server has, the
-    // failure count below is a floor, not a total, and the page must say so
-    // rather than hand out an all-clear it cannot stand behind.
+    // The honesty line. If we are holding fewer rows than the server has for
+    // THESE filters, the failure count below is a floor, not a total, and the
+    // page must say so rather than hand out an all-clear it cannot stand behind.
     const total = data?.total ?? 0;
     const truncated = total > entries.length;
+
+    // Failed vouchers the filter bar is hiding. The summary counts every
+    // failed entry; the rows only the matching ones — the difference is what
+    // a green "no failed vouchers" over a filtered table would be lying about.
+    // Only computed when the page holds every matching row: on a truncated
+    // page `failed.length` is a floor, so the subtraction would count rows
+    // the page simply did not fetch as "outside these filters" — the
+    // truncation copy above already says the page is not looking at them.
+    const failedElsewhere = filtersActive && summary && !truncated
+        ? Math.max(0, summary.all_time.failed - failed.length)
+        : 0;
+
+    // The names the table can never contain — the accountant's transactions
+    // that live only in Tally, what is planned, what does not exist in the
+    // books at all. Empty until the summary answers; never a zero, never a
+    // row.
+    const notMirrored = catalogueNote(summary?.by_category);
+
+    // Rows the classifier could not place — a real row, measured, that no
+    // category filter reaches unless `unknown` is offered. Zero is the
+    // ordinary case and says nothing; anything else is said out loud.
+    const unclassified = unclassifiedCount(summary?.by_category);
 
     const busy = retryingId !== null || releasingId !== null || dismissingId !== null || resyncingAll;
 
@@ -168,12 +246,20 @@ export default function TallySyncPage() {
      * Never shown when the fetch failed — see the error alert below: an empty
      * `entries` because the request 403'd looks identical to an empty queue,
      * and a green tick over the first of those is a lie the floor would act on.
+     *
+     * With a filter on, the rows are a subset by construction, so the copy
+     * says "among these" and never claims the whole — and an empty result is
+     * "nothing matches", NOT "nothing has been sent to Tally".
      */
-    const allClear = entries.length === 0
-        ? 'No vouchers queued yet — nothing has been sent to Tally so far.'
-        : truncated
-            ? `No failed vouchers among the ${entries.length} most recent`
-            : 'No failed vouchers — everything the ERP has sent, Tally has taken.';
+    const allClear = filtersActive
+        ? entries.length === 0
+            ? 'No vouchers match these filters.'
+            : `No failed vouchers among the ${entries.length}${truncated ? ' held here' : ''} matching these filters.`
+        : entries.length === 0
+            ? 'No vouchers queued yet — nothing has been sent to Tally so far.'
+            : truncated
+                ? `No failed vouchers among the ${entries.length} held here`
+                : 'No failed vouchers — everything the ERP has sent, Tally has taken.';
 
     async function resyncOne(entry: TallySyncEntry) {
         setRetryingId(entry.id);
@@ -299,7 +385,7 @@ export default function TallySyncPage() {
                 <Typography.Title level={3} style={{ marginBottom: 8 }}>
                     Tally Sync
                 </Typography.Title>
-                <Button onClick={() => refetch()} loading={isFetching && !busy}>
+                <Button onClick={() => Promise.all([refetch(), refetchSummary()])} loading={isFetching && !busy}>
                     Refresh
                 </Button>
             </Space>
@@ -345,8 +431,15 @@ export default function TallySyncPage() {
                             </span>
                             {truncated && (
                                 <span>
-                                    Showing the most recent {entries.length} of {total} vouchers — there may be older
-                                    failures than the ones counted here.
+                                    Holding {entries.length} of {total}
+                                    {filtersActive ? ' matching' : ''} vouchers (all failed and pending first) —
+                                    the rest were not fetched.
+                                </span>
+                            )}
+                            {failedElsewhere > 0 && (
+                                <span>
+                                    {failedElsewhere} more failed voucher{failedElsewhere === 1 ? '' : 's'} sit outside
+                                    these filters.
                                 </span>
                             )}
                             <Button danger type="primary" loading={resyncingAll} onClick={resyncAllFailed}>
@@ -359,7 +452,10 @@ export default function TallySyncPage() {
 
             {failed.length === 0 && !isLoading && !isError && (
                 <Alert
-                    type={truncated ? 'info' : 'success'}
+                    // Green only for a real all-clear: unfiltered AND
+                    // complete. A filtered "no failures here" is information,
+                    // not reassurance.
+                    type={truncated || filtersActive ? 'info' : 'success'}
                     showIcon
                     style={{ marginBottom: 16 }}
                     message={allClear}
@@ -370,8 +466,15 @@ export default function TallySyncPage() {
                                 tick vouch for vouchers nobody looked at. */}
                             {truncated && (
                                 <div>
-                                    This page is holding the most recent {entries.length} of {total} vouchers — older
-                                    ones have not been checked.
+                                    This page is holding {entries.length} of {total}
+                                    {filtersActive ? ' matching' : ''} vouchers (all failed and pending first) —
+                                    the rest were not fetched.
+                                </div>
+                            )}
+                            {failedElsewhere > 0 && (
+                                <div>
+                                    {failedElsewhere} failed voucher{failedElsewhere === 1 ? '' : 's'} exist outside
+                                    these filters — clear them to see every failure.
                                 </div>
                             )}
                             {pendingCount > 0 && (
@@ -389,7 +492,42 @@ export default function TallySyncPage() {
                 Vouchers reach Tally through the desktop agent at the factory — nothing here talks to Tally directly.
                 If nothing is syncing, that machine needs to be switched on with Tally open on the right company.
                 <br />
-                {isError ? (
+                {/* Today's picture, whatever the filter bar says — the one line
+                    on this page that always covers the whole queue. Read
+                    from /summary in the factory's day, not the browser's. */}
+                {summary ? (
+                    <span>
+                        Today ({summary.today.date}): <strong>{summary.today.total}</strong> voucher
+                        {summary.today.total === 1 ? '' : 's'}
+                        {' · '}<strong>{summary.today.synced}</strong> in Tally
+                        {' · '}<strong>{summary.today.pending}</strong> waiting
+                        {' · '}
+                        <Typography.Text type={summary.today.failed > 0 ? 'danger' : 'secondary'} strong>
+                            {summary.today.failed} failed
+                        </Typography.Text>
+                        {/* held_now, not today.held: the night shift's voucher is
+                            dated yesterday and held until 06:00 — a state, not a
+                            window, and "0 held" over it every night was a lie. */}
+                        {' · '}<strong>{summary.held_now}</strong> held now
+                        {unclassified > 0 && (
+                            <>
+                                {' · '}
+                                <Typography.Text type="warning" strong>
+                                    {unclassified} unclassified
+                                </Typography.Text>
+                            </>
+                        )}
+                        <br />
+                    </span>
+                ) : summaryError ? (
+                    // Said out loud rather than left blank: an absent line
+                    // reads as "nothing today", which is a claim.
+                    <span>
+                        Today&apos;s counts could not be read.
+                        <br />
+                    </span>
+                ) : null}
+                {isError && !summary ? (
                     // "—" here would read as "the agent has never delivered
                     // anything", which is a different and much more alarming
                     // claim than "this page could not find out".
@@ -398,10 +536,75 @@ export default function TallySyncPage() {
                     <>
                         Last voucher accepted by Tally: <strong>{instant(lastSynced)}</strong>
                         {' · '}
-                        Agent last collected work: <strong>{instant(lastCollected)}</strong>
+                        {/* "Action", not "contact": a heartbeat poll that finds
+                            nothing to deliver records no event, so an idle agent
+                            can be alive and polling while this stands still. */}
+                        {summary?.agent.last_action_at ? 'Agent last action' : 'Agent last collected work'}:{' '}
+                        <strong>{instant(lastCollected)}</strong>
+                        {summary?.agent.last_action_label && (
+                            <Typography.Text type="secondary"> ({summary.agent.last_action_label})</Typography.Text>
+                        )}
                     </>
                 )}
             </Typography.Paragraph>
+
+            {/* The filter bar. Every control writes straight into `filters`,
+                which is the query key — the server does the narrowing. */}
+            <Space wrap style={{ marginBottom: 12 }}>
+                <Select<TallySyncStatus[]>
+                    mode="multiple"
+                    allowClear
+                    placeholder="Any status"
+                    style={{ minWidth: 200 }}
+                    options={statusOptions}
+                    value={filters.status ?? []}
+                    onChange={(value) => setFilter('status', value.length > 0 ? value : undefined)}
+                />
+                <Select<string[]>
+                    mode="multiple"
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    placeholder="Any category"
+                    style={{ minWidth: 260 }}
+                    // Only the categories that can have an entry — the ones
+                    // the ERP builds, plus `unknown` (see categoryFilterOptions).
+                    options={categoryFilterOptions(summary?.by_category)}
+                    value={filters.category ?? []}
+                    onChange={(value) => setFilter('category', value.length > 0 ? value : undefined)}
+                />
+                <DatePicker.RangePicker
+                    allowEmpty={[true, true]}
+                    placeholder={['Voucher date from', 'to']}
+                    value={[filters.from ? dayjs(filters.from) : null, filters.to ? dayjs(filters.to) : null]}
+                    onChange={(_, dateStrings) => {
+                        // Business dates (the voucher's date in Tally), not
+                        // when the row was queued — that is what an
+                        // accountant reconciling a day is asking about.
+                        const [from, to] = dateStrings;
+                        setFilters((prev) => ({ ...prev, from: from || undefined, to: to || undefined }));
+                    }}
+                />
+                <Input.Search
+                    allowClear
+                    placeholder="Voucher no., party or batch"
+                    style={{ width: 240 }}
+                    value={qDraft}
+                    onChange={(event) => setQDraft(event.target.value)}
+                    onSearch={(value) => setFilter('q', value.trim() || undefined)}
+                />
+                <Checkbox
+                    checked={filters.held === true}
+                    onChange={(event) => setFilter('held', event.target.checked || undefined)}
+                >
+                    Held only
+                </Checkbox>
+                {filtersActive && (
+                    <Button size="small" onClick={clearFilters}>
+                        Clear filters
+                    </Button>
+                )}
+            </Space>
 
             <Table<TallySyncEntry>
                 scroll={{ x: 'max-content' }}
@@ -418,6 +621,16 @@ export default function TallySyncPage() {
                                 <strong>{voucherNumber(row)}</strong>
                                 <Typography.Text type="secondary">{row.tally_voucher_type}</Typography.Text>
                             </Space>
+                        ),
+                    },
+                    {
+                        title: 'Category',
+                        render: (_, row) => (
+                            // categoryLabel() adds "· posts as Stock Journal"
+                            // where the ERP's label is not what Tally receives
+                            // — the row must never send anyone looking for a
+                            // voucher type the books do not contain.
+                            <div style={{ maxWidth: 260, whiteSpace: 'normal' }}>{categoryLabel(row.category)}</div>
                         ),
                     },
                     {
@@ -590,6 +803,21 @@ export default function TallySyncPage() {
                     ),
                 }}
             />
+
+            {/* The honesty line: what this table can NEVER show. These are
+                the accountant's own transactions — never counted here, never
+                mirrored, and an empty table above must not imply they do not
+                exist. Text only; a zero would claim a measurement. */}
+            {notMirrored.length > 0 && (
+                <Typography.Paragraph type="secondary" style={{ marginTop: 12 }}>
+                    {notMirrored.map((clause, index) => (
+                        <span key={clause}>
+                            {index > 0 && <br />}
+                            {clause}
+                        </span>
+                    ))}
+                </Typography.Paragraph>
+            )}
 
             <Modal
                 open={viewing !== null}

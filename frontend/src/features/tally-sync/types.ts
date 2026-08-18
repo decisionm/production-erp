@@ -1,10 +1,78 @@
 export type TallySyncStatus = 'pending' | 'synced' | 'failed' | 'dismissed';
 
+/**
+ * What kind of Tally transaction an entry IS — the backend's
+ * TallyTransactionCategory::describe(), derived on read from the entry's
+ * voucher-type label + source model, never stored. The same shape comes
+ * back on every entry AND on every row of the summary's catalogue, so one
+ * reader serves both.
+ *
+ * Two honesty axes, kept apart. `source` is where the transaction LIVES:
+ * 'erp' rows are built here and can have entries; 'tally' rows live in
+ * the accountant's books (Purchase, Purchase Order, Payment, Receipt,
+ * Contra, Credit/Debit Note) and can NEVER have an entry — the page names
+ * them as "lives in Tally, not mirrored" rather than showing a zero it
+ * never measured; 'absent' is Sales Order — no such voucher type exists in
+ * the books at all. `erp_build` is what the ERP has BUILT for it: 'built'
+ * for the six ERP categories, 'planned' for the ERP-originated Purchase
+ * Order (Phase 6), 'none' otherwise — so a Purchase Order can be in the
+ * books AND planned without one word having to say both.
+ * `erp_label_differs_from_wire` is true only where the ERP's label is not
+ * the voucher type Tally receives — today the per-batch production
+ * voucher, labelled "Manufacturing Journal" here but posted as a Stock
+ * Journal.
+ */
+export interface TallyTransactionCategory {
+    key: string;
+    label: string;
+    /** The exact <VOUCHERTYPENAME> on the wire; null when nothing emits one. */
+    wire_voucher_type: string | null;
+    source: 'erp' | 'tally' | 'absent' | 'unknown';
+    erp_build: 'built' | 'planned' | 'none';
+    direction: 'erp_to_tally' | 'tally_to_erp' | 'none';
+    source_module: string | null;
+    erp_label_differs_from_wire: boolean;
+}
+
+/**
+ * One row of an entry's history (tally_sync_events) — what happened, when,
+ * and who did it. `backfilled` marks a row reconstructed from the entry's
+ * timestamps by the backfill migration rather than observed as it happened.
+ */
+export interface TallySyncEvent {
+    id: number;
+    event: string;
+    direction: 'erp_to_tally' | 'tally_to_erp' | 'none';
+    occurred_at: string | null;
+    actor: {
+        /** The three shapes the table knows (TallySyncEvent::ACTOR_*): a person, the agent by its token name, or nobody. */
+        type: 'user' | 'agent' | 'system';
+        id: number | null;
+        label: string | null;
+    };
+    details: Record<string, unknown> | null;
+    backfilled: boolean;
+}
+
 export interface TallySyncEntry {
     id: number;
     syncable_type: string;
     syncable_id: number;
     tally_voucher_type: string;
+    /**
+     * What this entry IS. `tally_voucher_type` above stays the raw label the
+     * agent dispatches on; `category` says what that label means (and, via
+     * erp_label_differs_from_wire, where the two disagree).
+     */
+    category: TallyTransactionCategory;
+    /** The voucher's business date (payload voucher_date, YYYY-MM-DD) — not created_at. */
+    business_date: string | null;
+    /** The number staff search for in Tally (payload voucher_number). */
+    document_number: string | null;
+    /** Customer/vendor ledger; null for production and journal vouchers, which carry none. */
+    party: string | null;
+    /** First item name + how many DISTINCT items the voucher moves; null when it names none. */
+    item_summary: { first: string; count: number } | null;
     payload: Record<string, unknown>;
     status: TallySyncStatus;
     attempts: number;
@@ -40,6 +108,85 @@ export interface TallySyncEntry {
     resolution_log?: { at: string; by: number | null; previous_error?: string | null; note: string }[];
     /** The exact place a recognised Tally refusal is fixed; null for unknown errors. */
     fix?: { sentence: string; path: string } | null;
+    /** The entry's event history — only on GET /tally-sync/entries/{id}, never on the list. */
+    history?: TallySyncEvent[];
+}
+
+/**
+ * The server-side filters GET /tally-sync/entries accepts. Every field is
+ * optional; buildEntryQuery() (filters.ts) turns this into query params
+ * and drops whatever is empty. `from`/`to` are business dates (YYYY-MM-DD,
+ * matched against the payload's voucher_date), not created_at.
+ */
+export interface TallySyncEntryFilters {
+    status?: TallySyncStatus[];
+    /** TallyTransactionCategory keys — only 'erp' rows can ever match an entry. */
+    category?: string[];
+    /** Raw wire voucher-type labels ('Sales', 'Stock Journal', ...). */
+    voucher_type?: string[];
+    from?: string;
+    to?: string;
+    /** Free text, contains-match over voucher number, party ledger and batch number. */
+    q?: string;
+    shift_id?: number;
+    work_center_id?: number;
+    /** true = only entries the release gate is currently holding. */
+    held?: boolean;
+    /** 'none' is not a filter value: an entry always has a direction (every row is ERP→Tally). */
+    direction?: 'erp_to_tally' | 'tally_to_erp';
+    /** 'status_rank' = failed → pending → synced → dismissed, newest first within each. */
+    sort?: 'status_rank';
+}
+
+/** One block of counts on the summary — today's (in the factory timezone) or all-time. */
+export interface TallySyncCounts {
+    total: number;
+    synced: number;
+    pending: number;
+    failed: number;
+    dismissed: number;
+    held: number;
+}
+
+/**
+ * A catalogue row with its measured count. `count` is null — not 0 — for
+ * every 'tally' / 'absent' row: nothing was measured because nothing is
+ * mirrored, and a zero would claim "measured, none".
+ */
+export interface TallySyncCategoryCount extends Partial<TallyTransactionCategory> {
+    key: string;
+    label: string;
+    source: TallyTransactionCategory['source'];
+    erp_build: TallyTransactionCategory['erp_build'];
+    wire_voucher_type: string | null;
+    count: number | null;
+}
+
+/** GET /tally-sync/summary. */
+export interface TallySyncSummary {
+    today: TallySyncCounts & { date: string };
+    all_time: TallySyncCounts;
+    /**
+     * How many vouchers the release gate is holding RIGHT NOW, over the
+     * request's non-date filters. A state, not a window: `today.held` is
+     * bucketed inside today's business date, so the night shift's voucher —
+     * dated yesterday, held until 06:00 — is 0 there while it is 1 here.
+     */
+    held_now: number;
+    by_category: TallySyncCategoryCount[];
+    /**
+     * The last thing the agent DID (a delivery, an ack, a failure report, a
+     * masters push), from the events table — null if never. An ACTION, not
+     * a contact: a heartbeat poll that finds nothing records no event, so
+     * an idle agent can be alive while this stands still.
+     */
+    agent: {
+        last_action_at: string | null;
+        last_action_event: string | null;
+        last_action_label: string | null;
+    };
+    last_synced_at: string | null;
+    last_masters_pull_at: string | null;
 }
 
 export interface AgentToken {

@@ -13,9 +13,10 @@ use App\Modules\Production\Services\ShiftProductionEntryService;
 use App\Modules\Sales\Models\Delivery;
 use App\Modules\Sales\Models\Invoice;
 use App\Modules\TallySync\Models\Enums\TallyLedgerRole;
+use App\Modules\TallySync\Models\Enums\TallySyncEventKind;
 use App\Modules\TallySync\Models\Enums\TallySyncStatus;
 use App\Modules\TallySync\Models\TallySyncEntry;
-use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
@@ -47,6 +48,19 @@ class TallySyncService
         // receipt so the voucher and the ERP's own stock can never name
         // different scrap items.
         private readonly ScrapItemResolver $scrapItems,
+        // The append-only history (tally_sync_events). Every mutation below
+        // records itself AFTER the state change lands, and the paths that
+        // hold a transaction record INSIDE it — so the history never claims
+        // a thing that rolled back, and never loses one that committed.
+        // Transactional: enqueueShiftVoucher() (enqueue/merge/follow-up +
+        // their events), pending() (read → stamp → pending.delivered), and
+        // retry() (regenerate → update → voucher.rebuilt/voucher.retried).
+        // NOT transactional, by design: markSynced()/markFailed()/dismiss()/
+        // releaseNow() — one UPDATE then one INSERT, and enqueue() for the
+        // batch/sales/GRN/delivery/journal paths (one INSERT then one
+        // INSERT); a failure between the two there leaves the state change
+        // in place and the event missing, never the reverse.
+        private readonly TallySyncEventRecorder $events,
     ) {}
 
     public function enqueueSalesInvoice(Invoice $invoice): TallySyncEntry
@@ -261,6 +275,14 @@ class TallySyncService
                 'rebuild' => $rebuild,
                 'excluded_entry_ids' => $fixtures->pluck('id')->all(),
                 'reason' => 'each excluded member resolves to a local-only fixture item that exists in no Tally company; its lines are left off the payload, its membership stamp is left as it was',
+            ]);
+
+            // The same fact on the durable record — ONLY when something was
+            // left off. A rebuild that excluded nothing is the ordinary
+            // merge/retry, and those record themselves.
+            $this->events->record(TallySyncEventKind::VoucherRebuilt, $voucher, [
+                'rebuild' => $rebuild,
+                'excluded_entry_ids' => $fixtures->pluck('id')->all(),
             ]);
         }
 
@@ -772,6 +794,24 @@ class TallySyncService
                     ->whereIn('id', $joining->pluck('id'))
                     ->update(['tally_sync_entry_id' => $voucher->id]);
 
+                // Recorded once the voucher AND its membership stamps are
+                // in — inside this transaction, so a rolled-back creation
+                // leaves no ghost in the history.
+                $details = [
+                    'voucher_type' => $voucher->tally_voucher_type,
+                    'voucher_number' => $number,
+                    'entry_ids' => $joining->pluck('id')->all(),
+                ];
+
+                // A -2/-3 names the voucher it follows on: the latest earlier
+                // voucher of this (date, shift), closed (synced / failed /
+                // delivered) — which is the whole reason a new one exists.
+                if ($sequence > 1) {
+                    $details['follow_up_of'] = $voucherIds->max();
+                }
+
+                $this->events->record(TallySyncEventKind::VoucherEnqueued, $voucher, $details);
+
                 return $voucher;
             }
 
@@ -798,6 +838,13 @@ class TallySyncService
                 // voucher leaves only after it has sat untouched for the
                 // configured idle-hold (DEC-20260807-011).
                 'last_merged_at' => now(),
+            ]);
+
+            // WHICH entries joined WHEN — the one thing last_merged_at
+            // (overwritten on every merge) can never say afterwards.
+            $this->events->record(TallySyncEventKind::VoucherMerged, $voucher, [
+                'joined_entry_ids' => $joining->pluck('id')->all(),
+                'voucher_number' => $voucher->payload['voucher_number'],
             ]);
 
             return $voucher->fresh();
@@ -887,55 +934,101 @@ class TallySyncService
         ];
     }
 
-    public function pending(): Collection
+    /**
+     * @param  Authenticatable|null  $actor  the polling agent (its token names the installation) — recorded on each delivery
+     */
+    public function pending(?Authenticatable $actor = null): Collection
     {
-        $entries = TallySyncEntry::query()
-            ->where('status', TallySyncStatus::Pending)
-            ->orderBy('id')
-            ->get()
-            // The release gate fronts the hand-out: a shift voucher whose
-            // shift is still collecting (or that merged less than the
-            // idle-hold ago) is not offered, so its merge window below
-            // stays open (DEC-20260807-011). Batch vouchers and anything
-            // already delivered pass untouched — see ShiftVoucherReleaseGate.
-            ->reject(fn (TallySyncEntry $entry) => $this->releaseGate->withholds($entry))
-            ->values();
-
-        // First delivery closes the merge window (see the shift-voucher
-        // merge query). Unacked vouchers keep reappearing on later polls.
+        // ONE transaction around read → stamp → record. Before this the
+        // stamp and the events were separate statements: an insert error
+        // 500'd the poll AFTER delivered_at had landed, the response never
+        // reached the agent, and on the next poll every one of those
+        // vouchers arrived already stamped — which the agent's guard reads
+        // as "handed to an agent it has no record of" (postDecision.ts) and
+        // refuses until a human retries each one. Two polls racing could
+        // also both record pending.delivered from their own pre-stamp reads.
+        // Inside one transaction the stamp rolls back with the failed
+        // insert, so the next poll delivers cleanly, and the recorded set is
+        // the ids THIS call's stamp actually landed on — selected FOR UPDATE
+        // so a concurrent poll waits and then finds them stamped.
         //
-        // The rows are READ BEFORE THEY ARE STAMPED on purpose, and the
-        // agent depends on it: the delivered_at each entry carries in this
-        // response is its value as of the moment of this poll — null the
-        // first time it is handed out, set on every re-poll. That is the
-        // agent's idempotency line ("have I been given this voucher
-        // before?"), the one thing standing between a lost acknowledgement
-        // and the same voucher posted twice into live books. Stamp first
-        // and every delivery looks like a re-delivery; drop the mass
-        // update's ->whereNull() and a re-delivery looks brand new. Keep
-        // this ordering. Covered by VoucherPostedOnceTest.
-        TallySyncEntry::query()
-            ->whereIn('id', $entries->pluck('id'))
-            ->whereNull('delivered_at')
-            ->update(['delivered_at' => now()]);
+        // What is returned, and in what order, is unchanged: the same
+        // pending rows the gate does not withhold, id ascending, each
+        // carrying its delivered_at AS READ — see below.
+        return DB::transaction(function () use ($actor) {
+            $entries = TallySyncEntry::query()
+                ->where('status', TallySyncStatus::Pending)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get()
+                // The release gate fronts the hand-out: a shift voucher whose
+                // shift is still collecting (or that merged less than the
+                // idle-hold ago) is not offered, so its merge window below
+                // stays open (DEC-20260807-011). Batch vouchers and anything
+                // already delivered pass untouched — see ShiftVoucherReleaseGate.
+                ->reject(fn (TallySyncEntry $entry) => $this->releaseGate->withholds($entry))
+                ->values();
 
-        return $entries;
+            // First delivery closes the merge window (see the shift-voucher
+            // merge query). Unacked vouchers keep reappearing on later polls.
+            //
+            // The rows are READ BEFORE THEY ARE STAMPED on purpose, and the
+            // agent depends on it: the delivered_at each entry carries in this
+            // response is its value as of the moment of this poll — null the
+            // first time it is handed out, set on every re-poll. That is the
+            // agent's idempotency line ("have I been given this voucher
+            // before?"), the one thing standing between a lost acknowledgement
+            // and the same voucher posted twice into live books. Stamp first
+            // and every delivery looks like a re-delivery; drop the mass
+            // update's ->whereNull() and a re-delivery looks brand new. Keep
+            // this ordering. Covered by VoucherPostedOnceTest.
+            //
+            // The ids to stamp are the unstamped ones among the rows just
+            // locked and read — this call's own set, not a second read.
+            $newlyDelivered = $entries
+                ->filter(fn (TallySyncEntry $entry) => $entry->delivered_at === null)
+                ->values();
+
+            if ($newlyDelivered->isNotEmpty()) {
+                TallySyncEntry::query()
+                    ->whereIn('id', $newlyDelivered->pluck('id'))
+                    ->whereNull('delivered_at')
+                    ->update(['delivered_at' => now()]);
+            }
+
+            // One 'pending.delivered' PER ENTRY the stamp above just landed on.
+            // A re-poll of an unacked voucher is NOT recorded again: the
+            // agent's own guard refuses to act on a voucher that arrives
+            // already stamped, so a repeat hand-out is a heartbeat, not a
+            // delivery, and stamping it every ~90 s would bury the history
+            // under noise. The file log keeps its per-poll line (agentLog)
+            // untouched.
+            foreach ($newlyDelivered as $entry) {
+                $this->events->record(TallySyncEventKind::PendingDelivered, $entry, [
+                    'voucher_type' => $entry->tally_voucher_type,
+                    'voucher_number' => $entry->payload['voucher_number'] ?? null,
+                ], actor: $actor);
+            }
+
+            return $entries;
+        });
     }
 
-    public function paginate(int $perPage = 20): LengthAwarePaginator
-    {
-        return TallySyncEntry::query()
-            ->orderByDesc('id')
-            ->paginate($perPage);
-    }
-
-    public function markSynced(TallySyncEntry $entry): TallySyncEntry
+    /**
+     * @param  Authenticatable|null  $actor  the reporting agent — recorded on the history row
+     */
+    public function markSynced(TallySyncEntry $entry, ?Authenticatable $actor = null): TallySyncEntry
     {
         $entry->update([
             'status' => TallySyncStatus::Synced,
             'synced_at' => now(),
             'error_message' => null,
         ]);
+
+        $this->events->record(TallySyncEventKind::VoucherSynced, $entry, [
+            'voucher_type' => $entry->tally_voucher_type,
+            'voucher_number' => $entry->payload['voucher_number'] ?? null,
+        ], actor: $actor);
 
         return $entry;
     }
@@ -957,7 +1050,7 @@ class TallySyncService
      * would silence real Tally rejections ("Stock Item does not exist")
      * entirely — the one thing SyncFailureVisibilityTest exists to protect.
      */
-    public function markFailed(TallySyncEntry $entry, string $errorMessage): TallySyncEntry
+    public function markFailed(TallySyncEntry $entry, string $errorMessage, ?Authenticatable $actor = null): TallySyncEntry
     {
         if ($entry->isInTally()) {
             logger()->warning('Tally sync failure ignored: that voucher is already in Tally.', [
@@ -967,6 +1060,15 @@ class TallySyncService
                 'reported_error' => $errorMessage,
             ]);
 
+            // The refusal is itself history: the agent DID report a failure
+            // for a voucher in the books, and a reader of this entry's
+            // timeline should see that the report arrived and was declined —
+            // not nothing.
+            $this->events->record(TallySyncEventKind::VoucherFailureRefused, $entry, [
+                'error_message' => $errorMessage,
+                'synced_at' => $entry->synced_at?->toIso8601String(),
+            ], actor: $actor);
+
             return $entry;
         }
 
@@ -975,6 +1077,14 @@ class TallySyncService
             'error_message' => $errorMessage,
             'attempts' => $entry->attempts + 1,
         ]);
+
+        // Each failure is its own row with its own error and attempt number:
+        // the entry's error_message is overwritten by the next failure, this
+        // never is.
+        $this->events->record(TallySyncEventKind::VoucherFailed, $entry, [
+            'error_message' => $errorMessage,
+            'attempt' => $entry->attempts,
+        ], actor: $actor);
 
         return $entry;
     }
@@ -994,9 +1104,11 @@ class TallySyncService
      * posting authorisation — pending() re-stamps on the very next poll, so
      * the guard closes again by itself.
      *
+     * @param  Authenticatable|null  $actor  the person pressing Retry — recorded on the history row
+     *
      * @throws ValidationException 422 naming the voucher to check in Tally
      */
-    public function retry(TallySyncEntry $entry, ?int $userId = null): TallySyncEntry
+    public function retry(TallySyncEntry $entry, ?int $userId = null, ?Authenticatable $actor = null): TallySyncEntry
     {
         if ($entry->isInTally()) {
             $synced = $entry->synced_at?->format('d M Y H:i');
@@ -1032,35 +1144,52 @@ class TallySyncService
         // readable afterwards. Idempotency is untouched: an entry that ever
         // reached Tally is refused above, and the agent-side delivered_at
         // guard stays exactly as it was.
-        $failedError = $entry->error_message;
-        $payload = $this->regeneratePayload($entry) ?? $entry->payload;
+        //
+        // One transaction from regenerate to the last event: the rebuild
+        // may record voucher.rebuilt (postableMembers) before the entry is
+        // updated, and voucher.retried after — with no transaction a
+        // failure between them left an event for a retry that never
+        // landed, or a landed retry with no row saying who did it.
+        return DB::transaction(function () use ($entry, $userId, $actor) {
+            $failedError = $entry->error_message;
+            $regenerated = $this->regeneratePayload($entry);
+            $payload = $regenerated ?? $entry->payload;
 
-        $log = $payload['resolution_log'] ?? [];
-        if ($failedError !== null) {
-            $log[] = [
-                'at' => now()->toIso8601String(),
-                'by' => $userId,
+            $log = $payload['resolution_log'] ?? [];
+            if ($failedError !== null) {
+                $log[] = [
+                    'at' => now()->toIso8601String(),
+                    'by' => $userId,
+                    'previous_error' => $failedError,
+                    'note' => 'Payload regenerated from current mappings and re-queued.',
+                ];
+            }
+            $payload['resolution_log'] = $log;
+
+            $entry->update([
+                'status' => TallySyncStatus::Pending,
+                'error_message' => null,
+                'delivered_at' => null,
+                'payload' => $payload,
+                // The dispatch label rides with the regenerated payload: the
+                // first shift vouchers were enqueued under 'Stock Journal', a
+                // label the deployed agent has no builder for, and a retry that
+                // kept the frozen label would fail identically forever.
+                'tally_voucher_type' => is_string($payload['voucher_type'] ?? null)
+                    ? $payload['voucher_type']
+                    : $entry->tally_voucher_type,
+            ]);
+
+            // WHO retried, and whether the payload was rebuilt or replayed —
+            // the resolution_log above lives inside the mutable payload the
+            // next regenerate rewrites; this row does not.
+            $this->events->record(TallySyncEventKind::VoucherRetried, $entry, [
+                'payload_regenerated' => $regenerated !== null,
                 'previous_error' => $failedError,
-                'note' => 'Payload regenerated from current mappings and re-queued.',
-            ];
-        }
-        $payload['resolution_log'] = $log;
+            ], actor: $actor);
 
-        $entry->update([
-            'status' => TallySyncStatus::Pending,
-            'error_message' => null,
-            'delivered_at' => null,
-            'payload' => $payload,
-            // The dispatch label rides with the regenerated payload: the
-            // first shift vouchers were enqueued under 'Stock Journal', a
-            // label the deployed agent has no builder for, and a retry that
-            // kept the frozen label would fail identically forever.
-            'tally_voucher_type' => is_string($payload['voucher_type'] ?? null)
-                ? $payload['voucher_type']
-                : $entry->tally_voucher_type,
-        ]);
-
-        return $entry;
+            return $entry;
+        });
     }
 
     /**
@@ -1085,9 +1214,11 @@ class TallySyncService
      * same as retry(): the books already hold it, and a "dismissed" label
      * over a posted voucher would be a lie the accountant acts on.
      *
+     * @param  Authenticatable|null  $actor  the person writing it off — recorded on the history row
+     *
      * @throws ValidationException
      */
-    public function dismiss(TallySyncEntry $entry, ?int $userId = null): TallySyncEntry
+    public function dismiss(TallySyncEntry $entry, ?int $userId = null, ?Authenticatable $actor = null): TallySyncEntry
     {
         if ($entry->isInTally()) {
             $synced = $entry->synced_at?->format('d M Y H:i');
@@ -1126,6 +1257,14 @@ class TallySyncService
             'payload' => $payload,
         ]);
 
+        // The write-off on the durable record, carrying the error it was
+        // written off WITH — dismissal is not a repair, and the reason it
+        // failed is part of why it was abandoned. No reason of its own is
+        // taken today (the endpoint carries no body); none is invented.
+        $this->events->record(TallySyncEventKind::VoucherDismissed, $entry, [
+            'previous_error' => $entry->error_message,
+        ], actor: $actor);
+
         return $entry;
     }
 
@@ -1141,9 +1280,11 @@ class TallySyncService
      * already in Tally — deserves the honest answer, not a silent no-op
      * that looks like it did something.
      *
+     * @param  Authenticatable|null  $actor  the accountant releasing it — recorded on the history row
+     *
      * @throws ValidationException
      */
-    public function releaseNow(TallySyncEntry $entry, ?int $userId = null): TallySyncEntry
+    public function releaseNow(TallySyncEntry $entry, ?int $userId = null, ?Authenticatable $actor = null): TallySyncEntry
     {
         if ($entry->isInTally()) {
             throw ValidationException::withMessages([
@@ -1161,6 +1302,10 @@ class TallySyncService
             'released_at' => now(),
             'released_by' => $userId,
         ]);
+
+        $this->events->record(TallySyncEventKind::VoucherReleased, $entry, [
+            'voucher_number' => $entry->payload['voucher_number'] ?? null,
+        ], actor: $actor);
 
         return $entry;
     }
@@ -1235,7 +1380,7 @@ class TallySyncService
 
     private function enqueue(Model $syncable, string $voucherType, array $payload): TallySyncEntry
     {
-        return TallySyncEntry::create([
+        $entry = TallySyncEntry::create([
             'syncable_type' => $syncable->getMorphClass(),
             'syncable_id' => $syncable->getKey(),
             'tally_voucher_type' => $voucherType,
@@ -1243,5 +1388,15 @@ class TallySyncService
             'status' => TallySyncStatus::Pending,
             'attempts' => 0,
         ]);
+
+        // The first row of every voucher's history. No actor: an enqueue is
+        // the side effect of a domain event (an approval, an issued
+        // invoice), not an act anyone performed on the queue.
+        $this->events->record(TallySyncEventKind::VoucherEnqueued, $entry, [
+            'voucher_type' => $voucherType,
+            'voucher_number' => $payload['voucher_number'] ?? null,
+        ]);
+
+        return $entry;
     }
 }

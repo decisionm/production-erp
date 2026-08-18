@@ -1,24 +1,59 @@
 import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
-import type { AgentToken, TallySettings, TallySyncEntry } from './types';
+import { buildEntryQuery } from './filters';
+import type { AgentToken, TallySettings, TallySyncEntry, TallySyncEntryFilters, TallySyncSummary } from './types';
 
-export async function listTallySyncEntries(): Promise<Paginated<TallySyncEntry>> {
-    const { data } = await api.get<Paginated<TallySyncEntry>>('/tally-sync/entries');
+/**
+ * One page of the queue, server-filtered.
+ *
+ * Declared as an overload pair rather than one signature with optional
+ * arguments: the zero-argument form is what lets other features hand this
+ * function straight to useQuery as a queryFn (Live Monitor does), where
+ * TanStack calls it with its context object as the first argument. That
+ * object is a weak-type mismatch for TallySyncEntryFilters at compile time
+ * and would be garbage on the wire at run time — the overload keeps the
+ * type-check honest, and buildEntryQuery()'s allowlist keeps the URL clean.
+ */
+export function listTallySyncEntries(): Promise<Paginated<TallySyncEntry>>;
+export function listTallySyncEntries(
+    filters: TallySyncEntryFilters,
+    page?: number,
+    perPage?: number,
+): Promise<Paginated<TallySyncEntry>>;
+export async function listTallySyncEntries(
+    filters: TallySyncEntryFilters = {},
+    page?: number,
+    perPage?: number,
+): Promise<Paginated<TallySyncEntry>> {
+    const { data } = await api.get<Paginated<TallySyncEntry>>('/tally-sync/entries', {
+        params: {
+            ...buildEntryQuery(filters),
+            ...(page !== undefined ? { page } : {}),
+            ...(perPage !== undefined ? { per_page: perPage } : {}),
+        },
+    });
     return data;
 }
 
+/** One entry with its full event history (GET /tally-sync/entries/{id}). */
+export async function getTallySyncEntry(id: number): Promise<TallySyncEntry> {
+    const { data } = await api.get<{ data: TallySyncEntry }>(`/tally-sync/entries/${id}`);
+    return data.data;
+}
+
 /**
- * One explicit page of the queue. Kept separate from listTallySyncEntries()
- * above rather than adding an optional argument to it: that function is
- * handed straight to useQuery as a queryFn in places, which would call it
- * with TanStack's context object and post the whole thing as query params.
+ * The header numbers: today's and all-time counts, one count per catalogue
+ * category (null — never 0 — for anything not mirrored), last agent
+ * contact. The server applies the same filters as the list to the counts
+ * when given; the page calls this UNFILTERED on purpose, because "today:
+ * N failed" is a fact about today, not about whatever the table is
+ * narrowed to, and the liveness fields are global either way.
  */
-async function listTallySyncEntriesPage(params: {
-    page?: number
-    per_page?: number
-}): Promise<Paginated<TallySyncEntry>> {
-    const { data } = await api.get<Paginated<TallySyncEntry>>('/tally-sync/entries', { params });
-    return data;
+export async function getTallySyncSummary(filters?: TallySyncEntryFilters): Promise<TallySyncSummary> {
+    const { data } = await api.get<{ data: TallySyncSummary }>('/tally-sync/summary', {
+        params: buildEntryQuery(filters),
+    });
+    return data.data;
 }
 
 /** One request's worth of queue, and the ceiling on how many we'll ask for. */
@@ -32,26 +67,37 @@ export interface TallySyncQueue {
 }
 
 /**
- * The whole sync queue, not the newest page of it.
+ * The whole sync queue (as filtered), not the newest page of it.
  *
- * The dashboard counts failures and sorts them to the top, and both of those
- * are lies if it only ever sees page one: a Tally rejection from yesterday
- * would sit off the end of the list and be reported by nobody. So we page
- * through — one request in practice, since 200 covers a long while.
+ * The dashboard counts failures and wants them at the top, and both of
+ * those are lies if it only ever sees page one: a Tally rejection from
+ * yesterday would sit off the end of the list and be reported by nobody.
+ * So we page through — one request in practice, since 200 covers a long
+ * while.
  *
- * `total` is returned separately and deliberately: past MAX_ENTRY_PAGES we
- * stop, and the page must be able to notice that it is holding a subset and
- * say so, rather than quietly announcing an all-clear it cannot vouch for.
+ * Order is the SERVER's `sort=status_rank` (failed → pending → synced →
+ * dismissed, newest first within each), asked for by default here so every
+ * caller reads the same order — the client no longer re-sorts. `total` is
+ * the server's count for the same filters and is returned separately and
+ * deliberately: past MAX_ENTRY_PAGES we stop, and the page must be able to
+ * notice that it is holding a subset and say so, rather than quietly
+ * announcing an all-clear it cannot vouch for.
+ *
+ * Same overload pair as listTallySyncEntries(), for the same reason: the
+ * Dashboard hands this to useQuery as a bare queryFn.
  */
-export async function listAllTallySyncEntries(): Promise<TallySyncQueue> {
-    const first = await listTallySyncEntriesPage({ per_page: ENTRY_PAGE_SIZE });
+export function listAllTallySyncEntries(): Promise<TallySyncQueue>;
+export function listAllTallySyncEntries(filters: TallySyncEntryFilters): Promise<TallySyncQueue>;
+export async function listAllTallySyncEntries(filters: TallySyncEntryFilters = {}): Promise<TallySyncQueue> {
+    const query: TallySyncEntryFilters = { sort: 'status_rank', ...filters };
+    const first = await listTallySyncEntries(query, undefined, ENTRY_PAGE_SIZE);
     const entries = [...first.data];
     const lastPage = Math.min(first.meta.last_page, MAX_ENTRY_PAGES);
 
     // Sequential, not Promise.all: this runs against the same box the floor
     // is typing into, and the queue is one request deep on any normal day.
     for (let page = 2; page <= lastPage; page += 1) {
-        const next = await listTallySyncEntriesPage({ page, per_page: ENTRY_PAGE_SIZE });
+        const next = await listTallySyncEntries(query, page, ENTRY_PAGE_SIZE);
         entries.push(...next.data);
     }
 

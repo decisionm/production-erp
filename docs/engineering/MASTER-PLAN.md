@@ -16,8 +16,8 @@ prompt's Phase Completion Contract (§73) — that part of the prompt is kept.
 
 ```
 PHASE 0   Discovery + audit                    ← THIS DOCUMENT · DONE
-PHASE 1   Live-safety fixes                    no owner gate · start immediately
-PHASE 2   Sync Control Center — foundation     no owner gate
+PHASE 1   Live-safety fixes                    PASS WITH DEFERRED · PR #180 · awaiting merge chain
+PHASE 2   Sync Control Center — foundation     PASS WITH DEFERRED · PR (stacked on #180)
 PHASE 3   Sync Control Center — every type     no owner gate
 PHASE 3.5 Sales visibility (first-class)       Sales stays Tally-originated (DEC-20260809-003)
 PHASE 4   Agent XML/response snapshot          FC-06 review gate
@@ -55,8 +55,8 @@ The registry the UI needs, built *on* `tally_sync_entries`, not replacing it.
 |---|---|
 | **P2-01** Normalized read model over `tally_sync_entries`: source module, source entity, document number, business date, voucher type, party/item summary, direction, status, attempts, last error, resolution log | Adapt existing columns; the prompt's §29 shape is a *target*, not a table to create blindly |
 | **P2-02** Server-side filtering: date range, status, voucher type, source module, document number, party/item, shift, machine (where applicable) | The page has zero filters today |
-| **P2-03** Server-side CSV export honouring filters, with a range cap and a "Download All" backend job | Every current export is client-side; this must not be |
-| **P2-04** `needs_review` state + reason + attempt count; retry refuses permanent validation failures | Extends the 4-value enum minimally, keeps every existing guard |
+| **P2-03** ~~Server-side CSV export~~ → **moved to Phase 4.5** (built once in the Download Center on this read model) | Every current export is client-side; the Center fixes it once |
+| **P2-04** ~~`needs_review` state~~ → **deferred to Phase 3** with reason (retry is manual only; no infinite loop to break; events now record the classification) | revisit with real-failure evidence |
 | **P2-05** Journal / Stock Journal / (ERP-labelled) Manufacturing Journal as independent filter categories, with the label-vs-wire divergence shown honestly | Do **not** rename the wire value |
 | **P2-06** Header counts: today's total / synced / pending / failed / needs review, and per-type counters **for types actually present** | Prompt §33–34 |
 | **P2-07** Frontend tests for the tally-sync feature (currently zero) | |
