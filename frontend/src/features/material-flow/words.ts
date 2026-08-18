@@ -474,5 +474,11 @@ export function queueEmptyText(status: MaterialRequestStatus[] | MaterialRequest
 const COUNT_UNITS = ['nos', 'nos.', 'no', 'no.', 'pcs', 'pcs.', 'pc', 'pc.', 'piece', 'pieces', 'each', 'ea'];
 
 export function permitsFractions(uom: string | null | undefined): boolean {
-    return !COUNT_UNITS.includes((uom ?? '').trim().toLowerCase());
+    // PHP's trim() strips " \t\n\r\0\x0B" and nothing else; JS's strips all
+    // Unicode whitespace. So `\u00A0nos.` normalised to `nos.` here while the
+    // server left it Unknown — the browser refusing a decimal the server would
+    // have taken, which is the direction that blocks real work.
+    const trimmed = (uom ?? '').replace(/^[ \t\n\r\0\x0B]+|[ \t\n\r\0\x0B]+$/g, '');
+
+    return !COUNT_UNITS.includes(trimmed.toLowerCase());
 }

@@ -347,6 +347,55 @@ class TwoUnitsChainTest extends TestCase
         }
     }
 
+    /**
+     * AND EVERY SPELLING OF A FRACTION IS STILL A FRACTION.
+     *
+     * This is the test that was missing, and its absence let the defect back
+     * in. The one above asserts against a `Kgs.` item — which PERMITS
+     * fractions — so it passed no matter what the counted-material guard did.
+     *
+     * Widening the validation rule to admit `.5`, `1.` and `+5` while the
+     * private guard behind it kept the narrower spelling meant `+12.5` and
+     * `.5` cleared the rule, failed to match the guard's own pattern, and
+     * skipped the whole-number check completely: 26 fractional trays reached
+     * Production/WIP with a 201, on BOTH paths, reopening exactly what the
+     * previous commit had closed. Two copies of one predicate, again.
+     */
+    public function test_no_spelling_of_a_fraction_gets_past_a_counted_material(): void
+    {
+        $tray = $this->material('PKG-TRAY-60', '60 Ml Tray', 'Nos.');
+        $this->receive($tray, '5000', 'tu-spell2');
+
+        $ask = $this->submittedRequest($tray, '100');
+
+        foreach (['12.5', '+12.5', '.5', '+.5', '-.5', '12.50', '12.5000'] as $spelling) {
+            $this->postJson('/api/v1/inventory/store-issues', [
+                'lines' => [['item_id' => $tray->id, 'quantity' => $spelling]],
+            ])->assertStatus(422)->assertJsonValidationErrors('lines.0.quantity');
+
+            $this->postJson('/api/v1/inventory/store-issues', [
+                'material_request_id' => $ask['id'],
+                'lines' => [[
+                    'material_request_line_id' => $ask['line_id'],
+                    'item_id' => $tray->id,
+                    'quantity' => $spelling,
+                ]],
+            ])->assertStatus(422)->assertJsonValidationErrors('lines.0.quantity');
+        }
+
+        $this->assertSame(0, bccomp($this->balance($tray, $this->wip), '0', 4), 'not one fractional tray moved');
+
+        // ...while the whole-number spellings of the same figure still work.
+        $this->postJson('/api/v1/inventory/store-issues', [
+            'material_request_id' => $ask['id'],
+            'lines' => [[
+                'material_request_line_id' => $ask['line_id'],
+                'item_id' => $tray->id,
+                'quantity' => '+12',
+            ]],
+        ])->assertCreated();
+    }
+
     /* ------------------------------ helpers ------------------------------ */
 
     private function material(string $sku, string $name, string $uom): Item

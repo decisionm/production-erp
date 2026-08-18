@@ -296,6 +296,18 @@ describe('whether a unit may carry a fraction', () => {
         }
     });
 
+    it('trims the way PHP trims, so it cannot disagree with the server', () => {
+        // A non-breaking space is not whitespace to PHP's trim(), so the server
+        // reads `\u00A0nos.` as an unclassified unit and permits decimals. JS
+        // trim() would have normalised it to `nos.` and refused them.
+        for (const uom of ['\u00A0nos.', 'nos.\u00A0', '\u2009pcs', '\u3000nos']) {
+            expect(permitsFractions(uom)).toBe(true);
+        }
+
+        // Ordinary ASCII padding is still trimmed, exactly as PHP does.
+        expect(permitsFractions('  Nos.  ')).toBe(false);
+    });
+
     it('permits a fraction for a unit nobody has classified, rather than guessing', () => {
         // The same choice the backend enum makes: Unknown never collapses to
         // weight, and never blocks real work on a guess.

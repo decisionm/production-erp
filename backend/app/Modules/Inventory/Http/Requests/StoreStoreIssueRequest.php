@@ -39,6 +39,24 @@ use Illuminate\Validation\Rule;
  */
 class StoreStoreIssueRequest extends FormRequest
 {
+    /**
+     * A NUMBER A STOREKEEPER WRITES — exactly what bcmath accepts, and the
+     * ONLY definition of it. `numeric` alone lets `1e3`, `0x1A` and `INF`
+     * through to bcmath, which answered a 500 rather than a 422.
+     *
+     * ONE constant, because two copies of it is precisely how this broke. The
+     * validation rule was widened to admit `.5`, `1.` and `+5` — spellings
+     * bcmath takes and the older code took happily — while the private guard
+     * below kept the narrower one. So `+12.5` and `.5` cleared the rule, did
+     * NOT match the guard's own pattern, and skipped the whole-number check
+     * entirely: fractional trays landed in Production/WIP with a 201, on both
+     * paths, reopening the exact defect the previous commit had closed.
+     *
+     * The new test that should have caught it asserted against a `Kgs.` item,
+     * which permits fractions — so it passed for the wrong reason.
+     */
+    private const PLAIN_DECIMAL = '/^[+-]?(\d+(\.\d*)?|\.\d+)$/';
+
     public function authorize(): bool
     {
         return true;
@@ -87,7 +105,7 @@ class StoreStoreIssueRequest extends FormRequest
             // attempt at this narrowed the rule to `-?\d+(\.\d+)?` and started
             // refusing three spellings the old code took happily. Widening a
             // refusal by accident is the failure mode here, not the 500.
-            'lines.*.quantity' => ['required', 'numeric', 'regex:/^[+-]?(\\d+(\\.\\d*)?|\\.\\d+)$/'],
+            'lines.*.quantity' => ['required', 'numeric', 'regex:'.self::PLAIN_DECIMAL],
             'lines.*.uom' => ['nullable', 'string', 'max:16'],
             'lines.*.notes' => ['nullable', 'string', 'max:500'],
         ];
@@ -256,13 +274,8 @@ class StoreStoreIssueRequest extends FormRequest
         });
     }
 
-    /**
-     * `numeric` accepts `1e3`, `INF` and `0x1A`; bcmath does not, and threw a
-     * 500 out of the quantity guard rather than a 422. A quantity is written
-     * the way a storekeeper writes one.
-     */
     private function isPlainDecimal(mixed $value): bool
     {
-        return is_scalar($value) && preg_match('/^-?\d+(\.\d+)?$/', (string) $value) === 1;
+        return is_scalar($value) && preg_match(self::PLAIN_DECIMAL, (string) $value) === 1;
     }
 }

@@ -372,3 +372,43 @@ a stranded ask. Reversing a deliberate call unattended is not engineering's to m
 Also still true and still not fixed: no service-layer unit guard (one HTTP write path, all
 through the FormRequest), and no DOM in the frontend suite, so the GRN draft-restore
 machinery is covered by inspection only.
+
+## The third round — a fix that reopened the defect it was fixing
+
+The follow-up commit was verified against the same standard and produced one **P1**, found
+by probe rather than by reading:
+
+**The quantity rule was widened; the private guard it feeds was not.** Closing the `1e3`
+500 had narrowed the rule, and un-narrowing it admitted `.5`, `1.` and `+5` — while
+`isPlainDecimal()`, which gates the whole-number check for counted materials, kept the
+narrower spelling. So `+12.5`, `.5` and `+.5` cleared the rule, failed to match the guard's
+own pattern, and **skipped the fraction check entirely**: 26 fractional trays reached
+Production/WIP with a 201, on both the fresh-handover and the accepted-ask path. The exact
+defect the previous commit was written to close, reopened through a spelling.
+
+Two things about it are worth more than the fix:
+
+- **Two copies of one predicate, for the third time in this branch.** `MeasurementType`
+  exists because four call sites asked one question three ways; the accepted-ask branch
+  broke because eligibility and units were entangled; and this broke because a regex was
+  written down twice and only one copy was updated. It is now a single `PLAIN_DECIMAL`
+  constant used by both.
+- **The new test passed for the wrong reason.** `test_the_quantity_rule_refuses_only_what_
+  bcmath_refuses` asserted against a `Kgs.` item — a WEIGHT item, which permits fractions —
+  so it returned 201 no matter what the counted-material guard did. A test that cannot fail
+  for the reason it names is not covering that reason. The replacement drives seven
+  spellings of a fraction through a `Nos.` item on both paths, asserts no tray moved, and
+  then asserts `+12` still succeeds; the divergence is pinned by mutation.
+
+Also fixed: the browser mirror trimmed the way JS trims and the server the way PHP trims, so
+` nos.` was refused in the browser and permitted by the server — the dangerous
+direction again, now normalised to PHP's exact trim set.
+
+Everything else in that commit verified clean, each state actually posted rather than
+reasoned about: **`partially_issued` and `issued` can still head an issue, and a second
+issue against a part-fulfilled ask still succeeds** — the case where a wrong tightening
+would have stopped the factory. Draft- and cancelled-headed issues are refused with a body
+byte-identical to the one a nonexistent id returns, so the existence oracle is closed
+rather than merely narrowed. A full resin chain walked end to end: RM Store 100 → 40,
+Production/WIP 0 → 60, three transfer pairs, **zero consumption rows**. FC-01, FC-03 and
+FC-06 all hold.
