@@ -36,6 +36,9 @@ class ProductionSyncWritebackTest extends TestCase
         // testing the Tally ack/fail path rather than the quality queue —
         // that gate is covered in BatchQualityStageTest.
         config(['production.approvals.quality_stage_enabled' => false]);
+
+        // Batch mode is under test here explicitly; the packaged default is shift.
+        config(['tally-sync.voucher_granularity' => 'batch']);
     }
 
     private function approvedEntry(): ShiftProductionEntry

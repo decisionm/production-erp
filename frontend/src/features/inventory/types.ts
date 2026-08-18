@@ -48,7 +48,12 @@ export interface StockBalance {
     item: Item;
     warehouse: Warehouse;
     quantity: string;
-    average_cost: string;
+    /**
+     * Weighted average of the purchase rates received into this balance —
+     * served only to finance.view/manage eyes (FC-06); the key is ABSENT,
+     * never null, for everyone else. Presence is the server's ruling.
+     */
+    average_cost?: string;
 }
 
 export type StockMovementType = 'receipt' | 'issue' | 'transfer_in' | 'transfer_out';

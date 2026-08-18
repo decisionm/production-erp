@@ -22,11 +22,12 @@ class AgentTokenService
 {
     private const AGENT_EMAIL = 'tally-sync-agent@system.local';
 
-    // poll = fetch pending vouchers, report = ack/fail them, items/masters = push
-    // the Tally masters back up (masters pull, docs/archive/TALLY-SYNC-MASTER-PLAN.md §3).
-    // `items` stays for the item-only endpoint; `masters` covers the full pull
-    // (item groups, godowns, ledgers, items).
-    private const ABILITIES = ['tally-sync:poll', 'tally-sync:report', 'tally-sync:items', 'tally-sync:masters'];
+    // poll = fetch pending vouchers, report = ack/fail them, masters = push
+    // the Tally masters back up (masters pull, docs/archive/TALLY-SYNC-MASTER-PLAN.md §3)
+    // — the full pull: item groups, godowns, ledgers, items. The retired
+    // item-only ability ('tally-sync:items') may still ride on tokens issued
+    // before it was dropped; nothing checks for it any more, so it is inert.
+    private const ABILITIES = ['tally-sync:poll', 'tally-sync:report', 'tally-sync:masters'];
 
     public function listTokens(): Collection
     {

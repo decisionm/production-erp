@@ -89,6 +89,19 @@ class SaveProductionStandardPackagingRequest extends FormRequest
                     "\"{$item->name}\" is not an active item — production cannot post finished goods under it.",
                 );
             }
+
+            // A local-only fixture exists in this database and nowhere in
+            // Tally. Frozen onto a real product's batches as their identity,
+            // it would name something Tally cannot accept — and the posting
+            // gate (TallySyncService::isLocalFixtureEntry) would then decline
+            // every batch packed that way, quietly, for a product that IS in
+            // Tally. Refused here, where the refusal can name the item.
+            if ($item !== null && $item->isLocalFixture()) {
+                $validator->errors()->add(
+                    'item_id',
+                    "\"{$item->name}\" is a local-only fixture; Tally cannot accept it as a posted identity.",
+                );
+            }
         });
     }
 }

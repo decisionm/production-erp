@@ -89,6 +89,11 @@ export default function ItemsPage() {
         onSuccess: invalidate,
     });
 
+    // The item name is the Tally wire key (every voucher line carries it, no
+    // GUID does), so on a Tally-linked item it is Tally's to change — the API
+    // refuses a rename; the masters pull brings a Tally-side one across.
+    const nameIsTallys = editingItem?.tally_stock_item_guid != null;
+
     return (
         <>
             <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
@@ -238,8 +243,17 @@ export default function ItemsPage() {
                     <Form.Item label="SKU" validateStatus={editErrors.sku ? 'error' : ''} help={editErrors.sku?.message}>
                         <Controller name="sku" control={editControl} render={({ field }) => <Input {...field} />} />
                     </Form.Item>
-                    <Form.Item label="Name" validateStatus={editErrors.name ? 'error' : ''} help={editErrors.name?.message}>
-                        <Controller name="name" control={editControl} render={({ field }) => <Input {...field} />} />
+                    <Form.Item
+                        label="Name"
+                        validateStatus={editErrors.name ? 'error' : ''}
+                        help={editErrors.name?.message}
+                        extra={nameIsTallys ? "Tally's name — rename in Tally, then pull masters." : undefined}
+                    >
+                        <Controller
+                            name="name"
+                            control={editControl}
+                            render={({ field }) => <Input {...field} disabled={nameIsTallys} />}
+                        />
                     </Form.Item>
                     <Form.Item label="UOM" validateStatus={editErrors.uom ? 'error' : ''} help={editErrors.uom?.message}>
                         <Controller name="uom" control={editControl} render={({ field }) => <Input {...field} />} />

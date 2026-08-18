@@ -1,6 +1,7 @@
 # Master Plan — Production ERP
 
-**Status:** PROPOSED · awaiting owner/lead approval · 2026-08-16
+**Status:** APPROVED as the *working* engineering plan · 2026-08-16 · **rev 2**
+**Authority:** the lead's written directive in the engineering session of 2026-08-16 ("Phase 0 is approved and considered complete… The current Phases 2–8 plan shape is approved as the working plan"), recorded verbatim in `PHASE-LOG.md` (Phase 0 addendum). This is an **engineering** approval by the lead who runs this program — it is *not* a factory business decision and creates no `docs/factory/decisions/` record. Every owner-gated item in this plan (Q-nn, DEC-nn) still needs the owner.
 **Derived from:** `MASTER-PROMPT-AUDIT.md` §8 (Phase 0 output). That document holds the
 evidence; this one holds only the plan, so agents have one short thing to read.
 
@@ -18,11 +19,13 @@ PHASE 0   Discovery + audit                    ← THIS DOCUMENT · DONE
 PHASE 1   Live-safety fixes                    no owner gate · start immediately
 PHASE 2   Sync Control Center — foundation     no owner gate
 PHASE 3   Sync Control Center — every type     no owner gate
+PHASE 3.5 Sales visibility (first-class)       Sales stays Tally-originated (DEC-20260809-003)
 PHASE 4   Agent XML/response snapshot          FC-06 review gate
+PHASE 4.5 Download / Export Center             CEC slot BLOCKED until a sample exists
 PHASE 5   Ledger + packaging schema            D1 has a decision behind it
 PHASE 6   Purchase Order contract              Q31/Q38 → Q35 · staged, flag-off
 PHASE 7   Regression + reporting honesty       no owner gate
-PHASE 8   Release readiness                    —
+PHASE 8   END-TO-END CHAIN REGRESSION          Sonnet QA + browser proof · product not complete until it passes
 ──────────────────────────────────────────────────────────────────────
 HELD      Sales in ERP · CEC · reconciliation-by-read · SKU format · Q33
 ```
@@ -84,6 +87,36 @@ types that exist **today**, and what each needs:
 | **P3-04** Mapping-state surfacing: for each line, whether item/godown/ledger resolved by identity, by name-only, or unmapped | This is where §116/§62 becomes visible without inventing a conflict table |
 | **P3-05** Tests per type: create / retry / failure / duplicate-refused / dismissed / needs-review / permission-denied | Prompt §118 kept |
 
+### Phase 3.5 — Sales and Sales Order visibility (first-class deliverable)
+
+**Decision preserved:** real sales are invoiced in Tally (DEC-20260809-003). The ERP
+does not become the sales system of record unless a *new* owner decision says so.
+**What the ERP must do regardless:** make every Sales / Sales Order transaction it
+can see **visible, searchable, filterable, traceable and downloadable.**
+
+Honesty about the evidence base, so nobody builds on sand: the ERP has **no read
+path from Tally today** (removed in agent v0.3.3/0.3.4 after the 08-Aug corruption;
+Q36 gates any deliberate read). So "everything visible" is built in two layers:
+
+| Layer | Source | Available now? |
+|---|---|---|
+| **A** | ERP-originated sales orders, deliveries, invoices (`sales_orders`, `deliveries`, `invoices` + lines) and their `tally_sync_entries` (Delivery Note, Sales) | **Yes** — demo-scale today, real data if the factory ever uses the module |
+| **B** | Tally-side Sales / Sales Order vouchers | **Only after** a sanctioned, human-triggered read exists (Q36 + a decision that a read is wanted). Until then the Sales page **states plainly** that Tally-side sales are not mirrored, rather than showing an empty table as if it were the truth |
+
+| Task | |
+|---|---|
+| **P3.5-01** Sales Orders / Deliveries / Invoices: server-side search + filters (customer, status, date range, item, document number) and a real `show` endpoint per document — none exists today (§4.5) | |
+| **P3.5-02** Traceability: SO → delivery (carton scan, DEC-20260807-013) → invoice → `tally_sync_entries` (Delivery Note / Sales) rendered as one chain on the document page; the Tally status of every invoice exposed (prompt §25) | |
+| **P3.5-03** Wire or remove `SalesOrderStatus::Cancelled` and `InvoiceStatus::Paid` (§4.4) — an SO that can never be cancelled and an invoice that can never be paid are not "visible", they are misleading | |
+| **P3.5-04** Mark the Sales-invoice Tally builder as **unvalidated / no GST** in the UI wherever an invoice's Tally status is shown (§4.7); do not encourage posting real invoices from the ERP while DEC-20260809-003 stands | |
+| **P3.5-05** Layer B placeholder: a clearly-labelled "Sales in Tally" panel that says *not mirrored — deliberate reads only*, linking to the decision, so the gap is stated, not hidden | |
+| **P3.5-06** Tests: search/filter/show; carton-scan → delivery → SO chain; permission gates; the empty-state honesty | |
+| **P3.5-07** Downloads for all of the above land in Phase 4.5's Center, not as one-off buttons here | |
+
+**Exit:** a user can find any ERP sales document by any of its identifiers, follow it
+to its Tally entry, and the page never implies Tally-side sales are present when
+they are not.
+
 ### Phase 4 — Agent-side sanitized XML + response snapshot
 
 Investigation first, then build only if the FC-06 review passes.
@@ -95,6 +128,52 @@ Investigation first, then build only if the FC-06 review passes.
 | **P4-03** Storage: bounded table or file store with retention; `payload_hash` on the entry (§32) as a *fingerprint*, not identity | |
 | **P4-04** UI: "What the agent sent" / "What Tally answered" panels in the detail drawer, XML formatted + copy | Only after P4-02 |
 | **P4-05** Agent release via the existing ritual (build on CI, review gate, manual publish) | `releaseContract.test.js` governs |
+
+### Phase 4.5 — Download / Export Center (first-class deliverable)
+
+**Why a Center:** every export that exists today is **client-side CSV over an
+already-fetched page** (`ReportsPage.tsx:121, 313, 477`; the Tally sync page has none).
+The prompt's §43 rule — *never export only the rows rendered in the browser* — is
+therefore violated everywhere. One server-side export subsystem fixes it once.
+
+Shape (adapt to the existing module pattern — an `Exports` capability inside each
+owning module's Service, surfaced by one Core route group and one Core page; **not**
+a new module that reaches into other modules' Eloquent):
+
+```
+GET  /api/v1/exports                     catalogue: what this user may export
+POST /api/v1/exports/{kind}              enqueue with the same filter params the list endpoint takes
+GET  /api/v1/exports/{id}                status · row count · download when ready
+GET  /api/v1/exports/{id}/download       the file
+```
+Runs on the `database` queue (no Redis on this host); small ranges may stream
+synchronously; large ranges are a job with a row cap that is **stated**, never silent
+(prompt §43, "no silent caps"). Every export honours the caller's permissions —
+**FC-06 applies to the file exactly as to the screen** (no rate columns for
+non-finance).
+
+| Export kind | Owning module | Status at plan time |
+|---|---|---|
+| Shift Summary (date · shift A/B/C · all) | Production | build — data exists, no server export |
+| Production report / completed batches | Production | build — client-side today |
+| **CEC** (date · shift · all shifts) | Production | **BLOCKED — no CEC sample or format authority anywhere in the repo.** The slot ships visibly disabled with the reason. Requires the owner's CEC sample; then Completed Production = Shift Summary = CEC is asserted by test |
+| Purchase orders / receipts (filters as the list) | Procurement | build; rate columns finance-only |
+| Sales orders / deliveries / invoices (Layer A) | Sales | build (Phase 3.5 filters) |
+| Tally sync entries (filters as Control Center) | TallySync | build — Phase 2 P2-03 moves here |
+| Tally sync "run"/history CSV | TallySync | build once history exists (P3-03 timeline) |
+| Reconciliation / traceability (existing) | Production/Inventory | migrate from client-side |
+
+| Task | |
+|---|---|
+| **P4.5-01** Export contract + Core routes/page; catalogue is permission-filtered | |
+| **P4.5-02** Migrate the three existing client-side exports server-side (no feature loss) | |
+| **P4.5-03** Shift Summary + production exports | |
+| **P4.5-04** Procurement + Sales + Tally-sync exports (FC-06 on the file) | |
+| **P4.5-05** CEC slot: disabled with reason; the moment a sample lands, the format is a **golden test**, not a guess | |
+| **P4.5-06** Tests: filters honoured; row cap stated; permission-filtered columns; a non-finance user's file has no rate; browser proof of one download per kind | |
+
+**Exit:** every export in the product goes through the Center; none is client-side;
+CEC is either implemented against a sample or visibly blocked — never invented.
 
 ### Phase 5 — Ledger invariant + packaging schema
 
@@ -123,17 +202,44 @@ requires closing to exist.
 | **P7-04** Decide `ingestPage` — finish or document as API-only | §4.19 |
 | **P7-05** Full-application regression across every adopted module (prompt §111 kept) | |
 
-### Phase 8 — Release readiness
+### Phase 8 — End-to-end chain regression, then release readiness
 
-Prompt §86 kept as written, plus: `DEVELOPMENT-PLAN.md` status brought current or
-explicitly superseded by this plan.
+**The product is not complete until this chain passes**, with Sonnet as the
+independent QA gate and browser proof at every link. Module-by-module green is not
+the bar; the *chain* is.
+
+```
+Product / SKU configuration
+  → Purchase (PO → GRN → lot)          [PO→Tally only if Phase 6 live-write gate passed]
+  → Inventory (ledger == balance)
+  → Production (start → complete → QC → PM → Accountant)
+  → Shift Summary  (= Completed Production)
+  → CEC            (= Shift Summary — or BLOCKED, stated)
+  → Tally          (Stock Journal per shift, released by shift-end + idle; agent ack)
+  → Sales visibility (Layer A documents traced to their Tally entries; Layer B stated)
+  → Downloads      (one export per kind from the Center, FC-06 on every file)
+```
+
+| Task | |
+|---|---|
+| **P8-01** Chain script: a documented, repeatable walk with named fixtures (dev DB, never live), one representative product through every link | |
+| **P8-02** Assertions at each link — the transaction model, not the screen: stock movements sum to balances; the shift voucher contains exactly the approved entries; identities frozen at completion; Shift Summary totals equal completed production; each export equals its list | |
+| **P8-03** Sonnet independent QA runs the walk **without** the implementer's notes and reports per link: PASS / FAIL / NOT TESTED / BLOCKED | |
+| **P8-04** Browser proof at every link (screenshots + the API responses behind them), attached to the phase log | |
+| **P8-05** Full-application regression across every adopted module (prompt §111): login · roles · masters · products · purchase · inventory · production · sales · reports · downloads · Tally | |
+| **P8-06** Release readiness (prompt §86 kept): no P0, no unresolved P1 data-integrity issue, all migrations accounted for, all tests green, production build passes, browser smoke passes, sync dry-run passes, rollback documented, monitoring ready. `DEVELOPMENT-PLAN.md` brought current or explicitly superseded by this file | |
+
+**Verdict rule:** any link FAIL or NOT TESTED → the phase is `NOT READY`, full stop. A
+link that is BLOCKED by a named owner gate (CEC sample, Q35 live-write) is recorded as
+BLOCKED and the chain result is `PASS WITH DEFERRED ITEMS` — the product is **not
+called complete** while a BLOCKED link remains.
 
 ### HELD — needs the owner before a line is written
 
 | Item | Question |
 |---|---|
 | Sales lifecycle in ERP | New decision superseding DEC-20260809-003 |
-| CEC export | A sample + format authority; none exists |
+| CEC export | A sample + format authority; none exists. **The Download Center ships CEC's slot visibly BLOCKED** (Phase 4.5) — never an invented layout |
 | ERP↔Tally reconciliation by reading Tally | Q36; and a decision that a deliberate read is wanted |
 | SKU format programme | Format confirmation; agent HSN fetch first (does not exist) |
 | 490/box variant | Q33 |

@@ -179,6 +179,25 @@ class ShiftProductionEntry extends Model
         return $this->item;
     }
 
+    /**
+     * Whether this batch's finished goods post AS a local-only fixture — an
+     * item that exists in this database and nowhere in Tally, so a voucher
+     * naming it is refused ("Stock Item does not exist").
+     *
+     * THE ONE PREDICATE. Judged on the item the voucher will actually NAME
+     * (effectiveItem(), never the base product): a real product resolving to
+     * a fixture packaging identity would post a name Tally cannot accept.
+     * Every gate that asks the question — the Tally enqueue guard, the shift
+     * sweep, the payload rebuilds, the require_postable_voucher approval
+     * exemption — calls this, so no two of them can drift on WHICH item they
+     * judge. Null (a product retired after the run) is "not a fixture": its
+     * quantities stay on the voucher rather than silently dropping off it.
+     */
+    public function isLocalFixtureIdentity(): bool
+    {
+        return $this->effectiveItem()?->isLocalFixture() ?? false;
+    }
+
     public function warehouse(): BelongsTo
     {
         return $this->belongsTo(Warehouse::class);
@@ -351,9 +370,10 @@ class ShiftProductionEntry extends Model
     }
 
     /**
-     * The shift-level Stock Journal voucher this entry was aggregated into
-     * (tally-sync.voucher_granularity = 'shift'). Null under the default
-     * 'batch' granularity, where the morph above tracks vouchers instead.
+     * The shift-level Stock Journal voucher this entry was aggregated into —
+     * populated under the default 'shift' granularity
+     * (tally-sync.voucher_granularity); null under 'batch', where the morph
+     * above tracks the per-entry vouchers instead.
      * Read-only here — all writes stay in the TallySync module.
      */
     public function tallyShiftVoucher(): BelongsTo

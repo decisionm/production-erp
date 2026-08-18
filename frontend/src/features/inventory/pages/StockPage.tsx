@@ -6,6 +6,8 @@ import { Controller, useForm } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { z } from 'zod';
 import BarcodeScanInput from '@/components/barcode/BarcodeScanInput';
+import { hasModuleAccess } from '@/features/auth/permissions';
+import { useAuthStore } from '@/features/auth/store';
 import {
     listBatches,
     listAllItems,
@@ -66,6 +68,8 @@ export default function StockPage() {
     const [activeModal, setActiveModal] = useState<ActiveModal>(null);
     const [historyRow, setHistoryRow] = useState<StockBalance | null>(null);
     const queryClient = useQueryClient();
+    const user = useAuthStore((s) => s.user);
+    const financeAccess = hasModuleAccess(user, 'finance');
 
     const { data: balances, isLoading } = useQuery({
         queryKey: ['inventory', 'stock-balances'],
@@ -84,6 +88,20 @@ export default function StockPage() {
 
     const itemOptions = items?.data.map((item) => ({ value: item.id, label: itemLabel(item) })) ?? [];
     const warehouseOptions = warehouses?.data.map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })) ?? [];
+
+    /**
+     * DO THESE ROWS CARRY RATES AT ALL — the server's answer, honoured locally
+     * (the MaterialLotsPage precedent). average_cost / unit_cost are OMITTED
+     * by StockBalanceResource / StockMovementResource for anyone without
+     * finance access (FC-06), so their presence is the ruling that arrived
+     * with the data; the permission check alongside can only make it
+     * stricter. When false the cost columns do not exist — no '—' column
+     * advertising a number it will not show.
+     */
+    const showsAverageCost =
+        financeAccess && (balances?.data ?? []).some((row) => row.average_cost !== undefined);
+    const showsUnitCost =
+        financeAccess && (history?.data ?? []).some((row) => row.unit_cost !== undefined);
 
     const itemsById = new Map(items?.data.map((i) => [i.id, i]));
     const batchOptionsFor = (itemId?: number) =>
@@ -203,7 +221,7 @@ export default function StockPage() {
                     { title: 'Item', render: (_, row) => itemLabel(row.item) },
                     { title: 'Warehouse', render: (_, row) => `${row.warehouse.code} — ${row.warehouse.name}` },
                     { title: 'Quantity', dataIndex: 'quantity' },
-                    { title: 'Avg. Cost', dataIndex: 'average_cost' },
+                    ...(showsAverageCost ? [{ title: 'Avg. Cost', dataIndex: 'average_cost' }] : []),
                     {
                         title: 'Actions',
                         render: (_, row) => (
@@ -252,6 +270,12 @@ export default function StockPage() {
                             render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />}
                         />
                     </Form.Item>
+                    {/* Kept for every user, finance or not: the server REQUIRES
+                        unit_cost on a manual receipt (StoreStockReceiptRequest),
+                        because it feeds the balance's weighted average. Entering
+                        it here is write-only — the same store user never reads it
+                        back (the cost columns above are absent without finance
+                        access), exactly the GRN path's rule. */}
                     <Form.Item label="Unit Cost">
                         <Controller
                             name="unit_cost"
@@ -484,7 +508,7 @@ export default function StockPage() {
                                     render: (type: string) => <Tag color={movementTypeColor[type]}>{type}</Tag>,
                                 },
                                 { title: 'Quantity', dataIndex: 'quantity' },
-                                { title: 'Unit Cost', dataIndex: 'unit_cost' },
+                                ...(showsUnitCost ? [{ title: 'Unit Cost', dataIndex: 'unit_cost' }] : []),
                                 { title: 'Reference', dataIndex: 'reference' },
                                 { title: 'Notes', dataIndex: 'notes', render: (n: string | null) => n ?? '—' },
                             ]}

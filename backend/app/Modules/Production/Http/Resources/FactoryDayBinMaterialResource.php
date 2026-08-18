@@ -19,11 +19,19 @@ class FactoryDayBinMaterialResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        // This wraps a StockBalance, so average_cost is the weighted average
+        // of purchase rates — Owner/Accounts data (FC-06) — and the day-bin
+        // page is opened by every supervisor. Same gate, same omit-not-null
+        // rule as MaterialLotResource (see its class note): ABSENT for
+        // anyone without finance access, so no rate is one devtools panel
+        // away from a production login.
+        $showsCost = $request->user()?->hasAnyPermission(['finance.view', 'finance.manage']) ?? false;
+
         return [
             'item' => ItemResource::make($this->whenLoaded('item')),
             'item_id' => $this->item_id,
             'quantity_kg' => $this->quantity,
-            'average_cost' => $this->average_cost,
+            ...($showsCost ? ['average_cost' => $this->average_cost] : []),
         ];
     }
 }

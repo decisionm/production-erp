@@ -49,7 +49,12 @@ export interface PurchaseOrderLine {
     id: number;
     item: Item;
     quantity: string;
-    unit_price: string;
+    /**
+     * Owner/Accounts only (FC-06): the server OMITS the key — never nulls it —
+     * for anyone without finance access, so its presence on a row is the
+     * server's own answer about whether this user may see the rate.
+     */
+    unit_price?: string;
     quantity_received: string;
     schedules?: PurchaseOrderSchedule[];
 }
@@ -74,7 +79,8 @@ export interface GoodsReceiptNoteLine {
     purchase_order_line_id: number;
     item: Item;
     quantity: string;
-    unit_cost: string;
+    /** Same rule as PurchaseOrderLine.unit_price: absent (not null) without finance access. */
+    unit_cost?: string;
     material_lots?: MaterialLot[];
 }
 

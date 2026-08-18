@@ -298,10 +298,10 @@ Route::prefix('v1')->group(function () {
             Route::post('entries/{tally_sync_entry}/ack', [TallySyncAgentController::class, 'acknowledge']);
             Route::post('entries/{tally_sync_entry}/fail', [TallySyncAgentController::class, 'fail']);
 
-            // Inbound masters pull (agent → cloud). `items` is the stock-item-only
-            // endpoint; `masters` takes the full pull (item groups, godowns,
-            // ledgers, items). Gated by token abilities in the controller.
-            Route::post('items', [TallySyncAgentController::class, 'items']);
+            // Inbound masters pull (agent → cloud): `masters` takes the full
+            // pull (item groups, godowns, ledgers, items) — the only inbound
+            // path the shipped agent has ever called. Gated by token abilities
+            // in the controller.
             Route::post('masters', [TallySyncAgentController::class, 'masters']);
             Route::post('companies', [TallySyncAgentController::class, 'companies']);
 
@@ -552,8 +552,9 @@ Route::prefix('v1')->group(function () {
             // that handed over from it). After a check it is quality who hands
             // it back, at .../return-to-production above.
             Route::post('shift-production-entries/{shift_production_entry}/amend', [ShiftProductionEntryController::class, 'amend']);
-            // The 4-stage approval chain (Supervisor submits at completeBatch):
-            // PM verifies → Accountant reconciles → MD final approval → Tally.
+            // The approval chain (Supervisor submits at completeBatch):
+            // PM verifies → Accountant reconciles → Tally. The accountant is
+            // FINAL and is the posting gate; there is no MD stage.
             Route::post('shift-production-entries/{shift_production_entry}/pm-approve', [ShiftProductionEntryController::class, 'pmApprove']);
             Route::post('shift-production-entries/{shift_production_entry}/accountant-approve', [ShiftProductionEntryController::class, 'accountantApprove']);
             // What Tally will receive, resolved against real masters —

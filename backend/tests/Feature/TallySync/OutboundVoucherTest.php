@@ -80,6 +80,9 @@ class OutboundVoucherTest extends TestCase
 
     public function test_approved_production_enqueues_a_manufacturing_journal(): void
     {
+        // Batch mode is under test here explicitly; the packaged default is shift.
+        config(['tally-sync.voucher_granularity' => 'batch']);
+
         $consumption = new ShiftMaterialConsumption(['quantity_issued_kg' => '250.0000']);
         $consumption->setRelation('item', new Item(['sku' => 'RES-1', 'name' => 'PET Resin']));
         $consumption->setRelation('warehouse', new Warehouse(['name' => 'Raw Material Store']));

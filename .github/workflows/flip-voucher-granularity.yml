@@ -99,7 +99,7 @@ jobs:
               && $PHP artisan config:show tally-sync.voucher_granularity"
           else
             REMOTE="echo '--- .env line (dry run, nothing written) ---' \
-              && (grep '^TALLY_VOUCHER_GRANULARITY=' .env || echo 'TALLY_VOUCHER_GRANULARITY absent (default: batch)') \
+              && (grep '^TALLY_VOUCHER_GRANULARITY=' .env || echo 'TALLY_VOUCHER_GRANULARITY absent (default: shift)') \
               && echo '--- effective config ---' \
               && $PHP artisan config:show tally-sync.voucher_granularity"
           fi

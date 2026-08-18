@@ -1,0 +1,74 @@
+name: Show roles
+
+# Read-only answer to "which roles exist on LIVE, and what can each one
+# see?", runnable by anyone with repo access, against the LIVE database, at
+# any hour.
+#
+# Prints one line per role — its name, user count and permissions — and
+# flags any role that holds procurement.* without finance.* (FC-06: such a
+# role could read purchase rates off the Procurement payloads until the
+# resource gate shipped). Roles are created at runtime, never seeded, so this
+# is the only evidence-grade read of the live shape short of a person on the
+# Roles screen — dev fixtures do not answer it. The command it runs is
+# read-only by construction — two SELECTs, no writes, no options — so this
+# workflow needs no confirmation gates and takes no inputs.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: show-roles
+  cancel-in-progress: false
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # ssh-keyscan can exit 0 having collected nothing — check output,
+          # not exit code (the same trap every workflow here guards).
+          # The host intermittently answers nothing: 10 of the last 100 runs failed
+          # here, and EVERY one cleared on a re-run of the SAME commit — it is the
+          # host, not the change. Retrying in-workflow removes that manual re-run.
+          # It does NOT weaken the check: if all three attempts come back empty the
+          # step still fails loudly, which is the state that must never deploy.
+          keys=""
+          for attempt in 1 2 3; do
+            keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+            if [ -n "$keys" ]; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "ssh-keyscan attempt ${attempt} returned no host key; retrying in $((attempt * 10))s"
+              sleep "$((attempt * 10))"
+            fi
+          done
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Re-running usually clears a transient failure."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      - name: Read the roles
+        run: |
+          set -o pipefail
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && /opt/alt/php84/usr/bin/php artisan roles:show" \
+            2>&1 | tee roles-output.txt
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Live roles"
+            echo
+            echo '```'
+            cat roles-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

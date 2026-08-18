@@ -5,6 +5,8 @@ import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import BarcodeScanInput from '@/components/barcode/BarcodeScanInput';
+import { hasModuleAccess } from '@/features/auth/permissions';
+import { useAuthStore } from '@/features/auth/store';
 import { listAllEmployees } from '@/features/hrms/api';
 import { listAllItems, listAllWarehouses } from '@/features/inventory/api';
 import {
@@ -56,6 +58,7 @@ export default function WorkOrdersPage() {
     const [completingId, setCompletingId] = useState<number | null>(null);
     const [detailRow, setDetailRow] = useState<MaintenanceWorkOrder | null>(null);
     const queryClient = useQueryClient();
+    const user = useAuthStore((s) => s.user);
 
     const { data, isLoading } = useQuery({ queryKey: ['maintenance', 'work-orders'], queryFn: () => listMaintenanceWorkOrders() });
     const { data: assets } = useQuery({ queryKey: ['maintenance', 'assets'], queryFn: listAssets });
@@ -69,6 +72,24 @@ export default function WorkOrdersPage() {
     const warehouseOptions = warehouses?.data.map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })) ?? [];
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['maintenance', 'work-orders'] });
+
+    /**
+     * DO THE PARTS CARRY A RATE AT ALL — the server's answer, honoured locally
+     * (the MaterialLotsPage precedent). unit_cost is OMITTED by
+     * MaintenanceWorkOrderPartResource for anyone without finance access
+     * (FC-06), so its presence is the ruling that arrived with the data; the
+     * permission check alongside can only make it stricter. When false the
+     * column does not exist — no '—' column advertising a number it will
+     * not show.
+     */
+    const showsUnitCost =
+        hasModuleAccess(user, 'finance') &&
+        (detailRow?.parts ?? []).some((part) => part.unit_cost !== undefined);
+    // Order-level parts_cost/total_cost: same rule, judged on the list rows
+    // (key presence is the server's answer, ANDed with the module check).
+    const showsOrderCosts =
+        hasModuleAccess(user, 'finance') &&
+        (data?.data ?? []).some((wo) => wo.parts_cost !== undefined);
 
     const { control, handleSubmit, reset, setValue, formState: { errors } } = useForm<CreateFormValues>({
         resolver: zodResolver(createSchema),
@@ -173,9 +194,13 @@ export default function WorkOrdersPage() {
                         render: (status: MaintenanceWorkOrderStatus) => <Tag color={statusColor[status]}>{status}</Tag>,
                     },
                     { title: 'Reported', dataIndex: 'reported_date' },
-                    { title: 'Parts Cost', dataIndex: 'parts_cost' },
+                    // parts_cost/total_cost arrive only for finance eyes (they
+                    // embed the purchase rate, FC-06); a column that would show
+                    // blanks for everyone else is not rendered — MaterialLotsPage
+                    // precedent. labor_cost is always present.
+                    ...(showsOrderCosts ? [{ title: 'Parts Cost', dataIndex: 'parts_cost' }] : []),
                     { title: 'Labor Cost', dataIndex: 'labor_cost' },
-                    { title: 'Total Cost', dataIndex: 'total_cost' },
+                    ...(showsOrderCosts ? [{ title: 'Total Cost', dataIndex: 'total_cost' }] : []),
                     {
                         title: 'Actions',
                         render: (_, row) => (
@@ -348,9 +373,13 @@ export default function WorkOrdersPage() {
                             <Descriptions.Item label="Reported Date">{detailRow.reported_date}</Descriptions.Item>
                             <Descriptions.Item label="Started At">{detailRow.started_at ?? '—'}</Descriptions.Item>
                             <Descriptions.Item label="Completed At">{detailRow.completed_at ?? '—'}</Descriptions.Item>
-                            <Descriptions.Item label="Parts Cost">{detailRow.parts_cost}</Descriptions.Item>
+                            {detailRow.parts_cost !== undefined && (
+                                <Descriptions.Item label="Parts Cost">{detailRow.parts_cost}</Descriptions.Item>
+                            )}
                             <Descriptions.Item label="Labor Cost">{detailRow.labor_cost}</Descriptions.Item>
-                            <Descriptions.Item label="Total Cost">{detailRow.total_cost}</Descriptions.Item>
+                            {detailRow.total_cost !== undefined && (
+                                <Descriptions.Item label="Total Cost">{detailRow.total_cost}</Descriptions.Item>
+                            )}
                         </Descriptions>
 
                         <Typography.Title level={5} style={{ marginTop: 24 }}>
@@ -370,7 +399,7 @@ export default function WorkOrdersPage() {
                                     },
                                     { title: 'Warehouse', render: (_, p) => p.warehouse.code },
                                     { title: 'Quantity', dataIndex: 'quantity' },
-                                    { title: 'Unit Cost', dataIndex: 'unit_cost' },
+                                    ...(showsUnitCost ? [{ title: 'Unit Cost', dataIndex: 'unit_cost' }] : []),
                                 ]}
                             />
                         ) : (
