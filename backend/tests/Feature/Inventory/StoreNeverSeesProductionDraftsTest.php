@@ -156,6 +156,26 @@ class StoreNeverSeesProductionDraftsTest extends TestCase
         $this->assertContains($draft['request_number'], $seen, 'production must still see its own working papers');
     }
 
+    /**
+     * THE `status=draft` FILTER STILL SELECTS A DRAFT — for the desk allowed
+     * one. Both reviewers named this gap: MaterialRequestQueueFiltersTest no
+     * longer seeds a draft at all (its "draft" fixture had always been a
+     * submitted row through a dead comparison), so nothing pinned that the
+     * filter value still does its job for a permitted login.
+     */
+    public function test_the_floor_can_filter_for_drafts_specifically(): void
+    {
+        $draft = $this->raise();
+        $sent = $this->submitted();
+
+        $this->actAs($this->floor);
+        $seen = collect($this->getJson('/api/v1/inventory/material-requests?include_unsubmitted=1&status=draft')
+            ->assertOk()->json('data'))->pluck('request_number')->all();
+
+        $this->assertContains($draft['request_number'], $seen);
+        $this->assertNotContains($sent['request_number'], $seen, 'the status filter still narrows');
+    }
+
     public function test_even_the_floor_gets_no_drafts_unless_it_asks(): void
     {
         $draft = $this->raise();

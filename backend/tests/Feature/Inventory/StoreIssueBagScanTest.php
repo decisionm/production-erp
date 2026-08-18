@@ -48,6 +48,8 @@ class StoreIssueBagScanTest extends TestCase
 {
     use RefreshDatabase;
 
+    private ?MaterialRequest $ask = null;
+
     private Item $resin;
 
     private Warehouse $store;
@@ -142,8 +144,6 @@ class StoreIssueBagScanTest extends TestCase
             'lines' => [],
         ])->assertCreated()->json('data');
     }
-
-    private ?MaterialRequest $ask = null;
 
     private function balance(Warehouse $warehouse): string
     {

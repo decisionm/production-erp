@@ -2,7 +2,9 @@
 
 namespace App\Modules\Inventory\Http\Requests;
 
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 /**
@@ -34,5 +36,38 @@ class StoreStoreIssueBagScanRequest extends FormRequest
             'material_request_line_id' => ['nullable', 'integer', Rule::exists('material_request_lines', 'id')],
             'notes' => ['nullable', 'string', 'max:500'],
         ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            $lineId = $this->input('material_request_line_id');
+
+            if ($lineId === null) {
+                return;
+            }
+
+            // THE LINE MUST BELONG TO THE ASK THIS ISSUE IS FOR — the same
+            // rule the issue's own lines already carry, applied to the scan.
+            // `exists` alone let a scan on a headerless issue name ANY real
+            // request line, including an unsent draft's or another request's,
+            // and file a pointer to it that nothing could reconcile.
+            $issue = $this->route('store_issue');
+            $headerId = $issue?->material_request_id;
+
+            $belongs = $headerId !== null && DB::table('material_request_lines')
+                ->where('id', (int) $lineId)
+                ->where('material_request_id', (int) $headerId)
+                ->exists();
+
+            if (! $belongs) {
+                $validator->errors()->add(
+                    'material_request_line_id',
+                    $headerId === null
+                        ? 'This handover is not against a material request, so a scan on it cannot name a request line.'
+                        : 'That request line belongs to a different material request from the one this handover is for.',
+                );
+            }
+        });
     }
 }

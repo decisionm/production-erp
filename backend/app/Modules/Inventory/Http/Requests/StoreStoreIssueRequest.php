@@ -51,7 +51,23 @@ class StoreStoreIssueRequest extends FormRequest
             // issue could be filed against request 999999999: stock moved,
             // `store_issues.material_request_id` persisted, and nothing on
             // either side could ever resolve it back to an ask.
-            'material_request_id' => ['nullable', 'integer', Rule::exists('material_requests', 'id')],
+            //
+            // EXISTENCE ALONE WAS NOT ENOUGH, and the gap defeated a fix in
+            // this same commit. `exists` let the store head an issue with
+            // production's UNSUBMITTED DRAFT — no stock or document harm, but
+            // 201-vs-422 is an existence oracle for draft ids, which is
+            // precisely what the 404 on show/cancel was added to deny. A
+            // cancelled request is not owed either.
+            //
+            // The closure form is deliberate: `Rule::exists(...)->where(col,
+            // op, value)` takes only TWO arguments and DROPS the third in
+            // silence, so the cancelled half of this rule did nothing at all
+            // while the `whereNotNull` half worked — a rule that looked right,
+            // half-failed, and was caught only because the test asserted both.
+            'material_request_id' => ['nullable', 'integer', Rule::exists('material_requests', 'id')
+                ->where(fn ($query) => $query
+                    ->whereNotNull('submitted_at')
+                    ->where('status', '!=', 'cancelled'))],
             'received_by' => ['nullable', 'integer', 'exists:users,id'],
             'issued_at' => ['nullable', 'date'],
             'notes' => ['nullable', 'string', 'max:1000'],
@@ -65,10 +81,13 @@ class StoreStoreIssueRequest extends FormRequest
             // item is never issuable, whatever it is being issued against.
             'lines.*.item_id' => ['required', 'integer', Rule::exists('items', 'id')->whereNull('deleted_at')],
             'lines.*.from_warehouse_id' => ['nullable', 'integer', 'exists:warehouses,id'],
-            // `numeric` alone lets `1e3`, `0x1A` and `INF` through to
-            // bcmath, which threw a 500 instead of a 422. The sign is left
-            // permitted — only the exotic spellings are refused.
-            'lines.*.quantity' => ['required', 'numeric', 'regex:/^-?\\d+(\\.\\d+)?$/'],
+            // `numeric` alone lets `1e3`, `0x1A` and `INF` through to bcmath,
+            // which threw a 500 instead of a 422. The set below is exactly what
+            // bcmath ACCEPTS — `.5`, `1.` and `+5` included, because a first
+            // attempt at this narrowed the rule to `-?\d+(\.\d+)?` and started
+            // refusing three spellings the old code took happily. Widening a
+            // refusal by accident is the failure mode here, not the 500.
+            'lines.*.quantity' => ['required', 'numeric', 'regex:/^[+-]?(\\d+(\\.\\d*)?|\\.\\d+)$/'],
             'lines.*.uom' => ['nullable', 'string', 'max:16'],
             'lines.*.notes' => ['nullable', 'string', 'max:500'],
         ];
@@ -130,7 +149,15 @@ class StoreStoreIssueRequest extends FormRequest
                     // the item's.
                     $given = $line['uom'] ?? null;
 
+                    // AN ITEM WITH NO RECORDED UNIT HAS NOTHING TO DISAGREE
+                    // WITH. Comparing against a blank produced a refusal that
+                    // read "This material is kept in ." — an unusable sentence
+                    // on a floor screen — and meant an item whose master has no
+                    // unit could never be given one at handover. Hoisting this
+                    // block made that newly reachable on the accepted-ask path,
+                    // so the hoist widened exactly one refusal; this closes it.
                     if (is_string($given) && trim($given) !== ''
+                        && trim((string) $item->uom) !== ''
                         && mb_strtolower(trim($given)) !== mb_strtolower(trim((string) $item->uom))) {
                         $validator->errors()->add(
                             "lines.{$index}.uom",

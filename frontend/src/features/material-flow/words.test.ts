@@ -286,6 +286,16 @@ describe('whether a unit may carry a fraction', () => {
         }
     });
 
+    it('agrees with the backend list exactly, rather than normalising its own way', () => {
+        // Stripping a trailing dot instead of mirroring the list refused these
+        // four in the browser while the server accepted them. A UI that refuses
+        // what the server permits blocks real work; the reverse only costs a
+        // round trip. So the disagreement direction is the thing being pinned.
+        for (const uom of ['piece.', 'pieces.', 'each.', 'ea.']) {
+            expect(permitsFractions(uom)).toBe(true);
+        }
+    });
+
     it('permits a fraction for a unit nobody has classified, rather than guessing', () => {
         // The same choice the backend enum makes: Unknown never collapses to
         // weight, and never blocks real work on a guess.

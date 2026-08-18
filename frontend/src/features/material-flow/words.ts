@@ -464,10 +464,15 @@ export function queueEmptyText(status: MaterialRequestStatus[] | MaterialRequest
  * Kept deliberately narrow — the several older kg-detecting copies elsewhere
  * in this app are pre-existing and are not converged here on purpose.
  */
-const COUNT_UNITS = ['nos', 'no', 'pcs', 'pc', 'piece', 'pieces', 'each', 'ea'];
+// MIRRORED VERBATIM from MeasurementType::COUNT_UNITS, dotted spellings and
+// all. The first attempt normalised by stripping one trailing dot instead,
+// which disagreed with the server on `piece.`, `pieces.`, `each.` and `ea.` —
+// and disagreed in the DANGEROUS direction: the browser refusing a figure the
+// server would have accepted blocks real work, where the reverse is merely a
+// wasted round trip. No live item can spell a unit that way today; matching
+// the list exactly is still cheaper than relying on that.
+const COUNT_UNITS = ['nos', 'nos.', 'no', 'no.', 'pcs', 'pcs.', 'pc', 'pc.', 'piece', 'pieces', 'each', 'ea'];
 
 export function permitsFractions(uom: string | null | undefined): boolean {
-    const normalised = (uom ?? '').trim().toLowerCase().replace(/\.$/, '');
-
-    return !COUNT_UNITS.includes(normalised);
+    return !COUNT_UNITS.includes((uom ?? '').trim().toLowerCase());
 }

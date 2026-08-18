@@ -270,6 +270,83 @@ class TwoUnitsChainTest extends TestCase
         $this->assertSame(0, bccomp($this->balance($resin, $this->wip), '0', 4));
     }
 
+    /**
+     * AN ITEM WITH NO RECORDED UNIT HAS NOTHING TO DISAGREE WITH.
+     *
+     * The unit-mismatch guard compared against a blank and refused, producing
+     * "This material is kept in ." — an unusable sentence on a floor screen —
+     * and meaning such an item could never be given a unit at handover.
+     * Hoisting the block above the accepted-ask branch made that newly
+     * reachable on the path the store uses, so the hoist widened exactly one
+     * refusal. It is the only one, and this pins it closed.
+     */
+    public function test_an_item_with_no_unit_of_its_own_may_still_be_handed_over(): void
+    {
+        $odd = Item::create([
+            'sku' => 'RM-NOUOM', 'name' => 'Master with no unit recorded', 'uom' => '',
+            'is_active' => true, 'is_production_input' => true,
+        ]);
+        $this->receive($odd, '100', 'tu-blank');
+
+        $ask = $this->submittedRequest($odd, '10');
+
+        $this->postJson('/api/v1/inventory/store-issues', [
+            'material_request_id' => $ask['id'],
+            'lines' => [[
+                'material_request_line_id' => $ask['line_id'],
+                'item_id' => $odd->id,
+                'quantity' => '2.5',
+                'uom' => 'Kgs.',
+            ]],
+        ])->assertCreated();
+    }
+
+    /**
+     * THE HEADER MUST NAME AN ASK THE STORE HAS ACTUALLY BEEN GIVEN.
+     *
+     * `exists` alone was not enough and the gap defeated a fix in the same
+     * commit: an issue could be headed by production's UNSUBMITTED DRAFT. No
+     * stock or document harm followed, but 201-vs-422 is an existence oracle
+     * for draft ids — exactly what the 404 on show/cancel denies.
+     */
+    public function test_an_issue_may_not_be_headed_by_a_draft_or_a_cancelled_ask(): void
+    {
+        $resin = $this->material('RM-RELPET', 'Relpet PET Resin', 'Kgs.');
+        $this->receive($resin, '100', 'tu-head');
+
+        $draft = $this->postJson('/api/v1/inventory/material-requests', [
+            'lines' => [['item_id' => $resin->id, 'quantity' => '10']],
+        ])->assertCreated()->json('data');
+
+        $this->postJson('/api/v1/inventory/store-issues', [
+            'material_request_id' => $draft['id'],
+            'lines' => [],
+        ])->assertStatus(422)->assertJsonValidationErrors('material_request_id');
+
+        $sent = $this->submittedRequest($resin, '10');
+        $this->postJson("/api/v1/inventory/material-requests/{$sent['id']}/cancel", ['reason' => 'run pulled'])->assertOk();
+
+        $this->postJson('/api/v1/inventory/store-issues', [
+            'material_request_id' => $sent['id'],
+            'lines' => [],
+        ])->assertStatus(422)->assertJsonValidationErrors('material_request_id');
+    }
+
+    /** ...and the spellings bcmath DOES accept are still accepted. */
+    public function test_the_quantity_rule_refuses_only_what_bcmath_refuses(): void
+    {
+        $resin = $this->material('RM-RELPET', 'Relpet PET Resin', 'Kgs.');
+        $this->receive($resin, '100', 'tu-spell');
+
+        // A first attempt at closing the 500 narrowed this to `-?\d+(\.\d+)?`
+        // and started refusing three spellings the old code took happily.
+        foreach (['.5', '1.', '+5'] as $spelling) {
+            $this->postJson('/api/v1/inventory/store-issues', [
+                'lines' => [['item_id' => $resin->id, 'quantity' => $spelling]],
+            ])->assertCreated();
+        }
+    }
+
     /* ------------------------------ helpers ------------------------------ */
 
     private function material(string $sku, string $name, string $uom): Item

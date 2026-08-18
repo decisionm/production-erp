@@ -325,3 +325,50 @@ exemption, the header/line mismatch, the queue's own draft filter across every f
 paging, search and flag combination, partial-GRN scan discard, the timezone stamp, negative
 WIP visibility, the meta plumbing, `MeasurementType` itself, and — proved by mutation —
 `TwoUnitsChainTest` being non-vacuous. FC-01, FC-03 and FC-06 all hold on the delta.
+
+## The verification round, and what it found in the fixes themselves
+
+Both reviewers re-ran their own successful probes against the fix commit. All six are
+refused, each re-probed rather than re-read, and the central fix re-proved by mutation:
+restoring the old ordering fails exactly one test with exactly the old 201. All ten
+surrounding workflows still complete — the resin chain end to end, partial and repeat
+issues, return to store, all three cancellation paths, blank-uom decimals — verified under
+a genuinely store-only login rather than a combined-permission one, which is the only
+identity a permission-shaped refusal shows up for.
+
+Four things in the fixes did not survive, and they are worth naming because three of them
+were made BY the fixes:
+
+- **The `exists` rules checked existence but not lifecycle.** The store could head an issue
+  with production's unsubmitted draft, and a scan on a headerless issue could name any real
+  request line. No stock or document harm — the foreign pointer has no reader, and
+  `remainingForRequestLines` has zero call sites — but **201-vs-422 is an existence oracle
+  for draft ids, which is exactly what the 404 on show/cancel was added to deny.** A fix
+  that leaks through a side channel is not finished. Both rules now carry the lifecycle,
+  and the scan's line must belong to the issue's own request.
+- **The hoist widened exactly one refusal.** An item whose master carries no unit refused
+  any caller-supplied one, with a message reading "This material is kept in ." — an
+  unusable sentence on a floor screen, and newly reachable on the accepted-ask path
+  *because* of the hoist. A blank unit has nothing to disagree with.
+- **The quantity rule over-narrowed.** Closing the `1e3` 500 also started refusing `.5`,
+  `1.` and `+5`, all of which bcmath accepts and the old code took happily. The rule is now
+  exactly what bcmath accepts. Widening a refusal by accident is the failure mode here.
+- **The browser mirror disagreed with the server** on `piece.`, `pieces.`, `each.` and
+  `ea.` — and in the dangerous direction, the UI refusing what the server permits. Mirrored
+  verbatim instead of normalising its own way.
+
+One trap worth recording on its own: `Rule::exists(...)->where($column, $op, $value)` takes
+**two** arguments and drops the third in silence. The draft half of the lifecycle rule
+worked while the cancelled half did nothing at all. It was caught only because the test
+asserted both halves separately — a rule that looks right and half-fails is what a
+single-assertion test would have shipped.
+
+Left alone, deliberately: an accepted ask for a **soft-deleted** item cannot be fulfilled.
+That contradicts "history stays issuable" for the delete case, but it is a deliberate
+earlier decision in this series, hard delete is Super Admin/Owner only (DEC-20260817-002
+§3) so the desks that raise and fulfil asks cannot cause it, and the floor can still cancel
+a stranded ask. Reversing a deliberate call unattended is not engineering's to make.
+
+Also still true and still not fixed: no service-layer unit guard (one HTTP write path, all
+through the FormRequest), and no DOM in the frontend suite, so the GRN draft-restore
+machinery is covered by inspection only.
