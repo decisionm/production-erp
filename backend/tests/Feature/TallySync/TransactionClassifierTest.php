@@ -399,14 +399,16 @@ class TransactionClassifierTest extends TestCase
             ->assertOk()
             ->json('data'))->keyBy('id');
 
-        // The GRN: party is the vendor, items are the received lines.
+        // The GRN: party is the vendor — FC-06's "who supplied it", so null
+        // for this tally-sync-only reader (SupplierIdentityVisibilityTest
+        // pins the finance reader seeing it) — items are the received lines.
         $grnRow = $rows[$grn->id];
         $this->assertSame('receipt_note', $grnRow['category']['key']);
         $this->assertSame('Receipt Note', $grnRow['category']['wire_voucher_type']);
         $this->assertSame('erp', $grnRow['category']['source']);
         $this->assertSame('2026-08-04', $grnRow['business_date']);
         $this->assertSame('GRN-7', $grnRow['document_number']);
-        $this->assertSame('Reliance Industries', $grnRow['party']);
+        $this->assertNull($grnRow['party'], 'the vendor is withheld from a reader without finance (FC-06)');
         $this->assertSame(['first' => 'PET Resin', 'count' => 1], $grnRow['item_summary']);
 
         // The shift voucher: no party; the item count is DISTINCT names across

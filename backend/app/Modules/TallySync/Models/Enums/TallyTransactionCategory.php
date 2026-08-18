@@ -143,6 +143,28 @@ enum TallyTransactionCategory: string
     }
 
     /**
+     * Whether the voucher's party (payload `party_ledger` / `party_gstin`)
+     * is a SUPPLIER — the second half of FC-06 ("Purchase rates and supplier
+     * details are Owner/Accounts only. Floor and sales logins never see what
+     * a material cost or WHO SUPPLIED IT"). True for the Receipt Note the
+     * ERP builds today (enqueueGoodsReceiptNote() writes the PO's vendor as
+     * the party) and for the purchase categories a supplier is the party of
+     * by definition (Purchase; the planned Purchase Order voucher,
+     * DEC-20260812-002 — "vendor resolved to its Tally ledger"). A CUSTOMER
+     * on a Sales invoice or Delivery Note is not FC-06 and reads false, as
+     * does anything with no party. Every surface that must withhold the
+     * supplier from a non-finance reader (TallySyncEntryResource,
+     * EntryPresenter, EntryMappingSurface) asks THIS, so the rule lives once.
+     */
+    public function partyIsSupplier(): bool
+    {
+        return match ($this) {
+            self::ReceiptNote, self::Purchase, self::PurchaseOrder => true,
+            default => false,
+        };
+    }
+
+    /**
      * The exact <VOUCHERTYPENAME> the agent emits for this category, or the
      * voucher type name from the census for a Tally-only one. Null when
      * nothing emits one and nothing in the books carries one.

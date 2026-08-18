@@ -10,7 +10,12 @@ use Laravel\Sanctum\PersonalAccessToken;
  * ONE answer to "is this request the local sync agent?" — shared by the
  * event recorder (which types actors) and the entry resource (which decides
  * who receives a payload's rates), so the two can never disagree about who
- * the agent is.
+ * the agent is — and, built on it, ONE answer to "may this reader see
+ * purchase details?" (mayReadPurchaseDetails), the FC-06 predicate the entry
+ * resource judges BOTH halves of that rule against: rates AND supplier
+ * identity. There is deliberately no second predicate anywhere in this
+ * module: a gate that says "finance or the agent" for the rate and something
+ * else for the vendor is a gate nobody can reason about.
  *
  * The agent authenticates with a Sanctum PERSONAL ACCESS TOKEN carrying the
  * abilities AgentTokenService issues (poll + report + masters), and an
@@ -35,6 +40,28 @@ final class AgentIdentity
     public static function isAgent(?Authenticatable $actor): bool
     {
         return self::token($actor) !== null;
+    }
+
+    /**
+     * FC-06 — "Purchase rates and supplier details are Owner/Accounts only.
+     * Floor and sales logins never see what a material cost or who supplied
+     * it." Who may: finance (finance.view / finance.manage — the permission
+     * MaterialLotResource and GoodsReceiptNoteLineResource gate purchase
+     * rates on; the Owner and Accounts hold it, the store does not) or the
+     * sync AGENT, which must receive the whole payload to build the voucher
+     * Tally is sent (receiptNote.ts writes PARTYLEDGERNAME, RATE and AMOUNT
+     * from it). Judged on a real agent token, never on tokenCan() alone —
+     * see isAgent(). Everyone else — a plain tally-sync.view reader, a
+     * personal access token without the agent's abilities, no user at all —
+     * may not.
+     */
+    public static function mayReadPurchaseDetails(?Authenticatable $actor): bool
+    {
+        if ($actor instanceof User && $actor->hasAnyPermission(['finance.view', 'finance.manage'])) {
+            return true;
+        }
+
+        return self::isAgent($actor);
     }
 
     /**

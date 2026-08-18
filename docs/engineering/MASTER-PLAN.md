@@ -17,8 +17,8 @@ prompt's Phase Completion Contract (§73) — that part of the prompt is kept.
 ```
 PHASE 0   Discovery + audit                    ← THIS DOCUMENT · DONE
 PHASE 1   Live-safety fixes                    PASS WITH DEFERRED · PR #180 · awaiting merge chain
-PHASE 2   Sync Control Center — foundation     PASS WITH DEFERRED · PR (stacked on #180)
-PHASE 3   Sync Control Center — every type     no owner gate
+PHASE 2   Sync Control Center — foundation     PASS WITH DEFERRED · PR #181 (stacked on #180)
+PHASE 3   Sync Control Center — every type     PASS WITH DEFERRED · PR #182 (stacked on #181) · Q43 fail-closed
 PHASE 3.5 Sales visibility (first-class)       Sales stays Tally-originated (DEC-20260809-003)
 PHASE 4   Agent XML/response snapshot          FC-06 review gate
 PHASE 4.5 Download / Export Center             CEC slot BLOCKED until a sample exists

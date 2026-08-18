@@ -33,7 +33,8 @@ branch (DEC-20260810-003). Q34-Q37 are claimed by the 12-Aug overnight
 run (DEC-20260812-001 HRMS/payroll adoption, DEC-20260812-002 PO raised in
 the ERP). Q38-Q41 are claimed by the 12-Aug Tally
 evidence set and the purchase/tax configuration design. Q42 is claimed by the SKU scheme
-design. New questions continue from Q43.
+design. Q43 is claimed by the Phase 3 sync fix loop (duplicate master names).
+New questions continue from Q44.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 DEC-20260809-002/-003 landed with PR #155 (the finance-pull discovery
@@ -690,3 +691,24 @@ format is chosen for prefix search. Proposed shape recorded in
 TYPE-SIZE-SHAPE-COLOUR-WEIGHT, uppercase, hyphens only, three-digit zero-padded
 size, weight without a decimal point. Hard rule: no generated SKU may begin with
 LOCAL-, asserted in a test rather than a comment. Was open since 2026-08-13.
+
+## Q43 · Duplicate master names — should the ERP BLOCK approval, or only warn?
+
+`items.name` and `warehouses.name` carry no unique index, so two ERP items (or
+two warehouses) can share one name. A Tally voucher carries NAMES, not ids, so
+Tally would match ONE of them by name — and the ERP cannot say which. Today
+(Phase 3) the pre-approval voucher preview BLOCKS such a line — fail-closed —
+with the problem "N items in this ERP share the name "X" — Tally would match one
+and this ERP cannot say which; give them distinct names before posting" (and,
+when no candidate carries a Tally GUID, the no-identity problem too); the same
+for a duplicated warehouse name. This is the behaviour the preview had before
+Phase 3 by accident of ordering (it read the FIRST row by name and blocked when
+that row had no GUID); Phase 3's shared resolver made it order-independent and,
+for one review round, POSTABLE — that gap is closed and pinned
+(`VoucherPreviewAmbiguityTest`). The question for the owner: is a duplicate
+master name a hard stop on approval (as now), or a warning the accountant may
+approve past? Known so far: whether any LIVE master name is currently
+duplicated has not been counted (count on the live instance, not here); the sync
+page's mapping surface reports such names as `ambiguous` with the count, so a
+duplicate would be visible there. **Blocks:** nothing new; keeps the old preview
+behaviour (block) until answered. *Open since 2026-08-17.*

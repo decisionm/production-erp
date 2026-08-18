@@ -11,6 +11,16 @@ import {
     retryTallySyncEntry,
 } from '@/features/tally-sync/api';
 import {
+    holdCopy,
+    instant,
+    payloadText,
+    statusColor,
+    statusLabel,
+    voucherNumber,
+    showsFixedAfterFailures,
+} from '@/features/tally-sync/drawer';
+import EntryDrawer from '@/features/tally-sync/EntryDrawer';
+import {
     catalogueNote,
     categoryFilterOptions,
     categoryLabel,
@@ -19,85 +29,11 @@ import {
 } from '@/features/tally-sync/filters';
 import type { TallySyncEntry, TallySyncEntryFilters, TallySyncStatus } from '@/features/tally-sync/types';
 
-const statusColor: Record<TallySyncStatus, string> = {
-    pending: 'default',
-    synced: 'green',
-    failed: 'red',
-    // Neutral on purpose: a dismissed voucher is resolved history, not a
-    // problem — red would drag eyes back to a row nobody needs to act on.
-    dismissed: 'default',
-};
-
-const statusLabel: Record<TallySyncStatus, string> = {
-    pending: 'Waiting for agent',
-    synced: 'In Tally',
-    failed: 'FAILED',
-    dismissed: 'Dismissed — never sent',
-};
-
 /** The status filter's choices — the same words the Status column uses. */
 const statusOptions = (Object.keys(statusLabel) as TallySyncStatus[]).map((status) => ({
     value: status,
     label: statusLabel[status],
 }));
-
-/** One stock line of a production voucher, as the payload carries it. */
-type VoucherStockLine = { item: string; quantity: string; godown?: string | null };
-
-/**
- * The produced[]/consumed[] arrays out of a production voucher's payload —
- * batch and consolidated shift vouchers both carry them — or null for the
- * voucher types that don't (sales, receipt/delivery notes, journals), which
- * fall back to the raw payload view.
- */
-function voucherStockLines(entry: TallySyncEntry, key: 'produced' | 'consumed'): VoucherStockLine[] | null {
-    const value = entry.payload?.[key];
-    if (!Array.isArray(value)) {
-        return null;
-    }
-
-    const lines = value.filter(
-        (line): line is VoucherStockLine =>
-            typeof line === 'object' && line !== null
-            && typeof (line as VoucherStockLine).item === 'string'
-            && typeof (line as VoucherStockLine).quantity === 'string',
-    );
-
-    return lines.length === value.length ? lines : null;
-}
-
-/** A string field out of the voucher payload, or null if it isn't usable. */
-function payloadText(entry: TallySyncEntry, key: string): string | null {
-    const value = entry.payload?.[key];
-
-    return typeof value === 'string' && value !== '' ? value : null;
-}
-
-/**
- * The number staff will search for in Tally. Mirrors the backend's
- * TallySyncEntry::voucherNumber() fallback exactly — same answer on both
- * sides of the wire, so what the screen says matches what the log says.
- */
-function voucherNumber(entry: TallySyncEntry): string {
-    return payloadText(entry, 'voucher_number') ?? `#${entry.id}`;
-}
-
-/**
- * Server-stamped instants (synced_at, delivered_at, created_at) converted to
- * the viewer's clock. Deliberately NOT lib/datetime's formatDateTime: that one
- * reads the ISO string as written, which is right for a wall-clock time the
- * factory typed in, and wrong here — these are stamped `now()` in UTC, and
- * slicing them would show an IST user a sync that happened at 14:30 as 09:00.
- */
-function instant(value: string | null | undefined): string {
-    if (!value) return '—';
-    const parsed = new Date(value);
-
-    return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString('en-IN', {
-        dateStyle: 'medium',
-        timeStyle: 'short',
-    });
-}
 
 /** The most recent of a set of ISO timestamps — all share the server's offset. */
 function latest(values: (string | null | undefined)[]): string | null {
@@ -180,7 +116,11 @@ export default function TallySyncPage() {
     const [dismissingId, setDismissingId] = useState<number | null>(null);
     const [resyncingAll, setResyncingAll] = useState(false);
     const [report, setReport] = useState<{ id: number; voucher: string; ok: boolean; message: string }[] | null>(null);
-    const [viewing, setViewing] = useState<TallySyncEntry | null>(null);
+    // The drawer holds an ID, not a row: the row it shows is looked up from
+    // the live list on every render, so a Resync / Dismiss / Release done
+    // from the drawer's footer updates what the drawer says as soon as the
+    // list refetches — no stale copy of the entry.
+    const [viewingId, setViewingId] = useState<number | null>(null);
 
     // Failed first, always. Everything on this page — the count in the red
     // strip, what "Resync all failed" picks up — reads the same order, so a
@@ -620,6 +560,15 @@ export default function TallySyncPage() {
                             <Space direction="vertical" size={0}>
                                 <strong>{voucherNumber(row)}</strong>
                                 <Typography.Text type="secondary">{row.tally_voucher_type}</Typography.Text>
+                                {/* The agent's builder for this type says, in
+                                    its own docblock, that it is unvalidated
+                                    (Sales, DEC-20260809-003) — said on the
+                                    row, in the backend's words on hover. */}
+                                {row.flags?.unvalidated_builder && (
+                                    <Tooltip title={row.flags.unvalidated_builder.note}>
+                                        <Tag color="warning" style={{ marginTop: 2 }}>unvalidated builder</Tag>
+                                    </Tooltip>
+                                )}
                             </Space>
                         ),
                     },
@@ -661,13 +610,9 @@ export default function TallySyncPage() {
                                 // as "the factory machine should have taken
                                 // this already".
                                 <Space direction="vertical" size={0}>
-                                    <Tag color="blue">
-                                        {row.hold.phase === 'collecting' ? 'Collecting the shift' : 'Quiet period'}
-                                    </Tag>
+                                    <Tag color="blue">{holdCopy(row.hold).tag}</Tag>
                                     <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                        {row.hold.phase === 'collecting'
-                                            ? `Collecting until ${instant(row.hold.shift_ends_at)}`
-                                            : `Waiting: quiet period — last entry joined ${instant(row.hold.last_merged_at)}`}
+                                        {holdCopy(row.hold).detail}
                                     </Typography.Text>
                                 </Space>
                             ) : (
@@ -698,10 +643,14 @@ export default function TallySyncPage() {
                                                 </div>
                                             )}
                                         </>
+                                    ) : row.error_withheld ? (
+                                        // Withheld, not absent — the row DID fail; a bare "—" here
+                                        // would read as "no error" (FC-06, second half).
+                                        <Typography.Text type="warning">{row.error_withheld}</Typography.Text>
                                     ) : (
                                         <Typography.Text type="secondary">—</Typography.Text>
                                     )}
-                                    {(row.resolution_log?.length ?? 0) > 0 && !row.error_message && (
+                                    {showsFixedAfterFailures(row) && (
                                         <Typography.Text type="success" style={{ display: 'block', fontSize: 12 }}>
                                             Fixed after {row.resolution_log!.length} failed attempt{row.resolution_log!.length > 1 ? 's' : ''} — payload regenerated from current mappings.
                                         </Typography.Text>
@@ -738,7 +687,7 @@ export default function TallySyncPage() {
                         title: 'Actions',
                         render: (_, row) => {
                             const view = (
-                                <Button size="small" onClick={() => setViewing(row)}>
+                                <Button size="small" onClick={() => setViewingId(row.id)}>
                                     View
                                 </Button>
                             );
@@ -819,75 +768,19 @@ export default function TallySyncPage() {
                 </Typography.Paragraph>
             )}
 
-            <Modal
-                open={viewing !== null}
-                title={viewing ? `${voucherNumber(viewing)} — as it goes to Tally` : ''}
-                onCancel={() => setViewing(null)}
-                onOk={() => setViewing(null)}
-                width={720}
-                cancelButtonProps={{ style: { display: 'none' } }}
-            >
-                {viewing && (() => {
-                    const consumed = voucherStockLines(viewing, 'consumed');
-                    const produced = voucherStockLines(viewing, 'produced');
-                    const lineColumns = [
-                        { title: 'Item', dataIndex: 'item' },
-                        {
-                            title: 'Godown',
-                            render: (_: unknown, line: VoucherStockLine) =>
-                                line.godown ?? payloadText(viewing, 'godown') ?? '—',
-                        },
-                        { title: 'Quantity', dataIndex: 'quantity', align: 'right' as const },
-                    ];
-
-                    if (consumed === null || produced === null) {
-                        // Non-production vouchers (sales, notes, journals)
-                        // have no two-sided stock shape — show the payload.
-                        return (
-                            <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
-                                {JSON.stringify(viewing.payload, null, 2)}
-                            </pre>
-                        );
-                    }
-
-                    return (
-                        <Space direction="vertical" size={16} style={{ width: '100%' }}>
-                            <Space direction="vertical" size={0}>
-                                {/* What Tally RECEIVES: the production builder
-                                    emits a plain Stock Journal whatever the
-                                    dispatch label says — same layout as the
-                                    accountant's own vouchers. */}
-                                <span>Posts as a <strong>Stock Journal</strong> dated <strong>{payloadText(viewing, 'voucher_date') ?? '—'}</strong></span>
-                                {payloadText(viewing, 'shift') && <span>Shift: {payloadText(viewing, 'shift')}</span>}
-                                {payloadText(viewing, 'batch_number') && <span>Batch: {payloadText(viewing, 'batch_number')}</span>}
-                                {payloadText(viewing, 'narration') && (
-                                    <Typography.Text type="secondary">{payloadText(viewing, 'narration')}</Typography.Text>
-                                )}
-                            </Space>
-                            <div>
-                                <Typography.Text strong>Consumption (Source) — stock out</Typography.Text>
-                                <Table<VoucherStockLine>
-                                    size="small"
-                                    rowKey={(line) => `c-${line.item}-${line.godown ?? ''}`}
-                                    dataSource={consumed}
-                                    pagination={false}
-                                    columns={lineColumns}
-                                />
-                            </div>
-                            <div>
-                                <Typography.Text strong>Production (Destination) — stock in</Typography.Text>
-                                <Table<VoucherStockLine>
-                                    size="small"
-                                    rowKey={(line) => `p-${line.item}-${line.godown ?? ''}`}
-                                    dataSource={produced}
-                                    pagination={false}
-                                    columns={lineColumns}
-                                />
-                            </div>
-                        </Space>
-                    );
-                })()}
-            </Modal>
+            <EntryDrawer
+                entryId={viewingId}
+                listRow={viewingId === null ? null : entries.find((entry) => entry.id === viewingId) ?? null}
+                outcome={viewingId === null ? null : outcomes[viewingId] ?? null}
+                onClose={() => setViewingId(null)}
+                busy={busy}
+                retryingId={retryingId}
+                releasingId={releasingId}
+                dismissingId={dismissingId}
+                onResync={resyncOne}
+                onRelease={releaseOne}
+                onDismiss={confirmDismiss}
+            />
 
             <Modal
                 open={report !== null}

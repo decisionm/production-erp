@@ -87,3 +87,25 @@ Sync-payload rate visibility (four caller kinds incl. the real agent) · event h
 
 ### Still open (from the baseline list)
 `OverReceiptException` · `OverDeliveryException` · `DeliveryService` decrement · carton-scan guards · `InvoiceService` / invoice→Tally · CRM · Finance · `ShiftSummaryService::report()` · second same-mode packaging · `stock_balances == Σ stock_movements` — Phases 5 and 7. **New:** MySQL CI leg (Phase 7).
+
+## Phase 3 (feat/phase-3-sync-every-transaction-type, gate closed 2026-08-17)
+
+| Suite | Result | Evidence |
+|---|---|---|
+| Pint (whole tree) | PASS | clean |
+| Backend PHPUnit | PASS | **1,193 / 7,914** (Phase 2 close 1,097 / 6,503; +96: LineMappingResolverTest · SyncEntryMappingsTest · EntryPresenterTest · VoucherPreviewAmbiguityTest · SupplierIdentityVisibilityTest 8 · PerType/* 6 classes on the real endpoints · Sales/DispatchRefusesQualityRejectedCartonTest · AuditLocalFixturesCommandTest; SyncQueryFiltersTest corrected — it had pinned the q= vendor oracle) |
+| Frontend vitest | PASS | 45 → **69** (`drawer.test.ts` 24 incl. the four `showsFixedAfterFailures` cases) |
+| Typecheck · build | PASS | clean · built |
+| Agent (node:test) | PASS | 69/69 — untouched (`git diff main...HEAD -- tally-sync-agent/` empty) |
+| Factory-knowledge | PASS | exit 0 |
+| Red-before / green-after | PROVEN | per workstream and per fix (ambiguous fail-closed; supplier-identity predicate on headline/mappings/payload/root party/q=; rejection-text leak on error_message/resolution_log root+payload copy/timeline/history; banner status gate) |
+| Sonnet independent QA | PASS → fixes → FAIL → FAIL → **PASS** (re-gate #3, no findings) | see PHASE-LOG |
+| Adversarial review | Opus FAIL (2 P1) · Fable NOT READY → all fixed | 4 P1 · 1 P2 · 1 P3 (observation, deferred) |
+| Browser proof | PARTIAL | drawer chain for GRN-3 as Accounts (rate/amount columns) and as tally-sync-only (Item · Quantity only, no blanks); Ant Select/Input still not drivable via refs → filters at the API layer |
+| API proof | PASS | show keys flags/history/mapping_summary/mappings/summary/timeline; honest mapping_summary on the dev seed (no GUIDs); FC-06 supplier-identity matrix by reader kind |
+
+### Coverage gaps closed this phase
+Mapping state per line without a conflict table (identity/name_only/unmapped/fixture/ambiguous) · ambiguous names fail closed in the preview · supplier identity (not just rate) withheld from readers without standing, at every depth including Tally's own rejection text and the list search · per-type lifecycle through the REAL endpoints incl. the real agent token · DEC-20260807-013 refusal end to end + OverDeliveryException both paths (§4.6) · read-only fixture audit command · frontend banner truth table.
+
+### Still open (from the baseline list)
+`OverReceiptException` · `InvoiceService` / invoice→Tally · CRM · Finance · `ShiftSummaryService::report()` · second same-mode packaging · `stock_balances == Σ stock_movements` — Phases 5 and 7. **Closed here:** `OverDeliveryException` · `DeliveryService` decrement · carton-scan guards. **New:** Delivery replay key (Phase 3.5) · MySQL CI leg (Phase 7).

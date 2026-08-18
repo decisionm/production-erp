@@ -9,6 +9,7 @@ use App\Modules\TallySync\Models\Enums\TallySyncStatus;
 use App\Modules\TallySync\Models\Enums\TallyTransactionCategory;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Models\TallySyncEvent;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -70,9 +71,9 @@ class TallySyncQueryService
      *
      * @param  array<string, mixed>  $filters  the validated ListTallySyncEntriesRequest input
      */
-    public function paginate(array $filters, int $perPage = 20): LengthAwarePaginator
+    public function paginate(array $filters, int $perPage = 20, ?Authenticatable $reader = null): LengthAwarePaginator
     {
-        $query = $this->apply(TallySyncEntry::query(), $filters);
+        $query = $this->apply(TallySyncEntry::query(), $filters, null, $reader);
 
         if (($filters['sort'] ?? null) === self::SORT_STATUS_RANK) {
             // Bound, not interpolated, even though the values are our own
@@ -132,7 +133,7 @@ class TallySyncQueryService
      *     last_masters_pull_at: ?string,
      * }
      */
-    public function summary(array $filters): array
+    public function summary(array $filters, ?Authenticatable $reader = null): array
     {
         // "Today" is the FACTORY's day, judged against the voucher's
         // BUSINESS date (payload->voucher_date), never against created_at:
@@ -148,14 +149,14 @@ class TallySyncQueryService
         // windows and for the held filter, if the request carries one.
         $heldIds = $this->heldIds();
 
-        $filtered = fn (): Builder => $this->apply(TallySyncEntry::query(), $filters, $heldIds);
+        $filtered = fn (): Builder => $this->apply(TallySyncEntry::query(), $filters, $heldIds, $reader);
 
         // held_now: the same filters minus the business-date range (see the
         // docblock) — a held voucher is held whatever day it is dated.
         $undated = array_diff_key($filters, ['from' => true, 'to' => true]);
         $heldNow = $heldIds === []
             ? 0
-            : $this->apply(TallySyncEntry::query(), $undated, $heldIds)->whereIn('id', $heldIds)->count();
+            : $this->apply(TallySyncEntry::query(), $undated, $heldIds, $reader)->whereIn('id', $heldIds)->count();
 
         return [
             'today' => ['date' => $today] + $this->counts(
@@ -187,7 +188,7 @@ class TallySyncQueryService
      * @param  array<string, mixed>  $filters
      * @param  list<int>|null  $heldIds  the gate's verdict, when the caller already has it
      */
-    private function apply(Builder $query, array $filters, ?array $heldIds = null): Builder
+    private function apply(Builder $query, array $filters, ?array $heldIds = null, ?Authenticatable $reader = null): Builder
     {
         if (! empty($filters['status'])) {
             $query->whereIn('status', array_values($filters['status']));
@@ -226,7 +227,7 @@ class TallySyncQueryService
         }
 
         if (isset($filters['q']) && trim((string) $filters['q']) !== '') {
-            $this->applySearch($query, trim((string) $filters['q']));
+            $this->applySearch($query, trim((string) $filters['q']), AgentIdentity::mayReadPurchaseDetails($reader));
         }
 
         if (! empty($filters['shift_id'])) {
@@ -338,16 +339,53 @@ class TallySyncQueryService
      * q=null) would match every shift voucher in the queue. The guard
      * compiles JSON-null-aware on MySQL and is a no-op on SQLite.
      */
-    private function applySearch(Builder $query, string $term): void
+    private function applySearch(Builder $query, string $term, bool $mayReadPurchaseDetails): void
     {
         $needle = '%'.$this->escapeLike(mb_strtolower($term)).'%';
         $grammar = $query->getQuery()->getGrammar();
 
-        $query->where(function (Builder $any) use ($needle, $grammar) {
+        $query->where(function (Builder $any) use ($needle, $grammar, $mayReadPurchaseDetails) {
             foreach (['payload->voucher_number', 'payload->party_ledger', 'payload->batch_number'] as $path) {
-                $any->orWhere(fn (Builder $present) => $present
-                    ->whereNotNull($path)
-                    ->whereRaw('lower('.$grammar->wrap($path).") like ? escape '!'", [$needle]));
+                $any->orWhere(function (Builder $present) use ($path, $needle, $grammar, $mayReadPurchaseDetails) {
+                    $present
+                        ->whereNotNull($path)
+                        ->whereRaw('lower('.$grammar->wrap($path).") like ? escape '!'", [$needle]);
+
+                    // FC-06, second half: the SUPPLIER on a Receipt Note is
+                    // Owner/Accounts only. The resource already withholds the
+                    // name from a reader without that standing — but a LIKE
+                    // over party_ledger would still answer "?q=Reliance →
+                    // 3 rows", a yes/no oracle on who supplied what. So for
+                    // such a reader the party clause simply does not apply to
+                    // supplier-party categories (Receipt Note today; Purchase
+                    // and Purchase Order when they exist). A CUSTOMER on a
+                    // Delivery Note or Sales invoice is not FC-06 and stays
+                    // searchable for everyone.
+                    if ($path === 'payload->party_ledger' && ! $mayReadPurchaseDetails) {
+                        $present->whereNot(fn (Builder $supplier) => $this->whereSupplierPartyCategory($supplier));
+                    }
+                });
+            }
+        });
+    }
+
+    /**
+     * Rows whose category names a SUPPLIER as its party — read from the one
+     * classification table (TransactionClassifier::pairsFor), never from a
+     * second list of voucher types kept here.
+     */
+    private function whereSupplierPartyCategory(Builder $query): void
+    {
+        $query->where(function (Builder $any) {
+            foreach (TallyTransactionCategory::cases() as $category) {
+                if (! $category->partyIsSupplier()) {
+                    continue;
+                }
+                foreach ($this->classifier->pairsFor($category) as [$voucherType, $morph]) {
+                    $any->orWhere(fn (Builder $pair) => $pair
+                        ->where('tally_voucher_type', $voucherType)
+                        ->where('syncable_type', $morph));
+                }
             }
         });
     }

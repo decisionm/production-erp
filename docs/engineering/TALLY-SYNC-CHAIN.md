@@ -125,7 +125,14 @@ a heartbeat poll that delivers nothing records no event).
 - **No CSV here** — the export contract is built once in the Download Center
   (MASTER-PLAN Phase 4.5) on top of this read model.
 - **No change to what reaches Tally**, to `voucher_number` formats, to the release
-  gate, or to the agent. No Tally read of any kind.
+  gate, or to the agent. No Tally read of any kind. **One recorded deviation
+  (Phase 3):** the entry resource now carries a `flags` object on EVERY response —
+  the list, the action responses AND the agent's `GET /tally-sync/pending` — so the
+  agent's rows gained one key. Accepted because the agent does no strict parse of
+  the row — its `TallySyncEntry` interface (`tally-sync-agent/src/cloudApi.ts:12-33`)
+  types the keys it reads and an extra key is ignored, not refused; the resource's
+  own comment says so rather than claiming the prior shape is untouched. `flags`
+  is always an object (`{}` when nothing is raised), never a list.
 - **No UI redesign** — the existing page gets the filter bar and header counts
   wired to the new endpoints; the detail drawer and per-type views are Phase 3.
 

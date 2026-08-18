@@ -119,3 +119,182 @@ screens.
 | Next phase | Phase 3 — Sync Control Center: every real transaction type (detail drawer per type over the normalized chain, human-readable summary, timeline from events, mapping-state surfacing, per-type tests) |
 
 **Phase 2 PR:** #181 (`feat/phase-2-sync-control-center-foundation` → stacked on #180 → #179). Eight commits. **Deployment state:** not deployed — the stack #179 → #180 → #181 awaits the repository merge chain (Cursor → Codex → owner). Nothing pushed to `main`.
+
+---
+
+## PHASE 3 — Sync Control Center: every real transaction type
+
+```
+Phase:    3 — every real transaction type (MASTER-PLAN P3-01..05)
+Status:   PASS WITH DEFERRED ITEMS
+Branch:   feat/phase-3-sync-every-transaction-type (stacked on Phase 2 PR #181 → #180 → #179)
+Dates:    2026-08-17
+
+Goal:
+  Inspect, trace, display, filter and test all real transaction types over the
+  normalized chain — with mapping state surfaced per line WITHOUT inventing a
+  conflict table, a human summary and timeline per type, honest flags (Sales
+  builder unvalidated; GRN order reference not emitted), a detail drawer that
+  walks the chain, and per-type lifecycle contract tests. Sales stays
+  Tally-originated (DEC-20260809-003). No Tally read. Shift aggregation intact.
+
+What changed:
+  • LineMappingResolver — the ONE resolver of voucher-line names → mapping
+    state: identity (a Tally GUID or configured ledger role — proves the ERP
+    linked it once, not that Tally still has it) · name_only (row, no GUID —
+    Tally would match by name if it exists; the ERP cannot know) · unmapped ·
+    fixture (never postable) · ambiguous (>1 ERP row shares the name —
+    items.name and warehouses.name carry no unique index; Tally would match ONE
+    and the ERP cannot say which — nothing is chosen) · none. Exact names,
+    memoised per request, no Tally read. VoucherPreviewService now CALLS it —
+    its pre-approval sentences unchanged, its inline queries gone — so the
+    approval verdict and the Control Center can never disagree. Show endpoint
+    gains `mappings` (per line/dimension) + `mapping_summary`; list carries
+    neither; no rate rides in them. Ambiguity is surfaced, not turned into a new
+    approval gate (that would be a live-data blocker for the owner).
+  • EntryPresenter — `summary` {headline, lines} per category, counts and
+    quantities only, never a rate (GRN at 96.5 → '96.5' provably absent);
+    `timeline` = events ⊕ entry timestamps de-duplicated by kind within 5 s,
+    reconstructions flagged; `flags`: unvalidated_builder (Sales — quotes
+    salesInvoice.ts:19-32; DEC-20260809-003), order_reference_not_emitted
+    (Receipt Note carrying tally_order_no — receiptNote.ts emits neither),
+    label_differs_from_wire (batch), held (the real gate). Flags ride on the
+    list; summary/timeline show-only.
+  • EntryDrawer replaces the JSON View modal — sections in chain order (ERP
+    source → voucher → mappings with state badges → release → payload table
+    per type with rate/amount columns ONLY when the server sent the keys →
+    result → timeline with reconstructions muted). Banners for the flags.
+    Footer reuses the row's Release now / Resync / Dismiss handlers (lifted,
+    not duplicated). Sales rows wear an 'unvalidated builder' tag on the list.
+  • Per-type lifecycle contract tests — six ERP types through the REAL
+    endpoints: create → listed → real-agent-token delivery → fail → retry
+    403/200 → deliver → ack → then every dishonest mutation refused; failed →
+    dismiss → retry refused; 403 for strangers; duplicate enqueue → one row
+    (guards live upstream in each domain; Delivery has NO replay key — a raw
+    re-fired DeliveryDispatched would mint a second row: documented, not
+    papered over → Phase 3.5).
+  • DEC-20260807-013 end to end: quality-rejected carton refused at scan with
+    the exact sentence, nothing moves, mixed scan rolls back; not-yet-QC'd not
+    blocked; good scan dispatches once, one Delivery Note; OverDeliveryException
+    covered on both paths (audit §4.6 gap closed).
+  • tally-sync:audit-fixtures — READ-ONLY report (exit 0, DB byte-identical):
+    packagings pointing at a fixture · entries vouchered under the old sweep
+    hole · vouchers naming a fixture. The Phase 1 deferral delivered; on live
+    the owner decides what to do with any found.
+
+Files/modules:
+  TallySync (LineMappingResolver, EntryMappingSurface, EntryPresenter,
+  VoucherPreviewService, TallySyncEntryResource) · Console (AuditLocalFixtures)
+  · frontend tally-sync (EntryDrawer.tsx, drawer.ts, types.ts, TallySyncPage.tsx)
+  · tests: LineMappingResolverTest, SyncEntryMappingsTest, EntryPresenterTest,
+  PerType/* (6 + base), Sales/DispatchRefusesQualityRejectedCartonTest,
+  AuditLocalFixturesCommandTest, drawer.test.ts
+
+Migrations:       none
+Tests before:     1,097 / 6,503 (backend) · 45 (frontend)
+Tests after:      1,193 / 7,914 (backend, +96) · 69 (frontend, +24)
+                  agent untouched 69/69 · pint/typecheck/build clean · knowledge sound
+
+Sonnet first gate:   PASS (workstreams integrated; no P0/P1) — then adversarial
+                     review opened two P1s, so the gate was re-run after each fix
+                     round rather than treated as final.
+Findings:
+  P1  Ambiguous mapping arm weakened the fail-closed preview: the resolver's
+      STATE_AMBIGUOUS `break;` let a voucher naming a duplicated item/godown
+      reach the pre-approval verdict without the "no identity" refusal the old
+      `->first()` path gave (implementer framed it as "no new gate"; accepted
+      too quickly — recorded as a lesson). Fixed: ambiguous arms fail closed
+      (no-identity problem when no candidate carries a GUID + an ambiguity
+      blocker; UOM and packing-store checks walk ALL candidates); the
+      block-vs-warn policy itself is the owner's → Q43.
+  P1  FC-06 second half. Every earlier FC-06 gate reasoned about MONEY only;
+      supplier IDENTITY (party ledger, GSTIN) rode Receipt Note headline,
+      mappings.party, payload.party_ledger/party_gstin, root `party` and the
+      list `q=` search for a tally-sync-only reader. Fixed with ONE predicate:
+      AgentIdentity::mayReadPurchaseDetails() ∧ TallyTransactionCategory::
+      partyIsSupplier() → withheld state on mappings, headline without the
+      party, payload keys stripped, root party null, q= excludes supplier-party
+      categories from the party_ledger LIKE (SyncQueryFiltersTest had been
+      PINNING the oracle — corrected to expect []).
+  P1  (re-gate #1) Tally's own rejection text carries the supplier ("Ledger
+      does not exist : <vendor>") — leaked via error_message, resolution_log
+      .previous_error (root AND the copy inside payload), timeline detail,
+      history[].details. Fixed across TallySyncEntryResource / EntryPresenter
+      / TallySyncEventResource with an `error_withheld` note; PerTypeLifecycle
+      TestCase now states the rule per type instead of asserting error_message
+      readable for all.
+  P1  (re-gate #2) my frontend commit rendering error_withheld exposed a new
+      contradiction: the "Fixed after N failed attempts" banner was judged on
+      `!error_message` — now null on a still-FAILED withheld voucher → green
+      "Fixed" beside "withheld (FC-06)". Fixed: predicate lifted to drawer.ts
+      showsFixedAfterFailures() gated on status first, used by both the row
+      and the drawer, pinned by four vitest cases (5224cfc).
+  P2  ambiguity note wording overclaimed ("Tally would match ONE") → softened
+      to "this ERP cannot check"; identity notes say "linked once", not "Tally
+      still has it".
+  P3  fixSuggestion() has no arm for "Ledger does not exist" (observation, not
+      a defect — the failure still lands in the drawer verbatim for readers
+      with standing).
+Fixes:               all P1/P2 above closed on the branch (commits 8f1a16f …
+                     2985e00, 5224cfc); red-before/green-after per fix.
+Sonnet final gate:   re-gate #1 FAIL (rejection-text leak) → re-gate #2 FAIL
+                     (banner) → **re-gate #3 PASS** — no findings; banner truth
+                     table pinned; no other surface infers health from a null
+                     error (statusColor/holdCopy/timelineItems/button state
+                     checked); status emitted unchanged when withholding;
+                     1,193/7,914 · 69 · agent diff empty · knowledge exit 0.
+Independent review:  Opus (rules/honesty/FC-06) FAIL → both P1s fixed;
+                     Fable (correctness/tests) NOT READY → ambiguous arm fixed
+                     + q= oracle closed → satisfied by re-gate #3.
+
+API proof:
+  Show #3 (Accounts, dev DB): keys flags/history/mapping_summary/mappings/
+  summary/timeline present; headline "Receipt Note GRN-3 · Auro Print &
+  Packaging · 31-Jul-2026 · 1 item × 10000 · waiting for agent"; mapping_summary
+  {identity 0, name_only 3, unmapped 0, fixture 0, ambiguous 0} — HONEST on the
+  dev seed (no GUIDs) with the party's no-FK note verbatim; timeline one row,
+  source backfill, flagged.
+
+Browser proof:
+  Drawer opened for GRN-3 as Accounts: "GRN-3 — as it goes to Tally" → ERP source
+  → Voucher (Posts to Tally as Receipt Note) → Party ledger badged 'name only' →
+  Release "Not held" → Payload table Item · Quantity · Rate 0.8500 · Amount
+  8500.0000 → Result → Timeline "Queued [reconstructed] · backfill 2026-08-16"
+  (screenshot-1786914409631-7.jpg, -8.jpg). SAME drawer as the tally-sync-only
+  user: payload table Item · Quantity ONLY — no Rate/Amount columns, no blanks
+  (screenshot-1786914523486-8.jpg). Three-clause honesty line at the foot.
+  Harness note: Ant Select/Input still not drivable via refs; View needed a
+  second click on a fresh page — behaviour is proven at the API layer.
+
+Data/transaction proof:
+  Nothing that reaches Tally changed (payload builders, voucher_number,
+  pending() hand-out, release gate untouched). No migration. No Tally read.
+
+Security proof:
+  Non-finance reader: mappings/summary/timeline/flags carry no rate at any depth
+  (walked in SyncEntryMappingsTest + EntryPresenterTest); payload rate gate from
+  Phase 2 intact; the agent still receives the whole payload (SyncPayloadRate
+  VisibilityTest); 403 for users without tally-sync.view on list/show/summary
+  (per-type tests). Audit command proven read-only.
+
+Deferred items:
+  • unvalidated_builder now covers all four builders that carry the "NOT YET
+    VALIDATED" docblock (salesInvoice.ts:19, receiptNote.ts:17,
+    deliveryNote.ts:17, journalEntry.ts:13) — validation of those XML shapes
+    against real Tally is Phase 4/6 evidence work, not a flag change.
+  • fixSuggestion() "Ledger does not exist" arm (P3) — add when the first
+    real-failure text is on file; not invented from a guess.
+  • Delivery has no replay key (raw re-fired DeliveryDispatched → second row)
+    → Phase 3.5 P3.5-03 (the delivery/SO model work).
+  • `ambiguous` surfaces but does not block approval — a new approval gate on
+    live data is the owner's call.
+  • needs_review status: still deferred (Phase 2 reasoning stands; no
+    real-failure evidence yet).
+
+Owner-gated items:  Q43 (duplicate master names: block or warn) — the ERP fails
+                    closed until answered; audit-fixtures output on live → owner
+                    decides what to do with any found.
+PR:                 #182 (base: feat/phase-2-sync-control-center-foundation → #181 → #180 → #179)
+Deployment state:   not deployed; stack #179 → #180 → #181 → this PR awaits the merge chain
+Next phase:         3.5 — Sales and Sales Order visibility (first-class)
+```
