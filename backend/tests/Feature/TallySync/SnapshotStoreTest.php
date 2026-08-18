@@ -441,7 +441,10 @@ class SnapshotStoreTest extends TestCase
         $this->assertSame(TallySyncEvent::DIRECTION_ERP_TO_TALLY, $event->direction);
         $this->assertSame(TallySyncEvent::ACTOR_AGENT, $event->actor_type);
         $this->assertSame('factory-pc', $event->actor_label);
-        $this->assertSame(
+        // Every key, every value, and nothing else — by name: `details` is a
+        // json column and MySQL hands its keys back in its own order (see
+        // Tests\TestCase::assertSameJson).
+        $this->assertSameJson(
             [
                 'snapshot_id' => $id,
                 'attempt' => 2,

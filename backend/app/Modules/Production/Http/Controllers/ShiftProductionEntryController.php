@@ -40,6 +40,8 @@ class ShiftProductionEntryController extends Controller
             workCenterId: $request->idFilter('work_center_id'),
             shiftId: $request->idFilter('shift_id'),
             batchStatus: $request->batchStatus(),
+            correctable: $request->flagFilter('correctable'),
+            awaitingCorrection: $request->flagFilter('awaiting_correction'),
         ));
     }
 
@@ -61,6 +63,14 @@ class ShiftProductionEntryController extends Controller
      * The owner's priority (05-Aug): "the daily production entry, each page needs
      * to enter in our app." Ten to twelve machine rows, entered together, instead
      * of two dialogs each.
+     *
+     * NO SCREEN CALLS THIS TODAY (Phase 7, P7-04). Nothing in the bundled SPA
+     * references the route — it is reachable only by an API client, and
+     * `ApiSurfaceSmokeTest` pins that fact so it cannot drift unnoticed. It is
+     * deliberately NOT documented as "API-only": the priority quoted above is
+     * a 05-Aug discussion, not a recorded decision, so whether the factory
+     * still wants the page screen is owner question Q49 — the endpoint is not
+     * retired and not finished on an agent's judgement.
      *
      * ALWAYS 200, even when rows fail, and that is the contract rather than
      * laziness about status codes. A page is not one thing that either worked or

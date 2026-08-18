@@ -114,7 +114,10 @@ class JournalLifecycleTest extends PerTypeLifecycleTestCase
 
         $this->assertSame('2026-08-10', $entry->payload['voucher_date']);
         $this->assertSame('Cash sale banked', $entry->payload['narration']);
-        $this->assertSame(
+        // Line order is the builder's contract and is asserted; key order
+        // inside a line is the json column's (MySQL re-orders it) — see
+        // Tests\TestCase::assertSameJson.
+        $this->assertSameJson(
             [
                 ['ledger' => '1100 - Bank', 'debit' => '100.0000', 'credit' => '0.0000', 'memo' => 'to bank'],
                 ['ledger' => '4000 - Sales', 'debit' => '0.0000', 'credit' => '100.0000', 'memo' => 'from sales'],
@@ -137,7 +140,7 @@ class JournalLifecycleTest extends PerTypeLifecycleTestCase
         // as a Receipt Note's rate/amount, and gated by the same one rule
         // (FC-06): a viewer without finance.* sees the ledger and the memo,
         // never the figures — keys OMITTED, not nulled.
-        $this->assertSame(
+        $this->assertSameJson(
             [['ledger' => '1100 - Bank', 'memo' => 'to bank'], ['ledger' => '4000 - Sales', 'memo' => 'from sales']],
             $row['payload']['lines'],
         );

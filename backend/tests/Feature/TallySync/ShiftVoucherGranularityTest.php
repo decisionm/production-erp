@@ -138,14 +138,17 @@ class ShiftVoucherGranularityTest extends TestCase
         $this->assertSame("SJ-20260723-S{$this->shift->id}", $voucher->payload['voucher_number']);
         $this->assertSame('2026-07-23', $voucher->payload['voucher_date']);
 
-        // Consumption side: item+godown-wise totals across the members.
-        $this->assertSame([
+        // Consumption side: item+godown-wise totals across the members. Row
+        // ORDER is asserted (the builder walks members, then each member's
+        // consumptions — first seen, first listed); key order inside a row
+        // is not — MySQL's JSON column re-orders object keys (Tests\TestCase).
+        $this->assertSameJson([
             ['item' => 'PET Resin', 'quantity' => '350.0000', 'godown' => 'RM Store'],
             ['item' => 'Masterbatch Amber', 'quantity' => '2.0000', 'godown' => 'RM Store'],
         ], $voucher->payload['consumed']);
 
         // Production side: item-wise produced totals.
-        $this->assertSame([
+        $this->assertSameJson([
             ['item' => '500ml PET Bottle', 'quantity' => '8000.0000', 'godown' => 'FG Store'],
         ], $voucher->payload['produced']);
 
@@ -195,10 +198,10 @@ class ShiftVoucherGranularityTest extends TestCase
 
         $followUp = TallySyncEntry::query()->orderByDesc('id')->first();
         $this->assertSame("SJ-20260723-S{$this->shift->id}-2", $followUp->payload['voucher_number']);
-        $this->assertSame([
+        $this->assertSameJson([
             ['item' => 'PET Resin', 'quantity' => '40.0000', 'godown' => 'RM Store'],
         ], $followUp->payload['consumed']);
-        $this->assertSame([
+        $this->assertSameJson([
             ['item' => '500ml PET Bottle', 'quantity' => '1000.0000', 'godown' => 'FG Store'],
         ], $followUp->payload['produced']);
         $this->assertSame([$third->id], $followUp->payload['entry_ids']);
@@ -267,7 +270,7 @@ class ShiftVoucherGranularityTest extends TestCase
         $voucher = TallySyncEntry::query()->where('syncable_type', (new Shift)->getMorphClass())->sole();
         $this->assertSame([$shiftEra->id], $voucher->payload['entry_ids'], 'Batch-era entry must not be swept');
         $this->assertNull($batchEra->fresh()->tally_sync_entry_id);
-        $this->assertSame(
+        $this->assertSameJson(
             [['item' => 'PET Resin', 'quantity' => '100.0000', 'godown' => 'RM Store']],
             $voucher->payload['consumed'],
         );

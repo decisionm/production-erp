@@ -222,6 +222,21 @@ class TallySyncEntryResource extends JsonResource
                 $this->relationLoaded('snapshots'),
                 fn () => TallySyncSnapshotResource::collectionForCategory($this->snapshots, $category, $mayReadPurchaseDetails),
             ),
+            // How many snapshots this voucher HAS, and whether the list
+            // above is cut to the newest config('tally-sync.snapshot_show_
+            // cap') of them (Phase 7, P7-03 (b)) — the show endpoint seats
+            // the capped relation and the count together
+            // (TallySyncQueryService::show); when only the relation is
+            // seated (an older caller), the total is what was loaded and
+            // nothing is claimed cut. Rides the same gate as `snapshots`.
+            'snapshots_total' => $this->when(
+                $this->relationLoaded('snapshots'),
+                fn () => (int) ($this->snapshots_count ?? $this->snapshots->count()),
+            ),
+            'snapshots_truncated' => $this->when(
+                $this->relationLoaded('snapshots'),
+                fn () => (int) ($this->snapshots_count ?? $this->snapshots->count()) > $this->snapshots->count(),
+            ),
             // `mappings` + `mapping_summary` — for every NAME this voucher
             // hands Tally (each line's item and godown, the ledgers, the
             // party, the Sales ledger), whether the ERP resolved it by

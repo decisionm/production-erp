@@ -251,7 +251,8 @@ class EstimationUnifiedTest extends TestCase
             $this->assertNull($noCt['expected_pieces']);
             $this->assertNull($noCt['expected_boxes']);
             $this->assertNull($noCt['efficiency_pct']);
-            $this->assertSame('5880', $noCt['actual_pieces']);
+            // 4 dp: one shape, the live one — productionMetrics.
+            $this->assertSame('5880.0000', $noCt['actual_pieces']);
         }
     }
 

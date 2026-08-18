@@ -88,7 +88,9 @@ class StartBatchConcurrencyTest extends TestCase
 
         DB::enableQueryLog();
         app(ShiftProductionEntryService::class)->startBatch($this->payload($f), null);
-        $log = collect(DB::getQueryLog())->pluck('query')->map(fn ($q) => strtolower($q));
+        // Identifiers normalised to one quoting: sqlite's grammar writes
+        // "work_centers", MySQL's `work_centers` — the suite runs on both.
+        $log = collect(DB::getQueryLog())->pluck('query')->map(fn ($q) => strtolower(str_replace('`', '"', $q)));
         DB::disableQueryLog();
 
         $machineRead = $log->search(fn (string $q) => str_starts_with($q, 'select') && str_contains($q, 'from "work_centers"'));
@@ -128,7 +130,7 @@ class StartBatchConcurrencyTest extends TestCase
 
         DB::enableQueryLog();
         app(ShiftProductionEntryService::class)->startBatch($this->payload($f), null);
-        $queries = collect(DB::getQueryLog())->pluck('query')->map(fn ($q) => strtolower($q));
+        $queries = collect(DB::getQueryLog())->pluck('query')->map(fn ($q) => strtolower(str_replace('`', '"', $q)));
         DB::disableQueryLog();
 
         // Nothing may commit between locking the machine and inserting the

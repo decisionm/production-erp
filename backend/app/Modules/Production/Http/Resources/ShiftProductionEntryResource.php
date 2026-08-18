@@ -6,6 +6,8 @@ use App\Modules\Core\Http\Resources\UserResource;
 use App\Modules\HRMS\Http\Resources\EmployeeResource;
 use App\Modules\Inventory\Http\Resources\ItemResource;
 use App\Modules\Inventory\Http\Resources\WarehouseResource;
+use App\Modules\Production\Models\BatchResinAllocation;
+use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Services\BagCostAllocationService;
@@ -30,10 +32,35 @@ class ShiftProductionEntryResource extends JsonResource
     private ?array $pageTallyLinks = null;
 
     /**
-     * A page of entries resolves its Tally links in a constant number of
-     * queries — TallySyncLinkService::forMany / forEntryIds over the whole
-     * page — instead of one lookup per row, then hands each row its own
-     * answer. Everything else about the collection is the framework's.
+     * The page's material costs, keyed by entry id, priced ONCE for the
+     * whole collection (ShiftProductionEntryService::materialCosts — one
+     * stock_movements read per page, Phase 7 P7-03 (e)) — null on a
+     * resource made on its own, which prices its single entry itself. Not
+     * a wire field.
+     *
+     * @var array<int, array{lines: list<array<string, mixed>>, total_cost: ?string}|null>|null
+     */
+    private ?array $pageMaterialCosts = null;
+
+    /**
+     * The page's LIVE bag-cost allocation rows, keyed by entry id, read
+     * ONCE for the whole collection (BagCostAllocationService::forEntries —
+     * one batch_resin_allocations read per page) and handed to summary()
+     * per row — null on a resource made on its own, which lets summary()
+     * read its single entry's rows itself. Not a wire field.
+     *
+     * @var array<int, Collection<int, BatchResinAllocation>>|null
+     */
+    private ?array $pageAllocationRows = null;
+
+    /**
+     * A page of entries resolves its Tally links AND its two cost reads in
+     * a constant number of queries — TallySyncLinkService::forMany /
+     * forEntryIds, ShiftProductionEntryService::materialCosts and
+     * BagCostAllocationService::forEntries over the whole page — instead
+     * of one lookup per row, then hands each row its own answer. The
+     * index, Completed Today and the CEC composition all come through
+     * here. Everything else about the collection is the framework's.
      */
     public static function collection($resource): AnonymousResourceCollection
     {
@@ -43,9 +70,16 @@ class ShiftProductionEntryResource extends JsonResource
             }
 
             $rows = $collection->collection->filter(fn ($row) => $row instanceof self);
-            $links = self::tallyLinksFor($rows->map(fn (self $row) => $row->resource));
-            $rows->each(function (self $row) use ($links): void {
+            $entries = $rows->map(fn (self $row) => $row->resource);
+            $links = self::tallyLinksFor($entries);
+            $materialCosts = $entries->isEmpty() ? [] : app(ShiftProductionEntryService::class)->materialCosts($entries);
+            $allocationRows = $entries->isEmpty() ? [] : app(BagCostAllocationService::class)->forEntries(
+                $entries->filter(fn (ShiftProductionEntry $entry) => $entry->batch_status === BatchStatus::Completed)->pluck('id')->all(),
+            );
+            $rows->each(function (self $row) use ($links, $materialCosts, $allocationRows): void {
                 $row->pageTallyLinks = $links;
+                $row->pageMaterialCosts = $materialCosts;
+                $row->pageAllocationRows = $allocationRows;
             });
         });
     }
@@ -57,7 +91,13 @@ class ShiftProductionEntryResource extends JsonResource
         // `material_cost` and `batch_cost` each compute their own would
         // double the query count of the busiest read in the module — a
         // 20-row approval page is the normal case, not the worst one.
-        $materialCost = app(ShiftProductionEntryService::class)->materialCost($this->resource);
+        //
+        // On a page (collection() above) the price is already in hand — the
+        // whole page was priced off one stock_movements read; a resource
+        // made on its own prices its one entry here.
+        $materialCost = $this->pageMaterialCosts !== null && array_key_exists((int) $this->id, $this->pageMaterialCosts)
+            ? $this->pageMaterialCosts[(int) $this->id]
+            : app(ShiftProductionEntryService::class)->materialCost($this->resource);
 
         // ONE GATE FOR EVERY RATE ON THIS PAYLOAD. Per-material purchase
         // rates are Owner/Accounts data (FC-06); the module-coarse
@@ -304,10 +344,16 @@ class ShiftProductionEntryResource extends JsonResource
             // THERE ARE NO BAG BARCODES OR SUPPLIER LOTS IN IT AT ANY LEVEL
             // any more. The owner's correction (2-Aug) ended the bag-to-batch
             // claim — see BagCostAllocationService.
+            //
+            // Same one-read-per-page rule as material_cost: on a page the
+            // live allocation rows were read once for every row
+            // (collection() above) and are handed in; alone, summary()
+            // reads its own.
             'batch_cost' => app(BagCostAllocationService::class)->summary(
                 $this->resource,
                 withDetail: $showsRates,
                 materialCost: $materialCost,
+                liveRows: $this->pageAllocationRows[(int) $this->id] ?? null,
             ),
             'sync_error' => $this->when(
                 $this->status === ShiftProductionEntryStatus::Failed && $this->relationLoaded('tallySyncEntries'),

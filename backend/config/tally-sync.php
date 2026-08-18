@@ -85,6 +85,24 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Snapshots shown per voucher (Phase 7)
+    |--------------------------------------------------------------------------
+    |
+    | How many of a voucher's snapshots the show endpoint (GET
+    | /tally-sync/entries/{id}) carries — the NEWEST this many, newest
+    | first. A voucher retried through a long Tally outage holds one
+    | snapshot per attempt, each with an XML body of up to 2 MB, and the
+    | drawer used to receive them all. The response says how many exist
+    | (`snapshots_total`) and whether the list is cut (`snapshots_truncated`).
+    | What is KEPT is the retention rule above; this is only what is SHOWN.
+    | Engineering default, not a factory decision.
+    |
+    */
+
+    'snapshot_show_cap' => (int) env('TALLY_SYNC_SNAPSHOT_SHOW_CAP', 20),
+
+    /*
+    |--------------------------------------------------------------------------
     | Purchase Order → Tally (Phase 6, STAGED — OFF by default)
     |--------------------------------------------------------------------------
     |

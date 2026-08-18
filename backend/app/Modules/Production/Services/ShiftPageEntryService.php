@@ -21,6 +21,11 @@ use Throwable;
  * interactions to record. The floor does this every day for three shifts. That
  * arithmetic is the feature.
  *
+ * STATUS (Phase 7, P7-04): the endpoint works and is tested; NO screen calls
+ * it. The priority quoted above is a discussion, not a recorded decision, so
+ * whether the page screen is still wanted is owner question Q49. Nothing here
+ * is retired or finished until that is answered.
+ *
  * ============================ ROW BY ROW, NOT PAGE ============================
  *
  * Each row gets its OWN transaction, and a row that fails is reported beside the

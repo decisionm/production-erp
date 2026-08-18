@@ -61,6 +61,19 @@ return [
             'engine' => null,
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 Mysql::ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+                /*
+                 * update() must answer "rows the WHERE matched", not "rows
+                 * whose values changed" — MySQL's default. Every lifecycle
+                 * transition in this codebase is a conditional UPDATE guard
+                 * (where the state as read → update → 0 rows means someone
+                 * else moved it, throw), and one of them — returning a
+                 * never-checked batch to production, which writes nulls over
+                 * nulls — matched its row, changed nothing, read 0 and refused
+                 * a legitimate return on the live instance while the sqlite
+                 * suite (which reports matched rows) stayed green. Pinned by
+                 * tests/Feature/DatabaseDriverParityTest.php.
+                 */
+                Mysql::ATTR_FOUND_ROWS => true,
             ]) : [],
         ],
 
@@ -81,6 +94,8 @@ return [
             'engine' => null,
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 Mysql::ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+                // Same reason as the mysql connection above (matched rows, not changed rows).
+                Mysql::ATTR_FOUND_ROWS => true,
             ]) : [],
         ],
 

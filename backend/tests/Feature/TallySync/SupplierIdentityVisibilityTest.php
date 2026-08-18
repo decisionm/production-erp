@@ -189,7 +189,9 @@ class SupplierIdentityVisibilityTest extends TestCase
 
         $this->actAsStaff(['tally-sync.view']);
         $row = collect($this->getJson('/api/v1/tally-sync/entries')->assertOk()->json('data'))->firstWhere('id', $journal->id);
-        $this->assertSame(
+        // Key order inside a line is the json column's (MySQL re-orders it);
+        // the key SET and the line order are what is asserted — Tests\TestCase.
+        $this->assertSameJson(
             [['ledger' => '4000 - Sales', 'memo' => null], ['ledger' => '1200 - Debtors', 'memo' => null]],
             $row['payload']['lines'],
             'debit and credit are OMITTED, not nulled, and the rest of the line is untouched',

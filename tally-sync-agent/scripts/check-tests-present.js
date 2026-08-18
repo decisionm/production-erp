@@ -25,6 +25,7 @@ const REQUIRED = [
     'versionAdvance.test.js',
     'postDecision.test.js',
     'snapshot.test.js',
+    'snapshotRetry.test.js',
     'purchaseOrder.test.js',
 ];
 

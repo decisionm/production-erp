@@ -1,5 +1,6 @@
 import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
+import { CORRECTION_READ_PER_PAGE, type EntryWalk, walkEntryPages } from './correctionReads';
 import type {
     ConfigurationReview,
     ProductVariants,
@@ -370,6 +371,17 @@ export interface ShiftProductionEntryFilters {
     work_center_id?: number;
     shift_id?: number;
     batch_status?: BatchStatus;
+    /**
+     * Phase 7 (WS-B): the two correction flags, filtered IN SQL by the
+     * server from the same fields the resource derives them from. Send `1`
+     * to ask for only those rows; omit for no filter. `awaiting_correction`
+     * = quality sent the batch back and the floor has not re-submitted
+     * (correction.awaiting_correction); `correctable` = pending AND
+     * completed AND not quality-checked (canAmendCompletion in types.ts —
+     * the server mirrors that predicate).
+     */
+    awaiting_correction?: 1;
+    correctable?: 1;
     per_page?: number;
     page?: number;
 }
@@ -407,41 +419,45 @@ export async function listCompletedEntriesForDay(productionDate: string): Promis
 }
 
 /**
- * Every completed batch still waiting for its approval chain — the whole
- * pending list, not one page of it.
+ * The two correction reads the Shift Floor keeps beside Completed Today
+ * (Phase 7, WS-C) — the server's own filters, one request each in the
+ * normal case, replacing the `?status=pending` walk to page 25 that used
+ * to feed both lists from the whole approval backlog every minute.
  *
- * WHY IT PAGES INSTEAD OF READING THE FIRST RESPONSE, the same reason the
- * quality queue does: the list is fixed at 20 per page and ordered by
- * production date descending, and the batches that need attention are exactly
- * the ones that have been waiting longest. A night shift running 22:00→06:00
- * files under YESTERDAY's production date, so at 06:45 its batches are neither
- * "today" nor near the top of a newest-first page — and they are precisely the
- * ones a supervisor is still doing paperwork on.
+ * WHY NEITHER IS SCOPED TO TODAY, the same reason the old walk was not:
+ * quality can send back a batch produced two nights ago, and the night
+ * shift's own batches file under YESTERDAY's production date and are still
+ * theirs to correct at 06:45 when the clock has rolled to Day. Reading
+ * either off today's list would hide exactly the batches somebody is
+ * standing there holding.
  *
- * `status=pending` is the server's own filter and already implies a completed
- * batch (ShiftProductionEntryService::paginate refuses to mix in a running
- * one), so the walk is bounded by the approval backlog rather than by all of
- * production history. `meta.last_page` bounds the loop; the hard cap is a
- * second bound so a malformed meta cannot spin, and it is the honest limit of
- * this read — a backlog deeper than 25 pages (500 batches awaiting approval)
- * would leave the oldest unlisted, which is itself a sign the chain has
- * stopped moving.
+ * Both walk `meta.last_page` at the server's page ceiling (100) under the
+ * same 500-row bound the old read carried (correctionReads.ts says why);
+ * `truncated` says when that bound, not the last page, ended the read.
+ * `correctionLists()` derives the two lists the page renders and keeps the
+ * client predicates as a parity guard.
+ *
+ * `status=pending` rides along on both. Each flag already implies it on the
+ * server (a sent-back batch and an amendable one are both pending, completed
+ * and unchecked by quality — ShiftProductionEntryService::correctionHistory,
+ * amendCompletion), so on a matching backend it is a no-op; on a backend
+ * that does not read the flag keys yet it keeps the read bounded to the
+ * approval backlog, exactly what the old walk read, rather than the newest
+ * 500 entries of all history.
  */
-export async function listPendingEntries(): Promise<ShiftProductionEntry[]> {
-    const all: ShiftProductionEntry[] = [];
-    let page = 1;
-    let lastPage = 1;
+export async function listAwaitingCorrectionEntries(): Promise<EntryWalk> {
+    return walkEntryPages((page) =>
+        listShiftProductionEntries({
+            status: 'pending',
+            awaiting_correction: 1,
+            per_page: CORRECTION_READ_PER_PAGE,
+            page,
+        }));
+}
 
-    do {
-        const { data } = await api.get<Paginated<ShiftProductionEntry>>('/production/shift-production-entries', {
-            params: { status: 'pending', page },
-        });
-        all.push(...(data?.data ?? []));
-        lastPage = data?.meta?.last_page ?? 1;
-        page += 1;
-    } while (page <= lastPage && page <= 25);
-
-    return all;
+export async function listCorrectableEntries(): Promise<EntryWalk> {
+    return walkEntryPages((page) =>
+        listShiftProductionEntries({ status: 'pending', correctable: 1, per_page: CORRECTION_READ_PER_PAGE, page }));
 }
 
 /**
@@ -1064,7 +1080,7 @@ export async function getShiftKpiReport(shiftId: number | undefined, productionD
  * actual_production_kg (shiftSummaryReconcile.ts): the same entries the
  * server summed, fetched the way Completed Today fetches them.
  *
- * The 25-page cap is the same second bound listPendingEntries carries — a
+ * The 25-page cap is a second bound — a
  * malformed meta cannot spin the loop; 2,500 completed batches on one date
  * is not a factory day. If the cap, not the last page, ends the walk the
  * result says `truncated: true` so the reconcile line never calls a partial

@@ -199,7 +199,7 @@ class ProductionReportService
             return $right <=> $left ?: $a['entry_id'] <=> $b['entry_id'];
         });
 
-        return ['date_from' => $dateFrom, 'date_to' => $dateTo, 'rows' => $rows];
+        return ['date_from' => $dateFrom, 'date_to' => $dateTo, ...self::capped($rows, 'rows')];
     }
 
     /**
@@ -259,7 +259,7 @@ class ProductionReportService
             ];
         }
 
-        return ['date_from' => $dateFrom, 'date_to' => $dateTo, 'lots' => $lotRows];
+        return ['date_from' => $dateFrom, 'date_to' => $dateTo, ...self::capped($lotRows, 'lots')];
     }
 
     /**
@@ -347,6 +347,30 @@ class ProductionReportService
                 'sku' => $entry->item?->sku,
                 'name' => $entry->item?->name,
             ],
+        ];
+    }
+
+    /**
+     * Cut a report's list at the configured cap and SAY SO.
+     *
+     * A range wider than the factory's day is bounded only by
+     * MAX_RANGE_DAYS, so a busy period can return more rows than a screen
+     * should hold. The list is cut — but never silently: `truncated` says
+     * the range holds more than is shown and `row_cap` says where the line
+     * was drawn, so nobody reads a partial list as the whole period.
+     *
+     * @param  array<int, array<string, mixed>>  $rows
+     * @return array{0: mixed, row_cap: int, truncated: bool}
+     */
+    private static function capped(array $rows, string $key): array
+    {
+        $cap = max(1, (int) config('production.report_row_cap', 5000));
+        $truncated = count($rows) > $cap;
+
+        return [
+            $key => $truncated ? array_slice($rows, 0, $cap) : $rows,
+            'row_cap' => $cap,
+            'truncated' => $truncated,
         ];
     }
 }

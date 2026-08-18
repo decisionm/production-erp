@@ -160,7 +160,11 @@ class ProductionExportsTest extends TestCase
         $csv = $this->csv($this->postJson('/api/v1/exports/shift_summary', ['production_date' => self::DATE])->assertOk());
 
         $this->assertSame(
-            ['scope', 'shift_id', 'shift', 'production_date', 'supervisor_code', 'supervisor', 'target_production_kg', 'actual_production_kg', 'rejection_kg', 'net_good_output_kg', 'efficiency_percent', 'rejection_percent', 'machines_running', 'machines_down', 'idle_time_hours', 'no_of_mold_changes', 'power_consumption_units', 'unit_per_kg', 'power_interruption_hours', 'remarks'],
+            // Phase 7 (P7-03 (f)): `machines_running` / `machines_down` →
+            // `machines_running_now` / `machines_down_now` — the file reads
+            // the report's honest *_now keys (current state, not a fact of
+            // the date); the JSON aliases stay this release.
+            ['scope', 'shift_id', 'shift', 'production_date', 'supervisor_code', 'supervisor', 'target_production_kg', 'actual_production_kg', 'rejection_kg', 'net_good_output_kg', 'efficiency_percent', 'rejection_percent', 'machines_running_now', 'machines_down_now', 'idle_time_hours', 'no_of_mold_changes', 'power_consumption_units', 'unit_per_kg', 'power_interruption_hours', 'remarks'],
             $csv['headers'],
         );
         // Every shift with something recorded on the date, in the picker's
@@ -182,11 +186,15 @@ class ProductionExportsTest extends TestCase
             $this->assertSame((string) ($screen['supervisor']['name'] ?? ''), $row['supervisor']);
             foreach ([
                 'target_production_kg', 'actual_production_kg', 'rejection_kg', 'net_good_output_kg', 'efficiency_percent',
-                'rejection_percent', 'machines_running', 'machines_down', 'idle_time_hours', 'no_of_mold_changes',
+                'rejection_percent', 'machines_running_now', 'machines_down_now', 'idle_time_hours', 'no_of_mold_changes',
                 'power_consumption_units', 'unit_per_kg', 'power_interruption_hours', 'remarks',
             ] as $key) {
                 $this->assertSame($this->cell($screen[$key]), $row[$key], "{$key} on the {$row['scope']} row of ".($row['shift'] ?: 'the day'));
             }
+            // The aliases the file used to read are still on the JSON this
+            // release (the screen's fallback) and equal the *_now values.
+            $this->assertSame($screen['machines_running_now'], $screen['machines_running']);
+            $this->assertSame($screen['machines_down_now'], $screen['machines_down']);
         }
 
         // The figures themselves, pinned once so the file is read as a person would.
@@ -196,7 +204,8 @@ class ProductionExportsTest extends TestCase
         $this->assertSame('300.0000', $morning['target_production_kg']);
         $this->assertSame('288.9600', $morning['actual_production_kg']);
         $this->assertSame('10.6529', $morning['rejection_kg']);
-        $this->assertSame('1', $morning['machines_running']);
+        $this->assertSame('1', $morning['machines_running_now']);
+        $this->assertArrayNotHasKey('machines_running', $morning, 'the alias column is gone from the file');
         $this->assertSame('0.5000', $morning['power_interruption_hours']);
         $this->assertSame('Smooth run', $morning['remarks']);
         $afternoon = $csv['rows'][1];

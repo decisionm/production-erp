@@ -149,7 +149,9 @@ class LocalFixtureSweepTest extends TestCase
         $this->assertSame([$mate->id], $voucher->payload['entry_ids'], 'The fixture-identity entry must not ride the mate\'s voucher');
         $this->assertNull($fixtureBacked->fresh()->tally_sync_entry_id);
         $this->assertNotContains($fixtureIdentity->name, $this->producedNames($voucher));
-        $this->assertSame(
+        // Key order inside a payload row is the json column's (MySQL re-orders
+        // it); rows, keys and values are asserted — Tests\TestCase::assertSameJson.
+        $this->assertSameJson(
             [['item' => '500ml PET Bottle', 'quantity' => '5000.0000', 'godown' => 'FG Store']],
             $voucher->payload['produced'],
         );
@@ -280,7 +282,7 @@ class LocalFixtureSweepTest extends TestCase
         $rebuilt = TallySyncEntry::query()->sole();
         $this->assertSame([$first->id, $second->id], $rebuilt->payload['entry_ids'], 'the stamped fixture must not ride the rebuilt voucher');
         $this->assertNotContains($fixtureIdentity->name, $this->producedNames($rebuilt));
-        $this->assertSame(
+        $this->assertSameJson(
             [['item' => '500ml PET Bottle', 'quantity' => '8000.0000', 'godown' => 'FG Store']],
             $rebuilt->payload['produced'],
         );
@@ -315,7 +317,7 @@ class LocalFixtureSweepTest extends TestCase
         $this->assertSame(TallySyncStatus::Pending, $regenerated->status);
         $this->assertSame([$real->id], $regenerated->payload['entry_ids'], 'retry must regenerate without the stamped fixture');
         $this->assertNotContains($fixtureIdentity->name, $this->producedNames($regenerated));
-        $this->assertSame(
+        $this->assertSameJson(
             [['item' => '500ml PET Bottle', 'quantity' => '5000.0000', 'godown' => 'FG Store']],
             $regenerated->payload['produced'],
         );

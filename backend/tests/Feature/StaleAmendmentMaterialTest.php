@@ -182,9 +182,11 @@ class StaleAmendmentMaterialTest extends TestCase
         // REFUSED MEANS REFUSED: the amendment never began, so the original
         // completion stands untouched — no reversal, no half-corrected batch.
         $this->assertSame(0, bccomp('122', $this->storedResinKg($entryId), 4));
-        $this->assertSame('12000', (string) $this->getJson(
+        // quantity_produced rides the resource uncast: '12000' on sqlite,
+        // '12000.0000' on MySQL — compared as a figure, like the kg above.
+        $this->assertSame(0, bccomp('12000', (string) $this->getJson(
             '/api/v1/production/shift-production-entries?status=pending'
-        )->json('data.0.quantity_produced'));
+        )->json('data.0.quantity_produced'), 4));
     }
 
     public function test_the_named_figure_counts_stored_rejected_pieces_on_the_before_side(): void
@@ -307,9 +309,9 @@ class StaleAmendmentMaterialTest extends TestCase
         ])->assertOk();
 
         $this->assertSame(0, bccomp('122', $this->storedResinKg($entryId), 4));
-        $this->assertSame('10000', (string) $this->getJson(
+        $this->assertSame(0, bccomp('10000', (string) $this->getJson(
             '/api/v1/production/shift-production-entries?status=pending'
-        )->json('data.0.quantity_produced'));
+        )->json('data.0.quantity_produced'), 4));
     }
 
     public function test_the_confirmation_is_read_the_way_the_boolean_rule_accepts_it(): void

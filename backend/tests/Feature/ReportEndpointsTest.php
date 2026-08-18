@@ -173,7 +173,9 @@ class ReportEndpointsTest extends TestCase
             ->assertJsonPath('data.rows.0.expected_pieces', '13584.91')
             ->assertJsonPath('data.rows.0.expected_boxes', 16)
             ->assertJsonPath('data.rows.0.actual_boxes', 7)
-            ->assertJsonPath('data.rows.0.actual_pieces', '5880')
+            // actual_pieces rides the row uncast from quantity_produced —
+            // '5880' on sqlite, '5880.0000' on MySQL — compared as a figure.
+            ->assertJsonPath('data.rows.0.actual_pieces', fn ($pieces) => bccomp('5880', (string) $pieces, 4) === 0)
             ->assertJsonPath('data.rows.0.good_production_kg', '70.5600')
             ->assertJsonPath('data.rows.0.rejection_kg_production', '7.7529')
             ->assertJsonPath('data.rows.0.rejection_kg_qc', '7.7500')

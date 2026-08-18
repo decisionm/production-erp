@@ -179,8 +179,10 @@ class NegativeStockOnCompletionTest extends TestCase
         $response = $this->complete($entryId)->assertOk();
 
         // Recorded as a fact on the entry itself, names frozen alongside ids.
+        // (Read back through the json column, whose object-key order is the
+        // driver's — assertSameJson, see Tests\TestCase.)
         $recorded = ShiftProductionEntry::findOrFail($entryId)->config_snapshot['stock_shortfalls'];
-        $this->assertSame([[
+        $this->assertSameJson([[
             'item_id' => $this->resin->id,
             'item_name' => 'Billion Pet Resin IV-0.8',
             // The UNIT is frozen with the name, because not every shortfall is
@@ -428,8 +430,12 @@ class NegativeStockOnCompletionTest extends TestCase
         // The full 118.998 kg, against the bin it came out of. Tally permits
         // negative stock; the voucher's job is to say what happened, not to
         // trim it to what our balance could cover. The payload SHAPE is
-        // untouched — same keys, same one line per consumption.
-        $this->assertSame(['item', 'quantity', 'godown'], array_keys($voucher->payload['consumed'][0]));
+        // untouched — same keys, same one line per consumption. The key SET
+        // is what is pinned: the json column hands keys back in the driver's
+        // order (MySQL re-orders them), so they are sorted before comparing.
+        $keys = array_keys($voucher->payload['consumed'][0]);
+        sort($keys);
+        $this->assertSame(['godown', 'item', 'quantity'], $keys);
         $this->assertCount(1, $voucher->payload['consumed']);
         $this->assertSame('Billion Pet Resin IV-0.8', $voucher->payload['consumed'][0]['item']);
         $this->assertSame(0, bccomp('118.998', (string) $voucher->payload['consumed'][0]['quantity'], 4));

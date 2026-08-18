@@ -98,6 +98,16 @@ export type ShiftProductionEntryStatus =
     | 'synced'
     | 'failed';
 export type ShiftScrapType = 'rejected_finished_good' | 'lumps';
+/**
+ * The stamps ProductionCalculationEngine writes on an entry
+ * (VERSION_LEGACY · VERSION_FLOOR · VERSION_UNIFIED) — named so a screen
+ * compares against a name it did not retype. The wire fields below
+ * (`calculation_version` on ShiftProductionEntry, ProductionMetrics and
+ * BatchEstimation) deliberately stay `string | null`: a stamp this build
+ * does not know is still a stamp, and reading it as "legacy" is the
+ * server's rule to make, not a type's (Phase 7, WS-C).
+ */
+export type CalculationVersion = 'legacy_v1' | 'production_v2_floor' | 'production_v3_unified';
 
 /**
  * One material line issued at Complete Batch.
@@ -1584,6 +1594,16 @@ export interface ProductionReport {
     date: string;
     rows: ProductionReportRow[];
     totals: ProductionReportTotals;
+    /**
+     * What `efficiency_pct` divides by, IF the server names it (Phase 7,
+     * WS-C — the honesty key Shift Summary carries as `efficiency_basis`).
+     * NOT SERVED by ProductionReportService today; the page then reads the
+     * report's own documented definition (Σ actual pieces ÷ Σ expected
+     * pieces at the standard cycle time — see productionReports.ts) and
+     * labels the column "vs standard". Optional so a backend that never
+     * sends it and one that starts to are both read correctly.
+     */
+    efficiency_basis?: string | null;
 }
 
 /**

@@ -247,6 +247,7 @@ One estimation engine for preview and entry, versioned, legacy pinned · every e
 `OverReceiptException` (**Phase 6 WS-B, in progress**) · CRM · Finance — **Still:** MySQL CI leg (Phase 7). **New (recorded):** P5.7-03 reporting honesty sweep → P7-05; ShiftSummaryExport alias columns; per-entry cost reads (2 queries/batch) on the entries resource → P7-03.
 
 ## Phase 6 (feat/phase-6-purchase-chain, gate closed 2026-08-17)
+## Phase 7 (feat/phase-7-regression-hardening, integrated 2026-08-17; gate pending)
 
 | Suite | Result | Evidence |
 |---|---|---|
@@ -268,3 +269,64 @@ One estimation engine for preview and entry, versioned, legacy pinned · every e
 
 ### Still open (from the baseline list)
 CRM · Finance — **Still:** MySQL CI leg (**Phase 7, next**). **New (recorded):** the ORDERDUEDATE JD/P read-back at the first attended live post; the machine-stamped `day-bin/load` write door (cleanup against DEC-20260807-006); `match` not yet typed in the frontend procurement types.
+| Backend PHPUnit — **sqlite leg** | PASS | **1,661 / 15,382** (1 skipped by design: CecGoldenTest); Phase 6 close 1,595 / 14,633 |
+| Backend PHPUnit — **MySQL 8 leg** | **PASS** | **1,661 / 15,382** locally against a real `mysql:8.0` container; **and PASS in CI** — the new `app-mysql` job ran green on PR #190 in 5m51s (run 32038255491). Identical counts to the sqlite leg. The driver the live factory runs on had never met this suite before |
+| Frontend vitest | PASS | 368 → **383** |
+| Typecheck · build | PASS | clean · built |
+| Agent | PASS | 122 → **135** (snapshot journal + retry) |
+| Factory-knowledge | PASS | exit 0 (Q49 added; preamble → Q50) |
+| Migrations | 1, additive | a widened quality/scrap note column (from the MySQL work) |
+| Red-before / green-after | PROVEN | four MySQL failures reproduced and fixed: JSON object-key order ×2, sqlite identifier quoting in a SQL-predicate assertion, and the published decimal shape; the report cap's cut proved directly (7 rows → 3 with `truncated: true`, and exactly-at-cap NOT called truncated) |
+| Sonnet independent QA | **NOT YET RUN** | the gate is the next act — recorded honestly rather than implied |
+| Adversarial review | **NOT YET RUN** | as above |
+| Browser proof | NOT DONE (extension disconnected) | Phase 8 chain walk |
+| API proof | pending the gate | |
+
+### Coverage gaps closed this phase
+The MySQL leg itself (the longest-standing gap) · two published figures that differed between dev and live now single-shaped · the entries index cost per page instead of per row · work-queue filters in SQL before the page is cut · report `row_cap`/`truncated` · a regression smoke over the WHOLE read surface (401 unauthenticated, never 5xx to an admin, every parameterised GET classified — SKIPPED is empty) · auth/roles/module-index coverage where there was none · the agent no longer drops a snapshot captured while the cloud was down.
+
+### Still open (from the baseline list)
+CRM · Finance · the Phase 7 gate itself. **New (recorded):** Q49 (the paper-page screen); the `app-mysql` check needs adding to branch protection by the repo owner.
+
+## The Configuration Lifecycle Contract — baseline matrix (P7.6-01, audited 2026-08-17)
+
+Full audit: `docs/engineering/AUDIT-CONFIGURATION-LIFECYCLE-2026-08-17.md`. 35 configuration
+entities in scope; transactions and documents are N/A. PARTIAL counts as GAP for P8-08.
+
+| Column | PASS | PARTIAL | GAP | N/A |
+|---|---:|---:|---:|---:|
+| Create | 31 | 1 | 0 | 3 |
+| Edit | 20 | 1 | **9** | 5 |
+| Active/Inactive | 10 | 4 | **11** | 10 |
+| Delete-unused | 4 | 0 | **20** | 11 |
+| **Dependency guard** | **1** | 0 | **22** | 12 |
+| Duplicate guard (code) | 26 | 0 | 3 | 6 |
+| **Duplicate guard (name)** | **0** | 0 | **all** | — |
+| **Audit trail** | **1** | 4 | **30** | 0 |
+| Full lifecycle tests | **1** | 10 | 24 | — |
+
+The one PASS row is `Role` — a hard delete guarded by a dependency count, already shipped
+and tested; it is the model the shared mechanism generalises.
+
+**Two live-facing findings that need no delete to matter:** eleven `is_active`/`status`
+flags are set but filtered nowhere — *a retired mould and a withdrawn scrap reason are
+selectable on the floor today* — and Item/Warehouse are unfiltered on eight stock/GRN
+paths. Closing these widens the refusal set on live data, so each carries its own test.
+
+**The safety fact that governs the implementation:** soft delete never fires an FK
+cascade, so nothing has been bitten yet; a real hard delete does. Eight parents cascade to
+children with **no database backstop** — most seriously `employees` → attendance, leave and
+salary history, and `items` → stock balances and every machine configuration. For those,
+the application guard is the only thing there is, so a cascade-side count > 0 is a refusal
+and never a cleanup.
+
+### Test matrix to add (T1–T17)
+create · edit unused · delete unused · direct API delete unused · delete referenced →
+refused · direct API delete referenced → refused (asserting the cascade children SURVIVE)
+· deactivate referenced · inactive excluded from new selection · historical transactions
+still display the archived record · reactivate · duplicate code refused (including the
+soft-deleted case) · likely duplicate name handled (warning channel; block-vs-warn is
+Q43) · authorization · audit trail (zero activity-log assertions exist today) ·
+Tally-linked safety · **T16** the append-only surfaces still answer 405/404 after the
+convention change · **T17** the error contract itself (`code`, `blocking[].count`,
+`alternative`).

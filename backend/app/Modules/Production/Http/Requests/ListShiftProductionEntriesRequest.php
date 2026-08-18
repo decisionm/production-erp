@@ -27,6 +27,16 @@ use Illuminate\Validation\Rule;
  * clock the reader is standing in — is what a date here matches.
  * 'nullable' throughout: an empty `?production_date=` (null after the
  * empty-string middleware) is "no filter", not a malformed one.
+ *
+ * `correctable` / `awaiting_correction` (Phase 7, P7-03 (g)): the two
+ * work-queue questions, answered in SQL before the page is cut
+ * (ShiftProductionEntryService::paginate) — `correctable=1` is every
+ * completed batch still pending with no quality check (the frontend's
+ * canAmendCompletion, row for row); `awaiting_correction=1` is the subset
+ * quality has sent back that the floor has not yet re-submitted
+ * (correction.awaiting_correction on the resource, row for row). Boolean
+ * flags: 1/true asks; 0/false/absent is "no filter" — never the
+ * complement — so an old client that sends nothing reads exactly as before.
  */
 class ListShiftProductionEntriesRequest extends FormRequest
 {
@@ -51,7 +61,19 @@ class ListShiftProductionEntriesRequest extends FormRequest
             'status' => ['sometimes', 'nullable', Rule::enum(ShiftProductionEntryStatus::class)],
             'per_page' => ['sometimes', 'nullable', 'integer', 'between:1,'.self::PER_PAGE_MAX],
             'page' => ['sometimes', 'nullable', 'integer', 'min:1'],
+            // 1/0 and the words, because a query string carries strings and
+            // an axios params object spells a boolean 'true'/'false'.
+            'correctable' => ['sometimes', 'nullable', Rule::in(['1', '0', 'true', 'false'])],
+            'awaiting_correction' => ['sometimes', 'nullable', Rule::in(['1', '0', 'true', 'false'])],
         ];
+    }
+
+    /** A boolean flag filter: true only when asked (1 / true); absent, empty, 0 or false is "no filter". */
+    public function flagFilter(string $key): bool
+    {
+        $value = $this->validated($key);
+
+        return $value !== null && filter_var($value, FILTER_VALIDATE_BOOLEAN);
     }
 
     /** The approval-status filter as an enum, or null for none. */

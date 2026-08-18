@@ -140,6 +140,8 @@ class RunningHoursValidationTest extends TestCase
         $this->assertNull($metrics['expected_boxes']);
         $this->assertNull($metrics['efficiency_pct']);
         $this->assertSame(7, $metrics['actual_boxes']);
-        $this->assertSame('5880', $metrics['actual_pieces']);
+        // 4 dp: `actual_pieces` carries ONE shape now, the live (MySQL)
+        // one — see ShiftProductionEntryService::productionMetrics.
+        $this->assertSame('5880.0000', $metrics['actual_pieces']);
     }
 }

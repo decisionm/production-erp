@@ -35,7 +35,7 @@ the ERP). Q38-Q41 are claimed by the 12-Aug Tally
 evidence set and the purchase/tax configuration design. Q42 is claimed by the SKU scheme
 design. Q43 is claimed by the Phase 3 sync fix loop (duplicate master names).
 Q46 is claimed by the Phase 5.5 fix loop (paper-page ingest and the
-estimation version). New questions continue from Q49.
+estimation version). New questions continue from Q53.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 DEC-20260809-002/-003 landed with PR #155 (the finance-pull discovery
@@ -816,3 +816,164 @@ ERP's queue, not Tally's book. What is asked here is only the Tally side, once
 a voucher exists there. **Blocks:** nothing today — the flag is off; it decides
 what Phase 6's lifecycle must post the day the flag turns on. *Open since
 2026-08-17.*
+
+## Q49 · Is the "type a whole paper page in one go" screen still wanted?
+
+`POST production/shift-production-entries/page` exists and works: a date, a
+shift and ten to twelve machine rows in one submit, each row in its own
+transaction so eleven good rows are never lost to a twelfth bad one
+(`ShiftPageEntryService`). It has tests. It has **no screen** — nothing in the
+bundled SPA calls it, so today it can only be reached by an API client.
+
+It was built for a priority quoted in the code's own docblocks — the daily
+production entry, each page entered in the app rather than two dialogs per
+machine row. That sentence is quoted from a 05-Aug discussion; it is NOT in
+`docs/factory/decisions/`, so by this repo's own rule (a discussion is not a
+decision) the ERP does not actually know whether the factory wants it. The
+question is therefore neither "finish it" nor "delete it" — it is whether the
+paper page is still how the floor works now that Shift Floor asks nothing the
+configuration already knows:
+
+(a) Does the supervisor still fill a paper page per shift and type it later,
+    or is the batch entered on the floor as it happens?
+(b) If the page is still real, should the ERP grow the page screen (the
+    endpoint is ready), or is the endpoint dead weight to retire?
+(c) If a page of a shift that ALREADY RAN is typed in, Q46 already asks which
+    expected-output arithmetic it should follow.
+
+**Blocks:** nothing — the endpoint is inert without a caller. It decides whether
+Phase 8 builds the screen or the endpoint is retired. *Open since 2026-08-17.*
+
+## Q50 · Does a material request name a MACHINE, and may consumption name a BAG — for resin?
+
+The program lead has confirmed a corrected Store-to-Production workflow (17-Aug-2026):
+
+    Store Stock -> Production Material Request -> Store Issue -> Scan/Handover
+      -> Issued-to-Production -> Actual Consumption -> Return unused
+
+Production raises a material request (request number, requester, date/time, shift,
+machine/production area where applicable, SKU/batch where known, material, quantity,
+UOM, status); the Store works a queue, with partial fulfilment, remaining quantity,
+completion, cancellation and the return of unused material. For PET and raw-material
+bags the Store scans the actual bag at handover, recording bag/lot identity,
+quantity/weight, the request, issued by, received by and the time. Replenishment is
+not necessarily daily.
+
+**Most of this needs no ruling and is being built**, including the heart of it: a
+Store issue is NOT a consumption, and the ERP must keep `Store Stock` / `Issued to
+Production` / `Consumed` distinct with a return path. That AGREES with FC-01, which
+already says a bag scan is "a pour record, not Tally consumption" — this change moves
+the accounting event further away from the scan, not closer.
+
+**Two clauses need the owner, and only for the COMMON-INPUT RESIN.** The audit
+(`docs/engineering/AUDIT-WAREHOUSES-2026-08-17.md`'s sibling material-flow audit)
+finds the conflict is not with the workflow but with two specific claims, and only
+where the material is resin:
+
+1. **A resin request naming a machine or area.** DEC-20260807-006 records the physical
+   fact: ONE loading point, crane-fed, piped to all ten machines — "bag-to-batch
+   identity is physically impossible in this plant". A machine on a *resin* request
+   would be a field the floor cannot answer truthfully. For packing film, cartons,
+   tape and other non-common-input consumables a machine or area is perfectly
+   meaningful, and the ERP will carry it there.
+2. **Consumption tracing to the exact lot/bag.** FC-01: "the system must not claim
+   physical bag-to-machine or bag-to-batch provenance"; DEC-20260810-001 requires the
+   wording always be "the bin held these lots", never "this batch used this bag". And
+   DEC-20260807-007 records that the bin is never weighed, so the ledger never
+   re-anchors — a bag-level attribution would drift permanently with nothing to
+   correct it. What IS exact and true, and is being built: consumption traced to its
+   STORE ISSUE, and to the lots the bin held in that shift window.
+
+So the question is a question of fact about the floor:
+
+(a) Has the resin flow physically CHANGED — is resin now issued from the store for a
+    named machine or area, rather than every machine drawing from one common piped
+    loading point? If yes, FC-01's premise no longer holds, the owner can supersede
+    it, and bag-level provenance becomes honest to record.
+(b) Or does the common input still stand — in which case the ERP traces resin
+    consumption to the ISSUE (exact), names machines only on consumable requests, and
+    keeps saying "the bin held these lots" for resin.
+
+**Blocks:** only the resin bag-to-batch provenance claim and the machine field on a
+resin request. The request itself, the store queue, partial fulfilment, returns, the
+three stock states, bag scanning at handover, and issue-level traceability all proceed
+either way, for every material. *Open since 2026-08-17.*
+
+## Q51 · How many stores does the factory actually have, and which rows are they?
+
+The ERP holds five warehouses. Two pairs are functionally duplicated and the
+evidence says accidentally so (full audit:
+`docs/engineering/AUDIT-WAREHOUSES-2026-08-17.md`):
+
+    RM-STORE "Raw Material Store"   vs   RM "RM Store"
+    FG-STORE "Finished Goods Store" vs   FG "FG Store"
+    WIP      "Work In Progress"
+
+All five predate the current engineering programme. The `RM-STORE`/`WIP`/`FG-STORE`
+three came from a demo-data seeder (19-Jul); `RM` and `FG` came ten days later from
+an acceptance-fixture seeder whose own comment says *"Godowns that exist in Tally."*
+An archived go-live plan already flagged the overlap and deferred it: *"Consolidate
+after go-live; vouchers must reference godown names that exist in Tally."*
+
+Two things make this the owner's call rather than an engineering tidy-up:
+
+1. **The history sits on the wrong side.** In the rehearsal database the stock
+   movements, receipts and deliveries hang off the DEMO rows, while the
+   Tally-linked identity hangs off the fixture rows. Consolidating therefore means
+   REWRITING `warehouse_id` on historical movements, receipts and deliveries —
+   altering records of things that already happened, and (once vouchers exist) the
+   godown a past line claims to have posted under. This repo does not rewrite
+   history on an agent's judgement.
+2. **It is already costing something.** Two rows carry a Tally godown id, and the
+   resolver that falls back to *the sole* Tally-linked warehouse therefore finds
+   two and gives up. That fallback is dead while the pair exists.
+
+What is needed from the owner and the accountant:
+
+(a) How many stores does the factory actually keep, and what are they called in
+    Tally? (One godown, or a raw-material and a finished-goods godown, or more?)
+(b) For each ERP row above: is it a real place, or residue to retire?
+(c) If two rows are the same place, may their historical rows be moved onto the
+    surviving row — and on which side? This is the destructive half and needs an
+    explicit yes, after a dry run showing exactly what would move.
+
+**Blocks:** consolidating the warehouses, and the Tally sole-godown fallback.
+Nothing else — the ERP runs fine with the duplicates, it merely cannot tidy them
+safely without this. **Nothing has been merged, deleted or deactivated.**
+*Open since 2026-08-17.*
+
+## Q52 · Configuration lifecycle — five things the contract cannot decide for the factory
+
+The lead has formalised a product-wide Configuration Lifecycle Contract (17-Aug-2026):
+every master supports Create → View → Edit → Activate/Deactivate → Safe Delete → Audit,
+with delete refused by the backend once anything references the record. The audit is
+`docs/engineering/AUDIT-CONFIGURATION-LIFECYCLE-2026-08-17.md`. Five points in it are
+the factory's call, not engineering's:
+
+(a) **May a configuration record ever be HARD-deleted at all, or is Archive always the
+    answer?** The contract says hard delete when genuinely unused, and that is what is
+    being built. But a code freed by a hard delete becomes reusable, and a factory that
+    reads its own history by code could find one code meaning two things across time.
+
+(b) **When a master is archived, should it keep occupying its business code?** Today it
+    does: item SKUs, warehouse codes and vendor codes are unique INCLUDING soft-deleted
+    rows, so a retired `ASB-8` blocks a new `ASB-8` for ever. Intended, or should a
+    retired code be reusable? (Overlaps Q43 — not decided here.)
+
+(c) **Who may DELETE configuration, as opposed to edit it?** Today one permission per
+    module covers every write, so anyone who can edit a machine could delete one. Should
+    delete be a narrower grant, the way carton-trace was carved out?
+
+(d) **Does archiving in the ERP mean anything on the Tally side?** An ERP item carrying a
+    Tally stock-item id that the factory retires here still exists in Tally. The build
+    assumes the ERP flag is purely local and refuses to hard-delete any Tally-linked row
+    — an assumption, stated, not a decision.
+
+(e) **A maintenance schedule has no link to the work orders it generated**, so "has this
+    schedule ever been used?" cannot be answered from the data. Add the link (a schema
+    change on a live table), or make the schedule simply never deletable? Until then the
+    dependency report says *cannot prove unused* and refuses — it never guesses.
+
+**Blocks:** nothing immediately — the mechanism is built to refuse rather than guess, and
+Archive is always available. (a) and (b) decide how much of the contract's Delete half is
+ever switched on. *Open since 2026-08-17.*

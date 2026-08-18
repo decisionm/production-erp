@@ -20,6 +20,7 @@
 import { createHash } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
 import type { TallySyncEntry } from './cloudApi';
+import { enqueueSnapshot, type SnapshotQueueStore } from './snapshotQueue';
 import type { TallyImportResult } from './tally/client';
 
 /**
@@ -80,6 +81,14 @@ export interface SnapshotDeps {
     upload: (entryId: number, body: SnapshotBody) => Promise<void>;
     warn: (message: string, meta?: Record<string, unknown>) => void;
     info?: (message: string, meta?: Record<string, unknown>) => void;
+    error?: (message: string, meta?: Record<string, unknown>) => void;
+    /**
+     * Where a failed upload is written down so a later cycle can re-send it
+     * (snapshotJournal.ts in the app; see snapshotQueue.ts). Optional: with
+     * no queue the failure is warned about and the record is gone, exactly
+     * as before Phase 7.
+     */
+    queue?: SnapshotQueueStore;
 }
 
 export function sha256Hex(text: string): string {
@@ -150,6 +159,11 @@ export function buildSnapshotBody(input: SnapshotInput): SnapshotBody {
  * warned about (counts and the hash prefix only — never the XML or Tally's
  * text, which the cloud gates by reader) and swallowed. Returns whether the
  * cloud took it, for the log line and for tests.
+ *
+ * With a `queue` in deps a failed upload is JOURNALLED before returning
+ * false, so a Tally answer captured while the cloud was down is re-sent on a
+ * later cycle (flushSnapshotQueue) instead of being lost. The journal write
+ * is inside the same never-throws guard as everything else here.
  */
 export async function sendSnapshot(input: SnapshotInput, deps: SnapshotDeps): Promise<boolean> {
     const entryId = input.entry?.id;
@@ -172,12 +186,26 @@ export async function sendSnapshot(input: SnapshotInput, deps: SnapshotDeps): Pr
 
         return true;
     } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+
+        // Only a body that was actually built is honest to re-send: a
+        // builder failure (a malformed input) has nothing to journal.
+        const queued = body !== null && deps.queue !== undefined
+            && enqueueSnapshot(deps.queue, entryId, body, message, deps);
+
         try {
-            deps.warn(`Snapshot upload failed for entry #${entryId} — the post outcome above stands; the cloud just has no copy of the XML`, {
-                message: err instanceof Error ? err.message : String(err),
-                sha256: body?.xml_sha256.slice(0, 12) ?? null,
-                tallySuccess: body?.tally?.success ?? null,
-            });
+            deps.warn(
+                `Snapshot upload failed for entry #${entryId} — the post outcome above stands; `
+                    + (queued
+                        ? 'the record is queued and will be re-sent when the cloud answers again'
+                        : 'the cloud just has no copy of the XML'),
+                {
+                    message,
+                    sha256: body?.xml_sha256.slice(0, 12) ?? null,
+                    tallySuccess: body?.tally?.success ?? null,
+                    queued,
+                },
+            );
         } catch {
             // The logger is not allowed to be the thing that breaks the loop either.
         }
