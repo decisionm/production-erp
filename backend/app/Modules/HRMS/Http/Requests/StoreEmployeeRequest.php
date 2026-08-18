@@ -2,6 +2,7 @@
 
 namespace App\Modules\HRMS\Http\Requests;
 
+use App\Modules\HRMS\Http\Requests\Rules\SelectableEmployee;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StoreEmployeeRequest extends FormRequest
@@ -22,7 +23,7 @@ class StoreEmployeeRequest extends FormRequest
             'date_of_joining' => ['required', 'date'],
             'designation' => ['nullable', 'string', 'max:255'],
             'department' => ['nullable', 'string', 'max:255'],
-            'manager_id' => ['nullable', 'integer', 'exists:employees,id'],
+            'manager_id' => ['nullable', 'integer', SelectableEmployee::rule()],
         ];
     }
 }

@@ -1,10 +1,11 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { DatePicker, Button, Form, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { DatePicker, Button, Form, Input, Modal, Select, Space, Table, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
+import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/configuration';
 import { createEmployee, listEmployees, updateEmployee } from '@/features/hrms/api';
 import type { Employee, EmployeeStatus } from '@/features/hrms/types';
 
@@ -24,12 +25,6 @@ const editEmployeeSchema = employeeSchema.extend({
     status: z.enum(['active', 'inactive', 'terminated']).optional(),
 });
 type EditEmployeeFormValues = z.infer<typeof editEmployeeSchema>;
-
-const statusColor: Record<EmployeeStatus, string> = {
-    active: 'green',
-    inactive: 'default',
-    terminated: 'red',
-};
 
 const statusOptions: { value: EmployeeStatus; label: string }[] = [
     { value: 'active', label: 'Active' },
@@ -100,33 +95,41 @@ export default function EmployeesPage() {
                     { title: 'Manager', render: (_, row) => row.manager?.name },
                     { title: 'Joined', dataIndex: 'date_of_joining' },
                     {
+                        // The same two words as every other master, plus the
+                        // factory's own word for the case that is neither:
+                        // `terminated` is an HR and payroll fact, and folding
+                        // it into "Retired" would lose what payroll reads.
                         title: 'Status',
                         dataIndex: 'status',
-                        render: (status: EmployeeStatus) => <Tag color={statusColor[status]}>{status}</Tag>,
+                        render: (_: EmployeeStatus, row) => <ConfigurationStatusTag entity="employee" row={row} />,
                     },
                     {
                         title: 'Actions',
-                        render: (_, row) => (
-                            <Button
-                                size="small"
-                                onClick={() => {
-                                    setEditingEmployee(row);
-                                    resetEdit({
-                                        employee_code: row.employee_code,
-                                        name: row.name,
-                                        email: row.email ?? '',
-                                        phone: row.phone ?? '',
-                                        date_of_joining: row.date_of_joining,
-                                        designation: row.designation ?? '',
-                                        department: row.department ?? '',
-                                        manager_id: row.manager?.id,
-                                        status: row.status,
-                                    });
-                                }}
-                            >
-                                Edit
-                            </Button>
-                        ),
+                        render: (_, row) => {
+                            const edit = () => {
+                                setEditingEmployee(row);
+                                resetEdit({
+                                    employee_code: row.employee_code,
+                                    name: row.name,
+                                    email: row.email ?? '',
+                                    phone: row.phone ?? '',
+                                    date_of_joining: row.date_of_joining,
+                                    designation: row.designation ?? '',
+                                    department: row.department ?? '',
+                                    manager_id: row.manager?.id,
+                                    status: row.status,
+                                });
+                            };
+                            return (
+                                <ConfigurationActionsCell
+                                    entity="employee"
+                                    id={row.id}
+                                    can={row.can}
+                                    recordName={`${row.employee_code} — ${row.name}`}
+                                    onEdit={edit}
+                                />
+                            );
+                        },
                     },
                 ]}
             />
@@ -251,7 +254,10 @@ export default function EmployeesPage() {
                             )}
                         />
                     </Form.Item>
-                    <Form.Item label="Status">
+                    <Form.Item
+                        label="Status"
+                        extra="Taking an employee out of service is done with Archive on the row — that path checks the attendance, leave and payroll history first, takes a reason, and can be undone. Set a status here only to correct one."
+                    >
                         <Controller
                             name="status"
                             control={editControl}

@@ -3,6 +3,7 @@
 namespace App\Modules\Production\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Production\Http\Controllers\Concerns\ManagesConfigurationRecords;
 use App\Modules\Production\Http\Requests\AttachProductionStandardItemRequest;
 use App\Modules\Production\Http\Requests\ImportProductionStandardsRequest;
 use App\Modules\Production\Http\Requests\IndexProductionStandardsRequest;
@@ -13,11 +14,26 @@ use App\Modules\Production\Services\ProductionConfigurationService;
 use App\Modules\Production\Services\ProductionStandardImportService;
 use App\Modules\Production\Services\ProductionStandardService;
 use App\Modules\Production\Services\ProductStandardsWorkspaceService;
+use App\Support\Configuration\Http\ConfigurationReasonRequest;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Http\Response;
 
 class ProductionStandardController extends Controller
 {
+    use ManagesConfigurationRecords;
+
+    protected function configurationWritePermission(): string
+    {
+        return 'production.manage';
+    }
+
+    protected function configurationNoun(): string
+    {
+        return 'production standard';
+    }
+
     public function __construct(
         private readonly ProductionStandardImportService $import,
         private readonly ProductionStandardService $standards,
@@ -48,6 +64,22 @@ class ProductionStandardController extends Controller
             $this->workspace->resolvePerPage($request->query('per_page', 25)),
             max(1, (int) $request->query('page', 1)),
         );
+
+        // The row's `can` came out of the workspace as the RECORD's
+        // eligibility. It is intersected with this user's grant here, for the
+        // same reason show() does it: reading this list needs
+        // `production.view` and every write behind those buttons needs
+        // `production.manage`, so a read-only supervisor handed `edit: true`
+        // would get a 403 from each one — and WS-4's row actions read this
+        // block rather than re-deriving it.
+        if (! $this->mayWrite($request)) {
+            $result['page']->setCollection(
+                $result['page']->getCollection()->map(fn (array $row): array => [
+                    ...$row,
+                    'can' => ['edit' => false, 'activate' => false, 'archive' => false, 'delete' => false],
+                ]),
+            );
+        }
 
         return response()->json($result['page']->toArray() + [
             'summary' => $result['summary'],
@@ -190,6 +222,63 @@ class ProductionStandardController extends Controller
         $standard = $this->standards->create($request->validated(), $request->user());
 
         return response()->json(['data' => $standard], 201);
+    }
+
+    /**
+     * One standard, ARCHIVED ROWS INCLUDED, with the authoritative `can` —
+     * the Configuration Lifecycle Contract's View. An archived standard is
+     * reachable here on purpose: history has to stay readable, and Activate
+     * could not undo an Archive otherwise.
+     */
+    public function show(int $standard): JsonResponse
+    {
+        $found = $this->resolve($standard);
+
+        $this->withAbilities(request(), $this->standards, $found);
+
+        return response()->json(['data' => $found->toArray() + [
+            'is_archived' => $found->trashed(),
+            'can' => $found->can,
+        ]]);
+    }
+
+    /**
+     * Take the standard out of service. It keeps its variant identity —
+     * (item, product name, cavities, weight, cycle time) stays reserved, so
+     * nobody may add a second copy of it (DEC-20260817-002 §2) — and nothing
+     * is destroyed or posted to Tally.
+     */
+    public function archive(ConfigurationReasonRequest $request, int $standard): JsonResponse
+    {
+        $this->archiveRecord($this->standards, $this->resolve($standard), $request->reason());
+
+        return $this->show($standard);
+    }
+
+    public function activate(ConfigurationReasonRequest $request, int $standard): JsonResponse
+    {
+        $this->activateRecord($this->standards, $this->resolve($standard), $request->reason());
+
+        return $this->show($standard);
+    }
+
+    /**
+     * Hard delete — Super Admin / Owner only, and only for a standard no
+     * shift ever ran to and no packaging variant hangs off. Every refusal is
+     * the shared 422 with counts and an Archive offer.
+     */
+    public function destroy(Request $request, int $standard): Response
+    {
+        $this->standards->delete($this->resolve($standard), $request->user());
+
+        return response()->noContent();
+    }
+
+    private function resolve(int $standard): ProductionStandard
+    {
+        return ProductionStandard::withTrashed()
+            ->with(['item', 'packagings'])
+            ->find($standard) ?? abort(404);
     }
 
     /**

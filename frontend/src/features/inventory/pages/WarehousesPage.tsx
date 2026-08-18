@@ -1,9 +1,10 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, Input, Modal, Space, Switch, Table, Typography } from 'antd';
+import { Button, Form, Input, Modal, Space, Table, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
+import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/configuration';
 import { createWarehouse, listWarehouses, updateWarehouse } from '@/features/inventory/api';
 import type { Warehouse } from '@/features/inventory/types';
 
@@ -55,11 +56,6 @@ export default function WarehousesPage() {
         },
     });
 
-    const activeMutation = useMutation({
-        mutationFn: ({ id, is_active }: { id: number; is_active: boolean }) => updateWarehouse(id, { is_active }),
-        onSuccess: invalidate,
-    });
-
     return (
         <>
             <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
@@ -77,30 +73,33 @@ export default function WarehousesPage() {
                     { title: 'Code', dataIndex: 'code' },
                     { title: 'Name', dataIndex: 'name' },
                     {
-                        title: 'Active',
+                        // ONE status vocabulary, product-wide. The old control
+                        // was a Switch that PUT `is_active` straight onto the
+                        // record — a deactivate path around the mechanism, with
+                        // no dependency report, no lock and no audit line. The
+                        // state is now shown here and CHANGED through Archive /
+                        // Reactivate below, which is the contract's own path.
+                        title: 'Status',
                         dataIndex: 'is_active',
-                        render: (active: boolean, row) => (
-                            <Switch
-                                checked={active}
-                                size="small"
-                                loading={activeMutation.isPending}
-                                onChange={(checked) => activeMutation.mutate({ id: row.id, is_active: checked })}
-                            />
-                        ),
+                        render: (_: boolean, row) => <ConfigurationStatusTag entity="warehouse" row={row} />,
                     },
                     {
                         title: 'Actions',
-                        render: (_, row) => (
-                            <Button
-                                size="small"
-                                onClick={() => {
-                                    setEditingWarehouse(row);
-                                    resetEdit({ code: row.code, name: row.name });
-                                }}
-                            >
-                                Edit
-                            </Button>
-                        ),
+                        render: (_, row) => {
+                            const edit = () => {
+                                setEditingWarehouse(row);
+                                resetEdit({ code: row.code, name: row.name });
+                            };
+                            return (
+                                <ConfigurationActionsCell
+                                    entity="warehouse"
+                                    id={row.id}
+                                    can={row.can}
+                                    recordName={`${row.code} — ${row.name}`}
+                                    onEdit={edit}
+                                />
+                            );
+                        },
                     },
                 ]}
             />

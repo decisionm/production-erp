@@ -122,7 +122,11 @@ class StartBatchRequest extends FormRequest
             // Planned downtime known before the run — lowers the adjusted
             // target at Start rather than explaining the gap afterwards.
             'planned_downtime' => ['sometimes', 'array'],
-            'planned_downtime.*.downtime_reason_id' => ['required', 'integer', 'exists:downtime_reasons,id'],
+            // Active only — the Start Batch picker already filters on
+            // is_active (DowntimeReasonService::list), and the rule must
+            // agree with it: a stale tab or a direct API call must not be
+            // able to plan downtime against a withdrawn reason.
+            'planned_downtime.*.downtime_reason_id' => ['required', 'integer', Rule::exists('downtime_reasons', 'id')->where('is_active', true)],
             'planned_downtime.*.minutes' => ['required', 'numeric', 'gt:0', 'max:1440'],
             'planned_downtime.*.note' => ['sometimes', 'nullable', 'string', 'max:500'],
         ];

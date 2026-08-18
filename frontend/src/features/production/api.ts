@@ -329,6 +329,18 @@ export async function createScrapReason(payload: CreateScrapReasonPayload): Prom
 }
 
 /**
+ * The Edit half of the Configuration Lifecycle Contract for this master.
+ *
+ * `is_active` is deliberately NOT in the payload: withdrawing a reason is
+ * Archive, which counts what already uses it and records why
+ * (DEC-20260817-002). UpdateScrapReasonRequest refuses the flag anyway.
+ */
+export async function updateScrapReason(id: number, payload: Partial<CreateScrapReasonPayload>): Promise<ScrapReason> {
+    const { data } = await api.put<{ data: ScrapReason }>(`/production/scrap-reasons/${id}`, payload);
+    return data.data;
+}
+
+/**
  * `active: true` is the operational contract — only shifts the factory
  * currently runs, filtered server-side (mirrors listWorkCenters). Omit it
  * for admin and history surfaces, which must still see the retired rows
@@ -351,6 +363,15 @@ export interface CreateShiftPayload {
 
 export async function createShift(payload: CreateShiftPayload): Promise<Shift> {
     const { data } = await api.post<{ data: Shift }>('/production/shifts', payload);
+    return data.data;
+}
+
+/**
+ * The Edit half of the Configuration Lifecycle Contract for this master.
+ * `is_active` is not settable here — retiring a shift is Archive.
+ */
+export async function updateShift(id: number, payload: Partial<CreateShiftPayload>): Promise<Shift> {
+    const { data } = await api.put<{ data: Shift }>(`/production/shifts/${id}`, payload);
     return data.data;
 }
 
@@ -1662,6 +1683,13 @@ export async function approveProductionConfiguration(id: number): Promise<Produc
     return data.data;
 }
 
+/**
+ * The module's ORIGINAL deactivate. No screen calls it any more: withdrawing a
+ * machine exception is Archive now (`POST configurations/{id}/archive`), which
+ * counts what already uses the record, takes a reason and is reversible. Kept
+ * because the endpoint is still served and an external API client may hold it;
+ * do not reach for it from a page.
+ */
 export async function deactivateProductionConfiguration(id: number): Promise<ProductionConfiguration> {
     const { data } = await api.post<{ data: ProductionConfiguration }>(`/production/configurations/${id}/deactivate`);
     return data.data;

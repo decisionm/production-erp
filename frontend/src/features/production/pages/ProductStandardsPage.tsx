@@ -27,6 +27,7 @@ import dayjs from 'dayjs';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { activePickerOptions } from '@/components/configuration/pickerOptions';
+import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/configuration';
 import { listAllItems } from '@/features/inventory/api';
 import {
     buildStartBatchReturnUrl,
@@ -41,7 +42,6 @@ import {
     copyProductionConfiguration,
     createProductionConfiguration,
     createProductionStandard,
-    deactivateProductionConfiguration,
     listAllMolds,
     listProductionStandards,
     listStandardItemCandidates,
@@ -151,12 +151,6 @@ const STATUS: Record<string, { colour: string; label: string; help: string }> = 
         label: 'Needs a factory answer',
         help: 'The workbook cell was ambiguous or blank. The batch can still run; the figure is just not one anybody has confirmed.',
     },
-};
-
-const CONFIG_STATUS_COLOUR: Record<string, string> = {
-    approved: 'green',
-    draft: 'blue',
-    inactive: 'default',
 };
 
 // ---------------------------------------------------------------------------
@@ -785,7 +779,6 @@ function MachineExceptions({ standardId, itemId, productName }: { standardId: nu
     const onError = (error: any) => showSaveError(error, 'Could not save this machine exception');
 
     const approve = useMutation({ mutationFn: approveProductionConfiguration, onSuccess: invalidate, onError });
-    const deactivate = useMutation({ mutationFn: deactivateProductionConfiguration, onSuccess: invalidate, onError });
     const copy = useMutation({ mutationFn: copyProductionConfiguration, onSuccess: invalidate, onError });
 
     if (itemId === null) {
@@ -874,7 +867,12 @@ function MachineExceptions({ standardId, itemId, productName }: { standardId: nu
                             title: 'Status',
                             render: (_, c) => (
                                 <Space direction="vertical" size={2}>
-                                    <Tag color={CONFIG_STATUS_COLOUR[c.status] ?? 'default'}>{c.status}</Tag>
+                                    {/* The one status vocabulary: Approved is
+                                        this master's ACTIVE, inactive its
+                                        RETIRED, and a draft is neither — which
+                                        is exactly what ActiveFlag keeps apart
+                                        on the server. */}
+                                    <ConfigurationStatusTag entity="production-configuration" row={c} />
                                     {/* The factory's own wording, shown verbatim
                                         so nobody mistakes an unreviewed
                                         candidate for a decision. */}
@@ -888,13 +886,13 @@ function MachineExceptions({ standardId, itemId, productName }: { standardId: nu
                         },
                         {
                             title: 'Actions',
-                            render: (_, c) => (
-                                <Space size={4} wrap>
-                                    {c.status === 'draft' && (
-                                        <>
-                                            <Button size="small" onClick={() => setEditing(c)}>
-                                                Edit
-                                            </Button>
+                            render: (_, c) => {
+                                {/* Approve and Copy-to-draft are this module's
+                                    OWN acts, not lifecycle ones, and the
+                                    approval window they govern is unchanged. */}
+                                const ownActs = (
+                                    <>
+                                        {c.status === 'draft' && (
                                             <Button
                                                 size="small"
                                                 type="primary"
@@ -903,29 +901,42 @@ function MachineExceptions({ standardId, itemId, productName }: { standardId: nu
                                             >
                                                 Approve
                                             </Button>
-                                        </>
-                                    )}
-                                    {c.status === 'approved' && (
-                                        <Button size="small" danger onClick={() => deactivate.mutate(c.id)}>
-                                            Deactivate
-                                        </Button>
-                                    )}
-                                    {/* An approved row is never edited in
-                                        place — copy-to-draft is the same
-                                        refusal expressed as a next step. */}
-                                    <Tooltip
-                                        title={
-                                            c.status === 'approved'
-                                                ? 'An approved exception cannot be edited. This makes an editable draft with the same figures.'
-                                                : 'Make another draft with these figures.'
+                                        )}
+                                        {/* An approved row is never edited in
+                                            place — copy-to-draft is the same
+                                            refusal expressed as a next step. */}
+                                        <Tooltip
+                                            title={
+                                                c.status === 'approved'
+                                                    ? 'An approved exception cannot be edited. This makes an editable draft with the same figures.'
+                                                    : 'Make another draft with these figures.'
+                                            }
+                                        >
+                                            <Button size="small" loading={copy.isPending} onClick={() => copy.mutate(c.id)}>
+                                                Copy to draft
+                                            </Button>
+                                        </Tooltip>
+                                    </>
+                                );
+
+                                return (
+                                    <ConfigurationActionsCell
+                                        entity="production-configuration"
+                                        id={c.id}
+                                        can={c.can}
+                                        recordName={
+                                            [c.work_center.code, c.work_center.name].filter(Boolean).join(' — ') ||
+                                            `#${c.work_center.id}`
                                         }
-                                    >
-                                        <Button size="small" loading={copy.isPending} onClick={() => copy.mutate(c.id)}>
-                                            Copy to draft
-                                        </Button>
-                                    </Tooltip>
-                                </Space>
-                            ),
+                                        // Only a draft is editable in place —
+                                        // the module's own rule, expressed as
+                                        // an act this SCREEN does not offer.
+                                        // It never overrules `can`.
+                                        onEdit={c.status === 'draft' ? () => setEditing(c) : undefined}
+                                        extra={ownActs}
+                                    />
+                                );
+                            },
                         },
                     ]}
                 />
@@ -1630,6 +1641,20 @@ function ProductConfigurationDrawer({
                                         {p.tally_item ? 'Change' : 'Set the Tally identity'}
                                     </Button>
                                 </Typography.Text>
+                                {/* A packing option is a configuration record
+                                    of its own: it is nested under its standard,
+                                    so the endpoint is built from the parent id
+                                    rather than guessed. Editing it is the
+                                    modal above; the lifecycle acts are the
+                                    server's to allow. */}
+                                <ConfigurationActionsCell
+                                    entity="production-standard-packaging"
+                                    id={p.id}
+                                    parentId={row.id}
+                                    can={p.can}
+                                    recordName={p.label}
+                                    onEdit={() => setEditingPackaging(p)}
+                                />
                             </div>
                         );
                     })}
@@ -2441,20 +2466,46 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
                             render: (_, r) => {
                                 const s = STATUS[r.status] ?? { colour: 'default', label: r.status, help: '' };
                                 return (
-                                    <Tooltip title={r.status === 'unresolved' ? (r.unresolved_reason ?? s.help) : s.help}>
-                                        <Tag color={s.colour}>{s.label}</Tag>
-                                    </Tooltip>
+                                    <Space size={4} wrap>
+                                        <Tooltip title={r.status === 'unresolved' ? (r.unresolved_reason ?? s.help) : s.help}>
+                                            <Tag color={s.colour}>{s.label}</Tag>
+                                        </Tooltip>
+                                        {/* A DIFFERENT axis from the readiness
+                                            tag beside it, so it is shown only
+                                            when it has something to say: this
+                                            master has no active flag, archiving
+                                            IS its soft delete, and an archived
+                                            standard is normally not listed at
+                                            all. Rendering "Active" on every row
+                                            next to "Production ready" would be
+                                            two tags for one fact. */}
+                                        {r.is_archived ? (
+                                            <ConfigurationStatusTag entity="production-standard" row={r} />
+                                        ) : null}
+                                    </Space>
                                 );
                             },
                         },
                         {
                             title: '',
-                            width: 104,
+                            width: 190,
                             fixed: 'right' as const,
                             render: (_, r) => (
-                                <Button size="small" onClick={() => setOpenRow(r)}>
-                                    Configure
-                                </Button>
+                                <ConfigurationActionsCell
+                                    entity="production-standard"
+                                    id={r.id}
+                                    can={r.can}
+                                    recordName={r.source_product_name}
+                                    // Configure IS this master's view-and-edit
+                                    // door, and the factory calls it that. It
+                                    // rides along as the page's own act rather
+                                    // than being renamed "Edit".
+                                    extra={
+                                        <Button size="small" onClick={() => setOpenRow(r)}>
+                                            Configure
+                                        </Button>
+                                    }
+                                />
                             ),
                         },
                     ]}

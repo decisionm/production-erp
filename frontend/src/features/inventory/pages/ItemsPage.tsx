@@ -1,11 +1,12 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Drawer, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Typography } from 'antd';
+import { Button, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import BarcodeDisplay from '@/components/barcode/BarcodeDisplay';
+import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/configuration';
 import { createItem, listAllItems, updateItem } from '@/features/inventory/api';
 import type { Item, ItemTrackingType } from '@/features/inventory/types';
 
@@ -84,11 +85,6 @@ export default function ItemsPage() {
         },
     });
 
-    const activeMutation = useMutation({
-        mutationFn: ({ id, is_active }: { id: number; is_active: boolean }) => updateItem(id, { is_active }),
-        onSuccess: invalidate,
-    });
-
     // The item name is the Tally wire key (every voucher line carries it, no
     // GUID does), so on a Tally-linked item it is Tally's to change — the API
     // refuses a rename; the masters pull brings a Tally-side one across.
@@ -129,46 +125,48 @@ export default function ItemsPage() {
                         render: (type: ItemTrackingType) => <Tag color={trackingTypeColor[type]}>{type}</Tag>,
                     },
                     {
-                        title: 'Active',
+                        // The state, in the product's two words. The Switch this
+                        // replaces PUT `is_active` straight onto the item — a
+                        // deactivate that ran no dependency report, took no
+                        // reason and left no audit line, on the most-referenced
+                        // master in the schema.
+                        title: 'Status',
                         dataIndex: 'is_active',
-                        render: (active: boolean, row) => (
-                            <Switch
-                                checked={active}
-                                size="small"
-                                loading={activeMutation.isPending}
-                                onChange={(checked) => activeMutation.mutate({ id: row.id, is_active: checked })}
-                            />
-                        ),
+                        render: (_: boolean, row) => <ConfigurationStatusTag entity="item" row={row} />,
                     },
                     {
                         title: 'Actions',
-                        render: (_, row) => (
-                            <Space>
-                                <Button size="small" onClick={() => navigate(`/inventory/items/${row.id}`)}>
-                                    Details
-                                </Button>
-                                <Button size="small" onClick={() => setBarcodeItem(row)}>
-                                    Barcode
-                                </Button>
-                                <Button
-                                    size="small"
-                                    onClick={() => {
-                                        setEditingItem(row);
-                                        resetEdit({
-                                            sku: row.sku,
-                                            name: row.name,
-                                            uom: row.uom,
-                                            hsn_sac_code: row.hsn_sac_code ?? '',
-                                            reorder_level: Number(row.reorder_level),
-                                            nominal_weight_grams: row.nominal_weight_grams ? Number(row.nominal_weight_grams) : undefined,
-                                            tracking_type: row.tracking_type,
-                                        });
-                                    }}
-                                >
-                                    Edit
-                                </Button>
-                            </Space>
-                        ),
+                        render: (_, row) => {
+                            const edit = () => {
+                                setEditingItem(row);
+                                resetEdit({
+                                    sku: row.sku,
+                                    name: row.name,
+                                    uom: row.uom,
+                                    hsn_sac_code: row.hsn_sac_code ?? '',
+                                    reorder_level: Number(row.reorder_level),
+                                    nominal_weight_grams: row.nominal_weight_grams ? Number(row.nominal_weight_grams) : undefined,
+                                    tracking_type: row.tracking_type,
+                                });
+                            };
+                            return (
+                                <Space>
+                                    <Button size="small" onClick={() => navigate(`/inventory/items/${row.id}`)}>
+                                        Details
+                                    </Button>
+                                    <Button size="small" onClick={() => setBarcodeItem(row)}>
+                                        Barcode
+                                    </Button>
+                                    <ConfigurationActionsCell
+                                        entity="item"
+                                        id={row.id}
+                                        can={row.can}
+                                        recordName={`${row.sku} — ${row.name}`}
+                                        onEdit={edit}
+                                    />
+                                </Space>
+                            );
+                        },
                     },
                 ]}
             />

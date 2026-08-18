@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use App\Modules\Core\Services\PermissionService;
+use App\Modules\TallySync\Services\AgentIdentity;
+use App\Support\Configuration\HardDeleteAuthority;
 use Database\Seeders\AcceptanceFixtureSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Route;
@@ -106,5 +108,50 @@ class ModulePermissionGuardTest extends TestCase
         $this->actingAs(User::factory()->create(['is_active' => true]))
             ->getJson('/api/v1/tally-sync/entries')
             ->assertForbidden();
+    }
+
+    /**
+     * The fixture's supervisor desk must NOT hold the three elevated tiers.
+     *
+     * The seeder's job is to state locally what live states, and the failure
+     * mode is one-directional and silent: a fixture that grants MORE than live
+     * does not break anything visibly — it makes every manual walkthrough of
+     * that gate pass for the wrong reason. Both of the tiers below were caught
+     * exactly that way in the 18-Aug browser walk, after carton-trace had
+     * already been caught the same way earlier.
+     *
+     * Asserted through the real predicates the product gates on, not through
+     * the permission names, so renaming a permission cannot quietly reopen a
+     * tier that this test claims to hold shut.
+     */
+    public function test_the_fixture_supervisor_desk_holds_no_elevated_tier(): void
+    {
+        $this->seed(AcceptanceFixtureSeeder::class);
+
+        $supervisor = User::where('email', 'supervisor@example.com')->firstOrFail();
+
+        // FC-06, both halves: purchase rates AND supplier identity.
+        $this->assertFalse(
+            AgentIdentity::mayReadPurchaseDetails($supervisor),
+            'The fixture supervisor can read purchase rates and supplier identity — FC-06 is Owner/Accounts only, so the FC-06 half of any manual walkthrough would pass for the wrong reason.',
+        );
+
+        // The configuration hard-delete tier (DEC-20260817-002 §3).
+        $this->assertFalse(
+            $supervisor->can(HardDeleteAuthority::PERMISSION),
+            'The fixture supervisor can hard-delete configuration masters — that tier is Super Admin / Owner level.',
+        );
+
+        // The internal carton trace (DEC-20260810-001) — the original case.
+        $this->assertFalse(
+            $supervisor->can('carton-trace.view'),
+            'The fixture supervisor holds the internal carton trace tier.',
+        );
+
+        // ...and the desks that SHOULD hold them still do, or the fixture has
+        // simply been emptied rather than corrected.
+        $accounts = User::where('email', 'accounts@example.com')->firstOrFail();
+        $this->assertTrue(AgentIdentity::mayReadPurchaseDetails($accounts));
+        $this->assertTrue($accounts->can(HardDeleteAuthority::PERMISSION));
     }
 }

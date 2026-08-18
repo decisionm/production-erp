@@ -2,6 +2,8 @@
 
 namespace App\Modules\Inventory\Http\Resources;
 
+use App\Modules\Inventory\Models\Item;
+use App\Modules\Inventory\Services\ItemService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -9,6 +11,9 @@ class ItemResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        /** @var Item $item */
+        $item = $this->resource;
+
         return [
             'id' => $this->id,
             'sku' => $this->sku,
@@ -44,6 +49,19 @@ class ItemResource extends JsonResource
             'tally_stock_item_guid' => $this->tally_stock_item_guid,
             'tally_synced_at' => $this->tally_synced_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),
+            // Archived-by-soft-delete. Archive clears is_active rather than
+            // trashing the row, but the Tally masters pull restores trashed
+            // items, so the state is stated rather than inferred.
+            'archived_at' => $item->deleted_at?->toIso8601String(),
+            /*
+             * WHAT MAY BE DONE TO THIS RECORD, decided by the server
+             * (DEC-20260817-002) — see WarehouseResource for the full note.
+             * `delete` is null (undetermined, ask `show`) on a list, because
+             * an item's declaration is ~40 COUNT queries; authoritative on
+             * show and on every action, stamped by the controller.
+             */
+            'can' => $item->can ?? app(ItemService::class)
+                ->abilities($item, resolveDelete: false, user: $request->user()),
         ];
     }
 }

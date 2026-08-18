@@ -4,6 +4,7 @@ namespace App\Modules\Production\Http\Requests\Concerns;
 
 use App\Modules\Production\Models\DowntimeReason;
 use App\Modules\Production\Models\ShiftProductionEntry;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
 /**
@@ -38,7 +39,16 @@ trait ValidatesDowntimeEvents
     {
         return [
             $prefix => ['sometimes', 'nullable', 'array'],
-            "{$prefix}.*.downtime_reason_id" => ['required', 'integer', 'exists:downtime_reasons,id'],
+            // ACTIVE ONLY, and this WIDENS THE REFUSAL SET on live data.
+            // A withdrawn downtime reason must not be choosable on a NEW
+            // completion or handover — otherwise Archive means nothing on
+            // this master, which is the Configuration Lifecycle Contract's
+            // whole point. Already-recorded events keep naming their reason
+            // (production_downtime_events is untouched and the report still
+            // renders it); only a fresh selection is refused. Same
+            // Rule::exists(...)->where('is_active', true) shape the scrap
+            // reason paths already use.
+            "{$prefix}.*.downtime_reason_id" => ['required', 'integer', Rule::exists('downtime_reasons', 'id')->where('is_active', true)],
             "{$prefix}.*.minutes" => ['required', 'numeric', 'gt:0'],
             "{$prefix}.*.note" => ['nullable', 'string', 'max:500'],
         ];

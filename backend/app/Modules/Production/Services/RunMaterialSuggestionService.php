@@ -589,6 +589,41 @@ class RunMaterialSuggestionService
     }
 
     /**
+     * EVERY item id the colour map has ever named — the cross-module answer
+     * to "does a factory setting reference this item?", asked by Inventory's
+     * configuration delete guard (DEC-20260817-002 §5).
+     *
+     * Deliberately WIDER than colourMap() below in two ways, both fail-closed:
+     * it reads every row of the key rather than only the `is_active` one,
+     * because a superseded map is exactly what makes a past shift's prefill
+     * explainable and a deleted item would leave it naming nothing; and it is
+     * static, so the guard can ask without constructing this service's own
+     * dependencies. Malformed JSON contributes nothing, as below.
+     *
+     * @return list<int>
+     */
+    public static function mappedMasterbatchItemIds(): array
+    {
+        $ids = [];
+
+        foreach (FactorySetting::query()->where('key', self::COLOUR_MAP_KEY)->pluck('value') as $raw) {
+            $decoded = json_decode((string) $raw, true);
+
+            if (! is_array($decoded)) {
+                continue;
+            }
+
+            foreach ($decoded as $itemId) {
+                if (is_numeric($itemId)) {
+                    $ids[] = (int) $itemId;
+                }
+            }
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    /**
      * The colour → masterbatch item id map from factory settings, or an empty
      * map. Malformed JSON is an empty map, never an exception: a mistyped
      * setting must cost a blank suggestion box, not a 500 on the completion

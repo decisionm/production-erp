@@ -30,6 +30,16 @@ class ProductionConfiguration extends Model
     use RecordsConfigurationAudit;
     use SoftDeletes;
 
+    /**
+     * The Configuration Lifecycle Contract's `can`, stamped by the
+     * controller (authoritative) or by the service (cheap, delete: null) so
+     * ProductionConfigurationResource never re-derives eligibility. A plain
+     * public property, not an Eloquent attribute.
+     *
+     * @var array{edit: bool, activate: bool, archive: bool, delete: bool|null}|null
+     */
+    public ?array $can = null;
+
     protected function casts(): array
     {
         return [

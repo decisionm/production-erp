@@ -2,6 +2,7 @@
 
 namespace App\Modules\Payroll\Http\Requests;
 
+use App\Modules\HRMS\Http\Requests\Rules\SelectableEmployee;
 use App\Modules\Payroll\Models\Enums\SalaryCalculationType;
 use App\Modules\Payroll\Models\SalaryComponent;
 use Illuminate\Foundation\Http\FormRequest;
@@ -18,7 +19,7 @@ class StoreSalaryStructureRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'employee_id' => ['required', 'integer', 'exists:employees,id'],
+            'employee_id' => ['required', 'integer', SelectableEmployee::rule()],
             'effective_from' => ['required', 'date'],
             'lines' => ['required', 'array', 'min:1'],
             // WS-B: a withdrawn component joins no NEW structure; structures

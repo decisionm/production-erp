@@ -1,3 +1,5 @@
+import type { ConfigurationAbilities } from '@/components/configuration';
+
 export type EmployeeStatus = 'active' | 'inactive' | 'terminated';
 
 export interface Employee {
@@ -11,6 +13,13 @@ export interface Employee {
     designation: string | null;
     department: string | null;
     status: EmployeeStatus;
+    /**
+     * The Configuration Lifecycle Contract's `can` block (DEC-20260817-002).
+     * Optional: absent on a backend that predates the wiring, and the row
+     * actions then offer nothing rather than invent permission. `delete:
+     * null` on an index row means UNDETERMINED — the confirm asks.
+     */
+    can?: ConfigurationAbilities | null;
     manager?: { id: number; name: string };
     created_at: string;
 }

@@ -2,7 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Modules\Inventory\Models\Item;
+use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Production\Models\Shift;
+use App\Modules\Production\Models\ShiftProductionEntry;
+use App\Modules\Production\Models\WorkCenter;
+use App\Modules\Production\Services\ConfigSnapshotReference;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -61,5 +66,50 @@ class DatabaseDriverParityTest extends TestCase
 
         // And a where that matches nothing still answers 0 — the guard's other half.
         $this->assertSame(0, DB::table('shifts')->where('id', $shift->id)->where('name', 'Elsewhere')->update(['name' => 'Parity']));
+    }
+
+    /**
+     * THE FROZEN-SNAPSHOT DEPENDENCY CHECK — the one guard in the
+     * product-definition masters' declaration with no backstop of any kind
+     * behind it, and the one whose SQL differs by driver.
+     *
+     * A hard delete of a ProductionStandard or a ProductionConfiguration is
+     * blocked by counting the completed runs whose
+     * `shift_production_entries.config_snapshot` names it. That is a JSON
+     * key, not a foreign key: nothing cascades, nothing restricts, and
+     * `SchemaCascades` has nothing to say about it. If this count comes back
+     * 0 on MySQL where sqlite says 1, the live instance destroys a standard
+     * that every past run still names — and the whole suite stays green,
+     * because green is what a zero count produces.
+     *
+     * Laravel's `where('config_snapshot->key', $id)` compiles differently on
+     * the two drivers (`json_extract` vs `json_unquote(json_extract(...))`)
+     * and compares different types on each. ConfigSnapshotReference forces
+     * both sides to text on both drivers instead; this pins that it counts
+     * the same on whichever leg is running.
+     */
+    public function test_the_frozen_snapshot_reference_counts_the_same_on_both_drivers(): void
+    {
+        $item = Item::create(['sku' => 'PARITY-1', 'name' => 'Parity bottle', 'uom' => 'Nos', 'is_active' => true]);
+        $warehouse = Warehouse::create(['code' => 'PARITY-WH', 'name' => 'Parity store', 'is_active' => true]);
+        $machine = WorkCenter::create(['code' => 'PARITY-MC', 'name' => 'Parity machine', 'is_active' => true]);
+        $shift = Shift::create(['name' => 'Parity', 'start_time' => '06:00', 'end_time' => '14:00', 'is_active' => true]);
+
+        ShiftProductionEntry::create([
+            'shift_id' => $shift->id,
+            'work_center_id' => $machine->id,
+            'item_id' => $item->id,
+            'warehouse_id' => $warehouse->id,
+            'production_date' => '2026-04-01',
+            'quantity_produced' => '100',
+            'config_snapshot' => ['configuration_id' => 4242, 'production_standard_id' => 77],
+        ]);
+
+        $this->assertSame(1, ConfigSnapshotReference::count('configuration_id', 4242));
+        $this->assertSame(1, ConfigSnapshotReference::count('production_standard_id', 77));
+
+        // …and does not match a different id, or a key the snapshot lacks.
+        $this->assertSame(0, ConfigSnapshotReference::count('configuration_id', 4243));
+        $this->assertSame(0, ConfigSnapshotReference::count('mold_id', 4242));
     }
 }

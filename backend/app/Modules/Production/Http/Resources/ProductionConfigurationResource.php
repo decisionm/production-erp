@@ -2,12 +2,17 @@
 
 namespace App\Modules\Production\Http\Resources;
 
+use App\Modules\Production\Models\ProductionConfiguration;
+use App\Modules\Production\Services\ProductionConfigurationService;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 class ProductionConfigurationResource extends JsonResource
 {
     public function toArray($request): array
     {
+        /** @var ProductionConfiguration $configuration */
+        $configuration = $this->resource;
+
         return [
             'id' => $this->id,
             // The code rides beside the name because the floor calls machines
@@ -40,6 +45,11 @@ class ProductionConfigurationResource extends JsonResource
             'source_reference' => $this->source_reference,
             'confirmation_status' => $this->confirmation_status,
             'notes' => $this->notes,
+            'is_archived' => $configuration->trashed(),
+            // See EmployeeResource: the server's verdict, never re-derived by
+            // a screen. `delete` is null on a list and authoritative on show.
+            'can' => $configuration->can
+                ?? app(ProductionConfigurationService::class)->abilities($configuration, resolveDelete: false),
         ];
     }
 }

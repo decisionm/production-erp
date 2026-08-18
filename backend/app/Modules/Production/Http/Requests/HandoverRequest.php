@@ -2,6 +2,7 @@
 
 namespace App\Modules\Production\Http\Requests;
 
+use App\Modules\HRMS\Http\Requests\Rules\SelectableEmployee;
 use App\Modules\Production\Http\Requests\Concerns\ValidatesDowntimeEvents;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -29,7 +30,7 @@ class HandoverRequest extends FormRequest
             // shift the factory still runs — same contract as StartBatchRequest.
             'shift_id' => ['required', 'integer', Rule::exists('shifts', 'id')->where('is_active', true)],
             'production_date' => ['nullable', 'date'],
-            'operator_id' => ['nullable', 'integer', 'exists:employees,id'],
+            'operator_id' => ['nullable', 'integer', SelectableEmployee::rule()],
 
             'closing_day_bin' => ['nullable', 'array'],
             'closing_day_bin.*.item_id' => ['required', 'integer', 'exists:items,id'],

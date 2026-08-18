@@ -1785,3 +1785,251 @@ PR:                 #192 (base: feat/phase-7.6-configuration-lifecycle → #191 
 Deployment state:   not deployed; stack #179 → … → #191 → #192
 Next phase:         8 — end-to-end acceptance
 ```
+
+## PHASE 8 — End-to-end acceptance
+
+```
+Phase:    8 — the chain, not the modules (MASTER-PLAN rev 3, P8-01..08)
+Status:   NOT READY  (one link NOT TESTED; two links BLOCKED by named owner gates)
+Branch:   feat/phase-8-acceptance (stacked on Phase 7.5 PR #192 → … → #179)
+Dates:    2026-08-17
+
+The verdict, and why it is not a complaint about quality:
+  Every one of the five chains passes. The full backend suite is 1,904 tests /
+  1,903 passed / 1 skipped by design / 17,806 assertions; Pint clean; frontend
+  typecheck, tests and build clean; inventory:check-ledger clean. The phase is
+  NOT READY because ONE link is NOT TESTED, and the rule this programme set
+  says that is enough, full stop.
+
+  D-WIRING — the configuration lifecycle applied to the in-scope masters — is
+  NOT TESTED, because Phase 7.6 deliberately shipped the mechanism and wired no
+  entity. The independent QA confirmed it by inspection: no module declares
+  ManagesConfigurationLifecycle, and the one lifecycle-shaped route in the app
+  bypasses the shared mechanism. Chain D therefore proves the MECHANISM against
+  an existing master through routes that predate 7.6 — and proves nothing about
+  the 35 in-scope masters. That independently confirms both constraints the
+  lead set: 7.6 wired no entity, and a material configuration gap remains.
+
+What the chains proved:
+  A · the operator workflow end to end — configuration answers every Shift
+    Floor question; the standard is frozen at Start under its own
+    calculation_version and that stamp is load-bearing; Completed Today equals
+    the completed batches and excludes running, cancelled and yesterday's;
+    Shift Summary equals Σ completed production with the QC reduction flowing
+    through; the CEC composition is byte-identical to the Shift Summary; the
+    Tally shift voucher contains exactly the approved entries, proved by
+    inclusion AND exclusion; release gate → agent ack → snapshot.
+  B · PO → GRN → lot → movement → balance → consumption, traced backward to
+    every GRN line, FC-06 holding on every link in both halves.
+  B2 · the three states never collapse — proved by MOVEMENT CENSUS rather than
+    a total: the store's outflows are exactly three issue_to_production rows
+    and ZERO consumption rows, so it cannot be charged twice for the same
+    material. Mutation-checked twice. An open issue reads as NO drift.
+  C · sales traced to Tally, the Layer-B honesty statement stated plainly, one
+    export per kind, FC-06 on every file, the CEC slot BLOCKED not produced.
+  D · the mechanism — a referenced master refused with integer counts and its
+    cascade children surviving; an unused one really deleted and its code
+    released; fail-closed verdicts; the schema backstop refusing an incomplete
+    declaration.
+
+Owner-gated, correctly recorded BLOCKED (neither invented, neither bypassed):
+  • A6b — the CEC LAYOUT. The composition is proved equal to the Shift Summary;
+    the format waits on the owner's sample.
+  • B8 — the PO → Tally live write (Q35(d)). Flag off, staging proved, no
+    egress reachable. The first live post is attended, never unattended.
+  Even with D-WIRING closed, the best achievable state is PASS WITH
+  OWNER-GATED ITEMS, not unconditional PRODUCT READY, while these remain.
+
+Honest limits, stated rather than implied:
+  • NO BROWSER PROOF was taken for any chain at any point in this phase. The
+    Chrome extension disconnected early in the programme and never returned.
+    Every PASS is at the transaction-model / API layer.
+  • SQLITE ONLY. No MySQL on the build machine; the CI app-mysql leg (Phase 7)
+    must execute the acceptance files before "green on both drivers" is said.
+  • Chain B2's "Production Receipt" link has no separate document in the ERP —
+    the receipt IS the WIP arrival with a named two-handed handover. Recorded
+    as a PASS with the deviation stated, not as a gap.
+
+What would change the verdict: see docs/engineering/RELEASE-READINESS.md.
+PR:                 #193 (base: feat/phase-7.5-material-flow → #192 → … → #179)
+Deployment state:   not deployed; stack #179 → … → #192 → #193
+Next:               wire the Tier-1 masters through the contract, re-walk D
+                    against them, run the chains on MySQL, take the browser walk
+```
+
+────────────────────────────────────────────────────────────────────────────
+D-WIRING + verification night — 17→18 Aug 2026 (02:00–03:00 IST)
+────────────────────────────────────────────────────────────────────────────
+```
+Scope:              close the three engineering items that held Phase 8 at
+                    NOT READY — D-WIRING, the MySQL leg, the browser walk.
+
+Commits (branch feat/phase-8-acceptance):
+  55ab682  D-WIRING: the Configuration Lifecycle Contract becomes real on the
+           masters the factory uses. Eleven of them — Warehouse, Item,
+           WorkCenter, Mold, Shift, ScrapReason, DowntimeReason,
+           ProductionStandard, ProductionStandardPackaging,
+           ProductionConfiguration, Employee — plus the configuration-delete
+           permission tier. Chain D re-walked through those entities' OWN
+           routes, replacing the guard test that had recorded "no module
+           declares a lifecycle yet".
+  7e37261  The local fixture stops granting the floor three tiers live
+           withholds (see FOUND, below).
+  fa35b83  A mould-lifecycle test stops passing only because sqlite is
+           forgiving (see MYSQL, below).
+
+MYSQL — the acceptance chains on the driver live runs, at last:
+  A MySQL 8.0 container matching CI's service image; the WHOLE backend suite
+  against it. 2,113 tests · 2,111 passed · 1 skipped by design · 1 ERROR.
+  The error was in the NEW D-WIRING work and was a genuine driver divergence:
+  MoldLifecycleTest seeded a bare '08:00' into mold_change_logs.from_time,
+  which is a dateTime column. sqlite is typeless and stored it; MySQL refused
+  it outright (SQLSTATE 22007). Green on the dev driver, red on the real one.
+  Fixed; 13/13 on both afterwards. Third time the MySQL leg has caught what
+  sqlite hid — and the first time it caught it before CI did.
+
+BROWSER — 20 screens, full record in E2E-BROWSER-WALK-2026-08-18.md.
+  Served the phase-8 build from Laravel on its own port: the PRODUCTION
+  topology, not the Vite dev server.
+  Proven in the browser, not merely at the API:
+    · Delete refused with counts — "Cannot delete warehouse RM Store — used
+      by 3 stock balances, 3 stock movements, 2 material bags and 1 Tally
+      godown identity. Deactivate instead.", itemised.
+    · Delete ALLOWED when genuinely unused — a warehouse created through the
+      UI was hard-deleted; the row left the table (deleted_at not set).
+    · Store → Production/WIP: the Stock page lists RM-STORE and WIP as
+      separate locations with separate balances, and both the Material
+      Requests and Store Issue Queue screens state the rule in words:
+      "A store issue is not a consumption."
+    · The PO→Tally owner gate reads honestly on screen: "Not sent to Tally —
+      PO posting is disabled (owner gate Q35)".
+  METHOD LIMIT, stated rather than buried: the driven tab reports
+  visibilityState "hidden", so Chrome throttles its CSS animations and AntD
+  modals never finish their enter transition — invisible, and masking
+  coordinate clicks. Interactions were therefore dispatched in page context.
+  Real handlers, real requests, real responses; NOT mouse-level. Overlay and
+  z-index defects remain UNTESTED. A visible tab was attempted once and was
+  also hidden.
+
+FOUND — the fixture, not the product, was failing FC-06 open:
+  Logged in as the fixture supervisor, a Procurement Receipt Note returned its
+  supplier in the clear. The gate is correct; AgentIdentity::
+  mayReadPurchaseDetails() opens FC-06 to finance.view/finance.manage, and the
+  fixture handed the supervisor every permission except carton-trace.*. So
+  every manual FC-06 walkthrough had been passing for the WRONG REASON — the
+  same silent failure the seeder already carried a carton-trace comment about.
+  Generalised to a withheld-prefix list and pinned by a test asserting through
+  the product's own predicates, not permission names. Re-verified after: the
+  Receipt Note's party is null with an explicit party_withheld note and
+  party_ledger/party_gstin omitted, while a Delivery Note's CUSTOMER still
+  reads — a customer is not FC-06. The discrimination is correct.
+
+RECORDED AS GAPS, deliberately not fixed unattended:
+  · Duplicate business codes are not normalized IN CODE. 17+ masters use a
+    bare unique rule; no shared rule exists. Measured on both drivers rather
+    than assumed: MySQL (live) CATCHES a case-variant duplicate, sqlite does
+    NOT, and neither catches whitespace. The browser observation that started
+    this was therefore a sqlite artefact, not a live defect — the severity was
+    corrected by measuring instead of shipping. NOT fixed tonight because a
+    case-insensitive unique rule would begin refusing EDITS to any live pair
+    already differing only by case, and whether live holds such pairs is a
+    read-only query nobody has run. "Warn on likely duplicate NAMES" is
+    UNTESTED, not passing.
+  · The Day Bin surface outlives the decision — the page, the dashboard tile
+    and UpdateDayBinWarehouseRequest are all still wired, so it IS still
+    relied upon and was not blindly deleted; but the copy contradicts
+    DEC-20260817-001 and should not reach the floor that way.
+  · Mould master and duplicate-posting/retry were NOT exercised in the
+    browser — the fixture seeds no moulds and no retryable entry.
+
+GATE:               Sonnet independent QA + Opus adversarial safety review on
+                    the D-WIRING delta. The first Opus reviewer died on a 529
+                    after retries and was relaunched.
+```
+
+────────────────────────────────────────────────────────────────────────────
+The gate on D-WIRING, and why nothing was merged — 18 Aug 2026 (02:30–03:00)
+────────────────────────────────────────────────────────────────────────────
+```
+GATE:
+  Sonnet independent QA   PASS WITH DEFERRED. Wrote its own route-level tests
+                          for all eleven masters sharing no harness with the
+                          builder's, and reproduced every claim.
+  Opus adversarial safety FAIL → fixed in 3df98bb. Migrated all 175
+                          migrations into a scratch DB and diffed all 277
+                          foreign keys against the eleven declarations.
+                          Headline NEGATIVE worth recording: zero uncovered
+                          FK columns across all 91 inbound columns, for every
+                          delete rule. The hole was one level down.
+
+  The first Opus reviewer died on API 529 after retries and was relaunched
+  outside the workflow.
+
+FIXED (3df98bb) — a hole this branch created, not one it inherited:
+  DependencyCheck::count() excludes soft-deleted children unless the check
+  says includeTrashed(). D-WIRING's OWN migration gave
+  production_standard_packagings a deleted_at for the first time, which turned
+  Item's existing, correct-looking check blind. The column is SET NULL, so an
+  Item named only by an ARCHIVED pack variant read as CLEAR, was hard-deleted,
+  and left the variant unable to say which product it packed. The sibling line
+  above it already had includeTrashed() — an oversight, not a judgement.
+  Same fault on employees.manager_id.
+  Structural half, which matters more: the assertion that should have caught
+  it was called by 4 of 11 masters and Item — 43 inbound FK columns, the
+  largest declaration in the repo — was not one of them; and the assertion had
+  no notion of trashed rows anyway. It now reads soft-deletion from the SCHEMA
+  and demands includeTrashed, and a census test runs it across all eleven from
+  one visible list. Red-before proved.
+
+VERIFIED AT THE TIP (not at an earlier commit, which the docs had been citing):
+  backend 2,051 / 2,050 passed / 1 skipped by design / 18,668 assertions
+  pint clean · typecheck clean · vitest 515/515 · build clean
+
+PROCESS DEFECT, raised against me by the QA reviewer and upheld:
+  I committed in the same worktree the reviewer was working in, and a broad
+  `git add -A` swept its untracked scratch test into 7e37261 in a mid-edit,
+  2-red state, then moved HEAD twice more under it. Removed in 3f2d351;
+  history not rewritten. Its FINAL 78/78 version was never captured — a real
+  loss, stated rather than glossed. ONE WORKTREE, ONE WRITER.
+
+NOT MERGED, AND NOT DEPLOYED — deliberately. The reasoning, in full:
+  deploy.yml fires on every push to main, with concurrency group
+  deploy-production and cancel-in-progress:false. The stack is fifteen
+  linear PRs. Merging them in dependency order therefore opens up to fifteen
+  `artisan down` maintenance windows on a live factory — and by this repo's
+  own deploy skill, EVERY failure after the app closes leaves it closed. It
+  is 02:30 IST; the night shift (22:00–06:00) is on the floor.
+  The mitigation — suppress the deploy trigger, merge, then take exactly ONE
+  manual deploy — needed `gh workflow disable`, which the environment's
+  policy classifier blocked. I did not work around it.
+  That leaves the choice between fifteen unattended windows on a running
+  shift and stopping. The lead's own instruction settles it: "If a deployment
+  or migration creates a genuine production-integrity risk, stop that
+  specific release action, preserve the evidence, and continue any
+  independent safe work. Do not force a deployment merely to say it
+  completed."
+  So: everything is committed, pushed, CI-verified and ready to merge; the
+  merge and the single deploy are the owner's to start. Live remains 9a9cbe3.
+```
+
+```
+POSTSCRIPT — the QA reviewer's "unexplained discrepancy" reconciles exactly.
+It measured 2,040 where it expected 2,039+5 and, correctly, did not chase a
+moving target. The arithmetic: 2,039 at 55ab682, +1 for the guard-test method
+added in 7e37261, = 2,040 once 3f2d351 removed the 78-test scratch file —
+which is what it saw; then +11 census data sets in 3df98bb = 2,051 at the tip.
+The discrepancy was the scratch file it had been sharing the worktree with,
+not a mystery in the suite.
+
+MYSQL EVIDENCE, corrected. The local 2,113/2,111 figure is NOT quoted as
+authority anywhere: it was measured while that same scratch file sat in the
+tree mid-edit, so nobody can reproduce it. What stands is (a) the divergence
+it caught, which was real and is fixed, and (b) CI's own "Backend tests on
+MySQL 8" leg passing on 95faab3 in 7m29s.
+
+CI ON #193 @ 95faab3: all four checks PASS —
+  Backend tests on MySQL 8      pass  7m29s
+  Frontend build + backend tests pass  2m46s
+  Factory knowledge validation   pass  30s
+  Tally sync agent typecheck     pass  15s
+```

@@ -6,9 +6,16 @@ use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Production\Models\Enums\ConfigurationStatus;
 use App\Modules\Production\Models\ProductionConfiguration;
 use App\Modules\Production\Models\WorkCenter;
+use App\Support\Configuration\ActiveFlag;
+use App\Support\Configuration\DependencyCheck;
+use App\Support\Configuration\HardDeleteAuthority;
+use App\Support\Configuration\ManagesConfigurationLifecycle;
+use Closure;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -27,6 +34,207 @@ use Illuminate\Validation\ValidationException;
  */
 class ProductionConfigurationService
 {
+    use ManagesConfigurationLifecycle;
+
+    protected function configurationLabel(): string
+    {
+        return 'production configuration';
+    }
+
+    /**
+     * THE IN-SERVICE AXIS IS `status`, and it has THREE cases — which is
+     * exactly the shape ActiveFlag exists for. Approved means in service;
+     * Inactive is what Archive writes; DRAFT IS NEITHER, and that is
+     * load-bearing rather than a technicality: a draft has not been through
+     * assertComplete / assertWithinMachineCapability / assertNoOverlap, so
+     * "activate" must never be able to reach Approved for one. abilities()
+     * and activate() below both say so.
+     */
+    protected function configurationActiveColumn(): ActiveFlag|string|null
+    {
+        return ActiveFlag::status(
+            'status',
+            active: ConfigurationStatus::Approved,
+            retired: ConfigurationStatus::Inactive,
+        );
+    }
+
+    protected function configurationNameUsing(): ?Closure
+    {
+        return static fn (ProductionConfiguration $configuration): string => sprintf(
+            '%s · %s%s',
+            (string) ($configuration->workCenter?->code ?? 'machine #'.$configuration->work_center_id),
+            (string) ($configuration->item?->name ?? 'item #'.$configuration->item_id),
+            $configuration->colour === null ? '' : ' · '.$configuration->colour,
+        );
+    }
+
+    protected function configurationHardDeleteAuthorisation(): ?Closure
+    {
+        return HardDeleteAuthority::callback();
+    }
+
+    /**
+     * EVERYTHING THAT MAY REFER TO A MACHINE-PRODUCT CONFIGURATION.
+     *
+     * The schema, read 18-Aug-2026:
+     *
+     *   shift_production_entries.production_configuration_id   SET NULL
+     *
+     * That is the WHOLE foreign-key story, and it does not cascade — so
+     * `SchemaCascades` returns an empty list for this table and contributes no
+     * backstop whatsoever. Nulling that column on a hard delete would leave
+     * every past run saying it was measured against no agreed standard at
+     * all, which is the one thing the approval flow exists to make impossible.
+     *
+     * AND THE SNAPSHOT, which no foreign key expresses. Start Batch freezes
+     * `config_snapshot.configuration_id` (ShiftProductionEntryService) so that
+     * a later edit to the configuration can never rewrite what a run was
+     * measured against. It is a JSON key: no constraint, no cascade, no
+     * database mechanism of any kind would notice it. Counted here or not at
+     * all.
+     *
+     * CHECKED NEGATIVES: `production_configurations` is itself the CHILD in
+     * the cascade the audit lists (items → production_configurations), not the
+     * parent; `boms` are referenced BY a configuration, never the other way
+     * round; no settings key and no string match names a configuration id.
+     *
+     * @return list<DependencyCheck>
+     */
+    protected function dependencyChecks(): array
+    {
+        return [
+            DependencyCheck::table('shift_production_entries', 'production_configuration_id')
+                ->label('shift production entry'),
+
+            DependencyCheck::callable(
+                static fn (Model $configuration): int => ConfigSnapshotReference::count('configuration_id', $configuration->getKey()),
+                'shift_config_snapshots',
+            )->label('frozen run snapshot'),
+        ];
+    }
+
+    /**
+     * The contract's `can`, with the two answers only this module can give.
+     *
+     * `activate` is masked off for a DRAFT. The shared mechanism reads "not
+     * in service" and offers to put it in service; for this entity that
+     * transition is APPROVAL — an attributable act with three gates and an
+     * approver's name — so offering it here would be offering a one-click
+     * route around the four-eyes rule.
+     *
+     * `edit` is masked off for an APPROVED row, because update() has always
+     * refused one: live batches resolve against it and editing its numbers
+     * under them retroactively changes the standard a running shift is being
+     * measured on. Copy-to-draft is the supported path, and a `can` that
+     * promised otherwise would just produce a 422 the screen had to explain.
+     *
+     * @return array{edit: bool, activate: bool, archive: bool, delete: bool|null}
+     */
+    public function abilities(Model $model, bool $resolveDelete = true, ?Authenticatable $user = null): array
+    {
+        $abilities = $this->configurationLifecycle()->abilities($model, $resolveDelete, $user);
+
+        if ($model->status === ConfigurationStatus::Draft) {
+            $abilities['activate'] = false;
+        }
+
+        if ($model->status === ConfigurationStatus::Approved) {
+            $abilities['edit'] = false;
+        }
+
+        return $abilities;
+    }
+
+    /**
+     * Archive — DEACTIVATION, converged onto the shared contract while
+     * keeping every bit of the effective-window behaviour it already had.
+     *
+     * WHAT CHANGED: the status write is now the mechanism's
+     * (`ActiveFlag::markRetired` → `inactive`), which means it is now
+     * preceded by the mechanism's own ability check, so deactivating an
+     * already-inactive configuration is refused instead of silently
+     * rewriting the row (and its `updated_at`, and its audit trail) a second
+     * time. Nothing else moved.
+     *
+     * WHAT DID NOT CHANGE: `effective_to` is still stamped with today when
+     * the window was left open, so an archived configuration stops governing
+     * production on the day it was withdrawn exactly as before. It is set
+     * BEFORE the mechanism's save so both land in ONE update — two writes
+     * would mean two audit rows for one act — and only after the ability
+     * check has been asked, so a refused archive changes nothing at all.
+     */
+    public function archive(Model $model, ?string $reason = null): Model
+    {
+        if ($this->abilities($model, resolveDelete: false)['archive'] && $model->effective_to === null) {
+            $model->effective_to = now()->toDateString();
+        }
+
+        return $this->configurationLifecycle()->archive($model, $reason);
+    }
+
+    /**
+     * Put a withdrawn configuration back in service.
+     *
+     * THE THREE APPROVAL GATES RUN AGAIN, and that is the point rather than
+     * belt-and-braces: `inactive → approved` puts a row back in the set
+     * `resolve()` picks from, so a reactivation that skipped
+     * assertNoOverlap() could re-create exactly the two-live-standards
+     * ambiguity that check exists to prevent — the configuration it used to
+     * overlap with may well have been approved in the meantime.
+     *
+     * A DRAFT IS REFUSED HERE, pointing at approve(). See abilities().
+     *
+     * THE EFFECTIVE WINDOW IS LEFT EXACTLY AS RECORDED. Reopening
+     * `effective_to` would be inventing window policy nobody stated, so a
+     * configuration whose window has already closed is refused by name and
+     * the module's own supported path (copy → approve) is offered instead.
+     * Reactivating on the day it was withdrawn — the mistake this reverses —
+     * works, because `effective_to` is then today and today is still inside
+     * the window. Recorded as an owner question.
+     */
+    public function activate(Model $model, ?string $reason = null): Model
+    {
+        if ($model->status === ConfigurationStatus::Draft) {
+            throw InvalidStatusTransitionException::make(
+                'production configuration',
+                ConfigurationStatus::Draft->value,
+                ConfigurationStatus::Approved->value,
+            );
+        }
+
+        // A configuration that was withdrawn while still a DRAFT carries no
+        // approval on record. Reactivating it would write `approved` with
+        // nobody's name against it — an approved standard nobody approved —
+        // and approve() cannot rescue it afterwards because that path takes
+        // drafts only. Refused at the one point where it is still fixable.
+        if ($model->approved_at === null) {
+            throw ValidationException::withMessages([
+                'status' => 'This configuration was withdrawn before anyone approved it, so there is no approval to restore. Copy it to a new draft and approve that.',
+            ]);
+        }
+
+        $closed = $model->effective_to !== null
+            && $model->effective_to->toDateString() < now()->toDateString();
+
+        if ($closed) {
+            throw ValidationException::withMessages([
+                'effective_to' => sprintf(
+                    'This configuration\'s effective period ended on %s, so putting it back in service would approve a standard that governs nothing. Copy it to a new draft and approve that instead.',
+                    $model->effective_to->toDateString(),
+                ),
+            ]);
+        }
+
+        return DB::transaction(function () use ($model, $reason) {
+            $this->assertComplete($model);
+            $this->assertWithinMachineCapability($model);
+            $this->assertNoOverlap($model);
+
+            return $this->configurationLifecycle()->activate($model, $reason);
+        });
+    }
+
     /** @param array<string, mixed> $filters */
     public function paginate(array $filters = [], int $perPage = 25): LengthAwarePaginator
     {
@@ -409,12 +617,16 @@ class ProductionConfigurationService
         });
     }
 
+    /**
+     * The endpoint the machine-exceptions screen has always called. It is now
+     * one line over the shared contract's Archive — same status, same
+     * effective-window stamp, one write — rather than a second implementation
+     * of deactivation living beside it. See archive() for exactly what
+     * changed.
+     */
     public function deactivate(ProductionConfiguration $configuration): ProductionConfiguration
     {
-        $configuration->update([
-            'status' => ConfigurationStatus::Inactive->value,
-            'effective_to' => $configuration->effective_to ?? now()->toDateString(),
-        ]);
+        $this->archive($configuration);
 
         return $configuration->fresh(['workCenter', 'item', 'mold', 'bom']);
     }

@@ -5,6 +5,12 @@ namespace App\Modules\Production\Services;
 use App\Modules\Production\Exceptions\DuplicatePackagingVariantException;
 use App\Modules\Production\Models\ProductionStandard;
 use App\Modules\Production\Models\ProductionStandardPackaging;
+use App\Support\Configuration\ActiveFlag;
+use App\Support\Configuration\DependencyCheck;
+use App\Support\Configuration\HardDeleteAuthority;
+use App\Support\Configuration\ManagesConfigurationLifecycle;
+use Closure;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -50,6 +56,81 @@ use Illuminate\Validation\ValidationException;
  */
 class ProductionStandardPackagingService
 {
+    use ManagesConfigurationLifecycle;
+
+    protected function configurationLabel(): string
+    {
+        return 'packaging variant';
+    }
+
+    /**
+     * No in-service flag on this table, so Archive is the soft delete added
+     * by migration 2026_08_18_090000 and Activate is the restore. `is_default`
+     * is not it: a variant can be in service without being the default.
+     */
+    protected function configurationActiveColumn(): ActiveFlag|string|null
+    {
+        return null;
+    }
+
+    /** A refusal names the variant the way the screen labels it. */
+    protected function configurationNameUsing(): ?Closure
+    {
+        return static fn (ProductionStandardPackaging $packaging): string => $packaging->label();
+    }
+
+    protected function configurationHardDeleteAuthorisation(): ?Closure
+    {
+        return HardDeleteAuthority::callback();
+    }
+
+    /**
+     * EVERYTHING THAT MAY REFER TO ONE PACKAGING VARIANT.
+     *
+     * The schema, read 18-Aug-2026:
+     *
+     *   shift_production_entries.production_standard_packaging_id      SET NULL
+     *   shift_production_entry_packing_lines.
+     *                        production_standard_packaging_id          SET NULL
+     *
+     * NEITHER CASCADES, so `SchemaCascades` reports nothing for this table and
+     * there is NO backstop of any kind here — both are declared by hand or
+     * they are not checked at all. Both would be silently blanked by a hard
+     * delete, and a packing line that no longer names the variant it was
+     * counted under is a posted production document rewritten.
+     *
+     * THE TALLY IDENTITY IS THE THIRD, and it is the record's OWN attribute.
+     * `item_id` is the Tally stock item THIS packing posts as
+     * (DEC-20260810-003) — a variant carrying one has been given a place in
+     * Tally's world by a person, and dropping the row drops that mapping
+     * while Tally's own history keeps referring to it. Archive preserves it;
+     * hard delete may not (DEC-20260817-002 §4 — historical Tally identity
+     * and mapping are preserved). No Tally call is made to establish this:
+     * the attribute on our own row is the evidence.
+     *
+     * CHECKED NEGATIVE, stated so it is visibly not an oversight:
+     * `shift_production_entries.config_snapshot` freezes `packaging_mode` —
+     * the WORD "pouch", "tray", "direct_box" — and the resolved counts, but
+     * never the packaging ROW ID (ShiftProductionEntryService's snapshot
+     * block). A mode string is not a reference to this row, so there is
+     * nothing there to count.
+     *
+     * @return list<DependencyCheck>
+     */
+    protected function dependencyChecks(): array
+    {
+        return [
+            DependencyCheck::table('shift_production_entries', 'production_standard_packaging_id')
+                ->label('shift production entry'),
+
+            DependencyCheck::table('shift_production_entry_packing_lines', 'production_standard_packaging_id')
+                ->label('packing line'),
+
+            DependencyCheck::attribute('item_id', 'tally_identity')
+                ->label('Tally identity of its own'),
+        ];
+    }
+
     /**
      * @param  array<string, mixed>  $data  a SaveProductionStandardPackagingRequest's validated payload
      */
@@ -123,17 +204,47 @@ class ProductionStandardPackagingService
     }
 
     /**
+     * ONE of a standard's packaging variants, ARCHIVED ROWS INCLUDED, and
+     * only ever one of THAT standard's — the same refusal the writes make,
+     * so a delete cannot reach a sibling product's variant through a guessed
+     * id. Archived rows are found because Activate has to be able to undo an
+     * Archive, and a hard delete answers for a trashed row rather than
+     * 404ing it.
+     */
+    public function resolveFor(ProductionStandard $standard, int $packagingId): ProductionStandardPackaging
+    {
+        $packaging = ProductionStandardPackaging::withTrashed()->find($packagingId);
+
+        if ($packaging === null) {
+            throw (new ModelNotFoundException)->setModel(ProductionStandardPackaging::class, [$packagingId]);
+        }
+
+        $this->refuseForeignRow($standard, $packaging);
+
+        return $packaging;
+    }
+
+    /**
      * The row as every consumer sees it — counts, completeness, and the
      * identity with its provenance.
      *
      * @return array<string, mixed>
      */
-    public function describe(ProductionStandardPackaging $packaging): array
+    public function describe(ProductionStandardPackaging $packaging, bool $resolveDelete = true): array
     {
         $packaging->loadMissing(['tallyItem', 'standard.item']);
 
         return [
             'id' => (int) $packaging->id,
+            // The Configuration Lifecycle Contract's `can` — the SAME
+            // predicate the actions enforce, so no screen re-derives
+            // eligibility. Taken from the controller's stamp when there is one
+            // (it has already intersected the record's eligibility with this
+            // user's grant, ManagesConfigurationRecords); asked here otherwise.
+            // On a list `$resolveDelete` is false and `delete` comes back
+            // null: undetermined, ask, rather than a lie either way.
+            'can' => $packaging->can ?? $this->abilities($packaging, $resolveDelete),
+            'is_archived' => $packaging->trashed(),
             'mode' => (string) $packaging->mode,
             'nos_per_pouch' => $packaging->nos_per_pouch,
             'pouches_per_box' => $packaging->pouches_per_box,
@@ -244,6 +355,14 @@ class ProductionStandardPackagingService
         $stored = $this->attributes($data, $existing, 0);
 
         $duplicate = $standard->packagings()
+            // WITH THE ARCHIVED ONES. Adding `deleted_at` to this table
+            // (migration 2026_08_18_090000) gave Archive somewhere to go, and
+            // it must not have quietly loosened this guard on the way past:
+            // an ARCHIVED variant RETAINS and RESERVES its key
+            // (DEC-20260817-002 §2), so the twin refusal still fires against
+            // it and the answer names the archived row rather than letting a
+            // second copy in behind its back.
+            ->withTrashed()
             ->when($existing !== null, fn ($query) => $query->whereKeyNot($existing->id))
             ->where('mode', $mode)
             ->where('nos_per_pouch', $stored['nos_per_pouch'])
