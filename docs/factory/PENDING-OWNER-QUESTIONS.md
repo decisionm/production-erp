@@ -1162,3 +1162,44 @@ statement is that Day Bin is retired from the workflow and the UI, and still run
 as the resin costing inflow. No column was dropped and no historical row was touched, so
 nothing here is urgent — but batch costing depends on it, so it should not drift unowned.
 *Open since 2026-08-18.*
+
+## Q56 · Which items are production materials — the residue the evidence could not answer
+
+The Material Request picker now offers only items configured as production inputs
+(`items.is_production_input`), enforced in the API and not merely in the dropdown. The
+backfill that set that column derived it from EVIDENCE, never from names: the BOM component
+register, the packing-material register, the colourant register, a kg-family unit as a seed,
+and — the half that catches consumables no register covers — what the factory has actually
+requested, issued and consumed in the past.
+
+Two things follow that only the owner can settle.
+
+(a) **The residue.** Anything in none of those sources is left INELIGIBLE, because guessing
+    is the one thing this rule must not do. On the development master that residue included
+    **CARTON-24**, which is a perfectly ordinary production input — it simply has no BOM line,
+    no packing-register row, and has never been requested or issued in that database. The live
+    residue has not been measured and will differ.
+
+    **This is the failure mode that matters**, because it is the one that stops work: a
+    material the store needs to hand over that the floor cannot ask for. It is a switch on the
+    item, not a code change — but somebody has to look at the list and flip the ones that
+    belong. **Please run through the item master once and confirm which items are production
+    materials.** Until that happens, the honest statement is that the picker offers what the
+    factory has demonstrably used before, and nothing else.
+
+(b) **`BTL-PET-1000 — 1 Litre PET Bottle` is DEMO RESIDUE, and it is still on live.** It comes
+    from `BottleManufacturingDemoSeeder` (`uom: 'pcs'`, no Tally stock-item GUID) — a
+    never-cleaned-up demo row, which is why it was the example that caught the owner's eye. The
+    eligibility rule now hides it from the picker, but **the row is still there** and will keep
+    appearing in other item lists. There is precedent for the cleanup and a discipline to copy:
+    migration `2026_08_01_120001` exists solely to retire the demo WAREHOUSES, by id and code,
+    never by name pattern, and never by deleting anything with history.
+
+    Whether the demo ITEMS should be retired the same way is the owner's call. They must not be
+    deleted if anything references them.
+
+**Blocks:** nothing today — the reported defect is fixed and the floor can request everything
+the factory has previously used. (a) decides whether any material still needs switching on
+before someone finds it missing at the store window; (b) decides whether demo rows stop
+appearing in every other item list too.
+*Open since 2026-08-18.*
