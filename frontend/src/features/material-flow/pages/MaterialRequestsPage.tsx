@@ -253,13 +253,24 @@ export default function MaterialRequestsPage() {
                 rowKey="item_id"
                 size="small"
                 loading={floorQuery.isLoading}
-                dataSource={floorQuery.data}
+                dataSource={floorQuery.data?.data}
                 pagination={false}
                 locale={{
                     emptyText: (
                         <Empty
                             image={Empty.PRESENTED_IMAGE_SIMPLE}
-                            description={`Nothing is standing in ${LOCATION_LABEL.production_wip}. Everything issued has been consumed or returned.`}
+                            description={
+                                // THREE different empty tables, and only ONE of
+                                // them may say the floor is clear. Reporting a
+                                // failed request or an unconfigured location as
+                                // "everything has been consumed" is a false
+                                // statement about stock.
+                                floorQuery.isError
+                                    ? 'This could not be read just now, so what is on the floor is unknown. Refresh to try again.'
+                                    : floorQuery.data?.meta.wip_configured === false
+                                        ? `No ${LOCATION_LABEL.production_wip} location has been set, so the ERP cannot say what is standing on the floor. Name it in Inventory settings.`
+                                        : `Nothing is standing in ${LOCATION_LABEL.production_wip}. Everything issued has been consumed or returned.`
+                            }
                         />
                     ),
                 }}
@@ -274,13 +285,6 @@ export default function MaterialRequestsPage() {
                         render: (_, row) => formatQuantity(row.quantity),
                     },
                     { title: 'UOM', dataIndex: 'uom', render: (uom: string | null) => uom ?? '—' },
-                    {
-                        // null, not zero, where the material is not held in bags
-                        // — a 0 would read as "the bags are gone".
-                        title: 'Bags',
-                        align: 'right',
-                        render: (_, row) => (row.bag_count === null ? '—' : row.bag_count),
-                    },
                     {
                         title: 'Last issued',
                         render: (_, row) => (row.last_issued_at ? new Date(row.last_issued_at).toLocaleString() : '—'),

@@ -1203,3 +1203,58 @@ the factory has previously used. (a) decides whether any material still needs sw
 before someone finds it missing at the store window; (b) decides whether demo rows stop
 appearing in every other item list too.
 *Open since 2026-08-18.*
+
+## Q57 · A bag's LOCATION is not maintained — should it be, and what moves it back?
+
+`material_bags.current_warehouse_id` is written once, when the bag is created at goods
+receipt, and never again. Nothing in the application updates it when the bag is issued to
+production, poured, or returned. So a bag's own row says "in the Raw Material Store" for the
+whole of its life, and the question "which bags are standing on the production floor?" has no
+answer from the bag itself.
+
+**This was tried and reverted on 18-Aug**, and the reason is the useful part of the record.
+Setting the column to Production/WIP on a store-issue bag scan looks obviously right and broke
+two things at once:
+
+1. **A part-emptied bag became permanently unissuable.** The scan reads the bag's current
+   warehouse as the SOURCE of the transfer. Once the column said Production/WIP, the next
+   partial scan of that same bag was refused — "already the Production/WIP location, material
+   cannot be issued from production to itself". A storekeeper weighing 20 kg off a 50 kg bag
+   could never scan the rest of it. Reproduced empirically.
+2. **Nothing can move it back.** A return names an issue LINE and a quantity, never a barcode.
+   So a bag would claim to stand on the floor for ever after its kilograms had gone home.
+
+Before the attempt the column was uniformly stale and *known* to be. With the write it became
+*confidently wrong*, which is worse for a custody claim.
+
+**What the system does hold, exactly, is the scan record**: `store_issue_bag_scans` says this
+bag, this issue, this quantity, this moment. That is genuine custody provenance and is what
+the acceptance chain now asserts — four bags received, three scanned onto a handover, and the
+fourth provably never handed over.
+
+Three things only the factory can settle:
+
+(a) **Does the floor need to ask "which bags are here?" of the BAG, or is the handover record
+    enough?** The scan record answers "which bags were handed over and when". A location
+    column would answer "which bags are here right now", which is a different and stronger
+    claim — and one the system can only keep true if (b) and (c) are answered.
+
+(b) **What moves a bag back?** A return would have to name the bag, not just the quantity. Is
+    the store willing to scan bags on the way back as well as the way out? Without that, any
+    location column drifts wrong within a shift.
+
+(c) **What is a part-emptied bag's location?** Twenty kilograms of a fifty-kilogram bag have
+    gone to the floor and thirty are still in the store — in the same physical bag. Custody
+    and kilograms genuinely disagree here, and the answer is a factory convention, not an
+    engineering one.
+
+**Blocks:** nothing. The chain is fully traceable through the scan records today, and the
+floor's availability panel reads Production/WIP stock balances, which are correct. What is
+blocked is any screen that wants to say "these specific bags are on the floor right now".
+
+**Related:** a fully-poured bag is marked with the status `consumed` by the shared pour path,
+on a store issue as well as on the day-bin scan. On a handover that word contradicts
+DEC-20260817-001 — the material has been handed over, not consumed. The enum value is shared
+with the day-bin path and written into historical rows, so renaming it is a data decision
+rather than a code one. Worth settling alongside the above.
+*Open since 2026-08-18.*

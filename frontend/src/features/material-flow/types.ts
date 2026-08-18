@@ -224,6 +224,12 @@ export interface ReturnToStorePayload {
  *
  * There is no machine on this shape, and there never should be — a bag belongs
  * to no machine and no batch (FC-01), so the floor's stock is per MATERIAL.
+ *
+ * There is no BAG COUNT either: `material_bags.current_warehouse_id` is written
+ * once at receipt and never maintained, so a count of bags standing in
+ * Production/WIP could only ever be zero. Publishing that beside 300 kg of
+ * resin would say "this is not bag-tracked" on a system where every bag carries
+ * a barcode. See Q57.
  */
 export interface ProductionFloorStock {
     item_id: number;
@@ -231,10 +237,14 @@ export interface ProductionFloorStock {
     name: string | null;
     uom: string | null;
     quantity: string;
-    /** null where the material is not held in identifiable bags. */
-    bag_count: number | null;
     last_issued_at: string | null;
     last_issue_number: string | null;
     issued_by: string | null;
     received_by: string | null;
+}
+
+/** The floor panel's response — the rows, and whether the location even exists. */
+export interface ProductionFloorStockResult {
+    data: ProductionFloorStock[];
+    meta: { wip_configured: boolean };
 }

@@ -149,7 +149,7 @@ function loadDraft(key: string): ReceiptFormValues | null {
 
 function saveDraft(key: string, values: ReceiptFormValues): void {
     try {
-        window.localStorage.setItem(DRAFT_PREFIX + key, JSON.stringify(values));
+        window.localStorage.setItem(DRAFT_PREFIX + key, JSON.stringify({ ...values, saved_at: Date.now() }));
     } catch {
         // Private browsing, a full quota — the receipt still works, it just
         // stops being recoverable. Never surface this as an error.
@@ -164,18 +164,42 @@ function clearDraft(key: string): void {
     }
 }
 
-/** The key of a receipt left unfinished, if there is one. */
+/**
+ * The MOST RECENT unfinished receipt, not merely the first key the browser
+ * happens to iterate. An abandoned empty draft sorting ahead of a real
+ * twenty-scan one would otherwise hide it — and, because the prompt only
+ * appears when a draft has scans, hide it silently and for ever.
+ */
 function pendingDraftKey(): string | null {
+    let newest: { key: string; at: number } | null = null;
+
     try {
         for (let i = 0; i < window.localStorage.length; i += 1) {
             const k = window.localStorage.key(i);
-            if (k !== null && k.startsWith(DRAFT_PREFIX)) return k.slice(DRAFT_PREFIX.length);
+            if (k === null || !k.startsWith(DRAFT_PREFIX)) continue;
+
+            const at = Number((JSON.parse(window.localStorage.getItem(k) ?? '{}') as { saved_at?: number }).saved_at ?? 0);
+            if (newest === null || at > newest.at) newest = { key: k.slice(DRAFT_PREFIX.length), at };
         }
     } catch {
         // ignore
     }
 
-    return null;
+    return newest?.key ?? null;
+}
+
+/** Every abandoned draft. "Start a new receipt" means start clean. */
+function clearAllDrafts(): void {
+    try {
+        const keys: string[] = [];
+        for (let i = 0; i < window.localStorage.length; i += 1) {
+            const k = window.localStorage.key(i);
+            if (k !== null && k.startsWith(DRAFT_PREFIX)) keys.push(k);
+        }
+        keys.forEach((k) => window.localStorage.removeItem(k));
+    } catch {
+        // ignore
+    }
 }
 
 function newReceiptKey(): string {
@@ -447,6 +471,8 @@ export default function GoodsReceiptsPage() {
     const [detailReceipt, setDetailReceipt] = useState<GoodsReceiptNote | null>(null);
     const [createdReceipt, setCreatedReceipt] = useState<GoodsReceiptNote | null>(null);
     const [receiptKey, setReceiptKey] = useState(newReceiptKey);
+    /** True for exactly one effect pass while a saved draft is being restored. */
+    const restoringDraft = useRef(false);
     const [serverErrors, setServerErrors] = useState<string[]>([]);
     const queryClient = useQueryClient();
     const user = useAuthStore((s) => s.user);
@@ -563,6 +589,19 @@ export default function GoodsReceiptsPage() {
     };
 
     useEffect(() => {
+        // A RESTORE MUST NOT BE REBUILT OVER. Setting purchase_order_id from a
+        // saved draft changes selectedOrderId, which fires this effect — and
+        // this effect rebuilds every line from the purchase order with empty
+        // lots. That silently threw away the exact thing the draft exists to
+        // protect: the receiver was told "20 barcodes restored" and handed a
+        // form with none. The flag is cleared here, so the NEXT genuine change
+        // of order still rebuilds.
+        if (restoringDraft.current) {
+            restoringDraft.current = false;
+
+            return;
+        }
+
         const order = receivableOrders.find((o) => o.id === selectedOrderId);
         if (!order) {
             replace([]);
@@ -713,13 +752,14 @@ export default function GoodsReceiptsPage() {
                 okText: 'Carry on',
                 cancelText: 'Start a new receipt',
                 onOk: () => {
+                    restoringDraft.current = true;
                     setReceiptKey(unfinished);
                     reset(draft);
                     setServerErrors([]);
                     setModalOpen(true);
                 },
                 onCancel: () => {
-                    clearDraft(unfinished);
+                    clearAllDrafts();
                     reset({ lines: [], received_date: nowReceivedAt() });
                     setServerErrors([]);
                     setReceiptKey(newReceiptKey());
@@ -802,7 +842,14 @@ export default function GoodsReceiptsPage() {
                 title="New Goods Receipt"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
-                onOk={handleSubmit((values) => mutation.mutate(values))}
+                onOk={handleSubmit(
+                    (values) => mutation.mutate(values),
+                    // AN INVALID SUBMIT MUST SAY SOMETHING. The offending lot
+                    // may be scrolled out of sight in a tall modal, and a
+                    // button that simply does nothing reads as a broken screen
+                    // — which is how a part-scanned lot would have been met.
+                    () => message.error('This receipt cannot be submitted yet — check the lines marked in red, including any lot that is only part-scanned.'),
+                )}
                 confirmLoading={mutation.isPending}
                 destroyOnHidden
                 width={700}

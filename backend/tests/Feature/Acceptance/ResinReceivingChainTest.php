@@ -255,7 +255,9 @@ class ResinReceivingChainTest extends TestCase
             'inspection_date' => '2026-08-18',
         ])->assertCreated();
 
-        // Every bag starts in the STORE.
+        // Every bag is CREATED in the store. (This column is written once, at
+        // receipt, and not maintained afterwards — hence the scan-based
+        // assertions below rather than a location lookup.)
         foreach (MaterialBag::all() as $bag) {
             $this->assertSame($this->store->id, (int) $bag->current_warehouse_id);
         }
@@ -281,14 +283,34 @@ class ResinReceivingChainTest extends TestCase
 
         $this->record('5 · three bags scanned onto the handover');
 
-        // --- WHICH BAG IS WHERE --------------------------------------------
-        $onTheFloor = MaterialBag::query()->where('current_warehouse_id', $this->wip->id)->pluck('barcode')->all();
-        $stillInStore = MaterialBag::query()->where('current_warehouse_id', $this->store->id)->pluck('barcode')->all();
+        // --- WHICH BAG WENT TO THE FLOOR -----------------------------------
+        // Read from the SCAN RECORDS, not from a location column. A bag's
+        // `current_warehouse_id` is not maintained after creation, and writing
+        // it here broke two things (see StoreIssueService and Q57). What the
+        // system does hold, exactly and permanently, is which bag was scanned
+        // onto which handover — and that is the custody claim worth making.
+        $movedBarcodes = StoreIssueBagScan::query()
+            ->where('store_issue_id', $issue['id'])
+            ->join('material_bags', 'material_bags.id', '=', 'store_issue_bag_scans.material_bag_id')
+            ->pluck('material_bags.barcode')
+            ->all();
 
-        $this->assertEqualsCanonicalizing($handedOver, $onTheFloor,
-            'exactly the three scanned bags stand in Production/WIP');
-        $this->assertSame(['RELPET-C4'], $stillInStore,
-            'the bag nobody scanned is still in the Raw Material Store');
+        $neverScanned = MaterialBag::query()
+            ->whereNotIn('id', StoreIssueBagScan::query()->select('material_bag_id'))
+            ->pluck('barcode')
+            ->all();
+
+        $this->assertEqualsCanonicalizing($handedOver, $movedBarcodes,
+            'exactly the three scanned bags were handed to production');
+        $this->assertSame(['RELPET-C4'], $neverScanned,
+            'the bag nobody scanned never left the Raw Material Store');
+
+        // Each scan carries the kilograms that moved with it, so the identities
+        // and the balance are two views of one fact rather than two claims.
+        $this->assertSame(0, bccomp(
+            (string) StoreIssueBagScan::query()->where('store_issue_id', $issue['id'])->sum('quantity_kg'),
+            '75', 4,
+        ));
 
         // ...and the kilograms agree with the identities: 3 x 25 = 75.
         $this->assertSame(0, bccomp($this->balance($this->wip), '75', 4));

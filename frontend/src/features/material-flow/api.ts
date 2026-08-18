@@ -7,7 +7,7 @@ import type {
     MaterialFlowMaterial,
     MaterialRequest,
     MaterialRequestFilters,
-    ProductionFloorStock,
+    ProductionFloorStockResult,
     ReturnToStorePayload,
     StoreIssue,
     StoreIssueBagScan,
@@ -164,7 +164,11 @@ export function apiRefusalMessage(error: unknown, fallback: string): string {
  * have?" rather than "what did we ask for?", and the server sources it from
  * Production/WIP stock balances.
  */
-export async function listProductionFloorStock(): Promise<ProductionFloorStock[]> {
-    const { data } = await api.get<{ data: ProductionFloorStock[] }>(`${MATERIAL_FLOW_BASE}/production-floor-stock`);
-    return data.data;
+export async function listProductionFloorStock(): Promise<ProductionFloorStockResult> {
+    const { data } = await api.get<ProductionFloorStockResult>(`${MATERIAL_FLOW_BASE}/production-floor-stock`);
+
+    // `meta.wip_configured` is the difference between "the floor is empty" and
+    // "nobody has told the ERP where the floor is". Both arrive as an empty
+    // list, and only one of them may be reported as the floor being clear.
+    return { data: data.data ?? [], meta: data.meta ?? { wip_configured: true } };
 }

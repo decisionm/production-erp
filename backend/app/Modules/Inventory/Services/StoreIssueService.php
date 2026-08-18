@@ -171,19 +171,25 @@ class StoreIssueService
 
             $this->bags->pour($bag, $quantity, $remaining, $full);
 
-            // CUSTODY FOLLOWS THE MATERIAL. The kilograms have just moved to
-            // Production/WIP; without this the bag's own row went on saying it
-            // was in the store for ever, because nothing in the application
-            // ever wrote this column after the bag was created. That made every
-            // "which bags are on the floor" question unanswerable, and it is the
-            // provenance half of the chain the factory asked for:
-            // PO -> GRN -> lot -> BAG -> RM Store -> issue -> Production/WIP.
+            // NO CUSTODY WRITE HERE, and the attempt is worth recording.
             //
-            // This is CUSTODY, not consumption, and not attribution: the bag now
-            // stands in a different place, and it still belongs to no machine
-            // and no batch (FC-01).
-            $bag->current_warehouse_id = $wip->id;
-            $bag->save();
+            // Setting $bag->current_warehouse_id to Production/WIP looks
+            // obviously right and broke two things at once:
+            //
+            //  · $from above is this same column, so the NEXT partial scan of a
+            //    part-emptied bag read WIP as its source and was refused with
+            //    "already the Production/WIP location". A storekeeper weighing
+            //    20 kg off a 50 kg bag could never scan the rest of it again.
+            //  · A return names an issue LINE, never a barcode, so nothing can
+            //    move the bag back. The bag would claim to stand on the floor
+            //    for ever after its kilograms had gone home.
+            //
+            // Before, the column was uniformly stale and KNOWN to be. With the
+            // write it became confidently wrong, which is worse for a custody
+            // claim. What actually moved is recorded — and provable — as the
+            // StoreIssueBagScan rows created below: this bag, this issue, this
+            // quantity, this moment. That is custody provenance without
+            // pretending to a location the system cannot maintain. Q57.
 
             $line->quantity_issued = bcadd((string) $line->quantity_issued, $quantity, 4);
             $line->save();
