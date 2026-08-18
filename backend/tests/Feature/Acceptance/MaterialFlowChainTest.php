@@ -204,8 +204,8 @@ class MaterialFlowChainTest extends TestCase
         // ---- the materials -------------------------------------------------
         // A kg-family unit is what marks a COMMON INPUT in this database
         // (FC-01 / DEC-20260807-006), so the resin is Kgs and the carton Nos.
-        $this->resin = Item::create(['sku' => 'ACC-MF-RESIN', 'name' => 'ACC Chain Resin', 'uom' => 'Kgs']);
-        $this->carton = Item::create(['sku' => 'ACC-MF-CTN', 'name' => 'ACC Chain Carton', 'uom' => 'Nos']);
+        $this->resin = Item::create(['sku' => 'ACC-MF-RESIN', 'name' => 'ACC Chain Resin', 'uom' => 'Kgs', 'is_production_input' => true]);
+        $this->carton = Item::create(['sku' => 'ACC-MF-CTN', 'name' => 'ACC Chain Carton', 'uom' => 'Nos', 'is_production_input' => true]);
         $this->bottle = Item::create(['sku' => 'ACC-MF-BTL', 'name' => 'ACC Chain Bottle', 'uom' => 'Nos']);
 
         // Seeded THROUGH THE LEDGER, never straight into a balance row: the

@@ -48,9 +48,9 @@ class MaterialRequestCommonInputRefusalTest extends TestCase
 
         $this->actingWith(['production.manage']);
 
-        $this->resin = Item::create(['sku' => 'RM-PET', 'name' => 'Relpet PET Resin', 'uom' => 'Kgs']);
-        $this->masterbatch = Item::create(['sku' => 'RM-MB-BLU', 'name' => 'Blue Masterbatch', 'uom' => 'kg']);
-        $this->carton = Item::create(['sku' => 'PKG-CTN', 'name' => 'Carton 500ml', 'uom' => 'Nos']);
+        $this->resin = Item::create(['sku' => 'RM-PET', 'name' => 'Relpet PET Resin', 'uom' => 'Kgs', 'is_production_input' => true]);
+        $this->masterbatch = Item::create(['sku' => 'RM-MB-BLU', 'name' => 'Blue Masterbatch', 'uom' => 'kg', 'is_production_input' => true]);
+        $this->carton = Item::create(['sku' => 'PKG-CTN', 'name' => 'Carton 500ml', 'uom' => 'Nos', 'is_production_input' => true]);
         $this->machine = WorkCenter::create(['code' => 'M-03', 'name' => 'Machine 3', 'is_active' => true]);
     }
 
@@ -73,7 +73,7 @@ class MaterialRequestCommonInputRefusalTest extends TestCase
     public function test_the_refusal_holds_for_masterbatch_and_for_every_kg_family_spelling(): void
     {
         foreach (['Kgs', 'Kgs.', 'KGS', 'kg', 'kg.'] as $index => $spelling) {
-            $item = Item::create(['sku' => "RM-SPELL-{$index}", 'name' => "Raw {$spelling}", 'uom' => $spelling]);
+            $item = Item::create(['sku' => "RM-SPELL-{$index}", 'name' => "Raw {$spelling}", 'uom' => $spelling, 'is_production_input' => true]);
 
             $this->postJson('/api/v1/inventory/material-requests', [
                 'work_center_id' => $this->machine->id,

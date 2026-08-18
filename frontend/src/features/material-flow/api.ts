@@ -1,6 +1,4 @@
 import { api } from '@/lib/api';
-import { listAllItems } from '@/features/inventory/api';
-import { listRawMaterials } from '@/features/production/api';
 import type { Paginated } from '@/lib/types';
 import type {
     BagScanPayload,
@@ -56,38 +54,23 @@ export async function cancelMaterialRequest(id: number, reason: string): Promise
 }
 
 /**
- * The materials a request may ask for, each carrying the server's word on
- * whether a machine or area applies to it (FC-01/Q50).
+ * The materials the floor may ask the store for — ONE server read.
  *
- * Two server reads, no browser rule. The backend refuses a machine on a
- * request line whose item is of the kg family (`Item::hasKgUom`, the same
- * predicate the floor's raw-material reads use), so the kg-family list is
- * fetched from the server and membership of it — not a name, not an SKU, not
- * a guess about what "looks like resin" — is what sets `machine_applies`.
+ * The server decides membership. This used to fetch the WHOLE item master
+ * (`/inventory/items?per_page=1000`) and hand every row to the picker, which is
+ * how a finished good came to be offered as a requestable input. Eligibility is
+ * now a configured property of the item and the endpoint returns only what
+ * qualifies, so there is no browser rule to keep in step — and no name, SKU or
+ * unit is inspected anywhere on this path.
  *
- * If that list cannot be read (a store login without the production module
- * is the ordinary case), every material comes back `machine_applies: null`,
- * which the screens show as "the ERP has not been told" and name no machine
- * for. Nothing is inferred in the browser either way; the server still has
- * the last word, and its refusal message is what a reader sees.
+ * `machine_applies` (FC-01/Q50) is computed server-side by the same predicate
+ * the write-side guard refuses on. It used to be derived here by fetching a
+ * second, day-bin-named list and testing membership; that second read is gone,
+ * which also takes the last Day Bin dependency off this screen.
  */
 export async function listRequestableMaterials(): Promise<MaterialFlowMaterial[]> {
-    const items = await listAllItems();
-
-    let commonInputIds: Set<number> | null = null;
-    try {
-        commonInputIds = new Set((await listRawMaterials()).map((material) => material.id));
-    } catch {
-        commonInputIds = null;
-    }
-
-    return items.data.map((item) => ({
-        id: item.id,
-        sku: item.sku,
-        name: item.name,
-        uom: item.uom,
-        machine_applies: commonInputIds === null ? null : !commonInputIds.has(item.id),
-    }));
+    const { data } = await api.get<{ data: MaterialFlowMaterial[] }>(`${MATERIAL_FLOW_BASE}/requestable-materials`);
+    return data.data;
 }
 
 /* -------------------------------- issues -------------------------------- */

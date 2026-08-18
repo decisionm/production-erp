@@ -7,6 +7,7 @@ use App\Modules\Inventory\Http\Requests\CancelMaterialRequestRequest;
 use App\Modules\Inventory\Http\Requests\ListMaterialRequestsRequest;
 use App\Modules\Inventory\Http\Requests\StoreMaterialRequestRequest;
 use App\Modules\Inventory\Http\Resources\MaterialRequestResource;
+use App\Modules\Inventory\Http\Resources\RequestableMaterialResource;
 use App\Modules\Inventory\Models\MaterialRequest;
 use App\Modules\Inventory\Services\MaterialRequestService;
 use Illuminate\Http\JsonResponse;
@@ -32,6 +33,17 @@ class MaterialRequestController extends Controller
         $filters['per_page'] = $this->requests->perPage($request->integer('per_page') ?: null);
 
         return MaterialRequestResource::collection($this->requests->queue($filters));
+    }
+
+    /**
+     * The picker's list: only what may actually be issued to production.
+     *
+     * Replaces a browser-side `GET /inventory/items?per_page=1000` — the whole
+     * item master, finished goods included and silently truncated at 1,000.
+     */
+    public function requestableMaterials(): AnonymousResourceCollection
+    {
+        return RequestableMaterialResource::collection($this->requests->requestableMaterials());
     }
 
     public function show(MaterialRequest $materialRequest): MaterialRequestResource

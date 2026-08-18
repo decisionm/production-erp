@@ -38,7 +38,15 @@ class StoreMaterialRequestRequest extends FormRequest
             'notes' => ['sometimes', 'nullable', 'string', 'max:2000'],
 
             'lines' => ['required', 'array', 'min:1'],
-            'lines.*.item_id' => ['required', 'integer', Rule::exists('items', 'id')->whereNull('deleted_at')->where('is_active', true)],
+            // ELIGIBILITY IS ENFORCED HERE, not only in the picker. The
+            // dropdown used to be fed the whole item master, and the API
+            // accepted whatever it was handed — so a finished good could be
+            // requested as an input by anyone posting directly, which is why
+            // filtering the React list alone would not have been a fix.
+            // `is_production_input` is the factory's configuration; the
+            // refusal message names the item rather than the column.
+            'lines.*.item_id' => ['required', 'integer', Rule::exists('items', 'id')
+                ->whereNull('deleted_at')->where('is_active', true)->where('is_production_input', true)],
             // Stock quantities are decimal everywhere in this codebase, and
             // an ask of zero is not an ask.
             'lines.*.quantity' => ['required', 'numeric', 'gt:0', 'decimal:0,4'],

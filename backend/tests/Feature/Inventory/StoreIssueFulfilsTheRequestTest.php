@@ -69,7 +69,7 @@ class StoreIssueFulfilsTheRequestTest extends TestCase
 
         // Nos, not kg: a carton is not a common input, so a request for it
         // may name a work centre and nothing here trips FC-01's refusal.
-        $this->carton = Item::create(['sku' => 'PKG-CTN', 'name' => 'Carton 500ml', 'uom' => 'Nos']);
+        $this->carton = Item::create(['sku' => 'PKG-CTN', 'name' => 'Carton 500ml', 'uom' => 'Nos', 'is_production_input' => true]);
 
         app(StockMovementService::class)->recordReceipt(
             itemId: $this->carton->id,
@@ -162,7 +162,7 @@ class StoreIssueFulfilsTheRequestTest extends TestCase
         // The resin path: the store opens an EMPTY issue and scans bags onto
         // it. Wiring only the typed-lines path would leave the queue stale
         // for the one material that actually moves this way.
-        $resin = Item::create(['sku' => 'PET-RESIN', 'name' => 'PET Resin', 'uom' => 'KGS']);
+        $resin = Item::create(['sku' => 'PET-RESIN', 'name' => 'PET Resin', 'uom' => 'KGS', 'is_production_input' => true]);
         [$requestId, $lineId] = $this->resinRequest($resin, '50');
         $bag = $this->bagOfResin($resin, '25');
 
@@ -190,7 +190,7 @@ class StoreIssueFulfilsTheRequestTest extends TestCase
         // scan set. Crediting that id would put the second bag on the first
         // line, leaving one request line over-fulfilled and the other
         // showing work as still owed that was done this morning.
-        $resin = Item::create(['sku' => 'PET-RESIN', 'name' => 'PET Resin', 'uom' => 'KGS']);
+        $resin = Item::create(['sku' => 'PET-RESIN', 'name' => 'PET Resin', 'uom' => 'KGS', 'is_production_input' => true]);
         [$requestId, $lineIds] = $this->twoLineResinRequest($resin, '25', '25');
         $bags = $this->twoBagsOfResin($resin, '25');
 

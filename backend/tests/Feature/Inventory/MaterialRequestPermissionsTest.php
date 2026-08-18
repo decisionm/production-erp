@@ -39,7 +39,7 @@ class MaterialRequestPermissionsTest extends TestCase
     {
         parent::setUp();
 
-        $this->carton = Item::create(['sku' => 'PKG-CTN', 'name' => 'Carton 500ml', 'uom' => 'Nos']);
+        $this->carton = Item::create(['sku' => 'PKG-CTN', 'name' => 'Carton 500ml', 'uom' => 'Nos', 'is_production_input' => true]);
     }
 
     public function test_a_login_with_neither_module_sees_nothing(): void

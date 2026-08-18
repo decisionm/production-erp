@@ -60,17 +60,17 @@ class AcceptanceFixtureSeeder extends Seeder
 
         // --- materials -------------------------------------------------
         $resin = Item::updateOrCreate(['sku' => 'PET-IV08'], [
-            'name' => 'Billion Pet Resin IV-0.8', 'uom' => 'Kgs.', 'is_active' => true,
+            'name' => 'Billion Pet Resin IV-0.8', 'uom' => 'Kgs.', 'is_active' => true, 'is_production_input' => true,
             'tally_stock_item_guid' => 'itm-resin-fixture',
         ]);
         $mb = Item::updateOrCreate(['sku' => 'MB-AMBER'], [
-            'name' => 'Master Batch - Amber', 'uom' => 'Kgs.', 'is_active' => true,
+            'name' => 'Master Batch - Amber', 'uom' => 'Kgs.', 'is_active' => true, 'is_production_input' => true,
             'tally_stock_item_guid' => 'itm-mb-fixture',
         ]);
         // A Nos-unit consumable: it must appear as an expected recipe line
         // and must never be summed into the kg reconciliation.
         $cap = Item::updateOrCreate(['sku' => 'CAP-28'], [
-            'name' => '28mm Cap', 'uom' => 'Nos.', 'is_active' => true,
+            'name' => '28mm Cap', 'uom' => 'Nos.', 'is_active' => true, 'is_production_input' => true,
             'tally_stock_item_guid' => 'itm-cap-fixture',
         ]);
 

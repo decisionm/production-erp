@@ -3,6 +3,7 @@
 namespace App\Modules\Inventory\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 /**
  * Raising a store issue — the handover of material to production.
@@ -34,7 +35,14 @@ class StoreStoreIssueRequest extends FormRequest
             'lines' => ['present', 'array'],
             'lines.*.material_request_line_id' => ['nullable', 'integer'],
             'lines.*.quantity_requested' => ['nullable', 'numeric', 'gt:0'],
-            'lines.*.item_id' => ['required', 'integer', 'exists:items,id'],
+            // Was a bare `exists:items,id` — it carried NEITHER the
+            // soft-delete guard NOR the is_active guard that the request side
+            // has always had, so the store could issue an archived or deleted
+            // item that the floor could not even ask for. Brought level with
+            // the request side, eligibility included: the same material rule
+            // governs both halves of the flow.
+            'lines.*.item_id' => ['required', 'integer', Rule::exists('items', 'id')
+                ->whereNull('deleted_at')->where('is_active', true)->where('is_production_input', true)],
             'lines.*.from_warehouse_id' => ['nullable', 'integer', 'exists:warehouses,id'],
             'lines.*.quantity' => ['required', 'numeric'],
             'lines.*.uom' => ['nullable', 'string', 'max:16'],
