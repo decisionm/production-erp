@@ -574,3 +574,74 @@ one body. Unit mirror: 75 strings, zero disagreements. All six owner proofs re-p
 balances; 94 invalid-id posts across seven doors left movements 2→2, issues 0→0, bag scans
 0→0. Resin chain `{receipt: 1, transfer_in: 2, transfer_out: 2}`, **consumption rows: 0**.
 FC-01, FC-03, FC-06 hold.
+
+## The seventh round — the sibling three lines below
+
+Two P1s, both caused by the previous round's fixes. The pattern is now the whole story of
+this branch: **one idea written down twice, and only one copy updated.**
+
+**A field, not a door.** `PlainDecimal` went onto two fields of `StorePurchaseOrderRequest`
+and missed `lines.*.schedules.*.quantity` three lines below — which is the one that reaches
+`bcadd`. It answered `1e3` / `1e+21` / `1e400` with a **500**, and its amend twin (posted by
+the same modal) silently **accepted** `1e+21` as a **200**, storing a number nobody typed.
+Both reachable from a bare antd `InputNumber` on the live Purchase Orders page — the exact
+vector the previous round used to justify a P1. The previous commit's own claim that its
+test "names the DOORS rather than the rules, so a new door added without it fails there
+instead of in production" was **false as written**: it named doors, and the leak was a field
+on a door it already named.
+
+**So the class was measured instead of chased.** A sweep of every FormRequest in the
+application found **114 unguarded `numeric` fields** across CRM, Compliance, Finance, HRMS,
+Payroll, Quality, Sales, Maintenance, Inventory, Procurement, Production and TallySync. Not
+all reach bcmath, but the ones that do answer a 500 or store an exponent.
+
+Fixed here: the **13 fields in this workflow's own chain** — purchase order schedules, the
+three amend fields, six goods-receipt fields, MRP net requirements, the material cost
+version rate, and the day-bin bag load. `NoDoorInThisWorkflowTakesAnUnguardedNumberTest`
+reads the **rule arrays themselves** across those thirteen request classes, so a field added
+without a guard fails there; mutation-proved to name the exact field this round found.
+
+**Deliberately NOT fixed: the other ~100.** Putting a stricter rule on payroll, quality and
+CRM doors nobody has exercised, on the eve of a deploy, risks refusing work the factory does
+today — and this branch has already learned twice that a wrong tightening is worse than the
+500 it replaces. The full inventory is above; it is a named, sized follow-up, not a
+hand-wave.
+
+**The return guard's unit source was swapped, not closed.** The first attempt read
+`items.uom`, the second read `store_issue_lines.uom`. Each closed the hole facing one way
+and opened it facing the other, because the two can disagree — and not only through a human
+edit: `ItemService::upsertFromTally` overwrites `items.uom` from Tally's `BASEUNITS` on
+every masters pull, **unattended**. Now BOTH are consulted and a fraction is refused if
+either reading says the material is counted.
+
+With one deliberate exception, which matters more than the rule: **the entire outstanding
+quantity may always come back.** A fractional quantity already standing on the floor —
+issued before the rule, or reclassified afterwards — would otherwise be unreturnable for
+ever. A refusal that traps stock is worse than the state it objects to.
+
+**The draft gate still leaked to a read-only login.** Group middleware run before route
+middleware, and the OR-group demands `.manage` for a POST — so an `inventory.view` login was
+refused at the group and never reached the gate: 403 for a draft, 404 for a ghost. Same
+oracle, one rung further out, for a role the live Roles screen can create. The gate is on
+the **group** now, and first. The test sweeps three login shapes × four request forms and is
+mutation-proved against exactly that login.
+
+Everything else held: `route:list` confirms all three `{material_request}` routes carry the
+gate ahead of every permission answer; the middleware diff around the route move accounts
+for every entry with nothing lost; ordinary values still pass every guarded door (procurement
+walked end to end, all three stock-movement doors, JSON numeric literals as well as strings);
+and rounds one to six were independently re-probed rather than re-read. Resin chain
+consumption rows: **0**. FC-01 and FC-06 hold; FC-03 now holds on the return door too.
+
+### Known and recorded, not fixed
+
+- The ~100 remaining unguarded numeric fields outside this workflow (inventory above).
+- `SubstituteBindings` runs before `EnsureModulePermission` repo-wide, so every
+  `module:`-gated bound route is an existence oracle for any authenticated user. Root fix is
+  a global middleware-priority change — an owner-visible decision, not a deploy-eve one.
+- `PlainDecimal` refuses a JSON float that stringifies to exponent form (`0.000012` →
+  `1.2E-5`). The old rule accepted it and the `decimal(_,4)` column rounded it to `0.0000`,
+  so refusing is arguably the better answer; recorded because the Tally mirror posts through
+  one of those doors.
+- No service-layer unit guard; no DOM in the frontend suite, so the GRN draft-restore
+  machinery remains inspection-only.

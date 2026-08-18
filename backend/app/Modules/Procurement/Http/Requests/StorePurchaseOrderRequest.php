@@ -69,7 +69,7 @@ class StorePurchaseOrderRequest extends FormRequest
             'tally_order_no' => ['nullable', 'string', 'max:64', 'required_if:source,tally'],
             'lines.*.schedules' => ['sometimes', 'array'],
             'lines.*.schedules.*.due_date' => ['required_with:lines.*.schedules', 'date'],
-            'lines.*.schedules.*.quantity' => ['required_with:lines.*.schedules', 'numeric', 'gt:0'],
+            'lines.*.schedules.*.quantity' => ['required_with:lines.*.schedules', 'numeric', 'gt:0', new PlainDecimal],
             'lines.*.schedules.*.tally_reference' => ['nullable', 'string', 'max:64'],
         ];
     }

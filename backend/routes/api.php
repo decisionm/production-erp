@@ -288,7 +288,14 @@ Route::prefix('v1')->group(function () {
          * Append-only: every lifecycle step is a POST, there is no PUT and
          * no DELETE. A cancelled request keeps its row and its reason.
          */
-        Route::prefix('inventory')->middleware('module:production,inventory')->group(function () {
+        // `own-draft` FIRST, and on the GROUP rather than the routes. Group
+        // middleware run before route middleware, and this OR-group demands
+        // `.manage` for a POST — so a read-only store login was refused at the
+        // group and never reached the gate, getting 403 for a draft that exists
+        // and 404 for one that does not. The gate has to be the first thing
+        // that can answer. It is a no-op on the routes here that carry no
+        // {material_request}.
+        Route::prefix('inventory')->middleware(['own-draft', 'module:production,inventory'])->group(function () {
             // The queue itself, and one request in full. Read by the store
             // (inventory.view) and by the floor that raised it
             // (production.view).
@@ -297,12 +304,10 @@ Route::prefix('v1')->group(function () {
             // the controller runs after validation, so a 422 from the cancel
             // reason answered "this row exists" for a draft the store may not
             // know about. See EnsureDraftIsProductionsOwn.
-            Route::get('material-requests/{material_request}', [MaterialRequestController::class, 'show'])
-                ->middleware('own-draft');
+            Route::get('material-requests/{material_request}', [MaterialRequestController::class, 'show']);
             // Either side may withdraw one, with a reason: the floor when
             // the run is pulled, the store when it cannot fulfil.
-            Route::post('material-requests/{material_request}/cancel', [MaterialRequestController::class, 'cancel'])
-                ->middleware('own-draft');
+            Route::post('material-requests/{material_request}/cancel', [MaterialRequestController::class, 'cancel']);
 
             // THE REQUESTABLE MATERIALS. Deliberately here and NOT on
             // /inventory/items: that resource is gated `module:inventory`
@@ -341,9 +346,9 @@ Route::prefix('v1')->group(function () {
         // work: appending `own-draft` to a route inside `module:production`
         // never runs, the group aborts first. The permission answer is now
         // reached only for a request the caller can already see.
-        Route::prefix('inventory')->middleware('module:production,inventory')->group(function () {
+        Route::prefix('inventory')->middleware(['own-draft', 'module:production,inventory'])->group(function () {
             Route::post('material-requests/{material_request}/submit', [MaterialRequestController::class, 'submit'])
-                ->middleware(['own-draft', 'module:production']);
+                ->middleware('module:production');
         });
 
         Route::prefix('procurement')->middleware('module:procurement')->group(function () {

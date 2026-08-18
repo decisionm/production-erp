@@ -3,6 +3,7 @@
 namespace App\Modules\Inventory\Http\Requests;
 
 use App\Modules\Inventory\Models\Enums\MaterialCostVersionKind;
+use App\Rules\PlainDecimal;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -18,7 +19,7 @@ class StoreMaterialCostVersionRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'rate_per_kg' => ['required', 'numeric', 'gt:0', 'max:99999999999'],
+            'rate_per_kg' => ['required', 'numeric', 'gt:0', 'max:99999999999', new PlainDecimal],
             // 'receipt' is not appendable: the original rate belongs to the
             // system, and letting a person file a second "original" after
             // the fact would destroy the one number nothing may move.

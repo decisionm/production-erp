@@ -349,6 +349,60 @@ class StoreNeverSeesProductionDraftsTest extends TestCase
         $this->assertNotNull(MaterialRequest::query()->whereKey($draft['id'])->value('submitted_at'));
     }
 
+    /**
+     * NO LOGIN TELLS A DRAFT FROM A ROW THAT IS NOT THERE — including the ones
+     * the permission check refuses first.
+     *
+     * The gate was put on the ROUTES. Group middleware run before route
+     * middleware, and the group demands `.manage` for a POST, so a READ-ONLY
+     * store login was refused at the group and never reached the gate: 403 for
+     * a draft that exists, 404 for one that does not. Same oracle, one rung
+     * further out, for a role the live Roles screen can create.
+     *
+     * The gate is on the GROUP now, first, so it is the first thing that can
+     * answer at all.
+     */
+    public function test_no_login_can_tell_a_draft_from_a_ghost(): void
+    {
+        $draft = $this->raise();
+        $ghostId = $draft['id'] + 9_999;
+
+        $logins = [
+            'store manage' => $this->storekeeper,
+            'store view only' => $this->userWith(['inventory.view']),
+            'neither module' => $this->userWith(['sales.view']),
+        ];
+
+        foreach ($logins as $who => $user) {
+            $this->actAs($user);
+
+            foreach ([
+                ['get', '/api/v1/inventory/material-requests/{id}', []],
+                ['postJson', '/api/v1/inventory/material-requests/{id}/cancel', ['reason' => 'a proper reason']],
+                ['postJson', '/api/v1/inventory/material-requests/{id}/cancel', ['reason' => 'x']],
+                ['postJson', '/api/v1/inventory/material-requests/{id}/submit', []],
+            ] as [$verb, $template, $payload]) {
+                $onDraft = $verb === 'get'
+                    ? $this->getJson(str_replace('{id}', (string) $draft['id'], $template))
+                    : $this->postJson(str_replace('{id}', (string) $draft['id'], $template), $payload);
+                $onGhost = $verb === 'get'
+                    ? $this->getJson(str_replace('{id}', (string) $ghostId, $template))
+                    : $this->postJson(str_replace('{id}', (string) $ghostId, $template), $payload);
+
+                $this->assertSame(404, $onDraft->status(), "{$who}: {$template}");
+                $this->assertSame(404, $onGhost->status(), "{$who}: {$template}");
+                $this->assertSame(
+                    $this->refusal($onGhost, $ghostId),
+                    $this->refusal($onDraft, $draft['id']),
+                    "{$who}: {$template}",
+                );
+            }
+        }
+
+        $this->assertSame('draft', MaterialRequest::query()->whereKey($draft['id'])->value('status')->value);
+        $this->assertNull(MaterialRequest::query()->whereKey($draft['id'])->value('submitted_at'));
+    }
+
     /* ------------------------------ helpers ------------------------------ */
 
     /**

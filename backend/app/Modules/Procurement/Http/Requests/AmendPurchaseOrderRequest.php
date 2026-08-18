@@ -2,6 +2,7 @@
 
 namespace App\Modules\Procurement\Http\Requests;
 
+use App\Rules\PlainDecimal;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
@@ -27,11 +28,11 @@ class AmendPurchaseOrderRequest extends FormRequest
             'reason' => ['nullable', 'string', 'max:1000'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.item_id' => ['required', 'integer', 'exists:items,id'],
-            'lines.*.quantity' => ['required', 'numeric', 'gt:0'],
-            'lines.*.unit_price' => ['required', 'numeric', 'min:0'],
+            'lines.*.quantity' => ['required', 'numeric', 'gt:0', new PlainDecimal],
+            'lines.*.unit_price' => ['required', 'numeric', 'min:0', new PlainDecimal],
             'lines.*.schedules' => ['sometimes', 'array'],
             'lines.*.schedules.*.due_date' => ['required_with:lines.*.schedules', 'date'],
-            'lines.*.schedules.*.quantity' => ['required_with:lines.*.schedules', 'numeric', 'gt:0'],
+            'lines.*.schedules.*.quantity' => ['required_with:lines.*.schedules', 'numeric', 'gt:0', new PlainDecimal],
             'lines.*.schedules.*.tally_reference' => ['nullable', 'string', 'max:64'],
         ];
     }

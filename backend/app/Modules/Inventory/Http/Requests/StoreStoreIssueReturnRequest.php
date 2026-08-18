@@ -58,38 +58,62 @@ class StoreStoreIssueReturnRequest extends FormRequest
                 // locations at once — 484.5 in the store and 15.5 on the floor
                 // — which is not a state the factory can be in.
                 //
-                // Pre-existing rather than a regression: this door is unchanged
-                // from main. It is closed here because leaving it open would
-                // make the unit contract true of two doors out of three, which
-                // is not a contract.
-                // THE UNIT THE HANDOVER WAS RECORDED IN, falling back to the
-                // master's. The screen reads `line.uom` and this read the
-                // master's `items.uom`, and an item's unit is editable — so
-                // after an edit the two disagreed in BOTH directions,
-                // including the one this branch named dangerous (the browser
-                // blocking a figure the server would have taken).
+                // BOTH UNITS ARE CONSULTED, and that is the correction. A first
+                // attempt read the master's `items.uom`; a second read the
+                // handover's `store_issue_lines.uom`. Each closed the hole
+                // facing one way and opened it facing the other, because the
+                // two CAN disagree — and not only through a human edit:
+                // ItemService::upsertFromTally overwrites `items.uom` from
+                // Tally's BASEUNITS on every masters pull, unattended.
+                //
+                // So a fraction is refused if EITHER reading says the material
+                // is counted. A fraction of a counted thing is meaningless
+                // under either reading, and the stricter one is the safe one.
                 $line = DB::table('store_issue_lines as l')
                     ->join('items as i', 'i.id', '=', 'l.item_id')
                     ->where('l.id', $lineId)
-                    ->first(['l.uom as line_uom', 'i.uom as item_uom']);
-
-                $uom = $line === null
-                    ? null
-                    : (trim((string) $line->line_uom) !== '' ? $line->line_uom : $line->item_uom);
+                    ->first(['l.uom as line_uom', 'i.uom as item_uom', 'l.quantity_issued', 'l.quantity_returned']);
 
                 if ($line === null) {
                     continue; // the base `exists` rule already said so
                 }
 
-                $type = MeasurementType::forUom($uom);
+                $counted = collect([$line->line_uom, $line->item_uom])
+                    ->filter(fn ($uom) => trim((string) $uom) !== '')
+                    ->contains(fn ($uom) => ! MeasurementType::forUom($uom)->permitsFractions());
 
-                if (! $type->permitsFractions()
-                    && bccomp((string) $quantity, bcadd((string) (int) $quantity, '0', 4), 4) !== 0) {
-                    $validator->errors()->add(
-                        "lines.{$index}.quantity",
-                        "This material is measured in {$uom} — {$type->label()}. Return a whole number.",
-                    );
+                if (! $counted) {
+                    continue;
                 }
+
+                $isWhole = bccomp((string) $quantity, bcadd((string) (int) $quantity, '0', 4), 4) === 0;
+
+                if ($isWhole) {
+                    continue;
+                }
+
+                // BUT EVERYTHING OUTSTANDING MAY ALWAYS COME BACK. If a
+                // fractional quantity is already standing on the floor —
+                // because it was issued before this rule, or because the unit
+                // was reclassified afterwards — refusing to accept it back
+                // would strand it there for ever. A refusal that traps stock
+                // is worse than the state it is objecting to.
+                $outstanding = bcsub(
+                    (string) ($line->quantity_issued ?? '0'),
+                    (string) ($line->quantity_returned ?? '0'),
+                    4,
+                );
+
+                if (bccomp((string) $quantity, $outstanding, 4) === 0) {
+                    continue;
+                }
+
+                $named = trim((string) $line->line_uom) !== '' ? $line->line_uom : $line->item_uom;
+
+                $validator->errors()->add(
+                    "lines.{$index}.quantity",
+                    "This material is measured in {$named} — a whole number of items. Return a whole number, or the whole {$outstanding} still outstanding.",
+                );
             }
         });
     }

@@ -3,6 +3,7 @@
 namespace App\Modules\Production\Http\Requests;
 
 use App\Modules\Production\Services\FactoryDayBinService;
+use App\Rules\PlainDecimal;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -42,7 +43,7 @@ class LoadFactoryDayBinBagRequest extends FormRequest
             // Absent = the whole bag (its remaining_kg); present = a weighed
             // partial load. Partial loads and the bag's remaining balance are
             // preserved exactly as they were.
-            'quantity_kg' => ['nullable', 'numeric', 'gt:0'],
+            'quantity_kg' => ['nullable', 'numeric', 'gt:0', new PlainDecimal],
             'supervisor_id' => ['nullable', 'integer', 'exists:users,id'],
             // THE ACKNOWLEDGEMENT, sent only when the previous attempt was
             // refused because the common input still shows material.
