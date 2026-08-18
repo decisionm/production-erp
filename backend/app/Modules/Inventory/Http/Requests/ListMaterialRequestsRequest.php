@@ -55,6 +55,10 @@ class ListMaterialRequestsRequest extends FormRequest
             'sort' => ['sometimes', 'nullable', Rule::in($this->sortOptions())],
             'per_page' => ['sometimes', 'nullable', 'integer', 'between:1,'.MaterialRequestService::PER_PAGE_MAX],
             'page' => ['sometimes', 'nullable', 'integer', 'min:1'],
+            // Production's own screen asking for its unsubmitted drafts. Being
+            // ACCEPTED here is not being honoured — the controller grants it
+            // only to a caller holding production's permission.
+            'include_unsubmitted' => ['sometimes', 'boolean'],
         ];
     }
 

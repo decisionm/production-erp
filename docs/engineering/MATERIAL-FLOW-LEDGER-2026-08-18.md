@@ -73,9 +73,10 @@ Produced by `ResinReceivingChainTest`, walked over HTTP:
 1. **A purchase order must be SENT before goods can be received against it.** A draft is
    refused — "Cannot transition purchase order from draft to received".
 2. **Receiving creates the lot and one identifiable bag record per physical bag.** Four
-   supplier barcodes were scanned (`RELPET-B1..B4`) and those are the bags' identities. Where
-   a supplier prints no barcode the server mints one per bag instead, so the count of bag
-   records always equals the count of physical bags.
+   supplier barcodes were scanned (`RELPET-B1..B4`) and those are the bags' identities. The
+   no-barcode path is exercised by its own test rather than asserted here in prose: a receipt
+   submitted with no barcodes yields four bags with four distinct generated identities and the
+   same kilograms.
 3. **Provenance is two hops, and both are asserted:** the lot names its goods receipt, and
    that receipt names the purchase order — which names the supplier.
 4. **The receipt puts the resin in the Raw Material Store**, 4 × 25 kg = 100 kg.
@@ -94,10 +95,24 @@ screen throughout:
 
     Expected bags | Scanned | Remaining | Total weight
 
-Scanning is optional — leave it empty and the server generates a barcode per bag. What is not
-allowed is a HALF-finished scan: the server requires exactly one barcode per bag when any are
-supplied, so a partial list is submitted as none and every bag gets a generated barcode. The
-screen says so rather than letting it become a validation error with a trolley waiting.
+**The barcode contract, exactly as implemented and tested** (`frontend/src/features/procurement/lotScan.ts`,
+10 vitest cases):
+
+| Scans taken | Submittable? | What happens |
+|---|---|---|
+| none | yes | the server generates one identity per bag |
+| all expected | yes | the scanned barcodes ARE the bags' identities |
+| some (0 < n < expected) | **no** | refused, naming how many are left |
+| more than expected (bag count reduced under the scans) | **no** | refused, naming both figures |
+
+A part-scanned lot is never silently converted to generated identities. The only route from
+part-scanned to generated is the explicit, confirmed **"Discard scans"** action, which states
+how many will be lost. Reducing the bag count below the scans is refused rather than
+discarding the extras — the screen used to read "all bags scanned" in that case, because the
+remaining count floored at zero.
+
+An unfinished receipt survives a refresh: it is saved under its own receipt key on every scan
+and offered back when the form reopens, to carry on or to start fresh.
 
 `/inventory/material-lots` is the resin traceability register — each lot with its GRN, its
 purchase order, its received date and time, the price paid and its bags.

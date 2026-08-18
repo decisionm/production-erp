@@ -284,6 +284,12 @@ class MaterialRequestQueueFiltersTest extends TestCase
             'shift_id' => $shift->id,
             'work_center_id' => $workCenter?->id,
             'requested_at' => $requestedAt,
+            // A request in the STORE'S QUEUE has by definition been submitted —
+            // that is what puts it there. The fixture used to leave this null
+            // while setting a post-draft status, which is a state the flow
+            // cannot produce, and the queue now (correctly) refuses to show an
+            // unsubmitted request to the store.
+            'submitted_at' => $status === MaterialRequestStatus::Draft->value ? null : $requestedAt,
         ]);
 
         $request->lines()->create([

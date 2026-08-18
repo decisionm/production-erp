@@ -7,6 +7,7 @@ import { Controller, useFieldArray, useForm, useWatch, type Control, type FieldP
 import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import BarcodeScanInput from '@/components/barcode/BarcodeScanInput';
+import { lotIsSubmittable, lotScanState } from '../lotScan';
 import { hasModuleAccess } from '@/features/auth/permissions';
 import { useAuthStore } from '@/features/auth/store';
 import MaterialBagLabels from '@/features/inventory/components/MaterialBagLabels';
@@ -97,17 +98,12 @@ const receiptSchema = z.object({
                             barcodes: z.array(z.string().min(1)).optional(),
                         })
                         .refine(
-                            // NEVER SILENTLY DISCARD A SCAN. This used to submit
-                            // a half-finished scan as "no barcodes", so the
-                            // supplier barcodes on the physical bags were dropped
-                            // and generated ones minted in their place, with
-                            // nobody told. A trolley's worth of scanning could
-                            // disappear on submit.
-                            //
-                            // The contract now: none, or all. A receiver who
-                            // wants generated identities says so explicitly with
-                            // "Discard scans".
-                            (lot) => (lot.barcodes?.length ?? 0) === 0 || lot.barcodes?.length === lot.bag_count,
+                            // ONE RULE, shared with the screen — see lotScan.ts.
+                            // None, or all. A part-scanned lot is refused rather
+                            // than quietly submitted as "no barcodes", and a bag
+                            // count dropped below the scans is refused rather
+                            // than throwing the extra scans away.
+                            (lot) => lotIsSubmittable(lot.bag_count, lot.barcodes),
                             {
                                 message: 'Scan every bag, or discard the scans to have barcodes generated. A part-scanned lot cannot be submitted.',
                                 path: ['barcodes'],
@@ -303,7 +299,8 @@ function LotBagScanner({
             control={control}
             render={({ field }) => {
                 const scanned: string[] = field.value ?? [];
-                const remaining = Math.max(expected - scanned.length, 0);
+                const state = lotScanState(expected, scanned);
+                const remaining = state.remaining;
 
                 const add = (raw: string) => {
                     const code = raw.trim();
@@ -344,12 +341,10 @@ function LotBagScanner({
                                 ))}
                             </div>
                         )}
-                        {scanned.length > 0 && expected > 0 && scanned.length !== expected && (
+                        {state.message !== null && (
                             <Space align="baseline" wrap style={{ marginTop: 2 }}>
                                 <Typography.Text type="danger" style={{ fontSize: 11 }}>
-                                    {scanned.length > expected
-                                        ? `${scanned.length - expected} more scans than bags — correct the bag count or remove a scan.`
-                                        : `${remaining} bag${remaining === 1 ? '' : 's'} still to scan. This lot cannot be submitted part-scanned.`}
+                                    {state.message}
                                 </Typography.Text>
                                 {/* THE EXPLICIT WAY OUT. A receiver who cannot
                                     scan the rest — an unreadable label, a

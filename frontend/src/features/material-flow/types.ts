@@ -164,6 +164,12 @@ export interface MaterialRequestFilters {
     from?: string;
     to?: string;
     q?: string;
+    /**
+     * Production's OWN screen asking for its unsubmitted drafts. The store
+     * never sends it, and could not benefit if it did — the server grants it
+     * by permission, not by query string.
+     */
+    include_unsubmitted?: boolean;
 }
 
 export interface CreateMaterialRequestLinePayload {

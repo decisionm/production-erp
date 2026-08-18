@@ -78,7 +78,14 @@ export default function MaterialRequestsPage() {
 
     const requestsQuery = useQuery({
         queryKey: ['material-flow', 'requests', statusFilter],
-        queryFn: () => listMaterialRequests(statusFilter === 'all' ? {} : { status: statusFilter }),
+        // The floor's own page, so it asks for its drafts. The store's queue
+        // does not send this and the server would refuse it there anyway.
+        queryFn: () =>
+            listMaterialRequests(
+                statusFilter === 'all'
+                    ? { include_unsubmitted: true }
+                    : { status: statusFilter, include_unsubmitted: true },
+            ),
     });
     // Live Production/WIP stock — the second half of the page.
     const floorQuery = useQuery({ queryKey: ['material-flow', 'production-floor-stock'], queryFn: listProductionFloorStock });

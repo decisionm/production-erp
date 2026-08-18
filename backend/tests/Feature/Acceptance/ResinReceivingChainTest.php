@@ -347,6 +347,50 @@ class ResinReceivingChainTest extends TestCase
         $this->assertSame(0, bccomp($this->balance($this->store), '50', 4));
     }
 
+    /**
+     * THE OTHER HALF OF THE BARCODE CONTRACT, so the documentation can say it.
+     *
+     * A supplier who prints nothing scannable is the ordinary case, not an
+     * error: the receipt is submitted with no barcodes and the server mints one
+     * identity per physical bag. Every bag still ends up individually
+     * identifiable, which is what the traceability register depends on.
+     *
+     * The claim was previously written down without being exercised. It is
+     * exercised now.
+     */
+    public function test_a_supplier_with_no_barcodes_still_yields_one_identity_per_bag(): void
+    {
+        [$orderId, $lineId] = $this->sentOrder();
+
+        // No `barcodes` key at all — nothing was scanned.
+        $this->postJson('/api/v1/procurement/goods-receipts', [
+            'receipt_key' => 'rc-key-nobarcodes',
+            'purchase_order_id' => $orderId,
+            'warehouse_id' => $this->store->id,
+            'reference' => 'RC-DC-NB',
+            'received_date' => '2026-08-18',
+            'lines' => [[
+                'purchase_order_line_id' => $lineId,
+                'quantity' => '100',
+                'lots' => [['supplier_lot_no' => 'RC-LOT-NB', 'bag_count' => 4, 'bag_weight_kg' => '25']],
+            ]],
+        ])->assertCreated();
+
+        $lot = MaterialLot::query()->where('supplier_lot_no', 'RC-LOT-NB')->sole();
+        $bags = MaterialBag::query()->where('material_lot_id', $lot->id)->get();
+
+        $this->assertCount(4, $bags, 'one record per physical bag, scanned or not');
+
+        $barcodes = $bags->pluck('barcode')->all();
+        $this->assertCount(4, array_unique($barcodes), 'every generated identity is distinct');
+        foreach ($barcodes as $barcode) {
+            $this->assertNotEmpty($barcode);
+        }
+
+        // ...and the kilograms are the same as if they had been scanned.
+        $this->assertSame(0, bccomp($this->balance($this->store), '100', 4));
+    }
+
     /** @return array{0: int, 1: int} */
     private function sentOrder(): array
     {

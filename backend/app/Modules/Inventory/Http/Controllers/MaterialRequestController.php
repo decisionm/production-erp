@@ -33,7 +33,14 @@ class MaterialRequestController extends Controller
         $filters = $request->validated();
         $filters['per_page'] = $this->requests->perPage($request->integer('per_page') ?: null);
 
-        return MaterialRequestResource::collection($this->requests->queue($filters));
+        // Unsubmitted requests are production's own working papers. The floor's
+        // screen asks for them explicitly; the store's queue does not, and a
+        // store login could not obtain them even by asking, because the flag is
+        // granted by PERMISSION rather than taken from the query string.
+        $maySeeDrafts = $request->boolean('include_unsubmitted')
+            && $request->user()?->hasAnyPermission(['production.view', 'production.manage']) === true;
+
+        return MaterialRequestResource::collection($this->requests->queue($filters, $maySeeDrafts));
     }
 
     /**

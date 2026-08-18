@@ -51,7 +51,7 @@ class MaterialRequestService
      *
      * @param  array{status?: string|list<string>|null, shift_id?: int|null, work_center_id?: int|null, item_id?: int|null, from?: string|null, to?: string|null, q?: string|null, sort?: string|null, per_page?: int|null}  $filters
      */
-    public function queue(array $filters = []): LengthAwarePaginator
+    public function queue(array $filters = [], bool $includeUnsubmitted = false): LengthAwarePaginator
     {
         $query = MaterialRequest::query()->with([
             'lines.item:id,sku,name,uom',
@@ -60,6 +60,20 @@ class MaterialRequestService
             'shift:id,name',
             'workCenter:id,code,name',
         ]);
+
+        // A DRAFT IS PRODUCTION'S OWN PAPER AND THE STORE MUST NEVER SEE IT.
+        //
+        // Closed by DEFAULT, so this holds for a direct API call, for every
+        // filter and page combination, and for the "All requests" option —
+        // which means "everything that has reached the store", not "every row
+        // in the table". `submitted_at` is the exact test: it is set the moment
+        // the floor sends the request and never before.
+        //
+        // Opening it is an explicit act by a caller that has production's own
+        // permission (see the controller). The store cannot ask for it at all.
+        if (! $includeUnsubmitted) {
+            $query->whereNotNull('submitted_at');
+        }
 
         $this->applyFilters($query, $filters);
         $this->applySort($query, $filters['sort'] ?? null);
