@@ -16,7 +16,6 @@ import {
 import HandoverPanel from '../components/HandoverPanel';
 import PersonSelect from '../components/PersonSelect';
 import RequestLinesTable from '../components/RequestLinesTable';
-import ThreeStatesLegend from '../components/ThreeStatesLegend';
 import ReturnToStoreModal from '../components/ReturnToStoreModal';
 import type { MaterialRequest, MaterialRequestFilters, StoreIssue } from '../types';
 import {
@@ -173,7 +172,6 @@ export default function StoreIssueQueuePage() {
             </Typography.Title>
 
             <Alert type="info" showIcon style={{ marginBottom: 16 }} message={ISSUE_IS_NOT_CONSUMPTION} />
-            <ThreeStatesLegend />
 
             <Card size="small" style={{ marginBottom: 16 }}>
                 <Row gutter={[8, 8]}>

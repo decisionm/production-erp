@@ -98,9 +98,18 @@ export function stateLabel(state: MaterialState): string {
     return STATE_LABEL[state];
 }
 
-/** The line that goes on every material-flow screen, unabbreviated. */
+/**
+ * The one note that goes on the material-flow screens.
+ *
+ * Deliberately SHORT. The long form said the same thing three ways and was
+ * then printed twice on the same page — once as this note and again inside a
+ * legend — which is what the owner asked to be cut back on 18-Aug. The states
+ * themselves are already unambiguous where a reader meets them: the table's
+ * own tag reads "Issued to production — not yet consumed", so the screen does
+ * not need a paragraph to stop that being misread as consumption.
+ */
 export const ISSUE_IS_NOT_CONSUMPTION =
-    'A store issue is not a consumption. Material issued to production moves from the Raw Material Store to Production/WIP and stays in stock there; it is consumed only when a batch is completed, and whatever is left over can be returned to the store.';
+    'A store issue is not a consumption: material moves to Production/WIP and stays in stock until a batch is completed. Anything left over returns to the store.';
 
 /**
  * Over-issuing is NORMAL here, and the screens must not treat it as an error:

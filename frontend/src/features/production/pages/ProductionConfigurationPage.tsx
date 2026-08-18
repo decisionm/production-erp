@@ -402,7 +402,7 @@ function MachinesTab() {
             />
 
             <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 12 }}>
-                A machine is retired, never deleted — every batch, downtime entry and day-bin balance already
+                A machine is retired, never deleted — every batch, downtime entry and material movement already
                 recorded still points at its record, so it stays listed behind the filter above.
             </Typography.Paragraph>
 
@@ -712,7 +712,7 @@ function FactoryWarehousesCard() {
             )}
             {row(
                 'Raw-material store',
-                'Where material issues from when the day bin cannot supply it. The day bin itself is named on the Day Bin page.',
+                'The store that material is issued from. It is the source of every issue to production — RM Store → Production/WIP → FG Store.',
                 'raw_material_warehouse_id',
                 settings?.raw_material_warehouse_id,
                 settings?.raw_material_resolved_warehouse_id,
