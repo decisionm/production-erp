@@ -56,7 +56,12 @@ class MaterialRequestController extends Controller
      */
     public function productionFloorStock(ProductionFloorStockService $floor): JsonResponse
     {
-        return response()->json(['data' => $floor->onTheFloor()]);
+        return response()->json([
+            'data' => $floor->onTheFloor(),
+            // So the screen can tell "the floor is empty" apart from "nobody
+            // has told the ERP where the floor is". Both produce an empty list.
+            'meta' => ['wip_configured' => $floor->isConfigured()],
+        ]);
     }
 
     public function show(MaterialRequest $materialRequest): MaterialRequestResource

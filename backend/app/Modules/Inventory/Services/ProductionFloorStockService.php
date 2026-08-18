@@ -3,6 +3,7 @@
 namespace App\Modules\Inventory\Services;
 
 use App\Modules\Inventory\Models\StockBalance;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -22,13 +23,30 @@ use Illuminate\Support\Facades\DB;
  * machine or a batch: a bag belongs to no machine and no batch (FC-01), so the
  * figures are per MATERIAL, never per machine.
  *
- * The bag count is "how many identifiable bags are standing there", which is
- * only meaningful for materials that arrive in bags; everything else reports
- * null rather than a misleading zero.
+ * NO BAG COUNT, deliberately. It was here and it was always null: nothing in
+ * the application moves `material_bags.current_warehouse_id` when a bag is
+ * issued, so every bag stays flagged in the store for ever and a WIP bag count
+ * can only ever be zero. Publishing "—" beside 300 kg of resin would have said
+ * "this material is not bag-tracked" on a system where every bag carries a
+ * unique barcode. Whether a bag should change location on issue is a custody
+ * question for the owner, not something to infer here.
  */
 class ProductionFloorStockService
 {
     public function __construct(private readonly ProductionWipLocationResolver $wip) {}
+
+    /**
+     * Is a Production/WIP location configured at all?
+     *
+     * The caller needs this to tell two very different empty lists apart:
+     * "nothing is standing on the floor" and "nobody has told the ERP where
+     * the floor IS". Reporting the second as the first is a false statement
+     * about stock.
+     */
+    public function isConfigured(): bool
+    {
+        return $this->wip->warehouseId() !== null;
+    }
 
     /**
      * One row per material currently standing in Production/WIP.
@@ -48,8 +66,15 @@ class ProductionFloorStockService
         $balances = StockBalance::query()
             ->with('item:id,sku,name,uom')
             ->where('warehouse_id', $wipId)
-            // A balance that has fallen to zero is not "on the floor".
-            ->where('quantity', '>', 0)
+            // NOT `> 0`. A balance of zero is genuinely not on the floor, but a
+            // NEGATIVE one is a real, deliberately-unrefused state in this
+            // system: a batch may consume more than was ever issued to it
+            // (StoreIssueReversalBoundsTest pins WIP at -50 and does not
+            // refuse it). Hiding that row would be the worst possible answer —
+            // the floor would see nothing for a material it is standing next
+            // to, and raise another request, which is the exact failure this
+            // panel exists to prevent. The sign is the message.
+            ->where('quantity', '!=', 0)
             ->get();
 
         if ($balances->isEmpty()) {
@@ -58,35 +83,33 @@ class ProductionFloorStockService
 
         $itemIds = $balances->pluck('item_id')->all();
 
-        // A bag carries no item of its own — it belongs to a LOT, and the lot
-        // names the material. Counting only bags that still hold something:
-        // an emptied bag is not stock standing on the floor.
-        $bagCounts = DB::table('material_bags as b')
-            ->join('material_lots as lot', 'lot.id', '=', 'b.material_lot_id')
-            ->selectRaw('lot.item_id as item_id, COUNT(*) as bags')
-            ->where('b.current_warehouse_id', $wipId)
-            ->where('b.remaining_kg', '>', 0)
-            ->whereIn('lot.item_id', $itemIds)
-            ->groupBy('lot.item_id')
-            ->pluck('bags', 'item_id');
-
-        // The most recent HANDOVER of each material — the date the floor
-        // actually received it, with the two names on that handover.
-        $latest = DB::table('store_issue_lines as l')
+        // BOUNDED. This used to read every non-cancelled issue line ever
+        // recorded for these materials and then keep about ten of them in PHP —
+        // correct, but growing for ever and re-run on every page load. The
+        // newest issued_at per item is computed in the database first, and only
+        // those rows are fetched.
+        $newestPerItem = DB::table('store_issue_lines as l')
             ->join('store_issues as i', 'i.id', '=', 'l.store_issue_id')
-            ->leftJoin('users as issuer', 'issuer.id', '=', 'i.issued_by')
-            ->leftJoin('users as receiver', 'receiver.id', '=', 'i.received_by')
+            ->selectRaw('l.item_id as item_id, MAX(i.issued_at) as issued_at')
             ->whereIn('l.item_id', $itemIds)
             ->where('i.status', '!=', 'cancelled')
-            ->orderByDesc('i.issued_at')
+            ->groupBy('l.item_id');
+
+        $latest = DB::table('store_issue_lines as l')
+            ->join('store_issues as i', 'i.id', '=', 'l.store_issue_id')
+            ->joinSub($newestPerItem, 'newest', function ($join) {
+                $join->on('newest.item_id', '=', 'l.item_id')
+                    ->on('newest.issued_at', '=', 'i.issued_at');
+            })
+            ->leftJoin('users as issuer', 'issuer.id', '=', 'i.issued_by')
+            ->leftJoin('users as receiver', 'receiver.id', '=', 'i.received_by')
+            ->where('i.status', '!=', 'cancelled')
             ->get(['l.item_id', 'i.issued_at', 'i.issue_number', 'issuer.name as issued_by', 'receiver.name as received_by'])
-            // groupBy keeps the first of each — and the query is ordered
-            // newest-first, so the first IS the latest.
             ->groupBy('item_id')
             ->map(fn ($rows) => $rows->first());
 
         return $balances
-            ->map(function (StockBalance $balance) use ($bagCounts, $latest) {
+            ->map(function (StockBalance $balance) use ($latest) {
                 $last = $latest->get($balance->item_id);
 
                 return [
@@ -95,9 +118,14 @@ class ProductionFloorStockService
                     'name' => $balance->item?->name,
                     'uom' => $balance->item?->uom,
                     'quantity' => (string) $balance->quantity,
-                    // null, not 0, where bags are not how this material is held.
-                    'bag_count' => $bagCounts->get($balance->item_id),
-                    'last_issued_at' => $last->issued_at ?? null,
+                    // ISO8601 WITH ITS OFFSET, exactly as StoreIssueResource
+                    // returns it. A raw "2026-08-18 07:06:13" is parsed by the
+                    // browser as LOCAL time while the value is UTC, which put
+                    // every row 5h30m out and moved a night-shift handover onto
+                    // the wrong calendar day.
+                    'last_issued_at' => $last?->issued_at === null
+                        ? null
+                        : CarbonImmutable::parse($last->issued_at)->toIso8601String(),
                     'last_issue_number' => $last->issue_number ?? null,
                     'issued_by' => $last->issued_by ?? null,
                     'received_by' => $last->received_by ?? null,

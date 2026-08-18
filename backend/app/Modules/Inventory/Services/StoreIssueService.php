@@ -171,6 +171,20 @@ class StoreIssueService
 
             $this->bags->pour($bag, $quantity, $remaining, $full);
 
+            // CUSTODY FOLLOWS THE MATERIAL. The kilograms have just moved to
+            // Production/WIP; without this the bag's own row went on saying it
+            // was in the store for ever, because nothing in the application
+            // ever wrote this column after the bag was created. That made every
+            // "which bags are on the floor" question unanswerable, and it is the
+            // provenance half of the chain the factory asked for:
+            // PO -> GRN -> lot -> BAG -> RM Store -> issue -> Production/WIP.
+            //
+            // This is CUSTODY, not consumption, and not attribution: the bag now
+            // stands in a different place, and it still belongs to no machine
+            // and no batch (FC-01).
+            $bag->current_warehouse_id = $wip->id;
+            $bag->save();
+
             $line->quantity_issued = bcadd((string) $line->quantity_issued, $quantity, 4);
             $line->save();
 

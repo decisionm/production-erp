@@ -160,6 +160,91 @@ class ProductionFloorStockTest extends TestCase
         $this->assertStringNotContainsStringIgnoringCase('day bin', (string) $json);
     }
 
+    /**
+     * A NEGATIVE BALANCE IS THE ONE ROW THAT MUST NOT DISAPPEAR.
+     *
+     * This system deliberately does not refuse a batch that consumes more than
+     * was issued to it, so WIP genuinely goes negative
+     * (StoreIssueReversalBoundsTest pins exactly that). If the panel filtered
+     * to `> 0`, the floor would see NOTHING for a material it is standing next
+     * to and raise another request — the precise failure this panel exists to
+     * prevent.
+     */
+    public function test_an_over_consumed_material_is_still_shown_rather_than_hidden(): void
+    {
+        $this->issue('100');
+
+        app(StockMovementService::class)->recordIssue(
+            itemId: $this->resin->id,
+            warehouseId: $this->wip->id,
+            quantity: '150',
+            reference: 'FS over-consumption',
+            // The same seam a batch completion uses. Consumption is CALCULATED,
+            // not counted, so a batch can compute more than was ever issued —
+            // the system records the deficit rather than refusing the shift's
+            // paperwork at the end of a shift.
+            allowNegative: true,
+            purpose: StockMovementPurpose::Consumption,
+        );
+
+        $floor = $this->floor();
+
+        $this->assertCount(1, $floor, 'a deficit must be visible, not filtered away');
+        $this->assertSame(0, bccomp((string) $floor[0]['quantity'], '-50', 4));
+    }
+
+    /**
+     * The timestamp must carry its offset. A raw "2026-08-18 07:06:13" is read
+     * by a browser as LOCAL time while the value is UTC — 5h30m out here, and
+     * a night-shift handover lands on the wrong calendar day.
+     */
+    public function test_the_handover_time_carries_its_timezone(): void
+    {
+        $this->issue('100');
+
+        $when = $this->floor()[0]['last_issued_at'];
+
+        $this->assertNotNull($when);
+        $this->assertMatchesRegularExpression(
+            '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$/',
+            (string) $when,
+            "last_issued_at must be ISO8601 with an offset, got: {$when}",
+        );
+    }
+
+    /**
+     * "The floor is empty" and "nobody has told the ERP where the floor is" are
+     * different statements, and the screen must be able to tell them apart.
+     */
+    public function test_an_unconfigured_wip_location_is_reported_as_such(): void
+    {
+        app(ProductionWipLocationResolver::class)->setWarehouseId(null);
+
+        $response = $this->getJson('/api/v1/inventory/production-floor-stock')->assertOk();
+
+        $this->assertSame([], $response->json('data'));
+        $this->assertFalse($response->json('meta.wip_configured'));
+    }
+
+    public function test_a_configured_location_says_so(): void
+    {
+        $this->assertTrue(
+            $this->getJson('/api/v1/inventory/production-floor-stock')->assertOk()->json('meta.wip_configured'),
+        );
+    }
+
+    /** FC-06: no rate, no cost, no vendor may ride along on a floor screen. */
+    public function test_the_floor_surface_carries_no_rate_cost_or_supplier(): void
+    {
+        $this->issue('100');
+
+        $json = strtolower((string) json_encode($this->floor()));
+
+        foreach (['rate', 'cost', 'price', 'amount', 'vendor', 'supplier'] as $forbidden) {
+            $this->assertStringNotContainsString($forbidden, $json, "FC-06: '{$forbidden}' must not appear on the floor panel");
+        }
+    }
+
     private function issue(string $quantity): void
     {
         $this->postJson('/api/v1/inventory/store-issues', [
