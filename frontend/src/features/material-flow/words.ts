@@ -409,3 +409,44 @@ export function machineAppliesToRequest(
     if (named.every((material) => material.machine_applies === true)) return true;
     return null;
 }
+
+/* ------------------------------------------------------------------ *
+ * The store queue's status filter
+ * ------------------------------------------------------------------ */
+
+/** "Still to issue" is these two statuses, as the backend spells the filter. */
+export const OPEN_REQUEST_STATUSES: MaterialRequestStatus[] = ['submitted', 'partially_issued'];
+
+/** What the queue's status dropdown offers, in order. */
+export type QueueStatusChoice = 'open' | 'all' | MaterialRequestStatus;
+
+/**
+ * The `status` filter a dropdown choice means.
+ *
+ * `undefined` is not "no opinion" — it is ALL REQUESTS. Omitting the status
+ * is how the server is asked for everything, and it is the only way the store
+ * reaches a request it has already finished.
+ *
+ * This exists as a pure function because of what it cost when it was inline:
+ * a fully issued request leaves the default view, so the storekeeper finished
+ * a handover and watched the row vanish, with nothing on screen to say the
+ * work still existed. Reported from the floor as "after the approval it went
+ * blank — where do we see the history".
+ */
+export function queueStatusFilter(choice: QueueStatusChoice): MaterialRequestStatus[] | MaterialRequestStatus | undefined {
+    if (choice === 'open') return [...OPEN_REQUEST_STATUSES];
+    if (choice === 'all') return undefined;
+
+    return choice;
+}
+
+/**
+ * What an EMPTY queue should say. On the default filter the honest answer is
+ * not "nothing here" — it is "nothing is OUTSTANDING, and here is where the
+ * finished ones are".
+ */
+export function queueEmptyText(status: MaterialRequestStatus[] | MaterialRequestStatus | undefined): string {
+    return Array.isArray(status)
+        ? 'Nothing is still to issue. Requests the store has already finished are under "Fully issued" — or "All requests" to see everything.'
+        : 'No requests match these filters.';
+}

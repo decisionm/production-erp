@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import * as words from './words';
 import {
+    queueEmptyText,
+    queueStatusFilter,
     ISSUE_IS_NOT_CONSUMPTION,
     ISSUE_STATUS_HELP,
     ISSUE_STATUS_LABEL,
@@ -234,5 +236,37 @@ describe('FC-06: no rate, amount or vendor identity reaches these screens', () =
         const forbidden = /rate|amount|price|cost|value|vendor|supplier|invoice|₹/i;
         const offenders = EXPORTED_STRINGS.filter((s) => forbidden.test(s));
         expect(offenders).toEqual([]);
+    });
+});
+
+describe('the store queue status filter', () => {
+    it('defaults to the two OUTSTANDING statuses, so the queue is work not history', () => {
+        expect(queueStatusFilter('open')).toEqual(['submitted', 'partially_issued']);
+    });
+
+    it('asks for EVERY request by omitting the status — this is how history is reached', () => {
+        // The regression this pins: a fully issued request leaves the default
+        // view, and before "All requests" existed there was no way back to it
+        // from this screen. The store finished a handover and the row vanished.
+        expect(queueStatusFilter('all')).toBeUndefined();
+    });
+
+    it('passes a single status straight through', () => {
+        expect(queueStatusFilter('issued')).toBe('issued');
+        expect(queueStatusFilter('cancelled')).toBe('cancelled');
+    });
+
+    it('tells an empty DEFAULT queue where the finished requests went', () => {
+        const text = queueEmptyText(['submitted', 'partially_issued']);
+
+        expect(text).toContain('still to issue');
+        // The words that answer "where do we see the history".
+        expect(text).toContain('Fully issued');
+        expect(text).toContain('All requests');
+    });
+
+    it('says something different when the emptiness is the reader’s own filtering', () => {
+        expect(queueEmptyText('cancelled')).toBe('No requests match these filters.');
+        expect(queueEmptyText(undefined)).toBe('No requests match these filters.');
     });
 });
