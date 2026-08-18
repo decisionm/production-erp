@@ -134,7 +134,12 @@ summary) → **Needs Attention**.
    tile can never disagree with the grid.
 3. **Machine cards** rebuilt around state:
    - a coloured status rail (`borderInlineStart`) makes Idle / Running / Down / Mold
-     Change / Carryover distinct at a glance without reading a word;
+     Change / Carryover distinct at a glance without reading a word. **Carryover gets its
+     own gold rail** even though `machineFloorState` rightly classifies it as `running`
+     (it *is* running, it is counted as running, and it completes from here) — without
+     that it would be railed the same green as a clean current run and said so only in a
+     tag, which is the very failure §2.5 describes. It shares gold with "not handed over";
+     the two stay distinct by their status tag and header line;
    - **one primary CTA per state, labelled**: `Start Batch` (idle, `type="primary"`),
      `Complete Batch` (running), `Close Breakdown` (down), `Finish Mold Change`
      (mold change). Each calls the existing `primaryClick` — the same handler the card

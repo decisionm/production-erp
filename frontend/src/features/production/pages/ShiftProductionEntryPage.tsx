@@ -5248,6 +5248,16 @@ export default function ShiftProductionEntryPage() {
                         (running.production_date !== clockProductionDate ||
                             (detectedShift !== undefined && running.shift.id !== detectedShift.id));
                     const startedAt = running ? startedAtLabel(running) : null;
+                    // CARRYOVER GETS ITS OWN RAIL. It is one of the five states
+                    // that must be told apart at a glance, and machineFloorState
+                    // rightly calls it 'running' (it IS running, it is counted as
+                    // running, and it completes from here) — so without this it
+                    // was railed the same green as a clean current run and said
+                    // so only in a tag, which is the very failure this rework is
+                    // about. Gold, shared with "not handed over": both mean a run
+                    // that is not cleanly this shift's. The two stay distinct by
+                    // their status tag and their header line.
+                    const railAccent = isCarryover ? STATE_STYLE.running_other_shift.accent : style.accent;
                     // THE ONE PRIMARY ACTION FOR THIS STATE, said in words. All
                     // four used to be an unlabelled click on the card body.
                     const primaryLabel =
@@ -5388,7 +5398,7 @@ export default function ShiftProductionEntryPage() {
                                     // sat in the same slot for all five states.
                                     style={{
                                         height: '100%',
-                                        borderInlineStart: `4px solid ${style.accent}`,
+                                        borderInlineStart: `4px solid ${railAccent}`,
                                         background: runningForOtherShift ? style.wash : undefined,
                                     }}
                                     styles={{ body: { padding: 12, display: 'flex', flexDirection: 'column', gap: 8 } }}
@@ -5599,7 +5609,6 @@ export default function ShiftProductionEntryPage() {
                                                 in Floor actions below the grid. */}
                                             {running && traceabilityEnabled && (
                                                 <Button
-                                                    size="small"
                                                     // On a not-ours card this is the one
                                                     // action left worth taking — the way the
                                                     // machine becomes this shift's, so it
@@ -5616,7 +5625,6 @@ export default function ShiftProductionEntryPage() {
                                             )}
                                             {!running && (
                                                 <Button
-                                                    size="small"
                                                     type="text"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
@@ -5650,7 +5658,6 @@ export default function ShiftProductionEntryPage() {
                                                 this screen states that rule. */}
                                             {running && !running.quality?.checked && running.status === 'pending' && (
                                                 <Button
-                                                    size="small"
                                                     type="text"
                                                     danger
                                                     onClick={(e) => {
@@ -5679,7 +5686,6 @@ export default function ShiftProductionEntryPage() {
                                                 supervisor standing in front of it reports it
                                                 whichever shift the run is filed under. */}
                                             <Button
-                                                size="small"
                                                 type="text"
                                                 danger
                                                 style={{ marginInlineStart: 'auto' }}
