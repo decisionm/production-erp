@@ -1,15 +1,19 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Button, Descriptions, Drawer, Space, Table, Tag, Timeline, Tooltip, Typography } from 'antd';
+import { Alert, Button, Collapse, Descriptions, Drawer, Space, Table, Tag, Timeline, Tooltip, Typography } from 'antd';
 import { Link } from 'react-router-dom';
 import { getTallySyncEntry } from '@/features/tally-sync/api';
 import {
+    formatXml,
     holdCopy,
     instant,
     mappingBadge,
     mappingStateShort,
     payloadColumns,
     payloadText,
+    snapshotAnswer,
+    snapshotHeadline,
+    snapshotXmlDecision,
     sourceLink,
     statusColor,
     statusLabel,
@@ -21,7 +25,7 @@ import {
     showsFixedAfterFailures,
 } from '@/features/tally-sync/drawer';
 import { categoryLabel } from '@/features/tally-sync/filters';
-import type { EntryMappings, LedgerMapping, MappingSummary, TallySyncEntry } from '@/features/tally-sync/types';
+import type { EntryMappings, LedgerMapping, MappingSummary, TallySyncEntry, TallySyncSnapshot } from '@/features/tally-sync/types';
 
 /**
  * The row's actions, lifted from the page: the SAME Release now / Resync /
@@ -45,8 +49,8 @@ interface EntryDrawerProps extends EntryDrawerActions {
     /**
      * The row as the LIST holds it — painted at once while the show endpoint
      * answers, and the fallback for the sections the list already carries
-     * (source, voucher, release, result). Summary, timeline and mappings
-     * only ever come from the show endpoint.
+     * (source, voucher, release, result). Summary, timeline, mappings and
+     * snapshots only ever come from the show endpoint.
      */
     listRow: TallySyncEntry | null;
     /** The page's per-row action outcome ("Queued again — …"), shown in the Result section. */
@@ -96,8 +100,9 @@ function cell(value: unknown): string {
 /**
  * The detail drawer for one queued voucher — the chain in the order it
  * runs (TALLY-SYNC-CHAIN.md §1): ERP source → voucher → mappings → release
- * → payload → result → timeline. Fed by GET /tally-sync/entries/{id}
- * (summary, timeline, mappings ride only on that endpoint); the list's row
+ * → payload → result → what the agent sent / what Tally answered →
+ * timeline. Fed by GET /tally-sync/entries/{id} (summary, timeline,
+ * mappings and snapshots ride only on that endpoint); the list's row
  * paints first. Nothing here changes what reaches Tally.
  */
 export default function EntryDrawer({
@@ -489,7 +494,11 @@ function EntryBody({
                 ]}
             />
 
-            {/* 7 · Timeline */}
+            {/* 7 · What the agent sent / What Tally answered (Phase 4) */}
+            <SectionTitle>What the agent sent / What Tally answered</SectionTitle>
+            {entry.snapshots ? <SnapshotsSection snapshots={entry.snapshots} /> : pendingDetail}
+
+            {/* 8 · Timeline */}
             <SectionTitle>Timeline</SectionTitle>
             {entry.timeline ? (
                 entry.timeline.length === 0 ? (
@@ -619,6 +628,144 @@ function MappingsSection({ mappings, summary }: { mappings: EntryMappings; summa
                     ]}
                 />
             )}
+        </Space>
+    );
+}
+
+/**
+ * The agent's own record of each post (Phase 4): the XML it built locally
+ * and Tally's answer, one collapsible panel per attempt, newest first with
+ * the newest open. Everything shown is what the SERVER sent — the XML
+ * arrives only for a reader with finance standing (or for a Stock Journal,
+ * which carries no rate and no party), and the withheld note is rendered
+ * in its place in the same warning style the Result section uses for a
+ * withheld rejection (FC-06). Nothing here reads Tally or the agent.
+ */
+function SnapshotsSection({ snapshots }: { snapshots: TallySyncSnapshot[] }) {
+    if (snapshots.length === 0) {
+        return (
+            <Typography.Text type="secondary">
+                No snapshot yet — the agent uploads one after each post (agent ≥ 0.3.8).
+            </Typography.Text>
+        );
+    }
+
+    return (
+        <Collapse
+            size="small"
+            defaultActiveKey={[String(snapshots[0].id)]}
+            items={snapshots.map((snapshot) => {
+                const answer = snapshotAnswer(snapshot);
+                const verdict = answer.kind === 'answer' ? answer.tags[0] : { color: 'default' as const, text: 'no answer' };
+
+                return {
+                    key: String(snapshot.id),
+                    label: (
+                        <Tooltip title={`sha256 ${snapshot.xml_sha256}`}>
+                            <Typography.Text style={{ fontSize: 12 }}>{snapshotHeadline(snapshot)}</Typography.Text>
+                        </Tooltip>
+                    ),
+                    extra: <Tag color={verdict.color} style={{ marginInlineEnd: 0 }}>{verdict.text}</Tag>,
+                    children: <SnapshotPanel snapshot={snapshot} />,
+                };
+            })}
+        />
+    );
+}
+
+function SnapshotPanel({ snapshot }: { snapshot: TallySyncSnapshot }) {
+    const xml = snapshotXmlDecision(snapshot);
+    const answer = snapshotAnswer(snapshot);
+    // Formatting is for eyes; a 2 MB voucher is formatted once, not per render.
+    const pretty = useMemo(() => (xml.kind === 'xml' ? formatXml(xml.text) : ''), [xml.kind, xml.text]);
+    const [copied, setCopied] = useState<'idle' | 'done' | 'failed'>('idle');
+    const [showRaw, setShowRaw] = useState(false);
+    const rejected = answer.kind === 'answer' && answer.tags[0]?.text === 'rejected';
+
+    // The RAW string is copied — byte for byte what the agent posted, so a
+    // sha256 over the clipboard matches the header. navigator.clipboard is
+    // absent on an insecure origin (a LAN box over http) and refuses
+    // without a user gesture; either way the button says so, nothing throws.
+    const copy = async () => {
+        try {
+            await navigator.clipboard.writeText(xml.text);
+            setCopied('done');
+        } catch {
+            setCopied('failed');
+        }
+        window.setTimeout(() => setCopied('idle'), 2000);
+    };
+
+    return (
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <div>
+                <Space size={8} wrap style={{ marginBottom: 6 }}>
+                    <Typography.Text strong>What the agent sent</Typography.Text>
+                    {xml.kind === 'xml' && (
+                        <Button size="small" onClick={copy}>
+                            {copied === 'done' ? 'Copied' : copied === 'failed' ? 'Copy failed — select the text instead' : 'Copy XML'}
+                        </Button>
+                    )}
+                </Space>
+                {xml.kind === 'xml' && (
+                    <pre style={{ margin: 0, maxHeight: 360, overflow: 'auto', fontSize: 12, whiteSpace: 'pre' }}>{pretty}</pre>
+                )}
+                {xml.kind === 'withheld' && (
+                    <Typography.Text type="warning" style={{ display: 'block' }}>
+                        {xml.text}
+                    </Typography.Text>
+                )}
+                {xml.kind === 'none' && (
+                    <Typography.Text type="secondary" style={{ display: 'block' }}>
+                        {xml.text}
+                    </Typography.Text>
+                )}
+            </div>
+
+            <div>
+                <Typography.Text strong>What Tally answered</Typography.Text>
+                {answer.kind === 'none' ? (
+                    <div style={{ marginTop: 6 }}>
+                        <Typography.Text type="secondary">
+                            No answer recorded — the XML was sent and Tally did not answer before the agent gave up (inconclusive).
+                        </Typography.Text>
+                    </div>
+                ) : (
+                    <>
+                        <div style={{ marginTop: 6 }}>
+                            <Space size={6} wrap>
+                                {answer.tags.map((tag) => (
+                                    <Tag key={tag.text} color={tag.color} style={{ marginInlineEnd: 0 }}>
+                                        {tag.text}
+                                    </Tag>
+                                ))}
+                            </Space>
+                        </div>
+                        {answer.message && (
+                            <div style={{ marginTop: 4, whiteSpace: 'normal' }}>
+                                <Typography.Text type={rejected ? 'danger' : undefined}>{answer.message}</Typography.Text>
+                            </div>
+                        )}
+                        {answer.messageWithheld && (
+                            <div style={{ marginTop: 4, whiteSpace: 'normal' }}>
+                                <Typography.Text type="warning">{answer.messageWithheld}</Typography.Text>
+                            </div>
+                        )}
+                        {answer.raw && (
+                            <div style={{ marginTop: 8 }}>
+                                <Button size="small" onClick={() => setShowRaw((value) => !value)}>
+                                    {showRaw ? 'Hide raw response' : 'Show raw response'}
+                                </Button>
+                                {showRaw && (
+                                    <pre style={{ margin: '8px 0 0', maxHeight: 240, overflow: 'auto', fontSize: 12, whiteSpace: 'pre-wrap' }}>
+                                        {answer.raw}
+                                    </pre>
+                                )}
+                            </div>
+                        )}
+                    </>
+                )}
+            </div>
         </Space>
     );
 }

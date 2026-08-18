@@ -22,6 +22,19 @@ return Application::configure(basePath: dirname(__DIR__))
             EnsureFrontendRequestsAreStateful::class,
         ]);
 
+        // The agent's snapshot is a byte-exact record of the XML it sent —
+        // its sha256 is recomputed server-side — so the global TrimStrings /
+        // ConvertEmptyStringsToNull must not touch that one body: a document
+        // ending in a newline would otherwise fail its own hash and never be
+        // recorded (fire-and-forget on the agent → one warn line, nothing
+        // here). Everything else keeps the framework defaults.
+        $middleware->trimStrings(except: [
+            fn (Request $request) => $request->is('api/v1/tally-sync/entries/*/snapshot'),
+        ]);
+        $middleware->convertEmptyStringsToNull(except: [
+            fn (Request $request) => $request->is('api/v1/tally-sync/entries/*/snapshot'),
+        ]);
+
         $middleware->alias([
             'module' => EnsureModulePermission::class,
             'active' => EnsureUserIsActive::class,

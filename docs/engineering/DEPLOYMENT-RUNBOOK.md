@@ -1,0 +1,60 @@
+# Deployment runbook — the Phase 0–4 stack (as of 2026-08-17)
+
+Live is at `9a9cbe3` (deploy of PR #178, 16-Aug 15:52 UTC). **Nothing from the
+engineering program is deployed yet.** Five phase PRs are open, stacked, all CI-green
+and MERGEABLE/CLEAN, none reviewed. `main` auto-deploys (deploy.yml, maintenance
+window). The merge chain (Builder → Cursor → Codex → owner) is the team's; this file
+says exactly what each merge lands and what to check after, so nobody has to
+re-derive it under time pressure.
+
+## Order and content
+
+| # | PR | Base | Migrations | Config / env | Live effect when deployed |
+|---|---|---|---|---|---|
+| 1 | #179 Phase 0 baseline | main | none | none | docs only (MASTER-PLAN, audit, logs) |
+| 2 | #180 Phase 1 live-safety | #179 | none | `tally-sync.voucher_granularity` default `shift` (live already `shift` — no change); `/tally-sync/items` route REMOVED | FC-06 rate gates on 8 resources; local-fixture voucher hole closed; item `name` wire-key guard; ShowRoles read-only workflow |
+| 3 | #181 Phase 2 sync foundation | #180 | `2026_08_16_100000_create_tally_sync_events_table`, `2026_08_16_100001_backfill_tally_sync_events` (idempotent) | none | events history table + backfill from existing entries; classification; filters/show/summary; payload rate-gated for non-finance readers (agent unaffected) |
+| 4 | #182 Phase 3 every type | #181 | none | none | mapping states, summaries, drawer; **supplier identity withheld from readers without finance standing** (Tally rejection text included); ambiguous names fail closed in the preview (Q43); audit-fixtures command |
+| 5 | #183 Phase 3.5 sales visibility | #182 | none | none | sales filters/show/trace/cancel; tally-mirror statement; **generic enqueue idempotent** (a re-fired event no longer mints a second voucher) |
+| 6 | #184 Phase 4 snapshot | #183 | `2026_08_17_100000_create_tally_sync_snapshots_table` | `TALLY_SYNC_SNAPSHOT_RETENTION_DAYS` optional (default 90) | snapshot endpoint (accepts agent ≥ 0.3.8; older agents unaffected); **agent report endpoints (pending/ack/fail/snapshot) now require the agent's real token** — the live agent's PAT carries poll+report, so no change for it; a browser session can no longer ack/fail |
+
+Merging #179 first retargets #180 to `main` automatically when the base branch is
+deleted on merge (GitHub behaviour) — merge top-down, one at a time, and let each
+deploy finish before the next merge (each merge = one maintenance window).
+
+## After EACH deploy — `.claude/skills/deploy-live-verify` applies, in this order
+
+1. The deploy run's **migrate step output** — every migration named above must read
+   `DONE` (a green tick is not evidence).
+2. Site loads; the screens the phase touched render (Tally Sync page after #181/#182/#184;
+   Sales pages after #183; PO/GRN drawers after #180).
+3. **Tally Sync queue: no NEW failures, nothing stuck** — specifically an entry that is
+   `pending` with `delivered_at` SET and no progress after a window that overlapped a
+   sync cycle (issue #168 signature).
+4. Server log for errors newer than the deploy (`read-server-log`, **≥ 10 min after the
+   deploy's SSH session** — the Hostinger brute-force ban).
+5. Already-posted vouchers byte-identical (no phase in this stack rewrites a payload;
+   #183's idempotency and #184's snapshot are additive).
+
+## Phase 1 live verification (owed before Phase 1 is "fully deployed")
+
+After #180's deploy: (a) `show-roles` workflow (read-only) → confirm which roles hold
+`finance.view/manage` — the FC-06 exposure map; (b) as a non-finance login on live, a
+PO/GRN drawer shows no rate columns; (c) `tally-sync-status` workflow → queue healthy;
+(d) an item rename attempt to a different wire name is refused (422) — API-layer check
+by the reviewer, not a live write. Record the evidence in PHASE-LOG (Phase 1 →
+"Deployment state").
+
+## The agent
+
+Agent 0.3.8 (Phase 4) is **built and tested on the branch, NOT published.**
+Publishing is a deliberate manual act (`build-agent.yml` publish job, main-only;
+`releaseContract.test.js` governs). Until it is published the cloud simply receives no
+snapshots — nothing else changes. Publish only after #184 is live (the endpoint must
+exist first).
+
+## Rollback
+
+Every migration in this stack is additive (new tables); rolling back code without
+rolling back the tables is safe. `git revert` of a merge + deploy is the path; the
+tables can stay.

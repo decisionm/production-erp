@@ -1,6 +1,6 @@
 # Master Plan — Production ERP
 
-**Status:** APPROVED as the *working* engineering plan · 2026-08-16 · **rev 2**
+**Status:** APPROVED as the *working* engineering plan · 2026-08-16 · **rev 3 (2026-08-17)** — Phases 5–8 restructured around the FACTORY OPERATOR WORKFLOW at the lead's direction: after the Tally foundation (1–4) and the Download/Export foundation (4.5), the execution priority is Product/SKU configuration → Shift Floor → Estimation → Complete Batch → Completed Today → Shift Summary → CEC infrastructure → Purchase/Inventory → Sales visibility + Downloads. The final acceptance test is the operator workflow first, then accounting traceability. This is not to become a Tally Control Center project only.
 **Authority:** the lead's written directive in the engineering session of 2026-08-16 ("Phase 0 is approved and considered complete… The current Phases 2–8 plan shape is approved as the working plan"), recorded verbatim in `PHASE-LOG.md` (Phase 0 addendum). This is an **engineering** approval by the lead who runs this program — it is *not* a factory business decision and creates no `docs/factory/decisions/` record. Every owner-gated item in this plan (Q-nn, DEC-nn) still needs the owner.
 **Derived from:** `MASTER-PROMPT-AUDIT.md` §8 (Phase 0 output). That document holds the
 evidence; this one holds only the plan, so agents have one short thing to read.
@@ -15,19 +15,22 @@ by *what blocks what*, with the owner-gates named. Each phase ends with the
 prompt's Phase Completion Contract (§73) — that part of the prompt is kept.
 
 ```
-PHASE 0   Discovery + audit                    ← THIS DOCUMENT · DONE
+PHASE 0   Discovery + audit                    DONE · PR #179
 PHASE 1   Live-safety fixes                    PASS WITH DEFERRED · PR #180 · awaiting merge chain
 PHASE 2   Sync Control Center — foundation     PASS WITH DEFERRED · PR #181 (stacked on #180)
 PHASE 3   Sync Control Center — every type     PASS WITH DEFERRED · PR #182 (stacked on #181) · Q43 fail-closed
 PHASE 3.5 Sales visibility (first-class)       PASS WITH DEFERRED · PR #183 (stacked on #182) · Q44 · Sales stays Tally-originated
-PHASE 4   Agent XML/response snapshot          FC-06 review gate
-PHASE 4.5 Download / Export Center             CEC slot BLOCKED until a sample exists
-PHASE 5   Ledger + packaging schema            D1 has a decision behind it
-PHASE 6   Purchase Order contract              Q31/Q38 → Q35 · staged, flag-off
-PHASE 7   Regression + reporting honesty       no owner gate
-PHASE 8   END-TO-END CHAIN REGRESSION          Sonnet QA + browser proof · product not complete until it passes
+PHASE 4   Agent XML/response snapshot          PASS WITH DEFERRED · PR #184 (stacked on #183) · agent 0.3.8 built, NOT published
+PHASE 4.5 Download / Export Center             NEXT · CEC slot BLOCKED until a sample exists
+──────────────────────────── OPERATIONAL WORKFLOW (rev 3) ────────────────────────────
+PHASE 5   Product / SKU configuration          variant model · SKU→Tally identity · multi-match review · pack qty in config
+PHASE 5.5 Shift Floor → Complete → Today       select SKU once · estimation verified · completion durable · Completed Today server-side
+PHASE 5.7 Shift Summary + CEC infrastructure   history/A-B-C/all reconcile with completed production · CEC format BLOCKED, everything around it built
+PHASE 6   Purchase → GRN → lot → inventory → consumption; then PO→Tally staged, flag-off (Q35 gates the live write)
+PHASE 7   Regression + reporting honesty + hardening (MySQL leg; deferred items)
+PHASE 8   END-TO-END ACCEPTANCE: operator workflow, then accounting traceability, purchase chain, sales visibility + downloads
 ──────────────────────────────────────────────────────────────────────
-HELD      Sales in ERP · CEC · reconciliation-by-read · SKU format · Q33
+HELD      Sales in ERP · CEC format · reconciliation-by-read · SKU format · Q33 (490/box) · Q35 (PO live write)
 ```
 
 ### Phase 1 — Live-safety fixes (Track A, first slice)
@@ -183,69 +186,138 @@ non-finance).
 **Exit:** every export in the product goes through the Center; none is client-side;
 CEC is either implemented against a sample or visibly blocked — never invented.
 
-### Phase 5 — Ledger invariant + packaging schema
+### Phase 5 — Product / SKU configuration (operational workflow, first slice)
+
+**Why first:** everything downstream (Shift Floor, estimation, completion, Tally
+identity, exports) reads configuration. Today the model is Product (`items`) →
+standard (`production_standards`) → packaging variants (`production_standard_packagings`,
+DEC-20260810-003, own Tally identity) — but the schema cannot represent two same-mode
+packings with different counts (§4.12, D1), the pack-quantity reader disagrees with the
+writer (§4.14), `packing_lines` are discarded (§4.16), and `sku` is re-seeded from
+`name` on every masters pull (§4.13). **What stays the owner's:** the actual 490/520
+mapping (Q33), any SKU→Tally identity that is ambiguous, cycle times, moulds — the ERP
+builds the *capacity* to hold and review them; it does not invent a value.
+
+| Task | What "done" is |
+|---|---|
+| **P5-01 (D1)** Replace `psp_standard_mode_unique` so two same-mode packings with different counts are representable; 422 not 500 on a duplicate; different-counts test | §4.12 |
+| **P5-02** Variant model made explicit: one logical product → N SKUs (configured variants) → each with its production configuration and EXACT Tally identity (GUID + wire name); a `sku` is never re-seeded from `name` (§4.13) | Product page shows the tree; API `GET products/{id}/variants` |
+| **P5-03** Multiple-Tally-match review: when a name resolves to more than one Tally item, the configuration surface OFFERS "create/link a separate SKU" and marks the variant `needs review` — never auto-picks (Phase 3's LineMappingResolver `ambiguous` state, Q43) | review queue + test |
+| **P5-04** Pack quantity lives in configuration: precedence configuration → standard → item master, read by ONE reader used by estimation, completion and Tally (§4.14); `packing_lines` persisted or the contract deleted (§4.16) | one reader, one test per precedence rung |
+| **P5-05** Ledger invariant `stock_balances == Σ stock_movements` (test + check command; append-only) and movement *purpose* (§4.2/§4.3) — kept here because production consumption reads it | invariant test green on dev + a live read-only check command |
+| **P5-06** Configuration honesty on screen: a variant missing any of {standard, packaging, Tally identity} is shown as INCOMPLETE with the missing pieces named — never as a blank that Shift Floor will "ask again" | test + browser proof |
+
+**Acceptance:** an operator opening Shift Floor for a fully configured SKU is asked
+NOTHING that configuration already knows; an incompletely configured SKU says exactly
+what is missing; a duplicate Tally name is a review item, never a guess.
+**Owner-gated:** Q33 (490/box), any ambiguous SKU→Tally mapping, SKU format programme.
+
+### Phase 5.5 — Shift Floor → Start → Estimation → Complete → Completed Today
+
+The audit (`MASTER-PROMPT-AUDIT.md` §5) established what is already true — the pack
+question is asked only when the product genuinely offers a choice (§49); the only
+typed number at Start is Active Cavities and the "420" lives in Complete Batch as
+`nos_per_box` (§50); pack quantity is a divisor, never in the pieces formula (§51);
+completion is a server-side compare-and-swap (§52); Completed Today is a real table
+with a sliced-page flaw (§53). This phase makes each of those a **tested contract**
+and fixes the real defects — it does not rebuild what works.
+
+| Task | What "done" is |
+|---|---|
+| **P5.5-01** Select the SKU once: Start Batch loads packaging, pack quantity, standard, mould and Tally identity FROM the Phase 5 configuration; the pouch/tray/standard radios appear only when the configuration holds a real choice (contract test per branch: 0/1/N variants, 0/1/N packagings) | tests + browser proof per branch |
+| **P5.5-02** The Complete-Batch quantity fields are named for what they are (`nos_per_box` = the box actually packed; `quantity_produced` = pieces) and pre-filled from configuration; the "420 as example" docblock replaced by the real semantics; nothing typed at Start reaches the server as a pack quantity (already true — pinned) | request tests |
+| **P5.5-03** Estimation verified against the production standards: cycle time × cavities × runtime − downtime → expected pieces (`production_v2_floor`), boxes = pieces ÷ pack quantity; recalculates on every input change; a table-driven test over the recorded standards (owner figures — never interpolated) and the piece-grain efficiency regression (§51) | `BatchEstimationService` + `ProductionCalculationEngine` contract tests |
+| **P5.5-04** Completion reliable and durable: expected vs actual, good/reject, packs, downtime, efficiency; concurrent double-complete throws (pinned); the completed record is what Shift Summary and Tally read (identities frozen at completion) | lifecycle test + browser proof |
+| **P5.5-05** Completed Today: SERVER-SIDE filter (date = today in factory time, status completed, machine/shift filters), paginated, columns machine · shift · SKU · expected · actual · good · reject · efficiency · approval/Tally state (Phase 3.5's TallySyncLinkService) — no client slice of page 1 (§53) | endpoint + test + browser proof |
+| **P5.5-06** Start-Batch context preserved when configuration is missing: the operator can still start with what is known; the missing pieces are named on the batch and on Completed Today (never silently defaulted) | test |
+
+**Acceptance (the operator's half of the final chain):** SKU → Shift Floor → Start Batch
+→ Complete Batch, with expected/actual/good/reject/efficiency correct on the completed
+record, Completed Today listing every completed batch of the day.
+
+### Phase 5.7 — Shift Summary + CEC infrastructure
+
+| Task | What "done" is |
+|---|---|
+| **P5.7-01** Shift Summary tests (§4.18): historical dates, Shift A/B/C, All Shifts; totals reconcile with completed production (`Σ completed batches == summary actual`), the two non-computed KPI inputs labelled honestly | `ShiftSummaryService::report()` contract tests + browser proof for a past date |
+| **P5.7-02** CEC: **format BLOCKED — SOURCE DOCUMENT REQUIRED** stays until the owner's sample exists (HELD); everything around it is built: the CEC data endpoint (date · shift · all) returning the same figures Shift Summary shows, the export slot (Phase 4.5) wired to it, and the golden-file test harness that will assert `Completed Production == Shift Summary == CEC` the day a sample lands | endpoint + harness + the slot's reason verbatim |
+| **P5.7-03** Reporting honesty sweep on Production reports (production / reconciliation / traceability): server-side, filters honoured, exports through the Center | tests |
+
+**Acceptance:** Shift Summary for any past date and any shift equals the completed
+production of that date/shift; CEC infrastructure complete with the format visibly
+blocked.
+
+### Phase 6 — Purchase → GRN → lot → inventory → production consumption; then PO → Tally (staged, flag-off)
+
+| Task | What "done" is |
+|---|---|
+| **P6-01** The purchase chain as a tested contract: PO (draft → sent → partially received → received; amend/close endpoints — "closing synchronizes" needs closing to exist) → GRN (receipt_key idempotency; `OverReceiptException` tests §4.6) → material lot → stock movement (purpose = opening/receipt) → balance (Phase 5 invariant) → production consumption (issue against a batch, purpose = consumption) | lifecycle tests + browser proof; FC-06 on every payload (Phase 1 gates kept) |
+| **P6-02** PO server filters + show + trace (mirroring Phase 3.5's Sales shape) so the purchase chain is searchable and traceable end to end | tests |
+| **P6-03** PO → Tally staged exactly per `MASTER-PROMPT-AUDIT.md` §7.4 P0–P4: contract proven from the supplied XML, payload builder, idempotency/retry, agent builder behind `tally-sync.purchase_orders_enabled=false`, browser-proven, **live write DISABLED until Q35 is answered** — the first live PO write is an owner gate and never happens unattended | contract tests; flag off; PHASE-LOG "owner-gated" |
+
+**Acceptance (the accounting half of the final chain):** Purchase → GRN → Inventory →
+Production consumption, traceable, with Tally visibility of the GRN (Receipt Note) as
+today and the PO voucher staged behind the flag.
+
+### Phase 7 — Regression + reporting honesty + hardening
 
 | Task | Ref |
 |---|---|
-| **P5-01** `stock_balances == Σ stock_movements` invariant: test + check command; append-only enforced on the model | §4.2 |
-| **P5-02** Movement *purpose* dimension (opening / consumption / output / adjustment / reconcile) alongside direction; backfill from `reference`/`notes` where unambiguous, else `unknown` | §4.3 |
-| **P5-03 (D1)** Replace `psp_standard_mode_unique` so two same-mode packings with different counts are representable; 422 not 500; mode select honesty; different-counts test | §4.12, DEC-20260810-003 |
-| **P5-04** Pack-quantity precedence: metric reader consults the packaging row / snapshot; snapshot keys actually read | §4.14 |
-| **P5-05** Persist `packing_lines` (or delete the contract) | §4.16 |
-| **P5-06** Wire or remove dead statuses; `InvoiceStatus::Paid` first | §4.4 |
-
-### Phase 6 — Purchase Order → Tally (staged, flag-off)
-
-Exactly the P0–P4 staging in §7.4. Live writes stay **disabled** until Q35 is
-answered. Also delivers PO amend/close endpoints, since "closing synchronizes"
-requires closing to exist.
-
-### Phase 7 — Regression + reporting honesty
-
-| Task | Ref |
-|---|---|
-| **P7-01** Tests for `OverReceiptException`, `OverDeliveryException`, delivery decrement, carton-scan guards, PO `send()` transition | §4.6 |
-| **P7-02** `ShiftSummaryService::report()` tests; label the two non-computed KPI inputs honestly | §4.18 |
-| **P7-03** Completed Today: server-side filter, not a sliced page | §5 |
+| **P7-01** Tests for `OverDeliveryException` (done 3.5), `OverReceiptException`, PO `send()` transition, carton-scan guards (done 3) | §4.6 |
+| **P7-02** MySQL CI leg (the suite runs on sqlite; several constructs are MySQL-safe by reading only) + `assertEqualsCanonicalizing` on the six JSON-order tests | Phase 2 finding |
+| **P7-03** Deferred hardening from the gates: agent snapshot for a post made while the cloud was down; snapshot show cap; TallySyncLinkService ranking for legacy duplicates; cancel/confirm actor + reason (with Q44) | PHASE-LOG deferred lists |
 | **P7-04** Decide `ingestPage` — finish or document as API-only | §4.19 |
 | **P7-05** Full-application regression across every adopted module (prompt §111 kept) | |
 
-### Phase 8 — End-to-end chain regression, then release readiness
+### Phase 8 — End-to-end acceptance, then release readiness
 
 **The product is not complete until this chain passes**, with Sonnet as the
-independent QA gate and browser proof at every link. Module-by-module green is not
-the bar; the *chain* is.
+independent QA gate and browser proof at every link. Module-by-module green is not the
+bar; the *chain* is — and the OPERATOR'S chain comes first.
 
 ```
-Product / SKU configuration
-  → Purchase (PO → GRN → lot)          [PO→Tally only if Phase 6 live-write gate passed]
-  → Inventory (ledger == balance)
-  → Production (start → complete → QC → PM → Accountant)
-  → Shift Summary  (= Completed Production)
-  → CEC            (= Shift Summary — or BLOCKED, stated)
-  → Tally          (Stock Journal per shift, released by shift-end + idle; agent ack)
-  → Sales visibility (Layer A documents traced to their Tally entries; Layer B stated)
-  → Downloads      (one export per kind from the Center, FC-06 on every file)
+A · OPERATOR WORKFLOW
+   SKU (configured once) → Shift Floor (asks nothing already known) → Start Batch
+   → Complete Batch (expected · actual · good · reject · packs · downtime · efficiency)
+   → Completed Today → Shift Summary (= completed production) → CEC (= Shift Summary, or BLOCKED stated)
+   → Tally (Stock Journal per shift, released by shift-end + idle; agent ack; snapshot)
+B · ACCOUNTING TRACEABILITY
+   Purchase (PO → GRN → lot) → Inventory (ledger == balance) → Production consumption
+   [PO→Tally only if the Q35 live-write gate passed]
+C · SALES VISIBILITY + DOWNLOADS
+   Sales documents traced to their Tally entries (Layer A; Layer B stated) →
+   one export per kind from the Center, FC-06 on every file
 ```
 
 | Task | |
 |---|---|
-| **P8-01** Chain script: a documented, repeatable walk with named fixtures (dev DB, never live), one representative product through every link | |
-| **P8-02** Assertions at each link — the transaction model, not the screen: stock movements sum to balances; the shift voucher contains exactly the approved entries; identities frozen at completion; Shift Summary totals equal completed production; each export equals its list | |
+| **P8-01** Chain script: a documented, repeatable walk with named fixtures (dev DB, never live), one representative product through every link of A, then B, then C | |
+| **P8-02** Assertions at each link — the transaction model, not the screen: configuration answers every Shift Floor question; expected pieces from the recorded standard; the completed record's figures; Completed Today == completed batches; Shift Summary totals == completed production; the shift voucher contains exactly the approved entries; stock movements sum to balances; each export equals its list | |
 | **P8-03** Sonnet independent QA runs the walk **without** the implementer's notes and reports per link: PASS / FAIL / NOT TESTED / BLOCKED | |
 | **P8-04** Browser proof at every link (screenshots + the API responses behind them), attached to the phase log | |
 | **P8-05** Full-application regression across every adopted module (prompt §111): login · roles · masters · products · purchase · inventory · production · sales · reports · downloads · Tally | |
 | **P8-06** Release readiness (prompt §86 kept): no P0, no unresolved P1 data-integrity issue, all migrations accounted for, all tests green, production build passes, browser smoke passes, sync dry-run passes, rollback documented, monitoring ready. `DEVELOPMENT-PLAN.md` brought current or explicitly superseded by this file | |
 
 **Verdict rule:** any link FAIL or NOT TESTED → the phase is `NOT READY`, full stop. A
-link that is BLOCKED by a named owner gate (CEC sample, Q35 live-write) is recorded as
-BLOCKED and the chain result is `PASS WITH DEFERRED ITEMS` — the product is **not
-called complete** while a BLOCKED link remains.
+link that is BLOCKED by a named owner gate (CEC sample, Q35 live-write, Q33 490/box) is
+recorded as BLOCKED and the chain result is `PASS WITH OWNER-GATED ITEMS` — the product
+is **not called complete** while a BLOCKED link remains.
 
 ### HELD — needs the owner before a line is written
 
 | Item | Question |
 |---|---|
+| Sales lifecycle in ERP | New decision superseding DEC-20260809-003 |
+| CEC format | A sample + format authority; none exists. **The Download Center ships CEC's slot visibly BLOCKED** (Phase 4.5); Phase 5.7 builds everything around it — never an invented layout |
+| ERP↔Tally reconciliation by reading Tally | Q36; and a decision that a deliberate read is wanted |
+| SKU format programme | Format confirmation; agent HSN fetch first (does not exist) |
+| 490/box variant, ambiguous SKU→Tally mappings | Q33; Q43 (block or warn on duplicate names) — the ERP holds the capacity (Phase 5), the owner supplies the mapping |
+| First live PO write to Tally | Q35 — never unattended |
+| Committing XML/exports to the repo | Q31, Q38 |
+| Finance / CRM surfaces | DEC-20260812-001 |
+| ERP sales-document lifecycle defaults | Q44 |
+
+---|---|
 | Sales lifecycle in ERP | New decision superseding DEC-20260809-003 |
 | CEC export | A sample + format authority; none exists. **The Download Center ships CEC's slot visibly BLOCKED** (Phase 4.5) — never an invented layout |
 | ERP↔Tally reconciliation by reading Tally | Q36; and a decision that a deliberate read is wanted |

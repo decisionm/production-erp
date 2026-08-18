@@ -131,3 +131,26 @@ Server-side sales filters incl. factory-day range and LIKE escaping · document-
 
 ### Still open (from the baseline list)
 `OverReceiptException` · CRM · Finance · `ShiftSummaryService::report()` · second same-mode packaging · `stock_balances == Σ stock_movements` — Phases 5 and 7. **Closed here:** `InvoiceService` / invoice→Tally (issue → Sales entry; replay). **Still:** MySQL CI leg (Phase 7).
+
+## Phase 4 (feat/phase-4-agent-xml-snapshot, gate closed 2026-08-17)
+
+| Suite | Result | Evidence |
+|---|---|---|
+| Pint (whole tree) | PASS | clean |
+| Backend PHPUnit | PASS | **1,276 / 9,429** (Phase 3.5 close 1,243 / 9,064; +33: SnapshotStoreTest 17 · SnapshotVisibilityTest 12 · PendingPayloadHashTest 4) |
+| Frontend vitest | PASS | 105 → **127** (`tally-sync/drawer.test.ts` +22: formatXml, snapshotHeadline, snapshotXmlDecision, snapshotAnswer, event label) |
+| Agent (node:test) | PASS | 69 → **94** (`tests/snapshot.test.js` 25; releaseContract + versionAdvance still governing; check-tests-present lists it) |
+| Typecheck · build | PASS | frontend + agent clean · built |
+| Voucher builders / .github | UNTOUCHED | `git diff … -- tally-sync-agent/src/tally/ .github/` empty |
+| Factory-knowledge | PASS | exit 0 |
+| Red-before / green-after | PROVEN | session guard (200 → 403), sha recompute / verdicts / prune (mutation-tested by Sonnet), attempt default, answered-vs-unanswered idempotency, byte-exact XML |
+| Sonnet independent QA | PASS → fix loop → re-gate (see PHASE-LOG) | |
+| Adversarial review | Opus NOT_READY (1 P1 · 1 P2 · 5 P3) · Fable PASS (9 P3) → all fixed except 3 recorded deferrals | |
+| Browser proof | PASS | drawer section as Administrator (XML pretty-printed, Copy, rejected tag) and as tally-sync-only (withheld notes, counts) |
+| API proof | PASS | payload_hash on /pending (agent only); store 201 / idempotent 200 / sha mismatch 422 / poll-only 403; four-caller matrix on show for Receipt Note and Delivery Note; timeline sentence |
+
+### Coverage gaps closed this phase
+The agent's report surface is the agent's alone (session refused on pending/ack/fail/snapshot) · snapshot store contract (sha recompute, caps at request AND column, idempotency incl. answered/unanswered, retention prune, event details without text, byte-exact body) · FC-06 on the XML per caller kind × voucher type, verdicts table over every category (fail-closed for Unknown) · payload_hash on the agent branch only · agent snapshot body builder (caps, omission, never-throws, attempt ordinal) · formatXml adversarial inputs.
+
+### Still open (from the baseline list)
+`OverReceiptException` · CRM · Finance · `ShiftSummaryService::report()` · second same-mode packaging · `stock_balances == Σ stock_movements` — Phases 5 and 7. **Still:** MySQL CI leg (Phase 7). **New:** agent snapshot for a post made while the cloud was down (journal-persisted, later).

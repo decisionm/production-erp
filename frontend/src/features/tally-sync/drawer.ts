@@ -1,4 +1,4 @@
-import type { TallySyncEntry, TallySyncStatus, TimelineItem } from './types';
+import type { TallySnapshotAnswer, TallySyncEntry, TallySyncSnapshot, TallySyncStatus, TimelineItem } from './types';
 
 /**
  * Pure helpers behind the Tally Sync page and its detail drawer. No React,
@@ -236,6 +236,7 @@ const EVENT_LABELS: Record<string, string> = {
     'voucher.retried': 'Resynced',
     'voucher.dismissed': 'Dismissed',
     'voucher.released': 'Released',
+    'snapshot.stored': 'Snapshot uploaded',
 };
 
 export function eventLabel(event: string): string {
@@ -330,4 +331,209 @@ export function showsFixedAfterFailures(entry: {
     resolution_log?: unknown[] | null;
 }): boolean {
     return entry.status !== 'failed' && (entry.resolution_log?.length ?? 0) > 0 && !entry.error_message;
+}
+
+// ---- snapshots (Phase 4: what the agent sent / what Tally answered) --------
+
+const XML_INDENT = '  ';
+
+/**
+ * One token of an XML string: a declaration / processing instruction, a
+ * comment, a CDATA section, a tag (open, close or self-closing), or the
+ * text between tags. Order matters — the special forms are tried before
+ * the generic tag so a `>` inside a comment or CDATA cannot cut it short;
+ * the tag itself is quote-aware, so a `>` inside a quoted attribute value
+ * cannot either.
+ */
+const XML_TOKEN = /<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<(?:[^>"']|"[^"]*"|'[^']*')*>|[^<]+/g;
+
+function xmlTagName(tag: string): string {
+    const match = /^<\/?\s*([^\s/>]+)/.exec(tag);
+
+    return match?.[1] ?? '';
+}
+
+/**
+ * The XML the agent sent, pretty-printed for a person: one tag per line,
+ * indented two spaces per depth, a text-only element (`<NAME>value</NAME>`
+ * — most of a Tally voucher) and an empty element kept on one line. No
+ * library, no DOM: a small tokenizer, so it runs in a test and never
+ * throws — an unbalanced close tag clamps the depth at zero, mixed
+ * content stands on its own line, and whitespace between tags is
+ * dropped, so already-pretty input comes back unchanged.
+ *
+ * FOR EYES ONLY. Text nodes are trimmed and inter-tag whitespace removed,
+ * so the output is not byte-identical to what was posted; the Copy button
+ * copies the RAW string, which is what the sha256 was computed over.
+ */
+export function formatXml(xml: string): string {
+    const tokens = xml.match(XML_TOKEN) ?? [];
+    const lines: string[] = [];
+    let depth = 0;
+    const indent = () => XML_INDENT.repeat(depth);
+    const isText = (token: string | undefined): token is string => token !== undefined && !token.startsWith('<');
+    const isCloseOf = (token: string | undefined, name: string): token is string =>
+        token !== undefined && token.startsWith('</') && xmlTagName(token) === name;
+
+    for (let i = 0; i < tokens.length; i += 1) {
+        const token: string = tokens[i];
+
+        if (!token.startsWith('<')) {
+            const text = token.trim();
+            if (text !== '') lines.push(indent() + text);
+            continue;
+        }
+
+        if (token.startsWith('<?') || token.startsWith('<!')) {
+            // Declaration, comment or CDATA — a line of its own at the current depth.
+            lines.push(indent() + token.trim());
+            continue;
+        }
+
+        if (token.startsWith('</')) {
+            depth = Math.max(0, depth - 1);
+            lines.push(indent() + token);
+            continue;
+        }
+
+        if (/\/\s*>$/.test(token)) {
+            lines.push(indent() + token);
+            continue;
+        }
+
+        // An open tag. A leaf — text then the matching close — and an
+        // empty element both stay on one line; anything else opens a level.
+        const name = xmlTagName(token);
+        const next = tokens[i + 1];
+        if (isText(next) && isCloseOf(tokens[i + 2], name)) {
+            lines.push(indent() + token + next.trim() + tokens[i + 2]);
+            i += 2;
+            continue;
+        }
+        if (isCloseOf(next, name)) {
+            lines.push(indent() + token + next);
+            i += 1;
+            continue;
+        }
+
+        lines.push(indent() + token);
+        depth += 1;
+    }
+
+    return lines.join('\n');
+}
+
+/**
+ * The one-line header of a snapshot panel — "attempt N · agent vX · when ·
+ * sha256 (first 12) · N bytes · payload verdict" — the facts EVERY
+ * tally-sync.view reader gets whatever the XML gate says. What the
+ * snapshot cannot say reads as unknown ("attempt —", "agent version
+ * unknown", "payload not compared"), never as a guess. `payload changed
+ * since` means the cloud regenerated the payload (a Resync) after this
+ * XML was built from it.
+ */
+export function snapshotHeadline(snapshot: TallySyncSnapshot): string {
+    const version = snapshot.agent_version?.trim() || null;
+    const bytes = snapshot.xml_bytes === null
+        ? 'size unknown'
+        : snapshot.xml_bytes === 1
+            ? '1 byte'
+            : `${snapshot.xml_bytes} bytes`;
+    // A STORE-TIME verdict — judged once, when the cloud took the snapshot,
+    // against the payload it held then; a later Resync does not re-judge it.
+    const payload = snapshot.payload_matches === true
+        ? 'payload matched at upload'
+        : snapshot.payload_matches === false
+            ? 'payload had changed before upload'
+            : 'payload not compared';
+
+    return [
+        `attempt ${snapshot.attempt ?? '—'}`,
+        version ? `agent ${version.startsWith('v') ? version : `v${version}`}` : 'agent version unknown',
+        instant(snapshot.created_at),
+        `sha256 ${snapshot.xml_sha256.slice(0, 12)}`,
+        bytes,
+        payload,
+    ].join(' · ');
+}
+
+/** What the "What the agent sent" block shows: the XML itself, the server's withheld note, or the fact that no body was uploaded. */
+export interface SnapshotXmlDecision {
+    kind: 'xml' | 'withheld' | 'none';
+    text: string;
+}
+
+/**
+ * Whether the drawer may show this snapshot's XML — decided by WHAT THE
+ * SERVER SENT, never re-judged here. `xml` present → show it (raw; the
+ * component formats it). `xml` null with `xml_withheld` → the reader may
+ * not see it (FC-06: the XML carries rates or a party and this reader has
+ * no finance standing), and the server's note is shown in place — never
+ * a blank, which would read as "nothing was sent". Neither → the agent
+ * uploaded no body (it omits the XML above 2 MB) and only the sha256 and
+ * size stand.
+ */
+export function snapshotXmlDecision(snapshot: TallySyncSnapshot): SnapshotXmlDecision {
+    if (typeof snapshot.xml === 'string' && snapshot.xml !== '') {
+        return { kind: 'xml', text: snapshot.xml };
+    }
+    if (snapshot.xml_withheld) {
+        return { kind: 'withheld', text: snapshot.xml_withheld };
+    }
+
+    return {
+        kind: 'none',
+        text: 'The agent uploaded no XML body for this attempt (it omits the body above 2 MB) — the sha256 and size above are all that was recorded.',
+    };
+}
+
+/** One tag of the "What Tally answered" block. */
+export interface AnswerTag {
+    color: 'green' | 'red' | 'default';
+    text: string;
+}
+
+export type SnapshotAnswer =
+    | { kind: 'none' }
+    | {
+        kind: 'answer';
+        tags: AnswerTag[];
+        message: string | null;
+        messageWithheld: string | null;
+        raw: string | null;
+    };
+
+/**
+ * Tally's answer as the block renders it. `none` when the agent had no
+ * answer to report — a null `tally`, or one with every field null, which
+ * is the inconclusive-timeout path (the XML went, nothing came back before
+ * the agent gave up). Otherwise the verdict tag (accepted / rejected / no
+ * verdict), then the CREATED and ERRORS counts the agent parsed — a count
+ * it was not given is skipped rather than shown as 0 — then Tally's words
+ * or the server's withheld note (FC-06, same rule as error_message), and
+ * the raw response when the server chose to send it.
+ */
+export function snapshotAnswer(snapshot: TallySyncSnapshot): SnapshotAnswer {
+    const tally: TallySnapshotAnswer | null = snapshot.tally;
+    if (!tally || (tally.success === null && tally.created === null && tally.errors === null && !tally.message && !tally.message_withheld)) {
+        return { kind: 'none' };
+    }
+
+    const tags: AnswerTag[] = [
+        tally.success === true
+            ? { color: 'green', text: 'accepted' }
+            : tally.success === false
+                ? { color: 'red', text: 'rejected' }
+                : { color: 'default', text: 'no verdict' },
+    ];
+    if (typeof tally.created === 'number') tags.push({ color: 'default', text: `created ${tally.created}` });
+    if (typeof tally.errors === 'number') tags.push({ color: tally.errors > 0 ? 'red' : 'default', text: `errors ${tally.errors}` });
+
+    return {
+        kind: 'answer',
+        tags,
+        message: tally.message || null,
+        messageWithheld: tally.message_withheld || null,
+        raw: typeof tally.raw === 'string' && tally.raw !== '' ? tally.raw : null,
+    };
 }

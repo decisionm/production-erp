@@ -465,3 +465,172 @@ PR:                 #183 (base: feat/phase-3-sync-every-transaction-type → #18
 Deployment state:   not deployed; stack #179 → #180 → #181 → #182 → #183
 Next phase:         4 — Agent-side sanitized XML + response snapshot
 ```
+
+## PHASE 4 — Agent-side XML + Tally-response snapshot
+
+```
+Phase:    4 — what the agent sent, what Tally answered (MASTER-PLAN P4-01..05)
+Status:   PASS WITH DEFERRED ITEMS
+Branch:   feat/phase-4-agent-xml-snapshot (stacked on Phase 3.5 PR #183 → #182 → #181 → #180 → #179)
+Dates:    2026-08-17
+
+Goal:
+  Close the observability gap: the cloud had no record of the XML the agent
+  sent to Tally nor of Tally's answer beyond a one-line error. Now the agent
+  uploads a snapshot after each post; the Control Center drawer shows "What
+  the agent sent / What Tally answered" — gated by reader (FC-06), without
+  moving XML generation to the cloud and without the cloud ever contacting
+  Tally.
+
+What changed:
+  • Cloud: `tally_sync_snapshots` (one row per post report: xml mediumText,
+    sha256, bytes, attempt, Tally {success, created, errors, message, raw},
+    agent_version, payload_hash echoed, payload_matches computed against the
+    cloud's CURRENT payload hash); POST tally-sync/entries/{id}/snapshot under
+    the tally-sync:report ability — sha256 recomputed over the body (422 on
+    mismatch), caps at request AND column, idempotent re-upload (same
+    entry+sha+attempt within 60 s → the existing row), retention 90 days
+    (TALLY_SYNC_SNAPSHOT_RETENTION_DAYS) pruned on write (no scheduler on the
+    host); `payload_hash` on /pending for the agent's real token only;
+    `snapshots` on show; a `snapshot.stored` event with counts/hash only and a
+    one-line timeline sentence.
+  • FC-06 on the XML — decided ONCE (TallySyncSnapshotResource::verdicts):
+    the body is shown to a reader with finance standing or the agent, and to
+    every tally-sync.view reader for a Stock Journal (rate-free, party-free by
+    construction); for every other voucher type it is withheld WHOLE with a
+    note — no partial redaction of XML text; Tally's message/raw follow the
+    error_message rule. Every reader always gets sha256, bytes, version,
+    attempt, when, payload verdict, and Tally's counts.
+  • Agent 0.3.8: after every post — Tally rejection, success (either ack
+    outcome), inconclusive timeout (tally null) — a fire-and-forget upload
+    inside its own try/catch: sha256, raw capped 65535 bytes, body omitted
+    over 2 MiB (size still sent), attempt = attempts+1, agent_version from
+    package.json, payload_hash echoed. Never on refuse/report-only/ack-only/
+    ECONNREFUSED/builder-throw. Voucher builders untouched. Built and tested;
+    NOT published — publishing is a manual act (releaseContract.test.js).
+  • Drawer: section 7 "What the agent sent / What Tally answered" between
+    Result and Timeline — headline (attempt · agent · when · sha 12 · bytes ·
+    payload verdict), pretty-printed XML with Copy (raw, so the sha stays
+    checkable) or the withheld note, Tally's tags + message/withheld + raw
+    toggle; "Snapshot uploaded" timeline label.
+
+Files/modules:
+  TallySync (TallySyncSnapshot, TallySyncSnapshotService, PayloadHash,
+  StoreTallySyncSnapshotRequest, TallySyncSnapshotResource, TallySyncEntry
+  Resource, TallySyncQueryService::show, TallySyncAgentController::snapshot,
+  TallySyncEntry::snapshots, EntryPresenter, TallySyncEventKind) · routes ·
+  config/tally-sync.php · migration 2026_08_17_100000 · docs/engineering/
+  TALLY-SYNC-CHAIN.md · agent (snapshot.ts, version.ts, cloudApi.ts, sync.ts,
+  package 0.3.8, tests/snapshot.test.js, check-tests-present) · frontend
+  tally-sync (EntryDrawer.tsx, drawer.ts, types.ts, drawer.test.ts)
+
+Migrations:       2026_08_17_100000_create_tally_sync_snapshots_table (additive; Blueprint only)
+Tests before:     1,243 / 9,064 (backend) · 105 (frontend) · 69 (agent)
+Tests after:      1,276 / 9,429 (backend, +33) · 127 (frontend, +22) · 94 (agent, +25)
+                  pint/typecheck/build clean · voucherBuilders diff empty · knowledge sound
+
+Sonnet first gate:   PASS (2 P3) — mutation-verified the sha recompute, the
+                     verdicts table and the prune by editing source to red.
+Findings (adversarial: Opus FC-06/rules NOT_READY · Fable correctness PASS):
+  P1  (Opus) The new snapshot endpoint gated on tokenCan('tally-sync:report')
+      alone — a browser session's TransientToken answers TRUE — so any
+      logged-in staff member could (a) use payload_matches as a hash-
+      comparison oracle to recover a withheld payload value (Sales rate:
+      demonstrated in 26 unthrottled requests) and (b) author a snapshot
+      readers see as the agent's own record. The AUTH property was inherited
+      from ack/fail (documented in routes/api.php as accepted precedent —
+      "staff can still exercise these from the browser regardless of their
+      tally-sync role"); the consequences were new. FIXED for the WHOLE agent
+      report surface — pending, ack, fail, snapshot now require a REAL agent
+      token (AgentIdentity::isAgent ∧ ability); the precedent comment
+      corrected; a web session holding tally-sync.manage AND finance.view is
+      refused on all four (red-before proven; the only test that had relied
+      on a session polling /pending was updated). Live agent unaffected (its
+      PAT carries poll+report); the frontend has no callers of these routes.
+  P2  (Opus) `attempt` meant three things (agent: attempts+1 ordinal; cloud
+      fallback: entry->attempts, which markFailed increments and markSynced
+      does not; docblocks: "as the agent saw it"). FIXED: one meaning — the
+      1-based ordinal of THIS post as the agent counted it; an agent that
+      sent none stores 0, never guessed; docblocks aligned (migration,
+      request, client).
+  P3  dead TallySyncSnapshotService::forEntry + unused injection → removed ·
+      xml_bytes no max vs its column → max:4294967295 · snapshot_count typed
+      but never emitted → dropped · chain doc retention without the
+      "engineering default" qualifier → added · TrimStrings trimmed the
+      byte-exact XML body (a trailing newline 422'd its own hash) → the
+      snapshot route exempted from trimStrings/convertEmptyStringsToNull,
+      byte-exact test · idempotency swallowed an ANSWERED post behind an
+      unanswered one of the same XML/attempt inside 60 s → predicate
+      distinguishes answered/unanswered, tested both ways · agent info-logger
+      fault after a successful upload read as failure → own try · formatXml
+      mis-split a quoted attribute containing '>' → quote-aware tokenizer +
+      test · headline "payload matches" implied a live comparison → "payload
+      matched at upload" / "had changed before upload".
+  P3  (deferred) a voucher posted while the cloud was unreachable for its ack
+      ends up synced with no snapshot (the ack-only re-cycle builds no XML) ·
+      show returns every snapshot of an entry (bounded in practice; a
+      newest-N cap with a true total is a later touch) · prune is one DELETE
+      inside the write transaction (bounded by the index; a LIMIT is a later
+      touch).
+Fixes:               8cdb302 (all P1/P2/P3 above except the three deferred).
+Sonnet final gate:   re-gate PASS_WITH_DEFERRED — P1 guard mutation-tested (revert
+                     → 201, fix → 403), P2 and every P3 verified by diff/grep;
+                     two doc nits (stale class docblock echoing the old
+                     precedent; a dangling comment) + one theoretical edge
+                     (an empty-string body after the trim exemption) fixed on
+                     the branch after the re-gate; suites re-run green.
+Independent review:  Opus NOT_READY → P1 + P2 fixed · Fable PASS.
+
+API proof (dev API; real agent PAT with poll+report):
+  /pending as the agent carries payload_hash per entry. POST entries/4/
+  snapshot → 201 {id 1, attempt 1, agent 0.3.8, sha, 517 bytes,
+  payload_matches true, tally {false,0,1,message,raw}, xml}; same body again
+  → 200 (idempotent); sha mismatch → 422 "xml_sha256 does not match the
+  sha256 of the xml body sent — the snapshot was not stored." Receipt Note
+  snapshot on entry 1: Administrator sees xml + message + raw; the
+  tally-sync-only login sees xml null + xml_withheld note, message null +
+  message_withheld note, raw null, counts {false,0,1}, sha/bytes/payload
+  verdict; the agent's own read-back is full. Delivery Note (customer) to the
+  same login: xml withheld (uniform rate rule), message SHOWN (customer
+  party). Timeline: "The agent uploaded what it sent and what Tally answered
+  — attempt 1 · sha256 2d59946ac5c0 · 409 bytes · Tally rejected."
+
+Browser proof (Chrome MCP, vite dev):
+  As Administrator, /tally-sync?entry=1 → drawer "GRN-1 — as it goes to
+  Tally" → "What the agent sent / What Tally answered": headline line with
+  the rejected tag, Copy XML, the XML pretty-printed (PARTYLEDGERNAME, RATE,
+  AMOUNT visible to finance standing) (screenshot-1786930223945-14.jpg). As
+  the tally-sync-only login, the same drawer: "What the agent sent" → the
+  withheld note; "What Tally answered" → rejected · created 0 · errors 1 +
+  the response-text-withheld note; Timeline gains the snapshot row
+  (screenshot-1786930270694-16.jpg). Two cosmetics found and fixed in the
+  proof (run-on withheld line; raw event kind as the timeline label).
+
+Data/transaction proof:
+  Nothing that reaches Tally changed: voucher builders byte-identical (diff
+  empty), pending() hand-out unchanged except an additive payload_hash for
+  the agent, ack/fail untouched. Migration additive. No Tally read. The agent
+  is NOT published.
+
+Security proof:
+  Store endpoint 403 without tally-sync:report (SnapshotStoreTest); four-
+  caller visibility matrix per voucher type (SnapshotVisibilityTest); event
+  details and agentLog carry counts/hash only; payload_hash only on the
+  agent's real-token branch (PendingPayloadHashTest).
+
+Deferred items:
+  • A voucher posted while the cloud was unreachable for its ack ends up
+    synced with no snapshot (the ack-only re-cycle builds no XML) — needs a
+    journal-persisted pending snapshot on the agent; later.
+  • `snapshot_count` on the list — not added (list kept light).
+  • Retention window is an engineering default (90 days) — the owner has not
+    been asked whether the factory wants a different window (recorded).
+
+Owner-gated items:  publishing agent 0.3.8 to the factory floor (manual,
+                    lead/owner; not part of this phase).
+PR:                 #184 (base: feat/phase-3.5-sales-visibility → #183 → #182 → #181 → #180 → #179)
+Deployment state:   not deployed; stack #179 → … → #183 → #184; the
+                    migration lands with the deploy; the agent needs its
+                    own release for snapshots to start arriving.
+Next phase:         4.5 — Download / Export Center (CEC slot BLOCKED)
+```

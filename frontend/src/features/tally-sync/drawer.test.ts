@@ -1,15 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
     eventLabel,
+    formatXml,
     holdCopy,
+    instant,
     mappingBadge,
     payloadColumns,
     showsFixedAfterFailures,
+    snapshotAnswer,
+    snapshotHeadline,
+    snapshotXmlDecision,
     sourceLink,
     timelineItems,
     voucherStockLines,
 } from './drawer';
-import type { TallySyncEntry, TimelineItem } from './types';
+import type { TallySyncEntry, TallySyncSnapshot, TimelineItem } from './types';
 
 /**
  * The detail drawer's contract with GET /tally-sync/entries/{id}, pinned
@@ -177,6 +182,7 @@ describe('eventLabel', () => {
         expect(eventLabel('pending.delivered')).toBe('Handed to the agent');
         expect(eventLabel('voucher.synced')).toBe('Accepted by Tally');
         expect(eventLabel('voucher.failed')).toBe('Rejected by Tally');
+        expect(eventLabel('snapshot.stored')).toBe('Snapshot uploaded');
         expect(eventLabel('voucher.retried')).toBe('Resynced');
         expect(eventLabel('voucher.dismissed')).toBe('Dismissed');
         expect(eventLabel('voucher.released')).toBe('Released');
@@ -264,5 +270,204 @@ describe('showsFixedAfterFailures', () => {
     it('is quiet when there was never a repair, or the error is still on the row', () => {
         expect(showsFixedAfterFailures({ status: 'pending', error_message: null, resolution_log: [] })).toBe(false);
         expect(showsFixedAfterFailures({ status: 'pending', error_message: 'Stock Item does not exist', resolution_log: [{}] })).toBe(false);
+    });
+});
+
+// ---- snapshots (Phase 4: what the agent sent / what Tally answered) --------
+
+describe('formatXml', () => {
+    it('keeps a ">" inside a quoted attribute value inside the tag', () => {
+        expect(formatXml('<A B="x>y"><C>1</C></A>').split('\n')).toEqual(['<A B="x>y">', '  <C>1</C>', '</A>']);
+    });
+
+    it('indents by tag depth and keeps a text-only element on one line', () => {
+        const xml = '<ENVELOPE><HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER><BODY><DESC><STATICVARIABLES><SVCURRENTCOMPANY>X</SVCURRENTCOMPANY></STATICVARIABLES></DESC></BODY></ENVELOPE>';
+        expect(formatXml(xml)).toBe([
+            '<ENVELOPE>',
+            '  <HEADER>',
+            '    <TALLYREQUEST>Import Data</TALLYREQUEST>',
+            '  </HEADER>',
+            '  <BODY>',
+            '    <DESC>',
+            '      <STATICVARIABLES>',
+            '        <SVCURRENTCOMPANY>X</SVCURRENTCOMPANY>',
+            '      </STATICVARIABLES>',
+            '    </DESC>',
+            '  </BODY>',
+            '</ENVELOPE>',
+        ].join('\n'));
+    });
+
+    it('puts a self-closing tag on its own line without changing the depth of what follows', () => {
+        expect(formatXml('<A><B/><C attr="1"/><D>x</D></A>')).toBe([
+            '<A>',
+            '  <B/>',
+            '  <C attr="1"/>',
+            '  <D>x</D>',
+            '</A>',
+        ].join('\n'));
+    });
+
+    it('keeps the declaration on the first line and an empty element on one line', () => {
+        expect(formatXml('<?xml version="1.0" encoding="UTF-8"?><A><B></B><C>1</C></A>')).toBe([
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<A>',
+            '  <B></B>',
+            '  <C>1</C>',
+            '</A>',
+        ].join('\n'));
+    });
+
+    it('preserves attributes and text — including entities — untouched, and trims a text node', () => {
+        const out = formatXml('<VOUCHER VCHTYPE="Stock Journal" ACTION="Create"><NARRATION> Batch B&amp;7 </NARRATION></VOUCHER>');
+        expect(out).toBe([
+            '<VOUCHER VCHTYPE="Stock Journal" ACTION="Create">',
+            '  <NARRATION>Batch B&amp;7</NARRATION>',
+            '</VOUCHER>',
+        ].join('\n'));
+    });
+
+    it('is stable on input that is already pretty-printed (whitespace between tags is not text)', () => {
+        const pretty = formatXml('<A><B>1</B><C><D/></C></A>');
+        expect(formatXml(pretty)).toBe(pretty);
+        expect(formatXml('<A>\n  <B>1</B>\n</A>\n')).toBe('<A>\n  <B>1</B>\n</A>');
+    });
+
+    it('never throws on malformed or empty input — depth clamps at zero and text stands alone', () => {
+        expect(formatXml('')).toBe('');
+        expect(formatXml('   ')).toBe('');
+        expect(formatXml('</A></B><C>x</C>')).toBe('</A>\n</B>\n<C>x</C>');
+        // Mixed content: text beside a child element gets its own indented line.
+        expect(formatXml('<A>lead<B>1</B></A>')).toBe('<A>\n  lead\n  <B>1</B>\n</A>');
+        expect(formatXml('<A><B>1</B>')).toBe('<A>\n  <B>1</B>');
+        expect(formatXml('plain text only')).toBe('plain text only');
+    });
+
+    it('treats a comment as a line of its own at the current depth', () => {
+        expect(formatXml('<A><!-- built by agent --><B>1</B></A>')).toBe('<A>\n  <!-- built by agent -->\n  <B>1</B>\n</A>');
+    });
+});
+
+const snapshot = (over: Partial<TallySyncSnapshot> = {}): TallySyncSnapshot => ({
+    id: 41,
+    attempt: 2,
+    created_at: '2026-08-16T04:34:00+00:00',
+    agent_version: '0.3.8',
+    xml_sha256: '3f2a9c1b7d0e4a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3',
+    xml_bytes: 1842,
+    payload_matches: true,
+    tally: { success: true, created: 1, errors: 0, message: 'Imported successfully' },
+    xml: '<ENVELOPE><BODY/></ENVELOPE>',
+    xml_withheld: null,
+    ...over,
+});
+
+describe('snapshotHeadline', () => {
+    it('reads attempt · agent version · when · sha256 (first 12) · bytes · payload verdict, in that order', () => {
+        const parts = snapshotHeadline(snapshot()).split(' · ');
+        expect(parts).toEqual([
+            'attempt 2',
+            'agent v0.3.8',
+            instant('2026-08-16T04:34:00+00:00'),
+            'sha256 3f2a9c1b7d0e',
+            '1842 bytes',
+            'payload matched at upload',
+        ]);
+    });
+
+    it('says "size unknown" when neither a body nor a size arrived — never "null bytes"', () => {
+        expect(snapshotHeadline(snapshot({ xml_bytes: null }))).toContain('size unknown');
+        expect(snapshotHeadline(snapshot({ xml_bytes: null }))).not.toContain('null');
+    });
+
+    it('says the payload changed since when the cloud regenerated it after this XML was built', () => {
+        expect(snapshotHeadline(snapshot({ payload_matches: false }))).toContain('payload had changed before upload');
+        expect(snapshotHeadline(snapshot({ payload_matches: false }))).not.toContain('matched at upload');
+    });
+
+    it('does not invent what the snapshot cannot say — unknown attempt, version, time or comparison read as unknown', () => {
+        const parts = snapshotHeadline(snapshot({ attempt: null, agent_version: null, created_at: null, payload_matches: null, xml_bytes: 1 })).split(' · ');
+        expect(parts).toEqual(['attempt —', 'agent version unknown', '—', 'sha256 3f2a9c1b7d0e', '1 byte', 'payload not compared']);
+    });
+
+    it('does not repeat a "v" the agent already put in its version string', () => {
+        expect(snapshotHeadline(snapshot({ agent_version: 'v0.3.8' }))).toContain('agent v0.3.8');
+        expect(snapshotHeadline(snapshot({ agent_version: 'v0.3.8' }))).not.toContain('vv');
+    });
+});
+
+describe('snapshotXmlDecision', () => {
+    it('shows the XML when the server sent it', () => {
+        expect(snapshotXmlDecision(snapshot())).toEqual({ kind: 'xml', text: '<ENVELOPE><BODY/></ENVELOPE>' });
+    });
+
+    it('shows the server\'s withheld note — never a blank — when the XML is held back (FC-06)', () => {
+        const note = "withheld — this voucher's XML carries rates or a party; readers with finance standing see it (FC-06)";
+        expect(snapshotXmlDecision(snapshot({ xml: null, xml_withheld: note }))).toEqual({ kind: 'withheld', text: note });
+    });
+
+    it('says the agent uploaded no body when there is neither XML nor a withheld note', () => {
+        const decision = snapshotXmlDecision(snapshot({ xml: null, xml_withheld: null }));
+        expect(decision.kind).toBe('none');
+        expect(decision.text).toMatch(/no XML body/);
+        expect(decision.text).toMatch(/sha256/);
+    });
+
+    it('prefers the XML over a stray note if both were ever sent', () => {
+        expect(snapshotXmlDecision(snapshot({ xml: '<A/>', xml_withheld: 'x' })).kind).toBe('xml');
+    });
+});
+
+describe('snapshotAnswer', () => {
+    it('reads an accepted post as green with its counts and message', () => {
+        expect(snapshotAnswer(snapshot())).toEqual({
+            kind: 'answer',
+            tags: [
+                { color: 'green', text: 'accepted' },
+                { color: 'default', text: 'created 1' },
+                { color: 'default', text: 'errors 0' },
+            ],
+            message: 'Imported successfully',
+            messageWithheld: null,
+            raw: null,
+        });
+    });
+
+    it('reads a rejection as red, colours a non-zero error count red, and carries Tally\'s words', () => {
+        const answer = snapshotAnswer(snapshot({ tally: { success: false, created: 0, errors: 1, message: 'Stock Item does not exist', raw: '<RESPONSE>…</RESPONSE>' } }));
+        expect(answer.kind).toBe('answer');
+        if (answer.kind !== 'answer') return;
+        expect(answer.tags).toEqual([
+            { color: 'red', text: 'rejected' },
+            { color: 'default', text: 'created 0' },
+            { color: 'red', text: 'errors 1' },
+        ]);
+        expect(answer.message).toBe('Stock Item does not exist');
+        expect(answer.raw).toBe('<RESPONSE>…</RESPONSE>');
+    });
+
+    it('carries the withheld note in place of the message on a supplier voucher for a reader without standing (FC-06)', () => {
+        const answer = snapshotAnswer(snapshot({ tally: { success: false, created: 0, errors: 1, message: null, message_withheld: 'withheld (FC-06)' } }));
+        expect(answer.kind).toBe('answer');
+        if (answer.kind !== 'answer') return;
+        expect(answer.message).toBeNull();
+        expect(answer.messageWithheld).toBe('withheld (FC-06)');
+    });
+
+    it('is "none" when the agent had no answer to report — a null tally, or one with every field null', () => {
+        expect(snapshotAnswer(snapshot({ tally: null })).kind).toBe('none');
+        expect(snapshotAnswer(snapshot({ tally: { success: null, created: null, errors: null, message: null } })).kind).toBe('none');
+        // A verdict without counts is still an answer.
+        expect(snapshotAnswer(snapshot({ tally: { success: false, created: null, errors: null, message: null } })).kind).toBe('answer');
+    });
+
+    it('marks an unknown verdict as such and skips a count it was not given', () => {
+        const answer = snapshotAnswer(snapshot({ tally: { success: null, created: 0, errors: null, message: 'Tally did not confirm import' } }));
+        expect(answer.kind).toBe('answer');
+        if (answer.kind !== 'answer') return;
+        expect(answer.tags).toEqual([
+            { color: 'default', text: 'no verdict' },
+            { color: 'default', text: 'created 0' },
+        ]);
     });
 });

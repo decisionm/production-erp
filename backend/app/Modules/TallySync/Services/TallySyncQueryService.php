@@ -93,13 +93,15 @@ class TallySyncQueryService
     }
 
     /**
-     * One entry with its history loaded — the ONLY place `events` is
-     * eager-loaded, which is what keeps `history` off the list and off every
-     * other response of the resource (TallySyncEntryResource whenLoaded).
+     * One entry with its history AND its snapshots (what the agent sent to
+     * Tally and what Tally answered — Phase 4), for the drawer. Both are
+     * relations on the model; the resource keys off relationLoaded().
      */
     public function show(TallySyncEntry $entry): TallySyncEntry
     {
-        return $entry->load('events');
+        $entry->load(['events', 'snapshots']);
+
+        return $entry;
     }
 
     /**

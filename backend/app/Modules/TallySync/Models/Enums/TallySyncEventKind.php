@@ -54,4 +54,13 @@ enum TallySyncEventKind: string
 
     /** Tally → ERP: a godown-wise stock summary was previewed and kept as a snapshot. */
     case StockSummaryPreviewed = 'stock-summary.previewed';
+
+    /**
+     * The agent uploaded a post-Tally snapshot — the XML it sent and what
+     * Tally answered (tally_sync_snapshots; Phase 4). Details carry the
+     * snapshot id, attempt, sha256, byte size, Tally's success flag, the
+     * agent version and the payload verdict — NEVER the XML or Tally's
+     * message text, which are reader-gated on the snapshot itself (FC-06).
+     */
+    case SnapshotStored = 'snapshot.stored';
 }
