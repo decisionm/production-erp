@@ -13,6 +13,7 @@ use App\Modules\Production\Services\DayBinLedgerService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Tests\Concerns\RecordsDayBinHistory;
 use Tests\TestCase;
 
 /**
@@ -54,7 +55,7 @@ use Tests\TestCase;
  */
 class DayBinCrossBatchCarryoverTest extends TestCase
 {
-    use RefreshDatabase;
+    use RecordsDayBinHistory, RefreshDatabase;
 
     protected function setUp(): void
     {
@@ -109,10 +110,10 @@ class DayBinCrossBatchCarryoverTest extends TestCase
             'item_id' => $bottle->id, 'warehouse_id' => $warehouse->id,
         ])->assertOk()->json('data.id');
 
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->loadDayBin([
             'barcode' => $bagA->barcode, 'work_center_id' => $machine->id,
             'shift_production_entry_id' => $entryA, 'quantity_kg' => '10',
-        ])->assertSuccessful();
+        ]);
 
         $this->postJson("/api/v1/production/shift-production-entries/{$entryA}/complete", [
             'quantity_produced' => '100',
@@ -144,11 +145,11 @@ class DayBinCrossBatchCarryoverTest extends TestCase
         $this->assertSame('4.0000', $ledger->openingFor($entryBModel, $resin->id));
 
         // Batch B loads 10kg of its own. Physical bin now holds 4 + 10 = 14kg.
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->loadDayBin([
             'barcode' => $bagB->barcode, 'work_center_id' => $machine->id,
             'shift_production_entry_id' => $entryB, 'quantity_kg' => '10',
             'override_fifo' => true,
-        ])->assertSuccessful();
+        ]);
         $this->assertSame('14.0000', $ledger->balanceFor($machine->id, $resin->id));
 
         // The operator does an honest scale reading at close: 6kg remains.
@@ -197,10 +198,10 @@ class DayBinCrossBatchCarryoverTest extends TestCase
             'item_id' => $bottle->id, 'warehouse_id' => $warehouse->id,
         ])->assertOk()->json('data.id');
 
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->loadDayBin([
             'barcode' => $lot->bags->first()->barcode, 'work_center_id' => $machine->id,
             'shift_production_entry_id' => $entryA, 'quantity_kg' => '10',
-        ])->assertSuccessful();
+        ]);
 
         $this->postJson("/api/v1/production/shift-production-entries/{$entryA}/complete", [
             'quantity_produced' => '100',

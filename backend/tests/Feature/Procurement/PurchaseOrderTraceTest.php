@@ -5,8 +5,12 @@ namespace Tests\Feature\Procurement;
 use App\Models\User;
 use App\Modules\Inventory\Models\Enums\MaterialBagStatus;
 use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
+use App\Modules\Inventory\Models\Enums\StoreIssueStatus;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\MaterialBag;
+use App\Modules\Inventory\Models\StoreIssue;
+use App\Modules\Inventory\Models\StoreIssueBagScan;
+use App\Modules\Inventory\Models\StoreIssueLine;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Inventory\Services\TraceabilityService;
@@ -583,5 +587,92 @@ class PurchaseOrderTraceTest extends TestCase
         $this->getJson("/api/v1/procurement/purchase-orders/{$order->id}")->assertOk();
         $this->getJson("/api/v1/procurement/purchase-orders/{$order->id}/trace")->assertOk();
         $this->getJson("/api/v1/procurement/goods-receipts/{$grn->id}")->assertOk();
+    }
+
+    // ---- the store-issue half of the trace (Phase 7.5, WS-C) ------------------------
+
+    /**
+     * THE TRACE FOLLOWS THIS ORDER'S BAGS INTO THE STORE ISSUE, AND STOPS
+     * THERE.
+     *
+     * The `consumption` block is the HISTORICAL machine/segment answer and
+     * only ever fills from machine-stamped day-bin rows; those write doors
+     * are closed, so for material received from here on it is legitimately
+     * empty. `issued_to_production` is what replaced it: which of this
+     * order's bags the store handed over, how many kg, by whom, received by
+     * whom, when, against which request.
+     *
+     * FC-01 is the assertion that matters most — NO machine and NO batch
+     * anywhere in that block. The ERP says which bags were issued to
+     * production; it never says which batch used them.
+     */
+    public function test_the_trace_follows_this_orders_bags_into_a_store_issue_and_names_no_batch(): void
+    {
+        $user = $this->actAs(['procurement.view', 'procurement.manage', 'finance.view']);
+        [$order] = $this->chain();
+
+        $bag = MaterialBag::query()->where('barcode', 'BAG-A1-1')->firstOrFail();
+        $issue = StoreIssue::create([
+            'issue_number' => 'SI-2026-0007',
+            'status' => StoreIssueStatus::Issued,
+            'issued_by' => $user->id,
+            'received_by' => $user->id,
+            'issued_at' => now(),
+        ]);
+        $line = StoreIssueLine::create([
+            'store_issue_id' => $issue->id,
+            'item_id' => $this->itemA->id,
+            'from_warehouse_id' => $this->store->id,
+            'to_warehouse_id' => Warehouse::create(['code' => 'WIP', 'name' => 'Work In Progress'])->id,
+            'quantity_issued' => '25',
+            'quantity_returned' => '0',
+            'uom' => 'Kgs',
+        ]);
+        StoreIssueBagScan::create([
+            'store_issue_id' => $issue->id,
+            'store_issue_line_id' => $line->id,
+            'material_bag_id' => $bag->id,
+            'material_lot_id' => $bag->material_lot_id,
+            'quantity_kg' => '25',
+            'issued_by' => $user->id,
+            'received_by' => $user->id,
+            'scanned_at' => now(),
+        ]);
+
+        $trace = $this->getJson("/api/v1/procurement/purchase-orders/{$order->id}/trace")->assertOk()->json('data');
+
+        $this->assertCount(1, $trace['issued_to_production']);
+        $handover = $trace['issued_to_production'][0];
+
+        $this->assertSame('SI-2026-0007', $handover['issue_number']);
+        $this->assertSame('issued', $handover['status']);
+        $this->assertSame('25.0000', $handover['issued_kg_from_this_order']);
+        $this->assertSame($user->id, $handover['issued_by']['id']);
+        $this->assertSame($user->id, $handover['received_by']['id']);
+        $this->assertCount(1, $handover['bags']);
+        $this->assertSame(
+            [$bag->id, 'BAG-A1-1', '25.0000'],
+            [$handover['bags'][0]['material_bag_id'], $handover['bags'][0]['barcode'], $handover['bags'][0]['quantity_kg']],
+        );
+
+        // FC-01: the trace stops at the issue. FC-06: no rate rides it — the
+        // store-issue ledger carries none at all.
+        foreach (['machine', 'work_center', 'segment', 'batch_number', 'shift_production_entry'] as $forbidden) {
+            $this->assertArrayNotHasKey($forbidden, $handover);
+        }
+        foreach (self::RATE_KEYS as $rateKey) {
+            $this->assertArrayNotHasKey($rateKey, $handover);
+        }
+
+        // The historical block is untouched and legitimately empty: nothing
+        // was ever loaded into a machine's day bin for this order.
+        $this->assertSame([], $trace['consumption']);
+
+        // A CANCELLED issue was reversed in full, and stops being an answer.
+        $issue->update(['status' => StoreIssueStatus::Cancelled]);
+        $this->assertSame(
+            [],
+            $this->getJson("/api/v1/procurement/purchase-orders/{$order->id}/trace")->assertOk()->json('data.issued_to_production'),
+        );
     }
 }

@@ -25,6 +25,27 @@ enum StockMovementPurpose: string
     /** Material received from outside — a purchase arriving on a GRN. */
     case Receipt = 'receipt';
 
+    /**
+     * The store handed material to production — the transfer pair that moves
+     * it out of the store and into Production/WIP (Phase 7.5, WS-B).
+     *
+     * IT IS NOT A CONSUMPTION, which is the whole reason it exists: the
+     * material has left the store's shelf and is standing with production,
+     * unconsumed. DEC-20260817-001 names Production/WIP as the location that
+     * holds exactly that state, so this purpose always rides a TRANSFER pair
+     * rather than an issue — a purpose alone would be invisible to
+     * `inventory:check-ledger`, which signs by movement TYPE, and would
+     * create no second state at all.
+     */
+    case IssueToProduction = 'issue_to_production';
+
+    /**
+     * Material production did not use, coming back from Production/WIP to
+     * the store it came out of. The mirror of IssueToProduction, and never a
+     * receipt: nothing new arrived in the factory.
+     */
+    case ReturnFromProduction = 'return_from_production';
+
     /** Material consumed by production — a batch's consumption lines. */
     case Consumption = 'consumption';
 

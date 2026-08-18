@@ -12,6 +12,7 @@ use App\Modules\Production\Models\WorkCenter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Tests\Concerns\RecordsDayBinHistory;
 use Tests\TestCase;
 
 /**
@@ -28,7 +29,7 @@ use Tests\TestCase;
  */
 class BinBayTest extends TestCase
 {
-    use RefreshDatabase;
+    use RecordsDayBinHistory, RefreshDatabase;
 
     private function actingAsUserWithPermissions(string ...$permissions): User
     {
@@ -150,9 +151,9 @@ class BinBayTest extends TestCase
 
         // A weighed count re-anchors the bin at 6 kg: 14 kg has been used,
         // which FIFO attributes to the older lot first.
-        $this->postJson('/api/v1/production/day-bin/count', [
+        $this->countDayBin([
             'work_center_id' => $machine->id, 'item_id' => $resin->id, 'quantity_kg' => 6,
-        ])->assertSuccessful();
+        ]);
 
         $bin = $this->getJson(
             '/api/v1/production/bin-bay/availability?work_center_id='.$machine->id.'&item_id='.$resin->id,

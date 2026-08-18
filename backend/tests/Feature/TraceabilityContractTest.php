@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Modules\Inventory\Exceptions\FifoPolicyException;
 use App\Modules\Inventory\Models\Enums\MaterialBagStatus;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\Warehouse;
@@ -15,6 +16,7 @@ use App\Modules\Production\Services\ShiftProductionEntryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Tests\Concerns\RecordsDayBinHistory;
 use Tests\TestCase;
 
 /**
@@ -26,7 +28,7 @@ use Tests\TestCase;
  */
 class TraceabilityContractTest extends TestCase
 {
-    use RefreshDatabase;
+    use RecordsDayBinHistory, RefreshDatabase;
 
     private function actingAsUserWithPermissions(string ...$permissions): User
     {
@@ -116,12 +118,12 @@ class TraceabilityContractTest extends TestCase
         [$bag1, $bag2] = $lot->bags->sortBy('id')->values();
 
         // Full bag to the machine + a weighed partial from the next bag.
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->loadDayBin([
             'work_center_id' => $machine->id, 'barcode' => $bag1->barcode,
-        ])->assertSuccessful();
-        $this->postJson('/api/v1/production/day-bin/load', [
+        ]);
+        $this->loadDayBin([
             'work_center_id' => $machine->id, 'barcode' => $bag2->barcode, 'quantity_kg' => '7.5',
-        ])->assertSuccessful();
+        ]);
 
         // Exactly the shape the SPA's DayBinState type binds to.
         $this->getJson("/api/v1/production/work-centers/{$machine->id}/day-bin")
@@ -162,19 +164,19 @@ class TraceabilityContractTest extends TestCase
         ], $user->id);
         [$bag1, $bag2] = $lot->bags->sortBy('id')->values();
 
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->loadDayBin([
             'work_center_id' => $machine->id, 'barcode' => $bag1->barcode,
             'shift_production_entry_id' => $entry->id,
-        ])->assertSuccessful();
-        $this->postJson('/api/v1/production/day-bin/load', [
+        ]);
+        $this->loadDayBin([
             'work_center_id' => $machine->id, 'barcode' => $bag2->barcode,
             'quantity_kg' => '7.5', 'shift_production_entry_id' => $entry->id,
-        ])->assertSuccessful();
-        $this->postJson('/api/v1/production/day-bin/return', [
+        ]);
+        $this->returnDayBin([
             'work_center_id' => $machine->id, 'item_id' => $resin->id,
             'quantity_kg' => '1.3', 'material_bag_id' => $bag2->id,
             'shift_production_entry_id' => $entry->id,
-        ])->assertSuccessful();
+        ]);
 
         // No closing count yet: consumption_kg is null, never a guess.
         $this->getJson("/api/v1/production/shift-production-entries/{$entry->id}/day-bin")
@@ -188,10 +190,10 @@ class TraceabilityContractTest extends TestCase
                 'consumption_kg' => null,
             ]]]]);
 
-        $this->postJson('/api/v1/production/day-bin/count', [
+        $this->countDayBin([
             'work_center_id' => $machine->id, 'item_id' => $resin->id,
             'quantity_kg' => '4.2', 'shift_production_entry_id' => $entry->id,
-        ])->assertSuccessful();
+        ]);
 
         // consumed = 0 + 32.5 − 4.2 − 1.3 = 27.0000.
         $this->getJson("/api/v1/production/shift-production-entries/{$entry->id}/day-bin")
@@ -212,25 +214,39 @@ class TraceabilityContractTest extends TestCase
         ], $user->id);
         $bag = $lot->bags->first();
 
-        // Unknown barcode: a clear 422, not a 404 or a silent no-op.
-        $this->postJson('/api/v1/production/day-bin/load', [
-            'work_center_id' => $machine->id, 'barcode' => 'NO-SUCH-BAG',
-        ])->assertStatus(422)->assertJsonValidationErrors(['barcode']);
+        // Unknown barcode: a clear 422 naming what went wrong, not a 404 or
+        // a silent no-op. Asserted on the SURVIVING scan door — the retired
+        // day-bin/load carried this sentence in its own FormRequest, and
+        // LoadFactoryDayBinBagRequest carries it verbatim, so the refusal
+        // moved with the door rather than being lost with it.
+        $this->postJson('/api/v1/production/day-bin/load-bag', ['barcode' => 'NO-SUCH-BAG'])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.barcode.0', 'Unknown bag barcode — no registered bag carries this code.');
 
-        // Neither identifier, or both at once: rejected.
-        $this->postJson('/api/v1/production/day-bin/load', [
-            'work_center_id' => $machine->id,
-        ])->assertStatus(422);
-        $this->postJson('/api/v1/production/day-bin/load', [
-            'work_center_id' => $machine->id, 'barcode' => $bag->barcode, 'material_bag_id' => $bag->id,
-        ])->assertStatus(422)->assertJsonValidationErrors(['material_bag_id']);
+        // Neither identifier, or both at once: rejected. Both refusals moved
+        // from the retired door's FormRequest onto the WRITER when the door
+        // closed (Phase 7.5, WS-C) — the refusal set a refactor inherits is
+        // the OLD one, and the service still accepts a mismatched pair and
+        // would silently prefer the id if it did not refuse here.
+        $this->assertSame(
+            'Name the bag being loaded — send either its barcode or its material_bag_id.',
+            $this->refusedDayBinWrite(fn () => $this->loadDayBin([
+                'work_center_id' => $machine->id,
+            ])),
+        );
+        $this->assertSame(
+            'Send either material_bag_id or barcode, not both.',
+            $this->refusedDayBinWrite(fn () => $this->loadDayBin([
+                'work_center_id' => $machine->id, 'barcode' => $bag->barcode, 'material_bag_id' => $bag->id,
+            ])),
+        );
 
         // The scanner-gun happy path.
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $movement = $this->loadDayBin([
             'work_center_id' => $machine->id, 'barcode' => $bag->barcode,
-        ])->assertSuccessful()
-            ->assertJsonPath('data.quantity_kg', '25.0000')
-            ->assertJsonPath('data.material_bag.barcode', $bag->barcode);
+        ]);
+        $this->assertSame('25.0000', (string) $movement->quantity_kg);
+        $this->assertSame($bag->barcode, $movement->materialBag->barcode);
     }
 
     public function test_a_return_can_never_push_a_bag_past_its_original_kg(): void
@@ -246,20 +262,18 @@ class TraceabilityContractTest extends TestCase
         [$bag1, $bag2] = $lot->bags->sortBy('id')->values();
 
         // Bin holds 35 kg (25 full + 10 partial); bag2 still holds 15 kg.
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->loadDayBin([
             'work_center_id' => $machine->id, 'barcode' => $bag1->barcode,
-        ])->assertSuccessful();
-        $this->postJson('/api/v1/production/day-bin/load', [
+        ]);
+        $this->loadDayBin([
             'work_center_id' => $machine->id, 'barcode' => $bag2->barcode, 'quantity_kg' => '10',
-        ])->assertSuccessful();
+        ]);
 
         // 15 + 20 = 35 > the bag's original 25 — refused, naming the figures.
-        $response = $this->postJson('/api/v1/production/day-bin/return', [
+        $message = $this->refusedDayBinWrite(fn () => $this->returnDayBin([
             'work_center_id' => $machine->id, 'item_id' => $resin->id,
             'quantity_kg' => '20', 'material_bag_id' => $bag2->id,
-        ]);
-        $response->assertStatus(422);
-        $message = $response->json('message');
+        ]));
         $this->assertStringContainsString('20.0000', $message);
         $this->assertStringContainsString('15.0000', $message);
         $this->assertStringContainsString('25.0000', $message);
@@ -268,10 +282,10 @@ class TraceabilityContractTest extends TestCase
         $this->assertSame('15.0000', $bag2->fresh()->remaining_kg);
 
         // An honest return passes and the bag lands back in the store.
-        $this->postJson('/api/v1/production/day-bin/return', [
+        $this->returnDayBin([
             'work_center_id' => $machine->id, 'item_id' => $resin->id,
             'quantity_kg' => '10', 'material_bag_id' => $bag2->id,
-        ])->assertSuccessful();
+        ]);
         $bag2 = $bag2->fresh();
         $this->assertSame('25.0000', $bag2->remaining_kg);
         $this->assertSame(MaterialBagStatus::InStore, $bag2->status);
@@ -291,33 +305,36 @@ class TraceabilityContractTest extends TestCase
         ], $user->id);
         [$bag1, $bag2] = $lot->bags->sortBy('id')->values();
 
-        $this->postJson('/api/v1/production/day-bin/load', [
+        $this->loadDayBin([
             'work_center_id' => $machine->id, 'barcode' => $bag1->barcode,
             'shift_production_entry_id' => $entry->id,
-        ])->assertSuccessful();
+        ]);
 
         app(ShiftProductionEntryService::class)->completeBatch($entry, ['quantity_produced' => '100'], null);
 
         // Load, return and count all refuse a closed segment window.
-        $this->postJson('/api/v1/production/day-bin/load', [
-            'work_center_id' => $machine->id, 'barcode' => $bag2->barcode,
-            'shift_production_entry_id' => $entry->id,
-        ])->assertStatus(422)->assertJsonFragment(['message' => "Segment already completed — day-bin movements cannot reference shift production entry #{$entry->id} because it is no longer in progress."]);
-        $this->postJson('/api/v1/production/day-bin/return', [
+        $this->assertSame(
+            "Segment already completed — day-bin movements cannot reference shift production entry #{$entry->id} because it is no longer in progress.",
+            $this->refusedDayBinWrite(fn () => $this->loadDayBin([
+                'work_center_id' => $machine->id, 'barcode' => $bag2->barcode,
+                'shift_production_entry_id' => $entry->id,
+            ])),
+        );
+        $this->refusedDayBinWrite(fn () => $this->returnDayBin([
             'work_center_id' => $machine->id, 'item_id' => $resin->id,
             'quantity_kg' => '1', 'shift_production_entry_id' => $entry->id,
-        ])->assertStatus(422);
-        $this->postJson('/api/v1/production/day-bin/count', [
+        ]));
+        $this->refusedDayBinWrite(fn () => $this->countDayBin([
             'work_center_id' => $machine->id, 'item_id' => $resin->id,
             'quantity_kg' => '1', 'shift_production_entry_id' => $entry->id,
-        ])->assertStatus(422);
+        ]));
 
         // The refused load left the bag untouched.
         $this->assertSame('25.0000', $bag2->fresh()->remaining_kg);
         // Movements without a segment reference still work on the machine.
-        $this->postJson('/api/v1/production/day-bin/count', [
+        $this->countDayBin([
             'work_center_id' => $machine->id, 'item_id' => $resin->id, 'quantity_kg' => '5',
-        ])->assertSuccessful();
+        ]);
     }
 
     public function test_a_fifo_refusal_carries_the_machine_readable_code(): void
@@ -338,8 +355,15 @@ class TraceabilityContractTest extends TestCase
 
         // The SPA keys its "override FIFO?" prompt off this code — never
         // off message text.
-        $this->postJson('/api/v1/production/day-bin/load', [
-            'work_center_id' => $machine->id, 'barcode' => $newer->bags->first()->barcode,
-        ])->assertStatus(422)->assertJsonPath('code', 'fifo_order');
+        try {
+            $this->loadDayBin([
+                'work_center_id' => $machine->id, 'barcode' => $newer->bags->first()->barcode,
+            ]);
+            $this->fail('Loading out of FIFO order must be refused.');
+        } catch (FifoPolicyException $refusal) {
+            // bootstrap/app.php renders a DomainException's errorCode() as
+            // the 422 body's `code`, which is what the SPA keys off.
+            $this->assertSame('fifo_order', $refusal->errorCode());
+        }
     }
 }

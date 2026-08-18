@@ -81,6 +81,17 @@ class TraceabilityReportExport extends AbstractProductionExport
             'batch_number' => 'fed.segment.batch_number',
             'loaded_kg' => 'fed.loaded_kg',
             'loads' => 'fed.loads',
+            // THE STORE-ISSUE HALF (Phase 7.5, WS-C), summarised on the bag
+            // rather than fanned into rows of its own: the flattening below
+            // is the screen's drill-down and its row count is a pinned
+            // contract. A bag handed over more than once carries every issue
+            // number here, comma-joined, with the total kg and the last
+            // handover time — and NO machine and NO batch, because an issue
+            // names neither (FC-01). Blank for bags that only ever moved
+            // under the old day-bin flow.
+            'issued_kg' => 'bag.issued_kg',
+            'issue_numbers' => 'bag.issue_numbers',
+            'issued_to_production_at' => 'bag.issued_to_production_at',
         ];
     }
 
@@ -156,7 +167,7 @@ class TraceabilityReportExport extends AbstractProductionExport
 
             foreach ($bags as $bag) {
                 $fed = $bag['fed'] ?? [];
-                $bagOnly = Arr::except($bag, ['fed']);
+                $bagOnly = [...Arr::except($bag, ['fed', 'issued']), ...$this->issueSummary($bag['issued'] ?? [])];
 
                 if ($fed === []) {
                     yield ['lot' => $lotOnly, 'bag' => $bagOnly, 'fed' => null];
@@ -169,5 +180,40 @@ class TraceabilityReportExport extends AbstractProductionExport
                 }
             }
         }
+    }
+
+    /**
+     * One bag's store-issue handovers flattened onto the bag row: total kg,
+     * the issue numbers comma-joined, and the LAST handover time. A bag
+     * never issued through the new flow gets '0.0000' and empty strings —
+     * blanks, never a fabricated machine or batch (FC-01).
+     *
+     * @param  array<int, array<string, mixed>>  $issued
+     * @return array{issued_kg: string, issue_numbers: string, issued_to_production_at: string}
+     */
+    private function issueSummary(array $issued): array
+    {
+        $kg = '0.0000';
+        $numbers = [];
+        $last = '';
+
+        foreach ($issued as $handover) {
+            $kg = bcadd($kg, (string) ($handover['issued_kg'] ?? '0'), 4);
+
+            if (($handover['issue_number'] ?? null) !== null) {
+                $numbers[] = (string) $handover['issue_number'];
+            }
+
+            $at = (string) ($handover['issued_at'] ?? '');
+            if ($at !== '' && $at > $last) {
+                $last = $at;
+            }
+        }
+
+        return [
+            'issued_kg' => $kg,
+            'issue_numbers' => implode(', ', $numbers),
+            'issued_to_production_at' => $last,
+        ];
     }
 }

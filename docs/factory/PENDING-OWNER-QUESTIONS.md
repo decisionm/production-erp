@@ -35,9 +35,9 @@ the ERP). Q38-Q41 are claimed by the 12-Aug Tally
 evidence set and the purchase/tax configuration design. Q42 is claimed by the SKU scheme
 design. Q43 is claimed by the Phase 3 sync fix loop (duplicate master names).
 Q46 is claimed by the Phase 5.5 fix loop (paper-page ingest and the
-estimation version). Q53 is claimed by the Phase 7.6 configuration-lifecycle
-branch (the four selection-rule deferrals WS-B left open).
-New questions continue from Q54.
+estimation version). Q53 is the Phase 7.6 configuration-lifecycle branch's
+(four selection-rule deferrals); Q54 is the Phase 7.5 material-flow branch's
+(five material-flow questions). New questions continue from Q55.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 DEC-20260809-002/-003 landed with PR #155 (the finance-pull discovery
@@ -1030,3 +1030,82 @@ its narrow reading, and history still displays every retired master it
 already names. What it blocks is knowing whether the narrow reading is the
 factory's. (c) additionally decides whether the `source: tally` route needs a
 trust check at all. *Open since 2026-08-17.*
+
+## Q54 · Five things the Store -> Production material flow cannot decide for itself
+
+Phase 7.5 builds the workflow the lead confirmed on 17-Aug (Q50, DEC-20260817-001):
+Store Stock -> Material Request -> Store Issue -> Scan/Handover -> Issued to
+Production (the WIP location) -> Consumption -> Return unused. Building it raised
+five points that are the factory's call, not engineering's. **None of them is
+answered here.** Where a question is open the build takes the option that refuses or
+reports rather than the one that guesses, and which option that is, is recorded in
+the branch's own report — a safe reading of an open question, never an answer to it.
+
+(a) **Is every kg material a "common input" that must refuse a machine, or may
+    masterbatch name one?** FC-01 and DEC-20260807-006 fix the resin case: ONE
+    crane-fed loading point piped to all ten machines, so a machine on a resin
+    request would be a field the floor cannot answer truthfully. Masterbatch is
+    dosed per machine, which would make a machine meaningful on ITS request. But the
+    only classification the data actually carries is the unit of measure — the
+    raw-material picker is literally "active kg-uom items" — so the build treats
+    every kg material alike and lets none of them name a machine. That is a
+    consequence of the data, not a ruling. If masterbatch, or any other kg material,
+    should be allowed to name a machine, the factory has to say which materials
+    those are and the ERP needs a way to tell them apart. (Narrower than Q50, which
+    asks whether the RESIN flow itself has changed; this asks how the OTHER kg
+    materials are classified.)
+
+(b) **When an issue is cancelled, or unused material returned, after a batch has
+    already consumed against it — refuse, or cap?** The invariant is not in doubt: a
+    reversal may never take back more than is still standing unconsumed for that
+    issue, or it drains material that belongs to another issue. Two honest ways to
+    meet it, and they differ only in what the storekeeper sees. REFUSE: the return is
+    rejected with the reason, and the storekeeper raises the smaller figure himself.
+    CAP: the ERP silently returns only what is still standing and tells him it did.
+    Refusing never puts a number nobody typed into the ledger; capping never leaves a
+    storekeeper stuck at a screen. Which does the factory want at the counter?
+
+(c) **The Start Batch material-availability panel is per-MACHINE — should it stay,
+    change, or go?** It reads the bin bay for the machine about to run. With the
+    common input (FC-01, DEC-20260807-006) nothing is stamped to a machine any more,
+    and material issued to production now stands in one pooled Production/WIP
+    location — so a per-machine reading for resin has nothing to report and shows
+    zero. The material is real; it simply belongs to no machine. Three options: make
+    the panel a factory-wide Production/WIP figure (true, but it stops answering "can
+    THIS machine run"), remove it (the supervisor loses a pre-start check he has
+    today), or leave it per-machine and accept that it reads zero for pooled
+    materials. The gate behind it already fails OPEN and never stops a machine the
+    floor can run, so nothing is blocked either way.
+
+(d) **What should the carton trace say about a lot that reached the machine through
+    a store issue?** DEC-20260810-001 fixes the internal trace's wording as "the
+    common day bin held loads from these lots" — deliberately, so that no
+    bag-to-batch claim is ever made (FC-01). Material now also reaches production
+    through a store issue, which did not pass through the day bin, so those lots sit
+    outside the sentence the owner fixed. An owner-fixed sentence is not rewritten by
+    an agent, so the build either keeps store-issue lots out of that attribution or
+    gives them their own separately-worded line. The wording of that second line is
+    the owner's: "issued from the store on this issue" is EXACT, unlike the day-bin
+    attribution which is calculated over a shift window — and a trace that mixes an
+    exact statement and a calculated one under one sentence would overstate the
+    calculated half.
+
+(e) **May a batch consume more from Production/WIP than was ever issued to it?**
+    Consumption is calculated, not counted (DEC-20260807-007: the bin is never
+    weighed, so the figure drifts permanently with nothing to re-anchor it), so a
+    batch CAN compute a consumption larger than everything the store issued. Two
+    readings. REFUSE the completion until the store issues the difference: the books
+    never carry material that was never issued, but the floor's paperwork stops on a
+    figure nobody counted, at the end of a shift. ACCEPT it and record the shortfall
+    as its own visible, named figure the store must make good: the batch closes, and
+    the gap is a number somebody has to answer for rather than a silent negative.
+    Either way the WIP balance must not quietly go negative and the ledger invariant
+    must still sign — that part is engineering's and is not a question. Which of the
+    two the factory wants IS.
+
+**Blocks:** nothing immediately — every one of the five has a safe reading already in
+force, and the flow (request, queue, partial issue, bag scan, the three stock states,
+return) proceeds either way. (a) decides whether a machine field ever appears on a
+masterbatch request; (d) decides one sentence on one internal screen; (b), (c) and
+(e) decide what the floor and the store see, not whether the material is tracked.
+*Open since 2026-08-17.*

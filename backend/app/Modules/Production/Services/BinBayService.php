@@ -16,8 +16,21 @@ use App\Modules\Production\Models\Enums\DayBinMovementType;
  * the floor's only load flow is the common resin input's bag scan
  * (FactoryDayBinService::loadBag), which names no machine. The
  * machine-stamped Load rows this class still reads are the audit history of
- * how the factory ran under the previous understanding, plus whatever the
- * remaining day-bin endpoints record; they are read here, never written.
+ * how the factory ran under the previous understanding; they are read here,
+ * never written.
+ *
+ * HISTORICAL-ONLY READER, AND A NAMED GAP (Phase 7.5, WS-C). Every query
+ * below filters `work_center_id = <machine>`. The only live writer of Load
+ * rows since DEC-20260807-006 is the common-input scan, which writes
+ * work_center_id NULL — so this panel has already been answering 0.0000 with
+ * no layers for every machine since 07-Aug, and the three machine-stamped
+ * day-bin write doors closing in Phase 7.5 changes nothing about that. It is
+ * recorded here rather than quietly repaired because the honest replacement
+ * is not a like-for-like swap: what Production/WIP holds is a FACTORY-WIDE
+ * balance (there is one common input — FC-01), not a per-machine one, and
+ * turning a per-machine panel into a factory-wide one changes what the
+ * screen claims to the supervisor. That is the lead's call, not an
+ * implementation detail — it is in this phase's owner questions.
  *
  * Ownership boundaries this class deliberately respects:
  *  - balances come from DayBinLedgerService, never re-derived here;

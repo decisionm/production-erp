@@ -58,14 +58,25 @@ class ReconcileStockToTally extends Command
             // and then trusted.
             $sign = str_starts_with($change['difference'], '-') ? 'issue ' : 'receive';
 
+            // The ERP side is the store balance PLUS anything of that item
+            // standing in Production/WIP — Tally never saw the handover, so
+            // an open issue must not read as a difference. Where WIP does
+            // contribute, the two halves are printed: a reader comparing this
+            // against a stock screen has to be able to see why the figure is
+            // bigger than the store's own balance.
+            $split = bccomp($change['production_wip'], '0', 4) === 0
+                ? ''
+                : sprintf('  (store %s + %s in Production/WIP)', $change['erp'], $change['production_wip']);
+
             $this->line(sprintf(
-                '  %-7s %-14s %-36s @ %-24s ERP %14s -> Tally %14s',
+                '  %-7s %-14s %-36s @ %-24s ERP %14s -> Tally %14s%s',
                 $sign,
                 ltrim($change['difference'], '-'),
                 mb_strimwidth($change['item'], 0, 36, '…'),
                 mb_strimwidth($change['warehouse'], 0, 24, '…'),
-                $change['erp'],
+                $change['erp_including_wip'],
                 $change['tally'],
+                $split,
             ));
         }
 
@@ -77,6 +88,25 @@ class ReconcileStockToTally extends Command
 
         foreach ($result['skipped'] as $note) {
             $this->warn('  '.$note);
+        }
+
+        // MATERIAL ON THE FLOOR, NAMED. Printed whether or not it changed an
+        // answer: the reason this block exists is that an open issue used to
+        // read as store drift, and the cure is not that it silently nets out
+        // but that a person can see it.
+        if ($result['production_wip']['lines'] !== []) {
+            $this->line('');
+            $this->line('Standing in Production/WIP:');
+            $this->line('  '.$result['production_wip']['note']);
+
+            foreach ($result['production_wip']['lines'] as $line) {
+                $this->line(sprintf(
+                    '  %-36s %14s  %s',
+                    mb_strimwidth((string) ($line['item'] ?? '?'), 0, 36, '…'),
+                    $line['quantity'],
+                    $line['counted_with_godown'] ? 'counted with its godown' : 'NOT counted — no godown line carries it',
+                ));
+            }
         }
 
         if ($write) {

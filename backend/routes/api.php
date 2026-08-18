@@ -27,9 +27,11 @@ use App\Modules\Inventory\Http\Controllers\ItemController;
 use App\Modules\Inventory\Http\Controllers\MaterialBagController;
 use App\Modules\Inventory\Http\Controllers\MaterialLotController;
 use App\Modules\Inventory\Http\Controllers\MaterialLotCostVersionController;
+use App\Modules\Inventory\Http\Controllers\MaterialRequestController;
 use App\Modules\Inventory\Http\Controllers\SerialNumberController;
 use App\Modules\Inventory\Http\Controllers\StockBalanceController;
 use App\Modules\Inventory\Http\Controllers\StockMovementController;
+use App\Modules\Inventory\Http\Controllers\StoreIssueController;
 use App\Modules\Inventory\Http\Controllers\WarehouseController;
 use App\Modules\Maintenance\Http\Controllers\AssetController;
 use App\Modules\Maintenance\Http\Controllers\MaintenanceReportController;
@@ -169,6 +171,30 @@ Route::prefix('v1')->group(function () {
             Route::apiResource('serial-numbers', SerialNumberController::class)->only(['index', 'store']);
             Route::get('serial-numbers/{serial_number}/history', [SerialNumberController::class, 'history']);
 
+            /*
+             * THE STORE ISSUE (Phase 7.5): the handover of material to
+             * production, and the three states it keeps apart —
+             * Store Stock -> Issued to Production -> Consumed, with unused
+             * material returning. A store issue is NOT a consumption, and
+             * nothing here deducts stock as one.
+             *
+             * Append-only, like every other lifecycle on this API: every
+             * change of state is a POST. There is no PUT and no DELETE — a
+             * wrong handover is CANCELLED (which reverses the stock, with a
+             * reason), never edited away.
+             *
+             * `outstanding` and `trace` are registered BEFORE the
+             * {store_issue} route so neither word is ever read as an id.
+             */
+            Route::get('store-issues/outstanding', [StoreIssueController::class, 'outstanding']);
+            Route::get('store-issues/trace', [StoreIssueController::class, 'trace']);
+            Route::get('store-issues', [StoreIssueController::class, 'index']);
+            Route::get('store-issues/{store_issue}', [StoreIssueController::class, 'show']);
+            Route::post('store-issues', [StoreIssueController::class, 'store']);
+            Route::post('store-issues/{store_issue}/returns', [StoreIssueController::class, 'returnUnused']);
+            Route::post('store-issues/{store_issue}/complete', [StoreIssueController::class, 'complete']);
+            Route::post('store-issues/{store_issue}/cancel', [StoreIssueController::class, 'cancel']);
+
             // Phase 6 traceability (store side): supplier lots + bags with
             // unique barcodes, and the FIFO pick list. The whole surface
             // 404s until production.traceability_enabled is on — with the
@@ -180,6 +206,11 @@ Route::prefix('v1')->group(function () {
 
                 Route::get('material-bags', [MaterialBagController::class, 'index']);
                 Route::get('material-bags/pick-list', [MaterialBagController::class, 'pickList']);
+
+                // The bag scan AT THE HANDOVER — inside this gate for the
+                // same reason the floor's scan is: a barcode only resolves
+                // to a MaterialBag with traceability on.
+                Route::post('store-issues/{store_issue}/bag-scans', [StoreIssueController::class, 'scanBag']);
             });
         });
 
@@ -204,6 +235,42 @@ Route::prefix('v1')->group(function () {
         Route::prefix('inventory')->middleware('module:finance')->group(function () {
             Route::get('material-lots/{lot}/cost-versions', [MaterialLotCostVersionController::class, 'index']);
             Route::post('material-lots/{lot}/cost-versions', [MaterialLotCostVersionController::class, 'store']);
+        });
+
+        /*
+         * THE PRODUCTION MATERIAL REQUEST and THE STORE'S QUEUE (Phase 7.5).
+         *
+         * A document with TWO SIDES, so a sibling group again rather than a
+         * nested one — but this time gated on EITHER module: the floor
+         * raises the request and the store works it, and neither holds the
+         * other's permission. `module:production,inventory` means "any of
+         * these", never "both" (EnsureModulePermission).
+         *
+         * A material request is NOT a purchase requisition (that one faces
+         * a vendor and carries money — /procurement/purchase-requisitions
+         * below) and it is NOT a consumption: the store handing material
+         * over moves it into Production/WIP (DEC-20260817-001), and what a
+         * batch used is calculated later, somewhere else.
+         *
+         * Append-only: every lifecycle step is a POST, there is no PUT and
+         * no DELETE. A cancelled request keeps its row and its reason.
+         */
+        Route::prefix('inventory')->middleware('module:production,inventory')->group(function () {
+            // The queue itself, and one request in full. Read by the store
+            // (inventory.view) and by the floor that raised it
+            // (production.view).
+            Route::get('material-requests', [MaterialRequestController::class, 'index']);
+            Route::get('material-requests/{material_request}', [MaterialRequestController::class, 'show']);
+            // Either side may withdraw one, with a reason: the floor when
+            // the run is pulled, the store when it cannot fulfil.
+            Route::post('material-requests/{material_request}/cancel', [MaterialRequestController::class, 'cancel']);
+        });
+
+        // Raising and submitting are the FLOOR's act — production.manage.
+        // The store fulfils requests; it does not write them for the floor.
+        Route::prefix('inventory')->middleware('module:production')->group(function () {
+            Route::post('material-requests', [MaterialRequestController::class, 'store']);
+            Route::post('material-requests/{material_request}/submit', [MaterialRequestController::class, 'submit']);
         });
 
         Route::prefix('procurement')->middleware('module:procurement')->group(function () {
@@ -685,11 +752,27 @@ Route::prefix('v1')->group(function () {
             // shift handover. 404 until production.traceability_enabled —
             // same invisibility rule as the inventory half above.
             Route::middleware('traceability')->group(function () {
+                // READ ONLY. The three machine-stamped WRITE doors —
+                // day-bin/load, day-bin/return and day-bin/count — are gone
+                // (Phase 7.5, WS-C). None of them had a single UI caller:
+                // day-bin/load was the machine-stamped load path DEC-20260807-006
+                // retired, and DEC-20260807-007 records that the bin is never
+                // weighed, so no count will ever be taken through day-bin/count.
+                // DEC-20260817-001 then removed the Day Bin from the factory's
+                // logical locations altogether (Raw Material Store ->
+                // Production/WIP -> Finished Goods Store).
+                //
+                // NOTHING WAS DELETED BELOW THE DOORS: day_bin_movements, every
+                // historical machine-stamped row in it, DayBinLedgerService and
+                // the writers TraceabilityService::loadBagToDayBin /
+                // returnFromDayBin / recordCount all remain — the reads here and
+                // the historical readers listed in
+                // docs/engineering/AUDIT-MATERIAL-FLOW-2026-08-17.md §3 still
+                // serve that history. Closing-count writes are unaffected: they
+                // go through ShiftProductionEntryService::recordClosingDayBin,
+                // which calls the ledger directly and never touched these routes.
                 Route::get('day-bin/movements', [DayBinController::class, 'movements']);
                 Route::get('day-bin/consumption', [DayBinController::class, 'consumption']);
-                Route::post('day-bin/load', [DayBinController::class, 'load']);
-                Route::post('day-bin/return', [DayBinController::class, 'returnMaterial']);
-                Route::post('day-bin/count', [DayBinController::class, 'count']);
 
                 // The CENTRALIZED bag scan into the FACTORY day bin (the
                 // warehouse, all machines at once — no work center picked).

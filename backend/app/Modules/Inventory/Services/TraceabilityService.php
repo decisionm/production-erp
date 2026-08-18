@@ -209,6 +209,26 @@ class TraceabilityService
     }
 
     /**
+     * LEGACY, DELIBERATELY KEPT — no production caller since Phase 7.5
+     * (WS-C). The `day-bin/load` door this stood behind is retired:
+     * DEC-20260807-006 retired the machine-stamped load path, because the
+     * floor's one load flow is the common input's bag scan, which names no
+     * machine (FC-01); DEC-20260817-001 then removed the Day Bin from the
+     * factory's logical inventory locations altogether (Raw Material Store
+     * -> Production/WIP -> Finished Goods Store). Today the only callers
+     * are tests.
+     *
+     * It is not dead code that nobody noticed — it is kept on purpose, and
+     * NOTHING under it was deleted: `day_bin_movements` holds every row,
+     * including the historical machine-stamped ones DEC-20260807-006
+     * requires be preserved untouched, and the read surfaces listed in
+     * docs/engineering/AUDIT-MATERIAL-FLOW-2026-08-17.md section 3 still
+     * serve that history. This writer is the only executable statement of
+     * the shape those rows were written in, and the tests that exercise it
+     * are how that history stays reproducible. Do not wire it to a new
+     * route, a new screen or a new service: reopening a machine-stamped
+     * load path needs an owner decision, not a caller.
+     *
      * Scan a bag into a machine's day bin. Full-bag scan (no quantity) =
      * the bag's whole remaining_kg and the bag moves to the bin; partial
      * load (weighed, Vincent Q6) decrements the bag, which stays in the
@@ -232,6 +252,25 @@ class TraceabilityService
                         'shift_production_entry_id' => 'The selected production segment belongs to a different machine.',
                     ]);
                 }
+            }
+
+            // EXACTLY ONE IDENTIFIER, NAMED EXPLICITLY. Both halves of this
+            // guard used to sit in the day-bin/load FormRequest, retired with
+            // its endpoint (Phase 7.5, WS-C) — and they belong on the writer
+            // anyway. NEITHER identifier is refused in words instead of
+            // tripping over an undefined key; BOTH is refused because the
+            // query below silently prefers the id, so a caller sending a
+            // mismatched pair would pour out of a bag it did not name.
+            if (! isset($data['material_bag_id']) && ! isset($data['barcode'])) {
+                throw ValidationException::withMessages([
+                    'barcode' => 'Name the bag being loaded — send either its barcode or its material_bag_id.',
+                ]);
+            }
+
+            if (isset($data['material_bag_id']) && isset($data['barcode'])) {
+                throw ValidationException::withMessages([
+                    'material_bag_id' => 'Send either material_bag_id or barcode, not both.',
+                ]);
             }
 
             $bag = MaterialBag::query()
@@ -281,6 +320,17 @@ class TraceabilityService
     }
 
     /**
+     * LEGACY, DELIBERATELY KEPT — no production caller since Phase 7.5
+     * (WS-C), when the `day-bin/return` door was retired with the other
+     * two machine-stamped doors. Today the only callers are tests. Same
+     * standing as loadBagToDayBin above, for the same reasons and with the
+     * same prohibition: the rows are never deleted, the readers still read
+     * them, and this writer stays as their executable shape — it is not to
+     * be given a new caller. Material coming back OUT of production is a
+     * different movement entirely and has its own path: the return on a
+     * store issue (Production/WIP -> store), which is stock, where this is
+     * a bin ledger row.
+     *
      * Material back out of the day bin. Named bag: the kg flows back into
      * it and it returns to the store. No bag: ledger row only — where the
      * material physically lands (regrind/return item) is Vincent Q4 and
@@ -338,6 +388,20 @@ class TraceabilityService
     }
 
     /**
+     * LEGACY, DELIBERATELY KEPT — no production caller since Phase 7.5
+     * (WS-C), when the `day-bin/count` door was retired. It had none
+     * before that either: DEC-20260807-007 records that the bin will never
+     * be weighed or counted, so no count was ever going to be taken
+     * through here. Today the only callers are tests.
+     *
+     * READ THIS BEFORE CONCLUDING THAT COUNTS STOPPED. Closing counts are
+     * still written on every completion and handover — that is a different
+     * path, ShiftProductionEntryService::recordClosingDayBin, which calls
+     * DayBinLedgerService directly and never came through this method or
+     * its retired route. Nothing about closing counts changed. Same
+     * prohibition as the two writers above: kept as the executable shape
+     * of rows that are still read, not to be given a new caller.
+     *
      * A weighed/estimated observation of the bin (Vincent Q2 — method is
      * the floor's, the app just records the figure). With a segment id it
      * is that segment's closing; guards live in the ledger service.

@@ -354,3 +354,26 @@ The delete guard cannot be defeated by an incomplete declaration — the schema 
 
 ### Still open (from the baseline list)
 No entity is wired and no route exposed — the next wave, carrying the Super-Admin grant (**and the repo has no Super Admin construct today**). Tier-1 entity rows are not yet green. Q43 owns duplicate NAMES; Q51 gates warehouse consolidation.
+
+## Phase 7.5 (feat/phase-7.5-material-flow, gate closed 2026-08-17)
+
+| Suite | Result | Evidence |
+|---|---|---|
+| Pint (whole tree) | PASS | clean |
+| Backend PHPUnit | PASS | **1,874 / 16,688** (1 skipped by design: CecGoldenTest) — after the rebase onto 7.6, so inclusive of it |
+| `inventory:check-ledger` | PASS | VERDICT clean, exit 0, after every state change in the tests |
+| Frontend vitest | PASS | **489** |
+| Typecheck · build | PASS | clean · built |
+| Factory-knowledge | PASS | exit 0 (Q54 added; preamble → Q55) |
+| Migrations | 3, additive + reversible | material_requests, material_request_lines, store_issues tables; no backfill, nothing dropped |
+| Red-before / green-after | PROVEN | 38 → 0 on the request suite; the P0 wiring proved by reverting the scan's line-credit expression (issued → partially_issued); 16 tests 4-pass/12-fail in a throwaway sandbox before the fix loop |
+| Sonnet independent QA | FAIL → fix loop → **re-gate PASS, ZERO findings** | the re-gate wrote its own scratch tests for the reversal bounds, the reconciliation, the second over-draw, the resolver under two other Tally-linked warehouses, and append-only by row id |
+| Adversarial review | Opus **FAIL** (P0 + 8) → all fixed | the P0 was the phase's own seam: the request and the issue were never wired together |
+| Browser proof | NOT DONE (extension disconnected) | pinned by tests; Phase 8's chain B2 |
+| API proof | PASS | the request/issue lifecycle is walked through the real HTTP API in StoreIssueFulfilsTheRequestTest |
+
+### Coverage gaps closed this phase
+A store issue is no longer a consumption — three distinct states with a return path, held as a LOCATION so the ledger invariant sees them · the request and the issue actually wired · reversals bounded by what is still standing and refusing rather than silently writing a smaller figure · Production/WIP visible to the Tally reconciliation so an open issue is not reported as drift · the second over-draw no longer falls through to the store · WIP identified by its own identity rather than a sole-guid fallback that would have 422'd on day one · the Day Bin retired from the target workflow with every row and historical reader preserved.
+
+### Still open
+Q54's five questions. The three legacy day-bin writers survive through tests only. Two concurrent reversals on different issues rely on the ledger's own non-negative decrement rather than a shared lock.

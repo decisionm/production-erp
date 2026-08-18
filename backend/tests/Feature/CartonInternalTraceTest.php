@@ -4,9 +4,13 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use App\Modules\Inventory\Models\Enums\MaterialBagStatus;
+use App\Modules\Inventory\Models\Enums\StoreIssueStatus;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\MaterialBag;
 use App\Modules\Inventory\Models\MaterialLot;
+use App\Modules\Inventory\Models\StoreIssue;
+use App\Modules\Inventory\Models\StoreIssueBagScan;
+use App\Modules\Inventory\Models\StoreIssueLine;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Procurement\Models\Enums\PurchaseOrderStatus;
 use App\Modules\Procurement\Models\GoodsReceiptNote;
@@ -54,6 +58,10 @@ class CartonInternalTraceTest extends TestCase
     private Item $resin;
 
     private Warehouse $store;
+
+    private ?Warehouse $wip = null;
+
+    private ?User $issuer = null;
 
     protected function setUp(): void
     {
@@ -156,6 +164,57 @@ class CartonInternalTraceTest extends TestCase
             // UTC storage — production writes recorded_at with now().
             'recorded_at' => CarbonImmutable::parse($factoryClock, 'Asia/Kolkata')->utc(),
         ]);
+    }
+
+    /**
+     * A STORE ISSUE handing this bag to production at an exact FACTORY
+     * wall-clock instant (Phase 7.5, WS-C) — how material reaches production
+     * now that DEC-20260817-001 has retired the Day Bin. Written as the
+     * database holds it: the lifecycle is StoreIssueService's subject, the
+     * WINDOW is this test's.
+     */
+    private function issueAt(MaterialBag $bag, string $kg, string $factoryClock, StoreIssueStatus $status = StoreIssueStatus::Issued): void
+    {
+        static $sequence = 0;
+        // ->utc() for the same reason loadAt() does it: this table stores UTC.
+        $at = CarbonImmutable::parse($factoryClock, 'Asia/Kolkata')->utc();
+
+        $issue = StoreIssue::create([
+            'issue_number' => sprintf('SI-2026-%04d', ++$sequence),
+            'status' => $status,
+            'issued_by' => $this->issuer()->id,
+            'received_by' => $this->issuer()->id,
+            'issued_at' => $at,
+        ]);
+        $line = StoreIssueLine::create([
+            'store_issue_id' => $issue->id,
+            'item_id' => $this->resin->id,
+            'from_warehouse_id' => $this->store->id,
+            'to_warehouse_id' => $this->wipWarehouse()->id,
+            'quantity_issued' => $kg,
+            'quantity_returned' => '0',
+            'uom' => 'Kgs',
+        ]);
+        StoreIssueBagScan::create([
+            'store_issue_id' => $issue->id,
+            'store_issue_line_id' => $line->id,
+            'material_bag_id' => $bag->id,
+            'material_lot_id' => $bag->material_lot_id,
+            'quantity_kg' => $kg,
+            'issued_by' => $this->issuer()->id,
+            'received_by' => $this->issuer()->id,
+            'scanned_at' => $at,
+        ]);
+    }
+
+    private function issuer(): User
+    {
+        return $this->issuer ??= User::factory()->create(['is_active' => true]);
+    }
+
+    private function wipWarehouse(): Warehouse
+    {
+        return $this->wip ??= Warehouse::create(['code' => 'WIP', 'name' => 'Work In Progress']);
     }
 
     /** Every key in a nested array payload, dotted, for exact-shape asserts. */
@@ -315,6 +374,80 @@ class CartonInternalTraceTest extends TestCase
         $this->assertSame('25.0000', $lotB['loaded_kg']);
 
         $this->assertSame('0.0000', $attribution['unattributed_loaded_kg']);
+    }
+
+    /**
+     * THE SAME WINDOW, ASKED OF THE STORE-ISSUE LEDGER (Phase 7.5, WS-C).
+     *
+     * Material reaches production as a store issue into Production/WIP now
+     * (DEC-20260817-001), so a provenance surface that read only
+     * day_bin_movements would be EMPTY for every batch run under the current
+     * flow — the one failure this tier must not have. The attribution stays
+     * exactly what it always was: by shift window, calculated, never a claim
+     * that a bag reached a batch (DEC-20260810-001, FC-01).
+     *
+     * Boundaries are asserted the same way as the day-bin test above:
+     * start-INCLUSIVE, end-EXCLUSIVE. A handover-instant issue belongs to
+     * the incoming shift, and to exactly one shift — an inclusive upper
+     * bound would attribute the same kilograms to two shifts at once.
+     */
+    public function test_the_attribution_also_lists_lots_issued_to_production_within_the_window(): void
+    {
+        $issuedInside = $this->lotWithBag('ISS-IN', '101.0000');
+        $issuedAtStart = $this->lotWithBag('ISS-START', '102.0000');
+        $issuedBefore = $this->lotWithBag('ISS-EARLY', '103.0000');
+        $issuedAtEnd = $this->lotWithBag('ISS-LATE', '104.0000');
+        $cancelled = $this->lotWithBag('ISS-CANCELLED', '105.0000');
+        $dayBinLot = $this->lotWithBag('OLD-DAYBIN', '106.0000');
+
+        // Morning runs 06:00–14:00 IST on 2026-08-02.
+        $this->issueAt($issuedAtStart, '10.0000', '2026-08-02 06:00:00');
+        $this->issueAt($issuedInside, '35.0000', '2026-08-02 10:30:00');
+        $this->issueAt($issuedBefore, '99.0000', '2026-08-02 05:59:59');
+        $this->issueAt($issuedAtEnd, '99.0000', '2026-08-02 14:00:00');
+        // Reversed in full — it never stood in production, so it is not
+        // provenance for anything.
+        $this->issueAt($cancelled, '99.0000', '2026-08-02 09:00:00', StoreIssueStatus::Cancelled);
+        // And a historical day-bin load in the same window: the two ledgers
+        // are read side by side, neither replacing the other.
+        $this->loadAt($dayBinLot, '20.0000', '2026-08-02 08:00:00');
+
+        $this->actingAsTraceReader();
+        $entry = $this->completedEntry($this->morningShift());
+
+        $attribution = $this->getJson("/api/v1/production/cartons/{$entry->batch_number}-C01/trace")
+            ->assertSuccessful()
+            ->json('data.day_bin_attribution');
+
+        // THE OWNER-FIXED SENTENCE COVERS ONLY WHAT THE DAY BIN HELD.
+        // DEC-20260810-001 fixed the bin-held-these-lots wording, so a lot
+        // that never went through the day bin must not be listed under it —
+        // and the sentence itself is not this workstream's to reword. The
+        // store-issue lots therefore get their own block and their own
+        // separately-worded sentence.
+        $this->assertSame(FinishedCartonService::ATTRIBUTION_SENTENCE, $attribution['basis']);
+        $this->assertSame(['day_bin_loaded_kg' => '20.0000', 'store_issued_kg' => '45.0000'], $attribution['sources']);
+
+        $this->assertSame(['OLD-DAYBIN'], array_column($attribution['lots'], 'supplier_lot_no'));
+        $this->assertSame('0.0000', $attribution['unattributed_loaded_kg']);
+
+        $issued = $this->getJson("/api/v1/production/cartons/{$entry->batch_number}-C01/trace")
+            ->assertSuccessful()
+            ->json('data.store_issue_attribution');
+
+        $this->assertSame(FinishedCartonService::STORE_ISSUE_ATTRIBUTION_SENTENCE, $issued['basis']);
+        $this->assertNotSame(FinishedCartonService::ATTRIBUTION_SENTENCE, $issued['basis']);
+
+        $lots = collect($issued['lots'])->keyBy('supplier_lot_no');
+        $this->assertSame(['ISS-START', 'ISS-IN'], $lots->keys()->all());
+        $this->assertSame('10.0000', $lots['ISS-START']['loaded_kg']);
+        $this->assertSame('35.0000', $lots['ISS-IN']['loaded_kg']);
+        $this->assertSame('PET Resin', $lots['ISS-IN']['material']);
+        // The lot's own rate still reaches this internal tier through the
+        // ordinary lot-attribution path — the issue ledger carries none.
+        $this->assertSame('101.0000', $lots['ISS-IN']['rate_per_kg']);
+
+        $this->assertSame('0.0000', $issued['unattributed_issued_kg']);
     }
 
     public function test_an_overnight_shifts_window_crosses_midnight_in_factory_time(): void

@@ -39,6 +39,13 @@ const VERDICT_TAGS: Record<string, { color: string; label: string }> = {
  * renders the server's `basis` sentence beside it: the day bin held loads
  * from these lots during that shift — a calculated attribution, never
  * "this batch used this bag". Do not shorten those sentences away.
+ *
+ * AND THERE ARE TWO SUCH BLOCKS, deliberately not one. The day bin's
+ * sentence is owner-fixed (DEC-20260810-001) and says the BIN held these
+ * lots; material now reaches production as a store issue instead
+ * (DEC-20260817-001), and those lots never entered the bin. Each ledger
+ * renders under its own sentence — merging the tables would make the
+ * owner's sentence untrue about half the rows under it.
  */
 export default function CartonTracePage() {
     const [scanned, setScanned] = useState('');
@@ -54,7 +61,7 @@ export default function CartonTracePage() {
     const detail =
         (error as { response?: { data?: { message?: string } } } | null)?.response?.data?.message;
 
-    const lotColumns = [
+    const lotColumns = (quantityTitle: string) => [
         { title: 'Material', dataIndex: 'material', render: (v: string | null) => v ?? '—' },
         { title: 'Supplier lot', dataIndex: 'supplier_lot_no', render: (v: string | null) => v ?? '—' },
         { title: 'GRN reference', dataIndex: 'grn_reference', render: (v: string | null) => v ?? '—' },
@@ -72,7 +79,7 @@ export default function CartonTracePage() {
                     </>
                 ),
         },
-        { title: 'Loaded (kg)', dataIndex: 'loaded_kg', render: fmtDecimal },
+        { title: quantityTitle, dataIndex: 'loaded_kg', render: fmtDecimal },
     ];
 
     return (
@@ -173,7 +180,7 @@ export default function CartonTracePage() {
                             <Table<CartonTraceLot>
                                 size="small"
                                 rowKey={(row) => `${row.supplier_lot_no}-${row.grn_reference}`}
-                                columns={lotColumns}
+                                columns={lotColumns('Loaded (kg)')}
                                 dataSource={data.day_bin_attribution.lots}
                                 pagination={false}
                                 locale={{
@@ -186,6 +193,53 @@ export default function CartonTracePage() {
                                     {fmtDecimal(data.day_bin_attribution.unattributed_loaded_kg)} kg was
                                     loaded without a bag identity in this window — kilograms with no lot
                                     to name.
+                                </Typography.Text>
+                            )}
+                        </Space>
+                    </Card>
+
+                    {/*
+                      * THE SECOND LEDGER, IN ITS OWN CARD AND UNDER ITS OWN
+                      * SENTENCE. Material reaches production as a store issue
+                      * now (DEC-20260817-001); those lots never went through
+                      * the day bin, so they must not render under the card
+                      * above, whose sentence is owner-fixed
+                      * (DEC-20260810-001) and speaks only of what the bin
+                      * held. Do not merge the two tables.
+                      */}
+                    <Card title="Store-issue lot attribution" size="small">
+                        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                            <Alert type="info" showIcon message={data.store_issue_attribution.basis} />
+                            {data.store_issue_attribution.reason !== null && (
+                                <Alert
+                                    type="warning"
+                                    showIcon
+                                    message={data.store_issue_attribution.reason}
+                                />
+                            )}
+                            {data.store_issue_attribution.window !== null && (
+                                <Typography.Text type="secondary">
+                                    Window: {data.store_issue_attribution.window.shift} shift on{' '}
+                                    {data.store_issue_attribution.window.production_date} (
+                                    {data.store_issue_attribution.window.timezone})
+                                </Typography.Text>
+                            )}
+                            <Table<CartonTraceLot>
+                                size="small"
+                                rowKey={(row) => `${row.supplier_lot_no}-${row.grn_reference}`}
+                                columns={lotColumns('Issued (kg)')}
+                                dataSource={data.store_issue_attribution.lots}
+                                pagination={false}
+                                locale={{
+                                    emptyText:
+                                        'No material was issued from the store during this production date and shift.',
+                                }}
+                            />
+                            {parseFloat(data.store_issue_attribution.unattributed_issued_kg) > 0 && (
+                                <Typography.Text type="secondary">
+                                    {fmtDecimal(data.store_issue_attribution.unattributed_issued_kg)} kg
+                                    was issued without a lot identity in this window — kilograms with no
+                                    lot to name.
                                 </Typography.Text>
                             )}
                         </Space>

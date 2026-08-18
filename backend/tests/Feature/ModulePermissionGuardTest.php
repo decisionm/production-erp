@@ -31,7 +31,15 @@ class ModulePermissionGuardTest extends TestCase
 {
     use RefreshDatabase;
 
-    /** Every distinct module guard actually registered on a route. */
+    /**
+     * Every distinct module guard actually registered on a route.
+     *
+     * A guard may name MORE THAN ONE module — `module:production,inventory`,
+     * the two-sided documents (Phase 7.5) — and then EITHER module's
+     * permission opens it. Each name is checked against the catalogue
+     * separately: a typo in the second name would be exactly as silent as a
+     * typo in the first.
+     */
     private function guardedModules(): array
     {
         $modules = [];
@@ -39,7 +47,9 @@ class ModulePermissionGuardTest extends TestCase
         foreach (Route::getRoutes() as $route) {
             foreach ($route->gatherMiddleware() as $middleware) {
                 if (is_string($middleware) && str_starts_with($middleware, 'module:')) {
-                    $modules[substr($middleware, strlen('module:'))] = true;
+                    foreach (explode(',', substr($middleware, strlen('module:'))) as $module) {
+                        $modules[trim($module)] = true;
+                    }
                 }
             }
         }

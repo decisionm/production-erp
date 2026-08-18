@@ -192,13 +192,19 @@ class NegativeStockOnCompletionTest extends TestCase
             'warehouse_id' => $this->dayBin->id,
             'warehouse_name' => 'Factory Day Bin',
             'short_kg' => '118.9980',
+            // Null everywhere but Production/WIP (Phase 7.5). A shortfall in
+            // a STORE is the stock record being behind and the accountant
+            // fixes it; one in Production/WIP means the batch consumed more
+            // than the store ever issued, which is a different fact with a
+            // different owner, so that one carries a sentence saying so.
+            'basis' => null,
         ]], $recorded);
 
         // And it survives to the screen through the resource's metrics block.
         $shortfalls = $response->json('data.metrics.stock_shortfalls');
         $this->assertCount(1, $shortfalls);
 
-        // THE CONTRACT, pinned by name. These six keys are what
+        // THE CONTRACT, pinned by name. These seven keys are what
         // frontend/src/features/production/types.ts StockShortfall declares and
         // what readStockShortfalls() reads — item_name, warehouse_name and
         // short_kg are the three it prints. An earlier draft of that file also
@@ -208,7 +214,7 @@ class NegativeStockOnCompletionTest extends TestCase
         // approval drawer goes quiet; this assertion is what makes that fail
         // loudly instead.
         $this->assertSame(
-            ['item_id', 'item_name', 'item_uom', 'warehouse_id', 'warehouse_name', 'short_kg'],
+            ['item_id', 'item_name', 'item_uom', 'warehouse_id', 'warehouse_name', 'short_kg', 'basis'],
             array_keys($shortfalls[0]),
         );
         $this->assertSame('Kgs.', $shortfalls[0]['item_uom']);
@@ -365,7 +371,12 @@ class NegativeStockOnCompletionTest extends TestCase
         $this->assertStringContainsString('Factory Day Bin', $message);
         $this->assertStringContainsString('0.0000 recorded there', $message);
         $this->assertStringContainsString('118.998 needed', $message);
-        $this->assertStringContainsString('Receive the material against its purchase, or enter its opening stock on the Day Bin page', $message);
+        $this->assertStringContainsString('Receive the material against its purchase', $message);
+        $this->assertStringContainsString('return the unused part on its store issue', $message);
+        // DEC-20260817-001 took the Day Bin out of the factory's logical
+        // inventory locations, so it is no longer a place stock enters —
+        // the way out must never point there again.
+        $this->assertStringNotContainsString('Day Bin page', $message);
 
         // A refusal must refuse everything: the batch is still running, no
         // consumption landed, and no balance row was left behind.
