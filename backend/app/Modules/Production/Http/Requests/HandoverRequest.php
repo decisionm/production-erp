@@ -39,7 +39,9 @@ class HandoverRequest extends FormRequest
             'completion.batch_number' => ['nullable', 'string', 'max:64'],
             'completion.quantity_produced' => ['required', 'numeric', 'gt:0'],
             'completion.quantity_scrap' => ['nullable', 'numeric', 'gte:0'],
-            'completion.scrap_reason_id' => ['nullable', 'integer', 'exists:scrap_reasons,id'],
+            // WS-B: same withdrawn-reason guard as CompleteBatchRequest —
+            // the handover completion is the same act on the same payload.
+            'completion.scrap_reason_id' => ['nullable', 'integer', Rule::exists('scrap_reasons', 'id')->where('is_active', true)],
             'completion.nos_per_tray' => ['nullable', 'integer', 'min:0'],
             'completion.no_of_trays' => ['nullable', 'integer', 'min:0'],
             'completion.nos_per_box' => ['nullable', 'integer', 'min:0'],
@@ -65,7 +67,7 @@ class HandoverRequest extends FormRequest
             'completion.scraps.*.type' => ['required', Rule::in(['rejected_finished_good', 'lumps'])],
             'completion.scraps.*.quantity_nos' => ['nullable', 'numeric', 'gte:0'],
             'completion.scraps.*.quantity_kg' => ['nullable', 'numeric', 'gte:0'],
-            'completion.scraps.*.scrap_reason_id' => ['nullable', 'integer', 'exists:scrap_reasons,id'],
+            'completion.scraps.*.scrap_reason_id' => ['nullable', 'integer', Rule::exists('scrap_reasons', 'id')->where('is_active', true)],
 
             // Downtime logged with the outgoing segment's completion — same
             // shape and cross-checks as CompleteBatchRequest, via the shared

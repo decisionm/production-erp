@@ -22,13 +22,14 @@ class StoreMaterialLotRequest extends FormRequest
         return [
             'grn_id' => ['nullable', 'required_with:goods_receipt_note_line_id', 'integer', 'exists:goods_receipt_notes,id'],
             'goods_receipt_note_line_id' => ['nullable', 'required_with:grn_id', 'integer', 'exists:goods_receipt_note_lines,id'],
-            'item_id' => ['required', 'integer', 'exists:items,id'],
+            // WS-B: no supplier lot may arrive against a retired item.
+            'item_id' => ['required', 'integer', Rule::exists('items', 'id')->where('is_active', true)],
             'supplier_lot_no' => ['nullable', 'string', 'max:100'],
             'received_date' => ['required', 'date'],
             'bag_count' => ['required', 'integer', 'min:1', 'max:2000'],
             'bag_weight_kg' => ['nullable', 'numeric', 'gt:0'],
             'total_received_kg' => ['required', 'numeric', 'gt:0'],
-            'warehouse_id' => ['nullable', 'required_with:grn_id', 'integer', 'exists:warehouses,id'],
+            'warehouse_id' => ['nullable', 'required_with:grn_id', 'integer', Rule::exists('warehouses', 'id')->where('is_active', true)],
             'notes' => ['nullable', 'string'],
             // Supplier barcodes (Vincent Q1): when the bags carry scannable
             // codes, one per bag; omitted = app-generated LOT{lot}-B{seq}.

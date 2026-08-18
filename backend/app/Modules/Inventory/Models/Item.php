@@ -3,6 +3,7 @@
 namespace App\Modules\Inventory\Models;
 
 use App\Modules\Inventory\Models\Enums\ItemTrackingType;
+use App\Support\Configuration\Concerns\RecordsConfigurationAudit;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -21,6 +22,7 @@ use Illuminate\Support\Facades\Log;
 ])]
 class Item extends Model
 {
+    use RecordsConfigurationAudit;
     use SoftDeletes;
 
     /**

@@ -3,6 +3,7 @@ import { Alert, Button, message, Modal, Select, Space, Table, Tag, Tooltip, Typo
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { hasManageAccess } from '@/features/auth/permissions';
+import { showApiError } from '@/lib/showApiError';
 import { useAuthStore } from '@/features/auth/store';
 import { attachStandardItem, getConfigurationReview, setPackagingIdentity } from '@/features/production/api';
 import {
@@ -128,18 +129,10 @@ export default function ConfigurationReviewPanel({
         queryClient.invalidateQueries({ queryKey: ['production', 'batch-preview'] });
     };
 
-    const showRefusal = (error: any, title: string) => {
-        const errors = error?.response?.data?.errors;
-        Modal.error({
-            title,
-            // The backend's refusals name the reason (an inactive item, a
-            // local-only fixture, a twin packing, a re-point without
-            // confirmation) — shown verbatim.
-            content: errors
-                ? Object.values(errors).flat().join(' ')
-                : (error?.response?.data?.message ?? 'Unexpected error.'),
-        });
-    };
+    // The backend's refusals name the reason (an inactive item, a local-only
+    // fixture, a twin packing, a re-point without confirmation) — shown
+    // verbatim, under the field key each one belongs to.
+    const showRefusal = (error: unknown, title: string) => showApiError(error, title);
 
     const linkPackaging = useMutation({
         // Identity ONLY — `{ item_id }` to the identity route, never a mode

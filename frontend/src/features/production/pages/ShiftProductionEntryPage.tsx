@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
+import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { listUsers } from '@/features/access/api';
 import { useAuthStore } from '@/features/auth/store';
 import { listAllEmployees } from '@/features/hrms/api';
@@ -86,6 +87,8 @@ import { chosenStartVariant, mouldLabel, startBatchChoices, startBatchTallyIdent
 import { expectedOutput, netRunningHours } from '@/features/production/expectedOutput';
 import { roundPer, useProductionSettings } from '@/features/production/packing';
 import { itemLabel } from '@/lib/itemLabel';
+import { apiErrorParts } from '@/lib/apiError';
+import { showApiError } from '@/lib/showApiError';
 import {
     buildStartBatchStandardUrl,
     hasStartBatchResume,
@@ -1715,7 +1718,24 @@ export default function ShiftProductionEntryPage() {
                 Tally-linked store could be worked out — check {warehouseSettingsLink}.
             </>
         );
-    const scrapReasonOptions = scrapReasons?.data.map((r) => ({ value: r.id, label: `${r.code} — ${r.name}` })) ?? [];
+    /**
+     * The rejection-reason picker. WS-B made `CompleteBatchRequest` refuse a
+     * WITHDRAWN scrap reason, so offering one here would invite a 422 the
+     * supervisor cannot act on — the reason is filtered where the choice is
+     * made, not only where it is checked.
+     *
+     * A function rather than a list because the AMEND drawer reopens a
+     * completed batch that may already NAME a reason since withdrawn: that
+     * one row stays visible and marked, and cannot be re-chosen, which is
+     * exactly what the server allows. Whether an amendment should be able to
+     * keep it is an owner question, not this picker's to answer.
+     */
+    const scrapReasonOptionsFor = (chosenId: number | null | undefined) =>
+        activePickerOptions(scrapReasons?.data, {
+            isActive: (r) => r.is_active,
+            option: (r) => ({ value: r.id, label: `${r.code} — ${r.name}` }),
+            keep: chosenId,
+        });
     const downtimeReasonOptions =
         downtimeReasons?.data.filter((r) => r.is_active).map((r) => ({ value: r.id, label: r.description })) ?? [];
     const employeeOptions =
@@ -2337,19 +2357,11 @@ export default function ShiftProductionEntryPage() {
             setCancelReason('');
             message.success('Batch cancelled. The machine is free.');
         },
-        onError: (error: any) => {
-            const errors = error?.response?.data?.errors;
-            Modal.error({
-                // The server is the authority on whether a batch may still be
-                // withdrawn — a quality check recorded a second ago closes the
-                // door, and it says so by name. Surfacing its words beats a
-                // generic failure the supervisor cannot act on.
-                title: 'Could not cancel this batch',
-                content: errors
-                    ? Object.values(errors).flat().join(' ')
-                    : (error?.response?.data?.message ?? 'Please try again.'),
-            });
-        },
+        // The server is the authority on whether a batch may still be
+        // withdrawn — a quality check recorded a second ago closes the door,
+        // and it says so by name. Surfacing its words beats a generic failure
+        // the supervisor cannot act on.
+        onError: (error: unknown) => showApiError(error, 'Could not cancel this batch', 'Please try again.'),
     });
 
     const startMutation = useMutation({
@@ -4479,7 +4491,12 @@ export default function ShiftProductionEntryPage() {
             // server is the one place that knows which item, which store and
             // which figures, and a sentence reworded here is a sentence that
             // stops matching what the backend can actually explain.
-            const fieldMessages: string[] = body?.errors ? (Object.values(body.errors).flat() as string[]) : [];
+            // Read through the SHARED reader, which keeps the field key each
+            // message belongs to — this handler used to flatten them away like
+            // the six converted with it. The drawer keeps its own words around
+            // the list, because "nothing you typed was lost" is this screen's
+            // promise and no generic modal can make it.
+            const parts = apiErrorParts(error, 'Someone may have already completed this batch — refresh and try again.');
 
             // THE ONE REFUSAL THAT HAS AN ANSWER ON THIS SCREEN. The server
             // keys it on `material_consumptions` and only ever raises it from
@@ -4496,19 +4513,21 @@ export default function ShiftProductionEntryPage() {
             Modal.error({
                 title: 'Could not complete batch',
                 content:
-                    fieldMessages.length > 0 ? (
+                    parts.fields.length > 0 ? (
                         <>
                             <Typography.Paragraph style={{ marginBottom: 8 }}>
                                 Nothing was submitted and nothing you typed was lost. Fix these, then press Complete Batch again:
                             </Typography.Paragraph>
                             <ul style={{ margin: 0, paddingLeft: 18 }}>
-                                {fieldMessages.map((message) => (
-                                    <li key={message}>{message}</li>
+                                {parts.fields.map((field) => (
+                                    <li key={field.field}>
+                                        <strong>{field.label}</strong>: {field.messages.join(' ')}
+                                    </li>
                                 ))}
                             </ul>
                         </>
                     ) : (
-                        (body?.message ?? 'Someone may have already completed this batch — refresh and try again.')
+                        parts.message
                     ),
             });
         },
@@ -7021,7 +7040,15 @@ export default function ShiftProductionEntryPage() {
                             <Controller
                                 name="scrap_reason_id"
                                 control={completeForm.control}
-                                render={({ field }) => <Select {...field} options={scrapReasonOptions} showSearch optionFilterProp="label" allowClear />}
+                                render={({ field }) => (
+                                    <Select
+                                        {...field}
+                                        options={scrapReasonOptionsFor(field.value)}
+                                        showSearch
+                                        optionFilterProp="label"
+                                        allowClear
+                                    />
+                                )}
                             />
                         </Form.Item>
                     )}

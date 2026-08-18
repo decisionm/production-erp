@@ -4,7 +4,8 @@ import { Button, Form, InputNumber, Modal, Select, Space, Table, Typography } fr
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { allocateLeaveBalance, listAllEmployees, listLeaveBalances, listLeaveTypes } from '@/features/hrms/api';
+import { activePickerOptions } from '@/components/configuration/pickerOptions';
+import { allocateLeaveBalance, listAllEmployees, listAllLeaveTypes, listLeaveBalances } from '@/features/hrms/api';
 import type { LeaveBalance } from '@/features/hrms/types';
 
 const currentYear = new Date().getFullYear();
@@ -23,10 +24,15 @@ export default function LeaveBalancesPage() {
 
     const { data, isLoading } = useQuery({ queryKey: ['hrms', 'leave-balances'], queryFn: listLeaveBalances });
     const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: listAllEmployees });
-    const { data: leaveTypes } = useQuery({ queryKey: ['hrms', 'leave-types'], queryFn: listLeaveTypes });
+    const { data: leaveTypes } = useQuery({ queryKey: ['hrms', 'leave-types', 'all'], queryFn: listAllLeaveTypes });
 
     const employeeOptions = employees?.data.map((e) => ({ value: e.id, label: `${e.employee_code} — ${e.name}` })) ?? [];
-    const leaveTypeOptions = leaveTypes?.data.map((t) => ({ value: t.id, label: `${t.code} — ${t.name}` })) ?? [];
+    // WS-B: a WITHDRAWN leave type is refused by the server, so it is no
+    // longer offered here. Leave already taken under it still reads back.
+    const leaveTypeOptions = activePickerOptions(leaveTypes?.data, {
+        isActive: (t) => t.is_active,
+        option: (t) => ({ value: t.id, label: `${t.code} — ${t.name}` }),
+    });
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<AllocateFormValues>({
         resolver: zodResolver(allocateSchema),

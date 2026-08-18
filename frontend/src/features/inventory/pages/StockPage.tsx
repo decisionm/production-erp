@@ -21,6 +21,7 @@ import {
 } from '@/features/inventory/api';
 import type { StockBalance } from '@/features/inventory/types';
 import { formatDateTime } from '@/lib/datetime';
+import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { itemLabel } from '@/lib/itemLabel';
 
 const movementTypeColor: Record<string, string> = {
@@ -86,8 +87,19 @@ export default function StockPage() {
     const { data: batches } = useQuery({ queryKey: ['inventory', 'batches'], queryFn: () => listBatches() });
     const { data: serialNumbers } = useQuery({ queryKey: ['inventory', 'serial-numbers'], queryFn: () => listSerialNumbers() });
 
-    const itemOptions = items?.data.map((item) => ({ value: item.id, label: itemLabel(item) })) ?? [];
-    const warehouseOptions = warehouses?.data.map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })) ?? [];
+    // WS-B: Item and Warehouse are filtered on every stock WRITE path now
+    // (receipt, issue, transfer), so the three modals below stop offering a
+    // retired item or a retired store. Only the modals use these lists — the
+    // balances table and the movement history read whatever the ledger
+    // recorded, retired or not, and must keep doing so.
+    const itemOptions = activePickerOptions(items?.data, {
+        isActive: (item) => item.is_active,
+        option: (item) => ({ value: item.id, label: itemLabel(item) }),
+    });
+    const warehouseOptions = activePickerOptions(warehouses?.data, {
+        isActive: (w) => w.is_active,
+        option: (w) => ({ value: w.id, label: `${w.code} — ${w.name}` }),
+    });
 
     /**
      * DO THESE ROWS CARRY RATES AT ALL — the server's answer, honoured locally

@@ -5,6 +5,7 @@ namespace App\Modules\Production\Models;
 use App\Models\User;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Production\Models\Enums\ConfigurationStatus;
+use App\Support\Configuration\Concerns\RecordsConfigurationAudit;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -26,6 +27,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 ])]
 class ProductionConfiguration extends Model
 {
+    use RecordsConfigurationAudit;
     use SoftDeletes;
 
     protected function casts(): array

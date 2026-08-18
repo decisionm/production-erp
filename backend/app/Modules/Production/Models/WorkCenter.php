@@ -2,6 +2,7 @@
 
 namespace App\Modules\Production\Models;
 
+use App\Support\Configuration\Concerns\RecordsConfigurationAudit;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -17,6 +18,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 ])]
 class WorkCenter extends Model
 {
+    use RecordsConfigurationAudit;
     use SoftDeletes;
 
     protected function casts(): array

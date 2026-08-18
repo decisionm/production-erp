@@ -3,6 +3,7 @@
 namespace App\Modules\Sales\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreSalesOrderRequest extends FormRequest
 {
@@ -14,7 +15,8 @@ class StoreSalesOrderRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'customer_id' => ['required', 'integer', 'exists:customers,id'],
+            // WS-B: no new order for a customer the factory has retired.
+            'customer_id' => ['required', 'integer', Rule::exists('customers', 'id')->where('is_active', true)],
             'order_date' => ['required', 'date'],
             'expected_date' => ['nullable', 'date', 'after_or_equal:order_date'],
             'notes' => ['nullable', 'string'],

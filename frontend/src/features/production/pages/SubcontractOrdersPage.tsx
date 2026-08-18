@@ -4,6 +4,7 @@ import { Button, Descriptions, Drawer, Form, InputNumber, Modal, Select, Space, 
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
+import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { listAllItems, listAllWarehouses } from '@/features/inventory/api';
 import { listAllVendors } from '@/features/procurement/api';
 import {
@@ -46,7 +47,11 @@ export default function SubcontractOrdersPage() {
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
     const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses', 'all'], queryFn: listAllWarehouses });
 
-    const vendorOptions = vendors?.data.map((v) => ({ value: v.id, label: `${v.code} — ${v.name}` })) ?? [];
+    // WS-B: no new subcontract work for a vendor the factory has retired.
+    const vendorOptions = activePickerOptions(vendors?.data, {
+        isActive: (v) => v.is_active,
+        option: (v) => ({ value: v.id, label: `${v.code} — ${v.name}` }),
+    });
     const itemOptions = items?.data.map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
     const warehouseOptions = warehouses?.data.map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })) ?? [];
 

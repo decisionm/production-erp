@@ -15,7 +15,9 @@ class StoreMaintenanceWorkOrderRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'asset_id' => ['required', 'integer', 'exists:assets,id'],
+            // WS-B: a RETIRED asset takes no new work order;
+            // `under_maintenance` must and does still pass.
+            'asset_id' => ['required', 'integer', Rule::exists('assets', 'id')->whereNot('status', 'retired')],
             'type' => ['required', Rule::in(['preventive', 'corrective'])],
             'description' => ['nullable', 'string'],
             'reported_date' => ['nullable', 'date'],

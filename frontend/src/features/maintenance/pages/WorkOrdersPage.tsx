@@ -7,6 +7,7 @@ import { z } from 'zod';
 import BarcodeScanInput from '@/components/barcode/BarcodeScanInput';
 import { hasModuleAccess } from '@/features/auth/permissions';
 import { useAuthStore } from '@/features/auth/store';
+import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { listAllEmployees } from '@/features/hrms/api';
 import { listAllItems, listAllWarehouses } from '@/features/inventory/api';
 import {
@@ -14,7 +15,7 @@ import {
     cancelMaintenanceWorkOrder,
     completeMaintenanceWorkOrder,
     createMaintenanceWorkOrder,
-    listAssets,
+    listAllAssets,
     listMaintenanceWorkOrders,
     startMaintenanceWorkOrder,
 } from '@/features/maintenance/api';
@@ -61,15 +62,29 @@ export default function WorkOrdersPage() {
     const user = useAuthStore((s) => s.user);
 
     const { data, isLoading } = useQuery({ queryKey: ['maintenance', 'work-orders'], queryFn: () => listMaintenanceWorkOrders() });
-    const { data: assets } = useQuery({ queryKey: ['maintenance', 'assets'], queryFn: listAssets });
+    const { data: assets } = useQuery({ queryKey: ['maintenance', 'assets', 'all'], queryFn: listAllAssets });
     const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: listAllEmployees });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
     const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses', 'all'], queryFn: listAllWarehouses });
 
-    const assetOptions = assets?.data.map((a) => ({ value: a.id, label: `${a.code} — ${a.name}` })) ?? [];
+    // WS-B: a RETIRED asset takes no new maintenance work. `under_maintenance`
+    // deliberately stays selectable — an asset being worked on is exactly the
+    // asset maintenance is planned for, and the server says the same.
+    const assetOptions = activePickerOptions(assets?.data, {
+        isActive: (a) => a.status !== 'retired',
+        option: (a) => ({ value: a.id, label: `${a.code} — ${a.name}` }),
+    });
     const employeeOptions = employees?.data.map((e) => ({ value: e.id, label: `${e.employee_code} — ${e.name}` })) ?? [];
-    const itemOptions = items?.data.map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];
-    const warehouseOptions = warehouses?.data.map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })) ?? [];
+    // WS-B: drawing a spare is a stock issue, so Add Part obeys the same
+    // active-item / active-store rule the stock paths do.
+    const itemOptions = activePickerOptions(items?.data, {
+        isActive: (i) => i.is_active,
+        option: (i) => ({ value: i.id, label: `${i.sku} — ${i.name}` }),
+    });
+    const warehouseOptions = activePickerOptions(warehouses?.data, {
+        isActive: (w) => w.is_active,
+        option: (w) => ({ value: w.id, label: `${w.code} — ${w.name}` }),
+    });
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['maintenance', 'work-orders'] });
 

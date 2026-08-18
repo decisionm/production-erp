@@ -26,6 +26,7 @@ import type { FormInstance } from 'antd';
 import dayjs from 'dayjs';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { listAllItems } from '@/features/inventory/api';
 import {
     buildStartBatchReturnUrl,
@@ -79,6 +80,7 @@ import type {
     StandardSpecColumn,
 } from '@/features/production/types';
 import { itemLabel } from '@/lib/itemLabel';
+import { showApiError } from '@/lib/showApiError';
 
 /**
  * THE PRODUCT CONFIGURATION WORKSPACE — one screen that answers, for every
@@ -252,19 +254,11 @@ function ProvisionalSkuTag({ item }: { item: Parameters<typeof provisionalSkuTag
     );
 }
 
-const showSaveError = (error: any, title: string) => {
-    const errors = error?.response?.data?.errors;
-    Modal.error({
-        title,
-        // Field-level messages say exactly what the backend refused and why —
-        // a cavity count outside the machine's capability, an overlapping
-        // approval, an attach that collides with an existing variant. All are
-        // real answers, not "unexpected error".
-        content: errors
-            ? Object.values(errors).flat().join(' ')
-            : (error?.response?.data?.message ?? 'Unexpected error.'),
-    });
-};
+// Field-level messages say exactly what the backend refused and why — a
+// cavity count outside the machine's capability, an overlapping approval, an
+// attach that collides with an existing variant. All are real answers, not
+// "unexpected error", and each now prints under the field key it belongs to.
+const showSaveError = (error: unknown, title: string) => showApiError(error, title);
 
 // ---------------------------------------------------------------------------
 // The gaps, and where each one is closed
@@ -684,12 +678,23 @@ function MachineExceptionModal({
                 <Row gutter={12}>
                     <Col xs={24} sm={12}>
                         <Form.Item name="mold_id" label="Mould (optional)">
+                            {/* WS-B: a RETIRED mould cannot govern a new
+                                configuration, so it is not offered. An
+                                existing draft that already names one keeps it
+                                on screen, marked and unselectable — the server
+                                lets an edit RE-POINT a retired mould but never
+                                keep it, and this picker says the same thing
+                                before the save is attempted. */}
                             <Select
                                 allowClear
                                 showSearch
                                 optionFilterProp="label"
                                 loading={molds.isLoading}
-                                options={(molds.data?.data ?? []).map((m) => ({ value: m.id, label: m.name }))}
+                                options={activePickerOptions(molds.data?.data, {
+                                    isActive: (m) => m.status !== 'retired',
+                                    option: (m) => ({ value: m.id, label: m.name }),
+                                    keep: configuration?.mold?.id ?? null,
+                                })}
                             />
                         </Form.Item>
                     </Col>

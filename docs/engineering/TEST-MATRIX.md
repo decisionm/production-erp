@@ -330,3 +330,27 @@ Q43) · authorization · audit trail (zero activity-log assertions exist today) 
 Tally-linked safety · **T16** the append-only surfaces still answer 405/404 after the
 convention change · **T17** the error contract itself (`code`, `blocking[].count`,
 `alternative`).
+
+## Phase 7.6 (feat/phase-7.6-configuration-lifecycle, gate closed 2026-08-17)
+
+| Suite | Result | Evidence |
+|---|---|---|
+| Pint (whole tree) | PASS | clean |
+| Backend PHPUnit | PASS | **1,766 / 15,925** (1 skipped by design: CecGoldenTest); Phase 7 close 1,670 |
+| Backend — the mechanism on **both drivers** | PASS | its own 41 tests pass on sqlite AND on a real MySQL 8, no driver skips — the schema backstop is implemented twice (PRAGMA / information_schema) and tested twice |
+| Frontend vitest | PASS | 383 → **456** |
+| Typecheck · build | PASS | clean · built |
+| Factory-knowledge | PASS | exit 0 |
+| Migrations | 1, additive + reversible | created_by/updated_by on the ten Tier-1 configuration tables only; per-column guard; down() drops only what it added |
+| Red-before / green-after | PROVEN | the reviewer's empty-checks employee deletion (attendance row destroyed → now refused); the per-table matcher written first and caught by the two-column masterbatch case; `archive()` writing `"0"` into an enum status; 12 induced failures on the auth seam |
+| Sonnet independent QA | PASS_WITH_DEFERRED | reproduced counts; own cascade, fail-closed and TOCTOU tests |
+| Adversarial review | Opus **FAIL** (the cascade P1 + 8) · Fable PASS_WITH_DEFERRED (8) → fixed | **all three reviewers independently found the same P1** |
+| Sonnet **re-gate** | **PASS_WITH_DEFERRED** (1 P2 + 3 P3, all fixed after) | archive/activate now enforce their own abilities; the refusal's offer matches its sentence |
+| Browser proof | NOT DONE (extension disconnected) | nothing is wired to a screen yet — Phase 8's chain D |
+| API proof | N/A this pass | no route is exposed; the mechanism is proved at the service layer |
+
+### Coverage gaps closed this phase
+The delete guard cannot be defeated by an incomplete declaration — the schema is asked and a gap is a refusal · per-column cascade coverage · soft-deleted children count · status-enum masters can be archived at all · a fail-closed authority seam for the Super-Admin-only delete · the audit trail exists for the first time (activitylog was installed and idle) · **eleven active flags that were set but filtered nowhere — a retired mould and a withdrawn scrap reason were selectable on the floor** · the pickers narrowed to match · the append-only claim in routes/api.php corrected from false to scoped-and-true.
+
+### Still open (from the baseline list)
+No entity is wired and no route exposed — the next wave, carrying the Super-Admin grant (**and the repo has no Super Admin construct today**). Tier-1 entity rows are not yet green. Q43 owns duplicate NAMES; Q51 gates warehouse consolidation.

@@ -4,7 +4,8 @@ import { Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Tab
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { createMaintenanceSchedule, generateDueWorkOrders, listAssets, listMaintenanceSchedules } from '@/features/maintenance/api';
+import { activePickerOptions } from '@/components/configuration/pickerOptions';
+import { createMaintenanceSchedule, generateDueWorkOrders, listAllAssets, listMaintenanceSchedules } from '@/features/maintenance/api';
 import type { MaintenanceSchedule } from '@/features/maintenance/types';
 
 const scheduleSchema = z.object({
@@ -20,8 +21,14 @@ export default function SchedulesPage() {
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['maintenance', 'schedules'], queryFn: () => listMaintenanceSchedules() });
-    const { data: assets } = useQuery({ queryKey: ['maintenance', 'assets'], queryFn: listAssets });
-    const assetOptions = assets?.data.map((a) => ({ value: a.id, label: `${a.code} — ${a.name}` })) ?? [];
+    const { data: assets } = useQuery({ queryKey: ['maintenance', 'assets', 'all'], queryFn: listAllAssets });
+    // WS-B: a RETIRED asset takes no new maintenance work. `under_maintenance`
+    // deliberately stays selectable — an asset being worked on is exactly the
+    // asset maintenance is planned for, and the server says the same.
+    const assetOptions = activePickerOptions(assets?.data, {
+        isActive: (a) => a.status !== 'retired',
+        option: (a) => ({ value: a.id, label: `${a.code} — ${a.name}` }),
+    });
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<ScheduleFormValues>({
         resolver: zodResolver(scheduleSchema),

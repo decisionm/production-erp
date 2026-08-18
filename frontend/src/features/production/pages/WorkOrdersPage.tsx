@@ -4,6 +4,7 @@ import { Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Mod
 import { useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
+import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { listAllItems, listAllWarehouses } from '@/features/inventory/api';
 import { completeWorkOrder, createWorkOrder, listAllScrapReasons, listWorkOrders, releaseWorkOrder } from '@/features/production/api';
 import type { WorkOrder, WorkOrderStatus } from '@/features/production/types';
@@ -49,7 +50,13 @@ export default function WorkOrdersPage() {
 
     const itemOptions = items?.data.map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
     const warehouseOptions = warehouses?.data.map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })) ?? [];
-    const scrapReasonOptions = scrapReasons?.data.map((r) => ({ value: r.id, label: `${r.code} — ${r.name}` })) ?? [];
+    // WS-B: `CompleteWorkOrderRequest` refuses a WITHDRAWN scrap reason, so
+    // the picker that feeds it stops offering one. A completion always writes
+    // NEW scrap lines, so there is no historical row to keep visible here.
+    const scrapReasonOptions = activePickerOptions(scrapReasons?.data, {
+        isActive: (r) => r.is_active,
+        option: (r) => ({ value: r.id, label: `${r.code} — ${r.name}` }),
+    });
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['production', 'work-orders'] });
 

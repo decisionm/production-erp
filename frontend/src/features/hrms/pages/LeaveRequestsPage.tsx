@@ -4,12 +4,13 @@ import { Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Mod
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
+import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import {
     approveLeaveRequest,
     createLeaveRequest,
     listAllEmployees,
+    listAllLeaveTypes,
     listLeaveRequests,
-    listLeaveTypes,
     rejectLeaveRequest,
 } from '@/features/hrms/api';
 import type { LeaveRequest, LeaveRequestStatus } from '@/features/hrms/types';
@@ -37,10 +38,15 @@ export default function LeaveRequestsPage() {
 
     const { data, isLoading } = useQuery({ queryKey: ['hrms', 'leave-requests'], queryFn: listLeaveRequests });
     const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: listAllEmployees });
-    const { data: leaveTypes } = useQuery({ queryKey: ['hrms', 'leave-types'], queryFn: listLeaveTypes });
+    const { data: leaveTypes } = useQuery({ queryKey: ['hrms', 'leave-types', 'all'], queryFn: listAllLeaveTypes });
 
     const employeeOptions = employees?.data.map((e) => ({ value: e.id, label: `${e.employee_code} — ${e.name}` })) ?? [];
-    const leaveTypeOptions = leaveTypes?.data.map((t) => ({ value: t.id, label: `${t.code} — ${t.name}` })) ?? [];
+    // WS-B: a WITHDRAWN leave type is refused by the server, so it is no
+    // longer offered here. Leave already taken under it still reads back.
+    const leaveTypeOptions = activePickerOptions(leaveTypes?.data, {
+        isActive: (t) => t.is_active,
+        option: (t) => ({ value: t.id, label: `${t.code} — ${t.name}` }),
+    });
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<RequestFormValues>({
         resolver: zodResolver(requestSchema),

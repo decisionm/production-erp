@@ -29,7 +29,7 @@ PHASE 5.7 Shift Summary + CEC infrastructure   PASS WITH DEFERRED · PR #188 (st
 PHASE 6   Purchase chain + PO→Tally staged      PASS WITH DEFERRED · PR #189 (stacked on #188) · lifecycle/show/trace · flag OFF (Q35) · Q48
 PHASE 7   Regression + hardening               INTEGRATED (gate pending) · PR #190 (stacked on #189) · suite green on sqlite AND MySQL 8 · Q49
 PHASE 7.5 Store → Production material flow     NEW (lead, 17-Aug): Material Request → Store Issue → Issued-to-Production → Consumption → Return; Day Bin leaves the target workflow
-PHASE 7.6 Configuration Lifecycle Contract     NEW (lead, 17-Aug): Create·View·Edit·Activate/Deactivate·Safe Delete·Audit, enforced in the BACKEND, across every master
+PHASE 7.6 Configuration Lifecycle Contract     Tier 0 PASS WITH DEFERRED · PR #191 (stacked on #190) · mechanism + schema backstop + 11 live flag fixes + audit trail; no entity wired yet
 PHASE 8   END-TO-END ACCEPTANCE: operator workflow, then accounting traceability, purchase chain, sales visibility + downloads
 ──────────────────────────────────────────────────────────────────────
 HELD      Sales in ERP · CEC format · reconciliation-by-read · SKU format · Q33 (490/box) · Q35 (PO live write)
@@ -293,19 +293,25 @@ Store Stock → Production Material Request → Store Issue → Scan/Handover
 | **P7.5-06** Consumption traces back to its Store issue | trace tests |
 | **P7.5-07** Day Bin retired from the target workflow: the live write doors closed, historical rows preserved and still readable, every reader migrated or explicitly retired | no data destroyed; readers named |
 
-**HELD — one clause needs the owner (FC-01).** The lead also asks that consumption trace
-to *the exact lot/bag*, and that a request may name a machine/area. `FACTORY-CONSTITUTION`
-**FC-01** — sourced to the owner's own rulings of 01–06 Aug and reaffirmed in the owner's
-06-Aug architecture brief — says the opposite in terms: *all machines draw from one common
-resin loading point; a resin bag must never be represented as physically assigned to a
-machine or a batch; batch consumption is calculated and the system must not claim physical
-bag-to-machine or bag-to-batch provenance.* Everything else in this phase is compatible
-with FC-01 (indeed FC-01 itself says a bag scan is a pour record, **not** consumption —
-which is exactly the Store-issue-is-not-consumption rule). Only the bag→batch/machine
-**provenance claim** collides. It is recorded as an owner question and **not built on an
-agent's judgement**: either the owner supersedes FC-01 with a new decision (because the
-floor now issues per machine/area), or consumption traces to the ISSUE and bag-level
-identity stops at the store handover.
+**RESOLVED — no clause is held (17-Aug-2026).** The required provenance chain
+(bag/barcode → lot → quantity/weight → material request → issue → received by →
+production consumption/return) was checked link by link against **FC-01** and conflicts
+with none of it — FC-01's own second clause ("a bag scan is a pour record, not
+consumption") *agrees* with the store-issue-is-not-consumption rule. **FC-01 is not
+weakened and the whole chain is built.** Two guardrails keep it compatible: a **resin**
+request carries no machine or area (one common piped loading point — DEC-20260807-006),
+while consumable requests do; and the trace from a batch stops at the **issue** — the ERP
+says which bags were issued to production, by whom, when and against which request, never
+"this batch used this bag". Batch consumption stays calculated. (Rates, amounts and vendor
+identity are **FC-06**, a different rule, and are separated as they always were.)
+
+**DEC-20260817-001 settles the locations:** `Raw Material Store → Production/WIP →
+Finished Goods Store`, **no Day Bin**, and Production/WIP is the location holding material
+issued to production but not yet consumed. A `WIP` warehouse row already exists and
+carries history — it is reused, never duplicated. Additional warehouses stay configurable
+only for a genuine additional physical or business location. Every destructive step on the
+duplicate rows (FG/FG-STORE, RM/RM-STORE) stays gated until dependency and stock history
+are proven per row.
 
 ### Phase 7.6 — The Configuration Lifecycle Contract (lead's requirement, 17-Aug-2026)
 
@@ -325,6 +331,18 @@ RM / RM-STORE) are one test case of it.
 | **P7.6-04** The refusal EXPLAINS itself, with counts: "Cannot delete — used by 12 stock movements and 2 production batches. Deactivate instead." A `can` block on every configuration resource so the UI never re-derives eligibility | contract test on the error shape |
 | **P7.6-05** Duplicate prevention: exact unique business codes where appropriate, normalised comparison where appropriate, WARN on likely duplicate names. Never auto-merge; **never merge records carrying transaction history without explicit evidence and an owner decision** | tests |
 | **P7.6-06** The lifecycle test matrix: create · edit unused · delete unused · direct API delete unused · delete referenced → refused · direct API delete referenced → refused · deactivate referenced · inactive excluded from new operational selection · historical transactions still display the inactive configuration · reactivate where allowed · duplicate code refused · likely duplicate name handled · authorization · audit trail · Tally-linked configuration safety | one matrix, every applicable module |
+
+**DEC-20260817-002 settles the contract's open points (17-Aug-2026):** hard delete IS
+required, but only for records proven never-used and dependency-free. An **archived record
+retains and reserves its business code** — historical codes are never reused — so today's
+global uniqueness (including soft-deleted rows) is correct and STAYS; only a genuinely
+unused hard-deleted row releases its code. **Hard delete is Super Admin / Owner level
+only**; everyone else creates, edits, activates and deactivates per RBAC. Archiving causes
+**no automatic Tally mutation** — historical identity and mapping are preserved and any
+Tally master change is a separate explicit act. And "ever used" means historical
+references, maintenance schedules and every other dependency, not merely current foreign
+keys: **where historical use cannot be safely proven for legacy data the system refuses
+the hard delete and offers Archive only.** The mechanism is fail-closed by decision.
 
 **Convention note the reviewer must see, not have slipped past them:** `routes/api.php`
 declares the repo append-only with no PUT and no DELETE anywhere, and CLAUDE.md says
@@ -388,7 +406,9 @@ is **not called complete** while a BLOCKED link remains.
 | Committing XML/exports to the repo | Q31, Q38 |
 | Finance / CRM surfaces | DEC-20260812-001 |
 | ERP sales-document lifecycle defaults | Q44 |
-| Bag → batch / machine consumption provenance (Phase 7.5) | Collides with **FC-01**; either a new owner decision superseding it, or consumption traces to the ISSUE and bag identity stops at the store handover |
-| Merging any two masters that already carry transaction history (e.g. the duplicate warehouses) | Explicit evidence + an owner decision; never an agent's call |
+| ~~Bag → batch provenance~~ | **RESOLVED 17-Aug** — no conflict with FC-01 for the chain as specified; consumption traces to the ISSUE, batch consumption stays calculated. Nothing held |
+| ~~Configuration lifecycle open points~~ | **ANSWERED** DEC-20260817-002 |
+| ~~Which warehouse rows are real~~ | **ANSWERED** DEC-20260817-001 — RM Store → Production/WIP → FG Store, no Day Bin |
+| **Merging** any two masters that already carry transaction history (the duplicate warehouses) | STILL HELD — DEC-20260817-001 gates it until dependency and stock history are proven per row, with a dry run; never an agent's call |
 
 ---

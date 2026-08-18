@@ -3,6 +3,7 @@
 namespace App\Modules\Inventory\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreStockTransferRequest extends FormRequest
 {
@@ -14,9 +15,11 @@ class StoreStockTransferRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'item_id' => ['required', 'integer', 'exists:items,id'],
-            'from_warehouse_id' => ['required', 'integer', 'exists:warehouses,id', 'different:to_warehouse_id'],
-            'to_warehouse_id' => ['required', 'integer', 'exists:warehouses,id'],
+            // WS-B: both ends of a transfer must be live stores, and the
+            // item still on the catalogue.
+            'item_id' => ['required', 'integer', Rule::exists('items', 'id')->where('is_active', true)],
+            'from_warehouse_id' => ['required', 'integer', Rule::exists('warehouses', 'id')->where('is_active', true), 'different:to_warehouse_id'],
+            'to_warehouse_id' => ['required', 'integer', Rule::exists('warehouses', 'id')->where('is_active', true)],
             'quantity' => ['required', 'numeric', 'gt:0'],
             'batch_id' => ['nullable', 'integer', 'exists:batches,id'],
             'serial_number_id' => ['nullable', 'integer', 'exists:serial_numbers,id'],
