@@ -89,6 +89,7 @@ use App\Modules\Sales\Http\Controllers\DeliveryController;
 use App\Modules\Sales\Http\Controllers\InvoiceController;
 use App\Modules\Sales\Http\Controllers\SalesCostInsightController;
 use App\Modules\Sales\Http\Controllers\SalesOrderController;
+use App\Modules\Sales\Http\Controllers\SalesTallyMirrorController;
 use App\Modules\TallySync\Http\Controllers\TallySettingsController;
 use App\Modules\TallySync\Http\Controllers\TallyStockSnapshotController;
 use App\Modules\TallySync\Http\Controllers\TallySyncAgentController;
@@ -197,15 +198,25 @@ Route::prefix('v1')->group(function () {
         Route::prefix('sales')->middleware('module:sales')->group(function () {
             Route::apiResource('customers', CustomerController::class)->only(['index', 'store', 'update']);
 
-            Route::apiResource('sales-orders', SalesOrderController::class)->only(['index', 'store']);
+            // Phase 3.5 — the honesty statement the Sales pages render: Tally-
+            // side Sales / Sales Order vouchers are NOT mirrored here
+            // (DEC-20260809-003). Read-only; a bare object, not a row.
+            Route::get('tally-mirror', [SalesTallyMirrorController::class, 'show']);
+
+            // index takes the ListSalesOrdersRequest filters; show carries the
+            // document's trace (deliveries with cartons, invoices, Tally links).
+            Route::apiResource('sales-orders', SalesOrderController::class)->only(['index', 'store', 'show']);
             Route::post('sales-orders/{sales_order}/confirm', [SalesOrderController::class, 'confirm']);
+            // Cancel: draft/confirmed, nothing delivered, nothing invoiced —
+            // else 422. Touches no stock, queues nothing for Tally.
+            Route::post('sales-orders/{sales_order}/cancel', [SalesOrderController::class, 'cancel']);
             // Honest cost visibility: an estimate for every line, an actual
             // only where an approved batch really stands behind it. Read-only.
             Route::get('sales-orders/{sales_order}/cost-insight', [SalesCostInsightController::class, 'show']);
 
-            Route::apiResource('deliveries', DeliveryController::class)->only(['index', 'store']);
+            Route::apiResource('deliveries', DeliveryController::class)->only(['index', 'store', 'show']);
 
-            Route::apiResource('invoices', InvoiceController::class)->only(['index', 'store']);
+            Route::apiResource('invoices', InvoiceController::class)->only(['index', 'store', 'show']);
             Route::post('invoices/{invoice}/issue', [InvoiceController::class, 'issue']);
         });
 

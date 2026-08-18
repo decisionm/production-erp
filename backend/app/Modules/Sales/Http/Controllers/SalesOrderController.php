@@ -3,19 +3,31 @@
 namespace App\Modules\Sales\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Sales\Http\Requests\ListSalesOrdersRequest;
 use App\Modules\Sales\Http\Requests\StoreSalesOrderRequest;
 use App\Modules\Sales\Http\Resources\SalesOrderResource;
 use App\Modules\Sales\Models\SalesOrder;
+use App\Modules\Sales\Services\SalesDocumentQuery;
 use App\Modules\Sales\Services\SalesOrderService;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class SalesOrderController extends Controller
 {
-    public function __construct(private readonly SalesOrderService $orders) {}
+    public function __construct(
+        private readonly SalesOrderService $orders,
+        private readonly SalesDocumentQuery $query,
+    ) {}
 
-    public function index(): AnonymousResourceCollection
+    public function index(ListSalesOrdersRequest $request): AnonymousResourceCollection
     {
-        return SalesOrderResource::collection($this->orders->paginate());
+        $filters = $request->validated();
+
+        return SalesOrderResource::collection($this->orders->paginate($this->query->perPage($filters), $filters));
+    }
+
+    public function show(SalesOrder $salesOrder): SalesOrderResource
+    {
+        return SalesOrderResource::make($this->orders->show($salesOrder));
     }
 
     public function store(StoreSalesOrderRequest $request): SalesOrderResource
@@ -28,5 +40,10 @@ class SalesOrderController extends Controller
     public function confirm(SalesOrder $salesOrder): SalesOrderResource
     {
         return SalesOrderResource::make($this->orders->confirm($salesOrder));
+    }
+
+    public function cancel(SalesOrder $salesOrder): SalesOrderResource
+    {
+        return SalesOrderResource::make($this->orders->cancel($salesOrder));
     }
 }

@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Collapse, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, Collapse, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
@@ -13,6 +13,10 @@ import {
     listCustomers,
     listSalesOrders,
 } from '@/features/sales/api';
+import { hasActiveFilters } from '@/features/sales/filters';
+import SalesDocumentDrawer from '@/features/sales/SalesDocumentDrawer';
+import SalesFilterBar from '@/features/sales/SalesFilterBar';
+import TallyMirrorPanel from '@/features/sales/TallyMirrorPanel';
 import type {
     SalesCostActualSource,
     SalesCostComponent,
@@ -23,8 +27,10 @@ import type {
     SalesOrderStatus,
 } from '@/features/sales/types';
 import { salesRateSourceLabel } from '@/features/sales/types';
+import { useSalesListParams } from '@/features/sales/useSalesListParams';
 import { formatDate } from '@/lib/datetime';
 import { itemLabel } from '@/lib/itemLabel';
+import { INVOICED_CAPTION, listEmptyText } from '@/features/sales/drawer';
 
 const orderSchema = z.object({
     customer_id: z.number({ error: 'Customer is required' }),
@@ -455,10 +461,18 @@ function OrderCostSection({ orderId }: { orderId: number }) {
 
 export default function SalesOrdersPage() {
     const [modalOpen, setModalOpen] = useState(false);
-    const [detailOrder, setDetailOrder] = useState<SalesOrder | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['sales', 'sales-orders'], queryFn: listSalesOrders });
+    // The filters, the page and the open drawer all live in the URL — a
+    // pasted link is the same view. The server does the narrowing.
+    const { filters, setFilters, setPage, target, openTarget, closeTarget } = useSalesListParams('sales_order');
+    const filtersActive = hasActiveFilters('sales_order', filters);
+
+    const { data, isLoading, isPending, isError, error } = useQuery({
+        queryKey: ['sales', 'sales-orders', 'list', filters],
+        queryFn: () => listSalesOrders(filters),
+        placeholderData: (previous) => previous,
+    });
     const { data: customers } = useQuery({
         queryKey: ['sales', 'customers', 'picker'],
         // Explicit thunk: passing listCustomers directly would hand
@@ -497,27 +511,73 @@ export default function SalesOrdersPage() {
                 <Button type="primary" onClick={() => setModalOpen(true)}>New Sales Order</Button>
             </Space>
 
+            {/* What this list is NOT: real sales are invoiced in Tally and
+                are not mirrored here (DEC-20260809-003) — the server's own
+                words, so an empty table never reads as "no sales". */}
+            <TallyMirrorPanel />
+
+            <SalesFilterBar kind="sales_order" filters={filters} onChange={setFilters} />
+
             <Table<SalesOrder>
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                locale={{ emptyText: listEmptyText({ isPending, isError, error }, 'sales_order', filtersActive) }}
+                pagination={
+                    data?.meta
+                        ? {
+                              current: data.meta.current_page,
+                              pageSize: data.meta.per_page,
+                              total: data.meta.total,
+                              showSizeChanger: true,
+                              pageSizeOptions: [20, 50, 100],
+                              showTotal: (total) => `${total} order${total === 1 ? '' : 's'}`,
+                              onChange: (page, pageSize) => setPage(page, pageSize),
+                          }
+                        : false
+                }
                 columns={[
-                    { title: 'ID', dataIndex: 'id' },
+                    { title: 'Number', render: (_, row) => <strong>{row.document_number ?? `SO-${row.id}`}</strong> },
                     {
                         title: 'Status',
                         dataIndex: 'status',
                         render: (status: SalesOrderStatus) => <Tag color={statusColor[status]}>{status}</Tag>,
                     },
-                    { title: 'Customer', render: (_, row) => row.customer.name },
+                    { title: 'Customer', render: (_, row) => row.customer?.name ?? '—' },
                     { title: 'Order Date', dataIndex: 'order_date' },
                     { title: 'Lines', render: (_, row) => row.lines.length },
+                    {
+                        title: (
+                            <Tooltip title={INVOICED_CAPTION}>
+                                <span>Delivered / Invoiced</span>
+                            </Tooltip>
+                        ),
+                        render: (_, row) =>
+                            row.totals ? (
+                                <span style={numeric}>
+                                    {row.totals.delivered_quantity} / {row.totals.invoiced_quantity} of {row.totals.ordered_quantity}
+                                </span>
+                            ) : (
+                                '—'
+                            ),
+                    },
+                    {
+                        title: 'Docs',
+                        render: (_, row) =>
+                            row.deliveries_count !== undefined && row.invoices_count !== undefined ? (
+                                <Typography.Text type="secondary">
+                                    {row.deliveries_count} DN · {row.invoices_count} INV
+                                </Typography.Text>
+                            ) : (
+                                '—'
+                            ),
+                    },
                     {
                         title: 'Actions',
                         render: (_, row) => (
                             <Space>
-                                <Button size="small" onClick={() => setDetailOrder(row)}>
+                                <Button size="small" onClick={() => openTarget({ kind: 'sales_order', id: row.id })}>
                                     View
                                 </Button>
                                 {row.status === 'draft' && (
@@ -632,69 +692,16 @@ export default function SalesOrdersPage() {
                 </Form>
             </Modal>
 
-            <Drawer
-                title={`Sales Order #${detailOrder?.id}`}
-                open={detailOrder !== null}
-                onClose={() => setDetailOrder(null)}
-                // Widened to the same 760 this page's own order modal uses: the
-                // cost breakdown carries a rate, its unit and its provenance on
-                // one row, and 620 wrapped every one of them.
-                width="min(100vw, 760px)"
-                destroyOnHidden
-            >
-                {detailOrder && (
-                    <>
-                        <Descriptions column={1} size="small" bordered>
-                            <Descriptions.Item label="Status">
-                                <Tag color={statusColor[detailOrder.status]}>{detailOrder.status}</Tag>
-                            </Descriptions.Item>
-                            <Descriptions.Item label="Customer">{detailOrder.customer.name}</Descriptions.Item>
-                            <Descriptions.Item label="Order Date">{detailOrder.order_date}</Descriptions.Item>
-                            <Descriptions.Item label="Expected Date">{detailOrder.expected_date ?? '—'}</Descriptions.Item>
-                            <Descriptions.Item label="Notes">{detailOrder.notes ?? '—'}</Descriptions.Item>
-                        </Descriptions>
-
-                        <Typography.Title level={5} style={{ marginTop: 24 }}>
-                            Lines
-                        </Typography.Title>
-                        <Table
-                            rowKey="id"
-                            size="small"
-                            pagination={false}
-                            dataSource={detailOrder.lines}
-                            scroll={{ x: 'max-content' }}
-                            columns={[
-                                { title: 'Item', render: (_, line) => `${line.item.sku} — ${line.item.name}` },
-                                { title: 'Quantity', dataIndex: 'quantity' },
-                                { title: 'Delivered', dataIndex: 'quantity_delivered' },
-                                { title: 'Unit Price', dataIndex: 'unit_price' },
-                                {
-                                    title: 'Amount',
-                                    render: (_, line) => (Number(line.quantity) * Number(line.unit_price)).toFixed(2),
-                                },
-                            ]}
-                            summary={(lines) => {
-                                const total = lines.reduce(
-                                    (sum, line) => sum + Number(line.quantity) * Number(line.unit_price),
-                                    0,
-                                );
-                                return (
-                                    <Table.Summary.Row>
-                                        <Table.Summary.Cell index={0} colSpan={4}>
-                                            <strong>Total</strong>
-                                        </Table.Summary.Cell>
-                                        <Table.Summary.Cell index={1}>
-                                            <strong>{total.toFixed(2)}</strong>
-                                        </Table.Summary.Cell>
-                                    </Table.Summary.Row>
-                                );
-                            }}
-                        />
-
-                        <OrderCostSection orderId={detailOrder.id} />
-                    </>
-                )}
-            </Drawer>
+            {/* The trace drawer: header → lines → deliveries (with cartons) →
+                invoices → Tally state, from the show endpoint. Cost & margin
+                rides underneath, fetched only for the order being looked at
+                (see OrderCostSection). */}
+            <SalesDocumentDrawer
+                target={target}
+                onClose={closeTarget}
+                onOpen={openTarget}
+                extra={target?.kind === 'sales_order' ? <OrderCostSection orderId={target.id} /> : undefined}
+            />
         </>
     );
 }

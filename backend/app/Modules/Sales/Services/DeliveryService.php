@@ -12,6 +12,7 @@ use App\Modules\Sales\Models\Delivery;
 use App\Modules\Sales\Models\Enums\SalesOrderStatus;
 use App\Modules\Sales\Models\SalesOrder;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -23,14 +24,48 @@ use Illuminate\Validation\ValidationException;
  */
 class DeliveryService
 {
-    public function __construct(private readonly StockMovementService $stock) {}
+    /** Loaded on every delivery the service hands back, so the resource never lazy-loads. */
+    private const WITH = ['lines.item', 'warehouse', 'salesOrder.customer'];
 
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    public function __construct(
+        private readonly StockMovementService $stock,
+        private readonly SalesDocumentQuery $query,
+        private readonly SalesDocumentTraceService $trace,
+    ) {}
+
+    /**
+     * The list, filtered (Phase 3.5). $filters is the validated
+     * ListDeliveriesRequest input; an empty array is the unfiltered list —
+     * newest first, same page size as before. Every row is stamped with its
+     * Delivery Note TallyLink and its scanned-carton count (two queries for
+     * the page, through the other modules' services).
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    public function paginate(int $perPage = 20, array $filters = []): LengthAwarePaginator
     {
-        return Delivery::query()
-            ->with(['lines.item', 'warehouse', 'salesOrder.customer'])
-            ->orderByDesc('id')
-            ->paginate($perPage);
+        $query = Delivery::query()->with(self::WITH);
+
+        $this->applyFilters($query, $filters);
+        $this->query->applySort($query, $filters['sort'] ?? null, ['delivered_date']);
+
+        $page = $query->paginate($perPage)->withQueryString();
+        $this->trace->decorateDeliveries($page->getCollection());
+
+        return $page;
+    }
+
+    /**
+     * One delivery with its chain — the show endpoint: the order it fulfils
+     * (with customer), the cartons that physically left on it, and its
+     * Delivery Note link, as `trace`.
+     */
+    public function show(Delivery $delivery): Delivery
+    {
+        $this->decorate($delivery);
+        $delivery->trace = $this->trace->deliveryTrace($delivery);
+
+        return $delivery;
     }
 
     /**
@@ -114,8 +149,57 @@ class DeliveryService
             // with the dispatch.
             event(new DeliveryDispatched($delivery));
 
-            return $delivery->load(['lines.item', 'warehouse', 'salesOrder']);
+            // Decorated like a list row: the Delivery Note the event just
+            // queued is already visible on the dispatch response.
+            return $this->decorate($delivery);
         });
+    }
+
+    /**
+     * Every filter of ListDeliveriesRequest. `q` matches the delivery
+     * number in any spelling ("DN-5", "dn 5", "5"), the delivery's
+     * reference, or the customer's name or code — never notes. The date
+     * range is FACTORY days on delivered_date (a datetime), not UTC ones.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function applyFilters(Builder $query, array $filters): void
+    {
+        if (! empty($filters['customer_id'])) {
+            $query->whereHas('salesOrder', fn (Builder $order) => $order->where('customer_id', (int) $filters['customer_id']));
+        }
+
+        if (! empty($filters['sales_order_id'])) {
+            $query->where('sales_order_id', (int) $filters['sales_order_id']);
+        }
+
+        $this->query->applyFactoryDayRange($query, 'delivered_date', $filters['from'] ?? null, $filters['to'] ?? null);
+
+        if (! empty($filters['item_id'])) {
+            $query->whereHas('lines', fn (Builder $lines) => $lines->where('item_id', (int) $filters['item_id']));
+        }
+
+        if (isset($filters['q']) && trim((string) $filters['q']) !== '') {
+            $term = trim((string) $filters['q']);
+            $id = $this->query->documentId($term, 'DN');
+
+            $query->where(function (Builder $any) use ($term, $id) {
+                if ($id !== null) {
+                    $any->orWhere('deliveries.id', $id);
+                }
+                $any->orWhere(fn (Builder $reference) => $this->query->whereLike($reference, 'reference', $term));
+                $any->orWhereHas('salesOrder.customer', fn (Builder $customer) => $this->query->whereCustomerMatches($customer, $term));
+            });
+        }
+    }
+
+    /** The relations the resource prints plus the TallyLink and carton count, on ONE delivery. */
+    private function decorate(Delivery $delivery): Delivery
+    {
+        $delivery->load(self::WITH);
+        $this->trace->decorateDeliveries([$delivery]);
+
+        return $delivery;
     }
 
     /**

@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Checkbox, DatePicker, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import dayjs from 'dayjs';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
     dismissTallySyncEntry,
     getTallySyncSummary,
@@ -116,11 +116,35 @@ export default function TallySyncPage() {
     const [dismissingId, setDismissingId] = useState<number | null>(null);
     const [resyncingAll, setResyncingAll] = useState(false);
     const [report, setReport] = useState<{ id: number; voucher: string; ok: boolean; message: string }[] | null>(null);
+    // ?entry=41 — a sales document's Tally column (or any other page)
+    // linking straight to one voucher. Read once, on load: the drawer opens
+    // on that id whether or not the row is on this page — EntryDrawer asks
+    // the show endpoint for it itself, and the list row paints first when
+    // it is here. Closing the drawer drops the param so a refresh does not
+    // reopen it. Without the param the page is unchanged.
+    const [searchParams, setSearchParams] = useSearchParams();
+    const entryParam = Number(searchParams.get('entry')) || null;
     // The drawer holds an ID, not a row: the row it shows is looked up from
     // the live list on every render, so a Resync / Dismiss / Release done
     // from the drawer's footer updates what the drawer says as soon as the
     // list refetches — no stale copy of the entry.
-    const [viewingId, setViewingId] = useState<number | null>(null);
+    const [viewingId, setViewingId] = useState<number | null>(entryParam);
+
+    // A later ?entry= (Back to a link, a second link while this page is
+    // mounted) opens that voucher too; the param going away closes nothing —
+    // that is the drawer's own Close.
+    useEffect(() => {
+        if (entryParam !== null) setViewingId(entryParam);
+    }, [entryParam]);
+
+    function closeDrawer() {
+        setViewingId(null);
+        if (searchParams.has('entry')) {
+            const next = new URLSearchParams(searchParams);
+            next.delete('entry');
+            setSearchParams(next, { replace: true });
+        }
+    }
 
     // Failed first, always. Everything on this page — the count in the red
     // strip, what "Resync all failed" picks up — reads the same order, so a
@@ -772,7 +796,7 @@ export default function TallySyncPage() {
                 entryId={viewingId}
                 listRow={viewingId === null ? null : entries.find((entry) => entry.id === viewingId) ?? null}
                 outcome={viewingId === null ? null : outcomes[viewingId] ?? null}
-                onClose={() => setViewingId(null)}
+                onClose={closeDrawer}
                 busy={busy}
                 retryingId={retryingId}
                 releasingId={releasingId}

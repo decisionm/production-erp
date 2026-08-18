@@ -1,11 +1,17 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { createInvoice, issueInvoice, listInvoices, listSalesOrders } from '@/features/sales/api';
+import { hasActiveFilters } from '@/features/sales/filters';
+import SalesDocumentDrawer, { TallyLinkCell } from '@/features/sales/SalesDocumentDrawer';
+import SalesFilterBar from '@/features/sales/SalesFilterBar';
+import TallyMirrorPanel from '@/features/sales/TallyMirrorPanel';
 import type { Invoice, InvoiceStatus } from '@/features/sales/types';
+import { useSalesListParams } from '@/features/sales/useSalesListParams';
+import { listEmptyText } from '@/features/sales/drawer';
 
 const invoiceSchema = z.object({
     sales_order_id: z.number({ error: 'Sales order is required' }),
@@ -33,10 +39,18 @@ const statusColor: Record<InvoiceStatus, string> = {
 
 export default function InvoicesPage() {
     const [modalOpen, setModalOpen] = useState(false);
-    const [detailInvoice, setDetailInvoice] = useState<Invoice | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['sales', 'invoices'], queryFn: listInvoices });
+    // The filters, the page and the open drawer all live in the URL — a
+    // pasted link is the same view. The server does the narrowing.
+    const { filters, setFilters, setPage, target, openTarget, closeTarget } = useSalesListParams('invoice');
+    const filtersActive = hasActiveFilters('invoice', filters);
+
+    const { data, isLoading, isPending, isError, error } = useQuery({
+        queryKey: ['sales', 'invoices', 'list', filters],
+        queryFn: () => listInvoices(filters),
+        placeholderData: (previous) => previous,
+    });
     const { data: orders } = useQuery({ queryKey: ['sales', 'sales-orders'], queryFn: listSalesOrders });
 
     // Only orders that have actually been committed to are invoiceable — not
@@ -99,28 +113,78 @@ export default function InvoicesPage() {
                 <Button type="primary" onClick={() => setModalOpen(true)}>New Invoice</Button>
             </Space>
 
+            {/* What this list is NOT: real sales are invoiced in Tally and
+                are not mirrored here (DEC-20260809-003) — the server's own
+                words, so an empty table never reads as "no sales". */}
+            <TallyMirrorPanel />
+
+            <SalesFilterBar kind="invoice" filters={filters} onChange={setFilters} />
+
             <Table<Invoice>
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                locale={{
+                    emptyText: listEmptyText({ isPending, isError, error }, 'invoice', filtersActive),
+                }}
+                pagination={
+                    data?.meta
+                        ? {
+                              current: data.meta.current_page,
+                              pageSize: data.meta.per_page,
+                              total: data.meta.total,
+                              showSizeChanger: true,
+                              pageSizeOptions: [20, 50, 100],
+                              showTotal: (total) => `${total} invoice${total === 1 ? '' : 's'}`,
+                              onChange: (page, pageSize) => setPage(page, pageSize),
+                          }
+                        : false
+                }
                 columns={[
-                    { title: 'ID', dataIndex: 'id' },
+                    { title: 'Number', render: (_, row) => <strong>{row.document_number ?? `INV-${row.id}`}</strong> },
                     {
-                        title: 'Status',
+                        title: (
+                            // Paid is never set by this ERP: receipts are recorded
+                            // in Tally (DEC-20260809-003). Said on the column so a
+                            // long-issued invoice is not read as unpaid.
+                            <Tooltip title="Paid: recorded in Tally, not here — this ERP never marks an invoice paid.">
+                                <span>Status</span>
+                            </Tooltip>
+                        ),
                         dataIndex: 'status',
                         render: (status: InvoiceStatus) => <Tag color={statusColor[status]}>{status}</Tag>,
                     },
-                    { title: 'Customer', render: (_, row) => row.customer.name },
+                    { title: 'Customer', render: (_, row) => row.customer?.name ?? '—' },
+                    {
+                        title: 'SO',
+                        render: (_, row) => (
+                            <Button
+                                type="link"
+                                size="small"
+                                style={{ padding: 0 }}
+                                onClick={() => openTarget({ kind: 'sales_order', id: row.sales_order?.id ?? row.sales_order_id })}
+                            >
+                                {row.sales_order?.document_number ?? `SO-${row.sales_order_id}`}
+                            </Button>
+                        ),
+                    },
                     { title: 'Invoice Date', dataIndex: 'invoice_date' },
                     { title: 'Due Date', dataIndex: 'due_date' },
                     { title: 'Lines', render: (_, row) => row.lines.length },
                     {
+                        title: (
+                            <Tooltip title="Where this invoice's Sales voucher stands in the Tally sync queue. A dash means nothing is queued — a draft queues nothing until it is issued. Paid: recorded in Tally, not here.">
+                                <span>Tally</span>
+                            </Tooltip>
+                        ),
+                        render: (_, row) => <TallyLinkCell link={row.tally} compact />,
+                    },
+                    {
                         title: 'Actions',
                         render: (_, row) => (
                             <Space>
-                                <Button size="small" onClick={() => setDetailInvoice(row)}>
+                                <Button size="small" onClick={() => openTarget({ kind: 'invoice', id: row.id })}>
                                     View
                                 </Button>
                                 {row.status === 'draft' && (
@@ -233,64 +297,9 @@ export default function InvoicesPage() {
                 </Form>
             </Modal>
 
-            <Drawer
-                title={`Invoice #${detailInvoice?.id}`}
-                open={detailInvoice !== null}
-                onClose={() => setDetailInvoice(null)}
-                width="min(100vw, 620px)"
-                destroyOnHidden
-            >
-                {detailInvoice && (
-                    <>
-                        <Descriptions column={1} size="small" bordered>
-                            <Descriptions.Item label="Status">
-                                <Tag color={statusColor[detailInvoice.status]}>{detailInvoice.status}</Tag>
-                            </Descriptions.Item>
-                            <Descriptions.Item label="Customer">{detailInvoice.customer.name}</Descriptions.Item>
-                            <Descriptions.Item label="Sales Order">SO #{detailInvoice.sales_order_id}</Descriptions.Item>
-                            <Descriptions.Item label="Invoice Date">{detailInvoice.invoice_date}</Descriptions.Item>
-                            <Descriptions.Item label="Due Date">{detailInvoice.due_date ?? '—'}</Descriptions.Item>
-                            <Descriptions.Item label="Notes">{detailInvoice.notes ?? '—'}</Descriptions.Item>
-                        </Descriptions>
-
-                        <Typography.Title level={5} style={{ marginTop: 24 }}>
-                            Lines
-                        </Typography.Title>
-                        <Table
-                            rowKey="id"
-                            size="small"
-                            pagination={false}
-                            dataSource={detailInvoice.lines}
-                            scroll={{ x: 'max-content' }}
-                            columns={[
-                                { title: 'Item', render: (_, line) => `${line.item.sku} — ${line.item.name}` },
-                                { title: 'Quantity', dataIndex: 'quantity' },
-                                { title: 'Unit Price', dataIndex: 'unit_price' },
-                                {
-                                    title: 'Amount',
-                                    render: (_, line) => (Number(line.quantity) * Number(line.unit_price)).toFixed(2),
-                                },
-                            ]}
-                            summary={(lines) => {
-                                const total = lines.reduce(
-                                    (sum, line) => sum + Number(line.quantity) * Number(line.unit_price),
-                                    0,
-                                );
-                                return (
-                                    <Table.Summary.Row>
-                                        <Table.Summary.Cell index={0} colSpan={3}>
-                                            <strong>Total</strong>
-                                        </Table.Summary.Cell>
-                                        <Table.Summary.Cell index={1}>
-                                            <strong>{total.toFixed(2)}</strong>
-                                        </Table.Summary.Cell>
-                                    </Table.Summary.Row>
-                                );
-                            }}
-                        />
-                    </>
-                )}
-            </Drawer>
+            {/* The trace drawer: the order it bills, lines, and where its
+                Sales voucher stands with Tally. */}
+            <SalesDocumentDrawer target={target} onClose={closeTarget} onOpen={openTarget} />
         </>
     );
 }

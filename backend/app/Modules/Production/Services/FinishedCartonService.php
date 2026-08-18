@@ -11,6 +11,7 @@ use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -135,6 +136,58 @@ class FinishedCartonService
 
         return $entry->cartons()->with('item')->orderBy('id')->get()
             ->each(fn (FinishedCarton $carton) => $carton->setRelation('entry', $entry));
+    }
+
+    /**
+     * THE DELIVERY-SIDE TRACE READ (Phase 3.5): every carton stamped onto
+     * these deliveries, with the batch (entry) each came from, grouped by
+     * delivery id — one query for a whole page. Sales reads cartons through
+     * this door and never queries FinishedCarton itself (CLAUDE.md:
+     * cross-module reads go through the other module's Service class).
+     *
+     * Public tier only: carton number, pieces and batch identity — nothing
+     * of internalTrace() (no lot, no rate) rides this read.
+     *
+     * @param  list<int>  $deliveryIds
+     * @return SupportCollection<int, Collection<int, FinishedCarton>> keyed by delivery_id
+     */
+    public function forDeliveries(array $deliveryIds): SupportCollection
+    {
+        $deliveryIds = array_values(array_unique(array_map('intval', $deliveryIds)));
+        if ($deliveryIds === []) {
+            return collect();
+        }
+
+        return FinishedCarton::query()
+            ->with('entry')
+            ->whereIn('delivery_id', $deliveryIds)
+            ->orderBy('id')
+            ->get()
+            ->groupBy('delivery_id');
+    }
+
+    /**
+     * How many cartons left on each of these deliveries — the list-column
+     * companion of forDeliveries(), one grouped COUNT. A delivery with no
+     * scanned carton (a typed dispatch) is absent; callers read 0.
+     *
+     * @param  list<int>  $deliveryIds
+     * @return array<int, int> delivery_id => carton count
+     */
+    public function countForDeliveries(array $deliveryIds): array
+    {
+        $deliveryIds = array_values(array_unique(array_map('intval', $deliveryIds)));
+        if ($deliveryIds === []) {
+            return [];
+        }
+
+        return FinishedCarton::query()
+            ->whereIn('delivery_id', $deliveryIds)
+            ->groupBy('delivery_id')
+            ->selectRaw('delivery_id, count(*) as aggregate')
+            ->pluck('aggregate', 'delivery_id')
+            ->map(fn ($count) => (int) $count)
+            ->all();
     }
 
     /** The traceability read: one scanned carton back to its batch. */
