@@ -10,6 +10,7 @@ use App\Modules\Inventory\Services\ProductionWipLocationResolver;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Production\Services\FactoryWarehouseResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
@@ -234,6 +235,66 @@ class StoreNeverSeesProductionDraftsTest extends TestCase
             ->assertOk()->json('data'))->pluck('request_number')->all();
 
         $this->assertNotContains($draft['request_number'], $seen);
+    }
+
+    /**
+     * A REFUSAL MUST NOT TELL YOU THE ROW IS THERE — INCLUDING BY BEING A
+     * DIFFERENT REFUSAL.
+     *
+     * The gate was first written in the CONTROLLER, which runs after the
+     * FormRequest. So a cancel carrying a too-short reason answered 422 for a
+     * draft that exists and 404 for an id that does not, and a store login
+     * could walk the id space with one ordinary request and no side effects —
+     * defeating the 404 that was added for exactly this reason.
+     *
+     * It is middleware now, so it runs before anything that could answer
+     * differently, and it throws the same exception route-model binding throws
+     * so the body is byte-identical too.
+     */
+    public function test_a_refusal_cannot_be_told_apart_from_a_row_that_is_not_there(): void
+    {
+        $draft = $this->raise();
+        $ghostId = $draft['id'] + 9_999;
+
+        $this->actAs($this->storekeeper);
+
+        // An invalid payload must not become an oracle: the gate has to fire
+        // before the reason is ever validated.
+        $onDraft = $this->postJson("/api/v1/inventory/material-requests/{$draft['id']}/cancel", ['reason' => 'x']);
+        $onGhost = $this->postJson("/api/v1/inventory/material-requests/{$ghostId}/cancel", ['reason' => 'x']);
+
+        $onDraft->assertStatus(404);
+        $onGhost->assertStatus(404);
+        // Compared with the caller's OWN id normalised out: the framework
+        // echoes the id you asked for, which tells you nothing you did not
+        // already know. What must not differ is anything else.
+        $this->assertSame(
+            $this->refusal($onGhost, $ghostId),
+            $this->refusal($onDraft, $draft['id']),
+            'the two refusals must be indistinguishable',
+        );
+
+        // ...and the same for a well-formed reason, and for the plain read.
+        $this->postJson("/api/v1/inventory/material-requests/{$draft['id']}/cancel", ['reason' => 'a proper reason'])
+            ->assertStatus(404);
+
+        $readDraft = $this->getJson("/api/v1/inventory/material-requests/{$draft['id']}");
+        $readGhost = $this->getJson("/api/v1/inventory/material-requests/{$ghostId}");
+
+        $readDraft->assertStatus(404);
+        $this->assertSame(
+            $this->refusal($readGhost, $ghostId),
+            $this->refusal($readDraft, $draft['id']),
+            'a read must not be an oracle either',
+        );
+
+        $this->assertSame('draft', MaterialRequest::query()->whereKey($draft['id'])->value('status')->value);
+    }
+
+    /** The refusal's substance, with the caller's own id normalised out. */
+    private function refusal(TestResponse $response, int $id): string
+    {
+        return str_replace((string) $id, '{id}', (string) $response->json('message'));
     }
 
     /* ------------------------------ helpers ------------------------------ */

@@ -6,7 +6,6 @@ use App\Modules\Inventory\Rules\PlainDecimal;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\Rule;
 
 /**
  * One bag scanned at the handover.
@@ -31,10 +30,13 @@ class StoreStoreIssueBagScanRequest extends FormRequest
             'barcode' => ['required', 'string', 'max:255'],
             'quantity_kg' => ['nullable', 'numeric', new PlainDecimal],
             'received_by' => ['nullable', 'integer', 'exists:users,id'],
-            // THE SAME DANGLING-POINTER HOLE AS THE ISSUE HEADER. A scan may
-            // say which accepted line it satisfies; it may not name one that
-            // does not exist, because nothing downstream could ever resolve it.
-            'material_request_line_id' => ['nullable', 'integer', Rule::exists('material_request_lines', 'id')],
+            // NO `exists:` HERE, deliberately — the ownership check below
+            // subsumes it and answers with ONE body. When both ran, a
+            // nonexistent line produced two errors and a real line owned by
+            // someone else produced one, so line ids were enumerable through
+            // the difference. The issue door was collapsed to a single body;
+            // this one was left telling them apart.
+            'material_request_line_id' => ['nullable', 'integer'],
             'notes' => ['nullable', 'string', 'max:500'],
         ];
     }
@@ -62,11 +64,13 @@ class StoreStoreIssueBagScanRequest extends FormRequest
                 ->exists();
 
             if (! $belongs) {
+                // ONE BODY for "does not exist", "belongs to someone else" and
+                // "this handover has no request". Distinguishing them is a
+                // disclosure, not a courtesy: it tells a caller which line ids
+                // are real and whose they are.
                 $validator->errors()->add(
                     'material_request_line_id',
-                    $headerId === null
-                        ? 'This handover is not against a material request, so a scan on it cannot name a request line.'
-                        : 'That request line belongs to a different material request from the one this handover is for.',
+                    'This scan names a request line that this handover cannot satisfy.',
                 );
             }
         });

@@ -293,10 +293,16 @@ Route::prefix('v1')->group(function () {
             // (inventory.view) and by the floor that raised it
             // (production.view).
             Route::get('material-requests', [MaterialRequestController::class, 'index']);
-            Route::get('material-requests/{material_request}', [MaterialRequestController::class, 'show']);
+            // `own-draft` runs BEFORE the FormRequest, deliberately: a gate in
+            // the controller runs after validation, so a 422 from the cancel
+            // reason answered "this row exists" for a draft the store may not
+            // know about. See EnsureDraftIsProductionsOwn.
+            Route::get('material-requests/{material_request}', [MaterialRequestController::class, 'show'])
+                ->middleware('own-draft');
             // Either side may withdraw one, with a reason: the floor when
             // the run is pulled, the store when it cannot fulfil.
-            Route::post('material-requests/{material_request}/cancel', [MaterialRequestController::class, 'cancel']);
+            Route::post('material-requests/{material_request}/cancel', [MaterialRequestController::class, 'cancel'])
+                ->middleware('own-draft');
 
             // THE REQUESTABLE MATERIALS. Deliberately here and NOT on
             // /inventory/items: that resource is gated `module:inventory`

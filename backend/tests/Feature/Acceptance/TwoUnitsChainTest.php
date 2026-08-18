@@ -462,6 +462,60 @@ class TwoUnitsChainTest extends TestCase
         ])->assertStatus(422);
     }
 
+    /**
+     * EVERY FIELD ON THE DOOR, not just the one that was looked at.
+     *
+     * `quantity_requested` sat three lines above the converged rule in the same
+     * array and kept the old spelling, so `1e400` reached the decimal cast as a
+     * 500. There is no second definition of a number any more.
+     */
+    public function test_the_other_quantity_on_the_same_line_is_the_same_kind_of_number(): void
+    {
+        $resin = $this->material('RM-RELPET', 'Relpet PET Resin', 'Kgs.');
+        $this->receive($resin, '100', 'tu-qr');
+
+        foreach (['1e400', '1e3', '0x1A', 'INF'] as $spelling) {
+            $this->postJson('/api/v1/inventory/store-issues', [
+                'lines' => [['item_id' => $resin->id, 'quantity' => '5', 'quantity_requested' => $spelling]],
+            ])->assertStatus(422);
+        }
+
+        $this->postJson('/api/v1/inventory/store-issues', [
+            'lines' => [['item_id' => $resin->id, 'quantity' => '5', 'quantity_requested' => '60.0000']],
+        ])->assertCreated();
+    }
+
+    /**
+     * THE READ DOORS HAD NO FORM REQUEST AT ALL.
+     *
+     * `$request->string('status')` on raw input is a TypeError when the caller
+     * sends an array, so `?status[]=issued` was a 500 rather than a 422, and
+     * `per_page` was uncapped. No screen sends that shape — which is not a
+     * validation rule.
+     */
+    public function test_the_store_issue_reads_answer_a_bad_query_with_a_refusal(): void
+    {
+        $resin = $this->material('RM-RELPET', 'Relpet PET Resin', 'Kgs.');
+
+        foreach ([
+            'store-issues?status[]=issued',
+            'store-issues?per_page[]=5',
+            'store-issues?per_page=999999',
+            'store-issues?per_page=-5',
+            'store-issues?status=banana',
+            'store-issues?issued_from[]=x',
+            'store-issues/trace?item_id[]=1',
+            'store-issues/trace?item_id=1&as_of[]=x',
+        ] as $query) {
+            $this->getJson("/api/v1/inventory/{$query}")->assertStatus(422, $query);
+        }
+
+        // ...and what the screens actually send still works.
+        $this->getJson('/api/v1/inventory/store-issues')->assertOk();
+        $this->getJson('/api/v1/inventory/store-issues?status=issued&per_page=20')->assertOk();
+        $this->getJson("/api/v1/inventory/store-issues/trace?item_id={$resin->id}")->assertOk();
+    }
+
     /* ------------------------------ helpers ------------------------------ */
 
     private function material(string $sku, string $name, string $uom): Item

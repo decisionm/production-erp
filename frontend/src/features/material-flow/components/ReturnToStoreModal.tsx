@@ -3,6 +3,7 @@ import { Alert, Input, InputNumber, Modal, Space, Table, Typography, message } f
 import { useState } from 'react';
 import { itemLabel } from '@/lib/itemLabel';
 import { apiRefusalMessage, returnToStore } from '../api';
+import { permitsFractions } from '../words';
 import type { StoreIssue, StoreIssueLine } from '../types';
 import PersonSelect from './PersonSelect';
 import {
@@ -125,9 +126,17 @@ export default function ReturnToStoreModal({
                         render: (_, line) => (
                             <InputNumber
                                 min={0}
+                                // The issue side refuses half a tray at the
+                                // input; so must the return side. It is the
+                                // same stock, and a fractional return put
+                                // fractional counted quantities in BOTH
+                                // locations at once until the server started
+                                // refusing it.
+                                precision={permitsFractions(line.uom) ? undefined : 0}
+                                step={permitsFractions(line.uom) ? undefined : 1}
                                 value={quantities[line.id] ?? null}
                                 onChange={(value) => setQuantities((current) => ({ ...current, [line.id]: value }))}
-                                placeholder="kg / qty"
+                                placeholder={line.uom ?? 'qty'}
                                 style={{ width: 140 }}
                             />
                         ),

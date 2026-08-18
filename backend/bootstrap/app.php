@@ -1,6 +1,7 @@
 <?php
 
 use App\Exceptions\DomainException;
+use App\Http\Middleware\EnsureDraftIsProductionsOwn;
 use App\Http\Middleware\EnsureModulePermission;
 use App\Http\Middleware\EnsureTraceabilityEnabled;
 use App\Http\Middleware\EnsureUserIsActive;
@@ -39,6 +40,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'module' => EnsureModulePermission::class,
             'active' => EnsureUserIsActive::class,
             'traceability' => EnsureTraceabilityEnabled::class,
+            'own-draft' => EnsureDraftIsProductionsOwn::class,
         ]);
 
         // There is no server-side named "login" route — the SPA owns /login

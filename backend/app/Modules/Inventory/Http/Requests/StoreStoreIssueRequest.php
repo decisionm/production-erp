@@ -75,7 +75,10 @@ class StoreStoreIssueRequest extends FormRequest
 
             'lines' => ['present', 'array'],
             'lines.*.material_request_line_id' => ['nullable', 'integer'],
-            'lines.*.quantity_requested' => ['nullable', 'numeric', 'gt:0'],
+            // THREE LINES ABOVE THE ONE THAT CONVERGED, and it kept the old
+            // spelling: `1e400` reached the decimal cast as a 500. The whole
+            // point of PlainDecimal is that there is no second definition.
+            'lines.*.quantity_requested' => ['nullable', 'numeric', 'gt:0', new PlainDecimal],
             // The floor of the rule, applied to EVERY line. It was a bare
             // `exists:items,id`, which carried neither the soft-delete guard
             // the request side has always had nor anything else. A deleted

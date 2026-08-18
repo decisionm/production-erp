@@ -466,3 +466,55 @@ id shapes, 26 draft-visibility combinations), `PLAIN_DECIMAL` confirmed the only
 by mutation, zero 500s across an aggressive sweep, 109 strings agreeing between the browser
 mirror and the server classifier with no disagreement in either direction, and a full resin
 chain with **zero consumption rows**. FC-01, FC-03, FC-06 hold.
+
+## The fifth round — the gate that could be told apart
+
+One PASS, one FAIL again. The blocking finding defeated a fix this branch had already made,
+for the third time in the series, and by the same mechanism each time: **a refusal that
+answers differently is a disclosure.**
+
+**The draft-privacy gate was defeated by validation ordering.** The `abort_if` sat in the
+CONTROLLER, which runs after the FormRequest. So `POST /material-requests/{id}/cancel` with
+a too-short reason answered **422** for a draft that exists and **404** for an id that does
+not — and a store-only login could walk the id space with one ordinary request, no crafted
+payload and no side effects. The gate's own comment said "404 rather than 403: a 403
+confirms the row is there, which is itself the thing being kept private"; a 422 confirms it
+just as well.
+
+It is **middleware** now (`EnsureDraftIsProductionsOwn`), because middleware is the only
+place that runs before everything else that could answer differently — and it throws the
+same `ModelNotFoundException` route-model binding throws, so the body is indistinguishable
+too, not merely the status. Mutation-proved: disarming it reproduces exactly the 422.
+
+### The audit that should have run four rounds earlier
+
+Round four's lesson was made this round's FIRST task: **compare what the frontend actually
+puts on the wire against the rule that receives it**, with every query string written by
+hand. The material-flow surface came back clean — `include_unsubmitted` across 23 spellings
+and two logins, `status[]` arrays, cleared antd filters (which axios drops entirely), dates,
+JSON nulls. What it found instead were the doors nobody had validated at all:
+
+- **`GET /inventory/store-issues` had no FormRequest.** `$request->string('status')` on raw
+  input is a TypeError, so `?status[]=issued`, `?issued_from[]=x` and `?per_page=-5` were
+  **500s**; `?status=banana` was silently ignored and `per_page` was uncapped. Two request
+  classes now, strict about shape and permissive about meaning: nothing a working screen
+  sends changes behaviour.
+- **The material-lot door 500s on `1e3`** in three fields (`bcmul`, `bcadd`). Pre-existing.
+- **`quantity_requested` sat three lines above the rule that converged** and kept the old
+  spelling, so `1e400` reached the decimal cast as a 500. The same predicate, drifting for
+  the fourth time — which is the argument for `PlainDecimal` being a class rather than a
+  constant, and it now guards every quantity field in the module.
+- **The bag-scan door was still an existence oracle.** `Rule::exists` fired IN ADDITION to
+  the ownership check, so a nonexistent line produced two errors and a foreign one produced
+  one. The issue door had been collapsed to a single body; this one had been left telling
+  them apart. One body for all three cases now.
+
+Also: the return modal's quantity input had no precision guard while the issue side's did,
+so a storekeeper could type half a tray back and learn about it only from the server.
+
+Everything else held. All six of the owner's proofs PROVEN again with balances before and
+after — 16 fractional posts across both paths, 12 invalid-id shapes across five doors with
+movements 2→2 and bag scans 0→0, 23 flag spellings, partial→full walking
+`submitted → partially_issued → issued`. Browser/server unit mirror: 77 strings, zero
+disagreements. Resin chain: `{receipt: 2, transfer_in: 2, transfer_out: 2}`, **consumption
+rows: 0**. FC-01, FC-03, FC-06 hold.

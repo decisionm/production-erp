@@ -4,9 +4,11 @@ namespace App\Modules\Inventory\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Inventory\Http\Requests\CancelStoreIssueRequest;
+use App\Modules\Inventory\Http\Requests\ListStoreIssuesRequest;
 use App\Modules\Inventory\Http\Requests\StoreStoreIssueBagScanRequest;
 use App\Modules\Inventory\Http\Requests\StoreStoreIssueRequest;
 use App\Modules\Inventory\Http\Requests\StoreStoreIssueReturnRequest;
+use App\Modules\Inventory\Http\Requests\TraceStoreIssuesRequest;
 use App\Modules\Inventory\Http\Resources\StoreIssueBagScanResource;
 use App\Modules\Inventory\Http\Resources\StoreIssueResource;
 use App\Modules\Inventory\Models\StoreIssue;
@@ -27,7 +29,7 @@ class StoreIssueController extends Controller
 {
     public function __construct(private readonly StoreIssueService $issues) {}
 
-    public function index(Request $request): AnonymousResourceCollection
+    public function index(ListStoreIssuesRequest $request): AnonymousResourceCollection
     {
         return StoreIssueResource::collection($this->issues->paginate(
             status: $request->string('status')->toString() ?: null,
@@ -57,7 +59,7 @@ class StoreIssueController extends Controller
      * Which store issues put a material into Production/WIP — the trace
      * behind a batch's consumption. It stops at the issue; see the service.
      */
-    public function trace(Request $request): JsonResponse
+    public function trace(TraceStoreIssuesRequest $request): JsonResponse
     {
         return response()->json(['data' => $this->issues->traceForItem(
             itemId: $request->integer('item_id'),
