@@ -171,7 +171,33 @@ summary) → **Needs Attention**.
 | KPI tiles that filter the machine grid on click | Would add a client-side filter over the state the backend's "one in-progress batch per machine" guard is mirrored from. Out of scope for a presentation pass. |
 | Merging `Report Down` into a single overflow menu with `Cancel Batch` | `Cancel Batch` is gated on `running && !running.quality?.checked && running.status === 'pending'` — burying a permission-gated destructive action inside a menu that also holds an ungated one blurs a rule the screen currently states by showing/hiding the button. Both stay visible, both stay secondary. |
 
-## 7. Preserved verbatim
+## 7. Verified in the browser
+
+Against an isolated instance (`php artisan serve` on `:8011` from this worktree, over a
+**copy** of the dev SQLite fixture — the shared `:8010` instance serves a different
+worktree's build, so it could never have shown these changes).
+
+| Check | Result |
+|---|---|
+| `Report Down` opens exactly one modal, and **not** Start Batch | 1 modal, `Report Down — Machine 1`. The card's own `onClick` did not also fire. |
+| `Start Batch` button on an Idle card | 1 modal, `Start Batch — Machine 2`. |
+| `Mold Change` secondary button | 1 modal, `Mold Change — Machine 3`. |
+| Clicking the card **background** still works as it always did | Opened `Start Batch — Machine 4`. `primaryClick` unchanged. |
+| Down state end to end | Reported a breakdown on MC-01 → red rail, `Down` tag, problem text, `Since 14:06`, `Close Breakdown` as the primary CTA; `Report Down` correctly absent. Closed it again → card returned to Idle. |
+| Tiles agree with the grid | 10 Idle / 0 Down → 9 Idle / 1 Down → 10 Idle / 0 Down, tracking the grid exactly. |
+| Responsive | 1440×1000 (4 cards/row) and 390×844 (full-width cards, tiles wrapped, `Segmented` in `block` mode) both read correctly. |
+| Console | No new errors. One pre-existing service-worker scope warning from the PWA build. |
+
+`npm run typecheck`, `npm run test` (533 passing, 26 files) and `npm run build` are clean.
+
+**Not verified visually, and why:** the **Running** and **Mold Change** cards. The fixture
+database holds no in-progress batch and no molds. Producing a Running card would have
+meant **creating a production batch**, which `AGENTS.md` forbids without exception — the
+rule is not qualified by "unless the database is a local copy", so it was not bent for a
+screenshot. Both card variants were verified by code path and by the shared pure
+functions instead.
+
+## 8. Preserved verbatim
 
 Re-verified unchanged after the rework:
 
