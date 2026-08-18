@@ -177,20 +177,24 @@ function decisionIn(label: string): string | undefined {
  * accountant's transactions this page does NOT mirror, named — never a zero
  * count, never an empty table implying absence.
  *
- *   "Lives in Tally, not mirrored: Purchase · Purchase Order · Payment · … · Debit Note"
- *   "Purchase Order: ERP-originated version planned (Phase 6)"
+ *   "Lives in Tally, not mirrored: Purchase · Payment · … · Debit Note"
+ *   "<name>: ERP-originated version planned (Phase N)"   — only when a row is planned
  *   "Sales Order: no such voucher type in Tally — sales are invoiced there (DEC-20260809-003)"
  *
  * Built from the summary's catalogue rows on the server's TWO axes: source
  * 'tally' rows are the first clause, in the order the server lists them
  * (its case order is the catalogue order); erp_build 'planned' rows are the
- * second — a Purchase Order is BOTH in the books and planned, and both are
- * said; source 'absent' rows are the third. The phase on a planned row and
- * the decision on an absent row are read out of the server's own label,
- * not typed here — a plan and a decision are factory facts and this file
- * does not invent those. Empty when the catalogue has no such rows (or has
- * not loaded), so the caller renders nothing rather than a heading with no
- * names under it.
+ * second — a row can be BOTH in the books and planned, and both are said;
+ * source 'absent' rows are the third. Purchase Order is NOT in any clause
+ * since Phase 6: the ERP BUILDS and STAGES it (source 'erp', erp_build
+ * 'built'; live posting owner-gated, flag off — Q35), so it sits in the
+ * table as an ERP row with an honest 0, not in this note. No served row is
+ * planned today; the clause is kept for the next one. The phase on a
+ * planned row and the decision on an absent row are read out of the
+ * server's own label, not typed here — a plan and a decision are factory
+ * facts and this file does not invent those. Empty when the catalogue has
+ * no such rows (or has not loaded), so the caller renders nothing rather
+ * than a heading with no names under it.
  */
 export function catalogueNote(rows: readonly TallySyncCategoryCount[] | null | undefined): string[] {
     if (!rows || rows.length === 0) return [];

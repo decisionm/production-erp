@@ -317,6 +317,50 @@ class StockMovementService
     }
 
     /**
+     * The movements a caller already knows BY ID, in one query — how
+     * Procurement's purchase-order trace reads the ledger row a goods
+     * receipt line NAMED (goods_receipt_note_lines.stock_movement_id,
+     * Phase 6). Exact by construction: no reference, no narrowing, no
+     * chance of another receipt's row. Ids that name no row are simply
+     * absent. Additive; reads only.
+     *
+     * @param  list<int>  $ids
+     * @return Collection<int, StockMovement>
+     */
+    public function byIds(array $ids): Collection
+    {
+        $ids = array_values(array_unique(array_map('intval', $ids)));
+
+        if ($ids === []) {
+            return new Collection;
+        }
+
+        return StockMovement::query()->whereIn('id', $ids)->orderBy('id')->get();
+    }
+
+    /**
+     * Every RECEIPT movement stamped with one reference — the cross-module
+     * read Procurement's purchase-order trace uses for a receipt line booked
+     * BEFORE stock_movement_id existed (Phase 6). The ledger carries no GRN
+     * foreign key, so such a line is matched by the reference
+     * GoodsReceiptService stamped (the receipt's own `reference`, else
+     * "GRN for PO #{id}") and the caller narrows further by item and
+     * warehouse. Inexact where two referenceless arrivals share one order —
+     * which is why byIds() above is the road every new row takes. Additive;
+     * reads only.
+     *
+     * @return Collection<int, StockMovement>
+     */
+    public function receiptsForReference(string $reference): Collection
+    {
+        return StockMovement::query()
+            ->where('reference', $reference)
+            ->where('type', StockMovementType::Receipt)
+            ->orderBy('id')
+            ->get();
+    }
+
+    /**
      * Every transfer INTO one warehouse on one calendar date, newest first,
      * with item and the acting user loaded — the "today's loads into the
      * factory day bin" read. Filtered on type+warehouse+date, never on the

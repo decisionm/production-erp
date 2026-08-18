@@ -1,8 +1,11 @@
 import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
+import { buildPurchaseOrderQuery, unwrapTraceResponse } from './purchaseOrders';
 import type {
     GoodsReceiptNote,
     PurchaseOrder,
+    PurchaseOrderListFilters,
+    PurchaseOrderTrace,
     PurchaseRequisition,
     Vendor,
 } from './types';
@@ -33,6 +36,8 @@ export interface CreateVendorPayload {
     address?: string;
     gstin?: string;
     state_code?: string;
+    /** The vendor's Tally ledger name (Phase 6) — typed, never pulled; empty string clears it. */
+    tally_ledger_name?: string;
 }
 
 export async function createVendor(payload: CreateVendorPayload): Promise<Vendor> {
@@ -80,12 +85,38 @@ export async function rejectPurchaseRequisition(id: number): Promise<PurchaseReq
 }
 
 /**
- * `per_page` exists so a page opened on a link to one specific older order
- * (`?po=7`) can load past the default first page of 20 and actually find it.
+ * The list, narrowed SERVER-SIDE by ListPurchaseOrdersRequest's filters
+ * (status — one or several —, vendor, item, order-date range, `q`, sort,
+ * paging; see PurchaseOrderListFilters). buildPurchaseOrderQuery() drops
+ * empties and anything the server would 422. No argument = the unfiltered
+ * first page every earlier caller still gets (the GRN page's order picker
+ * calls it that way).
  */
-export async function listPurchaseOrders(params?: { per_page?: number }): Promise<Paginated<PurchaseOrder>> {
-    const { data } = await api.get<Paginated<PurchaseOrder>>('/procurement/purchase-orders', { params });
+export async function listPurchaseOrders(filters?: PurchaseOrderListFilters): Promise<Paginated<PurchaseOrder>> {
+    const { data } = await api.get<Paginated<PurchaseOrder>>('/procurement/purchase-orders', {
+        params: buildPurchaseOrderQuery(filters),
+    });
     return data;
+}
+
+/**
+ * GET /procurement/purchase-orders/{id} — the order with lines, schedules,
+ * revisions, receipts summary, its Tally link/staging and `can` (Phase 6,
+ * P6-02). What the detail drawer reads; the list row is only its placeholder.
+ */
+export async function getPurchaseOrder(id: number): Promise<PurchaseOrder> {
+    const { data } = await api.get<{ data: PurchaseOrder }>(`/procurement/purchase-orders/${id}`);
+    return data.data;
+}
+
+/**
+ * GET /procurement/purchase-orders/{id}/trace — the chain below the order:
+ * receipts → lots → stock movements → consumption. Answered bare or wrapped
+ * in `data`; both are read. Rates on it are the server's call (FC-06).
+ */
+export async function getPurchaseOrderTrace(id: number): Promise<PurchaseOrderTrace> {
+    const { data } = await api.get<PurchaseOrderTrace | { data: PurchaseOrderTrace }>(`/procurement/purchase-orders/${id}/trace`);
+    return unwrapTraceResponse(data);
 }
 
 export interface CreatePurchaseOrderPayload {
@@ -115,10 +146,49 @@ export async function sendPurchaseOrder(id: number): Promise<PurchaseOrder> {
     return data.data;
 }
 
+// ---- lifecycle (Phase 6, P6-01) — append-only POST actions, never PUT/DELETE.
+// Each transition adds a row (a revision) or moves the status; the server
+// refuses what its state machine forbids with a 422 whose message the
+// screen prints verbatim. None of these touches stock or posts to Tally.
+
+/**
+ * POST purchase-orders/{id}/amend — Draft ONLY: replaces the lines (and
+ * their schedules) and records the prior lines as a revision with `reason`.
+ * The same line shape as create. Amending after Send is refused by the
+ * server (that would be a new category of Tally write — an owner question).
+ */
+export interface AmendPurchaseOrderPayload {
+    reason?: string;
+    lines: CreatePurchaseOrderPayload['lines'];
+}
+
+export async function amendPurchaseOrder(id: number, payload: AmendPurchaseOrderPayload): Promise<PurchaseOrder> {
+    const { data } = await api.post<{ data: PurchaseOrder }>(`/procurement/purchase-orders/${id}/amend`, payload);
+    return data.data;
+}
+
+/** POST purchase-orders/{id}/close — Sent | PartiallyReceived → Closed, with a required reason (short-close). */
+export async function closePurchaseOrder(id: number, reason: string): Promise<PurchaseOrder> {
+    const { data } = await api.post<{ data: PurchaseOrder }>(`/procurement/purchase-orders/${id}/close`, { reason });
+    return data.data;
+}
+
+/** POST purchase-orders/{id}/cancel — Draft | Sent with ZERO receipts → Cancelled, with a required reason. */
+export async function cancelPurchaseOrder(id: number, reason: string): Promise<PurchaseOrder> {
+    const { data } = await api.post<{ data: PurchaseOrder }>(`/procurement/purchase-orders/${id}/cancel`, { reason });
+    return data.data;
+}
+
 /** Same reason as listPurchaseOrders: links point at one specific receipt. */
 export async function listGoodsReceipts(params?: { per_page?: number }): Promise<Paginated<GoodsReceiptNote>> {
     const { data } = await api.get<Paginated<GoodsReceiptNote>>('/procurement/goods-receipts', { params });
     return data;
+}
+
+/** GET /procurement/goods-receipts/{id} — one receipt with its lines, lots and Tally link (Phase 6). */
+export async function getGoodsReceipt(id: number): Promise<GoodsReceiptNote> {
+    const { data } = await api.get<{ data: GoodsReceiptNote }>(`/procurement/goods-receipts/${id}`);
+    return data.data;
 }
 
 /**

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\Procurement\Http\Requests\ListGoodsReceiptsRequest;
 use App\Modules\Procurement\Http\Requests\StoreGoodsReceiptRequest;
 use App\Modules\Procurement\Http\Resources\GoodsReceiptNoteResource;
+use App\Modules\Procurement\Models\GoodsReceiptNote;
 use App\Modules\Procurement\Services\GoodsReceiptService;
 use App\Modules\Procurement\Services\ProcurementDocumentQuery;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -28,6 +29,12 @@ class GoodsReceiptController extends Controller
         $filters = $request->validated();
 
         return GoodsReceiptNoteResource::collection($this->receipts->paginate($this->query->perPage($filters), $filters));
+    }
+
+    /** One receipt with its lines, lots, bags and Receipt Note link (Phase 6, P6-02). */
+    public function show(GoodsReceiptNote $goodsReceipt): GoodsReceiptNoteResource
+    {
+        return GoodsReceiptNoteResource::make($this->receipts->show($goodsReceipt));
     }
 
     public function store(StoreGoodsReceiptRequest $request): GoodsReceiptNoteResource

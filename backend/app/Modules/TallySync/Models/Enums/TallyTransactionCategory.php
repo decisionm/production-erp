@@ -72,28 +72,34 @@ enum TallyTransactionCategory: string
      */
     case Journal = 'journal';
 
+    /**
+     * enqueuePurchaseOrder(): PurchaseOrder → Tally 'Purchase Order' — an
+     * ORDER voucher that touches neither accounts nor stock BY TYPE
+     * (DEC-20260812-002). BUILT and STAGED in Phase 6, live posting
+     * OWNER-GATED: tally-sync.purchase_orders_enabled is off by default and
+     * the first live write is the owner's call (Q35), so on the live
+     * instance this row's count is an honest 0 until then. Like Journal it
+     * is BOTH ERP-built AND in the 12-Aug census (92 accountant-keyed
+     * orders): source stays 'erp' and the query side counts ONLY the
+     * ERP-staged rows — the 92 are the accountant's and are never counted
+     * here. (Before Phase 6 this row read source 'tally' / erp_build
+     * 'planned' and sat in the Tally-only block below; the plan is now the
+     * build, and the case moved up here with the other enqueue paths — the
+     * catalogue order is the case order.)
+     */
+    case PurchaseOrder = 'purchase_order';
+
     // ── Lives in Tally only (source 'tally', direction none) — the
     //    accountant's transactions the ERP does not mirror, from the 12-Aug
     //    Statistics census (TALLY-EVIDENCE-2026-08-12 §A, 1-Apr-26 to
-    //    10-Aug-26): Purchase 351, Purchase Order 92, Payment 925,
-    //    Receipt 553, Contra 60, Credit Note 17, Debit Note 5. (Journal 418
-    //    in the same census is the Tally-side count of a category the ERP
-    //    DOES build; see the Journal case.) Counts here are the query
-    //    side's null, never these figures: the census is evidence of what
-    //    exists, not a live measurement. ───────────────────────────────────
+    //    10-Aug-26): Purchase 351, Payment 925, Receipt 553, Contra 60,
+    //    Credit Note 17, Debit Note 5. (Journal 418 and Purchase Order 92
+    //    in the same census are the Tally-side counts of categories the ERP
+    //    DOES build; see those cases.) Counts here are the query side's
+    //    null, never these figures: the census is evidence of what exists,
+    //    not a live measurement. ────────────────────────────────────────────
 
     case Purchase = 'purchase';
-
-    /**
-     * Purchase Orders EXIST in the books — 92 in the census — keyed by the
-     * accountant, so the row lives in Tally like its neighbours. What is
-     * planned is the ERP-ORIGINATED version: DEC-20260812-002 has purchase
-     * orders raised in the ERP and sent to Tally as a Purchase Order
-     * voucher — Phase 6, NOT BUILT. There is no enqueuePurchaseOrder() and
-     * no entry can classify here today. erpBuild() carries the plan;
-     * source() does not, so the two facts stop sharing one word.
-     */
-    case PurchaseOrder = 'purchase_order';
 
     case Payment = 'payment';
     case Receipt = 'receipt';
@@ -131,7 +137,7 @@ enum TallyTransactionCategory: string
             self::ReceiptNote => 'Procurement — Receipt Note',
             self::Journal => 'Finance — Journal',
             self::Purchase => 'Purchase (lives in Tally)',
-            self::PurchaseOrder => 'Purchase Order (lives in Tally; ERP-originated version planned, Phase 6)',
+            self::PurchaseOrder => 'Procurement — Purchase Order (staged; live posting owner-gated, Q35 — flag off)',
             self::Payment => 'Payment (lives in Tally)',
             self::Receipt => 'Receipt (lives in Tally)',
             self::Contra => 'Contra (lives in Tally)',
@@ -149,8 +155,9 @@ enum TallyTransactionCategory: string
      * a material cost or WHO SUPPLIED IT"). True for the Receipt Note the
      * ERP builds today (enqueueGoodsReceiptNote() writes the PO's vendor as
      * the party) and for the purchase categories a supplier is the party of
-     * by definition (Purchase; the planned Purchase Order voucher,
-     * DEC-20260812-002 — "vendor resolved to its Tally ledger"). A CUSTOMER
+     * by definition (Purchase; the Purchase Order voucher —
+     * enqueuePurchaseOrder() writes the vendor's Tally ledger as the party,
+     * DEC-20260812-002). A CUSTOMER
      * on a Sales invoice or Delivery Note is not FC-06 and reads false, as
      * does anything with no party. Every surface that must withhold the
      * supplier from a non-finance reader (TallySyncEntryResource,
@@ -191,11 +198,12 @@ enum TallyTransactionCategory: string
     }
 
     /**
-     * Where the transaction LIVES today. 'erp': the ERP builds and posts it.
-     * 'tally': it is in the accountant's books (the 12-Aug census) and the
-     * ERP does not mirror it — Purchase Order included, whatever is planned
-     * for it. 'absent': no such voucher type is in the books at all.
-     * What the ERP has built or plans to build is erpBuild(), not this.
+     * Where the transaction LIVES today. 'erp': the ERP builds and posts it
+     * (Purchase Order: builds and STAGES it — posting is owner-gated, and
+     * an ERP-built row with an honest zero is the truth, not a Tally-only
+     * row). 'tally': it is in the accountant's books (the 12-Aug census)
+     * and the ERP does not mirror it. 'absent': no such voucher type is in
+     * the books at all. What the ERP has built is erpBuild(), not this.
      *
      * @return 'erp'|'tally'|'absent'|'unknown'
      */
@@ -207,9 +215,9 @@ enum TallyTransactionCategory: string
             self::SalesInvoice,
             self::DeliveryNote,
             self::ReceiptNote,
-            self::Journal => 'erp',
+            self::Journal,
+            self::PurchaseOrder => 'erp',
             self::Purchase,
-            self::PurchaseOrder,
             self::Payment,
             self::Receipt,
             self::Contra,
@@ -221,13 +229,14 @@ enum TallyTransactionCategory: string
     }
 
     /**
-     * What the ERP has built for this category: 'built' for the six
-     * categories with an enqueue path in TallySyncService; 'planned' for
-     * the Purchase Order voucher (DEC-20260812-002, Phase 6 — no
-     * enqueuePurchaseOrder() exists yet); 'none' for everything else. This
-     * is the axis that used to ride on source() as "planned" — separated
-     * so "lives in Tally" and "the ERP will build it" can both be true of
-     * one row without contradiction.
+     * What the ERP has built for this category: 'built' for the seven
+     * categories with an enqueue path in TallySyncService — the Purchase
+     * Order voucher joined them in Phase 6 (enqueuePurchaseOrder(); staged,
+     * flag off, DEC-20260812-002); 'planned' is kept as a value for the
+     * next category that is decided but not yet built (none today); 'none'
+     * for everything else. This is the axis that used to ride on source()
+     * as "planned" — separated so "lives in Tally" and "the ERP builds it"
+     * can both be true of one row without contradiction.
      *
      * @return 'built'|'planned'|'none'
      */
@@ -239,8 +248,8 @@ enum TallyTransactionCategory: string
             self::SalesInvoice,
             self::DeliveryNote,
             self::ReceiptNote,
-            self::Journal => 'built',
-            self::PurchaseOrder => 'planned',
+            self::Journal,
+            self::PurchaseOrder => 'built',
             default => 'none',
         };
     }
@@ -248,9 +257,9 @@ enum TallyTransactionCategory: string
     /**
      * Which way the transaction moves. 'none' means the ERP never carries
      * it — nothing is mirrored either way, so no tally_sync_entries row can
-     * ever be of this category (its count is null on the query side). That
-     * includes Purchase Order today: the ERP-originated version is planned,
-     * not built, and a plan moves nothing.
+     * ever be of this category (its count is null on the query side).
+     * Purchase Order is 'erp_to_tally' since Phase 6: staged rows CAN
+     * exist (the flag on), and the invariant below is what says so.
      *
      * Unknown is 'erp_to_tally' and that is not a guess: the classifier
      * only ever produces Unknown for a row of tally_sync_entries, and every
@@ -271,9 +280,8 @@ enum TallyTransactionCategory: string
     }
 
     /**
-     * The ERP module that originates the transaction — or, for the planned
-     * Purchase Order voucher, will originate it — and null for anything the
-     * ERP does not originate (Tally-only rows; SalesOrder too, since the
+     * The ERP module that originates the transaction, and null for anything
+     * the ERP does not originate (Tally-only rows; SalesOrder too, since the
      * ERP's sales_orders table is not a Tally flow) and for Unknown.
      */
     public function sourceModule(): ?string

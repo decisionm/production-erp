@@ -6,12 +6,14 @@ use App\Modules\Finance\Models\JournalEntry;
 use App\Modules\Inventory\Services\ScrapItemResolver;
 use App\Modules\Inventory\Services\TallyGodownResolver;
 use App\Modules\Procurement\Models\GoodsReceiptNote;
+use App\Modules\Procurement\Models\PurchaseOrder;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
 use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Services\ShiftProductionEntryService;
 use App\Modules\Sales\Models\Delivery;
 use App\Modules\Sales\Models\Invoice;
+use App\Modules\TallySync\Exceptions\PurchaseOrderNotPostable;
 use App\Modules\TallySync\Models\Enums\TallyLedgerRole;
 use App\Modules\TallySync\Models\Enums\TallySyncEventKind;
 use App\Modules\TallySync\Models\Enums\TallySyncStatus;
@@ -57,7 +59,7 @@ class TallySyncService
         // retry() (regenerate → update → voucher.rebuilt/voucher.retried).
         // NOT transactional, by design: markSynced()/markFailed()/dismiss()/
         // releaseNow() — one UPDATE then one INSERT, and enqueue() for the
-        // batch/sales/GRN/delivery/journal paths (one SELECT for a live
+        // batch/sales/GRN/PO/delivery/journal paths (one SELECT for a live
         // entry to return, else one INSERT then one INSERT); a failure
         // between the two writes there leaves the state change in place and
         // the event missing, never the reverse.
@@ -163,6 +165,224 @@ class TallySyncService
                 ->filter(fn ($row) => $row['due_date'] !== null)
                 ->values()
                 ->all(),
+        ]);
+    }
+
+    /**
+     * An ERP-raised purchase order, sent to its vendor → Tally 'Purchase
+     * Order' voucher — STAGED (Phase 6, DEC-20260812-002: "purchase orders
+     * are raised in the ERP and sent to Tally as a Purchase Order voucher;
+     * it must not touch accounts or stock in Tally").
+     *
+     * WHAT THIS WRITES: ONE tally_sync_entries row (voucher type 'Purchase
+     * Order') and its voucher.enqueued event — nothing else. No stock
+     * movement, no stock balance, no material lot, no journal: an ORDER is a
+     * promise, and Tally treats it as one BECAUSE OF THE VOUCHER TYPE
+     * (VCHTYPE 'Purchase Order', ISINVOICE No), not because any ledger block
+     * is left out of the XML — the real exports carry the party and purchase
+     * ledgers on every order and still move no stock. The agent
+     * (purchaseOrder.ts, ≥ 0.3.9) builds that shape; PurchaseOrderTallyStagingTest
+     * counts the tables before and after to prove the cloud half.
+     *
+     * OWNER GATE. tally-sync.purchase_orders_enabled is OFF by default and the
+     * first live PO write to real Tally is the owner's call (Q35(d)); this
+     * method refuses while the flag is off, so no caller — the listener, a
+     * command, a test that forgot config() — can stage one unnoticed. The
+     * listener (TallySyncEventServiceProvider) checks the flag itself first
+     * and records 'disabled' on the order without calling here.
+     *
+     * NAMES ARE NEVER INVENTED (DEC-20260812-002 (iii)). Every Tally name the
+     * voucher carries is a RECORDED identity, and a missing one is a REFUSAL
+     * with a named reason (PurchaseOrderNotPostable), never a guess and never
+     * a default:
+     *   party ledger     vendors.tally_ledger_name (typed by Accounts; nothing
+     *                    populates it from Tally)              → 'party_unmapped'
+     *   purchase ledger  TallyLedgerRole::Purchase via the ledger mappings
+     *                    (Settings → Ledger Mappings) — ONE role for now, Q39
+     *                    (a ledger per rate) pending; NOT an env key → 'purchase_ledger_unmapped'
+     *   stock item       the item's exact Tally name, only for a Tally-sourced
+     *                    item (Item::isTallySourced — GUID recorded by the
+     *                    masters pull) that is not a local fixture → 'item_unmapped'
+     *   godown           the ONE Tally-linked warehouse (TallyGodownResolver::
+     *                    soleTallyGodownName; a PO has no receiving store of
+     *                    its own until its GRN)                  → 'godown_unresolved'
+     *   lines            none                                    → 'no_lines'
+     * All reasons are collected before refusing, so the order's tally_staging
+     * names everything to fix at once. This method never writes to the order
+     * itself — it returns the entry or throws — so a direct caller sees the
+     * pure contract; the LISTENER records the outcome on the order through
+     * PurchaseOrderService::recordTallyStaging().
+     *
+     * PAYLOAD (the GRN's key names, followed for the same reasons —
+     * TransactionClassifier reads them):
+     *   voucher_type · voucher_date (order_date, ISO — the agent writes
+     *   yyyymmdd) · voucher_number "PO-{id}" (the ERP reference, the same
+     *   convention GRN-{id} uses; Q35(c) — whose number is authoritative —
+     *   is PENDING and may change this before the first live write) ·
+     *   voucher_number_source 'erp' (tally_order_no is a MIRROR's field and
+     *   is never used for an ERP-raised order) · party_ledger · party_gstin ·
+     *   purchase_ledger · godown · reference (the same ERP reference — on the
+     *   real exports REFERENCE equals VOUCHERNUMBER) · narration (notes) ·
+     *   lines[]{item, quantity, rate, amount, schedules[]{due_date, quantity,
+     *   amount}} · total_amount.
+     *   schedules[] mirror PurchaseOrderSchedule (Tally's ORDERDUEDATE
+     *   allocations, one BATCHALLOCATIONS each), each at its own quantity ×
+     *   rate; a line whose schedules promise LESS than the line gets one
+     *   more REMAINDER allocation (quantity = line − Σ schedules, due_date =
+     *   the order's expected_date or null); a line with no schedule gets ONE
+     *   allocation for the whole line dated the order's expected_date, or
+     *   none at all when there is no expected date — the agent emits no
+     *   ORDERDUEDATE for a null due date rather than a made-up one. The last
+     *   allocation's amount is the remainder, so allocation quantities and
+     *   amounts always sum to the line exactly (docs/tally-sync/
+     *   PO-VOUCHER-CONTRACT.md §4). NO `unit`: Item.uom is Tally's base unit at the
+     *   last pull but is user-editable and carries no provenance, so the ERP
+     *   cannot say it IS the Tally symbol (Q40) — the agent emits bare
+     *   decimals, the form the live Stock Journals already post with.
+     *   Signs (negative inventory / positive party) are the AGENT's business
+     *   (measured on the exports; purchaseOrder.ts docblock) — the payload
+     *   carries plain positive figures like every other builder's.
+     *
+     * FC-06: rate/amount (line AND schedule) and party_ledger/party_gstin ride
+     * TallySyncEntryResource's existing gate — 'Purchase Order' is a
+     * supplier-party category (TallyTransactionCategory::partyIsSupplier).
+     * Idempotent per (order, 'Purchase Order') through enqueue().
+     */
+    public function enqueuePurchaseOrder(PurchaseOrder $order): TallySyncEntry
+    {
+        $order->loadMissing(['lines.item', 'lines.schedules', 'vendor']);
+
+        $reasons = [];
+
+        if (! config('tally-sync.purchase_orders_enabled')) {
+            $reasons[] = [
+                'code' => 'purchase_orders_disabled',
+                'detail' => 'PO posting to Tally is disabled (tally-sync.purchase_orders_enabled = false; owner gate Q35).',
+            ];
+        }
+
+        // vendors.tally_ledger_name — additive column typed by Accounts;
+        // reads null (never throws) when it is not there.
+        $partyLedger = $order->vendor?->tally_ledger_name;
+        $partyLedger = is_string($partyLedger) && trim($partyLedger) !== '' ? trim($partyLedger) : null;
+        if ($partyLedger === null) {
+            $reasons[] = [
+                'code' => 'party_unmapped',
+                'detail' => $order->vendor === null
+                    ? 'the order names no vendor.'
+                    : "vendor #{$order->vendor->id} has no Tally ledger name recorded (vendors.tally_ledger_name).",
+            ];
+        }
+
+        $purchaseLedger = $this->ledgerMappings->get(TallyLedgerRole::Purchase);
+        if ($purchaseLedger === null) {
+            $reasons[] = [
+                'code' => 'purchase_ledger_unmapped',
+                'detail' => "no Tally ledger is mapped to the '".TallyLedgerRole::Purchase->value."' role (Settings → Ledger Mappings).",
+            ];
+        }
+
+        if ($order->lines->isEmpty()) {
+            $reasons[] = ['code' => 'no_lines', 'detail' => 'the order has no lines.'];
+        }
+
+        foreach ($order->lines as $line) {
+            $item = $line->item;
+            if ($item === null || ! $item->isTallySourced() || $item->isLocalFixture()) {
+                $reasons[] = [
+                    'code' => 'item_unmapped',
+                    'detail' => $item === null
+                        ? "line #{$line->id} names no item."
+                        : "item #{$item->id} '{$item->name}' is not a Tally stock item (no Tally identity recorded).",
+                ];
+            }
+        }
+
+        $godown = $this->godowns->soleTallyGodownName();
+        if ($godown === null) {
+            $reasons[] = [
+                'code' => 'godown_unresolved',
+                'detail' => 'no single Tally-linked godown to allocate the order to (a purchase order names no receiving store until its GRN).',
+            ];
+        }
+
+        if ($reasons !== []) {
+            throw PurchaseOrderNotPostable::because($reasons);
+        }
+
+        $expected = $order->expected_date?->toDateString();
+
+        $lines = $order->lines->map(function ($line) use ($expected) {
+            $quantity = (string) $line->quantity;
+            $rate = (string) $line->unit_price;
+            $amount = bcmul($quantity, $rate, 4);
+
+            $schedules = $line->schedules
+                ->filter(fn ($schedule) => $schedule->due_date !== null)
+                ->values()
+                ->map(fn ($schedule) => [
+                    'due_date' => $schedule->due_date->toDateString(),
+                    'quantity' => (string) $schedule->quantity,
+                ])
+                ->all();
+
+            if ($schedules === [] && $expected !== null) {
+                $schedules = [['due_date' => $expected, 'quantity' => $quantity]];
+            }
+
+            // Allocation amounts: each schedule at ITS OWN quantity × rate.
+            // Whatever the schedules did not promise — an UNDER-SCHEDULED
+            // line — is one REMAINDER allocation (quantity = line − Σ) dated
+            // the order's expected_date when there is one, else undated
+            // (the agent then emits no ORDERDUEDATE — the same rule the
+            // unscheduled line already follows; a date is never made up).
+            // The LAST allocation — the remainder, or the last schedule when
+            // the schedules cover the line exactly — takes the amount
+            // remainder, so allocation quantities AND amounts sum to the
+            // line to the paisa in every case.
+            $scheduledQuantity = array_reduce($schedules, fn ($carry, $schedule) => bcadd($carry, $schedule['quantity'], 4), '0.0000');
+            $unscheduled = bcsub($quantity, $scheduledQuantity, 4);
+            if ($schedules !== [] && bccomp($unscheduled, '0.0000', 4) === 1) {
+                $schedules[] = ['due_date' => $expected, 'quantity' => $unscheduled];
+            }
+
+            $allocated = '0.0000';
+            $count = count($schedules);
+            foreach ($schedules as $index => $schedule) {
+                $share = $index === $count - 1
+                    ? bcsub($amount, $allocated, 4)
+                    : bcmul($schedule['quantity'], $rate, 4);
+                $schedules[$index]['amount'] = $share;
+                $allocated = bcadd($allocated, $share, 4);
+            }
+
+            return [
+                // The exact Tally stock-item name (a Tally-sourced item's name
+                // IS the Tally name) — what <STOCKITEMNAME> must match.
+                'item' => $line->item->name,
+                'quantity' => $quantity,
+                'rate' => $rate,
+                'amount' => $amount,
+                'schedules' => $schedules,
+            ];
+        })->all();
+
+        $totalAmount = array_reduce($lines, fn ($carry, $line) => bcadd($carry, $line['amount'], 4), '0.0000');
+        $reference = "PO-{$order->id}";
+
+        return $this->enqueue($order, 'Purchase Order', [
+            'voucher_type' => 'Purchase Order',
+            'voucher_date' => $order->order_date?->toDateString(),
+            'voucher_number' => $reference,
+            'voucher_number_source' => 'erp',
+            'party_ledger' => $partyLedger,
+            'party_gstin' => $order->vendor?->gstin,
+            'purchase_ledger' => $purchaseLedger,
+            'godown' => $godown,
+            'reference' => $reference,
+            'narration' => $order->notes,
+            'lines' => $lines,
+            'total_amount' => $totalAmount,
         ]);
     }
 
@@ -1242,14 +1462,72 @@ class TallySyncService
         // one log tells the whole story in order: failed, retried, failed
         // again, dismissed. error_message deliberately stays on the row —
         // dismissal is not a repair, and the reason it failed is part of
-        // why it was written off.
+        // why it was written off. No reason of its own is taken today (the
+        // endpoint carries no body); none is invented.
+        return $this->writeOff(
+            $entry,
+            note: 'Dismissed — will never be sent to Tally.',
+            details: ['previous_error' => $entry->error_message],
+            userId: $userId,
+            actor: $actor,
+        );
+    }
+
+    /**
+     * WITHDRAW a voucher THIS ERP staged and the agent has NOT collected —
+     * the one dismissal nobody has to click, because the document behind it
+     * stopped existing: a purchase order cancelled or short-closed while
+     * its Purchase Order voucher was still sitting Pending in our own
+     * queue (Phase 6; TallySyncEventServiceProvider's PurchaseOrderCancelled
+     * / PurchaseOrderClosed listeners are the only callers).
+     *
+     * The SAME write-off dismiss() performs — status Dismissed, the act in
+     * the resolution_log, a voucher.dismissed history row — so the queue's
+     * history reads identically however a row died. What differs is who may
+     * be written off and why: dismiss() writes off a FAILED voucher a human
+     * gave up on; this writes off a PENDING one nothing has ever seen.
+     *
+     * Refused for anything the ERP no longer owns — a row already delivered
+     * to the agent, already synced, already failed, or already dismissed.
+     * Those are left exactly as they are: what Tally should be told about an
+     * order it has already received (an Alter or a Cancel voucher) is owner
+     * question Q48, and this method never guesses it.
+     *
+     * @param  string  $reasonCode  the withdrawal's own reason, on the history row
+     * @param  string  $note  the human sentence for the resolution_log
+     */
+    public function withdrawUncollected(TallySyncEntry $entry, string $reasonCode, string $note, ?int $userId = null, ?Authenticatable $actor = null): ?TallySyncEntry
+    {
+        if ($entry->status !== TallySyncStatus::Pending || $entry->delivered_at !== null || $entry->isInTally()) {
+            return null;
+        }
+
+        return $this->writeOff(
+            $entry,
+            note: $note,
+            details: ['reason' => $reasonCode],
+            userId: $userId,
+            actor: $actor,
+        );
+    }
+
+    /**
+     * THE dismissal write, shared by dismiss() and withdrawUncollected() so
+     * a withdrawn row and a written-off one are the same kind of dead: one
+     * status change, one resolution_log line, one voucher.dismissed history
+     * row. Judges nothing — every caller has already decided.
+     *
+     * @param  array<string, mixed>  $details  what the history row carries beyond the act itself
+     */
+    private function writeOff(TallySyncEntry $entry, string $note, array $details, ?int $userId, ?Authenticatable $actor): TallySyncEntry
+    {
         $payload = $entry->payload;
         $log = $payload['resolution_log'] ?? [];
         $log[] = [
             'at' => now()->toIso8601String(),
             'by' => $userId,
             'previous_error' => $entry->error_message,
-            'note' => 'Dismissed — will never be sent to Tally.',
+            'note' => $note,
         ];
         $payload['resolution_log'] = $log;
 
@@ -1258,13 +1536,7 @@ class TallySyncService
             'payload' => $payload,
         ]);
 
-        // The write-off on the durable record, carrying the error it was
-        // written off WITH — dismissal is not a repair, and the reason it
-        // failed is part of why it was abandoned. No reason of its own is
-        // taken today (the endpoint carries no body); none is invented.
-        $this->events->record(TallySyncEventKind::VoucherDismissed, $entry, [
-            'previous_error' => $entry->error_message,
-        ], actor: $actor);
+        $this->events->record(TallySyncEventKind::VoucherDismissed, $entry, $details, actor: $actor);
 
         return $entry;
     }
@@ -1381,7 +1653,7 @@ class TallySyncService
 
     /**
      * The generic queue path (Sales, Journal, Receipt Note, Delivery Note,
-     * batch-mode production). IDEMPOTENT per (syncable, voucher type) since
+     * Purchase Order, batch-mode production). IDEMPOTENT per (syncable, voucher type) since
      * Phase 3.5: a live entry — pending, synced or failed — already standing
      * for this document is returned as-is, and NOTHING is recorded (no new
      * row, no voucher.enqueued event). Before this, a replayed domain event

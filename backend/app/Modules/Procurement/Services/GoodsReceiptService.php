@@ -49,6 +49,7 @@ class GoodsReceiptService
         private readonly StockMovementService $stock,
         private readonly TraceabilityService $traceability,
         private readonly ProcurementDocumentQuery $query,
+        private readonly PurchaseOrderTraceService $trace,
     ) {}
 
     /**
@@ -63,8 +64,12 @@ class GoodsReceiptService
     {
         // withQueryString(): the paginator's own links carry the request's
         // query string, so an API client walking links.next stays on the
-        // same query (as the Sales lists do).
-        return $this->listQuery($filters)->paginate($perPage)->withQueryString();
+        // same query (as the Sales lists do). Every row stamped with its
+        // Receipt Note TallyLink (one query for the page).
+        $page = $this->listQuery($filters)->paginate($perPage)->withQueryString();
+        $this->trace->decorateReceipts($page->getCollection());
+
+        return $page;
     }
 
     /**
@@ -80,7 +85,29 @@ class GoodsReceiptService
      */
     public function cursor(array $filters = []): LazyCollection
     {
-        return $this->listQuery($filters)->lazy(self::EXPORT_CHUNK);
+        return $this->listQuery($filters)
+            ->lazy(self::EXPORT_CHUNK)
+            ->chunk(self::EXPORT_CHUNK)
+            ->flatMap(function (LazyCollection $chunk): LazyCollection {
+                $this->trace->decorateReceipts($chunk);
+
+                return $chunk;
+            });
+    }
+
+    /**
+     * One receipt as the show endpoint returns it (Phase 6, P6-02): the
+     * list's relations (lines with their lots and bags, the store, the
+     * order and its vendor) plus its Receipt Note TallyLink. The chain
+     * around it — the order, the other arrivals, where the bags went — is
+     * GET purchase-orders/{po}/trace.
+     */
+    public function show(GoodsReceiptNote $receipt): GoodsReceiptNote
+    {
+        $receipt->load(self::WITH);
+        $this->trace->decorateReceipts([$receipt]);
+
+        return $receipt;
     }
 
     /**
@@ -293,7 +320,7 @@ class GoodsReceiptService
                     // This is still the one and only inventory receipt. The
                     // material lots below add physical bag identity; they do
                     // not create another stock movement and never post Tally.
-                    $this->stock->recordReceipt(
+                    $movement = $this->stock->recordReceipt(
                         itemId: $poLine->item_id,
                         warehouseId: $data['warehouse_id'],
                         quantity: (string) $lineData['quantity'],
@@ -304,6 +331,14 @@ class GoodsReceiptService
                         createdBy: $createdBy,
                         purpose: StockMovementPurpose::Receipt,
                     );
+
+                    // NAME the ledger row instead of hunting for it later.
+                    // The reference the movement carries is not an identity:
+                    // two arrivals on one order with no reference of their
+                    // own share the same fallback string, and the trace used
+                    // to show each other's movements. The id is written here,
+                    // at the one place that knows it (Phase 6, P6-02).
+                    $grnLine->update(['stock_movement_id' => $movement->id]);
 
                     foreach ($lineData['lots'] ?? [] as $lotData) {
                         $this->traceability->createLot([
@@ -603,7 +638,7 @@ class GoodsReceiptService
 
     private function loadReceipt(GoodsReceiptNote $receipt): GoodsReceiptNote
     {
-        return $receipt->load([
+        $receipt->load([
             'lines.item',
             'lines.materialLots.item',
             'lines.materialLots.bags',
@@ -614,6 +649,12 @@ class GoodsReceiptService
             'warehouse',
             'purchaseOrder',
         ]);
+        // The store response and a replay carry the link too: for a fresh
+        // receipt the Receipt Note listener has already run (the event is
+        // in-transaction), so the row exists by the time this loads.
+        $this->trace->decorateReceipts([$receipt]);
+
+        return $receipt;
     }
 
     private function isMassUom(?string $uom): bool

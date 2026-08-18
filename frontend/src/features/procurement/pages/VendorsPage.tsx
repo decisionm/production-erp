@@ -18,6 +18,11 @@ const vendorSchema = z.object({
         .optional()
         .or(z.literal('')),
     state_code: z.string().regex(/^[0-9]{2}$/, 'Enter a 2-digit GST state code').optional().or(z.literal('')),
+    // The vendor's ledger name in Tally, EXACTLY as Tally spells it — the
+    // party a staged Purchase Order voucher names (Phase 6). Typed by
+    // Accounts; the ERP never reads it from Tally. Empty = not mapped, and
+    // a PO for this vendor is refused staging ('party_unmapped').
+    tally_ledger_name: z.string().trim().max(255).optional().or(z.literal('')),
 });
 
 type VendorFormValues = z.infer<typeof vendorSchema>;
@@ -33,7 +38,7 @@ export default function VendorsPage() {
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<VendorFormValues>({
         resolver: zodResolver(vendorSchema),
-        defaultValues: { code: '', name: '', email: '', phone: '', gstin: '', state_code: '' },
+        defaultValues: { code: '', name: '', email: '', phone: '', gstin: '', state_code: '', tally_ledger_name: '' },
     });
 
     const mutation = useMutation({
@@ -89,6 +94,18 @@ export default function VendorsPage() {
                     { title: 'GSTIN', dataIndex: 'gstin' },
                     { title: 'State', dataIndex: 'state_code' },
                     {
+                        title: 'Tally ledger',
+                        render: (_, row) =>
+                            row.tally_ledger_name ? (
+                                row.tally_ledger_name
+                            ) : (
+                                // Not a blank: a vendor with no ledger name
+                                // cannot be staged for Tally, and this is
+                                // where that gets fixed.
+                                <Typography.Text type="secondary">not mapped</Typography.Text>
+                            ),
+                    },
+                    {
                         title: 'Active',
                         dataIndex: 'is_active',
                         render: (active: boolean, row) => (
@@ -114,6 +131,7 @@ export default function VendorsPage() {
                                         phone: row.phone ?? '',
                                         gstin: row.gstin ?? '',
                                         state_code: row.state_code ?? '',
+                                        tally_ledger_name: row.tally_ledger_name ?? '',
                                     });
                                 }}
                             >
@@ -156,6 +174,14 @@ export default function VendorsPage() {
                     >
                         <Controller name="state_code" control={control} render={({ field }) => <Input {...field} />} />
                     </Form.Item>
+                    <Form.Item
+                        label="Tally ledger name"
+                        extra="Exactly as the ledger is named in Tally. Leave empty if not mapped — a Purchase Order for this vendor is then not staged for Tally."
+                        validateStatus={errors.tally_ledger_name ? 'error' : ''}
+                        help={errors.tally_ledger_name?.message}
+                    >
+                        <Controller name="tally_ledger_name" control={control} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
                 </Form>
             </Modal>
 
@@ -192,6 +218,14 @@ export default function VendorsPage() {
                         help={editErrors.state_code?.message}
                     >
                         <Controller name="state_code" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item
+                        label="Tally ledger name"
+                        extra="Exactly as the ledger is named in Tally. Leave empty if not mapped — a Purchase Order for this vendor is then not staged for Tally."
+                        validateStatus={editErrors.tally_ledger_name ? 'error' : ''}
+                        help={editErrors.tally_ledger_name?.message}
+                    >
+                        <Controller name="tally_ledger_name" control={editControl} render={({ field }) => <Input {...field} />} />
                     </Form.Item>
                 </Form>
             </Modal>

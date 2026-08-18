@@ -28,6 +28,7 @@ use App\Modules\TallySync\Models\TallySyncEntry;
  *   production (shift / batch)  produced[{item, quantity[, godown]}] · consumed[{item, quantity, godown}] · godown
  *   Sales                       lines[{item, …}] · party_ledger · sales_ledger            (no godown)
  *   Receipt Note / Delivery Note lines[{item, …}] · party_ledger · godown (voucher-level)
+ *   Purchase Order              lines[{item, …}] · party_ledger · purchase_ledger · godown (voucher-level)
  *   Journal                     lines[{ledger, …}]                                        (no item, no party)
  *   Unknown                     whatever of the above the payload actually carries
  *
@@ -87,6 +88,7 @@ class EntryMappingSurface
      *         ledgers: list<array{name: ?string, state: string, note: ?string}>,
      *         party: array{name: ?string, state: string, note: ?string}|null,
      *         sales_ledger: array{name: ?string, state: string, note: ?string}|null,
+     *         purchase_ledger: array{name: ?string, state: string, note: ?string}|null,
      *     },
      *     mapping_summary: array<string, int>,
      * }
@@ -142,11 +144,22 @@ class EntryMappingSurface
             $salesLedger = ['name' => $salesName] + $this->resolver->ledgerRole(TallyLedgerRole::Sales, $salesName);
         }
 
+        // The Purchase Order's purchase ledger (TallyLedgerRole::Purchase —
+        // enqueuePurchaseOrder writes payload.purchase_ledger from the
+        // mapping and refuses when there is none), judged the way the Sales
+        // ledger is. Additive key: null on every other category.
+        $purchaseLedger = null;
+        if ($shape['purchase_ledger']) {
+            $purchaseName = $this->name($payload['purchase_ledger'] ?? null);
+            $purchaseLedger = ['name' => $purchaseName] + $this->resolver->ledgerRole(TallyLedgerRole::Purchase, $purchaseName);
+        }
+
         $mappings = [
             'lines' => $lines,
             'ledgers' => $ledgers,
             'party' => $party,
             'sales_ledger' => $salesLedger,
+            'purchase_ledger' => $purchaseLedger,
         ];
 
         return [
@@ -163,24 +176,27 @@ class EntryMappingSurface
      * still described rather than shown blank.
      *
      * @param  array<string, mixed>  $payload
-     * @return array{stock: list<string>, ledgers: bool, party: bool, sales_ledger: bool}
+     * @return array{stock: list<string>, ledgers: bool, party: bool, sales_ledger: bool, purchase_ledger: bool}
      */
     private function shape(TallyTransactionCategory $category, array $payload): array
     {
         return match ($category) {
             TallyTransactionCategory::ProductionStockJournalShift,
             TallyTransactionCategory::ProductionStockJournalBatch => [
-                'stock' => ['produced', 'consumed'], 'ledgers' => false, 'party' => false, 'sales_ledger' => false,
+                'stock' => ['produced', 'consumed'], 'ledgers' => false, 'party' => false, 'sales_ledger' => false, 'purchase_ledger' => false,
             ],
             TallyTransactionCategory::SalesInvoice => [
-                'stock' => ['lines'], 'ledgers' => false, 'party' => true, 'sales_ledger' => true,
+                'stock' => ['lines'], 'ledgers' => false, 'party' => true, 'sales_ledger' => true, 'purchase_ledger' => false,
             ],
             TallyTransactionCategory::ReceiptNote,
             TallyTransactionCategory::DeliveryNote => [
-                'stock' => ['lines'], 'ledgers' => false, 'party' => true, 'sales_ledger' => false,
+                'stock' => ['lines'], 'ledgers' => false, 'party' => true, 'sales_ledger' => false, 'purchase_ledger' => false,
+            ],
+            TallyTransactionCategory::PurchaseOrder => [
+                'stock' => ['lines'], 'ledgers' => false, 'party' => true, 'sales_ledger' => false, 'purchase_ledger' => true,
             ],
             TallyTransactionCategory::Journal => [
-                'stock' => [], 'ledgers' => true, 'party' => false, 'sales_ledger' => false,
+                'stock' => [], 'ledgers' => true, 'party' => false, 'sales_ledger' => false, 'purchase_ledger' => false,
             ],
             default => [
                 'stock' => array_values(array_filter(
@@ -190,15 +206,17 @@ class EntryMappingSurface
                 'ledgers' => $this->rowsCarry($payload, 'lines', 'ledger'),
                 'party' => array_key_exists('party_ledger', $payload),
                 'sales_ledger' => array_key_exists('sales_ledger', $payload),
+                'purchase_ledger' => array_key_exists('purchase_ledger', $payload),
             ],
         };
     }
 
     /**
      * Counts per counted state over every name the block judged — each
-     * line's item AND godown, each ledger, the party, the sales ledger.
+     * line's item AND godown, each ledger, the party, the sales ledger, the
+     * purchase ledger.
      *
-     * @param  array{lines: list<array<string, mixed>>, ledgers: list<array<string, mixed>>, party: ?array<string, mixed>, sales_ledger: ?array<string, mixed>}  $mappings
+     * @param  array{lines: list<array<string, mixed>>, ledgers: list<array<string, mixed>>, party: ?array<string, mixed>, sales_ledger: ?array<string, mixed>, purchase_ledger: ?array<string, mixed>}  $mappings
      * @return array<string, int>
      */
     private function summarise(array $mappings): array
@@ -213,7 +231,7 @@ class EntryMappingSurface
         foreach ($mappings['ledgers'] as $ledger) {
             $states[] = $ledger['state'];
         }
-        foreach (['party', 'sales_ledger'] as $single) {
+        foreach (['party', 'sales_ledger', 'purchase_ledger'] as $single) {
             if ($mappings[$single] !== null) {
                 $states[] = $mappings[$single]['state'];
             }

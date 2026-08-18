@@ -67,8 +67,19 @@ class EntryPresenter
 
     private const JOURNAL_BUILDER = 'tally-sync-agent/src/tally/voucherBuilders/journalEntry.ts';
 
+    private const PURCHASE_ORDER_BUILDER = 'tally-sync-agent/src/tally/voucherBuilders/purchaseOrder.ts';
+
     /** The line every one of the four carries, verbatim (salesInvoice.ts:19, receiptNote.ts:17, deliveryNote.ts:17, journalEntry.ts:13). */
     private const UNVALIDATED_LINE = 'BEST-EFFORT TEMPLATE — NOT YET VALIDATED AGAINST A REAL TALLY INSTANCE';
+
+    /**
+     * The Purchase Order builder's own status line, verbatim
+     * (purchaseOrder.ts docblock; Phase 6). Different words on purpose: it is
+     * NOT a best-effort template — its shape is measured on 107 real exports
+     * — but it has never posted to a real Tally, and will not until the
+     * owner flips tally-sync.purchase_orders_enabled (Q35).
+     */
+    private const PURCHASE_ORDER_STAGED_LINE = 'DERIVED FROM THE STRUCTURE OF 107 REAL PURCHASE ORDER EXPORTS — NOT YET POSTED TO A REAL TALLY (flag off; owner gate Q35)';
 
     /**
      * The entry columns that stand in for an event when no event exists —
@@ -204,6 +215,7 @@ class EntryPresenter
             case TallyTransactionCategory::SalesInvoice:
             case TallyTransactionCategory::DeliveryNote:
             case TallyTransactionCategory::ReceiptNote:
+            case TallyTransactionCategory::PurchaseOrder:
                 $lines = $this->rows($payload, 'lines');
                 $names = array_values(array_unique(array_filter(array_map(
                     fn (array $line) => is_string($line['item'] ?? null) ? $line['item'] : null,
@@ -254,6 +266,13 @@ class EntryPresenter
             // A receipt lands IN its godown, a delivery leaves FROM its; a
             // Sales invoice's payload names no godown, so its lines name none.
             TallyTransactionCategory::ReceiptNote => array_map(fn (array $line) => $this->stockLine('', $line, ' → ', $payload), $this->rows($payload, 'lines')),
+            // An order's line is what is EXPECTED into the godown, with its
+            // due-date allocations (the schedules) named after it — dates
+            // and quantities only, never the allocation's amount.
+            TallyTransactionCategory::PurchaseOrder => array_map(
+                fn (array $line) => $this->stockLine('', $line, ' → ', $payload).$this->dueDates($line),
+                $this->rows($payload, 'lines'),
+            ),
             TallyTransactionCategory::DeliveryNote => array_map(fn (array $line) => $this->stockLine('', $line, ' ← ', $payload), $this->rows($payload, 'lines')),
             TallyTransactionCategory::SalesInvoice => array_map(fn (array $line) => $this->stockLine('', $line, null, $payload), $this->rows($payload, 'lines')),
             default => [],
@@ -275,6 +294,31 @@ class EntryPresenter
         }
 
         return $text;
+    }
+
+    /**
+     * " · due 01-Sep-2026 × 60, 15-Sep-2026 × 40" — a purchase-order line's
+     * schedules (enqueuePurchaseOrder writes schedules[{due_date, quantity,
+     * amount}]); empty when the line has none. An UNDATED allocation (the
+     * remainder of an under-scheduled line on an order without an expected
+     * date — due_date null) reads "undated × 20", so the quantities shown
+     * still add up to the line. The amount is never read.
+     *
+     * @param  array<string, mixed>  $line
+     */
+    private function dueDates(array $line): string
+    {
+        $parts = [];
+        foreach ($this->rows($line, 'schedules') as $schedule) {
+            $due = $this->string($schedule, 'due_date');
+            $quantity = isset($schedule['quantity']) ? ' × '.$this->quantity($schedule['quantity']) : '';
+            if ($due === null && $quantity === '') {
+                continue;
+            }
+            $parts[] = ($due === null ? 'undated' : $this->humanDate($due)).$quantity;
+        }
+
+        return $parts === [] ? '' : ' · due '.implode(', ', $parts);
     }
 
     /** @param  array<string, mixed>  $line */
@@ -480,7 +524,8 @@ class EntryPresenter
      * shares the syncable the resource's `hold` already loaded.
      *
      *   unvalidated_builder          the agent's builder for this category says, in its own docblock, that it is unvalidated
-     *                                (all four non-production builders do; Sales additionally names the GST gap and DEC-20260809-003)
+     *                                (all four non-production builders do; Sales additionally names the GST gap and DEC-20260809-003;
+     *                                the Purchase Order builder says, in its own words, that it has never posted to a real Tally — flag off, Q35)
      *   order_reference_not_emitted  a Receipt Note carrying tally_order_no / order_due_dates the agent's builder does not emit
      *   label_differs_from_wire      the ERP's label is not the voucher type Tally receives
      *   held                         the release gate is holding this shift voucher right now
@@ -525,6 +570,19 @@ class EntryPresenter
                     .'"more likely to be close to correct as-is, but still confirm against a real export before trusting it '
                     .'in production".',
                 'builder' => self::JOURNAL_BUILDER,
+            ],
+            // Not a template — measured on the real exports (Q38: read
+            // locally, never committed) — but never yet posted: the first
+            // live Purchase Order write is the owner's gate (Q35), and the
+            // flag that would let one through is off. Says so in the
+            // builder's own words; the decision that makes it an ORDER
+            // voucher rides along.
+            TallyTransactionCategory::PurchaseOrder => [
+                'note' => 'The agent\'s Purchase Order voucher builder is, in its own words, "'.self::PURCHASE_ORDER_STAGED_LINE.'" — '
+                    .'an ORDER voucher that touches neither accounts nor stock by type (DEC-20260812-002); staged, not live. '
+                    .'The first live post is the check on the due-date (ORDERDUEDATE JD/P) and unit-suffix (Q40) rules.',
+                'builder' => self::PURCHASE_ORDER_BUILDER,
+                'decision' => 'DEC-20260812-002',
             ],
             default => null,
         };

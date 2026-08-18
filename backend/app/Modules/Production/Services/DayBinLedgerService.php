@@ -10,6 +10,7 @@ use App\Modules\Production\Models\Enums\DayBinMovementType;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\WorkCenter;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -306,6 +307,38 @@ class DayBinLedgerService
             ShiftProductionEntry::query()->findOrFail($shiftProductionEntryId),
             $itemId,
         );
+    }
+
+    /**
+     * Every LOAD row that names one of the given bags, oldest first, with
+     * the machine and the segment it was recorded under loaded — the
+     * cross-module read Procurement's purchase-order trace uses to walk
+     * lot → bag → "where was it loaded, during which batch" (Phase 6). The
+     * same query ProductionReportService::traceabilityReport runs for its
+     * feed map, exposed for a caller outside this module. One query for
+     * the whole set; the caller groups. Reads only.
+     *
+     * A row's work_center_id is null for the COMMON RESIN INPUT and its
+     * shift_production_entry_id null for a load recorded outside any batch
+     * window — a bag belongs to no machine and no batch (FC-01); this is
+     * where it was poured, not whose it was.
+     *
+     * @param  list<int>  $bagIds
+     * @return Collection<int, DayBinMovement>
+     */
+    public function loadsForBags(array $bagIds): Collection
+    {
+        $bagIds = array_values(array_unique(array_map('intval', $bagIds)));
+        if ($bagIds === []) {
+            return new Collection;
+        }
+
+        return DayBinMovement::query()
+            ->whereIn('material_bag_id', $bagIds)
+            ->where('type', DayBinMovementType::Load->value)
+            ->with(['workCenter', 'item', 'shiftProductionEntry.workCenter'])
+            ->orderBy('id')
+            ->get();
     }
 
     /**

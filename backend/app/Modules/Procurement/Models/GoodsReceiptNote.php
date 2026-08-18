@@ -17,6 +17,22 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 ])]
 class GoodsReceiptNote extends Model
 {
+    /**
+     * Read-side decoration set by GoodsReceiptService (via
+     * PurchaseOrderTraceService::decorateReceipts) and read by
+     * GoodsReceiptNoteResource — a plain property, never an attribute: the
+     * TallyLink for this receipt's Receipt Note entry (TallySyncLinkService),
+     * or null when none exists. Every row the service returns is decorated,
+     * so null means "no entry", never "not looked up".
+     */
+    public ?array $tallyLink = null;
+
+    /** The receipt as every list and trace names it: "GRN-{id}" (the list's `q` grammar). */
+    public function documentNumber(): string
+    {
+        return "GRN-{$this->id}";
+    }
+
     protected function casts(): array
     {
         return [

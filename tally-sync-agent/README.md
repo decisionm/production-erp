@@ -15,11 +15,27 @@ Tray app (this machine)
   ├─ version.ts      — the agent's version from package.json, stamped on every snapshot (testable outside Electron)
   ├─ tally/client.ts — POST XML to http://<tallyHost>:<tallyPort>, parse response body for real result
   ├─ tally/voucherBuilders/ — one file per Tally voucher type, dispatched by tally_voucher_type
+  │     purchaseOrder.ts — (0.3.9) the ERP-raised Purchase Order as a Tally ORDER voucher (DEC-20260812-002):
+  │                        shape measured on 107 real exports (structure only — Q38), signs as observed, no tax /
+  │                        rounding line (Q35(e)), bare quantities (Q40); STAGED on the cloud behind
+  │                        tally-sync.purchase_orders_enabled = false (owner gate Q35) — see
+  │                        docs/tally-sync/PO-VOUCHER-CONTRACT.md. Never yet posted to a real Tally.
   ├─ tray.ts         — tray icon + menu (status, Sync Now, Pause, View Logs, Settings, Quit)
   ├─ settings-window/ — small BrowserWindow, IPC bridge to read/write config
   ├─ config.ts        — electron-store, persisted in the OS's per-user app-data folder
   └─ logger.ts         — rotating file log (the audit trail the master plan's §5 requires)
 ```
+
+## Versions
+
+The published feed is what the factory PC runs; a version bump on a branch is NOT a release
+(see `CLAUDE.md` here and the RELEASE RITUAL in the repo root's `DEPLOY.md`).
+
+| Version | What it adds | Published? |
+|---|---|---|
+| 0.3.5 | the consolidated shift Stock Journal builder (`Stock Journal` case) | yes — the fleet floor for shift vouchers |
+| 0.3.8 | post-Tally snapshots (`snapshot.ts`), version stamp | built and tested; **not published** (owner-gated, DEPLOYMENT-RUNBOOK) |
+| 0.3.9 | the Purchase Order builder (`purchaseOrder.ts`, Phase 6) — an ORDER voucher, staged behind a cloud flag that is OFF | built and tested on the branch; **NOT published**. Nothing reaches an agent until the owner flips `tally-sync.purchase_orders_enabled` (Q35), and an older agent would fail such an entry loudly ("No XML builder"), never post it wrongly |
 
 ## Setup
 

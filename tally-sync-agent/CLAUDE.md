@@ -12,6 +12,16 @@ factory's live Tally** (first proven sync: batch #45), and real Stock
 Journals have been read back through it. Treat it as production software
 touching real books, not a prototype.
 
+**The Purchase Order builder (0.3.9, `purchaseOrder.ts`) has never posted
+either — by design.** Its shape is measured on the factory's real 12-Aug-2026
+exports (structure only; the exports stay outside the repo — Q38) and it is
+an ORDER voucher that Tally posts to neither accounts nor stock BY TYPE
+(DEC-20260812-002). The cloud stages one only while
+`tally-sync.purchase_orders_enabled` is on, and that flag is OFF until the
+owner opens the gate (Q35). `docs/tally-sync/PO-VOUCHER-CONTRACT.md` is the
+contract; `tests/purchaseOrder.test.js` and its synthetic golden are the
+proof. 0.3.9 is built and tested, NOT published.
+
 **The Sales-invoice builder is NOT part of that claim.** It has never
 posted to a live Tally and emits no GST tax ledger entries — enabling
 Sales sync without validating it first would post GST-less sales vouchers

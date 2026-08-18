@@ -82,7 +82,10 @@ class SyncEntryMappingsTest extends TestCase
 
         $data = $this->getJson("/api/v1/tally-sync/entries/{$grn->id}")->assertOk()->json('data');
 
-        $this->assertSame(['lines', 'ledgers', 'party', 'sales_ledger'], array_keys($data['mappings']));
+        // `purchase_ledger` is Phase 6's additive key (the Purchase Order's
+        // TallyLedgerRole::Purchase row) — null on every other category.
+        $this->assertSame(['lines', 'ledgers', 'party', 'sales_ledger', 'purchase_ledger'], array_keys($data['mappings']));
+        $this->assertNull($data['mappings']['purchase_ledger'], 'Only a Purchase Order carries a purchase ledger');
 
         $line = $data['mappings']['lines'][0];
         $this->assertSame('lines', $line['side']);

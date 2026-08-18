@@ -430,8 +430,8 @@ class TallySyncQueryService
                     // over party_ledger would still answer "?q=Reliance →
                     // 3 rows", a yes/no oracle on who supplied what. So for
                     // such a reader the party clause simply does not apply to
-                    // supplier-party categories (Receipt Note today; Purchase
-                    // and Purchase Order when they exist). A CUSTOMER on a
+                    // supplier-party categories (Receipt Note; Purchase Order
+                    // since Phase 6; Purchase if it ever exists). A CUSTOMER on a
                     // Delivery Note or Sales invoice is not FC-06 and stays
                     // searchable for everyone.
                     if ($path === 'payload->party_ledger' && ! $mayReadPurchaseDetails) {
@@ -580,9 +580,10 @@ class TallySyncQueryService
      * just as real) — and NULL, never 0, on a Tally-only or absent row.
      * Nothing was measured there because nothing was mirrored; a zero would
      * read as "measured, none", which is a claim about the accountant's
-     * books this ERP cannot make without reading Tally. Purchase Order
-     * (source 'tally', erp_build 'planned') is null for the same reason,
-     * and Sales Order (source 'absent') is null because there is nothing in
+     * books this ERP cannot make without reading Tally. Purchase Order is
+     * ERP-built since Phase 6 (staged, flag off) and so is MEASURED — an
+     * honest 0 on live until the owner opens the gate, never the accountant's
+     * 92. Sales Order (source 'absent') is null because there is nothing in
      * the books to have measured at all — the census figures themselves are
      * evidence, not a count this ERP took.
      *

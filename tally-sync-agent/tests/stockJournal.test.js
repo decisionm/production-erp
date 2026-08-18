@@ -66,9 +66,13 @@ test('the dispatcher accepts the voucher type the server actually labels', () =>
 });
 
 test('an unknown voucher type still fails loudly, naming the type and the entry', () => {
+    // 'Payment' is a voucher type the ERP never builds (it lives in Tally
+    // only — TallyTransactionCategory::Payment). This case used to name
+    // 'Purchase Order' as the canonical unknown; since 0.3.9 that type HAS a
+    // builder (purchaseOrder.ts, Phase 6), so the unknown moved here.
     assert.throws(
-        () => buildVoucherXml({ id: 41, tally_voucher_type: 'Purchase Order', payload: {} }, COMPANY),
-        /No XML builder for voucher type "Purchase Order" \(entry #41\)/,
+        () => buildVoucherXml({ id: 41, tally_voucher_type: 'Payment', payload: {} }, COMPANY),
+        /No XML builder for voucher type "Payment" \(entry #41\)/,
     );
 });
 

@@ -288,10 +288,9 @@ class TransactionClassifierTest extends TestCase
         // What lives in Tally without the ERP: source 'tally', direction
         // 'none', nothing built, no ERP module, and the wire voucher type is
         // the name from the 12-Aug Statistics census (TALLY-EVIDENCE-2026-08-12
-        // §A) — Purchase Order included: 92 of them are in the books.
+        // §A). Purchase Order is no longer among them (Phase 6, below).
         foreach ([
             'purchase' => 'Purchase',
-            'purchase_order' => 'Purchase Order',
             'payment' => 'Payment',
             'receipt' => 'Receipt',
             'contra' => 'Contra',
@@ -302,21 +301,25 @@ class TransactionClassifierTest extends TestCase
             $this->assertSame('none', $rows[$key]['direction'], $key);
             $this->assertSame($wire, $rows[$key]['wire_voucher_type'], $key);
             $this->assertFalse($rows[$key]['erp_label_differs_from_wire'], $key);
-            if ($key !== 'purchase_order') {
-                $this->assertSame('none', $rows[$key]['erp_build'], $key);
-                $this->assertNull($rows[$key]['source_module'], $key);
-            }
+            $this->assertSame('none', $rows[$key]['erp_build'], $key);
+            $this->assertNull($rows[$key]['source_module'], $key);
         }
 
-        // The ERP-originated Purchase Order is PLANNED (DEC-20260812-002,
-        // Phase 6) — on the erp_build axis, not on source: the two facts
-        // "in the books" and "the ERP will build it" are both true of this
-        // row and no longer share one word. The module that will originate
-        // it is named; the direction is still none, because a plan moves
-        // nothing.
-        $this->assertSame('planned', $rows['purchase_order']['erp_build']);
+        // The ERP-originated Purchase Order is BUILT and STAGED
+        // (DEC-20260812-002, Phase 6; enqueuePurchaseOrder — live posting
+        // owner-gated behind tally-sync.purchase_orders_enabled, Q35): like
+        // Journal, it is both in the 12-Aug census (92, the accountant's)
+        // and ERP-built, and reads source 'erp', direction 'erp_to_tally',
+        // module procurement, wire type 'Purchase Order' — the label says
+        // it is staged and owner-gated, so nobody reads the row as live.
+        $this->assertSame('erp', $rows['purchase_order']['source']);
+        $this->assertSame('built', $rows['purchase_order']['erp_build']);
+        $this->assertSame('erp_to_tally', $rows['purchase_order']['direction']);
         $this->assertSame('procurement', $rows['purchase_order']['source_module']);
-        $this->assertStringContainsString('Phase 6', $rows['purchase_order']['label']);
+        $this->assertSame('Purchase Order', $rows['purchase_order']['wire_voucher_type']);
+        $this->assertFalse($rows['purchase_order']['erp_label_differs_from_wire']);
+        $this->assertStringContainsString('owner-gated', $rows['purchase_order']['label']);
+        $this->assertStringContainsString('Q35', $rows['purchase_order']['label']);
 
         // No Sales Order voucher type exists in the books (DEC-20260809-003:
         // sales are invoiced in Tally): source 'absent' — NOT 'tally', which
@@ -329,12 +332,14 @@ class TransactionClassifierTest extends TestCase
         $this->assertNull($rows['sales_order']['source_module']);
         $this->assertStringContainsString('DEC-20260809-003', $rows['sales_order']['label']);
 
-        // Only the six ERP-built rows are built.
+        // Only the seven ERP-built rows are built (Purchase Order joined in
+        // Phase 6); nothing is 'planned' today — the value stays for the
+        // next decided-but-unbuilt category.
         $this->assertSame(
-            ['production_stock_journal_shift', 'production_stock_journal_batch', 'sales_invoice', 'delivery_note', 'receipt_note', 'journal'],
+            ['production_stock_journal_shift', 'production_stock_journal_batch', 'sales_invoice', 'delivery_note', 'receipt_note', 'journal', 'purchase_order'],
             collect($catalogue)->where('erp_build', 'built')->pluck('key')->all(),
         );
-        $this->assertSame(['purchase_order'], collect($catalogue)->where('erp_build', 'planned')->pluck('key')->all());
+        $this->assertSame([], collect($catalogue)->where('erp_build', 'planned')->pluck('key')->all());
 
         // The honesty flag is raised on exactly one row.
         $this->assertSame(
@@ -351,11 +356,11 @@ class TransactionClassifierTest extends TestCase
      * (TALLY-EVIDENCE-2026-08-12 §A, 1-Apr-26 to 10-Aug-26) has a catalogue
      * case that names it by its exact wire voucher type — so the Control
      * Center can say where each of the accountant's transactions lives
-     * without a gap. All of them live in Tally except Journal, which the ERP
-     * ALSO builds and counts only its own postings of (the 418 are the
-     * accountant's; see the Journal case). The figures are the census's,
-     * quoted here as the evidence for the row's existence and never as a
-     * count this ERP took.
+     * without a gap. All of them live in Tally except Journal and, since
+     * Phase 6, Purchase Order — both of which the ERP ALSO builds and counts
+     * only its own postings of (the 418 and the 92 are the accountant's;
+     * see those cases). The figures are the census's, quoted here as the
+     * evidence for the row's existence and never as a count this ERP took.
      */
     public function test_every_voucher_type_in_the_12_aug_census_maps_to_a_catalogue_case(): void
     {
@@ -380,7 +385,7 @@ class TransactionClassifierTest extends TestCase
 
             $sources = $byWire[$wire]->pluck('source')->unique()->values()->all();
             $this->assertSame(
-                $wire === 'Journal' ? ['erp'] : ['tally'],
+                in_array($wire, ['Journal', 'Purchase Order'], true) ? ['erp'] : ['tally'],
                 $sources,
                 "{$wire}: source",
             );

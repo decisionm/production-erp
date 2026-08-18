@@ -374,7 +374,9 @@ test('agentVersion() reads package.json and is the strict semver the release gat
     assert.match(agentVersion(), /^\d+\.\d+\.\d+$/);
 });
 
-test('this candidate is 0.3.8 — the first agent that uploads snapshots', () => {
-    // The drawer's "agent ≥ 0.3.8" line depends on this being the floor.
-    assert.equal(agentVersion(), '0.3.8');
+test('this candidate is 0.3.9 — snapshots since 0.3.8, the Purchase Order builder since 0.3.9', () => {
+    // The drawer's "agent ≥ 0.3.8" line depends on 0.3.8 being the snapshot
+    // FLOOR; the candidate itself advances (0.3.9 adds purchaseOrder.ts —
+    // Phase 6, staged, flag off — and is built and tested, NOT published).
+    assert.equal(agentVersion(), '0.3.9');
 });
