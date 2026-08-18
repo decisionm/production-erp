@@ -47,6 +47,7 @@ use App\Modules\Production\Http\Controllers\BatchPreviewController;
 use App\Modules\Production\Http\Controllers\BinBayController;
 use App\Modules\Production\Http\Controllers\BomController;
 use App\Modules\Production\Http\Controllers\CapacityPlanController;
+use App\Modules\Production\Http\Controllers\CecReportController;
 use App\Modules\Production\Http\Controllers\ConfigurationReviewController;
 use App\Modules\Production\Http\Controllers\DayBinController;
 use App\Modules\Production\Http\Controllers\DowntimeReasonController;
@@ -623,6 +624,12 @@ Route::prefix('v1')->group(function () {
 
             Route::post('shift-summaries', [ShiftSummaryController::class, 'store']);
             Route::get('shift-summaries/report', [ShiftSummaryController::class, 'report']);
+
+            // Phase 5.7 — the CEC's DATA: the Shift Summary + the completed
+            // entries of a date, composed per shift/machine (no new
+            // arithmetic). The FORMAT stays BLOCKED — SOURCE DOCUMENT
+            // REQUIRED (the response says so; the export kind answers 409).
+            Route::get('cec', CecReportController::class);
 
             // Reports wave — read-only aggregation over completed entries;
             // production.view suffices (GET). The traceability report lives

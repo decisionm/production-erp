@@ -20,6 +20,7 @@ re-derive it under time pressure.
 | 7 | #185 Phase 4.5 Export Center | #184 | `2026_08_17_120000_create_export_runs_table` | `EXPORT_ROW_CAP` optional (default 5000) | /exports (Downloads) for every login (catalogue filters by permission); PO/GRN lists gain filters (backward compatible; per_page 422 outside 1..1000 where it was clamped — no frontend caller affected) |
 | 8 | #186 Phase 5 Product/SKU config | #185 | `2026_08_17_130000` (packaging unique index swap), `130001` (packing lines), `131000` (items.sku_provisional), `150000` (stock_movements.purpose), `150001` (purpose backfill — reversible only together with 150000) | none | two same-mode packings representable; identity-only PATCH; provisional SKU flag on newly pulled items; `inventory:check-ledger` available (read-only — run it after the deploy) |
 | 9 | #187 Phase 5.5 Shift Floor | #186 | none | none | new batches stamp `production_v3_unified` (floored expected pieces — up to one shot below the paper's arithmetic; historical entries keep their formula); entries index filters; Completed Today server-side; a completion event (no listener) |
+| 10 | #188 Phase 5.7 Shift Summary + CEC infra | #187 | none | none | Shift Summary report gains additive honesty keys (old keys aliased); `GET production/cec` (data only; format BLOCKED; export slot unchanged 409); Shift Summary page reconcile line + CEC preview (no download) |
 
 Merging #179 first retargets #180 to `main` automatically when the base branch is
 deleted on merge (GitHub behaviour) — merge top-down, one at a time, and let each

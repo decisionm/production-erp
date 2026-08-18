@@ -14,6 +14,7 @@ import type {
     BatchStatus,
     BinBayAvailabilityResponse,
     CartonInternalTrace,
+    CecReport,
     FinishedCarton,
     Bom,
     DowntimeReason,
@@ -1049,6 +1050,65 @@ export async function saveShiftSummary(payload: SaveShiftSummaryPayload): Promis
 export async function getShiftKpiReport(shiftId: number | undefined, productionDate: string): Promise<ShiftKpiReport> {
     const { data } = await api.get<{ data: ShiftKpiReport }>('/production/shift-summaries/report', {
         params: { shift_id: shiftId, production_date: productionDate },
+    });
+    return data.data;
+}
+
+/**
+ * Every batch COMPLETED on one production date — for one shift, or every
+ * shift that ran it when `shiftId` is omitted — read through the entries
+ * index with the server's own filters (Phase 5.5: production_date · shift_id
+ * · batch_status = completed · per_page 100) and walked to `meta.last_page`
+ * so a day deeper than one page is still the whole day. This is the read
+ * the Shift Summary page reconciles against the report's
+ * actual_production_kg (shiftSummaryReconcile.ts): the same entries the
+ * server summed, fetched the way Completed Today fetches them.
+ *
+ * The 25-page cap is the same second bound listPendingEntries carries — a
+ * malformed meta cannot spin the loop; 2,500 completed batches on one date
+ * is not a factory day. If the cap, not the last page, ends the walk the
+ * result says `truncated: true` so the reconcile line never calls a partial
+ * sum a difference.
+ */
+export interface CompletedEntriesWalk {
+    entries: ShiftProductionEntry[];
+    /** true when the 25-page bound — not meta.last_page — stopped the walk; the sum is then partial and says so. */
+    truncated: boolean;
+}
+
+export async function listCompletedEntriesFor(productionDate: string, shiftId?: number): Promise<CompletedEntriesWalk> {
+    const all: ShiftProductionEntry[] = [];
+    let page = 1;
+    let lastPage = 1;
+
+    do {
+        const response = await listShiftProductionEntries({
+            production_date: productionDate,
+            shift_id: shiftId,
+            batch_status: 'completed',
+            per_page: 100,
+            page,
+        });
+        all.push(...(response?.data ?? []));
+        lastPage = response?.meta?.last_page ?? 1;
+        page += 1;
+    } while (page <= lastPage && page <= 25);
+
+    return { entries: all, truncated: page <= lastPage };
+}
+
+/**
+ * The CEC's DATA for one date (one shift, or every shift that ran it) —
+ * Phase 5.7's `GET production/cec`, a thin server-side composition of the
+ * Shift Summary report and the entries index. DATA ONLY: the CEC FORMAT is
+ * blocked (source document required — the owner's sample), the export kind
+ * stays blocked, and this frontend previews the figures without a download.
+ * The grammar is CecReportRequest's — the export slot's own filters: `date`
+ * (Y-m-d, required) and `shift_id` (omitted = the day-wide read).
+ */
+export async function getCecReport(productionDate: string, shiftId?: number): Promise<CecReport> {
+    const { data } = await api.get<{ data: CecReport }>('/production/cec', {
+        params: { date: productionDate, shift_id: shiftId },
     });
     return data.data;
 }

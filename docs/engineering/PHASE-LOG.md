@@ -1194,3 +1194,136 @@ PR:                 #187 (base: feat/phase-5-product-sku-configuration → #186 
 Deployment state:   not deployed; stack #179 → … → #186 → #187
 Next phase:         5.7 — Shift Summary + CEC infrastructure
 ```
+
+## PHASE 5.7 — Shift Summary contract + CEC infrastructure (format BLOCKED)
+
+```
+Phase:    5.7 — Shift Summary + CEC infrastructure (MASTER-PLAN rev 3, P5.7-01..03)
+Status:   PASS WITH DEFERRED ITEMS
+Branch:   feat/phase-5.7-shift-summary-cec (stacked on Phase 5.5 PR #187 → … → #179)
+Dates:    2026-08-17
+
+Goal:
+  Make ShiftSummaryService::report() (zero tests before this phase) a tested
+  contract — historical dates, Shift A/B/C, All Shifts, totals reconciling
+  with completed production — and build everything AROUND the CEC that can be
+  built without its format: the data endpoint, the golden-file harness, the
+  preview. The CEC FORMAT stays BLOCKED — SOURCE DOCUMENT REQUIRED; no layout
+  is invented anywhere; the export slot stays 409-BLOCKED.
+
+What changed:
+  • Shift Summary contract (P5.7-01): ShiftSummaryReportTest — 12 tests on a
+    frozen clock (2026-08-17) over a historical day (2026-08-03) with three
+    shifts, three machines, two items, batches through startBatch/
+    completeBatch and logs through the log services: per shift
+    actual_production_kg == Σ completed batches' quantity_produced_kg == Σ of
+    GET shift-production-entries?production_date&shift_id&batch_status=
+    completed; a running batch adds no kg; each downtime/mould/power/stock
+    log lands in its shift only; the day == Σ three shifts to the digit for
+    every kg figure (ratios recomputed from day totals); efficiency null
+    without a supervisor target and the basis stated; empty date → honest
+    zeros/nulls; a past date is served. Honesty keys, additive only:
+    efficiency_basis ('supervisor_target'|null), kpi_inputs {target_
+    production_kg, power_consumption_units: 'supervisor'|null}, machines_
+    running_now / machines_down_now (the old keys kept as aliases one release;
+    the docblock says they read CURRENT machine state, not the date's). Zero
+    arithmetic change to any existing key. No aggregation defect was found —
+    day == Σ shifts held before the phase; idle hours per shift are truncated
+    from minutes and the day from raw minutes (pinned as behaviour).
+  • CEC infrastructure (P5.7-02): CecReportService — a THIN composition: per
+    shift the Shift Summary report VERBATIM + the completed entries of that
+    date/shift read through ShiftProductionEntryResource (paginate walked at
+    100 a page), grouped by machine in picker order → batches {expected_
+    pieces, actual_pieces, good_production_kg, rejection_kg (= the
+    production-side figure the Shift Summary sums), rejection_kg_qc,
+    efficiency_pct/band, expected_boxes, packs, downtime_minutes_total,
+    calculation_version, approval_status, tally_status, tally}; sums per
+    machine/shift/day are plain bcadd sums with nulls skipped and counted
+    (skipped_nulls, always an object) and a basis sentence; efficiency never
+    summed; the response says format: 'BLOCKED — SOURCE DOCUMENT REQUIRED'
+    and figures_from. GET production/cec (date required Y-m-d, shift_id
+    optional; module:production). CecGoldenTest reads tests/fixtures/cec/
+    *.golden.csv with a sibling .golden.json reading guide + .seed.php and
+    asserts sample == CEC == Shift Summary == entries index; with no sample
+    it SKIPS with exactly "CEC sample not on file — format authority is the
+    owner's"; a csv without its guide, a guide naming a missing seed, an
+    unknown key, or ANY unrecognised file in the directory FAILS loudly.
+    README.md says only the owner's sample goes there. CecExport stays
+    409-BLOCKED (ProductionExportsTest pins the reason). paginate() gained
+    an optional $page (every existing caller byte-identical).
+  • Page (P5.7-01/02): "Completed batches vs summary" line — Σ completed
+    entries (the entries index walked to last_page) vs the report's
+    actual_production_kg at 4 dp (BigInt, no float): '✓ equal (N batches)'
+    or 'differs by X kg' with both figures, or 'not compared' when the walk
+    hit its 25-page bound; machines (now) labels; efficiency title from
+    efficiency_basis; CecPreviewPanel captioned EXACTLY 'CEC preview — format
+    pending: owner sample required', the server's format string verbatim,
+    shift → machine → batches from the server's figures, NO download; the
+    panel's read waits for the shift to resolve.
+  • P5.7-03 (reporting honesty sweep on the other Production reports) —
+    NOT DONE this phase; carried to Phase 7's regression (recorded below).
+
+Tests:
+  Backend 1,502 → 1,526 (1 skipped: CecGoldenTest by design) / 13,602
+  assertions: ShiftSummaryReportTest 12 · CecReportTest 11 · CecGoldenTest 1.
+  Frontend vitest 269 → 304: shiftSummaryReconcile 18 · cecPreview 17.
+  Typecheck/build clean. Knowledge validator sound (Q47 added).
+
+Independent QA + adversarial review (Sonnet QA · Opus rules · Fable
+correctness) — all three PASS_WITH_DEFERRED, no P0/P1/P2:
+  Sonnet built its OWN fixture (amended entry, handover parent+child,
+  awaiting-correction, cancelled, in-progress on one date/shift): report ==
+  index == CEC at 125.0000 kg, cancelled/in-progress correctly excluded; 42/42
+  field-for-field CEC-vs-index assertions on a discriminating fixture (real
+  standard so expected_pieces/efficiency non-null, QC weight ≠ production
+  rejection, a completion downtime line); the exact skip message captured
+  byte-for-byte; a stray csv made the harness FAIL loudly; empty date → 200
+  honest zeros. Opus confirmed the reconcile predicate parity (whereDate vs
+  half-open range on the same DATE column, same status set, shift_id NOT
+  NULL, no soft-delete scope), existing report keys byte-identical, and that
+  the CEC's rejection_kg IS the field the summary sums.
+  P3s fixed on the branch: reconcile line honest when the 25-page bound cuts
+  the walk (was: a false 'differs'); CecPreviewPanel `enabled` gate (was: a
+  day-wide read before the shift resolved); skipped_nulls always `{}`; golden
+  harness fails on an unrecognised file; 'blank until a non-zero target is
+  typed'.
+  Recorded, not fixed (out of ownership / performance): the entries resource
+  costs two queries per completed batch (materialCost stock_movements + bag
+  allocations) — inherited by Completed Today (5.5) and the CEC; a
+  batching/variant follow-up (Phase 7 P7-03).
+
+API proof (dev API, Administrator; the dev DB holds no entries → honest):
+  GET production/shift-summaries/report?production_date=2026-08-03 → keys
+  efficiency_basis null, kpi_inputs {null,null}, machines_running_now 0 (old
+  keys equal). GET production/cec?date=2026-08-03 → format 'BLOCKED — SOURCE
+  DOCUMENT REQUIRED', figures_from [shift_summary, shift_production_entries],
+  shifts [], day.sums nulls with skipped_nulls {}. Validation: no date → 422,
+  03-08-2026 → 422, shift_id 999 → 422. GET exports → cec kind status
+  'blocked', reason 'CEC FORMAT = BLOCKED — SOURCE DOCUMENT REQUIRED'.
+
+Browser proof:
+  NOT DONE (extension still disconnected); the page behaviour is pinned by 35
+  vitest cases and the endpoint by 24 backend tests + Sonnet's independent
+  fixture. To be re-proven in Phase 8's chain walk (Shift Summary → CEC link).
+
+Data/transaction proof:
+  Nothing that reaches Tally changed (TallySync suite green; no payload
+  touched). No migration. Historical figures never recomputed (the CEC reads
+  the calculation_version-stamped metrics).
+
+Owner-gated items:
+  • CEC FORMAT — BLOCKED — SOURCE DOCUMENT REQUIRED (unchanged; the harness
+    is ready for the sample + a reading guide the day it lands).
+  • Q47 — which rejection figure the CEC sheet carries (production-side, QC-
+    weighed, or confirmed): both exposed; the guide decides; NOT chosen here.
+
+Deferred items:
+  • P5.7-03 reporting honesty sweep (production / reconciliation /
+    traceability reports server-side, filters honoured) → Phase 7 P7-05.
+  • ShiftSummaryExport columns still read the alias keys (machines_running/
+    down); rename to *_now with the header pin when the aliases are dropped.
+  • Per-entry cost reads on the entries resource (2 queries/batch) → P7-03.
+PR:                 #188 (base: feat/phase-5.5-shift-floor → #187 → … → #179)
+Deployment state:   not deployed; stack #179 → … → #187 → #188
+Next phase:         6 — Purchase → GRN → lot → inventory → consumption; PO → Tally staged, flag OFF
+```

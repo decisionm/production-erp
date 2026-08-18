@@ -107,6 +107,13 @@ class ShiftProductionEntryService
      * withdrawn batches by name IS asking to see them, and the default
      * predicate below would otherwise contradict the filter into an empty
      * page. Any other batch_status leaves the default alone.
+     *
+     * `$page` (Phase 5.7, P5.7-02): WHICH page, for a caller that is not an
+     * HTTP request — the CEC composition (CecReportService) walks every
+     * page of the completed entries for a date/shift and cannot read the
+     * page number off a query string. Null keeps the framework's own
+     * resolution (the request's `page`), so every existing caller answers
+     * exactly as before.
      */
     public function paginate(
         int $perPage = 20,
@@ -118,6 +125,7 @@ class ShiftProductionEntryService
         ?int $workCenterId = null,
         ?int $shiftId = null,
         ?BatchStatus $batchStatus = null,
+        ?int $page = null,
     ): LengthAwarePaginator {
         $includeCancelled = $includeCancelled || $batchStatus === BatchStatus::Cancelled;
 
@@ -195,7 +203,7 @@ class ShiftProductionEntryService
             ->when($shiftId, fn ($query) => $query->where('shift_id', $shiftId))
             ->orderByDesc('production_date')
             ->orderByDesc('id')
-            ->paginate($perPage);
+            ->paginate($perPage, ['*'], 'page', $page);
     }
 
     /**

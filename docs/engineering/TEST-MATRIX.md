@@ -222,3 +222,26 @@ One estimation engine for preview and entry, versioned, legacy pinned · every e
 
 ### Still open (from the baseline list)
 `OverReceiptException` · CRM · Finance · `ShiftSummaryService::report()` (**Phase 5.7, next**) — **Still:** MySQL CI leg (Phase 7). **New (recorded):** the two pre-existing per-row cost reads on the entries list (materialCost stock_movements; bag-cost allocations) — a batching follow-up.
+
+## Phase 5.7 (feat/phase-5.7-shift-summary-cec, gate closed 2026-08-17)
+
+| Suite | Result | Evidence |
+|---|---|---|
+| Pint (whole tree) | PASS | clean |
+| Backend PHPUnit | PASS | **1,526 / 13,602** (1 skipped by design: CecGoldenTest "CEC sample not on file — format authority is the owner's"); Phase 5.5 close 1,502 / 13,167; +24: ShiftSummaryReportTest 12 · CecReportTest 11 · CecGoldenTest 1 |
+| Frontend vitest | PASS | 269 → **304** (`shiftSummaryReconcile.test.ts` 18 · `cecPreview.test.ts` 17) |
+| Typecheck · build | PASS | clean · built |
+| Agent | UNTOUCHED | — |
+| Factory-knowledge | PASS | exit 0 (Q47 added; preamble → Q48) |
+| Migrations | none | — |
+| Red-before / green-after | PROVEN | honesty keys absent (6 red → green); CEC route absent (11 red → green); stray fixture file → harness fails loudly (proved with a throwaway csv, removed) |
+| Sonnet independent QA | PASS_WITH_DEFERRED (P3s) | own fixture: report == index == CEC at 125.0000 kg with amended/handover/awaiting-correction/cancelled/in-progress on one shift; 42/42 field-for-field; skip message byte-exact |
+| Adversarial review | Opus PASS_WITH_DEFERRED (P3s) · Fable PASS_WITH_DEFERRED (P3s) → P3s fixed on the branch except the inherited per-entry cost reads (recorded, P7-03) | |
+| Browser proof | NOT DONE (extension disconnected) | pinned by vitest/backend tests; Phase 8 chain walk |
+| API proof | PASS | report honesty keys; GET production/cec format string + figures_from + honest empty day; 422 matrix; exports cec kind still `blocked` with the verbatim reason |
+
+### Coverage gaps closed this phase
+`ShiftSummaryService::report()` — historical dates, A/B/C, All, Σ completed batches == summary, day == Σ shifts, logs per shift, honesty keys · CEC data endpoint == Shift Summary == entries index (field-for-field) · golden harness (skips honestly; fails loudly on a stray/unguided sample) · reconcile line (BigInt 4 dp; honest when the walk is capped) · CEC preview (server figures only; no download).
+
+### Still open (from the baseline list)
+`OverReceiptException` (**Phase 6 WS-B, in progress**) · CRM · Finance — **Still:** MySQL CI leg (Phase 7). **New (recorded):** P5.7-03 reporting honesty sweep → P7-05; ShiftSummaryExport alias columns; per-entry cost reads (2 queries/batch) on the entries resource → P7-03.

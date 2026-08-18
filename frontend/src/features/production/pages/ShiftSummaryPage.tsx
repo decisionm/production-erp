@@ -6,8 +6,10 @@ import { useEffect, useRef, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { listAllEmployees } from '@/features/hrms/api';
-import { getShiftKpiReport, listShifts, saveShiftSummary } from '@/features/production/api';
+import { getShiftKpiReport, listCompletedEntriesFor, listShifts, saveShiftSummary } from '@/features/production/api';
+import CecPreviewPanel from '@/features/production/components/CecPreviewPanel';
 import { currentShift, productionDateFor } from '@/features/production/shiftClock';
+import { reconcileShiftSummary } from '@/features/production/shiftSummaryReconcile';
 import { itemLabel } from '@/lib/itemLabel';
 import type {
     ShiftKpiDowntimeLog,
@@ -69,6 +71,33 @@ export default function ShiftSummaryPage() {
         queryFn: () => getShiftKpiReport(queryShiftId, productionDate),
         enabled: scope === 'day' || effectiveShiftId !== undefined,
     });
+
+    // Completed batches ↔ summary (Phase 5.7): the same date/shift read the
+    // way Completed Today reads it (entries index, batch_status = completed,
+    // walked to the last page), summed at 4 dp and set beside the report's
+    // actual_production_kg. Two server reads of the same entries — this line
+    // says whether they agree, and names the difference when they do not.
+    const { data: completedWalk, isLoading: completedLoading, error: completedError } = useQuery({
+        queryKey: ['production', 'shift-summary-reconcile', queryShiftId ?? 'day', productionDate],
+        queryFn: () => listCompletedEntriesFor(productionDate, queryShiftId),
+        enabled: scope === 'day' || effectiveShiftId !== undefined,
+    });
+    // A walk the 25-page bound cut short is not a verdict — say so instead.
+    const completedTruncated = completedWalk?.truncated === true;
+    const reconcile =
+        report && completedWalk && !completedTruncated ? reconcileShiftSummary(report.actual_production_kg, completedWalk.entries) : null;
+    // Phase 5.7 names the two live counts for what they are; a backend that
+    // predates the rename sends only the old keys, which mean the same thing.
+    const machinesRunningNow = report?.machines_running_now ?? report?.machines_running;
+    const machinesDownNow = report?.machines_down_now ?? report?.machines_down;
+    // The server names what efficiency divides by (only ever the
+    // supervisor-typed target) and whether a target is on record at all.
+    const efficiencyTitle =
+        report?.efficiency_basis === 'supervisor_target'
+            ? 'Shift Efficiency (vs supervisor target)'
+            : report?.kpi_inputs?.target_production_kg === null
+              ? 'Shift Efficiency (no target typed)'
+              : 'Shift Efficiency';
 
     // Prefill the editable fields (target/power/remarks/supervisor) from
     // whatever's already saved for this shift+date, without touching the
@@ -185,19 +214,50 @@ export default function ShiftSummaryPage() {
                             <Col xs={12} sm={8}><Statistic title="Actual Production (Kg)" value={report?.actual_production_kg ?? '—'} /></Col>
                             <Col xs={12} sm={8}><Statistic title="Rejection (Kg)" value={report?.rejection_kg ?? '—'} /></Col>
                             <Col xs={12} sm={8}><Statistic title="Net Good Output (Kg)" value={report?.net_good_output_kg ?? '—'} /></Col>
-                            <Col xs={12} sm={8}><Statistic title="Shift Efficiency" value={formatPercent(report?.efficiency_percent ?? null)} /></Col>
+                            <Col xs={12} sm={8}>
+                                <Statistic title={efficiencyTitle} value={formatPercent(report?.efficiency_percent ?? null)} />
+                            </Col>
                             <Col xs={12} sm={8}><Statistic title="Rejection %" value={formatPercent(report?.rejection_percent ?? null)} /></Col>
                             <Col xs={12} sm={8}><Statistic title="Unit / Kg" value={report?.unit_per_kg?.toFixed(2) ?? '—'} /></Col>
-                            <Col xs={12} sm={8}><Statistic title="Machines Running" value={report?.machines_running ?? '—'} /></Col>
-                            <Col xs={12} sm={8}><Statistic title="Machines Down" value={report?.machines_down ?? '—'} /></Col>
+                            <Col xs={12} sm={8}><Statistic title="Machines Running (now)" value={machinesRunningNow ?? '—'} /></Col>
+                            <Col xs={12} sm={8}><Statistic title="Machines Down (now)" value={machinesDownNow ?? '—'} /></Col>
                             <Col xs={12} sm={8}><Statistic title="Mold Changes" value={report?.no_of_mold_changes ?? '—'} /></Col>
                             <Col xs={12} sm={8}><Statistic title="Idle Time — Machines (Hrs)" value={report?.idle_time_hours ?? '—'} /></Col>
                             <Col xs={12} sm={8}><Statistic title="Idle Time — Power Cuts (Hrs)" value={report?.power_interruption_hours ?? '—'} /></Col>
                         </Row>
                         <Typography.Paragraph type="secondary" style={{ marginTop: 16, marginBottom: 0 }}>
-                            Machines Down is a live count of currently-open breakdowns; the two idle-time figures are
-                            kept separate on purpose — one machine breaking down isn&apos;t the same as the whole
+                            Machines Running and Machines Down are counted <strong>now</strong> — batches in progress and
+                            breakdowns still open at this moment, filed under this date — not what the machines were doing
+                            during the shift; on a past date they read 0 unless something is still open. Shift Efficiency
+                            is measured against the supervisor-typed target and is blank until a non-zero target is typed. The two idle-time
+                            figures are kept separate on purpose — one machine breaking down isn&apos;t the same as the whole
                             floor losing power at once.
+                        </Typography.Paragraph>
+                        <Typography.Paragraph style={{ marginTop: 12, marginBottom: 0 }}>
+                            <Typography.Text strong>Completed batches vs summary: </Typography.Text>
+                            {completedError ? (
+                                <Typography.Text type="secondary">could not read the completed batches for this date.</Typography.Text>
+                            ) : completedLoading || reportLoading ? (
+                                <Typography.Text type="secondary">reading…</Typography.Text>
+                            ) : completedTruncated ? (
+                                <Typography.Text type="warning">
+                                    not compared — the completed-batches read stopped at its 25-page bound (2,500 entries) before the
+                                    last page; the summary&apos;s figure stands on its own
+                                </Typography.Text>
+                            ) : reconcile === null ? (
+                                <Typography.Text type="secondary">—</Typography.Text>
+                            ) : reconcile.equal ? (
+                                <Typography.Text type="success">
+                                    ✓ equal ({reconcile.batches} {reconcile.batches === 1 ? 'batch' : 'batches'}) — Σ completed batches{' '}
+                                    {reconcile.sumKg} kg = Shift Summary actual {reconcile.summaryKg} kg
+                                </Typography.Text>
+                            ) : (
+                                <Typography.Text type="danger">
+                                    differs by {reconcile.difference} kg — Σ completed batches ({reconcile.batches}) {reconcile.sumKg} kg vs
+                                    Shift Summary actual {reconcile.summaryKg} kg (
+                                    {reconcile.direction === 'batches_over' ? 'batches exceed the summary' : 'summary exceeds the batches'})
+                                </Typography.Text>
+                            )}
                         </Typography.Paragraph>
                     </Card>
                 </Col>
@@ -315,6 +375,14 @@ export default function ShiftSummaryPage() {
                         </Card>
                     </Col>
                 )}
+
+                <Col xs={24}>
+                    <CecPreviewPanel
+                        productionDate={productionDate}
+                        shiftId={queryShiftId}
+                        enabled={scope === 'day' || effectiveShiftId !== undefined}
+                    />
+                </Col>
             </Row>
         </>
     );
