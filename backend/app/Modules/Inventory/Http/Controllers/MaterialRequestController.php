@@ -10,6 +10,7 @@ use App\Modules\Inventory\Http\Resources\MaterialRequestResource;
 use App\Modules\Inventory\Http\Resources\RequestableMaterialResource;
 use App\Modules\Inventory\Models\MaterialRequest;
 use App\Modules\Inventory\Services\MaterialRequestService;
+use App\Modules\Inventory\Services\ProductionFloorStockService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
@@ -44,6 +45,18 @@ class MaterialRequestController extends Controller
     public function requestableMaterials(): AnonymousResourceCollection
     {
         return RequestableMaterialResource::collection($this->requests->requestableMaterials());
+    }
+
+    /**
+     * WHAT IS ALREADY STANDING ON THE FLOOR.
+     *
+     * Deliberately a separate read from the request queue: it answers "what do
+     * we already have?" rather than "what did we ask for?", and it is sourced
+     * from Production/WIP stock balances, never from request history.
+     */
+    public function productionFloorStock(ProductionFloorStockService $floor): JsonResponse
+    {
+        return response()->json(['data' => $floor->onTheFloor()]);
     }
 
     public function show(MaterialRequest $materialRequest): MaterialRequestResource

@@ -7,6 +7,7 @@ import type {
     MaterialFlowMaterial,
     MaterialRequest,
     MaterialRequestFilters,
+    ProductionFloorStock,
     ReturnToStorePayload,
     StoreIssue,
     StoreIssueBagScan,
@@ -154,4 +155,16 @@ export function apiRefusalMessage(error: unknown, fallback: string): string {
         ?.response;
     const firstFieldError = Object.values(response?.data?.errors ?? {})[0]?.[0];
     return firstFieldError ?? response?.data?.message ?? fallback;
+}
+
+/**
+ * What is already standing on the production floor.
+ *
+ * A separate read from the queue on purpose: it answers "what do we already
+ * have?" rather than "what did we ask for?", and the server sources it from
+ * Production/WIP stock balances.
+ */
+export async function listProductionFloorStock(): Promise<ProductionFloorStock[]> {
+    const { data } = await api.get<{ data: ProductionFloorStock[] }>(`${MATERIAL_FLOW_BASE}/production-floor-stock`);
+    return data.data;
 }

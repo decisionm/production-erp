@@ -213,3 +213,28 @@ export interface ReturnToStorePayload {
     notes?: string | null;
     lines: { store_issue_line_id: number; quantity: number }[];
 }
+
+/**
+ * One material STANDING in Production/WIP right now.
+ *
+ * Sourced from the Production/WIP stock balance, never from request history:
+ * a request says what was asked for and an issue says what was handed over,
+ * but only the balance says what is still there after a batch has consumed
+ * some and a return has taken some back.
+ *
+ * There is no machine on this shape, and there never should be — a bag belongs
+ * to no machine and no batch (FC-01), so the floor's stock is per MATERIAL.
+ */
+export interface ProductionFloorStock {
+    item_id: number;
+    sku: string | null;
+    name: string | null;
+    uom: string | null;
+    quantity: string;
+    /** null where the material is not held in identifiable bags. */
+    bag_count: number | null;
+    last_issued_at: string | null;
+    last_issue_number: string | null;
+    issued_by: string | null;
+    received_by: string | null;
+}

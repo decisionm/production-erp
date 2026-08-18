@@ -309,6 +309,11 @@ Route::prefix('v1')->group(function () {
             // WHOLE item master, finished goods included, capped at 1000 rows
             // and therefore silently truncating once the master outgrows it.
             Route::get('requestable-materials', [MaterialRequestController::class, 'requestableMaterials']);
+
+            // WHAT IS ALREADY ON THE FLOOR — Production/WIP balances, so the
+            // floor can see what it holds before asking for more. Same group
+            // as the queue: both desks read it.
+            Route::get('production-floor-stock', [MaterialRequestController::class, 'productionFloorStock']);
         });
 
         // Raising and submitting are the FLOOR's act — production.manage.
