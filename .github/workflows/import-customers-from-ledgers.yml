@@ -138,7 +138,7 @@ jobs:
           # Single-quoted for the REMOTE shell. This is only sound because the
           # validation above already refused every quote, $, backtick and
           # semicolon — so nothing in $GROUPS can terminate these quotes.
-          REMOTE="cd '${{ secrets.DEPLOY_PATH }}/backend' && /opt/alt/php84/usr/bin/php artisan sales:import-customers-from-ledgers"
+          REMOTE="cd '${{ secrets.DEPLOY_PATH }}/backend' && \$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php) artisan sales:import-customers-from-ledgers"
           if [ -n "$GROUPS" ]; then
             REMOTE="$REMOTE --groups='$GROUPS'"
           fi

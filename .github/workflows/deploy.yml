@@ -217,7 +217,7 @@ jobs:
         run: |
           ssh $SSH_MUX -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "cd '${{ secrets.DEPLOY_PATH }}/backend' && { /opt/alt/php84/usr/bin/php artisan down --render=errors::503 --retry=300 || /opt/alt/php84/usr/bin/php artisan down --retry=300; }"
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && PHP=\$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php) && { \$PHP artisan down --render=errors::503 --retry=300 || \$PHP artisan down --retry=300; }"
 
       # NOTE ON --exclude='storage/': it is LOAD-BEARING for the maintenance
       # window above. `artisan down` writes storage/framework/down and
@@ -269,4 +269,4 @@ jobs:
       - name: Explain a deploy that stopped before the app was closed
         if: (failure() || cancelled()) && steps.maintenance.outcome == 'failure'
         run: |
-          echo "::error::This run stopped AT the maintenance step, so THIS run never closed the app and never copied anything to the server — it failed in the safe direction, before the rsync. Do not assume the floor is serving, though: if an EARLIER deploy left the app closed it is STILL closed. Check for storage/framework/down on the server before concluding anything. Usual causes for this step failing: the PHP binary path is pinned to /opt/alt/php84/usr/bin/php and a host PHP upgrade can move it (see issue #167); or the app cannot boot — a half-installed vendor/ or a stale bootstrap/cache from a previous failed deploy will do it, in which case the app IS still down from that earlier run."
+          echo "::error::This run stopped AT the maintenance step, so THIS run never closed the app and never copied anything to the server — it failed in the safe direction, before the rsync. Do not assume the floor is serving, though: if an EARLIER deploy left the app closed it is STILL closed. Check for storage/framework/down on the server before concluding anything. Usual causes for this step failing: the app cannot boot — a half-installed vendor/ or a stale bootstrap/cache from a previous failed deploy will do it, in which case the app IS still down from that earlier run."

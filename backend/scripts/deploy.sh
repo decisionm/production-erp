@@ -12,15 +12,10 @@ set -euo pipefail
 # 8.1, spatie/activitylog 5), while Hostinger's default CLI `php` is an older
 # alt-php (8.2 here). Pick an 8.4+ binary explicitly so composer and artisan
 # run under a compatible version. Override with PHP_BIN=... if needed.
-pick_php() {
-  if [ -n "${PHP_BIN:-}" ]; then echo "$PHP_BIN"; return; fi
-  for c in php8.4 php8.5 /opt/alt/php84/usr/bin/php /opt/alt/php85/usr/bin/php \
-           php8.3 /opt/alt/php83/usr/bin/php; do
-    if command -v "$c" >/dev/null 2>&1 || [ -x "$c" ]; then echo "$c"; return; fi
-  done
-  echo php   # fall back to default and let composer's platform check complain
-}
-PHP="$(pick_php)"
+# The search itself lives in scripts/pick-php.sh so the workflows can ask the
+# same question instead of pinning a literal path (issue #167). The fallback
+# keeps this script working on a server whose copy predates that file.
+PHP="$(bash "$(dirname "$0")/pick-php.sh" 2>/dev/null || echo /opt/alt/php84/usr/bin/php)"
 
 echo "==> Deploying from $(pwd) using $($PHP -v | head -1)"
 
