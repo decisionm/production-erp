@@ -14,6 +14,16 @@ name: Map a colour to its masterbatch
 # Answered so far (owner, 06-Aug, and confirmed against their own 38 Tally Stock
 # Journals): Amber -> "Master Batch Amber".
 
+# Least privilege: nothing here writes to the repository. Every workflow uses
+# only checkout, setup-node/php and same-run artifacts, and reaches the server
+# over SSH with a deploy key — never the GITHUB_TOKEN. Without this block the
+# token is repository-default, which on a push-triggered workflow that runs
+# `npm ci` (arbitrary lockfile postinstall) is a write-capable token one
+# compromised transitive dependency away from the pipeline that rsyncs to a
+# live factory. Read is all any of these need.
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
     inputs:

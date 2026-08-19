@@ -17,6 +17,16 @@ name: Seed pouch and cover doses
 # exactly as it is. A figure typed by the floor outranks one seeded from a
 # photograph of a handwritten sheet.
 
+# Least privilege: nothing here writes to the repository. Every workflow uses
+# only checkout, setup-node/php and same-run artifacts, and reaches the server
+# over SSH with a deploy key — never the GITHUB_TOKEN. Without this block the
+# token is repository-default, which on a push-triggered workflow that runs
+# `npm ci` (arbitrary lockfile postinstall) is a write-capable token one
+# compromised transitive dependency away from the pipeline that rsyncs to a
+# live factory. Read is all any of these need.
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
     inputs:
