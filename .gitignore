@@ -17,3 +17,11 @@ __pycache__/
 # a rule, which is how docs/.DS_Store reached main in 6ba89b4 (untracked
 # 16-Aug). The pattern is unanchored so it matches at any depth.
 .DS_Store
+
+# Migration working files (19-Aug-2026 move to decisionm/actech).
+# These carry LIVE credentials and factory data — untracked is not enough,
+# one `git add -A` would put a live DB password in GitHub history forever.
+/.env
+/env
+/*.sql
+/storage.zip
