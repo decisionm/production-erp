@@ -165,7 +165,7 @@ jobs:
       # blocks the publish — never assume a first publish.
       - name: Fetch currently published metadata
         env:
-          FEED_URL: https://erpdemo.amrtech.in/storage/agent/tally-sync-agent-latest.json
+          FEED_URL: https://erp.actech.co.in/storage/agent/tally-sync-agent-latest.json
         run: |
           CACHE_BUSTER="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(echo "${GITHUB_SHA}" | cut -c1-7)"
           curl --fail --show-error --silent \

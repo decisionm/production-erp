@@ -4,7 +4,7 @@
 # has been synced onto the server (by the GitHub Actions workflow, or by hand
 # over SSH). Safe to re-run — every step is idempotent.
 #
-#   Manual use:  cd ~/domains/erpdemo.amrtech.in/erp/backend && bash scripts/deploy.sh
+#   Manual use:  cd ~/domains/actech.co.in/public_html/erp_app/backend && bash scripts/deploy.sh
 #
 set -euo pipefail
 
@@ -89,7 +89,10 @@ fi
 
 if [ -z "$DB_DATABASE" ] || [ -z "$DB_USERNAME" ]; then
   echo "ERROR: DB_DATABASE and/or DB_USERNAME are missing from $(pwd)/.env, so the database" >&2
-  echo "       cannot be backed up and migrations have not been run. Nothing was changed." >&2
+  echo "       cannot be backed up and migrations have not been run. The SCHEMA is untouched," >&2
+  echo "       but the app is CLOSED (artisan down ran before the rsync) and the new code is" >&2
+  echo "       already on disk. The factory is at 503 until this is fixed and the workflow" >&2
+  echo "       re-run — it is idempotent and takes a fresh backup. Do NOT 'artisan up' by hand." >&2
   exit 1
 fi
 
@@ -102,14 +105,34 @@ done
 if [ -z "$DUMP_BIN" ]; then
   echo "ERROR: neither mysqldump nor mariadb-dump is on PATH, so no pre-migration backup could" >&2
   echo "       be taken. The deploy has STOPPED before 'artisan migrate' — the code on the" >&2
-  echo "       server is now newer than its schema, but nothing has been migrated and the" >&2
-  echo "       previous release is still what runs. Install the MySQL client tools (hPanel →" >&2
+  echo "       server is now newer than its schema and nothing has been migrated. The app is" >&2
+  echo "       CLOSED and the factory is at 503 until this is fixed and the workflow re-run." >&2
+  echo "       Do NOT 'artisan up' by hand. Install the MySQL client tools (hPanel →" >&2
   echo "       Advanced → SSH) or take a dump by hand from phpMyAdmin and re-run this script." >&2
   exit 1
 fi
 
-mkdir -p ../backups
-BACKUP_FILE="../backups/erp-db-$(date +%Y%m%d-%H%M%S).sql"
+# WHERE the dump lands is a security decision, not a convenience one. This used
+# to be a bare relative ../backups, which resolves to $DEPLOY_PATH/backups. That
+# was harmless while the app lived OUTSIDE the web root — but since the
+# 19-Aug-2026 migration the app sits INSIDE public_html of a live WordPress site,
+# so ../backups put seven rolling FULL dumps (password hashes, customers, and
+# purchase rates — Owner/Accounts only under FC-06) at a URL path on someone
+# else's site. They were not actually reachable (403, from that site's .htaccess
+# plus a host-level .sql denylist), but that is protection owned by an unrelated
+# site and regenerated routinely by WP/caching plugins. $HOME is never web-served.
+#
+# The fallback matters: this runs BEFORE the hard backup gate, with the app
+# already closed. A home directory that cannot be created must not turn a
+# hardening improvement into a 503 — prefer the safe path, never require it.
+BACKUP_DIR="${BACKUP_DIR:-$HOME/backups/erp}"
+if ! mkdir -p "$BACKUP_DIR" 2>/dev/null; then
+  echo "WARN: could not create $BACKUP_DIR — falling back to ../backups." >&2
+  echo "      That path may sit under a web document root; check exposure." >&2
+  BACKUP_DIR=../backups
+  mkdir -p "$BACKUP_DIR"
+fi
+BACKUP_FILE="$BACKUP_DIR/erp-db-$(date +%Y%m%d-%H%M%S).sql"
 
 echo "==> Backing up '$DB_DATABASE' to $BACKUP_FILE before migrating"
 # --single-transaction: dump from one consistent snapshot without locking the
@@ -126,7 +149,8 @@ if ! MYSQL_PWD="$DB_PASSWORD" "$DUMP_BIN" \
   rm -f "$BACKUP_FILE"   # a partial dump must not sit there looking like a backup
   echo "ERROR: $DUMP_BIN failed (its own error is just above), so there is no pre-migration" >&2
   echo "       backup. The deploy has STOPPED before 'artisan migrate': the schema is" >&2
-  echo "       untouched and the previous release is still serving. Usual causes, in order:" >&2
+  echo "       untouched, but the app is CLOSED and the factory is at 503 until this is fixed" >&2
+  echo "       and the workflow re-run. Do NOT 'artisan up' by hand. Usual causes, in order:" >&2
   echo "         * wrong DB credentials in $(pwd)/.env, or a full disk quota;" >&2
   echo "         * 'Access denied; you need the PROCESS privilege ... when trying to dump" >&2
   echo "           tablespaces' — MySQL 8.0.21+ wants a privilege shared-hosting DB users are" >&2
@@ -153,10 +177,10 @@ echo "==> Backup OK: $(basename "$BACKUP_FILE") ($(ls -lh "$BACKUP_FILE" | awk '
 echo "    restore with: mysql -h $DB_HOST -P $DB_PORT -u $DB_USERNAME -p $DB_DATABASE < $BACKUP_FILE"
 
 # Keep the last 7, delete older. The glob is this script's own filename pattern
-# and nothing else, so a hand-made dump someone parked in ../backups before a
+# and nothing else, so a hand-made dump someone parked in $BACKUP_DIR before a
 # risky upgrade is never reaped by an unrelated deploy. Pruning happens only
 # AFTER a dump succeeded — a failed backup must not also destroy the history.
-OLD_BACKUPS="$(ls -1t ../backups/erp-db-*.sql 2>/dev/null | tail -n +8 || true)"
+OLD_BACKUPS="$(ls -1t "$BACKUP_DIR"/erp-db-*.sql 2>/dev/null | tail -n +8 || true)"
 if [ -n "$OLD_BACKUPS" ]; then
   printf '%s\n' "$OLD_BACKUPS" | while IFS= read -r old; do
     rm -f "$old"

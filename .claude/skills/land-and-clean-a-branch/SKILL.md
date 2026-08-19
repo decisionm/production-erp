@@ -26,7 +26,19 @@ you remember.
   no-op redeploy is not free — if the payload is unchanged, question the merge
   timing rather than shrugging.
 
-Check `git diff --name-only origin/main..HEAD -- backend frontend` and the
+
+> ⚠️ **Never hardcode `origin/main` in these checks.** After the 19-Aug-2026
+> migration `origin` still pointed at the OLD repo, so `origin/main` froze at
+> the last fetch and **still resolved locally** — every command below answered
+> confidently and WRONGLY, with no error. Resolve the real upstream first and
+> use it everywhere:
+>
+> ```bash
+> MAIN=$(git rev-parse --abbrev-ref main@{upstream})   # e.g. decisionm/main
+> git fetch "${MAIN%%/*}" --prune
+> ```
+
+Check `git diff --name-only "$MAIN"..HEAD -- backend frontend` and the
 migrations directory. Zero files there means the deployed app is byte-identical
 to what already runs.
 
@@ -35,8 +47,8 @@ to what already runs.
 A PR is a snapshot of a moment, not a proposal that stays true.
 
 ```bash
-git cherry origin/main <branch>        # '+' = not on main, '-' = already there
-git log --oneline $(git merge-base origin/main <branch>)..origin/main | wc -l
+git cherry "$MAIN" <branch>        # '+' = not on main, '-' = already there
+git log --oneline $(git merge-base "$MAIN" <branch>).."$MAIN" | wc -l
 ```
 
 Check the version the branch ships against the version in the field. A PR at
@@ -49,7 +61,7 @@ refuse the downgrade.
 If every commit has a patch-equivalent on main, the work already landed:
 
 ```bash
-git cherry origin/main <branch>        # all '-' means fully contained
+git cherry "$MAIN" <branch>        # all '-' means fully contained
 ```
 
 Close it with the evidence in the comment — identical patch-ids, the
@@ -72,7 +84,7 @@ nobody. Merging it "just to tidy up" collides with whatever superseded it.
    reserved ahead of time, so a collision is usually not real — verify before
    re-minting.
 5. Push with a lease pinned to the exact prior SHA:
-   `git push --force-with-lease=<branch>:<sha> origin <branch>`
+   `git push --force-with-lease=<branch>:<sha> "${MAIN%%/*}" <branch>`
 
 ## Before deleting a ref, ask what ONLY that ref records
 
@@ -88,7 +100,7 @@ Convert first, verify, then delete:
 ```bash
 git show origin/<branch>:tally-sync-agent/package.json   # confirm the version matches
 git tag -a agent-vX.Y.Z origin/<branch> -m "...released SHA, run <id>..."
-git push origin --tags
+git push "${MAIN%%/*}" --tags
 ```
 
 ## Before removing a worktree, look inside it

@@ -48,6 +48,14 @@ A Manufacturing ERP for the Indian market (GST/TDS/PF/ESI compliance, Tally inte
 
 Two separate projects, deployed as one unit. `frontend/` has its own `package.json`, own `tsconfig.json`, own tooling — it is not nested inside `backend/resources/`. `npm run build` in `frontend/` writes straight into `backend/public/build/`; Laravel's catch-all web route (`backend/routes/web.php`) serves that build's `index.html` for every non-API path. One `git pull` + `composer install` + (`cd frontend && npm install && npm run build`) + point-domain-at-`backend/` is still the entire deployment — this split cost nothing operationally, it's purely an organizational/scalability improvement over nesting React inside Laravel's resource folder.
 
+**The live instance (as of 19-Aug-2026):** `https://erp.actech.co.in`, GitHub
+`decisionm/production-erp` — `main` tracks `decisionm/main`, and the `origin`
+remote still points at the OLD repo, so `git push origin main` does not
+deploy. It moved from `erpdemo.amrtech.in` / `sendhilpalanivel` on
+19-Aug-2026; anything still naming those is stale. `DEPLOY.md` is the single
+source of truth for host, paths, secrets, the bootstrap gotcha (the deploy
+workflow cannot cold-start an empty server) and the known leftovers.
+
 ## Architecture decisions already made — don't relitigate these
 
 1. **`frontend/` and `backend/` are separate projects, not React nested inside Laravel's `resources/`.** Rejected the Laravel-convention approach (React in `resources/js/` + Blade `@vite()` shell) deliberately: at ERP scale (8-10 large modules, meant to grow into a big codebase) a full-blown SPA nested inside a backend framework's resource folder under-signals that it's a first-class, independently reasoned-about codebase, and couples frontend tooling/history to the PHP project. The frontend still builds directly into `backend/public/build/` and Laravel serves it statically — same single-deployable-unit simplicity, cleaner separation. See `TECHNICAL-DOCS.md` §3 for the full rationale.
