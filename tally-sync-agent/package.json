@@ -35,7 +35,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "https://erpdemo.amrtech.in/storage/agent/"
+        "url": "https://erp.actech.co.in/storage/agent/"
       }
     ],
     "files": [

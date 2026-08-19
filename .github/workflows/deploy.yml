@@ -30,6 +30,16 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # The app is CLOSED from "Enter maintenance mode" until artisan up at the end
+    # of scripts/deploy.sh. Every FAILURE in that window announces itself with a
+    # red X and fires an explainer step. A HANG does not: both explainers are
+    # gated on failure()/cancelled(), so a stalled SSH session, a composer wait on
+    # a dead mirror, or a MySQL connection that hangs rather than refuses (this
+    # host throws intermittent [HY000] [2002]) would sit on GitHub's 360-minute
+    # default with the run showing "in progress" and the factory at 503, silently.
+    # A whole server-side deploy is ~90s; 25 minutes is generous and converts the
+    # only silent outage in the pipeline into a failed run that explains itself.
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -249,7 +259,7 @@ jobs:
       - name: Explain a deploy that stopped with the app closed
         if: (failure() || cancelled()) && steps.maintenance.outcome == 'success'
         run: |
-          echo "::error::The app is in MAINTENANCE MODE and has been left that way deliberately — it is serving 503, not broken writes. The code may or may not have synced, so the schema may not match it. DO NOT bring it up blind. Read the failing step above: if 'artisan migrate' failed, the pre-migration backup was already taken and is named in the log (../backups/erp-db-*.sql). Fix the cause, re-run this workflow (it is idempotent and takes a fresh backup), and the deploy brings the app back up itself. IF SSH IS BANNED and you cannot re-run: the app can be reopened WITHOUT SSH by deleting storage/framework/down and storage/framework/maintenance.php in hPanel's file manager — that is exactly what 'artisan up' does. Only do that if the rsync did NOT land, i.e. the schema was never touched; reopening after a partial deploy puts the floor on code whose migrations never ran, which is the state this window exists to prevent."
+          echo "::error::The app is in MAINTENANCE MODE and has been left that way deliberately — it is serving 503, not broken writes. The code may or may not have synced, so the schema may not match it. DO NOT bring it up blind. Read the failing step above: if 'artisan migrate' failed, the pre-migration backup was already taken and is named in the log (~/backups/erp/erp-db-*.sql). Fix the cause, re-run this workflow (it is idempotent and takes a fresh backup), and the deploy brings the app back up itself. IF SSH IS BANNED and you cannot re-run: the app can be reopened WITHOUT SSH by deleting storage/framework/down and storage/framework/maintenance.php in hPanel's file manager — that is exactly what 'artisan up' does. Only do that if the rsync did NOT land, i.e. the schema was never touched; reopening after a partial deploy puts the floor on code whose migrations never ran, which is the state this window exists to prevent."
 
       # Separate message for the opposite state. It deliberately does NOT claim
       # the app is up: a PREVIOUS failed deploy may have left it closed, and

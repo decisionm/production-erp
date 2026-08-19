@@ -19,16 +19,29 @@ echo "── factory status ($(date '+%Y-%m-%d %H:%M')) ──"
 echo "branch:   $(git branch --show-current)  @ $(git rev-parse --short HEAD)"
 echo "worktree: $(git status --porcelain | wc -l | tr -d ' ') dirty file(s)"
 
+# Pin the repo explicitly. Without --repo, gh resolves through the `origin`
+# remote — which after the 19-Aug-2026 migration still pointed at the OLD repo,
+# so both calls 404'd, the 404 was swallowed by `2>/dev/null || true`, and this
+# check (which CLAUDE.md mandates at session start) printed a confident
+# "(no runs visible)" all-clear while the real deploy state was never read.
+# A status check that cannot reach its repo must SAY SO, not shrug.
+ERP_REPO="${ERP_REPO:-decisionm/production-erp}"
+
 if command -v gh >/dev/null 2>&1; then
-  deploy=$(gh run list --workflow=deploy.yml --limit 1 \
+  if ! gh repo view "$ERP_REPO" >/dev/null 2>&1; then
+    echo "deploy:   (CANNOT REACH $ERP_REPO — wrong gh account, or no access. NOT an all-clear.)"
+    echo "open PRs: (unknown — see above)"
+  else
+  deploy=$(gh run list --repo "$ERP_REPO" --workflow=deploy.yml --limit 1 \
     --json status,conclusion,headSha,updatedAt \
     --jq '"deploy:   \(.[]|.status) \(.[]|.conclusion // "") @ \(.[]|.headSha[0:7]) (\(.[]|.updatedAt[0:16]))"' \
     2>/dev/null || true)
   # An empty run list yields empty output with exit 0 — the fallback has to
   # test the OUTPUT, not the exit code (reviewed 06 Aug).
   [ -n "$deploy" ] && echo "$deploy" || echo "deploy:   (no runs visible — check GitHub Actions)"
-  prs=$(gh pr list --state open --json number --jq 'length' 2>/dev/null || echo "?")
+  prs=$(gh pr list --repo "$ERP_REPO" --state open --json number --jq 'length' 2>/dev/null || echo "?")
   echo "open PRs: ${prs}"
+  fi
 else
   echo "deploy:   (gh not installed — cannot check)"
 fi

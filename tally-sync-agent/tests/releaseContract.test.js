@@ -455,7 +455,7 @@ test('the cache-buster is a query on the real feed path, and the URL is quoted',
     // FEED_URL lives in the step's env:, which is executable YAML.
     assert.match(
         step,
-        /FEED_URL: https:\/\/erpdemo\.amrtech\.in\/storage\/agent\/tally-sync-agent-latest\.json\s*$/m,
+        /FEED_URL: https:\/\/erp\.actech\.co\.in\/storage\/agent\/tally-sync-agent-latest\.json\s*$/m,
         'the feed URL must remain the real generic-provider metadata path',
     );
     assert.ok(

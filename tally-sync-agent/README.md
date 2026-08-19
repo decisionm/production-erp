@@ -52,7 +52,7 @@ On first launch with no config, the Settings window opens automatically. Fill in
 
 | Field | Where it comes from |
 |---|---|
-| Cloud API base URL | Your ERP instance, e.g. `https://erpdemo.amrtech.in/api/v1` |
+| Cloud API base URL | Your ERP instance, e.g. `https://erp.actech.co.in/api/v1` |
 | Cloud API token | A Sanctum token scoped to `tally-sync:poll` + `tally-sync:report` — see below |
 | Tally host / port | `127.0.0.1` / `9000` if the agent runs on the same machine as Tally |
 | Tally company name | Must match exactly what's shown in Tally, and that company must be loaded in the Tally UI |
