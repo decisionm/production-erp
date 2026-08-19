@@ -164,6 +164,20 @@ export interface MaterialRequestFilters {
     from?: string;
     to?: string;
     q?: string;
+    /**
+     * Production's OWN screen asking for its unsubmitted drafts. The store
+     * never sends it, and could not benefit if it did — the server grants it
+     * by permission, not by query string.
+     */
+    /**
+     * Typed as the literal `1`, not `boolean`, and the reason is written down
+     * in `features/production/api.ts` already: Laravel's `boolean` rule takes
+     * `1`, `0`, `"1"` and `"0"` but NOT `"true"`, which is exactly what axios
+     * puts on the wire for a JS `true`. This flag was typed `boolean`, sent
+     * `true`, and answered the floor's own page with a 422 and a blank table.
+     * The literal makes that a compile error instead.
+     */
+    include_unsubmitted?: 1;
 }
 
 export interface CreateMaterialRequestLinePayload {
@@ -212,4 +226,39 @@ export interface ReturnToStorePayload {
     received_by?: number | null;
     notes?: string | null;
     lines: { store_issue_line_id: number; quantity: number }[];
+}
+
+/**
+ * One material STANDING in Production/WIP right now.
+ *
+ * Sourced from the Production/WIP stock balance, never from request history:
+ * a request says what was asked for and an issue says what was handed over,
+ * but only the balance says what is still there after a batch has consumed
+ * some and a return has taken some back.
+ *
+ * There is no machine on this shape, and there never should be — a bag belongs
+ * to no machine and no batch (FC-01), so the floor's stock is per MATERIAL.
+ *
+ * There is no BAG COUNT either: `material_bags.current_warehouse_id` is written
+ * once at receipt and never maintained, so a count of bags standing in
+ * Production/WIP could only ever be zero. Publishing that beside 300 kg of
+ * resin would say "this is not bag-tracked" on a system where every bag carries
+ * a barcode. See Q57.
+ */
+export interface ProductionFloorStock {
+    item_id: number;
+    sku: string | null;
+    name: string | null;
+    uom: string | null;
+    quantity: string;
+    last_issued_at: string | null;
+    last_issue_number: string | null;
+    issued_by: string | null;
+    received_by: string | null;
+}
+
+/** The floor panel's response — the rows, and whether the location even exists. */
+export interface ProductionFloorStockResult {
+    data: ProductionFloorStock[];
+    meta: { wip_configured: boolean };
 }

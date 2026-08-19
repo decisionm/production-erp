@@ -171,6 +171,26 @@ class StoreIssueService
 
             $this->bags->pour($bag, $quantity, $remaining, $full);
 
+            // NO CUSTODY WRITE HERE, and the attempt is worth recording.
+            //
+            // Setting $bag->current_warehouse_id to Production/WIP looks
+            // obviously right and broke two things at once:
+            //
+            //  · $from above is this same column, so the NEXT partial scan of a
+            //    part-emptied bag read WIP as its source and was refused with
+            //    "already the Production/WIP location". A storekeeper weighing
+            //    20 kg off a 50 kg bag could never scan the rest of it again.
+            //  · A return names an issue LINE, never a barcode, so nothing can
+            //    move the bag back. The bag would claim to stand on the floor
+            //    for ever after its kilograms had gone home.
+            //
+            // Before, the column was uniformly stale and KNOWN to be. With the
+            // write it became confidently wrong, which is worse for a custody
+            // claim. What actually moved is recorded — and provable — as the
+            // StoreIssueBagScan rows created below: this bag, this issue, this
+            // quantity, this moment. That is custody provenance without
+            // pretending to a location the system cannot maintain. Q57.
+
             $line->quantity_issued = bcadd((string) $line->quantity_issued, $quantity, 4);
             $line->save();
 

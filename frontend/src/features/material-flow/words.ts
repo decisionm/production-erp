@@ -409,3 +409,76 @@ export function machineAppliesToRequest(
     if (named.every((material) => material.machine_applies === true)) return true;
     return null;
 }
+
+/* ------------------------------------------------------------------ *
+ * The store queue's status filter
+ * ------------------------------------------------------------------ */
+
+/** "Still to issue" is these two statuses, as the backend spells the filter. */
+export const OPEN_REQUEST_STATUSES: MaterialRequestStatus[] = ['submitted', 'partially_issued'];
+
+/** What the queue's status dropdown offers, in order. */
+export type QueueStatusChoice = 'open' | 'all' | MaterialRequestStatus;
+
+/**
+ * The `status` filter a dropdown choice means.
+ *
+ * `undefined` is not "no opinion" — it is ALL REQUESTS. Omitting the status
+ * is how the server is asked for everything, and it is the only way the store
+ * reaches a request it has already finished.
+ *
+ * This exists as a pure function because of what it cost when it was inline:
+ * a fully issued request leaves the default view, so the storekeeper finished
+ * a handover and watched the row vanish, with nothing on screen to say the
+ * work still existed. Reported from the floor as "after the approval it went
+ * blank — where do we see the history".
+ */
+export function queueStatusFilter(choice: QueueStatusChoice): MaterialRequestStatus[] | MaterialRequestStatus | undefined {
+    if (choice === 'open') return [...OPEN_REQUEST_STATUSES];
+    if (choice === 'all') return undefined;
+
+    return choice;
+}
+
+/**
+ * What an EMPTY queue should say. On the default filter the honest answer is
+ * not "nothing here" — it is "nothing is OUTSTANDING, and here is where the
+ * finished ones are".
+ */
+export function queueEmptyText(status: MaterialRequestStatus[] | MaterialRequestStatus | undefined): string {
+    return Array.isArray(status)
+        ? 'Nothing is still to issue. Requests the store has already finished are under "Fully issued" — or "All requests" to see everything.'
+        : 'No requests match these filters.';
+}
+
+/**
+ * MAY A QUANTITY IN THIS UNIT HAVE A FRACTIONAL PART?
+ *
+ * The browser-side mirror of the backend's MeasurementType. The server is the
+ * authority and refuses a fractional count outright — this only keeps the
+ * storekeeper from typing a figure that is going to be rejected, and from
+ * believing 12.5 trays is a thing the store can hand over.
+ *
+ * Unknown units permit fractions, exactly as the backend does: refusing a
+ * decimal on a unit nobody has classified would block real work on a guess.
+ * Kept deliberately narrow — the several older kg-detecting copies elsewhere
+ * in this app are pre-existing and are not converged here on purpose.
+ */
+// MIRRORED VERBATIM from MeasurementType::COUNT_UNITS, dotted spellings and
+// all. The first attempt normalised by stripping one trailing dot instead,
+// which disagreed with the server on `piece.`, `pieces.`, `each.` and `ea.` —
+// and disagreed in the DANGEROUS direction: the browser refusing a figure the
+// server would have accepted blocks real work, where the reverse is merely a
+// wasted round trip. No live item can spell a unit that way today; matching
+// the list exactly is still cheaper than relying on that.
+const COUNT_UNITS = ['nos', 'nos.', 'no', 'no.', 'pcs', 'pcs.', 'pc', 'pc.', 'piece', 'pieces', 'each', 'ea'];
+
+export function permitsFractions(uom: string | null | undefined): boolean {
+    // PHP's trim() strips " \t\n\r\0\x0B" and nothing else; JS's strips all
+    // Unicode whitespace. So `\u00A0nos.` normalised to `nos.` here while the
+    // server left it Unknown — the browser refusing a decimal the server would
+    // have taken, which is the direction that blocks real work.
+    const trimmed = (uom ?? '').replace(/^[ \t\n\r\0\x0B]+|[ \t\n\r\0\x0B]+$/g, '');
+
+    return !COUNT_UNITS.includes(trimmed.toLowerCase());
+}

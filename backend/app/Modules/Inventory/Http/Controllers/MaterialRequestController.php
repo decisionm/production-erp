@@ -3,6 +3,7 @@
 namespace App\Modules\Inventory\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Http\Middleware\EnsureDraftIsProductionsOwn;
 use App\Modules\Inventory\Http\Requests\CancelMaterialRequestRequest;
 use App\Modules\Inventory\Http\Requests\ListMaterialRequestsRequest;
 use App\Modules\Inventory\Http\Requests\StoreMaterialRequestRequest;
@@ -10,7 +11,9 @@ use App\Modules\Inventory\Http\Resources\MaterialRequestResource;
 use App\Modules\Inventory\Http\Resources\RequestableMaterialResource;
 use App\Modules\Inventory\Models\MaterialRequest;
 use App\Modules\Inventory\Services\MaterialRequestService;
+use App\Modules\Inventory\Services\ProductionFloorStockService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 /**
@@ -32,7 +35,14 @@ class MaterialRequestController extends Controller
         $filters = $request->validated();
         $filters['per_page'] = $this->requests->perPage($request->integer('per_page') ?: null);
 
-        return MaterialRequestResource::collection($this->requests->queue($filters));
+        // Unsubmitted requests are production's own working papers. The floor's
+        // screen asks for them explicitly; the store's queue does not, and a
+        // store login could not obtain them even by asking, because the flag is
+        // granted by PERMISSION rather than taken from the query string.
+        $maySeeDrafts = $request->boolean('include_unsubmitted')
+            && $request->user()?->hasAnyPermission(EnsureDraftIsProductionsOwn::PRODUCTION_EYES) === true;
+
+        return MaterialRequestResource::collection($this->requests->queue($filters, $maySeeDrafts));
     }
 
     /**
@@ -44,6 +54,23 @@ class MaterialRequestController extends Controller
     public function requestableMaterials(): AnonymousResourceCollection
     {
         return RequestableMaterialResource::collection($this->requests->requestableMaterials());
+    }
+
+    /**
+     * WHAT IS ALREADY STANDING ON THE FLOOR.
+     *
+     * Deliberately a separate read from the request queue: it answers "what do
+     * we already have?" rather than "what did we ask for?", and it is sourced
+     * from Production/WIP stock balances, never from request history.
+     */
+    public function productionFloorStock(ProductionFloorStockService $floor): JsonResponse
+    {
+        return response()->json([
+            'data' => $floor->onTheFloor(),
+            // So the screen can tell "the floor is empty" apart from "nobody
+            // has told the ERP where the floor is". Both produce an empty list.
+            'meta' => ['wip_configured' => $floor->isConfigured()],
+        ]);
     }
 
     public function show(MaterialRequest $materialRequest): MaterialRequestResource

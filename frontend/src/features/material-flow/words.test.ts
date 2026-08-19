@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import * as words from './words';
 import {
+    permitsFractions,
+    queueEmptyText,
+    queueStatusFilter,
     ISSUE_IS_NOT_CONSUMPTION,
     ISSUE_STATUS_HELP,
     ISSUE_STATUS_LABEL,
@@ -234,5 +237,82 @@ describe('FC-06: no rate, amount or vendor identity reaches these screens', () =
         const forbidden = /rate|amount|price|cost|value|vendor|supplier|invoice|₹/i;
         const offenders = EXPORTED_STRINGS.filter((s) => forbidden.test(s));
         expect(offenders).toEqual([]);
+    });
+});
+
+describe('the store queue status filter', () => {
+    it('defaults to the two OUTSTANDING statuses, so the queue is work not history', () => {
+        expect(queueStatusFilter('open')).toEqual(['submitted', 'partially_issued']);
+    });
+
+    it('asks for EVERY request by omitting the status — this is how history is reached', () => {
+        // The regression this pins: a fully issued request leaves the default
+        // view, and before "All requests" existed there was no way back to it
+        // from this screen. The store finished a handover and the row vanished.
+        expect(queueStatusFilter('all')).toBeUndefined();
+    });
+
+    it('passes a single status straight through', () => {
+        expect(queueStatusFilter('issued')).toBe('issued');
+        expect(queueStatusFilter('cancelled')).toBe('cancelled');
+    });
+
+    it('tells an empty DEFAULT queue where the finished requests went', () => {
+        const text = queueEmptyText(['submitted', 'partially_issued']);
+
+        expect(text).toContain('still to issue');
+        // The words that answer "where do we see the history".
+        expect(text).toContain('Fully issued');
+        expect(text).toContain('All requests');
+    });
+
+    it('says something different when the emptiness is the reader’s own filtering', () => {
+        expect(queueEmptyText('cancelled')).toBe('No requests match these filters.');
+        expect(queueEmptyText(undefined)).toBe('No requests match these filters.');
+    });
+});
+
+describe('whether a unit may carry a fraction', () => {
+    it('refuses a fraction for the units the factory counts in', () => {
+        // Tally writes `Nos.` with the dot; the seeders have used `pcs`.
+        for (const uom of ['Nos.', 'nos', 'NOS', 'Pcs.', 'pcs', 'each']) {
+            expect(permitsFractions(uom)).toBe(false);
+        }
+    });
+
+    it('permits a fraction for weight — packing film genuinely arrives as 14.700 kg', () => {
+        for (const uom of ['Kgs.', 'kg', 'Kilograms']) {
+            expect(permitsFractions(uom)).toBe(true);
+        }
+    });
+
+    it('agrees with the backend list exactly, rather than normalising its own way', () => {
+        // Stripping a trailing dot instead of mirroring the list refused these
+        // four in the browser while the server accepted them. A UI that refuses
+        // what the server permits blocks real work; the reverse only costs a
+        // round trip. So the disagreement direction is the thing being pinned.
+        for (const uom of ['piece.', 'pieces.', 'each.', 'ea.']) {
+            expect(permitsFractions(uom)).toBe(true);
+        }
+    });
+
+    it('trims the way PHP trims, so it cannot disagree with the server', () => {
+        // A non-breaking space is not whitespace to PHP's trim(), so the server
+        // reads `\u00A0nos.` as an unclassified unit and permits decimals. JS
+        // trim() would have normalised it to `nos.` and refused them.
+        for (const uom of ['\u00A0nos.', 'nos.\u00A0', '\u2009pcs', '\u3000nos']) {
+            expect(permitsFractions(uom)).toBe(true);
+        }
+
+        // Ordinary ASCII padding is still trimmed, exactly as PHP does.
+        expect(permitsFractions('  Nos.  ')).toBe(false);
+    });
+
+    it('permits a fraction for a unit nobody has classified, rather than guessing', () => {
+        // The same choice the backend enum makes: Unknown never collapses to
+        // weight, and never blocks real work on a guess.
+        for (const uom of ['Roll', 'Mtr', '', null, undefined]) {
+            expect(permitsFractions(uom)).toBe(true);
+        }
     });
 });

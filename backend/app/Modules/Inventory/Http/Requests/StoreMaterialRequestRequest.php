@@ -2,7 +2,11 @@
 
 namespace App\Modules\Inventory\Http\Requests;
 
+use App\Modules\Inventory\Models\Enums\MeasurementType;
+use App\Rules\PlainDecimal;
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 /**
@@ -49,7 +53,7 @@ class StoreMaterialRequestRequest extends FormRequest
                 ->whereNull('deleted_at')->where('is_active', true)->where('is_production_input', true)],
             // Stock quantities are decimal everywhere in this codebase, and
             // an ask of zero is not an ask.
-            'lines.*.quantity' => ['required', 'numeric', 'gt:0', 'decimal:0,4'],
+            'lines.*.quantity' => ['required', 'numeric', 'gt:0', 'decimal:0,4', 'max:99999999999'],
             'lines.*.notes' => ['sometimes', 'nullable', 'string', 'max:500'],
         ];
     }
@@ -60,5 +64,46 @@ class StoreMaterialRequestRequest extends FormRequest
             'lines.required' => 'A material request has to name at least one material.',
             'lines.*.quantity.gt' => 'Ask for a quantity greater than zero.',
         ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            foreach ((array) $this->input('lines', []) as $index => $line) {
+                $itemId = isset($line['item_id']) ? (int) $line['item_id'] : 0;
+                $quantity = $line['quantity'] ?? null;
+
+                // PlainDecimal, not is_numeric: `is_numeric('1e3')` is true
+                // and bccomp() below then threw a ValueError — a 500 answering
+                // a malformed figure, on the request side, for counted items
+                // only (a weight item short-circuits before it). The rule
+                // above refuses the spelling too; this keeps the guard and the
+                // rule agreeing, which is the whole lesson of this branch.
+                if ($itemId <= 0 || $quantity === null || ! PlainDecimal::matches($quantity)) {
+                    continue;
+                }
+
+                // A COUNTED THING CANNOT BE ASKED FOR IN HALVES. 26 of the
+                // factory's 43 Tally stock items are counted rather than
+                // weighed, and across 1,045 observed quantities not one
+                // `Nos.` or `Pcs.` figure is fractional. Weight keeps its
+                // decimals — packing film really does arrive as 14.700 kg.
+                $item = DB::table('items')->where('id', $itemId)->first(['uom']);
+
+                if ($item === null) {
+                    continue;
+                }
+
+                $type = MeasurementType::forUom($item->uom);
+
+                if (! $type->permitsFractions()
+                    && bccomp((string) $quantity, bcadd((string) (int) $quantity, '0', 4), 4) !== 0) {
+                    $validator->errors()->add(
+                        "lines.{$index}.quantity",
+                        "This material is measured in {$item->uom} — {$type->label()}. Ask for a whole number.",
+                    );
+                }
+            }
+        });
     }
 }

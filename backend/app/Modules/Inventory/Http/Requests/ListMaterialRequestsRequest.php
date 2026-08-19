@@ -55,7 +55,38 @@ class ListMaterialRequestsRequest extends FormRequest
             'sort' => ['sometimes', 'nullable', Rule::in($this->sortOptions())],
             'per_page' => ['sometimes', 'nullable', 'integer', 'between:1,'.MaterialRequestService::PER_PAGE_MAX],
             'page' => ['sometimes', 'nullable', 'integer', 'min:1'],
+            // Production's own screen asking for its unsubmitted drafts. Being
+            // ACCEPTED here is not being honoured — the controller grants it
+            // only to a caller holding production's permission.
+            'include_unsubmitted' => ['sometimes', 'nullable', 'boolean'],
         ];
+    }
+
+    /**
+     * `boolean` REFUSES THE STRING `"true"`, WHICH IS WHAT A BROWSER SENDS.
+     *
+     * Laravel's rule takes `1`, `0`, `"1"` and `"0"` and nothing else; axios
+     * serialises a JS `true` as the literal `true`. So the floor's own
+     * Material Requests page asked for its drafts and got a 422 — an empty
+     * table with no error surfaced, and because Submit is a ROW ACTION on that
+     * table, a raised request could never be sent to the store at all.
+     *
+     * Coerced here rather than only fixed in the caller because
+     * `routes/api.php` is a real product surface (CLAUDE.md decision 3), and a
+     * flag that means the same thing spelled two ways should not answer one
+     * spelling with a dead page. `ExportRequest` already does exactly this.
+     * The caller now sends `1` as well — both halves, because either alone
+     * leaves the trap set for the next call site.
+     */
+    protected function prepareForValidation(): void
+    {
+        if (! $this->has('include_unsubmitted')) {
+            return;
+        }
+
+        $asked = filter_var($this->input('include_unsubmitted'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+
+        $this->merge(['include_unsubmitted' => $asked]);
     }
 
     /** @return list<string> */

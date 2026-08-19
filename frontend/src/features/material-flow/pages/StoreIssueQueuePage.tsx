@@ -30,11 +30,16 @@ import {
     TRANSITION_HELP,
     TRANSITION_LABEL,
     formatQuantity,
+    permitsFractions,
+    OPEN_REQUEST_STATUSES,
+    queueEmptyText,
+    queueStatusFilter,
     type MaterialRequestStatus,
+    type QueueStatusChoice,
 } from '../words';
 
-/** "Still to issue" is these two statuses, as the backend spells the filter. */
-const OPEN_STATUSES: MaterialRequestStatus[] = ['submitted', 'partially_issued'];
+/** Re-exported name kept local for readability; the list lives in words.ts. */
+const OPEN_STATUSES = OPEN_REQUEST_STATUSES;
 
 /**
  * THE STORE'S QUEUE — what production has asked for, and what the store has
@@ -131,7 +136,10 @@ export default function StoreIssueQueuePage() {
                     }),
             }),
         onSuccess: () => {
-            message.success(`Issued to production. The material now stands in ${LOCATION_LABEL.production_wip} — it is not consumed.`);
+            message.success(
+                `Issued to production. The material now stands in ${LOCATION_LABEL.production_wip} — it is not consumed. `
+                + 'A fully issued request leaves this queue; find it under "Fully issued".',
+            );
             setIssueQuantities({});
             refresh();
         },
@@ -178,12 +186,13 @@ export default function StoreIssueQueuePage() {
                     <Col xs={24} sm={8} md={5}>
                         <Select
                             style={{ width: '100%' }}
-                            value={Array.isArray(filters.status) ? 'open' : (filters.status ?? 'open')}
+                            value={Array.isArray(filters.status) ? 'open' : (filters.status ?? 'all')}
                             onChange={(value) =>
-                                setFilter({ status: value === 'open' ? [...OPEN_STATUSES] : (value as MaterialRequestStatus) })
+                                setFilter({ status: queueStatusFilter(value as QueueStatusChoice) })
                             }
                             options={[
                                 { value: 'open', label: 'Still to issue' },
+                                { value: 'all', label: 'All requests (including issued)' },
                                 { value: 'submitted', label: REQUEST_STATUS_LABEL.submitted },
                                 { value: 'partially_issued', label: REQUEST_STATUS_LABEL.partially_issued },
                                 { value: 'issued', label: REQUEST_STATUS_LABEL.issued },
@@ -254,7 +263,14 @@ export default function StoreIssueQueuePage() {
                 dataSource={queueQuery.data?.data}
                 pagination={false}
                 scroll={{ x: 'max-content' }}
-                locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Nothing waiting on the store." /> }}
+                locale={{
+                    emptyText: (
+                        <Empty
+                            image={Empty.PRESENTED_IMAGE_SIMPLE}
+                            description={queueEmptyText(filters.status)}
+                        />
+                    ),
+                }}
                 columns={[
                     { title: 'Request', dataIndex: 'request_number' },
                     {
@@ -356,6 +372,13 @@ export default function StoreIssueQueuePage() {
                                             render: (_, line) => (
                                                 <InputNumber
                                                     min={0}
+                                                    // A COUNTED MATERIAL CANNOT BE TYPED IN HALVES.
+                                                    // The server refuses it either way; this stops
+                                                    // the storekeeper writing 12.5 trays in the
+                                                    // first place. 26 of the factory's 43 stock
+                                                    // items are counted, not weighed.
+                                                    precision={permitsFractions(line.uom) ? undefined : 0}
+                                                    step={permitsFractions(line.uom) ? undefined : 1}
                                                     style={{ width: 140 }}
                                                     placeholder={line.uom}
                                                     value={issueQuantities[line.id] ?? null}

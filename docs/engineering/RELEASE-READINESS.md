@@ -229,3 +229,522 @@ that call is made.
 
 Until then, the Archive confirmation's wording — "stops being offered for new work" — is
 accurate for the other nine masters and **aspirational for Item and WorkCenter**.
+
+---
+
+# Re-gate of PR #196 — what two independent reviewers broke, 18 Aug 2026
+
+The branch was green: 2,092 backend tests, 530 frontend, all four CI legs including
+MySQL. Two reviewers were then asked to **reproduce the earlier exploits rather than read
+the new code**. They found five things the green suite did not, and the two worst were in
+the surfaces this PR was written to close.
+
+## P0 — the unit guards were unreachable on the one path the store actually uses
+
+`StoreStoreIssueRequest::withValidator()` checked `material_request_line_id` first, and
+**every arm of that branch ends in `continue`**. The fraction and unit guards sat below it.
+So they fired only on a fresh handover — the verbal-ask path — and never on a line that
+names the request line it fulfils, which is what the Store Issue Queue posts on every time.
+
+Reproduced, independently, by both reviewers:
+
+| probe | before | after |
+|---|---|---|
+| `Nos.` item, `quantity: "12.5"`, against a real accepted line | **201**, 12.5 trays in Production/WIP | **422** |
+| `Nos.` item, `uom: "Kgs."`, against a real accepted line | **201**, `'Kgs.'` persisted and read back in place of the item's | **422** |
+
+The second is precisely the FC-03 failure the UOM audit claimed closed — "a tape figure in
+metres filed as Nos is a different number about a different thing, and that reached live
+once". The store's own `InputNumber` carried no `precision`, so 12.5 was typable.
+
+**The lesson is about the test, not the code.** `TwoUnitsChainTest` passed throughout,
+because every assertion in it posted without a request line id. A guard is only proven on
+the paths the tests actually walk, and the path they skipped was the only one in daily use.
+
+**Fixed** by hoisting the unit block above the branch — and *only* the unit block.
+Eligibility stays below it, deliberately: whether a material may be asked for was settled
+when the ask was accepted, so history stays issuable. What unit a handover is in was never
+settled by anything. Proved by mutation: restoring the old ordering fails exactly the new
+test, with exactly the old 201.
+
+## P1 — the store could read AND CANCEL production's unsent working paper
+
+The `submitted_at` closure went into `queue()` only. `show` and `cancel` are route-model-
+bound in the group both desks read, and neither asked. Request numbers are sequential.
+
+- store-only login → `GET /material-requests/{draft_id}` → **200**, full body
+- store-only login → `POST /material-requests/{draft_id}/cancel` → **200**, *cancelled*
+
+`cancel`'s only guard is the lifecycle one (`! isFinal()`), and a draft is not final. The
+write is the worse half: production's paper could be torn up before the floor ever sent it.
+
+**Fixed** with one shared gate on both actions, using the same permission constant as the
+queue, answering **404 rather than 403** — a 403 confirms the row exists, which is the thing
+being kept private.
+
+## P2 — a ghost header, and a ghost scan pointer
+
+`material_request_id` carried no `exists`. An issue could be filed against request
+`999999999`: stock moved and the pointer persisted, resolvable by nothing, for ever. The
+bag-scan endpoint had the identical hole on `material_request_line_id`. Both now
+`exists`-checked. Two test fixtures were themselves passing magic numbers (`77`, `512`) and
+now build a real accepted ask.
+
+## P2 — Esc discarded the scans the dialog existed to protect
+
+On the "unfinished receipt" prompt, the destructive choice is the *cancel* role, and antd
+routes Esc and a mask click straight to `onCancel` → `clearAllDrafts()`. The most reflexive
+keystroke on a modal silently destroyed every saved supplier barcode. `keyboard: false`,
+`maskClosable: false`. Discarding is a choice you make, not one you fall into.
+
+## P3 — fixed
+
+`quantity: "1e3"` passed `numeric` and reached bcmath, which answered a **500**; now a 422.
+And a test of mine was dead: it compared a `MaterialRequestStatus` enum instance `===` the
+string `'draft'`, which is never true, so the fixture it claimed to fix never once did the
+thing it described. That file is about filter mechanics and now holds no draft at all.
+
+## P3 — known, bounded, NOT fixed
+
+- **`StoreIssueService::issue()` has no unit guard of its own.** A direct PHP call persisted
+  `3.25` and `'Litres'` on a `Nos.` item. There is exactly one HTTP write path into store
+  issues and it goes through the FormRequest, so this is reachable only by writing new
+  server code — defence in depth, not an open door. Left alone rather than changed on the
+  eve of a deploy.
+- **The GRN draft-restore machinery has no test.** `vite.config.ts` declares no DOM
+  environment, so `restoringDraft`, `pendingDraftKey()` and `loadDraft()` are unreachable
+  from the suite; only the pure `lotScanState` is covered. Verified by inspection only.
+- **The pre-existing kg-detecting copies elsewhere in the frontend are untouched** (class 3
+  in the UOM audit). `permitsFractions()` in `material-flow/words.ts` is the canonical one
+  to converge on when that is scoped.
+
+## What held up
+
+Everything else the reviewers attacked: the bogus request-line bypass, the cancelled-request
+exemption, the header/line mismatch, the queue's own draft filter across every filter,
+paging, search and flag combination, partial-GRN scan discard, the timezone stamp, negative
+WIP visibility, the meta plumbing, `MeasurementType` itself, and — proved by mutation —
+`TwoUnitsChainTest` being non-vacuous. FC-01, FC-03 and FC-06 all hold on the delta.
+
+## The verification round, and what it found in the fixes themselves
+
+Both reviewers re-ran their own successful probes against the fix commit. All six are
+refused, each re-probed rather than re-read, and the central fix re-proved by mutation:
+restoring the old ordering fails exactly one test with exactly the old 201. All ten
+surrounding workflows still complete — the resin chain end to end, partial and repeat
+issues, return to store, all three cancellation paths, blank-uom decimals — verified under
+a genuinely store-only login rather than a combined-permission one, which is the only
+identity a permission-shaped refusal shows up for.
+
+Four things in the fixes did not survive, and they are worth naming because three of them
+were made BY the fixes:
+
+- **The `exists` rules checked existence but not lifecycle.** The store could head an issue
+  with production's unsubmitted draft, and a scan on a headerless issue could name any real
+  request line. No stock or document harm — the foreign pointer has no reader, and
+  `remainingForRequestLines` has zero call sites — but **201-vs-422 is an existence oracle
+  for draft ids, which is exactly what the 404 on show/cancel was added to deny.** A fix
+  that leaks through a side channel is not finished. Both rules now carry the lifecycle,
+  and the scan's line must belong to the issue's own request.
+- **The hoist widened exactly one refusal.** An item whose master carries no unit refused
+  any caller-supplied one, with a message reading "This material is kept in ." — an
+  unusable sentence on a floor screen, and newly reachable on the accepted-ask path
+  *because* of the hoist. A blank unit has nothing to disagree with.
+- **The quantity rule over-narrowed.** Closing the `1e3` 500 also started refusing `.5`,
+  `1.` and `+5`, all of which bcmath accepts and the old code took happily. The rule is now
+  exactly what bcmath accepts. Widening a refusal by accident is the failure mode here.
+- **The browser mirror disagreed with the server** on `piece.`, `pieces.`, `each.` and
+  `ea.` — and in the dangerous direction, the UI refusing what the server permits. Mirrored
+  verbatim instead of normalising its own way.
+
+One trap worth recording on its own: `Rule::exists(...)->where($column, $op, $value)` takes
+**two** arguments and drops the third in silence. The draft half of the lifecycle rule
+worked while the cancelled half did nothing at all. It was caught only because the test
+asserted both halves separately — a rule that looks right and half-fails is what a
+single-assertion test would have shipped.
+
+Left alone, deliberately: an accepted ask for a **soft-deleted** item cannot be fulfilled.
+That contradicts "history stays issuable" for the delete case, but it is a deliberate
+earlier decision in this series, hard delete is Super Admin/Owner only (DEC-20260817-002
+§3) so the desks that raise and fulfil asks cannot cause it, and the floor can still cancel
+a stranded ask. Reversing a deliberate call unattended is not engineering's to make.
+
+Also still true and still not fixed: no service-layer unit guard (one HTTP write path, all
+through the FormRequest), and no DOM in the frontend suite, so the GRN draft-restore
+machinery is covered by inspection only.
+
+## The third round — a fix that reopened the defect it was fixing
+
+The follow-up commit was verified against the same standard and produced one **P1**, found
+by probe rather than by reading:
+
+**The quantity rule was widened; the private guard it feeds was not.** Closing the `1e3`
+500 had narrowed the rule, and un-narrowing it admitted `.5`, `1.` and `+5` — while
+`isPlainDecimal()`, which gates the whole-number check for counted materials, kept the
+narrower spelling. So `+12.5`, `.5` and `+.5` cleared the rule, failed to match the guard's
+own pattern, and **skipped the fraction check entirely**: 26 fractional trays reached
+Production/WIP with a 201, on both the fresh-handover and the accepted-ask path. The exact
+defect the previous commit was written to close, reopened through a spelling.
+
+Two things about it are worth more than the fix:
+
+- **Two copies of one predicate, for the third time in this branch.** `MeasurementType`
+  exists because four call sites asked one question three ways; the accepted-ask branch
+  broke because eligibility and units were entangled; and this broke because a regex was
+  written down twice and only one copy was updated. It is now a single `PLAIN_DECIMAL`
+  constant used by both.
+- **The new test passed for the wrong reason.** `test_the_quantity_rule_refuses_only_what_
+  bcmath_refuses` asserted against a `Kgs.` item — a WEIGHT item, which permits fractions —
+  so it returned 201 no matter what the counted-material guard did. A test that cannot fail
+  for the reason it names is not covering that reason. The replacement drives seven
+  spellings of a fraction through a `Nos.` item on both paths, asserts no tray moved, and
+  then asserts `+12` still succeeds; the divergence is pinned by mutation.
+
+Also fixed: the browser mirror trimmed the way JS trims and the server the way PHP trims, so
+` nos.` was refused in the browser and permitted by the server — the dangerous
+direction again, now normalised to PHP's exact trim set.
+
+Everything else in that commit verified clean, each state actually posted rather than
+reasoned about: **`partially_issued` and `issued` can still head an issue, and a second
+issue against a part-fulfilled ask still succeeds** — the case where a wrong tightening
+would have stopped the factory. Draft- and cancelled-headed issues are refused with a body
+byte-identical to the one a nonexistent id returns, so the existence oracle is closed
+rather than merely narrowed. A full resin chain walked end to end: RM Store 100 → 40,
+Production/WIP 0 → 60, three transfer pairs, **zero consumption rows**. FC-01, FC-03 and
+FC-06 all hold.
+
+## The fourth round — a P0 that three rounds of testing could not see
+
+The final gate returned one PASS and one **FAIL**. The blocking finding was not in any of
+the logic the previous rounds had been attacking:
+
+**The floor's Material Requests page was dead.** `include_unsubmitted` is validated with
+Laravel's `boolean` rule, which accepts `1`, `0`, `"1"` and `"0"` — and **not** `"true"`,
+which is exactly what axios puts on the wire for a JS `true`, and exactly what the page was
+sending. So the floor asked for its own drafts and got a 422. No error surfaced (the only
+axios interceptor handles 401), the table rendered "No data", and because **Submit is a row
+action on that table**, a request raised through the still-working modal could never be
+sent to the store at all. Work stoppage, not a display bug.
+
+**Why three verification rounds missed it, and this is the part worth keeping:** every
+backend test built its query with `http_build_query()`, which encodes PHP `true` as `"1"` —
+the one spelling that worked. The tests could not send what the browser sends, so they
+could not see what the browser sees. The regression test now writes the query string by
+hand and asserts `true`, `TRUE`, `1`, `false` and `0` all behave; mutation-proved against
+the exact 422 the reviewer reported.
+
+**And the repo already knew.** `frontend/src/features/production/api.ts` carries a docblock
+stating this trap verbatim, ending "Typing the literal makes that mistake a compile error
+instead of a blank page" — and the new call site typed the flag `boolean` anyway. Both
+halves are fixed: the server coerces (the API is a product surface, and a flag that means
+the same thing spelled two ways should not answer one spelling with a dead page), and the
+type is now the literal `1`, so the next call site gets a compile error.
+
+### The predicate, written down once, at last
+
+The same drift caused four separate defects on this branch — four call sites classifying a
+unit three ways, a rule and its guard spelled differently, a flag validated one way and read
+another. `PlainDecimal` is now a single rule class used by **all four quantity doors**:
+material request, store issue, return, and bag scan. Consolidating it closed three more
+findings at once:
+
+- **P1, the third door.** A fractional return of a counted material succeeded — 484.5 trays
+  in the store and 15.5 on the floor simultaneously. Pre-existing and unchanged from main,
+  so not a regression; closed because a unit contract true of two doors out of three is not
+  a contract.
+- **P2.** `1e3` on the material-request side was a **500**, not a 422 — `is_numeric('1e3')`
+  is true and `bccomp()` is not. It fired only for counted items, because a weight item
+  short-circuits before reaching it. Same defect on the return and bag-scan doors,
+  pre-existing.
+- **P3.** The request-LINE id was still an existence oracle: a nonexistent line and a real
+  line belonging to someone else's request answered differently. The header oracle had been
+  closed to byte-identity; this one had not. Both now answer the same body.
+
+Everything the adversarial half checked in the logic held: all six of the owner's required
+proofs PROVEN with balances before and after (34 fractional spellings × 2 paths, 14 invalid
+id shapes, 26 draft-visibility combinations), `PLAIN_DECIMAL` confirmed the only definition
+by mutation, zero 500s across an aggressive sweep, 109 strings agreeing between the browser
+mirror and the server classifier with no disagreement in either direction, and a full resin
+chain with **zero consumption rows**. FC-01, FC-03, FC-06 hold.
+
+## The fifth round — the gate that could be told apart
+
+One PASS, one FAIL again. The blocking finding defeated a fix this branch had already made,
+for the third time in the series, and by the same mechanism each time: **a refusal that
+answers differently is a disclosure.**
+
+**The draft-privacy gate was defeated by validation ordering.** The `abort_if` sat in the
+CONTROLLER, which runs after the FormRequest. So `POST /material-requests/{id}/cancel` with
+a too-short reason answered **422** for a draft that exists and **404** for an id that does
+not — and a store-only login could walk the id space with one ordinary request, no crafted
+payload and no side effects. The gate's own comment said "404 rather than 403: a 403
+confirms the row is there, which is itself the thing being kept private"; a 422 confirms it
+just as well.
+
+It is **middleware** now (`EnsureDraftIsProductionsOwn`), because middleware is the only
+place that runs before everything else that could answer differently — and it throws the
+same `ModelNotFoundException` route-model binding throws, so the body is indistinguishable
+too, not merely the status. Mutation-proved: disarming it reproduces exactly the 422.
+
+### The audit that should have run four rounds earlier
+
+Round four's lesson was made this round's FIRST task: **compare what the frontend actually
+puts on the wire against the rule that receives it**, with every query string written by
+hand. The material-flow surface came back clean — `include_unsubmitted` across 23 spellings
+and two logins, `status[]` arrays, cleared antd filters (which axios drops entirely), dates,
+JSON nulls. What it found instead were the doors nobody had validated at all:
+
+- **`GET /inventory/store-issues` had no FormRequest.** `$request->string('status')` on raw
+  input is a TypeError, so `?status[]=issued`, `?issued_from[]=x` and `?per_page=-5` were
+  **500s**; `?status=banana` was silently ignored and `per_page` was uncapped. Two request
+  classes now, strict about shape and permissive about meaning: nothing a working screen
+  sends changes behaviour.
+- **The material-lot door 500s on `1e3`** in three fields (`bcmul`, `bcadd`). Pre-existing.
+- **`quantity_requested` sat three lines above the rule that converged** and kept the old
+  spelling, so `1e400` reached the decimal cast as a 500. The same predicate, drifting for
+  the fourth time — which is the argument for `PlainDecimal` being a class rather than a
+  constant, and it now guards every quantity field in the module.
+- **The bag-scan door was still an existence oracle.** `Rule::exists` fired IN ADDITION to
+  the ownership check, so a nonexistent line produced two errors and a foreign one produced
+  one. The issue door had been collapsed to a single body; this one had been left telling
+  them apart. One body for all three cases now.
+
+Also: the return modal's quantity input had no precision guard while the issue side's did,
+so a storekeeper could type half a tray back and learn about it only from the server.
+
+Everything else held. All six of the owner's proofs PROVEN again with balances before and
+after — 16 fractional posts across both paths, 12 invalid-id shapes across five doors with
+movements 2→2 and bag scans 0→0, 23 flag spellings, partial→full walking
+`submitted → partially_issued → issued`. Browser/server unit mirror: 77 strings, zero
+disagreements. Resin chain: `{receipt: 2, transfer_in: 2, transfer_out: 2}`, **consumption
+rows: 0**. FC-01, FC-03, FC-06 hold.
+
+## The sixth round — two doors out of three is no doors
+
+Both halves found the same hole independently, which is the strongest signal in the series.
+
+**`POST /material-requests/{id}/submit` was the third route carrying a `{material_request}`,
+and leaving it out of the gate defeated the gate.** Laravel runs `SubstituteBindings` ahead
+of the unprioritised `module` alias, so route-model binding answered **404 for an id that
+does not exist** while the permission check answered **403 for one that does**. A store-only
+login enumerated production's unsubmitted drafts with one ordinary POST per id — the same
+bit, about the same rows, at the same cost as round five's finding.
+
+The obvious fix does not work, and that is worth recording: appending `own-draft` to a route
+inside `module:production` never runs, because the group aborts first. `submit` now sits in
+the group both desks may enter, with `own-draft` first and the production-only check after,
+so a 403 is reached only for a request the caller already sees in their own queue.
+Mutation-proved both ways.
+
+**Seven quantity fields still reached bcmath with `numeric` alone — and one is reachable
+from a live screen.** The three stock-movement doors, purchase requisitions and purchase
+orders. `1e+21` is what `JSON.stringify` emits for any JavaScript number at or above 1e21,
+and the stock page posts straight from an antd `InputNumber`, so a storekeeper holding a key
+down reaches the exponent spelling without ever typing an `e`. Probed: `1e+21` was a **500**
+on the receipt door and a clean 422 on the `PlainDecimal`-guarded one.
+
+That is the predicate's **fifth** drift on this branch. `PlainDecimal` has moved to
+`App\Rules` (it now spans two modules) and `EveryQuantityDoorRefusesAMalformedNumberTest`
+names the **doors** rather than the rules, so a new door added without it fails there
+instead of in production. Its mutant reproduces the reviewer's exact 500s — and a purchase
+order silently ACCEPTING `1e3` as a 201.
+
+**The return guard read the wrong unit.** The modal reads `line.uom`, the unit the handover
+was recorded in; the server read `items.uom`, the master's value now. An item's unit is
+editable, so after an edit the two disagreed in both directions — including the one this
+branch itself named dangerous, the browser blocking a figure the server would take.
+
+### Recorded, not fixed
+
+`SubstituteBindings` beating `EnsureModulePermission` is **repo-wide**: every `module:`-gated
+route with a bound model is an existence oracle for any authenticated user (`GET
+/inventory/items/1` → 403, `/999999` → 404). The root fix is a global middleware-priority
+change, which is not a thing to do unattended on a deploy eve. The `submit` instance was in
+scope because **this branch declared drafts private**; nobody has declared item ids private,
+so the general case is a separate, owner-visible decision.
+
+Also recorded: a boolean `material_request_id` coerces to `1` (framework-standard for every
+id field in the codebase, no screen sends one).
+
+Everything else held. Sixteen probe shapes × {draft, ghost} on `show`/`cancel` — including
+HEAD, OPTIONS, form-encoded, malformed JSON, and thirteen odd id spellings — **every pair
+identical in status and body**, with the gate failing closed when the permission rows are
+absent entirely. Read doors: 41 malformed queries, zero 500s. Bag-scan oracle: seven cases,
+one body. Unit mirror: 75 strings, zero disagreements. All six owner proofs re-proven with
+balances; 94 invalid-id posts across seven doors left movements 2→2, issues 0→0, bag scans
+0→0. Resin chain `{receipt: 1, transfer_in: 2, transfer_out: 2}`, **consumption rows: 0**.
+FC-01, FC-03, FC-06 hold.
+
+## The seventh round — the sibling three lines below
+
+Two P1s, both caused by the previous round's fixes. The pattern is now the whole story of
+this branch: **one idea written down twice, and only one copy updated.**
+
+**A field, not a door.** `PlainDecimal` went onto two fields of `StorePurchaseOrderRequest`
+and missed `lines.*.schedules.*.quantity` three lines below — which is the one that reaches
+`bcadd`. It answered `1e3` / `1e+21` / `1e400` with a **500**, and its amend twin (posted by
+the same modal) silently **accepted** `1e+21` as a **200**, storing a number nobody typed.
+Both reachable from a bare antd `InputNumber` on the live Purchase Orders page — the exact
+vector the previous round used to justify a P1. The previous commit's own claim that its
+test "names the DOORS rather than the rules, so a new door added without it fails there
+instead of in production" was **false as written**: it named doors, and the leak was a field
+on a door it already named.
+
+**So the class was measured instead of chased.** A sweep of every FormRequest in the
+application found **114 unguarded `numeric` fields** across CRM, Compliance, Finance, HRMS,
+Payroll, Quality, Sales, Maintenance, Inventory, Procurement, Production and TallySync. Not
+all reach bcmath, but the ones that do answer a 500 or store an exponent.
+
+Fixed here: the **13 fields in this workflow's own chain** — purchase order schedules, the
+three amend fields, six goods-receipt fields, MRP net requirements, the material cost
+version rate, and the day-bin bag load. `NoDoorInThisWorkflowTakesAnUnguardedNumberTest`
+reads the **rule arrays themselves** across those thirteen request classes, so a field added
+without a guard fails there; mutation-proved to name the exact field this round found.
+
+**Deliberately NOT fixed: the other ~100.** Putting a stricter rule on payroll, quality and
+CRM doors nobody has exercised, on the eve of a deploy, risks refusing work the factory does
+today — and this branch has already learned twice that a wrong tightening is worse than the
+500 it replaces. The full inventory is above; it is a named, sized follow-up, not a
+hand-wave.
+
+**The return guard's unit source was swapped, not closed.** The first attempt read
+`items.uom`, the second read `store_issue_lines.uom`. Each closed the hole facing one way
+and opened it facing the other, because the two can disagree — and not only through a human
+edit: `ItemService::upsertFromTally` overwrites `items.uom` from Tally's `BASEUNITS` on
+every masters pull, **unattended**. Now BOTH are consulted and a fraction is refused if
+either reading says the material is counted.
+
+With one deliberate exception, which matters more than the rule: **the entire outstanding
+quantity may always come back.** A fractional quantity already standing on the floor —
+issued before the rule, or reclassified afterwards — would otherwise be unreturnable for
+ever. A refusal that traps stock is worse than the state it objects to.
+
+**The draft gate still leaked to a read-only login.** Group middleware run before route
+middleware, and the OR-group demands `.manage` for a POST — so an `inventory.view` login was
+refused at the group and never reached the gate: 403 for a draft, 404 for a ghost. Same
+oracle, one rung further out, for a role the live Roles screen can create. The gate is on
+the **group** now, and first. The test sweeps three login shapes × four request forms and is
+mutation-proved against exactly that login.
+
+Everything else held: `route:list` confirms all three `{material_request}` routes carry the
+gate ahead of every permission answer; the middleware diff around the route move accounts
+for every entry with nothing lost; ordinary values still pass every guarded door (procurement
+walked end to end, all three stock-movement doors, JSON numeric literals as well as strings);
+and rounds one to six were independently re-probed rather than re-read. Resin chain
+consumption rows: **0**. FC-01 and FC-06 hold; FC-03 now holds on the return door too.
+
+### Known and recorded, not fixed
+
+- The ~100 remaining unguarded numeric fields outside this workflow (inventory above).
+- `SubstituteBindings` runs before `EnsureModulePermission` repo-wide, so every
+  `module:`-gated bound route is an existence oracle for any authenticated user. Root fix is
+  a global middleware-priority change — an owner-visible decision, not a deploy-eve one.
+- `PlainDecimal` refuses a JSON float that stringifies to exponent form (`0.000012` →
+  `1.2E-5`). The old rule accepted it and the `decimal(_,4)` column rounded it to `0.0000`,
+  so refusing is arguably the better answer; recorded because the Tally mirror posts through
+  one of those doors.
+- No service-layer unit guard; no DOM in the frontend suite, so the GRN draft-restore
+  machinery remains inspection-only.
+
+## The eighth round — two PASSes, and the follow-ups closed anyway
+
+**Both halves PASS.** The first double-PASS of the series, and the evidence is the kind that
+is hard to argue with rather than the kind that is merely green.
+
+The escape hatch — the riskiest thing round seven added, because "exactly equals the
+outstanding balance" is a comparison and comparisons at four decimal places are where abuse
+lives — held against every attack: rounding at 4dp **truncated** rather than over-moving,
+off-by-one refused, negative outstanding refused twice over, duplicate line ids rolled the
+whole transaction back, zero and malformed spellings refused with no 500s. The reason it
+holds is worth keeping: `StoreIssueService` re-reads `quantityOutstanding()` under
+`lockForUpdate()` with **the same `bcsub(issued, returned, 4)` arithmetic the validator
+uses**, so there is no second definition to drift — which is the failure mode that produced
+five of this branch's eight blocking findings.
+
+The both-units matrix is clean across 28 probes; the gate is clean across 7 logins × 3 verbs
+× 3 targets with byte-identical bodies and the draft surviving every refusal; and rounds one
+to seven were re-probed rather than re-read.
+
+### The follow-ups they named, all closed
+
+- **The structural test was "false as written" AGAIN.** Two classes the same commit guarded
+  — `MrpNetRequirementsRequest` and `LoadFactoryDayBinBagRequest` — were not in its `DOORS`
+  list, so stripping their guards left it green. The same defect the test exists to prevent,
+  inside the test. Both added; the regex now also sees pipe-string rules and arrays holding
+  a `Rule::` object.
+- **The magnitude class.** `PlainDecimal` closes the SHAPE (`1e3`, `INF`) and says nothing
+  about SIZE. A 14-digit quantity — what a held-down key on a number input produces, well
+  below the 1e21 where `JSON.stringify` switches to exponent form — cleared every guarded
+  door with a 201 and landed in a `decimal(15,4)` column that holds eleven integer digits.
+  Live MySQL runs strict, so that is an error rather than a rounded value; and **a figure
+  the column cannot hold is wrong whatever the driver does about it**, which is why this was
+  fixed on reasoning that does not depend on the MySQL leg the reviewer could not run. 26
+  fields bounded, and the test now demands BOTH guards — it immediately caught a
+  material-request field that had a shape guard and no bound.
+- **A flaky FC-06 pin.** `test_the_issue_never_shows_a_rate_or_an_amount_to_a_store_reader`
+  searched the encoded JSON for the substring `rate`, which matches a Faker-generated name —
+  "Monserrate". It reads keys and values now. **A guard that fails at random is worse than
+  no guard**: it teaches people to re-run it rather than read it.
+- **The return modal rounded its input to a whole number**, which made the escape hatch
+  untypable in exactly the case it exists for — a legacy fractional quantity standing on the
+  floor against a counted line. It now takes decimals when the outstanding balance is
+  itself fractional.
+
+### Still recorded, still not fixed
+
+The ~100 unguarded numeric fields outside this workflow; `SubstituteBindings` running before
+`EnsureModulePermission` repo-wide (every `module:`-gated bound route is an existence oracle
+for any authenticated user — a global middleware-priority change and an owner-visible
+decision); `PlainDecimal` refusing a JSON float that stringifies to exponent form; the
+boolean-id coercion the framework applies to every id field; no service-layer unit guard; and
+no DOM in the frontend suite, so the GRN draft-restore machinery stays inspection-only.
+
+## Deployment is blocked, and not by the code
+
+GitHub Actions is **billing-blocked** on the repository account: every job on `0e55c06`
+failed in three seconds, on two attempts, with `The job was not started because recent
+account payments have failed or your spending limit needs to be increased`. The previous
+commit's MySQL leg passed in 7m28s, so this began between the two.
+
+Two of the owner's four deployment conditions therefore cannot be met: **CI cannot run**, and
+**the deploy itself is a GitHub Actions workflow**. Deploying by hand over SSH would skip the
+maintenance window, the backup and the migrate-step evidence — the protections that exist
+because a deploy once left the floor serving new code on an unmigrated schema. It was not
+done. The account needs Settings → Billing & plans.
+
+## The frozen release candidate
+
+Both halves of the final verification returned **PASS** on `81c57fd`. Two concrete,
+reproduced defects were found in that commit's own unreviewed work, and only those two were
+corrected — the owner's freeze rule is that the SHA which passes is the SHA which merges, so
+nothing else was touched.
+
+**Five bounds were three orders of magnitude too loose.** `max:99999999999` is the
+`decimal(15,4)` edge and was applied uniformly, but `material_lots.bag_weight_kg`,
+`material_bags.original_kg`/`remaining_kg` (reached through both the lot and the GRN door)
+and `day_bin_movements.quantity_kg` are `decimal(12,4)` — eight integer digits. A nine-digit
+bag weight returned **201** and stored `999999999.0000`; live MySQL runs strict, so that is
+an error rather than a rounded value. Now `max:99999999`, proved at the edge: nine digits
+**422**, eight digits **201**, an ordinary 25.5 kg bag **201**.
+
+Worth being exact about what this was: **not a regression.** Those five fields carried no
+bound at all before the previous commit, so it was an improvement that had not gone far
+enough.
+
+**The FC-06 pin had been narrowed while being de-flaked.** Trading substring matching for
+equality lost `vendor_name`, `avg_rate` and `cost_per_kg` — mutation-proved. The original was
+right to match substrings; its mistake was scanning the whole encoded document, **values
+included**, and a Faker person really is named "Monserrate Fields" (reproduced
+deterministically by the QA half). Containment is back, on **keys only**. Keys are ours,
+values are the world's.
+
+**Deliberately not fixed, and recorded instead:** the structural test's regex cannot see a
+rule array containing a semicolon (an inline comment, or a closure rule). It is latent — all
+fifteen classes were proved fully visible — and widening that regex risks false positives,
+which on this branch has repeatedly been the worse trade.
+
+Final state: backend **2,121 / 2,120 passed / 1 skipped by design / 19,269 assertions**,
+Pint clean, typecheck clean, vitest 535/535, build clean, factory knowledge sound.
+
+**This candidate cannot merge or deploy until GitHub Actions billing is restored** — CI
+cannot run, and the deploy is itself an Actions workflow.

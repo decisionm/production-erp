@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Col, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Alert, Button, Card, Col, Empty, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import { useMemo, useState } from 'react';
 import { listShifts, listWorkCenters, machineLabel } from '@/features/production/api';
 import { itemLabel } from '@/lib/itemLabel';
@@ -8,13 +8,16 @@ import {
     cancelMaterialRequest,
     createMaterialRequest,
     listMaterialRequests,
+    listProductionFloorStock,
     listRequestableMaterials,
     submitMaterialRequest,
 } from '../api';
 import RequestLinesTable from '../components/RequestLinesTable';
-import type { CreateMaterialRequestLinePayload, MaterialFlowMaterial, MaterialRequest } from '../types';
+import type { CreateMaterialRequestLinePayload, MaterialFlowMaterial, MaterialRequest, ProductionFloorStock } from '../types';
 import {
+    formatQuantity,
     ISSUE_IS_NOT_CONSUMPTION,
+    LOCATION_LABEL,
     machineAppliesToRequest,
     machineFieldDecision,
     REFUSAL_MESSAGE,
@@ -75,8 +78,17 @@ export default function MaterialRequestsPage() {
 
     const requestsQuery = useQuery({
         queryKey: ['material-flow', 'requests', statusFilter],
-        queryFn: () => listMaterialRequests(statusFilter === 'all' ? {} : { status: statusFilter }),
+        // The floor's own page, so it asks for its drafts. The store's queue
+        // does not send this and the server would refuse it there anyway.
+        queryFn: () =>
+            listMaterialRequests(
+                statusFilter === 'all'
+                    ? { include_unsubmitted: 1 }
+                    : { status: statusFilter, include_unsubmitted: 1 },
+            ),
     });
+    // Live Production/WIP stock — the second half of the page.
+    const floorQuery = useQuery({ queryKey: ['material-flow', 'production-floor-stock'], queryFn: listProductionFloorStock });
     const materialsQuery = useQuery({ queryKey: ['material-flow', 'materials'], queryFn: listRequestableMaterials });
     const shiftsQuery = useQuery({ queryKey: ['production', 'shifts', 'active'], queryFn: () => listShifts(true) });
     const machinesQuery = useQuery({ queryKey: ['production', 'work-centers', 'active'], queryFn: () => listWorkCenters(true) });
@@ -221,6 +233,75 @@ export default function MaterialRequestsPage() {
                     },
                 ]}
             />
+
+            {/* ---------------------------------------------------------------
+                THE SECOND HALF OF THE PAGE — what the floor ALREADY holds.
+
+                Asked for by the owner so a supervisor can see what is standing
+                on the floor before asking the store for more. Sourced from the
+                Production/WIP stock BALANCE, never from request history: issues
+                only ever go up, so a floor built from them would never empty
+                and would send someone to the store for resin they are standing
+                next to.
+
+                No machine column, and there will not be one: a bag belongs to
+                no machine and no batch (FC-01), so this is per MATERIAL. No day
+                bin either — the location is Production/WIP (DEC-20260817-001).
+            ---------------------------------------------------------------- */}
+            <Typography.Title level={4} style={{ marginTop: 32 }}>
+                Material available on the production floor
+            </Typography.Title>
+            <Typography.Paragraph type="secondary" style={{ marginTop: -8 }}>
+                What is standing in {LOCATION_LABEL.production_wip} right now — already issued by the store and not yet
+                consumed by a batch. This is live stock, not a history of what was asked for.
+            </Typography.Paragraph>
+
+            <Table<ProductionFloorStock>
+                rowKey="item_id"
+                size="small"
+                loading={floorQuery.isLoading}
+                dataSource={floorQuery.data?.data}
+                pagination={false}
+                locale={{
+                    emptyText: (
+                        <Empty
+                            image={Empty.PRESENTED_IMAGE_SIMPLE}
+                            description={
+                                // THREE different empty tables, and only ONE of
+                                // them may say the floor is clear. Reporting a
+                                // failed request or an unconfigured location as
+                                // "everything has been consumed" is a false
+                                // statement about stock.
+                                floorQuery.isError
+                                    ? 'This could not be read just now, so what is on the floor is unknown. Refresh to try again.'
+                                    : floorQuery.data?.meta.wip_configured === false
+                                        ? `No ${LOCATION_LABEL.production_wip} location has been set, so the ERP cannot say what is standing on the floor. Name it in Inventory settings.`
+                                        : `Nothing is standing in ${LOCATION_LABEL.production_wip}. Everything issued has been consumed or returned.`
+                            }
+                        />
+                    ),
+                }}
+                columns={[
+                    {
+                        title: 'Material',
+                        render: (_, row) => itemLabel({ sku: row.sku ?? '', name: row.name ?? '' }),
+                    },
+                    {
+                        title: `In ${LOCATION_LABEL.production_wip}`,
+                        align: 'right',
+                        render: (_, row) => formatQuantity(row.quantity),
+                    },
+                    { title: 'UOM', dataIndex: 'uom', render: (uom: string | null) => uom ?? '—' },
+                    {
+                        title: 'Last issued',
+                        render: (_, row) => (row.last_issued_at ? new Date(row.last_issued_at).toLocaleString() : '—'),
+                    },
+                    { title: 'Issue', render: (_, row) => row.last_issue_number ?? '—' },
+                    { title: 'Issued by', render: (_, row) => row.issued_by ?? '—' },
+                    { title: 'Received by', render: (_, row) => row.received_by ?? '—' },
+                ]}
+            />
+
 
             <Modal
                 open={createOpen}

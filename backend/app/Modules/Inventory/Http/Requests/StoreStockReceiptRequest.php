@@ -2,6 +2,7 @@
 
 namespace App\Modules\Inventory\Http\Requests;
 
+use App\Rules\PlainDecimal;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -21,8 +22,8 @@ class StoreStockReceiptRequest extends FormRequest
             // already recorded against it are untouched and still read back.
             'item_id' => ['required', 'integer', Rule::exists('items', 'id')->where('is_active', true)],
             'warehouse_id' => ['required', 'integer', Rule::exists('warehouses', 'id')->where('is_active', true)],
-            'quantity' => ['required', 'numeric', 'gt:0'],
-            'unit_cost' => ['required', 'numeric', 'min:0'],
+            'quantity' => ['required', 'numeric', 'gt:0', 'max:99999999999', new PlainDecimal],
+            'unit_cost' => ['required', 'numeric', 'min:0', 'max:99999999999', new PlainDecimal],
             'batch_id' => ['nullable', 'integer', 'exists:batches,id'],
             'serial_number_id' => ['nullable', 'integer', 'exists:serial_numbers,id'],
             'reference' => ['nullable', 'string', 'max:255'],

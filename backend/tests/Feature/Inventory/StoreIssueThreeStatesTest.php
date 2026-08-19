@@ -592,11 +592,42 @@ class StoreIssueThreeStatesTest extends TestCase
     {
         $issue = $this->issueResin('300');
 
-        $shown = json_encode($this->getJson("/api/v1/inventory/store-issues/{$issue['id']}")->assertOk()->json());
+        $shown = $this->getJson("/api/v1/inventory/store-issues/{$issue['id']}")->assertOk()->json();
 
-        foreach (['unit_cost', 'average_cost', 'rate', 'amount', 'vendor', 'supplier_name', '85.0000'] as $forbidden) {
-            $this->assertStringNotContainsString($forbidden, (string) $shown, "FC-06: \"{$forbidden}\" must not reach a store reader.");
+        // KEYS, not a substring of the whole document. Scanning the encoded
+        // JSON for "rate" also matched a Faker-generated person's name —
+        // "Monserrate" contains it — so this pin failed at random, which is
+        // worse than not pinning at all: a flaky guard teaches people to
+        // re-run it rather than read it.
+        $keys = [];
+        $walk = function (array $node, string $prefix = '') use (&$walk, &$keys, &$values): void {
+            foreach ($node as $key => $value) {
+                $path = $prefix === '' ? (string) $key : $prefix.'.'.$key;
+                $keys[] = (string) $key;
+
+                if (is_array($value)) {
+                    $walk($value, $path);
+                } else {
+                    $values[] = (string) $value;
+                }
+            }
+        };
+        $values = [];
+        $walk($shown);
+
+        foreach (['cost', 'rate', 'price', 'amount', 'vendor', 'supplier'] as $forbidden) {
+            // CONTAINMENT on the key, so `vendor_name`, `avg_rate` and
+            // `cost_per_kg` are caught too. The original pin matched substrings
+            // and was right to; its mistake was scanning the whole encoded
+            // document, VALUES included — and a Faker person really is named
+            // "Monserrate". Keys are ours, values are the world's.
+            $leaked = array_values(array_filter($keys, fn (string $key) => str_contains($key, $forbidden)));
+
+            $this->assertSame([], $leaked, "FC-06: no \"{$forbidden}\" field may reach a store reader.");
         }
+
+        // ...and the purchase rate itself, as a VALUE, wherever it were hidden.
+        $this->assertNotContains('85.0000', $values, 'FC-06: the purchase rate must not reach a store reader.');
     }
 
     // (j) a plain read cannot write -----------------------------------------

@@ -4,11 +4,13 @@ namespace Tests\Feature\Inventory;
 
 use App\Models\User;
 use App\Modules\Inventory\Models\Enums\MaterialBagStatus;
+use App\Modules\Inventory\Models\Enums\MaterialRequestStatus;
 use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Models\Enums\StockMovementType;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\MaterialBag;
 use App\Modules\Inventory\Models\MaterialLot;
+use App\Modules\Inventory\Models\MaterialRequest;
 use App\Modules\Inventory\Models\StockBalance;
 use App\Modules\Inventory\Models\StockMovement;
 use App\Modules\Inventory\Models\StoreIssue;
@@ -45,6 +47,8 @@ use Tests\TestCase;
 class StoreIssueBagScanTest extends TestCase
 {
     use RefreshDatabase;
+
+    private ?MaterialRequest $ask = null;
 
     private Item $resin;
 
@@ -111,11 +115,32 @@ class StoreIssueBagScanTest extends TestCase
         ]);
     }
 
+    /**
+     * A REAL ACCEPTED ASK, not a magic number. These fixtures used to pass
+     * `material_request_id => 77` and `material_request_line_id => 512` —
+     * arbitrary stand-ins for "some request" that happened to point at nothing.
+     * Both are now `exists`-checked, because an issue or a scan filed against a
+     * request that does not exist is a pointer nothing can ever resolve.
+     */
+    private function acceptedAsk(): MaterialRequest
+    {
+        $request = MaterialRequest::create([
+            'status' => MaterialRequestStatus::Submitted,
+            'requested_at' => now(),
+            'submitted_at' => now(),
+        ]);
+        $request->lines()->create(['item_id' => $this->resin->id, 'quantity' => '25', 'uom' => 'Kgs']);
+
+        return $request;
+    }
+
     private function openIssue(): array
     {
+        $this->ask = $this->acceptedAsk();
+
         return $this->postJson('/api/v1/inventory/store-issues', [
             'received_by' => $this->supervisor->id,
-            'material_request_id' => 77,
+            'material_request_id' => $this->ask->id,
             'lines' => [],
         ])->assertCreated()->json('data');
     }
@@ -138,7 +163,7 @@ class StoreIssueBagScanTest extends TestCase
         $this->postJson("/api/v1/inventory/store-issues/{$issue['id']}/bag-scans", [
             'barcode' => 'LOT1-B1',
             'received_by' => $this->supervisor->id,
-            'material_request_line_id' => 512,
+            'material_request_line_id' => $this->ask->lines()->value('id'),
         ])->assertCreated();
 
         $scan = StoreIssueBagScan::query()->sole();
@@ -148,8 +173,8 @@ class StoreIssueBagScanTest extends TestCase
         $this->assertSame($this->storeKeeper->id, $scan->issued_by);
         $this->assertSame($this->supervisor->id, $scan->received_by);
         $this->assertNotNull($scan->scanned_at);
-        $this->assertSame(512, $scan->material_request_line_id);
-        $this->assertSame(77, StoreIssue::query()->sole()->material_request_id);
+        $this->assertSame($this->ask->lines()->value('id'), $scan->material_request_line_id);
+        $this->assertSame($this->ask->id, StoreIssue::query()->sole()->material_request_id);
 
         // The bag is emptied and the kilograms are now with production.
         $this->assertSame('0.0000', (string) $bag->fresh()->remaining_kg);

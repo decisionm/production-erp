@@ -128,9 +128,16 @@ class MaterialRequestPermissionsTest extends TestCase
 
     private function seededRequest(): MaterialRequest
     {
+        // SUBMITTED, because this file is about PERMISSION wiring and a
+        // submitted request is what both desks legitimately reach. It used to
+        // be a draft, which quietly asserted that the store may read and
+        // cancel production's unsent working paper — the leak that the
+        // `submitted_at` gate on show/cancel now closes. That rule has its own
+        // file: StoreNeverSeesProductionDraftsTest.
         $request = MaterialRequest::create([
-            'status' => MaterialRequestStatus::Draft,
+            'status' => MaterialRequestStatus::Submitted,
             'requested_at' => now(),
+            'submitted_at' => now(),
         ]);
         $request->lines()->create(['item_id' => $this->carton->id, 'quantity' => '40', 'uom' => 'Nos']);
 

@@ -2,6 +2,7 @@
 
 namespace App\Modules\Production\Http\Requests;
 
+use App\Rules\PlainDecimal;
 use Illuminate\Foundation\Http\FormRequest;
 
 class MrpNetRequirementsRequest extends FormRequest
@@ -15,7 +16,7 @@ class MrpNetRequirementsRequest extends FormRequest
     {
         return [
             'item_id' => ['required', 'integer', 'exists:items,id'],
-            'quantity' => ['required', 'numeric', 'gt:0'],
+            'quantity' => ['required', 'numeric', 'gt:0', 'max:99999999999', new PlainDecimal],
         ];
     }
 }

@@ -1,12 +1,13 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, message, Modal, Select, Space, Table, Typography } from 'antd';
+import { Alert, Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, message, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Controller, useFieldArray, useForm, useWatch, type Control, type FieldPath } from 'react-hook-form';
 import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import BarcodeScanInput from '@/components/barcode/BarcodeScanInput';
+import { lotIsSubmittable, lotScanState } from '../lotScan';
 import { hasModuleAccess } from '@/features/auth/permissions';
 import { useAuthStore } from '@/features/auth/store';
 import MaterialBagLabels from '@/features/inventory/components/MaterialBagLabels';
@@ -90,7 +91,24 @@ const receiptSchema = z.object({
                             supplier_lot_no: z.string().min(1, 'Lot no required'),
                             bag_count: z.number({ error: 'Bags required' }).int().min(1, 'At least 1 bag'),
                             bag_weight_kg: z.number({ error: 'Kg/bag required' }).gt(0, 'Must be > 0'),
-                        }),
+                            // One scanned supplier barcode per physical bag.
+                            // Optional as a WHOLE: leave it empty and the server
+                            // mints a barcode for every bag. What is refused is
+                            // a PARTIAL scan — see the refine below.
+                            barcodes: z.array(z.string().min(1)).optional(),
+                        })
+                        .refine(
+                            // ONE RULE, shared with the screen — see lotScan.ts.
+                            // None, or all. A part-scanned lot is refused rather
+                            // than quietly submitted as "no barcodes", and a bag
+                            // count dropped below the scans is refused rather
+                            // than throwing the extra scans away.
+                            (lot) => lotIsSubmittable(lot.bag_count, lot.barcodes),
+                            {
+                                message: 'Scan every bag, or discard the scans to have barcodes generated. A part-scanned lot cannot be submitted.',
+                                path: ['barcodes'],
+                            },
+                        ),
                     )
                     .optional(),
             }),
@@ -98,6 +116,87 @@ const receiptSchema = z.object({
         .min(1, 'Selected purchase order has nothing left to receive'),
 });
 type ReceiptFormValues = z.infer<typeof receiptSchema>;
+
+/**
+ * A RECEIPT IN PROGRESS SURVIVES A REFRESH.
+ *
+ * Scanning a pallet is the expensive part of receiving — twenty bags is twenty
+ * deliberate acts by someone standing at a trolley. Losing that to a stray
+ * refresh, a locked tablet or a mis-tap is not an inconvenience, it is the
+ * whole job again, and the likeliest recovery is that the bags get generated
+ * identities and the supplier's barcodes are never recorded.
+ *
+ * So the in-progress receipt is kept under its own receipt key (the same key
+ * that already makes submission idempotent) and restored when the form
+ * reopens. It is cleared on a successful receipt and when the receiver
+ * deliberately starts a new one.
+ */
+const DRAFT_PREFIX = 'grn-draft:';
+
+function loadDraft(key: string): ReceiptFormValues | null {
+    try {
+        const raw = window.localStorage.getItem(DRAFT_PREFIX + key);
+        return raw === null ? null : (JSON.parse(raw) as ReceiptFormValues);
+    } catch {
+        // A corrupt or unavailable store must never stop a receipt being typed.
+        return null;
+    }
+}
+
+function saveDraft(key: string, values: ReceiptFormValues): void {
+    try {
+        window.localStorage.setItem(DRAFT_PREFIX + key, JSON.stringify({ ...values, saved_at: Date.now() }));
+    } catch {
+        // Private browsing, a full quota — the receipt still works, it just
+        // stops being recoverable. Never surface this as an error.
+    }
+}
+
+function clearDraft(key: string): void {
+    try {
+        window.localStorage.removeItem(DRAFT_PREFIX + key);
+    } catch {
+        // ignore
+    }
+}
+
+/**
+ * The MOST RECENT unfinished receipt, not merely the first key the browser
+ * happens to iterate. An abandoned empty draft sorting ahead of a real
+ * twenty-scan one would otherwise hide it — and, because the prompt only
+ * appears when a draft has scans, hide it silently and for ever.
+ */
+function pendingDraftKey(): string | null {
+    let newest: { key: string; at: number } | null = null;
+
+    try {
+        for (let i = 0; i < window.localStorage.length; i += 1) {
+            const k = window.localStorage.key(i);
+            if (k === null || !k.startsWith(DRAFT_PREFIX)) continue;
+
+            const at = Number((JSON.parse(window.localStorage.getItem(k) ?? '{}') as { saved_at?: number }).saved_at ?? 0);
+            if (newest === null || at > newest.at) newest = { key: k.slice(DRAFT_PREFIX.length), at };
+        }
+    } catch {
+        // ignore
+    }
+
+    return newest?.key ?? null;
+}
+
+/** Every abandoned draft. "Start a new receipt" means start clean. */
+function clearAllDrafts(): void {
+    try {
+        const keys: string[] = [];
+        for (let i = 0; i < window.localStorage.length; i += 1) {
+            const k = window.localStorage.key(i);
+            if (k !== null && k.startsWith(DRAFT_PREFIX)) keys.push(k);
+        }
+        keys.forEach((k) => window.localStorage.removeItem(k));
+    } catch {
+        // ignore
+    }
+}
 
 function newReceiptKey(): string {
     return typeof crypto.randomUUID === 'function'
@@ -164,6 +263,121 @@ function LineAllocationsEditor({ control, lineIndex }: { control: Control<Receip
     );
 }
 
+/**
+ * SCANNING THE BAGS OF ONE SUPPLIER LOT.
+ *
+ * A pallet of resin is many identical bags, and the receiving bay should not
+ * have to re-enter a line per bag. So one lot row holds one scan box: scan,
+ * scan, scan — each barcode is appended, the count goes up, and the four
+ * figures the receiver actually watches are on screen the whole time:
+ *
+ *     Expected bags | Scanned | Remaining | Total weight
+ *
+ * Scanning is OPTIONAL. Where the supplier prints no barcode, leave it empty
+ * and the server mints one per bag, so every physical bag still ends up with
+ * one identifiable record either way. What is NOT allowed is a half-finished
+ * scan: the server requires exactly one barcode per bag when any are supplied,
+ * so a partial list is submitted as none — said plainly here rather than
+ * discovered as a validation error with a trolley waiting.
+ */
+function LotBagScanner({
+    control,
+    lineIndex,
+    lotIndex,
+}: {
+    control: Control<ReceiptFormValues>;
+    lineIndex: number;
+    lotIndex: number;
+}) {
+    const lot = useWatch({ control, name: `lines.${lineIndex}.lots.${lotIndex}` });
+    const expected = Number(lot?.bag_count ?? 0);
+    const weightPerBag = Number(lot?.bag_weight_kg ?? 0);
+
+    return (
+        <Controller
+            name={`lines.${lineIndex}.lots.${lotIndex}.barcodes`}
+            control={control}
+            render={({ field }) => {
+                const scanned: string[] = field.value ?? [];
+                const state = lotScanState(expected, scanned);
+                const remaining = state.remaining;
+
+                const add = (raw: string) => {
+                    const code = raw.trim();
+                    if (code === '') return;
+                    // A double-scan of the same bag is the ordinary slip in a
+                    // receiving bay, and it must not silently become two bags.
+                    if (scanned.includes(code)) return;
+                    if (expected > 0 && scanned.length >= expected) return;
+                    field.onChange([...scanned, code]);
+                };
+
+                return (
+                    <div style={{ marginTop: 4 }}>
+                        <Space wrap align="baseline">
+                            <BarcodeScanInput
+                                autoFocus={false}
+                                placeholder={remaining > 0 ? `Scan bag ${scanned.length + 1} of ${expected || '?'}…` : 'All bags scanned'}
+                                onScan={add}
+                                style={{ width: 260 }}
+                            />
+                            <Typography.Text style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
+                                Expected <strong>{expected || '—'}</strong> · Scanned <strong>{scanned.length}</strong> ·
+                                Remaining <strong>{expected ? remaining : '—'}</strong> · Total{' '}
+                                <strong>{parseFloat((expected * weightPerBag).toFixed(4)) || 0} kg</strong>
+                            </Typography.Text>
+                        </Space>
+                        {scanned.length > 0 && (
+                            <div style={{ marginTop: 4 }}>
+                                {scanned.map((code) => (
+                                    <Tag
+                                        key={code}
+                                        closable
+                                        onClose={() => field.onChange(scanned.filter((c) => c !== code))}
+                                        style={{ marginBottom: 4 }}
+                                    >
+                                        {code}
+                                    </Tag>
+                                ))}
+                            </div>
+                        )}
+                        {state.message !== null && (
+                            <Space align="baseline" wrap style={{ marginTop: 2 }}>
+                                <Typography.Text type="danger" style={{ fontSize: 11 }}>
+                                    {state.message}
+                                </Typography.Text>
+                                {/* THE EXPLICIT WAY OUT. A receiver who cannot
+                                    scan the rest — an unreadable label, a
+                                    supplier who barcodes the pallet and not the
+                                    bags — says so deliberately, and the server
+                                    generates an identity for every bag. What
+                                    must never happen is the same outcome
+                                    arriving silently on submit. */}
+                                <Button
+                                    size="small"
+                                    danger
+                                    onClick={() => {
+                                        Modal.confirm({
+                                            title: 'Discard the scanned barcodes?',
+                                            content: `The ${scanned.length} barcode${scanned.length === 1 ? '' : 's'} already scanned will not be recorded. The system will generate an identity for each of the ${expected} bags instead.`,
+                                            okText: 'Discard and generate',
+                                            okButtonProps: { danger: true },
+                                            cancelText: 'Keep scanning',
+                                            onOk: () => field.onChange([]),
+                                        });
+                                    }}
+                                >
+                                    Discard scans
+                                </Button>
+                            </Space>
+                        )}
+                    </div>
+                );
+            }}
+        />
+    );
+}
+
 function LineLotsSubForm({ control, lineIndex }: { control: Control<ReceiptFormValues>; lineIndex: number }) {
     const lots = useFieldArray({ control, name: `lines.${lineIndex}.lots` });
     const line = useWatch({ control, name: `lines.${lineIndex}` });
@@ -176,7 +390,8 @@ function LineLotsSubForm({ control, lineIndex }: { control: Control<ReceiptFormV
     return (
         <div style={{ margin: '4px 0 8px 16px' }}>
             {lots.fields.map((lotField, lotIndex) => (
-                <Space key={lotField.id} align="baseline" style={{ display: 'flex', marginTop: 4 }}>
+                <div key={lotField.id} style={{ marginTop: 8 }}>
+                    <Space align="baseline" style={{ display: 'flex' }}>
                     <Controller
                         name={`lines.${lineIndex}.lots.${lotIndex}.supplier_lot_no`}
                         control={control}
@@ -210,7 +425,9 @@ function LineLotsSubForm({ control, lineIndex }: { control: Control<ReceiptFormV
                     <Button size="small" danger onClick={() => lots.remove(lotIndex)}>
                         Remove
                     </Button>
-                </Space>
+                    </Space>
+                    <LotBagScanner control={control} lineIndex={lineIndex} lotIndex={lotIndex} />
+                </div>
             ))}
             <Button
                 size="small"
@@ -221,6 +438,7 @@ function LineLotsSubForm({ control, lineIndex }: { control: Control<ReceiptFormV
                         supplier_lot_no: '',
                         bag_count: undefined as unknown as number,
                         bag_weight_kg: undefined as unknown as number,
+                        barcodes: [],
                     })
                 }
             >
@@ -248,6 +466,8 @@ export default function GoodsReceiptsPage() {
     const [detailReceipt, setDetailReceipt] = useState<GoodsReceiptNote | null>(null);
     const [createdReceipt, setCreatedReceipt] = useState<GoodsReceiptNote | null>(null);
     const [receiptKey, setReceiptKey] = useState(newReceiptKey);
+    /** True for exactly one effect pass while a saved draft is being restored. */
+    const restoringDraft = useRef(false);
     const [serverErrors, setServerErrors] = useState<string[]>([]);
     const queryClient = useQueryClient();
     const user = useAuthStore((s) => s.user);
@@ -328,6 +548,17 @@ export default function GoodsReceiptsPage() {
         defaultValues: { lines: [] },
     });
     const { fields, replace } = useFieldArray({ control, name: 'lines' });
+
+    // Persist the receipt in progress. `watch` with a callback fires on every
+    // keystroke and every scan, which is exactly the granularity a trolley
+    // needs — the last scan before a refresh is already saved.
+    useEffect(() => {
+        if (!modalOpen) return undefined;
+
+        const subscription = watch((values) => saveDraft(receiptKey, values as ReceiptFormValues));
+
+        return () => subscription.unsubscribe();
+    }, [modalOpen, receiptKey, watch]);
     const selectedOrderId = watch('purchase_order_id');
     const selectedOrder = receivableOrders.find((o) => o.id === selectedOrderId);
     // Same rule for the form: the Unit Cost input exists only when the PO
@@ -353,6 +584,19 @@ export default function GoodsReceiptsPage() {
     };
 
     useEffect(() => {
+        // A RESTORE MUST NOT BE REBUILT OVER. Setting purchase_order_id from a
+        // saved draft changes selectedOrderId, which fires this effect — and
+        // this effect rebuilds every line from the purchase order with empty
+        // lots. That silently threw away the exact thing the draft exists to
+        // protect: the receiver was told "20 barcodes restored" and handed a
+        // form with none. The flag is cleared here, so the NEXT genuine change
+        // of order still rebuilds.
+        if (restoringDraft.current) {
+            restoringDraft.current = false;
+
+            return;
+        }
+
         const order = receivableOrders.find((o) => o.id === selectedOrderId);
         if (!order) {
             replace([]);
@@ -439,6 +683,11 @@ export default function GoodsReceiptsPage() {
                                   bag_count: lot.bag_count,
                                   bag_weight_kg: lot.bag_weight_kg,
                                   total_received_kg: Number((lot.bag_count * lot.bag_weight_kg).toFixed(4)),
+                                  // Validation has already guaranteed none-or-all,
+                                  // so this only has to choose between sending the
+                                  // scanned identities and asking the server to
+                                  // mint them. It can no longer discard a scan.
+                                  barcodes: (lot.barcodes?.length ?? 0) > 0 ? lot.barcodes : undefined,
                               }))
                             : undefined,
                 })),
@@ -446,6 +695,7 @@ export default function GoodsReceiptsPage() {
         onSuccess: (grn) => {
             invalidate();
             setModalOpen(false);
+            clearDraft(receiptKey);
             reset({ lines: [], received_date: nowReceivedAt() });
             setServerErrors([]);
             setReceiptKey(newReceiptKey());
@@ -479,6 +729,50 @@ export default function GoodsReceiptsPage() {
     });
 
     const openNewReceipt = () => {
+        // AN UNFINISHED RECEIPT IS OFFERED BACK, not silently resumed and not
+        // silently thrown away. Resuming without asking would be its own
+        // surprise — a receiver opening "new receipt" and finding yesterday's
+        // half-scanned pallet in front of them.
+        const unfinished = pendingDraftKey();
+        const draft = unfinished === null ? null : loadDraft(unfinished);
+        const scans = (draft?.lines ?? []).reduce(
+            (total, line) => total + (line.lots ?? []).reduce((n, lot) => n + (lot.barcodes?.length ?? 0), 0),
+            0,
+        );
+
+        if (draft !== null && unfinished !== null && scans > 0) {
+            Modal.confirm({
+                title: 'Carry on with the unfinished receipt?',
+                content: `A receipt left open has ${scans} bag barcode${scans === 1 ? '' : 's'} already scanned. Carry on with it, or start a new one and discard those scans.`,
+                okText: 'Carry on',
+                cancelText: 'Start a new receipt',
+                // ESC MUST NOT THROW THE SCANS AWAY. On a confirm dialog the
+                // cancel role is the destructive one here, and antd routes Esc
+                // and a mask click straight to onCancel — so the most reflexive
+                // keystroke on a modal would have silently discarded the very
+                // supplier barcodes this dialog exists to protect. Discarding
+                // is a choice you make, not one you fall into.
+                keyboard: false,
+                maskClosable: false,
+                onOk: () => {
+                    restoringDraft.current = true;
+                    setReceiptKey(unfinished);
+                    reset(draft);
+                    setServerErrors([]);
+                    setModalOpen(true);
+                },
+                onCancel: () => {
+                    clearAllDrafts();
+                    reset({ lines: [], received_date: nowReceivedAt() });
+                    setServerErrors([]);
+                    setReceiptKey(newReceiptKey());
+                    setModalOpen(true);
+                },
+            });
+
+            return;
+        }
+
         // Defaulted here rather than in defaultValues so it is the time the
         // form was opened, not the time the page was loaded.
         reset({ lines: [], received_date: nowReceivedAt() });
@@ -551,7 +845,14 @@ export default function GoodsReceiptsPage() {
                 title="New Goods Receipt"
                 open={modalOpen}
                 onCancel={() => setModalOpen(false)}
-                onOk={handleSubmit((values) => mutation.mutate(values))}
+                onOk={handleSubmit(
+                    (values) => mutation.mutate(values),
+                    // AN INVALID SUBMIT MUST SAY SOMETHING. The offending lot
+                    // may be scrolled out of sight in a tall modal, and a
+                    // button that simply does nothing reads as a broken screen
+                    // — which is how a part-scanned lot would have been met.
+                    () => message.error('This receipt cannot be submitted yet — check the lines marked in red, including any lot that is only part-scanned.'),
+                )}
                 confirmLoading={mutation.isPending}
                 destroyOnHidden
                 width={700}

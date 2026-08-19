@@ -288,11 +288,22 @@ Route::prefix('v1')->group(function () {
          * Append-only: every lifecycle step is a POST, there is no PUT and
          * no DELETE. A cancelled request keeps its row and its reason.
          */
-        Route::prefix('inventory')->middleware('module:production,inventory')->group(function () {
+        // `own-draft` FIRST, and on the GROUP rather than the routes. Group
+        // middleware run before route middleware, and this OR-group demands
+        // `.manage` for a POST — so a read-only store login was refused at the
+        // group and never reached the gate, getting 403 for a draft that exists
+        // and 404 for one that does not. The gate has to be the first thing
+        // that can answer. It is a no-op on the routes here that carry no
+        // {material_request}.
+        Route::prefix('inventory')->middleware(['own-draft', 'module:production,inventory'])->group(function () {
             // The queue itself, and one request in full. Read by the store
             // (inventory.view) and by the floor that raised it
             // (production.view).
             Route::get('material-requests', [MaterialRequestController::class, 'index']);
+            // `own-draft` runs BEFORE the FormRequest, deliberately: a gate in
+            // the controller runs after validation, so a 422 from the cancel
+            // reason answered "this row exists" for a draft the store may not
+            // know about. See EnsureDraftIsProductionsOwn.
             Route::get('material-requests/{material_request}', [MaterialRequestController::class, 'show']);
             // Either side may withdraw one, with a reason: the floor when
             // the run is pulled, the store when it cannot fulfil.
@@ -309,13 +320,35 @@ Route::prefix('v1')->group(function () {
             // WHOLE item master, finished goods included, capped at 1000 rows
             // and therefore silently truncating once the master outgrows it.
             Route::get('requestable-materials', [MaterialRequestController::class, 'requestableMaterials']);
+
+            // WHAT IS ALREADY ON THE FLOOR — Production/WIP balances, so the
+            // floor can see what it holds before asking for more. Same group
+            // as the queue: both desks read it.
+            Route::get('production-floor-stock', [MaterialRequestController::class, 'productionFloorStock']);
         });
 
         // Raising and submitting are the FLOOR's act — production.manage.
         // The store fulfils requests; it does not write them for the floor.
         Route::prefix('inventory')->middleware('module:production')->group(function () {
             Route::post('material-requests', [MaterialRequestController::class, 'store']);
-            Route::post('material-requests/{material_request}/submit', [MaterialRequestController::class, 'submit']);
+        });
+
+        // SUBMIT IS THE THIRD ROUTE THAT REACHES AN UNSUBMITTED REQUEST, and
+        // leaving it out of the gate left the whole gate defeated: Laravel runs
+        // SubstituteBindings ahead of the unprioritised `module` alias, so
+        // binding answered 404 for an id that does not exist while the
+        // permission check answered 403 for one that does. One ordinary POST
+        // per id and a store login had enumerated production's drafts — the
+        // exact disclosure EnsureDraftIsProductionsOwn exists to deny.
+        //
+        // It sits in the group BOTH desks may enter, with `own-draft` first and
+        // the production-only check after, because the obvious fix does not
+        // work: appending `own-draft` to a route inside `module:production`
+        // never runs, the group aborts first. The permission answer is now
+        // reached only for a request the caller can already see.
+        Route::prefix('inventory')->middleware(['own-draft', 'module:production,inventory'])->group(function () {
+            Route::post('material-requests/{material_request}/submit', [MaterialRequestController::class, 'submit'])
+                ->middleware('module:production');
         });
 
         Route::prefix('procurement')->middleware('module:procurement')->group(function () {

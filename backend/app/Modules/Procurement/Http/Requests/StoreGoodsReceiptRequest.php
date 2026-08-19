@@ -2,6 +2,7 @@
 
 namespace App\Modules\Procurement\Http\Requests;
 
+use App\Rules\PlainDecimal;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -32,8 +33,8 @@ class StoreGoodsReceiptRequest extends FormRequest
                 Rule::exists('purchase_order_lines', 'id')
                     ->where('purchase_order_id', $this->input('purchase_order_id')),
             ],
-            'lines.*.quantity' => ['required', 'numeric', 'gt:0'],
-            'lines.*.unit_cost' => ['nullable', 'numeric', 'min:0'],
+            'lines.*.quantity' => ['required', 'numeric', 'gt:0', 'max:99999999999', new PlainDecimal],
+            'lines.*.unit_cost' => ['nullable', 'numeric', 'min:0', 'max:99999999999', new PlainDecimal],
             // Arrival references (owner-confirmed): the Receipt Note reference
             // is recorded at physical arrival; both default deterministically
             // when blank so every arrival stays referenceable.
@@ -42,12 +43,12 @@ class StoreGoodsReceiptRequest extends FormRequest
             // Edited allocation preview — omitted means oldest-due-first.
             'lines.*.schedule_allocations' => ['sometimes', 'array', 'min:1'],
             'lines.*.schedule_allocations.*.purchase_order_schedule_id' => ['required_with:lines.*.schedule_allocations', 'integer', 'exists:purchase_order_schedules,id'],
-            'lines.*.schedule_allocations.*.quantity' => ['required_with:lines.*.schedule_allocations', 'numeric', 'gt:0'],
+            'lines.*.schedule_allocations.*.quantity' => ['required_with:lines.*.schedule_allocations', 'numeric', 'gt:0', 'max:99999999999', new PlainDecimal],
             'lines.*.lots' => ['sometimes', 'array', 'min:1'],
             'lines.*.lots.*.supplier_lot_no' => ['nullable', 'string', 'max:100'],
             'lines.*.lots.*.bag_count' => ['required_with:lines.*.lots', 'integer', 'min:1', 'max:2000'],
-            'lines.*.lots.*.bag_weight_kg' => ['nullable', 'numeric', 'gt:0'],
-            'lines.*.lots.*.total_received_kg' => ['nullable', 'numeric', 'gt:0'],
+            'lines.*.lots.*.bag_weight_kg' => ['nullable', 'numeric', 'gt:0', 'max:99999999', new PlainDecimal],
+            'lines.*.lots.*.total_received_kg' => ['nullable', 'numeric', 'gt:0', 'max:99999999999', new PlainDecimal],
             'lines.*.lots.*.barcodes' => ['nullable', 'array'],
             'lines.*.lots.*.barcodes.*' => [
                 'required',
@@ -56,7 +57,7 @@ class StoreGoodsReceiptRequest extends FormRequest
                 'distinct',
             ],
             'lines.*.lots.*.bag_weights' => ['nullable', 'array'],
-            'lines.*.lots.*.bag_weights.*' => ['required', 'numeric', 'gt:0'],
+            'lines.*.lots.*.bag_weights.*' => ['required', 'numeric', 'gt:0', 'max:99999999', new PlainDecimal],
             'lines.*.lots.*.notes' => ['nullable', 'string'],
         ];
     }

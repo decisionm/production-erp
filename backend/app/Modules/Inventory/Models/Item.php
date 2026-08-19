@@ -3,6 +3,7 @@
 namespace App\Modules\Inventory\Models;
 
 use App\Modules\Inventory\Models\Enums\ItemTrackingType;
+use App\Modules\Inventory\Models\Enums\MeasurementType;
 use App\Support\Configuration\Concerns\RecordsConfigurationAudit;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
@@ -72,6 +73,25 @@ class Item extends Model
      * add ->where('is_active', true), while a screen rendering HISTORY must
      * still be able to resolve an input that has since been archived.
      */
+    /**
+     * What this item's unit MEASURES — weight, a count, or unclassified.
+     *
+     * The one classifier. Prefer it over hasKgUom() for any new question: that
+     * one answers "is this kilograms", which is a narrower thing than it looks
+     * and has been standing in for questions it cannot answer (see Q54(a) —
+     * packing FILM is measured in kilograms and is not resin).
+     */
+    public function measurementType(): MeasurementType
+    {
+        return MeasurementType::forUom($this->uom);
+    }
+
+    /** May a quantity of this item carry decimals? Counted things may not. */
+    public function permitsFractionalQuantity(): bool
+    {
+        return $this->measurementType()->permitsFractions();
+    }
+
     public function scopeProductionInput(Builder $query): Builder
     {
         return $query->where('is_production_input', true);
