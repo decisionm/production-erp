@@ -109,9 +109,26 @@ git rebase -i HEAD~N
 `N` counts commits back from the tip. Prefer naming the base explicitly, which
 removes the off-by-one that `HEAD~N` invites:
 
+
+> ⚠️ **`origin/main` is not automatically the right ref here.** After the
+> 19-Aug-2026 migration this repo's `main` tracks `decisionm/main`, while the
+> `origin` remote still points at the OLD repository. A stale remote-tracking
+> ref does not error — it **still resolves**, frozen at the last fetch — so
+> every rebase and range below would silently use the wrong base, and rebasing
+> onto a frozen base can reintroduce commits that were later reverted.
+>
+> Resolve the real upstream once and use it throughout. Every `origin/main`
+> you see elsewhere means `$MAIN`, and every bare `origin` means `$REMOTE`:
+>
+> ```bash
+> MAIN=$(git rev-parse --abbrev-ref main@{upstream})   # e.g. decisionm/main
+> REMOTE=${MAIN%%/*}
+> git fetch "$REMOTE" --prune
+> ```
+
 ```bash
-git rebase -i origin/main          # everything your branch adds
-git rebase -i $(git merge-base origin/main HEAD)
+git rebase -i "$MAIN"          # everything your branch adds
+git rebase -i $(git merge-base "$MAIN" HEAD)
 ```
 
 ### The todo verbs
@@ -137,7 +154,7 @@ Do not hand-edit todo lists to move fixups around. Mark them at commit time:
 ```bash
 git commit --fixup=<sha>       # message becomes "fixup! <original subject>"
 git commit --squash=<sha>      # same, but keeps your message for combining
-git rebase -i --autosquash origin/main
+git rebase -i --autosquash "$MAIN"
 ```
 
 Git pre-orders the todo list so each `fixup!` sits directly under its target,
@@ -156,7 +173,7 @@ with one command before merge.
 The guarantee that makes `bisect run` work must itself be verified:
 
 ```bash
-git rebase -i --exec 'npm test' origin/main
+git rebase -i --exec 'npm test' "$MAIN"
 ```
 
 The command runs after **every** commit. If one fails, the rebase stops there —
@@ -166,7 +183,7 @@ during an incident six months later.
 For expensive suites, verify buildability rather than full correctness:
 
 ```bash
-git rebase -i --exec 'npm run typecheck' origin/main
+git rebase -i --exec 'npm run typecheck' "$MAIN"
 ```
 
 ### Splitting one commit into several
@@ -199,7 +216,7 @@ When several branches point into one stack, a rebase normally strands the
 intermediate ones:
 
 ```bash
-git rebase -i --update-refs origin/main
+git rebase -i --update-refs "$MAIN"
 git config --global rebase.updateRefs true
 ```
 
@@ -433,8 +450,8 @@ git branch recovered <dangling-sha>
 ### `--force-with-lease`, and its one sharp edge
 
 ```bash
-git push --force-with-lease origin feature
-git push --force-with-lease=feature:<expected-sha> origin feature    # explicit, safer
+git push --force-with-lease "$REMOTE" feature
+git push --force-with-lease=feature:<expected-sha> "$REMOTE" feature    # explicit, safer
 ```
 
 The lease refuses the push if the remote moved since your last fetch, so you
@@ -540,7 +557,7 @@ Before merging, read the workflow files **on the ref being merged** — path
 filters make this non-obvious:
 
 ```bash
-git diff --name-only origin/main..HEAD
+git diff --name-only "$MAIN"..HEAD
 ```
 
 A change that looks like documentation can still touch a filtered path and fire
@@ -552,7 +569,7 @@ If you promise bisectable history, test the promise:
 
 ```yaml
 - run: |
-    git rev-list --reverse origin/main..HEAD | while read sha; do
+    git rev-list --reverse "$MAIN"..HEAD | while read sha; do
       git checkout -q "$sha" && npm run typecheck || exit 1
     done
 ```
@@ -574,10 +591,10 @@ If you promise bisectable history, test the promise:
 ### Before opening a PR
 
 ```bash
-git fetch origin && git rebase -i --autosquash origin/main
-git rebase --exec 'npm test' origin/main
-git log --oneline origin/main..HEAD
-git diff --name-only origin/main..HEAD
+git fetch "$REMOTE" && git rebase -i --autosquash "$MAIN"
+git rebase --exec 'npm test' "$MAIN"
+git log --oneline "$MAIN"..HEAD
+git diff --name-only "$MAIN"..HEAD
 ```
 
 ### Recovery
