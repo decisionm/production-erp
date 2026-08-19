@@ -82,7 +82,7 @@ jobs:
             *)     VALUE='shift' ;;
           esac
 
-          PHP='/opt/alt/php84/usr/bin/php'
+          PHP='\$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php)'
 
           if [ "$WRITE_RAW" = "true" ]; then
             REMOTE="cp .env .env.bak-granularity-flip \

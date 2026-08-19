@@ -97,7 +97,7 @@ jobs:
 
           # The remote command is built from literals only. The input decides
           # WHICH literal, and never contributes text to the command.
-          REMOTE="cd '${{ secrets.DEPLOY_PATH }}/backend' && /opt/alt/php84/usr/bin/php artisan hrms:remove-demo-employees"
+          REMOTE="cd '${{ secrets.DEPLOY_PATH }}/backend' && \$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php) artisan hrms:remove-demo-employees"
           if [ "$WRITE_RAW" = "true" ]; then
             REMOTE="$REMOTE --write"
           fi
