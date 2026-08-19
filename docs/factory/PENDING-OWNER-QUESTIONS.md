@@ -1280,6 +1280,21 @@ fraction rules are now enforced. Four things remain the factory's to answer.
     master-data error — and only the factory can say which. Until then any code that resolves
     a tray by name is resolving between two different measurement types.
 
+    **Resolved 2026-08-19 by DEC-20260819-001: a master-data error.** `500ML IFF Tray`
+    (id 207, `Kgs.`) is redundant and is ARCHIVED through the configuration lifecycle —
+    reversible, deletes nothing, no Tally mutation. The live read that settled it: id 207
+    had zero movements and zero on-hand, and was the only one of EIGHT tray masters not in
+    `Nos.` No code change followed; the fraction rule was already correct.
+
+    Two things this did NOT settle, and they stay open here:
+    **(b-i)** `500ml Tray` (id 220, `Nos.`, 10 movements, 1470 on hand) and `500ML Tray IFF`
+    (id 221, `Nos.`, 1 movement, 2000 on hand) may themselves be duplicates of each other —
+    the live catalogue carries THREE 500ml tray masters, not the two this question named.
+    **(b-ii)** `Stretch Film` is measured in `Nos.` yet carries the only fractional counted
+    quantity in the entire database (58.2, an opening balance dated 07-Aug-2026). A count of
+    58.2 is not a count. This looks like the same class of unit error, and it is the one live
+    row the fraction rule would now refuse. *Both open since 2026-08-19.*
+
 (c) **Which side governs a dual-unit line?** When a receipt is entered against a line that
     displayed two units, which one is the stock-keeping quantity? This is Q40's question and
     it stays open; the build carries the single unit and converts nothing.
