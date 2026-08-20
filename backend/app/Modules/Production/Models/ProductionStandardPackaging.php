@@ -15,6 +15,12 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     // The Tally item THIS packing's production posts as (DEC-20260810-003).
     // Null = no identity of its own — the run uses the product's item and
     // the screen says so; an unknown identity stays editable, never guessed.
+    // READ, still exactly as above: this column is how every row already
+    // written, and every voucher already posted, is explained. WRITE, since
+    // DEC-20260821-001: a NEW value naming a different item from the
+    // standard's product is refused, because that packing is a separate
+    // finished product now, not a second identity under this one. Stored
+    // rows are left exactly as they are.
     'item_id', 'item_set_by', 'item_set_at',
 ])]
 class ProductionStandardPackaging extends Model

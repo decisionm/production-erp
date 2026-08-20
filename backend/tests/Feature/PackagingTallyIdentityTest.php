@@ -278,19 +278,27 @@ class PackagingTallyIdentityTest extends TestCase
     {
         $user = $this->actingAsProduction();
 
+        // The identity a packing may still be given: the standard's OWN
+        // product. Provenance stamps exactly as it always did.
+        //
+        // This case used to be stated with $this->trayIdentity — a DIFFERENT
+        // Tally item — under DEC-20260810-003's authority to hold two
+        // identities beneath one product. DEC-20260821-001 supersedes that;
+        // the refused half is asserted in
+        // test_a_new_distinct_identity_is_refused_on_both_writers() below.
         $this->postJson("/api/v1/production/standards/{$this->standard->id}/packagings", [
             'mode' => 'direct_box', 'nos_per_box' => 300,
-            'item_id' => $this->trayIdentity->id,
+            'item_id' => $this->bottle->id,
         ])
             ->assertCreated()
-            ->assertJsonPath('data.tally_item.name', 'B.200 Ml Round Pet Bottle Amber 18gms')
+            ->assertJsonPath('data.tally_item.name', $this->bottle->name)
             ->assertJsonPath('data.uses_product_identity', false);
 
         $this->assertDatabaseHas('production_standard_packagings', [
             'production_standard_id' => $this->standard->id,
             'mode' => 'direct_box',
             'nos_per_box' => 300,
-            'item_id' => $this->trayIdentity->id,
+            'item_id' => $this->bottle->id,
             'item_set_by' => $user->id,
         ]);
     }
@@ -301,15 +309,18 @@ class PackagingTallyIdentityTest extends TestCase
 
         // Same identity value on a second packing is fine — "if the Tally
         // identity is the same for both then two entries are the same value".
+        // Stated with the PRODUCT'S item, which is the only same-value answer
+        // DEC-20260821-001 leaves: two packings sharing one identity is one
+        // product, and one product's identity is its own item.
         $this->putJson("/api/v1/production/standards/{$this->standard->id}/packagings/{$this->pouchPacking->id}", [
             'mode' => 'pouch', 'nos_per_pouch' => 130, 'pouches_per_box' => 4,
-            'item_id' => $this->trayIdentity->id,
+            'item_id' => $this->bottle->id,
         ])
             ->assertOk()
-            ->assertJsonPath('data.tally_item.id', $this->trayIdentity->id);
+            ->assertJsonPath('data.tally_item.id', $this->bottle->id);
 
         $this->assertDatabaseHas('production_standard_packagings', [
-            'id' => $this->pouchPacking->id, 'item_id' => $this->trayIdentity->id, 'item_set_by' => $user->id,
+            'id' => $this->pouchPacking->id, 'item_id' => $this->bottle->id, 'item_set_by' => $user->id,
         ]);
 
         // Clearing is a real answer too: back to the product's identity,

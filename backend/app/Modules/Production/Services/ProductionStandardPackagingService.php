@@ -19,6 +19,16 @@ use Illuminate\Validation\ValidationException;
  * really packed (the 490/box tray the workbook never carried), and set or
  * correct each variant's own Tally identity (DEC-20260810-003).
  *
+ * WHAT AN IDENTITY MAY NOW BE SET TO (DEC-20260821-001). The authority to
+ * point a packing at a DIFFERENT product's Tally item is withdrawn — such a
+ * packing is a separate finished product, with its own item master, not a
+ * second identity under this one. The refusal is stated once, on both
+ * writers' requests (RefusesSeparateProductIdentity), so it cannot be
+ * dodged by sending the full save instead of the identity PATCH. Clearing
+ * to null, the product's own item, and re-saving what a legacy row already
+ * carries all still come through here unchanged — nothing below clears,
+ * rewrites or migrates a stored identity.
+ *
  * THE VARIANT KEY IS THE MODE PLUS ITS COUNTS (Phase 5, D1). One standard
  * may carry a 490/box tray AND a 520/box tray; what it may not carry is the
  * same mode with the same counts twice — that is refused here, named, as a
@@ -137,7 +147,8 @@ class ProductionStandardPackagingService
     public function store(ProductionStandard $standard, array $data, ?int $userId): ProductionStandardPackaging
     {
         return DB::transaction(function () use ($data, $standard, $userId) {
-            $this->lockStandard($standard);
+            $standard = $this->lockStandard($standard);
+            $this->refuseSeparateProduct($standard, null, $data['item_id'] ?? null);
             $this->refuseExactDuplicate($standard, $data, null);
 
             $packaging = $standard->packagings()->create(
@@ -162,7 +173,13 @@ class ProductionStandardPackagingService
         $this->refuseForeignRow($standard, $packaging);
 
         return DB::transaction(function () use ($data, $standard, $packaging, $userId) {
-            $this->lockStandard($standard);
+            $standard = $this->lockStandard($standard);
+            // `item_id` is `sometimes` on the save request: an omitted key
+            // leaves the stored identity alone, so only a PRESENT one is a
+            // write this rule has anything to say about.
+            if (array_key_exists('item_id', $data)) {
+                $this->refuseSeparateProduct($standard, $packaging, $data['item_id']);
+            }
             $this->refuseExactDuplicate($standard, $data, $packaging);
 
             $packaging->fill($this->attributes($data, $packaging, (int) $userId))->save();
@@ -188,7 +205,19 @@ class ProductionStandardPackagingService
     ): ProductionStandardPackaging {
         $this->refuseForeignRow($standard, $packaging);
 
-        return DB::transaction(function () use ($packaging, $itemId, $userId) {
+        return DB::transaction(function () use ($standard, $packaging, $itemId, $userId) {
+            // This writer did not use to lock: it touches ONE row and the
+            // twin check that motivated lockStandard() is not run here. It
+            // locks now because DEC-20260821-001 made this write depend on a
+            // column of ANOTHER row — the standard's `item_id`, which
+            // ProductionStandardService::attachItem writes behind this same
+            // lock. Unlocked, the two interleave: attachItem reads the
+            // packagings (all inheriting) while this request has already
+            // read the standard as unattached, and both commit a pair
+            // neither would have accepted.
+            $standard = $this->lockStandard($standard);
+            $this->refuseSeparateProduct($standard, $packaging, $itemId);
+
             $current = $packaging->item_id === null ? null : (int) $packaging->item_id;
 
             if ($itemId !== $current) {
@@ -407,9 +436,56 @@ class ProductionStandardPackagingService
      * makes the second wait for the first's commit (a no-op on sqlite,
      * which serialises writers anyway).
      */
-    private function lockStandard(ProductionStandard $standard): void
+    private function lockStandard(ProductionStandard $standard): ProductionStandard
     {
-        ProductionStandard::query()->whereKey($standard->id)->lockForUpdate()->first();
+        // Returns the row it locked, not void: every caller now reads
+        // `item_id` off it for the separate-product check, and reading that
+        // off the caller's own instance would read a value fetched before
+        // the lock — the exact stale read the lock exists to prevent.
+        // withTrashed so an archived standard still yields its row.
+        return ProductionStandard::withTrashed()->whereKey($standard->getKey())->lockForUpdate()->first() ?? $standard;
+    }
+
+    /**
+     * DEC-20260821-001 AT THE WRITER, behind the lock above — the durable
+     * half of the refusal the two FormRequests state
+     * (RefusesSeparateProductIdentity).
+     *
+     * Both layers are deliberate and neither is redundant. The request gives
+     * the person the good 422 naming both items, before anything opens a
+     * transaction; this one is what a caller that never passed a request —
+     * or one that passed it a moment before the standard was attached —
+     * still hits. Same predicate, same exemption.
+     */
+    private function refuseSeparateProduct(
+        ProductionStandard $standard,
+        ?ProductionStandardPackaging $existing,
+        mixed $incoming,
+    ): void {
+        if ($incoming === null) {
+            return;
+        }
+
+        $incomingId = (int) $incoming;
+
+        if (! ProductVariantService::identityConflictsWithProduct(
+            $incomingId,
+            $standard->item_id === null ? null : (int) $standard->item_id,
+        )) {
+            return;
+        }
+
+        // The legacy row keeping what it already has — a counts-only or
+        // default-flag edit that re-sends its stored identity. History is
+        // not rewritten here, so it must stay editable.
+        if ($existing !== null && $existing->item_id !== null && (int) $existing->item_id === $incomingId) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'item_id' => ProductVariantService::SEPARATE_PRODUCT_REASON.' '
+                .ProductVariantService::SEPARATE_PRODUCT_INSTRUCTION,
+        ]);
     }
 
     /**

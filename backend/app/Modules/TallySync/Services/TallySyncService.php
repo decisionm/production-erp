@@ -1122,6 +1122,13 @@ class TallySyncService
             // product: two packings of one product whose packagings carry
             // different Tally items land as their two Tally lines, and two
             // batches resolving to the same identity still merge into one.
+            // UNCHANGED by DEC-20260821-001, deliberately. That record stops
+            // NEW batches being started under a packing that posts as another
+            // product; it does not rewrite the ones already recorded, and
+            // this key is what keeps their vouchers rebuilding identically.
+            // Under the new rule the two products' lines arrive as two
+            // members with different item_id, and this same key still lands
+            // them as two Tally lines.
             $finishedId = $member->effectiveItemId();
             $key = "{$finishedId}@{$member->warehouse_id}";
             $produced[$key] = [
