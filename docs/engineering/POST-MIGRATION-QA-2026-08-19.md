@@ -258,27 +258,40 @@ a `sed` fix would break `check.sh`.
 
 ---
 
-## Fix status (branch `fix/post-migration-hardening`)
+## Fix status — updated 20-Aug after PRs #1-#8 merged and deployed
 
 | § | Finding | Status |
 |---|---|---|
-| 1 | Agent auto-updates from old domain | **Partly fixed** — feed repointed in the repo. *Installed agents are unaffected until rebuilt+republished*, so the old domain must stay parked. Code signing NOT added. |
-| 2 | Agent publish "blocked" | **Was wrong** — the new host already serves all three artifacts (migrated with `storage/`). `FEED_URL` repointed; no seeding needed. |
-| 2b | Tally agent cloud URL | Repo default fixed. **Factory PC still needs the Settings change + a new token** — that is an on-site action. |
-| 3 | Refusal on open Q58(b) | **NOT fixed — owner's decision.** |
-| 4 | 4th stock door | **NOT fixed** — would compound §3. |
-| 5 | No `timeout-minutes` | Fixed (`25`). |
-| 6 | False "still serving" messages | Fixed (all three). |
-| 7 | Dumps in the docroot | Fixed — `BACKUP_DIR` → `$HOME/backups/erp`, with a fallback so it cannot create a new 503. **Old dumps still on the server need moving by hand.** |
-| 8 | PHP pin / issue #167 | **NOT fixed** — touches the deploy path in 16 workflows; wants its own reviewed change. |
-| 9 | Stale `origin` refs | Fixed in `status.sh` and `land-and-clean-a-branch`. `CLEAN-GIT-ARCHITECTURE.md` and branch tracking still outstanding. |
+| 1 | Agent auto-updates from old domain | **Repo fixed, risk OPEN.** Feed repointed, but INSTALLED agents keep the old URL until rebuilt + republished. Old domain must stay REGISTERED. |
+| 2 | Agent publish "blocked" | **Finding was wrong** — new host already serves all three artifacts. Not blocked. |
+| 2b | Tally agent cloud URL | Repo default fixed. **Factory PC still needs Settings + a new token** — on-site, nobody else can do it. |
+| 3 | Refusal on open Q58(b) | **Open — owner's decision.** |
+| 4 | 4th stock door | **Open** — deliberately, would compound §3. |
+| 5 | No `timeout-minutes` | ✅ Fixed, deployed (PR #1). |
+| 6 | False "still serving" messages | ✅ Fixed, deployed (PR #1). |
+| 7 | Dumps in the docroot | ✅ Fixed and PROVEN in production — the 20-Aug deploy wrote to `~/backups/erp/` and pruned correctly. Old dumps moved by hand. |
+| 8 | PHP pin / issue #167 | ✅ Fixed (PR #3), and proven live — the maintenance step now resolves via `pick-php.sh`. |
+| 9 | Stale `origin` refs | ✅ `status.sh`, `land-and-clean-a-branch` (PR #1), `CLEAN-GIT-ARCHITECTURE.md` (PR #5). Branch tracking still points at the old remote. |
+| — | Workflow least privilege | ✅ All 19 have `permissions: contents: read` (PR #4). |
+| — | Agent build red since Phase 6 | ✅ Root-caused to CRLF on the Windows runner; fixed (PR #6). Green build proven. |
+| — | Layout: app inside WordPress docroot | **Open — owner's call.** Nothing leaks today (verified), but the protection is borrowed. |
+| — | 194 PRs / 3 issues / 17 branches not migrated | **Open.** Code is complete; metadata and branches are not. |
+| — | Stale `public_html/.user.ini` | **Open.** Inert, but a trap for the next person. |
 
-Verification after the fixes: release contract 32/32, agent suite 138/138, agent
-`tsc --noEmit` clean, factory-knowledge 23/23 + `check.sh` sound, backend Pint
-passed. `deploy.sh` and `status.sh` pass `bash -n`.
+## Delivered today, beyond the QA list
 
-A `migrate-instance` skill was added at `.claude/skills/migrate-instance/` so the
-next move starts from these failures rather than rediscovering them.
+- Q58(b) resolved and recorded as **DEC-20260819-001** (PR #2).
+- Vendor + Customer on the Configuration Lifecycle — the last two masters without it (PR #7).
+- `items.category` + `inventory:classify-items` dry-run command (PR #8).
+
+## Review debt — the honest gap
+
+All eight PRs merged on **builder review only**. `AGENTS.md` requires
+builder → Cursor → Codex → owner. The Codex leg has not run on any of them.
+Highest value targets, in order: the FC-06 guard narrowing in PR #7; the
+`deploy.sh` backup-path and PHP-resolution changes in PRs #1/#3 (they execute
+inside the maintenance window); and the dependency declarations in
+VendorService/CustomerService, which ARE the delete guard.
 
 ## Suggested order
 

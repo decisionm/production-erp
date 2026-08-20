@@ -26,3 +26,7 @@ __pycache__/
 /*.sql
 /storage.zip
 /MIGRATION-HANDOFF.md
+
+# Working file for the item-category classification pass (20-Aug).
+# Item names only — no rates, no supplier identity (FC-06).
+/items-to-classify.csv
