@@ -567,8 +567,16 @@ a production deployment.
 
 If you promise bisectable history, test the promise:
 
+`$MAIN` is a shell variable, not a CI one: a `run:` block is its own shell, and
+Actions normally checks a PR out at a detached SHA with no local `main`
+tracking branch. Resolve the checkout's remote and fetch `main` INSIDE the
+step, or the range is empty/wrong and the loop proves nothing.
+
 ```yaml
 - run: |
+    REMOTE=$(git remote | head -n 1)   # Actions checkout normally names it origin
+    git fetch "$REMOTE" main --prune
+    MAIN="$REMOTE/main"
     git rev-list --reverse "$MAIN"..HEAD | while read sha; do
       git checkout -q "$sha" && npm run typecheck || exit 1
     done

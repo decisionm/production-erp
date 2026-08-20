@@ -40,16 +40,28 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # NO JOB-LEVEL TIMEOUT, deliberately — see the per-step ones below.
+    #
     # The app is CLOSED from "Enter maintenance mode" until artisan up at the end
     # of scripts/deploy.sh. Every FAILURE in that window announces itself with a
-    # red X and fires an explainer step. A HANG does not: both explainers are
+    # red X and fires an explainer step. A HANG does not: the explainers are
     # gated on failure()/cancelled(), so a stalled SSH session, a composer wait on
     # a dead mirror, or a MySQL connection that hangs rather than refuses (this
     # host throws intermittent [HY000] [2002]) would sit on GitHub's 360-minute
     # default with the run showing "in progress" and the factory at 503, silently.
-    # A whole server-side deploy is ~90s; 25 minutes is generous and converts the
-    # only silent outage in the pipeline into a failed run that explains itself.
-    timeout-minutes: 25
+    #
+    # A job-level `timeout-minutes: 25` did bound that, but it bounded the WRONG
+    # thing in two ways. It counted npm ci + typecheck + vite build + composer
+    # install + ~2,100 tests inside the same 25 minutes as the maintenance
+    # window, so a slow-but-healthy gate eats the budget that exists for the
+    # outage; and when a job timeout fires it CANCELS the job rather than failing
+    # a step, which is precisely the state where an explainer is most needed and
+    # least guaranteed to run. Bounding each maintenance-window step instead
+    # makes a hang a normal step failure: the red X lands on the step that hung,
+    # and the existing explainers — which already read
+    # `steps.maintenance.outcome` — fire exactly as they do for any other
+    # failure. The gate above stays unbounded, because a slow gate is not an
+    # outage: nothing has been closed yet.
 
     steps:
       - name: Checkout
@@ -131,7 +143,7 @@ jobs:
       # Names the failure instead of leaving a red X to interpret. Only fires if
       # something above went red, in which case the rsync below never ran.
       - name: Explain a failed gate
-        if: failure()
+        if: failure() && steps.backup_preflight.outcome != 'failure'
         run: |
           echo "::error::Deploy aborted BEFORE the rsync — the pre-deploy gate failed, so the server still runs the previous release and nothing was copied to it. Open the first red step above: 'Type-check frontend' / 'Build frontend' means the SPA does not compile, 'Pint (style)' means PHP style (run ./vendor/bin/pint in backend/ and push), 'Backend tests' means the suite is red (reproduce with php artisan test in backend/). Fix on a branch and merge — re-running this workflow on the same commit will fail again."
 
@@ -173,21 +185,59 @@ jobs:
           #
           # This host runs brute-force protection that bans the runner IP for
           # rapid consecutive SSH sessions (see the deploy-live-verify skill:
-          # two bans in one night on 11-Aug-2026). The deploy authenticates
-          # three times — maintenance, rsync, deploy.sh — and adding the
-          # maintenance step made that risk MATERIAL rather than merely untidy:
-          # a ban tripping AFTER the app is closed but BEFORE the rsync would
-          # strand the factory at 503, with the runner unable to reconnect and
-          # the sanctioned recovery (re-run) being the very thing that extends
-          # the ban.
+          # two bans in one night on 11-Aug-2026). The deploy would otherwise
+          # authenticate four times — backup preflight, maintenance, rsync,
+          # deploy.sh — and adding the maintenance step made that risk MATERIAL
+          # rather than merely untidy: a ban tripping AFTER the app is closed
+          # but BEFORE the rsync would strand the factory at 503, with the
+          # runner unable to reconnect and the sanctioned recovery (re-run)
+          # being the very thing that extends the ban.
           #
-          # ControlMaster makes the first connection carry the other two over
-          # the same TCP session, so the deploy authenticates ONCE — fewer
-          # connections than before this window existed. Every ssh/rsync below
-          # must pass $SSH_MUX or it opens its own session and the guarantee is
-          # gone.
+          # ControlMaster makes the first connection carry the rest over the
+          # same TCP session, so the deploy authenticates ONCE — fewer
+          # connections than before this window existed, and the backup
+          # preflight below is therefore free in ban terms. Every ssh/rsync
+          # below must pass $SSH_MUX or it opens its own session and the
+          # guarantee is gone.
           mkdir -p ~/.ssh/cm
           echo "SSH_MUX=-o ControlMaster=auto -o ControlPath=$HOME/.ssh/cm/%r@%h:%p -o ControlPersist=600" >> "$GITHUB_ENV"
+
+      # --- Prove the backup directory works BEFORE anything is closed --------
+      #
+      # scripts/deploy.sh writes the pre-migration dump to ~/backups/erp, and
+      # that dump is the ONLY recovery from a half-applied migration. It used to
+      # fall back to ../backups when $HOME could not be written — which is a
+      # path under a live WordPress site's public_html on this host, i.e. seven
+      # rolling full dumps (password hashes, customers, purchase rates — FC-06)
+      # inside somebody else's document root. That fallback is gone: deploy.sh
+      # now STOPS instead. Stopping is correct, but on its own it moves the
+      # failure INTO the maintenance window, where the cost is a 503 on the
+      # floor.
+      #
+      # So the same question is asked HERE, before `artisan down`: create the
+      # directory, write a probe, read it back, delete it. A host that cannot do
+      # that fails this step with the app still serving and nothing copied — the
+      # cheapest possible version of this failure. It costs one round trip over
+      # the multiplexed connection that is opened anyway.
+      #
+      # It checks deploy.sh's DEFAULT path. deploy.sh honours a BACKUP_DIR
+      # override; nothing in this pipeline sets one, and a hand-run that does is
+      # responsible for its own directory.
+      - name: Check the backup directory is writable
+        id: backup_preflight
+        timeout-minutes: 3
+        run: |
+          if ! ssh $SSH_MUX -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+                 "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+                 'set -e; d="$HOME/backups/erp"; mkdir -p "$d"; p="$d/.deploy-write-probe.$$"; printf probe > "$p"; test -s "$p"; grep -q probe "$p"; rm -f "$p"; echo "backup directory OK: $d"'; then
+            echo "::error::The pre-migration backup directory ~/backups/erp is not usable on the server, so this deploy STOPPED before closing the app — the floor is still serving the previous release and nothing was copied. scripts/deploy.sh writes its only recovery dump there and refuses to migrate without it; it deliberately no longer falls back to ../backups, which on this host sits inside a live WordPress site's public_html. Usual causes: the account is over its disk quota, or ~/backups exists as a file or with wrong permissions. Fix it over SSH (mkdir -p ~/backups/erp && chmod 700 ~/backups/erp) and re-run this workflow."
+            exit 1
+          fi
+
+      - name: Explain a backup-directory preflight failure
+        if: failure() && steps.backup_preflight.outcome == 'failure'
+        run: |
+          echo "::error::The backup-directory preflight failed or timed out BEFORE maintenance mode. This run did not copy code. Do not infer that the website is healthy from this workflow alone, because an earlier failed deploy may already have left it closed; check storage/framework/down. Fix ~/backups/erp (permissions or disk quota) and re-run."
 
       # --- Close the app BEFORE the code changes underneath it ---------------
       #
@@ -222,8 +272,16 @@ jobs:
       #
       # `id` so the explainer below can tell "closed, then something failed"
       # from "never closed at all" — those need opposite instructions.
+      #
+      # THE MAINTENANCE WINDOW OPENS HERE. This step and the two below carry a
+      # `timeout-minutes` each, sized generously against a ~90s whole-deploy so
+      # they only ever fire on a hang. They do not need to sum to anything in
+      # particular: the ControlPersist set in "Set up SSH" is an IDLE timeout,
+      # so a long-running step holds the multiplexed connection open rather
+      # than expiring it mid-window.
       - name: Enter maintenance mode
         id: maintenance
+        timeout-minutes: 5
         run: |
           ssh $SSH_MUX -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
@@ -236,6 +294,7 @@ jobs:
       # would reopen the app mid-deploy, on new code and an unmigrated schema.
       # Do not "tidy" it away.
       - name: Rsync backend to server
+        timeout-minutes: 10
         run: |
           rsync -az --delete \
             -e "ssh $SSH_MUX -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }}" \
@@ -251,6 +310,7 @@ jobs:
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}/backend/"
 
       - name: Run server-side deploy tasks
+        timeout-minutes: 15
         run: |
           ssh $SSH_MUX -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
@@ -276,7 +336,7 @@ jobs:
       # this run cannot observe that. Asserting "still UP and serving" here was
       # wrong — on the documented fix-and-re-run path it is the likeliest way
       # for an operator to be told the floor is fine while it serves 503.
-      - name: Explain a deploy that stopped before the app was closed
+      - name: Explain a deploy that failed while entering maintenance mode
         if: (failure() || cancelled()) && steps.maintenance.outcome == 'failure'
         run: |
-          echo "::error::This run stopped AT the maintenance step, so THIS run never closed the app and never copied anything to the server — it failed in the safe direction, before the rsync. Do not assume the floor is serving, though: if an EARLIER deploy left the app closed it is STILL closed. Check for storage/framework/down on the server before concluding anything. Usual causes for this step failing: the app cannot boot — a half-installed vendor/ or a stale bootstrap/cache from a previous failed deploy will do it, in which case the app IS still down from that earlier run."
+          echo "::error::This run failed or timed out WHILE trying to enter maintenance mode and did not rsync. The app state is UNKNOWN: artisan down may have completed before the SSH transport failed, or an earlier failed deploy may already have left it closed. Check storage/framework/down before concluding the floor is serving. Because this run copied no code, fix the SSH/app-boot cause and re-run; do not make a blind schema or deployment change."

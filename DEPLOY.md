@@ -111,14 +111,25 @@ build on CI  →  REVIEW GATE  →  merge (candidate artifact only)  →  manual
    stops. Nothing reaches the factory on merge.
 4. **Manual publish dispatch, on main.** After the review passes, run the
    workflow **on `main`** with **`publish: true`**.
-   > ⚠️ **STOP — read this before the first publish after 19-Aug-2026.**
-   > `build-agent.yml`'s `FEED_URL` and `tally-sync-agent/package.json`'s
-   > publish `url` still point at `erpdemo.amrtech.in`, which no longer
-   > serves this ERP. Publishing IS deploying to the factory (the running
-   > agent auto-updates within ~6 hours), so a release cut with these
-   > unfixed ships an agent that updates from a dead host. Fix them —
-   > together with `tests/releaseContract.test.js`, which asserts the same
-   > URL — before publishing. See "Migration leftovers" below. That rebuilds and then
+   > ℹ️ **The feed now points at the new host, and the first publish after
+   > 19-Aug-2026 is still not routine.** `tally-sync-agent/package.json`'s
+   > `publish.url` is `https://erp.actech.co.in/storage/agent/`,
+   > `src/config.ts`'s `cloudApiBaseUrl` default is
+   > `https://erp.actech.co.in/api/v1`, and
+   > `tally-sync-agent/tests/releaseContract.test.js` asserts the matching
+   > `FEED_URL` — so a build cut today ships an agent pointed at the live
+   > host. The publish gate (`assert-version-advance.js`) reads that feed
+   > rather than writing it, and the new host was verified on 19-Aug-2026 to
+   > serve all three artifacts, so nothing needs hand-seeding.
+   >
+   > What that does NOT fix: an agent already installed on the factory PC has
+   > the OLD `erpdemo.amrtech.in` feed baked in and keeps using it until it is
+   > replaced by one built from the current `package.json`. That is why the
+   > old domain must stay registered (see "Migration leftovers" below), and
+   > why the version being published matters — the repo is at `0.3.9` while
+   > the last PUBLISHED version is `0.3.5` (tag `agent-v0.3.5`). Publishing IS
+   > deploying to the factory: the running agent auto-updates within ~6 hours.
+   > That rebuilds and then
    publishes. All three conditions are enforced in the workflow — manual
    dispatch, `publish: true`, and `refs/heads/main` — so a push cannot
    publish and a dispatch from a feature branch cannot publish even with
@@ -237,6 +248,8 @@ cd ~/domains/actech.co.in/public_html/erp_app/backend && /opt/alt/php84/usr/bin/
 | **`Access denied for user ...`** on migrate | Wrong DB creds in `.env`, or user not granted — verify/reset in hPanel → Databases. |
 | **Migration fails, "Identifier name ... is too long"** | Composite index/unique name > 64 chars — give it an explicit short name. |
 | **"Frontend build not found"** | `public/build/` missing — the frontend wasn't built/rsynced; re-run the deploy. |
+| **Deploy dies at "Check the backup directory is writable"** | `~/backups/erp` on the server cannot be created/written (usually disk quota). It fails BEFORE `artisan down`, so the floor is still serving and nothing was copied. Fix over SSH and re-run. `deploy.sh` deliberately does **not** fall back to `../backups` — that is inside the WordPress docroot. |
+| **A maintenance-window step times out (5/10/15 min)** | A hang, not a slow deploy — a whole server-side deploy is ~90s. The step fails normally, so the "app is in MAINTENANCE MODE" explainer fires and tells you what to do. Do not raise the timeout to make it pass. |
 
 ---
 
@@ -252,8 +265,8 @@ cd ~/domains/actech.co.in/public_html/erp_app/backend && /opt/alt/php84/usr/bin/
 | `tally-sync-agent/tests/releaseContract.test.js` | `:458` assertion repointed in the same commit, or CI goes red |
 | `tally-sync-agent/src/config.ts` | default `cloudApiBaseUrl` → new host (fresh installs only) |
 | `tally-sync-agent/src/settings-window/index.html` | placeholder |
-| `backend/scripts/deploy.sh` | stale `Manual use:` path; three error messages that claimed the app was still serving while it was at 503; `BACKUP_DIR` moved out of the web docroot |
-| `.github/workflows/deploy.yml` | `timeout-minutes: 25`; recovery text now names the new backup path |
+| `backend/scripts/deploy.sh` | stale `Manual use:` path; three error messages that claimed the app was still serving while it was at 503; `BACKUP_DIR` moved out of the web docroot, and (later) its fallback BACK into that docroot removed — it now refuses instead |
+| `.github/workflows/deploy.yml` | recovery text now names the new backup path; the maintenance window is bounded per STEP (job-level `timeout-minutes: 25` removed — it counted build+test time and cancelled rather than failed, so no explainer was guaranteed); a backup-directory read/write preflight runs BEFORE `artisan down` |
 | `scripts/factory-knowledge/status.sh` | `--repo` pinned; an unreachable repo now SAYS SO instead of printing a false all-clear |
 | `.claude/skills/land-and-clean-a-branch/SKILL.md` | `origin/main` → resolved upstream (`main@{upstream}`) |
 

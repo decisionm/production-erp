@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Modules\Inventory\Models\Enums\ItemCategory;
 use App\Modules\Inventory\Models\Item;
+use App\Modules\Production\Models\Enums\BatchStatus;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -29,9 +30,11 @@ use Illuminate\Support\Facades\DB;
  * WHAT COUNTS AS EVIDENCE, and why each is sound rather than convenient:
  *
  *   FinishedGood   the item carries a production standard, or is named by a
- *                  packaging variant, or has been produced in a shift entry.
- *                  All three mean the factory MAKES it — the strongest signal
- *                  available, and it is what a sales order is for.
+ *                  packaging variant, or has been produced in a COMPLETED
+ *                  shift entry (a cancelled or still-running batch has made
+ *                  nothing, so it proves nothing). All three mean the factory
+ *                  MAKES it — the strongest signal available, and it is what a
+ *                  sales order is for.
  *
  *   PackingMaterial the item appears in a packing-material mapping. That
  *                  mapping exists precisely to say "this is what a product is
@@ -162,8 +165,22 @@ class ClassifyItems extends Command
             )
             ->union(
                 DB::table('items as i')
-                    ->selectRaw("i.id, i.sku, ? , 'produced in a shift entry'", [$finishedGood])
+                    ->selectRaw("i.id, i.sku, ? , 'produced in a completed shift entry'", [$finishedGood])
                     ->join('shift_production_entries as spe', 'spe.finished_item_id', '=', 'i.id')
+                    // "the factory MAKES it" is a claim about production that
+                    // actually happened. A batch still `in_progress` has
+                    // produced nothing yet, and a `cancelled` one was withdrawn
+                    // as a mistake and had its stock reversed — neither is
+                    // evidence, and a batch entered against the wrong item and
+                    // then cancelled is precisely how a wrong category would
+                    // get written. Only `completed` survives. BatchStatus has
+                    // exactly these three cases, so naming the one that counts
+                    // excludes the other two by construction.
+                    ->where('spe.batch_status', '=', BatchStatus::Completed->value)
+                    // Belt-and-braces for legacy or manually repaired rows:
+                    // a cancellation timestamp is terminal evidence even if a
+                    // stale batch_status was not changed with it.
+                    ->whereNull('spe.cancelled_at')
                     ->whereNull('i.deleted_at')
             )
             ->union(
@@ -190,7 +207,27 @@ class ClassifyItems extends Command
     private function report(array $clean, array $conflicts): void
     {
         $active = Item::query()->where('is_active', true)->count();
-        $already = Item::query()->whereNotNull('category')->count();
+        $already = Item::query()->where('is_active', true)->whereNotNull('category')->count();
+        $unclassified = Item::query()->where('is_active', true)->whereNull('category')->count();
+
+        // WHICH proposals --write would actually apply. handle() skips only a
+        // row whose category a person already set; it still classifies inactive
+        // historical masters, and the dry run must say that truthfully.
+        $writableIds = Item::query()
+            ->whereIn('id', array_column($clean, 'id'))
+            ->whereNull('category')
+            ->pluck('id')
+            ->all();
+        $writable = array_flip($writableIds);
+
+        // STILL UNCLASSIFIED is deliberately about ACTIVE masters only, so its
+        // subtraction uses the narrower active-and-null intersection.
+        $activeApplicableIds = Item::query()
+            ->whereIn('id', $writableIds)
+            ->where('is_active', true)
+            ->pluck('id')
+            ->all();
+        $activeApplicable = array_flip($activeApplicableIds);
 
         $byCategory = [];
         foreach ($clean as $proposal) {
@@ -200,6 +237,33 @@ class ClassifyItems extends Command
         $this->info('Proposed from evidence:');
         foreach ($byCategory as $category => $count) {
             $this->line(sprintf('  %-18s %d', $category, $count));
+        }
+
+        // EVERY clean proposal, named, BEFORE --write could act on one. Counts
+        // alone turn this back into an authoring job done blind: a reviewer
+        // asked to approve "166 finished goods" cannot approve anything, and
+        // the one row that is wrong is invisible until it has been written.
+        // The conflicts below have always printed in full; the rows that WILL
+        // be written are the ones that most needed it.
+        if ($clean !== []) {
+            $this->newLine();
+            $this->line('Every proposal, with the evidence behind it:');
+
+            foreach ($clean as $proposal) {
+                $this->line(sprintf(
+                    '  #%-6d %-32s -> %-18s%s',
+                    $proposal['id'],
+                    $proposal['sku'],
+                    $proposal['category']->value,
+                    ! isset($writable[$proposal['id']])
+                        ? '  (no change: already classified)'
+                        : (isset($activeApplicable[$proposal['id']]) ? '' : '  (would be written; item is inactive)'),
+                ));
+
+                foreach ($proposal['reasons'] as $reason) {
+                    $this->line(sprintf('           %s', $reason['because']));
+                }
+            }
         }
 
         if ($conflicts !== []) {
@@ -214,12 +278,30 @@ class ClassifyItems extends Command
         }
 
         $proposedCount = count($clean);
-        $unknown = max(0, $active - $already - $proposedCount);
+        $writableCount = count($writableIds);
+        $activeApplicableCount = count($activeApplicableIds);
+
+        // ONE subtraction, from the population the line is about. This used to
+        // be `$active - $already - $proposedCount`, which subtracted twice over
+        // and from the wrong sets: `$already` counted classified items whether
+        // active or not, and `$proposedCount` included proposals for inactive
+        // and for already-classified items — rows that are not in the
+        // active-and-NULL population and that --write would not touch anyway.
+        // On live that under-reports the number of items still needing a
+        // person, which is the one figure this command exists to be honest
+        // about. `max(0, ...)` is gone with it: it was hiding the error.
+        $unknown = $unclassified - $activeApplicableCount;
 
         $this->newLine();
         $this->line(sprintf('  active items          %d', $active));
-        $this->line(sprintf('  already classified    %d', $already));
-        $this->line(sprintf('  proposed here         %d', $proposedCount));
+        $this->line(sprintf('  already classified    %d  (active only)', $already));
+        $this->line(sprintf(
+            '  proposed here         %d%s',
+            $proposedCount,
+            $proposedCount === $writableCount
+                ? sprintf('  (%d active)', $activeApplicableCount)
+                : sprintf('  (%d would be written; %d active)', $writableCount, $activeApplicableCount),
+        ));
         $this->line(sprintf('  STILL UNCLASSIFIED    %d  <- these need a person; they stay NULL', $unknown));
     }
 }

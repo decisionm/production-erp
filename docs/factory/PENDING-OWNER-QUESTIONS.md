@@ -1327,3 +1327,41 @@ units, and the fraction rules are enforced. What is blocked is any conversion be
 any lot/bag trace for a counted material, and any correct handling of the film-vs-resin
 distinction.
 *Open since 2026-08-18.*
+
+## Q59 · Which item categories may each document use?
+
+PR #8 added the nullable `items.category` column and four values — Raw Material,
+Packing Material, Finished Good and Other — plus policy helpers intended for a
+later enforcement phase. The migration says the owner stated three rules on
+20-Aug-2026, but there is no corresponding decision record or original owner
+artifact in the repository. Memory and a code comment are not evidence, so the
+rules cannot be treated as factory decisions yet.
+
+The classification column and the read-only proposal command do not need these
+answers: they can continue to record what kind of thing an item is. What must
+not proceed is making a document refuse an item until the following are settled:
+
+(a) **Purchase orders:** are they only for Raw Material and Packing Material, or
+    may `Other` items such as spares, tooling, stationery and consumables also
+    be purchased through the ERP? The current code contradicts itself: the
+    class comment says raw and packing only, while `Other->purchasable()` returns
+    true.
+
+(b) **Store material requests:** should eligibility continue to be the existing
+    owner-editable `is_production_input` flag, or should category participate?
+    The category class itself says it must not replace that flag, while its
+    helper currently makes every raw/packing item requestable and every `Other`
+    item non-requestable regardless of the flag.
+
+(c) **Sales orders:** may only Finished Goods be sold, or are there legitimate
+    sales of scrap, spare material or another `Other` item?
+
+(d) **Unclassified (`category = NULL`) items:** when enforcement arrives, should
+    a real document continue with a visible warning, or refuse until somebody
+    classifies the item? PR #8 currently proposes allow-and-flag, but that is not
+    recorded as the owner's answer.
+
+**Blocks:** document-eligibility enforcement based on `ItemCategory`. It does
+not block the nullable column, the honest dry-run classification report, or a
+person recording categories they actually know.
+*Open since 2026-08-21.*

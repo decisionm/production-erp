@@ -14,8 +14,15 @@ CLAUDE.md text eol=lf
 # tests/purchaseOrder.test.js compares generated XML against a golden fixture
 # BYTE FOR BYTE. The builder emits LF; a Windows checkout without this rule
 # converts the fixture to CRLF, so the comparison fails on a file nobody
-# edited. That is not hypothetical — it is why every agent build has failed
-# since Phase 6 (c4b5b78) added the fixture, and therefore why 0.3.6 through
-# 0.3.9 were never published and the factory is still running 0.3.5.
+# edited. That is not hypothetical — it is why every agent build failed from
+# Phase 6 (c4b5b78, which added the fixture) until this rule landed, proven by
+# the green build that followed it.
+#
+# It does NOT explain the release history, and this file used to claim it did.
+# Publishing is a separate, manual, main-only dispatch that nobody is recorded
+# as having attempted for 0.3.6-0.3.8, so a red build cannot be shown to be why
+# they went unpublished; 0.3.9 is simply the current unreleased version. What IS
+# evidenced: the last published version is 0.3.5 (tag agent-v0.3.5, and both
+# feeds were read live on 19-Aug-2026 advertising 0.3.5).
 # Same reasoning as the knowledge system above: byte-exact means LF only.
 tally-sync-agent/tests/** text eol=lf
