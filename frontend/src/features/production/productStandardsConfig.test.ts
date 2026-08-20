@@ -8,6 +8,7 @@ import {
     num,
     packagingCountsSummary,
     packagingForCompletion,
+    packagingBelongsToSeparateProduct,
     packagingState,
     packagingsOfMode,
     provisionalSkuTag,
@@ -423,5 +424,33 @@ describe('packagingsOfMode — the workbook columns show every same-mode packing
         expect(packagingsOfMode(row, 'tray').map((p) => p.id)).toEqual([1, 3]);
         expect(packagingsOfMode(row, 'pouch').map((p) => p.id)).toEqual([2]);
         expect(packagingsOfMode(row, 'direct_box')).toEqual([]);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// DEC-20260821-001 — the one judgment, and the one wording
+// ---------------------------------------------------------------------------
+
+describe('packagingBelongsToSeparateProduct', () => {
+    const product = { id: 7 };
+
+    it('is false for inheritance — no identity of its own means it posts as the product', () => {
+        expect(packagingBelongsToSeparateProduct({ tally_item: null }, product)).toBe(false);
+        expect(packagingBelongsToSeparateProduct({}, product)).toBe(false);
+    });
+
+    it('is false when the identity IS the product\'s item — one product, one Tally item', () => {
+        expect(packagingBelongsToSeparateProduct({ tally_item: { id: 7, name: 'X' } }, product)).toBe(false);
+    });
+
+    it('is true only for a packing naming a DIFFERENT item', () => {
+        expect(packagingBelongsToSeparateProduct({ tally_item: { id: 9, name: 'Y' } }, product)).toBe(true);
+    });
+
+    it('declares nothing it has not been shown — a missing side is never a conflict', () => {
+        expect(packagingBelongsToSeparateProduct({ tally_item: { id: 9, name: 'Y' } }, null)).toBe(false);
+        expect(packagingBelongsToSeparateProduct({ tally_item: { id: 9, name: 'Y' } }, {})).toBe(false);
+        expect(packagingBelongsToSeparateProduct(null, product)).toBe(false);
+        expect(packagingBelongsToSeparateProduct(undefined, undefined)).toBe(false);
     });
 });

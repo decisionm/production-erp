@@ -333,6 +333,56 @@ export function tallyIdentityLabel(
     return bare(sku) === bare(name) ? name : `${sku} · ${name}`;
 }
 
+// ---------------------------------------------------------------------------
+// DEC-20260821-001 — a packing that posts as its own Tally item is a
+// separate product
+// ---------------------------------------------------------------------------
+
+/**
+ * THE SENTENCE, WORDED ONCE. Every surface that has to say "this packing
+ * belongs under a separate product" repeats this string rather than phrasing
+ * it again, the same way the `missing` vocabulary is worded once above — a
+ * supervisor told one thing on the floor and another in the office is the
+ * failure this module exists to prevent.
+ */
+export const SEPARATE_PRODUCT_REQUIRED
+    = 'this packing belongs under a separate product';
+
+/** The same fact at explaining length, for an alert rather than a label. */
+export const SEPARATE_PRODUCT_REQUIRED_DETAIL
+    = 'This packing posts to Tally as its own stock item, which makes it a separate finished product — '
+    + 'not a second identity under this one. Pull the Tally masters so that stock item is in the catalogue '
+    + '(an item created by hand here carries no Tally GUID and cannot post), create or attach its production '
+    + 'standard, then select that product. The server refuses this start either way.';
+
+/**
+ * Whether a packing's OWN Tally identity names a DIFFERENT item from the
+ * product it is offered under — the frontend half of
+ * ProductVariantService::identityConflictsWithProduct, and ADVISORY ONLY:
+ * the backend refuses the start regardless, and this exists so the refusal
+ * is seen before the tap rather than after it.
+ *
+ * The two compliant answers are false here for the same reasons they are
+ * false there: no `tally_item` at all is INHERITANCE (the packing posts as
+ * its product, which is most live rows), and an identity equal to the
+ * product's item is one product's identity stated twice. Undefined ids —
+ * an older backend, or a payload that never carried the product — are
+ * false too: nothing is declared a conflict that has not been shown to be
+ * one.
+ */
+export function packagingBelongsToSeparateProduct(
+    packaging: { tally_item?: PackagingTallyItem | null } | null | undefined,
+    product: { id?: number | null } | null | undefined,
+): boolean {
+    const packagingItemId = packaging?.tally_item?.id;
+    const productItemId = product?.id;
+
+    if (packagingItemId === null || packagingItemId === undefined) return false;
+    if (productItemId === null || productItemId === undefined) return false;
+
+    return packagingItemId !== productItemId;
+}
+
 /**
  * The tag an item row wears while its SKU is the one the Tally pull seeded
  * from the name and no person has set it (P5-02 `sku_provisional`). The tag

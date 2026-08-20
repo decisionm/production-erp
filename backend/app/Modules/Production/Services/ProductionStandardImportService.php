@@ -8,6 +8,7 @@ use App\Modules\Production\Data\PackingSpecInferences;
 use App\Modules\Production\Data\ProductMasterCorrections;
 use App\Modules\Production\Models\ProductionStandard;
 use App\Modules\Production\Models\ProductionStandardPackaging;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -148,6 +149,14 @@ class ProductionStandardImportService
             // `packaging_warnings`. Zero on a dry run: nothing is written, so
             // nothing is refused.
             'packaging_warnings' => 0,
+            // Adoptions refused by DEC-20260821-001 — an unattached standard
+            // whose packing already posts as its own Tally stock item, which
+            // the importer therefore did not attach to a different product.
+            // Counted apart from `packaging_warnings` on purpose: that
+            // counter is labelled "standard holds >1 of the mode" in both
+            // commands, and folding a separate-product refusal into it would
+            // report the wrong kind of problem.
+            'separate_product_refusals' => 0,
             // Row-scoped, and deliberately reported alongside rather than
             // instead of the counts above. One mould standard covers every
             // colour variant of its bottle, so a variant writes one row PER
@@ -167,6 +176,7 @@ class ProductionStandardImportService
                 $summary['standard_rows'] += count($variant['matched_items'] ?? []);
             }
             $summary['packaging_warnings'] += count($variant['packaging_warnings'] ?? []);
+            $summary['separate_product_refusals'] += count($variant['separate_product_refusals'] ?? []);
         }
 
         return ['dry_run' => $dryRun, 'summary' => $summary, 'variants' => array_values($variants)];
@@ -668,6 +678,7 @@ class ProductionStandardImportService
 
             $variant['created_ids'] = [];
             $variant['packaging_warnings'] = [];
+            $variant['separate_product_refusals'] = [];
 
             // An unmatched variant still gets a row, with a null item. That is
             // what production_standards.item_id is nullable FOR: an unmatched
@@ -706,19 +717,65 @@ class ProductionStandardImportService
                 // the FIRST item of a fan-out; any further colour variants of
                 // the same mould are genuinely new rows.
                 if (! $standard->exists && $item !== null && $item === $targets[0]) {
-                    $orphan = ProductionStandard::withTrashed()
-                        ->whereNull('item_id')
-                        ->where([
-                            'source_product_name' => $variant['source_product_name'],
-                            'cavities' => $variant['cavities'],
-                            'unit_weight_grams' => $variant['unit_weight_grams'],
-                            'cycle_time' => $variant['cycle_time'],
-                        ])
-                        ->first();
+                    // Locked, and locked BEFORE the packagings are read
+                    // below — see lockOrphanForAdoption(). A null here now
+                    // means either "no orphan" or "the row stopped being an
+                    // orphan while we waited for the lock"; both take the
+                    // same path, which is the one that existed already:
+                    // adopt nothing, keep the fresh item-keyed row.
+                    $orphan = $this->lockOrphanForAdoption($variant);
 
                     if ($orphan !== null) {
-                        $standard = $orphan;
-                        $standard->item_id = $item->id;
+                        // DEC-20260821-001, THE FORWARD GUARD ON THIS WRITER.
+                        // Adoption is the importer's only write to
+                        // `production_standards.item_id` on a row that
+                        // already exists, and an orphan is exactly the row a
+                        // person is ALLOWED to have given a distinct identity
+                        // to: the configuration writers permit that while the
+                        // standard is unattached, because there is no product
+                        // to conflict with yet. Adopting it into a different
+                        // product would build the forbidden mismatch from the
+                        // product side, with no packaging writer involved.
+                        //
+                        // REFUSED, NOT ABORTED. This runs inside the import's
+                        // one transaction over the whole factory master, and
+                        // throwing would make a single legacy row block every
+                        // other variant in the sheet. So the ADOPTION is what
+                        // is refused: the orphan is left exactly as it is —
+                        // its identity, its packagings and its notes all
+                        // untouched, still readable and still maintainable —
+                        // and `$standard` stays the fresh item-keyed row from
+                        // firstOrNew(), whose packagings this import writes
+                        // with no identity of their own. Nothing anywhere
+                        // ends up mismatched, and the refusal is named on the
+                        // variant so both import commands print it.
+                        //
+                        // SERIALISED. This read of the packagings and the
+                        // write of `item_id` below both happen while this
+                        // import holds the FOR UPDATE that
+                        // lockOrphanForAdoption() took on `$orphan` — the
+                        // same row lock ProductionStandardPackagingService
+                        // and ProductionStandardService::attachItem() take,
+                        // and `$orphan` is the instance that lock returned,
+                        // not the one read before it.
+                        $conflict = ProductVariantService::firstPackagingConflictingWithProduct($orphan, (int) $item->id);
+
+                        if ($conflict === null) {
+                            $standard = $orphan;
+                            $standard->item_id = $item->id;
+                        } else {
+                            $variant['separate_product_refusals'][] = sprintf(
+                                'Standard #%d ("%s" %s) was NOT attached to "%s": its %s packing already posts to Tally as "%s". %s %s',
+                                $orphan->id,
+                                (string) $orphan->source_product_name,
+                                $orphan->variantLabel(),
+                                (string) $item->name,
+                                trim($conflict->label()) ?: "packing #{$conflict->id}",
+                                trim((string) ($conflict->tallyItem()->first()?->name ?? '')) ?: "item #{$conflict->item_id}",
+                                ProductVariantService::SEPARATE_PRODUCT_REASON,
+                                ProductVariantService::SEPARATE_PRODUCT_INSTRUCTION,
+                            );
+                        }
                     }
                 }
 
@@ -793,6 +850,83 @@ class ProductionStandardImportService
         unset($variant);
 
         return $variants;
+    }
+
+    /**
+     * THE ADOPTION LOCK — the orphan row this import is about to read the
+     * packagings of and write `item_id` on, re-read under the SAME FOR
+     * UPDATE that ProductionStandardPackagingService::lockStandard() and
+     * ProductionStandardService::attachItem() take on that row.
+     *
+     * WHY A LOCK AND NOT JUST THE TRANSACTION. write() already runs inside
+     * the import's one transaction, and that alone serialises nothing: the
+     * adopt block READS the orphan's packagings and then WRITES its item_id,
+     * while a packaging identity write READS the standard's item_id and then
+     * WRITES a packaging's. Two transactions can each pass their own read
+     * and commit a pair neither writer would have allowed on its own. One
+     * shared row lock is what makes them take turns. Both directions:
+     *
+     *   - packaging writer first → it holds the lock, this import waits, and
+     *     the re-read below happens after that commit, so the new identity
+     *     is visible to the conflict check and the adoption is refused;
+     *   - this import first → the packaging writer waits, then reads the
+     *     item_id this import wrote (lockStandard() deliberately returns the
+     *     row it locked, not the caller's pre-lock instance) and refuses a
+     *     distinct identity itself;
+     *   - attachItem() racing this → same row, same lock, so one of them
+     *     goes second and sees the other's work.
+     *
+     * WHY TWO READS. `whereNull('item_id')` is an IS NULL on the leading
+     * column of the (item_id, source_product_name, cavities,
+     * unit_weight_grams, cycle_time) unique index, so locking THAT query
+     * would take a lock covering every unattached standard — a table-wide
+     * lock on an import that touches one row. So the candidate is found
+     * with a plain unlocked read, and only the ONE row it named is locked,
+     * by primary key, exactly as the other two writers lock theirs.
+     *
+     * THE PREDICATE IS RE-EVALUATED UNDER THE LOCK, not just re-fetched:
+     * the locking read carries the same `item_id IS NULL` and the same four
+     * variant columns. A row that stopped being an orphan while this import
+     * waited (someone attached it) no longer matches, so this returns null
+     * and no adoption happens — which is the path that already existed for
+     * "no orphan found", writing the fresh item-keyed row instead. Nothing
+     * is refused in that case because nothing was contradicted: the orphan
+     * has a product now, and it is not this import's to move.
+     *
+     * @param  array<string, mixed>  $variant
+     */
+    private function lockOrphanForAdoption(array $variant): ?ProductionStandard
+    {
+        $candidate = $this->orphanQuery($variant)->first();
+
+        if ($candidate === null) {
+            return null;
+        }
+
+        return $this->orphanQuery($variant, $candidate->getKey())->first();
+    }
+
+    /**
+     * The orphan predicate, in one place so the locking read cannot drift
+     * from the read that found the candidate. With `$key`, it is the
+     * single-row locking re-read; without, the plain candidate lookup that
+     * must NOT lock.
+     *
+     * @param  array<string, mixed>  $variant
+     * @return Builder<ProductionStandard>
+     */
+    private function orphanQuery(array $variant, int|string|null $key = null): Builder
+    {
+        $query = ProductionStandard::withTrashed()
+            ->whereNull('item_id')
+            ->where([
+                'source_product_name' => $variant['source_product_name'],
+                'cavities' => $variant['cavities'],
+                'unit_weight_grams' => $variant['unit_weight_grams'],
+                'cycle_time' => $variant['cycle_time'],
+            ]);
+
+        return $key === null ? $query : $query->whereKey($key)->lockForUpdate();
     }
 
     /**
