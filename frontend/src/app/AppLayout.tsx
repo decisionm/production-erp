@@ -51,20 +51,20 @@ interface NavGroup {
 }
 
 /**
- * The sidebar, in a REQUESTED order — this sequence was specified for this
- * change, module by module, and is not something to re-derive or "tidy".
+ * The sidebar. The opening run is a REQUESTED order — the owner named these
+ * modules one by one and they are not something to re-derive or "tidy":
  *
- * It reads as the material flow: Procurement buys it, Inventory holds it,
- * Production makes it, Sales ships it, Quality judges it, Compliance files
- * it, then the people modules (HRMS, Payroll), then CRM, Maintenance and
- * Finance as a trailing block, then Tally Sync last of the modules.
+ *   Dashboard, Procurement, Inventory, Production, Sales, Quality,
+ *   Compliance, HRMS, Payroll — then "etc." — then Tally Sync last of the
+ *   modules.
+ *
+ * The "etc." was not spelled out. CRM, Finance and Maintenance are what falls
+ * in it, and they keep the relative order they already had in this file. That
+ * is the whole rule: the specified prefix is fixed, Tally Sync is last, and
+ * nothing unspecified was resequenced on an agent's judgement.
  *
  * Downloads, Help and Administration stay after Tally Sync, below the
  * divider `menuItems` inserts: they are utilities, not modules.
- *
- * NOTE for anyone comparing against the previous file: the trailing block is
- * CRM, Maintenance, Finance. That swaps Finance and Maintenance relative to
- * where they used to sit. It is the specified order, not a slip.
  *
  * This list is the FULL table — hidden modules included. It is exported, and
  * `readonly`, for exactly one reason: AppLayout.nav.test.ts reads it. Nothing
@@ -155,9 +155,12 @@ export const allNavItems: readonly NavGroup[] = [
             // Product Standards, Machines & Capabilities, Molds, Packing
             // Materials, Downtime Reasons, Scrap Reasons, Factory Rules and
             // Import from Workbook. Every retired URL still answers as a
-            // redirect (App.tsx), keeping its query string:
-            // /production/standards, /production/work-centers,
-            // /production/scrap-reasons and /production/molds.
+            // redirect (App.tsx), in two flavours: /production/standards,
+            // /production/scrap-reasons and /production/molds go through the
+            // shared query-preserving redirect, so an incoming search string
+            // survives the hop; /production/work-centers is unchanged by this
+            // PR and stays the plain <Navigate> to the machines tab, which
+            // carries no query string.
             { key: '/production/configuration', label: 'Production Configuration' },
             { key: '/production/boms', label: 'Bills of Material' },
             { key: '/production/shift-summary', label: 'Shift Summary' },
@@ -175,12 +178,13 @@ export const allNavItems: readonly NavGroup[] = [
             //
             // Scrap Reasons and Molds are gone from here too, but for the
             // opposite reason: they are not withdrawn, they MOVED. Both are
-            // masters — the lists a shift PICKS from, never the screens a
-            // shift is entered on — so they belong beside the other masters
-            // in Production Configuration rather than as two more lines
-            // between a supervisor and the pages they open daily. They are
-            // tabs of it now (?tab=scrap, ?tab=molds), the components and
-            // endpoints are unchanged, and the old URLs redirect.
+            // masters the Shift Floor selects from — a scrap reason on a
+            // rejection line, a mould on a mould change — so they belong
+            // beside the other masters in Production Configuration rather
+            // than as two more lines between a supervisor and the pages they
+            // open daily. They are tabs of it now (?tab=scrap, ?tab=molds),
+            // the components and endpoints are unchanged, and the old URLs
+            // redirect.
             { key: '/production/shifts', label: 'Shifts' },
         ],
     },
@@ -260,6 +264,17 @@ export const allNavItems: readonly NavGroup[] = [
         ],
     },
     {
+        key: 'finance',
+        icon: <AccountBookOutlined />,
+        label: 'Finance',
+        module: 'finance',
+        children: [
+            { key: '/finance/chart-of-accounts', label: 'Chart of Accounts' },
+            { key: '/finance/journal-entries', label: 'Journal Entries' },
+            { key: '/finance/reports', label: 'Reports' },
+        ],
+    },
+    {
         key: 'maintenance',
         icon: <BuildOutlined />,
         label: 'Maintenance',
@@ -269,17 +284,6 @@ export const allNavItems: readonly NavGroup[] = [
             { key: '/maintenance/schedules', label: 'Schedules' },
             { key: '/maintenance/work-orders', label: 'Work Orders' },
             { key: '/maintenance/reliability', label: 'Reliability Report' },
-        ],
-    },
-    {
-        key: 'finance',
-        icon: <AccountBookOutlined />,
-        label: 'Finance',
-        module: 'finance',
-        children: [
-            { key: '/finance/chart-of-accounts', label: 'Chart of Accounts' },
-            { key: '/finance/journal-entries', label: 'Journal Entries' },
-            { key: '/finance/reports', label: 'Reports' },
         ],
     },
     {

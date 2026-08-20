@@ -4,20 +4,22 @@ import { ADOPTED_MODULES } from '@/lib/adoptedModules';
 import { allNavItems, buildNavItems } from './AppLayout';
 
 /**
- * THE SIDEBAR ORDER IS A CONTRACT (20-Aug owner request).
+ * THE SIDEBAR ORDER IS A CONTRACT (21-Aug-2026 owner request).
  *
- * The order was asked for by name, module by module, and it is the one thing
- * on this screen every user of the factory sees on every route. Nothing in
- * the type system notices a group sliding one place up: the menu still
+ * The opening run was asked for by name, module by module, and it is the one
+ * thing on this screen every user of the factory sees on every route. Nothing
+ * in the type system notices a group sliding one place up: the menu still
  * renders, every link still works, and the only symptom is a supervisor
  * hunting for a screen that used to be where their thumb expects it.
  *
  * TWO ORDERS, PINNED SEPARATELY, because they can disagree:
  *
  *  - the CONFIGURED order (`allNavItems`) — the full table, hidden modules
- *    included. This is the one the owner specified. A module that is hidden
- *    today because the factory has not adopted it must still be sitting in
- *    its right place for the day it is adopted, and only this pin sees that.
+ *    included. Its prefix through Payroll, and Tally Sync last of the
+ *    modules, are what the owner specified; the rest is prior order kept as
+ *    it was. A module that is hidden today because the factory has not
+ *    adopted it must still be sitting in its right place for the day it is
+ *    adopted, and only this pin sees that.
  *  - the RENDERED order (`buildNavItems`) — what a login with every
  *    permission actually gets after ADOPTED_MODULES and the permission
  *    filter. Pinning only this one would let a hidden module be reordered or
@@ -33,10 +35,13 @@ const CONFIGURED_ORDER = [
     'Compliance',
     'HRMS',
     'Payroll',
-    // The trailing block of modules the factory has not put into daily use.
+    // Everything above was specified module by module; Tally Sync last was
+    // too. These three fill the unspecified "etc." between them and hold the
+    // relative order they had before that request, which is why they are
+    // CRM, Finance, Maintenance and not something an agent chose.
     'CRM',
-    'Maintenance',
     'Finance',
+    'Maintenance',
     'Tally Sync',
     // Utilities, below the divider AppLayout inserts before Downloads.
     'Downloads',

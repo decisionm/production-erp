@@ -61,10 +61,11 @@ import type { DowntimeReason, ImportResult, WorkCenter } from '@/features/produc
  * changed — /production/standards still resolves, as a redirect that keeps its
  * query string (see App.tsx).
  *
- * Scrap Reasons and Molds joined on the same terms: both were top-level
- * Production menu entries, and both are masters — the lists a shift picks
- * from, not screens a shift is entered on. Same components, same endpoints,
- * same permissions; the menu lines went, the screens did not.
+ * Scrap Reasons and Molds joined on the same terms: both were Production
+ * menu entries of their own, and both are masters the Shift Floor selects
+ * from — a scrap reason on a rejection line, a mould on a mould change — so
+ * they sit with the other masters. Same components, same endpoints, same
+ * permissions; the menu lines went, the screens did not.
  */
 
 /**

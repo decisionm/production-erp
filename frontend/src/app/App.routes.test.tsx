@@ -196,11 +196,13 @@ describe('the route table', () => {
  * THE RETIRED PRODUCTION CONFIGURATION URLs.
  *
  * Three menu entries became three tabs. The URLs outlive the menu entries
- * because bookmarks, printed wall notes and two in-app deep links (the
- * blocked-Start-Batch return trip, the Tally failure links) still point at
- * them — and a redirect that drops their query string is worse than a 404,
- * because it lands the reader on a plausible-looking screen with their
- * context silently gone.
+ * because bookmarks and printed wall notes still point at them, and because
+ * /production/standards in particular has two in-app deep links carrying
+ * state (the blocked-Start-Batch return trip, the Tally failure links; see
+ * App.tsx). No such caller is known for /production/scrap-reasons or
+ * /production/molds — they take the same redirect anyway, because a redirect
+ * that drops a query string is worse than a 404: it lands the reader on a
+ * plausible-looking screen with their context silently gone.
  *
  * Both halves are pinned: the target URL the redirect computes, and the fact
  * that App.tsx hands each path the right tab.
