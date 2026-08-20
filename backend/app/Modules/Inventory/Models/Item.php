@@ -2,6 +2,7 @@
 
 namespace App\Modules\Inventory\Models;
 
+use App\Modules\Inventory\Models\Enums\ItemCategory;
 use App\Modules\Inventory\Models\Enums\ItemTrackingType;
 use App\Modules\Inventory\Models\Enums\MeasurementType;
 use App\Support\Configuration\Concerns\RecordsConfigurationAudit;
@@ -18,7 +19,7 @@ use Illuminate\Support\Facades\Log;
     'nominal_weight_grams', 'nos_per_tray', 'trays_per_box', 'nos_per_box',
     'nos_per_pouch', 'pouches_per_box',
     'colour', 'standard_cycle_time', 'standard_cavities',
-    'tracking_type', 'is_active', 'is_local_fixture', 'is_production_input',
+    'tracking_type', 'is_active', 'is_local_fixture', 'is_production_input', 'category',
     'tally_stock_item_guid', 'tally_company', 'tally_alter_id', 'tally_synced_at', 'item_group_id',
 ])]
 class Item extends Model
@@ -154,6 +155,10 @@ class Item extends Model
     protected function casts(): array
     {
         return [
+            // What kind of thing this is — the column the purchase-order,
+            // sales-order and material-request rules read. NULL means nobody
+            // has said yet, which is NOT the same as ItemCategory::Other.
+            'category' => ItemCategory::class,
             'reorder_level' => 'decimal:4',
             'nominal_weight_grams' => 'decimal:4',
             'nos_per_tray' => 'integer',
