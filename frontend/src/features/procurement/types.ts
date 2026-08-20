@@ -1,3 +1,5 @@
+import type { ConfigurationAbilities } from '@/components/configuration/types';
+
 import type { Item, Warehouse } from '@/features/inventory/types';
 import type { MaterialLot } from '@/features/production/types';
 import type { TallyLink } from '@/features/sales/types';
@@ -19,6 +21,14 @@ export interface Vendor {
      * older backend.
      */
     tally_ledger_name?: string | null;
+    /** Archived-by-soft-delete, distinct from is_active. */
+    archived_at?: string | null;
+    /**
+     * The Configuration Lifecycle Contract's `can` block (DEC-20260817-002).
+     * Null delete on index means UNDETERMINED — the confirm dialog asks
+     * show(); it never means "no".
+     */
+    can?: ConfigurationAbilities | null;
     is_active: boolean;
     created_at: string;
 }

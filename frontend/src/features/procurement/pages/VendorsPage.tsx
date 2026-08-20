@@ -1,9 +1,10 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, Input, Modal, Space, Switch, Table, Typography } from 'antd';
+import { Button, Form, Input, Modal, Space, Table, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
+import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/configuration';
 import { createVendor, listVendors, updateVendor } from '@/features/procurement/api';
 import type { Vendor } from '@/features/procurement/types';
 
@@ -68,11 +69,6 @@ export default function VendorsPage() {
         },
     });
 
-    const activeMutation = useMutation({
-        mutationFn: ({ id, is_active }: { id: number; is_active: boolean }) => updateVendor(id, { is_active }),
-        onSuccess: invalidate,
-    });
-
     return (
         <>
             <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
@@ -106,38 +102,36 @@ export default function VendorsPage() {
                             ),
                     },
                     {
-                        title: 'Active',
+                        title: 'Status',
                         dataIndex: 'is_active',
-                        render: (active: boolean, row) => (
-                            <Switch
-                                checked={active}
-                                size="small"
-                                loading={activeMutation.isPending}
-                                onChange={(checked) => activeMutation.mutate({ id: row.id, is_active: checked })}
-                            />
-                        ),
+                        render: (_: boolean, row) => <ConfigurationStatusTag entity="vendor" row={row} />,
                     },
                     {
                         title: 'Actions',
-                        render: (_, row) => (
-                            <Button
-                                size="small"
-                                onClick={() => {
-                                    setEditingVendor(row);
-                                    resetEdit({
-                                        code: row.code,
-                                        name: row.name,
-                                        email: row.email ?? '',
-                                        phone: row.phone ?? '',
-                                        gstin: row.gstin ?? '',
-                                        state_code: row.state_code ?? '',
-                                        tally_ledger_name: row.tally_ledger_name ?? '',
-                                    });
-                                }}
-                            >
-                                Edit
-                            </Button>
-                        ),
+                        render: (_, row) => {
+                            const edit = () => {
+                                setEditingVendor(row);
+                                resetEdit({
+                                    code: row.code,
+                                    name: row.name,
+                                    email: row.email ?? '',
+                                    phone: row.phone ?? '',
+                                    gstin: row.gstin ?? '',
+                                    state_code: row.state_code ?? '',
+                                    tally_ledger_name: row.tally_ledger_name ?? '',
+                                });
+                            };
+
+                            return (
+                                <ConfigurationActionsCell
+                                    entity="vendor"
+                                    id={row.id}
+                                    can={row.can}
+                                    recordName={`${row.code} — ${row.name}`}
+                                    onEdit={edit}
+                                />
+                            );
+                        },
                     },
                 ]}
             />

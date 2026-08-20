@@ -8,11 +8,16 @@ use App\Modules\Sales\Http\Requests\UpdateCustomerRequest;
 use App\Modules\Sales\Http\Resources\CustomerResource;
 use App\Modules\Sales\Models\Customer;
 use App\Modules\Sales\Services\CustomerService;
+use App\Support\Configuration\Concerns\ServesConfigurationLifecycle;
+use App\Support\Configuration\Http\ConfigurationReasonRequest;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class CustomerController extends Controller
 {
+    use ServesConfigurationLifecycle;
+
     public function __construct(private readonly CustomerService $customers) {}
 
     /**
@@ -40,5 +45,46 @@ class CustomerController extends Controller
     public function update(UpdateCustomerRequest $request, Customer $customer): CustomerResource
     {
         return CustomerResource::make($this->customers->update($customer, $request->validated()));
+    }
+
+    /**
+     * One customer by id — the only read where `can.delete` is answered for
+     * real. The confirm dialog fetches this before offering Delete.
+     */
+    public function show(Request $request, Customer $customer): CustomerResource
+    {
+        return CustomerResource::make($this->withAbilities($customer, $this->customers, $request));
+    }
+
+    /**
+     * Hard delete — 422 with counts when an order, invoice, opportunity,
+     * quotation or converted lead references the customer, 403 below the
+     * hard-delete tier. Both refusals come out of the Service.
+     */
+    public function destroy(Request $request, Customer $customer): JsonResponse
+    {
+        $this->customers->delete($customer, $request->user());
+
+        return response()->json(null, 204);
+    }
+
+    /** Take out of service. Reversible, deletes nothing, no Tally mutation. */
+    public function archive(ConfigurationReasonRequest $request, Customer $customer): CustomerResource
+    {
+        $archived = $this->runLifecycleAction(
+            fn () => $this->customers->archive($customer, $request->reason()),
+        );
+
+        return CustomerResource::make($this->withAbilities($archived, $this->customers, $request));
+    }
+
+    /** Put an archived customer back in service. */
+    public function activate(ConfigurationReasonRequest $request, Customer $customer): CustomerResource
+    {
+        $activated = $this->runLifecycleAction(
+            fn () => $this->customers->activate($customer, $request->reason()),
+        );
+
+        return CustomerResource::make($this->withAbilities($activated, $this->customers, $request));
     }
 }

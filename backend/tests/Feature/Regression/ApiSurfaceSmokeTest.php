@@ -291,6 +291,11 @@ class ApiSurfaceSmokeTest extends TestCase
             'api/v1/inventory/warehouses/{warehouse}' => "/api/v1/inventory/warehouses/{$fx['fg']->id}",
             'api/v1/payroll/payslips/{payslip}' => "/api/v1/payroll/payslips/{$fx['payslip']->id}",
             'api/v1/procurement/goods-receipts/{goods_receipt}' => "/api/v1/procurement/goods-receipts/{$fx['grn']->id}",
+            // Vendor and Customer joined the Configuration Lifecycle Contract
+            // on 20-Aug; their show() is what the delete confirm dialog reads
+            // for the authoritative `can` block.
+            'api/v1/procurement/vendors/{vendor}' => "/api/v1/procurement/vendors/{$fx['vendor']->id}",
+            'api/v1/sales/customers/{customer}' => "/api/v1/sales/customers/{$fx['customer']->id}",
             'api/v1/procurement/purchase-orders/{purchase_order}' => "/api/v1/procurement/purchase-orders/{$fx['po']->id}",
             'api/v1/procurement/purchase-orders/{purchase_order}/trace' => "/api/v1/procurement/purchase-orders/{$fx['po']->id}/trace",
             'api/v1/production/cartons/{cartonNo}' => "/api/v1/production/cartons/{$fx['cartonNo']}",

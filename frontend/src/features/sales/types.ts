@@ -1,3 +1,5 @@
+import type { ConfigurationAbilities } from '@/components/configuration/types';
+
 import type { Item, Warehouse } from '@/features/inventory/types';
 import type { EntryFlags, TallySyncStatus } from '@/features/tally-sync/types';
 
@@ -11,6 +13,14 @@ export interface Customer {
     gstin: string | null;
     state_code: string | null;
     is_active: boolean;
+    /** Archived-by-soft-delete, distinct from is_active. */
+    archived_at?: string | null;
+    /**
+     * The Configuration Lifecycle Contract's `can` block (DEC-20260817-002).
+     * A null delete on index is UNDETERMINED, never "no" — the confirm
+     * dialog asks show() for the authoritative answer.
+     */
+    can?: ConfigurationAbilities | null;
     created_at: string;
 }
 

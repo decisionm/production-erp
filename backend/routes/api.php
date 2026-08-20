@@ -352,7 +352,12 @@ Route::prefix('v1')->group(function () {
         });
 
         Route::prefix('procurement')->middleware('module:procurement')->group(function () {
-            Route::apiResource('vendors', VendorController::class)->only(['index', 'store', 'update']);
+            // Vendor on the Configuration Lifecycle Contract (DEC-20260817-002).
+            // archive/activate are registered BEFORE the apiResource so neither
+            // word can be read as a {vendor} id.
+            Route::post('vendors/{vendor}/archive', [VendorController::class, 'archive']);
+            Route::post('vendors/{vendor}/activate', [VendorController::class, 'activate']);
+            Route::apiResource('vendors', VendorController::class)->only(['index', 'store', 'update', 'show', 'destroy']);
 
             Route::apiResource('purchase-requisitions', PurchaseRequisitionController::class)->only(['index', 'store']);
             Route::post('purchase-requisitions/{purchase_requisition}/approve', [PurchaseRequisitionController::class, 'approve']);
@@ -378,7 +383,11 @@ Route::prefix('v1')->group(function () {
         });
 
         Route::prefix('sales')->middleware('module:sales')->group(function () {
-            Route::apiResource('customers', CustomerController::class)->only(['index', 'store', 'update']);
+            // Customer on the Configuration Lifecycle Contract (DEC-20260817-002).
+            // Registered before the apiResource so neither verb reads as an id.
+            Route::post('customers/{customer}/archive', [CustomerController::class, 'archive']);
+            Route::post('customers/{customer}/activate', [CustomerController::class, 'activate']);
+            Route::apiResource('customers', CustomerController::class)->only(['index', 'store', 'update', 'show', 'destroy']);
 
             // Phase 3.5 — the honesty statement the Sales pages render: Tally-
             // side Sales / Sales Order vouchers are NOT mirrored here

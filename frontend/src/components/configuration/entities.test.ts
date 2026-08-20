@@ -31,6 +31,11 @@ const CONTRACTED: ConfigurationEntityKey[] = [
     'production-standard-packaging',
     'production-configuration',
     'employee',
+    // The twelfth and thirteenth, wired 20-Aug: the last two masters that
+    // carried is_active with no contract behind it. Both previously flipped
+    // that column through a plain update — no reason, no audit, no guard.
+    'vendor',
+    'customer',
 ];
 
 describe('the configuration entity registry', () => {
@@ -89,10 +94,48 @@ describe('the configuration entity registry', () => {
      * none of these screens is that. Mechanical, but this is exactly the rule a
      * later "just add a cost column" would break without anyone noticing.
      */
-    it('declares nothing priced and nobody supplying (FC-06)', () => {
-        const forbidden = /rate|price|amount|cost|salary|ctc|wage|vendor|supplier|purchase/i;
+    it('declares nothing priced (FC-06)', () => {
+        // The teeth, unchanged: no spec may declare a column carrying money.
+        // This is the half the docblock above is about — a later "just add a
+        // cost column" is what this catches.
+        const priced = /rate|price|amount|cost|salary|ctc|wage/i;
         for (const key of CONFIGURATION_ENTITY_KEYS) {
-            expect(JSON.stringify(CONFIGURATION_ENTITIES[key])).not.toMatch(forbidden);
+            const spec = CONFIGURATION_ENTITIES[key];
+            const declaredColumns = [
+                spec.flag?.column,
+                spec.archivedWhen?.column,
+            ].filter(Boolean).join(' ');
+
+            expect(declaredColumns).not.toMatch(priced);
+            expect(JSON.stringify(spec)).not.toMatch(priced);
+        }
+    });
+
+    /**
+     * FC-06's OTHER half — supplier identity — is a permission question, not a
+     * naming one, and this is where that distinction is written down.
+     *
+     * The rule is "FLOOR and SALES logins never see who supplied it". It is
+     * not "the word vendor may not appear". `vendor` and `customer` joined the
+     * registry on 20-Aug, and their pages sit behind `module:procurement` and
+     * `module:sales` respectively — a floor login holds neither, so no floor
+     * screen can render them. The shared lifecycle components are generic;
+     * an entity is only ever reached by a page that names it.
+     *
+     * So the assertion is narrowed to what it can actually prove: no OTHER
+     * master — the floor and production ones a floor login does reach — may
+     * name a supplier or a purchase concept. Adding a twelfth floor master
+     * that does still fails here.
+     */
+    it('lets no floor master name a supplier or a purchase (FC-06)', () => {
+        const supplying = /vendor|supplier|purchase/i;
+        const behindTheirOwnModule: ConfigurationEntityKey[] = ['vendor', 'customer'];
+
+        for (const key of CONFIGURATION_ENTITY_KEYS) {
+            if (behindTheirOwnModule.includes(key)) {
+                continue;
+            }
+            expect(JSON.stringify(CONFIGURATION_ENTITIES[key])).not.toMatch(supplying);
         }
     });
 
