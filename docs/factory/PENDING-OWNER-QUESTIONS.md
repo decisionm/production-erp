@@ -446,13 +446,33 @@ answered carries a warning that may be crying wolf. **Blocks:** trusting
 the capability note on ASB-8 450ML runs; the machine-capability row's
 correction. *Open since 2026-08-10.*
 
-## Q33 · 200ML RA — which live standard is it, and which Tally item is the 490 box?
+## Q33 · 200ML RA — which live standard is it, and which Tally item is the 490 box? — PARTLY RESOLVED
 
 The 07-Aug paper states 98/tray × 5 trays = 490/box for 200ML RA. The Tally
 catalogue's candidate item is named “B.200 Ml Round Pet Bottle Amber 18gms -
 520 Nos” — a box count the paper contradicts. Either the item name is stale
 (Tally renames when the factory changes the pack), or a separate 490 item
 exists/should exist, or the paper's 490 is itself wrong.
+
+**The design half is resolved 2026-08-21 by DEC-20260821-001.** Where Tally
+carries separate stock items for a finished product's pouch and tray packings,
+the ERP represents them as TWO separate finished-product item masters, each
+mapped one-to-one to its own Tally stock item — NOT as two packaging identities
+under one ERP product, which is what the now-superseded DEC-20260810-003
+allowed. For this 200ML Amber case the shape the owner stated is a 520 Nos
+pouch product and a separate 490 Nos tray product. That settles the SHAPE only.
+
+**What stays OPEN in this entry — the identities, which nothing in this repo
+evidences:**
+1. the exact live Tally stock item for the 490 tray — its name and GUID as they
+   actually read in Tally, attached here as an artifact. DEC-20260821-001
+   records only that the owner says a separate 490 Tally item is available; no
+   agent may guess that name or create a Tally master;
+2. which existing ERP standard/product the 490 tray actually belongs to, and
+   how the already-configured 98 × 5 = 490 packing rows listed below relate to
+   the separate tray product master the rule now calls for. Whether any master
+   must be created, renamed, or left exactly as it is is NOT decided by
+   DEC-20260821-001 and is not inferable from this repo.
 
 **Corrected 2026-08-11.** An earlier version of this entry said a 490/box
 variant “now exists” because DEC-20260810-003's data migration created one.
@@ -480,9 +500,11 @@ So the paper's packing is already configured — just under a different
 product name than the paper uses.
 
 **The question for the owner:** *is the paper's “200ML RA” the `200ML ROUND`
-standard — and if so, which of its Tally items is the 490-box one?* If the
-answer is yes, nothing needs creating: the 490 row is already there and the
-identity is set directly in the packaging-identity edit UI.
+standard — and if so, which live Tally stock item is the 490 box?* The answer
+names the tray product's one-to-one Tally identity under DEC-20260821-001, and
+the identity is then attached from the named Tally item by a person, citing the
+evidence. Nothing about the 490's Tally name follows from the already-configured
+490 packing rows below.
 
 Evidence supporting the ROUND reading — **verified, in-repo or read on live:**
 - The candidate Tally item is “B.200 Ml **Round** Pet Bottle **Amber** 18gms
@@ -514,14 +536,19 @@ as relay, not promoted to evidence, and not to be acted on until sourced
 If the paper or workbook backs those three, the source belongs in
 `docs/factory/sources/` and this entry should cite it.
 
-**Do NOT re-key the migration to a guessed product name.** Once the owner
-names the standard, the identity is set by a person in the edit UI, on the
-record — not by a migration matching a string. Re-keying it to `200ML ROUND`
-would also create a SECOND 490 spec beside the five that already exist.
+**Do NOT re-key the migration to a guessed product name.** Once the owner names
+the standard and the Tally item, a person sets the identity on the record — not
+a migration matching a string. Re-keying it to `200ML ROUND` would also create a
+SECOND 490 spec beside the five that already exist. DEC-20260821-001 makes this
+warning stronger, not weaker: a two-product split executed on a guessed name
+mints a WRONG master, where the old design at worst left a field unset.
 
-**Blocks:** the 490-tray packing posting under its own Tally name; nothing
+**Blocks:** the 490 tray posting under its own Tally name, and therefore any
+build of the separate tray product master DEC-20260821-001 calls for; nothing
 else — batches record normally against the product's identity, labelled as
-such. *Open since 2026-08-10; evidence corrected and extended 2026-08-11.*
+such. *Open since 2026-08-10; evidence corrected and extended 2026-08-11;
+design half resolved by DEC-20260821-001 on 2026-08-21, the two identity
+questions above still open.*
 
 ## Q34 · HRMS/payroll policy — the seeded defaults are conventions, not the factory's rules
 
