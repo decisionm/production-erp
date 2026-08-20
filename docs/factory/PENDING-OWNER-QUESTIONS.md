@@ -29,7 +29,7 @@ DEC-20260807-014 is the granularity-flip execution record on main;
 PR #148's colliding -014 was re-minted as -015 at merge, per this rule.
 Q29-Q31 landed with PR #155 (finance-pull discovery, merged 16-Aug); Q32 by the
 report-down backdate PR (#159). Q33 is claimed by the packaging-Tally-identity
-branch (DEC-20260810-003). Q34-Q37 are claimed by the 12-Aug overnight
+branch (DEC-20260821-001, which supersedes DEC-20260810-003). Q34-Q37 are claimed by the 12-Aug overnight
 run (DEC-20260812-001 HRMS/payroll adoption, DEC-20260812-002 PO raised in
 the ERP). Q38-Q41 are claimed by the 12-Aug Tally
 evidence set and the purchase/tax configuration design. Q42 is claimed by the SKU scheme
