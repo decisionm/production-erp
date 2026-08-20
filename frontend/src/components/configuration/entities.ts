@@ -37,7 +37,9 @@ export type ConfigurationEntityKey =
     | 'production-standard'
     | 'production-standard-packaging'
     | 'production-configuration'
-    | 'employee';
+    | 'employee'
+    | 'vendor'
+    | 'customer';
 
 /**
  * How a master says it is in service — mirroring `App\Support\Configuration\
@@ -111,6 +113,24 @@ export const CONFIGURATION_ENTITIES: Record<ConfigurationEntityKey, Configuratio
         flag: { kind: 'boolean', column: 'is_active' },
         archivedWhen: { column: 'archived_at', kind: 'timestamp' },
         invalidateKeys: [['inventory', 'warehouses']],
+    }),
+    vendor: spec({
+        key: 'vendor',
+        label: 'vendor',
+        endpoint: 'procurement/vendors',
+        hasShow: true,
+        flag: { kind: 'boolean', column: 'is_active' },
+        archivedWhen: { column: 'archived_at', kind: 'timestamp' },
+        invalidateKeys: [['procurement', 'vendors']],
+    }),
+    customer: spec({
+        key: 'customer',
+        label: 'customer',
+        endpoint: 'sales/customers',
+        hasShow: true,
+        flag: { kind: 'boolean', column: 'is_active' },
+        archivedWhen: { column: 'archived_at', kind: 'timestamp' },
+        invalidateKeys: [['sales', 'customers']],
     }),
     item: spec({
         key: 'item',

@@ -5,6 +5,7 @@ namespace Tests\Feature\Configuration;
 use App\Modules\HRMS\Services\EmployeeService;
 use App\Modules\Inventory\Services\ItemService;
 use App\Modules\Inventory\Services\WarehouseService;
+use App\Modules\Procurement\Services\VendorService;
 use App\Modules\Production\Services\DowntimeReasonService;
 use App\Modules\Production\Services\MoldService;
 use App\Modules\Production\Services\ProductionConfigurationService;
@@ -13,6 +14,7 @@ use App\Modules\Production\Services\ProductionStandardService;
 use App\Modules\Production\Services\ScrapReasonService;
 use App\Modules\Production\Services\ShiftService;
 use App\Modules\Production\Services\WorkCenterService;
+use App\Modules\Sales\Services\CustomerService;
 use App\Support\Configuration\SchemaCascades;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -64,6 +66,14 @@ class EveryWiredMasterDeclaresItsReferencesTest extends ProductDefinitionLifecyc
             'production standard packaging' => [ProductionStandardPackagingService::class, 'production_standard_packagings'],
             'production configuration' => [ProductionConfigurationService::class, 'production_configurations'],
             'employee' => [EmployeeService::class, 'employees'],
+            // The twelfth and thirteenth, wired 20-Aug. Vendor and Customer
+            // were the last two masters carrying is_active with no contract
+            // behind it. Customer is the one that earns this census: its
+            // leads.converted_customer_id is SET NULL, so the database would
+            // let a delete succeed and silently blank which customer a lead
+            // became — no foreign-key error, no schema backstop.
+            'vendor' => [VendorService::class, 'vendors'],
+            'customer' => [CustomerService::class, 'customers'],
         ];
     }
 

@@ -1,9 +1,10 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, Input, Modal, Space, Switch, Table, Typography } from 'antd';
+import { Button, Form, Input, Modal, Space, Table, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
+import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/configuration';
 import { createCustomer, listCustomers, updateCustomer } from '@/features/sales/api';
 import type { Customer } from '@/features/sales/types';
 
@@ -72,10 +73,6 @@ export default function CustomersPage() {
         },
     });
 
-    const activeMutation = useMutation({
-        mutationFn: ({ id, is_active }: { id: number; is_active: boolean }) => updateCustomer(id, { is_active }),
-        onSuccess: invalidate,
-    });
 
     return (
         <>
@@ -111,37 +108,35 @@ export default function CustomersPage() {
                     { title: 'GSTIN', dataIndex: 'gstin' },
                     { title: 'State', dataIndex: 'state_code' },
                     {
-                        title: 'Active',
+                        title: 'Status',
                         dataIndex: 'is_active',
-                        render: (active: boolean, row) => (
-                            <Switch
-                                checked={active}
-                                size="small"
-                                loading={activeMutation.isPending}
-                                onChange={(checked) => activeMutation.mutate({ id: row.id, is_active: checked })}
-                            />
-                        ),
+                        render: (_: boolean, row) => <ConfigurationStatusTag entity="customer" row={row} />,
                     },
                     {
                         title: 'Actions',
-                        render: (_, row) => (
-                            <Button
-                                size="small"
-                                onClick={() => {
-                                    setEditingCustomer(row);
-                                    resetEdit({
-                                        code: row.code,
-                                        name: row.name,
-                                        email: row.email ?? '',
-                                        phone: row.phone ?? '',
-                                        gstin: row.gstin ?? '',
-                                        state_code: row.state_code ?? '',
-                                    });
-                                }}
-                            >
-                                Edit
-                            </Button>
-                        ),
+                        render: (_, row) => {
+                            const edit = () => {
+                                setEditingCustomer(row);
+                                resetEdit({
+                                    code: row.code,
+                                    name: row.name,
+                                    email: row.email ?? '',
+                                    phone: row.phone ?? '',
+                                    gstin: row.gstin ?? '',
+                                    state_code: row.state_code ?? '',
+                                });
+                            };
+
+                            return (
+                                <ConfigurationActionsCell
+                                    entity="customer"
+                                    id={row.id}
+                                    can={row.can}
+                                    recordName={`${row.code} — ${row.name}`}
+                                    onEdit={edit}
+                                />
+                            );
+                        },
                     },
                 ]}
             />
