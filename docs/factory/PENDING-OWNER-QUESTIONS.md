@@ -544,11 +544,37 @@ warning stronger, not weaker: a two-product split executed on a guessed name
 mints a WRONG master, where the old design at worst left a field unset.
 
 **Blocks:** the 490 tray posting under its own Tally name, and therefore any
-build of the separate tray product master DEC-20260821-001 calls for; nothing
-else — batches record normally against the product's identity, labelled as
-such. *Open since 2026-08-10; evidence corrected and extended 2026-08-11;
+build of the separate tray product master DEC-20260821-001 calls for. Both
+identity questions above stay OPEN — the exact live Tally stock item for the
+490 tray (its real name and GUID, still unevidenced in this repo and never to
+be guessed), and which existing ERP standard/product the 490 tray actually
+belongs to.
+
+**Corrected 2026-08-21 — what this means for production.** An earlier wording
+here ended this entry with “nothing else — batches record normally against the
+product's identity”. That is unsafe under DEC-20260821-001: with no separate
+tray product master built, a NEW 490 tray batch falls back to the 520 pouch
+product identity and reproduces the exact wrong Tally mapping the decision
+exists to prevent. The correct reading:
+
+- **Once the application is aligned to DEC-20260821-001, no NEW 490 tray batch
+  may be selected, completed or queued under the 520 pouch product identity.**
+  Until the tray identity is evidenced and its own master exists, there is
+  nothing correct for such a batch to record against.
+- **Existing posted vouchers remain historical and untouched.**
+  DEC-20260821-001 rewrites nothing already posted.
+- **Correctly identified 520 pouch production may continue** under its own
+  product identity, unaffected by any of this.
+- **This documentation decision does not itself change running code.** The
+  shipped application enforces no such block today — the five already-configured
+  490 packing rows above remain exactly as they are, Tally identity NULL. A
+  separate, guarded code PR is still required to make the shipped application
+  refuse a new 490 tray batch under the 520 pouch identity; neither this entry
+  nor DEC-20260821-001 has done that.
+
+*Open since 2026-08-10; evidence corrected and extended 2026-08-11;
 design half resolved by DEC-20260821-001 on 2026-08-21, the two identity
-questions above still open.*
+questions above still open; the posting block clarified 2026-08-21.*
 
 ## Q34 · HRMS/payroll policy — the seeded defaults are conventions, not the factory's rules
 
