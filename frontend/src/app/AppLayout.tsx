@@ -50,17 +50,43 @@ interface NavGroup {
     children?: NavLeaf[];
 }
 
-const allNavItems: NavGroup[] = [
+/**
+ * The sidebar. The opening run is a REQUESTED order — the owner named these
+ * modules one by one and they are not something to re-derive or "tidy":
+ *
+ *   Dashboard, Procurement, Inventory, Production, Sales, Quality,
+ *   Compliance, HRMS, Payroll — then "etc." — then Tally Sync last of the
+ *   modules.
+ *
+ * The "etc." was not spelled out. CRM, Finance and Maintenance are what falls
+ * in it, and they keep the relative order they already had in this file. That
+ * is the whole rule: the specified prefix is fixed, Tally Sync is last, and
+ * nothing unspecified was resequenced on an agent's judgement.
+ *
+ * Downloads, Help and Administration stay after Tally Sync, below the
+ * divider `menuItems` inserts: they are utilities, not modules.
+ *
+ * This list is the FULL table — hidden modules included. It is exported, and
+ * `readonly`, for exactly one reason: AppLayout.nav.test.ts reads it. Nothing
+ * writes to it. What a given login actually SEES is `buildNavItems` below,
+ * which filters by ADOPTED_MODULES and then by permission.
+ *
+ * Both orders are pinned separately, because they can disagree: a module
+ * rejoining the adoption list must land back in its right place, and only the
+ * configured pin can see that while the module is still hidden.
+ */
+export const allNavItems: readonly NavGroup[] = [
     { key: '/', icon: <DashboardOutlined />, label: 'Dashboard' },
     {
-        key: 'crm',
-        icon: <ContactsOutlined />,
-        label: 'CRM',
-        module: 'crm',
+        key: 'procurement',
+        icon: <ShopOutlined />,
+        label: 'Procurement',
+        module: 'procurement',
         children: [
-            { key: '/crm/leads', label: 'Leads' },
-            { key: '/crm/opportunities', label: 'Opportunities' },
-            { key: '/crm/quotations', label: 'Quotations' },
+            { key: '/procurement/vendors', label: 'Vendors' },
+            { key: '/procurement/purchase-requisitions', label: 'Purchase Requisitions' },
+            { key: '/procurement/purchase-orders', label: 'Purchase Orders' },
+            { key: '/procurement/goods-receipts', label: 'Goods Receipts' },
         ],
     },
     {
@@ -126,10 +152,15 @@ const allNavItems: NavGroup[] = [
             // Machine Setup were separate menu entries, and nothing in either
             // name told a supervisor which one owned the setting they were
             // looking for — so this entry now opens a workspace whose tabs are
-            // Product Standards, Machines & Capabilities, Downtime Reasons,
-            // Factory Rules and Import from Workbook. Both retired URLs still
-            // answer as redirects (App.tsx): /production/standards keeps its
-            // query string, /production/work-centers lands on the machines tab.
+            // Product Standards, Machines & Capabilities, Molds, Packing
+            // Materials, Downtime Reasons, Scrap Reasons, Factory Rules and
+            // Import from Workbook. Every retired URL still answers as a
+            // redirect (App.tsx), in two flavours: /production/standards,
+            // /production/scrap-reasons and /production/molds go through the
+            // shared query-preserving redirect, so an incoming search string
+            // survives the hop; /production/work-centers is unchanged by this
+            // PR and stays the plain <Navigate> to the machines tab, which
+            // carries no query string.
             { key: '/production/configuration', label: 'Production Configuration' },
             { key: '/production/boms', label: 'Bills of Material' },
             { key: '/production/shift-summary', label: 'Shift Summary' },
@@ -144,21 +175,17 @@ const allNavItems: NavGroup[] = [
             // for a deliberate direct URL visit; do not re-add these nav
             // entries without first wiring the approval chain into
             // WorkOrderService.
-            { key: '/production/scrap-reasons', label: 'Scrap Reasons' },
-            { key: '/production/molds', label: 'Molds' },
+            //
+            // Scrap Reasons and Molds are gone from here too, but for the
+            // opposite reason: they are not withdrawn, they MOVED. Both are
+            // masters the Shift Floor selects from — a scrap reason on a
+            // rejection line, a mould on a mould change — so they belong
+            // beside the other masters in Production Configuration rather
+            // than as two more lines between a supervisor and the pages they
+            // open daily. They are tabs of it now (?tab=scrap, ?tab=molds),
+            // the components and endpoints are unchanged, and the old URLs
+            // redirect.
             { key: '/production/shifts', label: 'Shifts' },
-        ],
-    },
-    {
-        key: 'procurement',
-        icon: <ShopOutlined />,
-        label: 'Procurement',
-        module: 'procurement',
-        children: [
-            { key: '/procurement/vendors', label: 'Vendors' },
-            { key: '/procurement/purchase-requisitions', label: 'Purchase Requisitions' },
-            { key: '/procurement/purchase-orders', label: 'Purchase Orders' },
-            { key: '/procurement/goods-receipts', label: 'Goods Receipts' },
         ],
     },
     {
@@ -171,17 +198,6 @@ const allNavItems: NavGroup[] = [
             { key: '/sales/sales-orders', label: 'Sales Orders' },
             { key: '/sales/deliveries', label: 'Deliveries' },
             { key: '/sales/invoices', label: 'Invoices' },
-        ],
-    },
-    {
-        key: 'finance',
-        icon: <AccountBookOutlined />,
-        label: 'Finance',
-        module: 'finance',
-        children: [
-            { key: '/finance/chart-of-accounts', label: 'Chart of Accounts' },
-            { key: '/finance/journal-entries', label: 'Journal Entries' },
-            { key: '/finance/reports', label: 'Reports' },
         ],
     },
     {
@@ -237,6 +253,28 @@ const allNavItems: NavGroup[] = [
         ],
     },
     {
+        key: 'crm',
+        icon: <ContactsOutlined />,
+        label: 'CRM',
+        module: 'crm',
+        children: [
+            { key: '/crm/leads', label: 'Leads' },
+            { key: '/crm/opportunities', label: 'Opportunities' },
+            { key: '/crm/quotations', label: 'Quotations' },
+        ],
+    },
+    {
+        key: 'finance',
+        icon: <AccountBookOutlined />,
+        label: 'Finance',
+        module: 'finance',
+        children: [
+            { key: '/finance/chart-of-accounts', label: 'Chart of Accounts' },
+            { key: '/finance/journal-entries', label: 'Journal Entries' },
+            { key: '/finance/reports', label: 'Reports' },
+        ],
+    },
+    {
         key: 'maintenance',
         icon: <BuildOutlined />,
         label: 'Maintenance',
@@ -278,7 +316,7 @@ const allNavItems: NavGroup[] = [
     },
 ];
 
-function buildNavItems(user: User | null) {
+export function buildNavItems(user: User | null) {
     return allNavItems
         .map((item) => {
             // The group's own module gates the whole group (CRM, Inventory, ...

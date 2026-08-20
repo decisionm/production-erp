@@ -37,7 +37,20 @@ const statusOptions: { value: MoldStatus; label: string; disabled?: boolean }[] 
     { value: 'retired', label: 'Retired', disabled: true },
 ];
 
-export default function MoldsPage() {
+/**
+ * `embedded` is set when this renders as the Molds TAB of Production
+ * Configuration, which is now the only way a user reaches it. All it
+ * suppresses is the page-level heading — the tab is already labelled "Molds".
+ * The paragraph below it STAYS: it explains what a mould change on the Shift
+ * Floor picks and why a mould under repair disappears from that list, which
+ * is content, not a duplicated title.
+ *
+ * Nothing else is conditional on it: the same queries, the same endpoints,
+ * the same lifecycle actions and the same (absent) client-side permission
+ * gate in both modes. The default keeps the standalone signature working for
+ * anything that still imports this page.
+ */
+export default function MoldsPage({ embedded = false }: { embedded?: boolean }) {
     const [modalOpen, setModalOpen] = useState(false);
     const [editingMold, setEditingMold] = useState<Mold | null>(null);
     const queryClient = useQueryClient();
@@ -83,8 +96,8 @@ export default function MoldsPage() {
 
     return (
         <>
-            <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
-                <Typography.Title level={3} style={{ margin: 0 }}>Molds</Typography.Title>
+            <Space style={{ marginBottom: 16, justifyContent: embedded ? 'flex-end' : 'space-between', width: '100%' }}>
+                {!embedded && <Typography.Title level={3} style={{ margin: 0 }}>Molds</Typography.Title>}
                 <Button type="primary" onClick={() => setModalOpen(true)}>New Mold</Button>
             </Space>
             <Typography.Paragraph type="secondary">
