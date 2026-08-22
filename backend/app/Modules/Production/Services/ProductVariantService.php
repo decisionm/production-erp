@@ -102,9 +102,26 @@ class ProductVariantService
      * frontend's SEPARATE_PRODUCT_REQUIRED_DETAIL, and for the same reason
      * MISSING_VOCABULARY is worded once: a supervisor told one thing on the
      * floor and another in the office is the failure this module exists to
-     * prevent. Every refusal — Start Batch, the two packaging writers, the
-     * attach endpoint, the importer — states the case in its own first
-     * sentence and then repeats THESE two verbatim.
+     * prevent.
+     *
+     * FIVE REFUSAL SURFACES repeat these two verbatim, each after its own
+     * first sentence naming that case's parties. The two packaging writers
+     * are counted once per LAYER, not once per route, because both layers
+     * emit the message and a reader chasing the string needs both:
+     *   - Start Batch — PackagingBelongsToSeparateProductException::make()
+     *   - the two packaging writers at the REQUEST layer — the shared
+     *     RefusesSeparateProductIdentity trait (POST/PUT save and the
+     *     PATCH .../identity), so neither route is a door around the other
+     *   - those same two writers at the SERVICE layer, behind the row lock —
+     *     ProductionStandardPackagingService::refuseSeparateProduct()
+     *   - the attach endpoint — ProductionStandardService::attachItem()
+     *   - the importer — ProductionStandardImportService, which records the
+     *     refusal per orphan row and skips only that one adoption
+     *
+     * A SIXTH site reads the same predicate and deliberately does NOT use
+     * these strings: ConfigurationReviewService's packaging_separate_product
+     * row. It is ADVISORY — it reports pairs that already exist rather than
+     * refusing a write — so it carries its own listing copy instead.
      */
     public const SEPARATE_PRODUCT_REASON = 'A packing that posts as its own Tally stock item is a separate '
         .'finished product (DEC-20260821-001), not a second identity under this one.';

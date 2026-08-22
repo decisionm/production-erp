@@ -326,8 +326,17 @@ to re-grant, so it would 403 the entire ERP.
   deploy reported `Nothing to migrate` — no DDL ran against factory data.
 - **`storage/`** (534 MB of uploads) was copied across and is rsync-excluded,
   so deploys never touch it.
-- **Backups on the server:** `erp_app/backups/erp-db-*.sql`, written by
-  `deploy.sh` before every migrate, last 7 kept.
+- **Backups on the server:** `~/backups/erp/erp-db-*.sql`, written by
+  `deploy.sh` before every migrate, last 7 kept (`BACKUP_DIR` overrides the
+  directory). `$HOME` is never web-served, which is the whole point: a full
+  dump carries password hashes, customers and purchase rates (FC-06).
+  `deploy.sh` deliberately does **not** fall back to `../backups`, and
+  `deploy.yml` proves the directory is writable BEFORE `artisan down`, so an
+  unusable backup path fails the run with the floor still serving.
+  - *Legacy, no longer written to:* dumps taken before the 19-Aug-2026 layout
+    change still sit at `erp_app/backups/erp-db-*.sql`, inside a live
+    WordPress docroot. Those are the manual cleanup owed above — not the
+    current location, and not where `deploy.sh` writes or prunes.
 - **`.env` is mode 600** and is excluded from rsync — it exists only on the
   server. Never commit it; the repo root `.gitignore` now covers `/.env`,
   `/env`, `/*.sql`, `/storage.zip`.
