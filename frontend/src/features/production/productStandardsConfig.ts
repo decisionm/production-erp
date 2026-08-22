@@ -348,12 +348,27 @@ export function tallyIdentityLabel(
 export const SEPARATE_PRODUCT_REQUIRED
     = 'this packing belongs under a separate product';
 
-/** The same fact at explaining length, for an alert rather than a label. */
+/**
+ * The same fact at explaining length, for an alert rather than a label — the
+ * REASON and the INSTRUCTION, and deliberately nothing about what any one
+ * screen then does about it.
+ *
+ * It used to end "The server refuses this start either way", which is true in
+ * the Start Batch modal and FALSE in the configuration review: that screen is
+ * read-only and reports rows that already exist (and may already have posted
+ * vouchers), which nothing refuses retroactively. The consequence clause now
+ * lives at the site it is true of (SEPARATE_PRODUCT_START_REFUSED), so a
+ * second reader of this string cannot inherit a promise about a screen it is
+ * not on.
+ */
 export const SEPARATE_PRODUCT_REQUIRED_DETAIL
     = 'This packing posts to Tally as its own stock item, which makes it a separate finished product — '
     + 'not a second identity under this one. Pull the Tally masters so that stock item is in the catalogue '
     + '(an item created by hand here carries no Tally GUID and cannot post), create or attach its production '
-    + 'standard, then select that product. The server refuses this start either way.';
+    + 'standard, then select that product.';
+
+/** Start Batch only: the guard that makes this a dead end rather than a note. */
+export const SEPARATE_PRODUCT_START_REFUSED = 'The server refuses this start either way.';
 
 /**
  * Whether a packing's OWN Tally identity names a DIFFERENT item from the
