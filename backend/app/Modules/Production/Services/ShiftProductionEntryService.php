@@ -12,6 +12,7 @@ use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Production\Events\ShiftProductionEntryApproved;
 use App\Modules\Production\Events\ShiftProductionEntryCompleted;
 use App\Modules\Production\Exceptions\MachineBusyException;
+use App\Modules\Production\Exceptions\PackagingBelongsToSeparateProductException;
 use App\Modules\Production\Exceptions\ProductNotReadyException;
 use App\Modules\Production\Models\Bom;
 use App\Modules\Production\Models\Enums\BatchStatus;
@@ -393,6 +394,39 @@ class ShiftProductionEntryService
             // weight and cycle time it is about to snapshot two lines below.
             $standard = $this->standards->resolve($data['item_id'], $data['production_standard_id'] ?? null);
             $packaging = $this->standards->resolvePackaging($standard, $data['production_standard_packaging_id'] ?? null);
+
+            // FAIL CLOSED, FORWARD ONLY (DEC-20260821-001). A packing whose
+            // own Tally identity names a different stock item from the
+            // product being run is describing a SEPARATE finished product,
+            // and this batch must be started under that product instead.
+            //
+            // Here, and only here. This is the one place a new
+            // shift_production_entries row is written with a
+            // production_standard_packaging_id — the shift-page paper ingest
+            // composes this same method (ShiftPageEntryService::recordRow),
+            // so both floor paths are covered by the single site — and it is
+            // before the row, the receipt and the sync queue, so a refusal
+            // writes nothing at all.
+            //
+            // NOT at completion and NOT at amendment: those re-resolve the
+            // identity on every (re-)completion, so a guard there would make
+            // an entry recorded before this rule impossible to complete or
+            // amend. Start is the one moment where failing closed costs
+            // nothing already recorded.
+            //
+            // Inheritance (packaging->item_id null) and a packing restating
+            // its own product's item are both compliant and unaffected —
+            // ProductVariantService::identityConflictsWithProduct().
+            if ($packaging !== null && ProductVariantService::identityConflictsWithProduct(
+                $packaging->item_id === null ? null : (int) $packaging->item_id,
+                (int) $data['item_id'],
+            )) {
+                throw PackagingBelongsToSeparateProductException::make(
+                    $packaging,
+                    $item,
+                    $packaging->tallyItem()->first(),
+                );
+            }
 
             $shift = Shift::query()->find($data['shift_id']);
             $productionDate = $data['production_date']
@@ -912,7 +946,9 @@ class ShiftProductionEntryService
             }
 
             // THE TALLY IDENTITY THIS BATCH'S FINISHED GOODS MOVE AS
-            // (DEC-20260810-003): the selected packaging's own item when it
+            // (DEC-20260810-003 — the resolution rule, which DEC-20260821-001
+            // leaves untouched for reads; only NEW starts are refused, up in
+            // startBatch): the selected packaging's own item when it
             // carries one, else the product's — resolved HERE and frozen on
             // the row, so the receipt below, the voucher, the labels and the
             // trace all read one recorded answer instead of re-deriving it

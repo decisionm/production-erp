@@ -8,6 +8,7 @@ import { useAuthStore } from '@/features/auth/store';
 import { attachStandardItem, getConfigurationReview, setPackagingIdentity } from '@/features/production/api';
 import {
     PACKING_MODE_LABEL,
+    SEPARATE_PRODUCT_REQUIRED_DETAIL,
     missingWords,
     packagingCountsSummary,
     tallyIdentityLabel,
@@ -23,11 +24,13 @@ import type {
  * NEEDS REVIEW — everything in the product configuration that still waits
  * on a person (Phase 5, P5-03), fed by GET production/configuration/review.
  *
- * Three kinds of row arrive: a packing (or, when no packing inherits it, a
- * standard) whose resolved Tally identity is missing — null, GUID-less or a
- * local fixture (DEC-20260810-003 made each packing's identity its own
- * question); a packing whose identity's NAME is carried by more than one
- * items row (so the name cannot say which); and an item still on the SKU
+ * Four kinds of row arrive: a packing whose own Tally identity names a
+ * DIFFERENT item from the product it sits under, which under DEC-20260821-001
+ * makes it a separate finished product; a packing (or, when no packing
+ * inherits it, a standard) whose resolved Tally identity is missing — null,
+ * GUID-less or a local fixture (DEC-20260810-003 made each packing's identity
+ * its own question); a packing whose identity's NAME is carried by more than
+ * one items row (so the name cannot say which); and an item still on the SKU
  * the Tally pull seeded from its name.
  *
  * ## What this panel refuses to do
@@ -59,18 +62,45 @@ import type {
  *  - **Name a SKU.** A provisional-SKU row says the SKU is provisional and
  *    where it is set; what it should become is the SKU format programme's
  *    answer, which is held by the owner.
+ *  - **Split a product, or un-split one.** A `packaging_separate_product`
+ *    row (`fix_target: separate_product`, DEC-20260821-001) is the packing
+ *    that posts as its OWN Tally stock item while sitting under another
+ *    product. It offers no Link — the thing that closes it is a separate
+ *    PRODUCT: the Tally stock item pulled into the catalogue (only the
+ *    masters pull puts it there; an item made by hand carries no GUID and
+ *    cannot post), a production standard created for or attached to it, and
+ *    the packing configured under that product. It also never CLEARS the
+ *    identity — not because that column is the only record of what already
+ *    posted (it is not: a completed run froze its own identity on the entry,
+ *    and the queued voucher's payload and event trail are built from that
+ *    frozen column, never from this one) but because it is the CURRENT
+ *    configuration's evidence, and this panel is advisory: it rewrites
+ *    neither the configuration nor posted history. Evidence, not a refusal —
+ *    the guard that stops NEW ones of these lives on the write endpoints and
+ *    at Start Batch, and nothing already recorded is undone by this screen.
+ *
+ * An `item` on a separate-product row may name an ARCHIVED catalogue row: the
+ * packing is active and its identity is set, and only the item it points at
+ * has since been retired. The server resolves it anyway, because the finding
+ * is about the stored column and "posts as no Tally identity" over an
+ * identity that is plainly set would be false. The coexisting
+ * `packaging_no_identity` row is what says it cannot post today.
  *
  * On a backend that predates the endpoint (404) the panel renders nothing,
  * so the workspace it sits in is unchanged for it.
  */
 
 const KIND_LABEL: Record<ConfigurationReviewKind, string> = {
+    packaging_separate_product: 'Packing belongs under a separate product',
     packaging_no_identity: 'Packing has no Tally identity',
     packaging_ambiguous: 'Tally item name is carried by more than one item',
     item_provisional_sku: 'SKU is provisional (seeded from the Tally name)',
 };
 
 const KIND_COLOUR: Record<ConfigurationReviewKind, string> = {
+    // Red, alone among the four: the others are gaps still to be filled in,
+    // this one says the row is configured against the wrong product.
+    packaging_separate_product: 'red',
     packaging_no_identity: 'orange',
     packaging_ambiguous: 'gold',
     item_provisional_sku: 'purple',
@@ -90,14 +120,151 @@ const candidateLabel = (c: ConfigurationReviewCandidate): string =>
  * PATCH, a standard alone means attach-item, an item alone means the
  * item's SKU. An older server that still says `packaging_item` on an
  * ambiguous row is read as advisory too: linking never clears a shared name.
+ *
+ * THE TWO ADVISORY KINDS ARE DECIDED BY `kind`, BEFORE `fix_target` IS READ,
+ * and that ordering is the guarantee rather than a tidiness. A row whose
+ * payload said `fix_target: 'packaging_item'` — an older server, a proxy, a
+ * hand-rolled response — would otherwise render a Select and a Link button
+ * on a row where every link this screen can make is the write
+ * DEC-20260821-001 withdrew the authority for. Reading the kind first makes
+ * "no Link on a separate-product row" a property of the code, not of the
+ * data it is handed.
  */
 const fixTargetOf = (r: ConfigurationReviewRow): ConfigurationReviewFixTarget => {
     if (r.kind === 'packaging_ambiguous') return 'name_ambiguity';
+    if (r.kind === 'packaging_separate_product') return 'separate_product';
     if (r.fix_target) return r.fix_target;
     if (r.kind === 'item_provisional_sku') return 'item_sku';
     if (r.packaging) return 'packaging_item';
     return 'attach_item';
 };
+
+/**
+ * THE ACTION CELL — what, if anything, a person may do about one row.
+ *
+ * Lifted out of the table column unchanged so it can be called as a plain
+ * function and its returned element tree walked (no DOM in this repo's test
+ * setup; `App.routes.test.tsx` is the precedent). Hook-free and entirely
+ * prop-driven for that reason: everything stateful — the chosen candidate,
+ * the pending mutation, the permission — is passed in.
+ *
+ * That testability is the point. "A separate-product row never renders a
+ * Link or Attach control" is a claim about rendering, so it is pinned by
+ * reading the rendering, not by trusting the branch above it.
+ */
+export function ConfigurationReviewFixCell({
+    row: r,
+    canManage,
+    picked,
+    onPick,
+    busy,
+    isBusyRow,
+    onLink,
+}: {
+    row: ConfigurationReviewRow;
+    canManage: boolean;
+    /** The candidate a person has chosen on THIS row, if any — never pre-filled. */
+    picked: number | undefined;
+    onPick: (itemId: number | undefined) => void;
+    /** Any link/attach in flight (every row's control is disabled while one is). */
+    busy: boolean;
+    /** ...and whether it is this row's, which is the one that shows the spinner. */
+    isBusyRow: boolean;
+    onLink: (itemId: number) => void;
+}) {
+    const target = fixTargetOf(r);
+
+    // DEC-20260821-001. FIRST, and with no path from here to a control: the
+    // packing posts as its own Tally stock item, so it is a separate finished
+    // product, and there is nothing on this screen to link it to. Not a
+    // refusal either — the row already exists, and any voucher it has already
+    // posted keeps the identity it was posted under. `candidates` is empty
+    // from the server, and this branch returns before any candidate could be
+    // read, so a payload that carried some anyway still offers none.
+    if (target === 'separate_product') {
+        return (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {SEPARATE_PRODUCT_REQUIRED_DETAIL} Nothing here links it: the item that closes this is a separate
+                PRODUCT, which this screen does not create. This review is advisory — it changes neither the
+                configuration you see nor anything already posted. The identity is left exactly as it is; completed
+                runs keep the identity they froze at completion, queued and posted vouchers are unaffected, and
+                history is never rewritten.
+            </Typography.Text>
+        );
+    }
+    if (target === 'item_sku') {
+        return (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                Set the SKU on the item master
+                {r.item ? (
+                    <>
+                        {' '}
+                        (<Link to={`/inventory/items/${r.item.id}`}>open item</Link>)
+                    </>
+                ) : null}
+                ; the format is the owner&rsquo;s programme, so nothing here proposes one.
+            </Typography.Text>
+        );
+    }
+    if (target === 'name_ambiguity') {
+        const n = r.ambiguity?.shared_name_count;
+        return (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                A catalogue duplicate — {n ? `${n} items` : 'more than one item'} carry this name, and Tally matches a
+                voucher line by name, so linking any one of them does not clear it. The duplicate is settled in the
+                catalogue (Q43 — whether it blocks or warns is the owner&rsquo;s call); nothing here picks a row.
+            </Typography.Text>
+        );
+    }
+    if (!r.standard || (target === 'packaging_item' && !r.packaging)) {
+        return <Typography.Text type="secondary">—</Typography.Text>;
+    }
+    const candidates = r.candidates ?? [];
+    if (candidates.length === 0) {
+        return (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                No Tally item matches this name. Tally has to carry the product first — the ERP never creates one. Open
+                the product to search the whole catalogue.
+            </Typography.Text>
+        );
+    }
+    const verb = target === 'attach_item' ? 'Attach' : 'Link';
+    return (
+        <Space size={6} wrap>
+            <Select
+                size="small"
+                style={{ minWidth: 280 }}
+                placeholder={`Choose one of ${candidates.length} name match${candidates.length === 1 ? '' : 'es'}…`}
+                value={picked}
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                disabled={!canManage}
+                onChange={onPick}
+                options={candidates.map((c) => ({ value: c.id, label: candidateLabel(c) }))}
+            />
+            <Tooltip
+                title={
+                    !canManage
+                        ? 'Needs the production.manage permission.'
+                        : picked === undefined
+                          ? 'Choose the Tally item first — nothing is picked for you.'
+                          : undefined
+                }
+            >
+                <Button
+                    size="small"
+                    type="primary"
+                    disabled={!canManage || picked === undefined || busy}
+                    loading={isBusyRow}
+                    onClick={() => picked !== undefined && onLink(picked)}
+                >
+                    {verb}
+                </Button>
+            </Tooltip>
+        </Space>
+    );
+}
 
 export default function ConfigurationReviewPanel({
     onFindInTable,
@@ -308,6 +475,17 @@ export default function ConfigurationReviewPanel({
                                                 <Typography.Text style={{ fontFamily: 'monospace' }}>{r.item?.sku ?? '—'}</Typography.Text>
                                                 <Tag color="purple">provisional SKU</Tag>
                                             </Space>
+                                        ) : r.kind === 'packaging_separate_product' ? (
+                                            // BOTH ENDS OF THE RELATION, because either alone
+                                            // reads as ordinary: the item this packing posts
+                                            // as, and the product it is filed under. Seeing
+                                            // them side by side IS the finding.
+                                            <Space direction="vertical" size={0}>
+                                                <Typography.Text>posts as {tallyIdentityLabel(r.item)}</Typography.Text>
+                                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                                    under the product {tallyIdentityLabel(r.product_item)}
+                                                </Typography.Text>
+                                            </Space>
                                         ) : (
                                             <Typography.Text type={r.item ? undefined : 'secondary'}>
                                                 {tallyIdentityLabel(r.item)}
@@ -328,87 +506,17 @@ export default function ConfigurationReviewPanel({
                                 },
                                 {
                                     title: 'Link an existing Tally item',
-                                    render: (_, r) => {
-                                        const target = fixTargetOf(r);
-
-                                        if (target === 'item_sku') {
-                                            return (
-                                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                                    Set the SKU on the item master
-                                                    {r.item ? (
-                                                        <>
-                                                            {' '}
-                                                            (<Link to={`/inventory/items/${r.item.id}`}>open item</Link>)
-                                                        </>
-                                                    ) : null}
-                                                    ; the format is the owner&rsquo;s programme, so nothing here proposes
-                                                    one.
-                                                </Typography.Text>
-                                            );
-                                        }
-                                        if (target === 'name_ambiguity') {
-                                            const n = r.ambiguity?.shared_name_count;
-                                            return (
-                                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                                    A catalogue duplicate — {n ? `${n} items` : 'more than one item'} carry this
-                                                    name, and Tally matches a voucher line by name, so linking any one of them
-                                                    does not clear it. The duplicate is settled in the catalogue (Q43 — whether
-                                                    it blocks or warns is the owner&rsquo;s call); nothing here picks a row.
-                                                </Typography.Text>
-                                            );
-                                        }
-                                        if (!r.standard || (target === 'packaging_item' && !r.packaging)) {
-                                            return <Typography.Text type="secondary">—</Typography.Text>;
-                                        }
-                                        const key = rowKey(r);
-                                        const candidates = r.candidates ?? [];
-                                        if (candidates.length === 0) {
-                                            return (
-                                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                                    No Tally item matches this name. Tally has to carry the product
-                                                    first — the ERP never creates one. Open the product to search the
-                                                    whole catalogue.
-                                                </Typography.Text>
-                                            );
-                                        }
-                                        const picked = chosen[key];
-                                        const verb = target === 'attach_item' ? 'Attach' : 'Link';
-                                        return (
-                                            <Space size={6} wrap>
-                                                <Select
-                                                    size="small"
-                                                    style={{ minWidth: 280 }}
-                                                    placeholder={`Choose one of ${candidates.length} name match${candidates.length === 1 ? '' : 'es'}…`}
-                                                    value={picked}
-                                                    allowClear
-                                                    showSearch
-                                                    optionFilterProp="label"
-                                                    disabled={!canManage}
-                                                    onChange={(v) => setChosen((c) => ({ ...c, [key]: v }))}
-                                                    options={candidates.map((c) => ({ value: c.id, label: candidateLabel(c) }))}
-                                                />
-                                                <Tooltip
-                                                    title={
-                                                        !canManage
-                                                            ? 'Needs the production.manage permission.'
-                                                            : picked === undefined
-                                                              ? 'Choose the Tally item first — nothing is picked for you.'
-                                                              : undefined
-                                                    }
-                                                >
-                                                    <Button
-                                                        size="small"
-                                                        type="primary"
-                                                        disabled={!canManage || picked === undefined || busy}
-                                                        loading={busy && busyRow === r}
-                                                        onClick={() => picked !== undefined && link(r, picked)}
-                                                    >
-                                                        {verb}
-                                                    </Button>
-                                                </Tooltip>
-                                            </Space>
-                                        );
-                                    },
+                                    render: (_, r) => (
+                                        <ConfigurationReviewFixCell
+                                            row={r}
+                                            canManage={canManage}
+                                            picked={chosen[rowKey(r)]}
+                                            onPick={(v) => setChosen((c) => ({ ...c, [rowKey(r)]: v }))}
+                                            busy={busy}
+                                            isBusyRow={busy && busyRow === r}
+                                            onLink={(itemId) => link(r, itemId)}
+                                        />
+                                    ),
                                 },
                             ]}
                         />

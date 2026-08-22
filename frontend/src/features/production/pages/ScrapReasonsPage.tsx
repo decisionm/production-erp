@@ -14,7 +14,20 @@ const scrapReasonSchema = z.object({
 });
 type ScrapReasonFormValues = z.infer<typeof scrapReasonSchema>;
 
-export default function ScrapReasonsPage() {
+/**
+ * `embedded` is set when this renders as the Scrap Reasons TAB of Production
+ * Configuration, which is now the only way a user reaches it. All it
+ * suppresses is the page-level heading — the workspace already sits under a
+ * tab labelled "Scrap Reasons", and repeating it as an H3 two lines below
+ * reads as two screens stacked on top of each other.
+ *
+ * Nothing else is conditional on it: the same queries, the same endpoints,
+ * the same lifecycle actions and the same (absent) client-side permission
+ * gate in both modes. A second code path is how "permissions unchanged"
+ * quietly stops being true, so there isn't one. The default keeps the
+ * standalone signature working for anything that still imports this page.
+ */
+export default function ScrapReasonsPage({ embedded = false }: { embedded?: boolean }) {
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState<ScrapReason | null>(null);
     const queryClient = useQueryClient();
@@ -63,8 +76,8 @@ export default function ScrapReasonsPage() {
 
     return (
         <>
-            <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
-                <Typography.Title level={3} style={{ margin: 0 }}>Scrap Reasons</Typography.Title>
+            <Space style={{ marginBottom: 16, justifyContent: embedded ? 'flex-end' : 'space-between', width: '100%' }}>
+                {!embedded && <Typography.Title level={3} style={{ margin: 0 }}>Scrap Reasons</Typography.Title>}
                 <Button type="primary" onClick={() => setModalOpen(true)}>New Scrap Reason</Button>
             </Space>
 

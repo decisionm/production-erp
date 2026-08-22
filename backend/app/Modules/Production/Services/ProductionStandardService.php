@@ -138,6 +138,31 @@ class ProductionStandardService
      */
     public function attachItem(ProductionStandard $standard, int $itemId, ?User $actor, bool $confirmReattach = false): ProductionStandard
     {
+        return DB::transaction(function () use ($standard, $itemId, $actor, $confirmReattach) {
+            // FOR UPDATE on this standard, taken before anything is read —
+            // the SAME lock ProductionStandardPackagingService takes around
+            // its writes, and that is the whole point of taking it here.
+            // The separate-product check below reads the packagings and then
+            // writes item_id; a packaging identity write racing it reads
+            // item_id and then writes a packaging. Without one shared lock
+            // both reads pass and the pair commits the mismatch neither
+            // writer would have allowed on its own. `withTrashed` because a
+            // soft-deleted standard still holds its row and its slot in the
+            // unique index.
+            $locked = ProductionStandard::withTrashed()->whereKey($standard->getKey())->lockForUpdate()->first();
+            $standard = $locked ?? $standard;
+
+            return $this->attachItemLocked($standard, $itemId, $actor, $confirmReattach);
+        });
+    }
+
+    /**
+     * attachItem's body, running inside that transaction and behind that
+     * lock. Split out only so the lock cannot be forgotten by a later edit
+     * to the body: every early return here is already serialised.
+     */
+    private function attachItemLocked(ProductionStandard $standard, int $itemId, ?User $actor, bool $confirmReattach): ProductionStandard
+    {
         // Re-pointing an attached standard is allowed ONLY as an explicit,
         // confirmed correction (DEC-20260810-003: the Tally identity is
         // editable configuration). The confirmation is not ceremony — the
@@ -169,6 +194,43 @@ class ProductionStandardService
             throw ValidationException::withMessages([
                 'item_id' => sprintf('"%s" is not an active item, so no shift can be run against it.', (string) $item->name),
             ]);
+        }
+
+        // DEC-20260821-001, THE FORWARD GUARD ON THIS WRITER. A packing
+        // carrying its OWN Tally identity is describing a separate finished
+        // product; attaching this standard to a DIFFERENT product would make
+        // the very mismatch the rule forbids, and would do it without ever
+        // passing a packaging writer. This is the product-side end of the
+        // rule the packaging writers hold the other end of — see
+        // ProductVariantService::firstPackagingConflictingWithProduct() for
+        // the composed statement of it, and for why trashed packagings count.
+        //
+        // The exemption, and it is load-bearing: a standard that is ALREADY
+        // attached to this very item is being RE-attached (provenance,
+        // a confirmed no-op correction), not newly assigned. A legacy row
+        // written under the superseded DEC-20260810-003 must stay
+        // maintainable, and refusing its own identity back would strand it.
+        $currentItemId = $standard->item_id === null ? null : (int) $standard->item_id;
+
+        if ($currentItemId !== $item->id) {
+            $conflict = ProductVariantService::firstPackagingConflictingWithProduct($standard, (int) $item->id);
+
+            if ($conflict !== null) {
+                $conflictItem = $conflict->tallyItem()->first();
+                $packing = trim($conflict->label()) ?: "packing #{$conflict->id}";
+                $identityName = trim((string) ($conflictItem?->name ?? '')) ?: "item #{$conflict->item_id}";
+
+                throw ValidationException::withMessages([
+                    'item_id' => sprintf(
+                        'This standard\'s %s packing already posts to Tally as "%s", which is not "%s". %s %s',
+                        $packing,
+                        $identityName,
+                        (string) $item->name,
+                        ProductVariantService::SEPARATE_PRODUCT_REASON,
+                        ProductVariantService::SEPARATE_PRODUCT_INSTRUCTION,
+                    ),
+                ]);
+            }
         }
 
         $clash = ProductionStandard::withTrashed()
@@ -237,6 +299,17 @@ class ProductionStandardService
         $cycleTime = (string) $data['cycle_time'];
         $itemId = isset($data['item_id']) ? (int) $data['item_id'] : null;
 
+        // NO SEPARATE-PRODUCT GUARD HERE, and it is not an omission.
+        // DEC-20260821-001 is broken by a packaging identity that disagrees
+        // with its standard's product, and this method cannot produce one:
+        // the standard is created in this transaction, so it has no
+        // packagings to disagree with it, and the rows it then derives come
+        // from ProductionStandardImportService::packagings(), which writes
+        // mode and counts and NEVER item_id — every packing it makes
+        // inherits. A guard would therefore be dead code asserting a shape
+        // no caller can reach. Pinned by a test rather than by this comment
+        // alone (SeparateProductForDistinctPackingTest), so that a later
+        // change letting create() carry identities fails loudly here.
         if ($itemId !== null) {
             $item = Item::query()->find($itemId);
 

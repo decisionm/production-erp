@@ -154,6 +154,7 @@ class ImportProductMasterXlsx extends Command
             ['duplicates refused', $s['duplicates_refused']],
             ['  of which conflicting figures', $s['packaging_conflicts']],
             ['sheet packagings not written (standard holds >1 of the mode)', $s['packaging_warnings'] ?? 0],
+            ['standards not attached (packing is a separate product)', $s['separate_product_refusals'] ?? 0],
             ['matched to an item', $s['matched']],
             ['unmatched', $s['unmatched']],
             ['LOCAL- fixture items'.($result['dry_run'] ? ' (would create)' : ' created'), $s['local_fixture_items']],
@@ -169,6 +170,18 @@ class ImportProductMasterXlsx extends Command
             $this->newLine();
             $this->warn('Sheet packagings NOT written (the standard already holds more than one packing of that mode):');
             foreach ($packagingWarnings as $line) {
+                $this->line($line);
+            }
+        }
+
+        $separateProductRefusals = array_merge(...array_map(
+            fn ($v) => array_map(fn (string $w) => "  · {$w}", $v['separate_product_refusals'] ?? []),
+            $result['variants'],
+        ));
+        if ($separateProductRefusals !== []) {
+            $this->newLine();
+            $this->warn('Standards NOT attached (the packing posts as its own Tally stock item — DEC-20260821-001):');
+            foreach ($separateProductRefusals as $line) {
                 $this->line($line);
             }
         }

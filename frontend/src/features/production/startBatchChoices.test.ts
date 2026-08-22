@@ -5,6 +5,7 @@ import {
     mouldLabel,
     startBatchChoices,
     startBatchPackaging,
+    startBatchSeparateProductConflict,
     startBatchTallyIdentity,
     type StartBatchPackagingLite,
     type StartBatchPreviewLite,
@@ -226,6 +227,9 @@ describe('ask only when there is a real choice', () => {
             askStandard: false,
             askPacking: false,
             disabledPackagings: [],
+            // DEC-20260821-001's field, empty: no product was passed, so
+            // nothing is compared and nothing is declared a conflict.
+            conflictingPackagings: [],
             gaps: [],
         });
     });
@@ -452,5 +456,75 @@ describe('mouldLabel', () => {
         expect(mouldLabel(undefined)).toBeNull();
         expect(mouldLabel({ code: null, name: null })).toBeNull();
         expect(mouldLabel({ code: '  ', name: '' })).toBeNull();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// DEC-20260821-001 — a packing that posts as its own Tally item belongs
+// under a separate product
+// ---------------------------------------------------------------------------
+
+describe('the separate-product conflict (DEC-20260821-001)', () => {
+    const runProduct = { id: 2, sku: 'B-500-KID', name: '500ML KIDNEY' };
+    const otherItem = { id: 99, sku: 'B-500-KID-T', name: '500ML KIDNEY - 490 Nos' };
+
+    it('does not fire on inheritance — no identity of its own is how most live rows post', () => {
+        const plain = packaging('complete', { tally_item: null });
+        const p = preview([variant([plain])], { packaging: { id: plain.id } });
+
+        expect(startBatchSeparateProductConflict(p, runProduct)).toBe(false);
+        expect(startBatchChoices(p, undefined, runProduct).conflictingPackagings).toEqual([]);
+    });
+
+    it('does not fire when the packing restates its own product\'s item', () => {
+        const same = packaging('complete', { tally_item: { id: runProduct.id, name: runProduct.name } });
+        const p = preview([variant([same])], { packaging: { id: same.id } });
+
+        expect(startBatchSeparateProductConflict(p, runProduct)).toBe(false);
+        expect(startBatchChoices(p, undefined, runProduct).conflictingPackagings).toEqual([]);
+    });
+
+    it('fires on a single auto-resolved packing, where there is no picker to disable', () => {
+        // The shape this rule actually meets: one packing, resolved by the
+        // server, no radio shown. Without the resolved-packaging read the
+        // only refusal would arrive after the tap.
+        const distinct = packaging('complete', { tally_item: otherItem });
+        const p = preview([variant([distinct])], { packaging: { id: distinct.id } });
+
+        expect(startBatchChoices(p, undefined, runProduct).askPacking).toBe(false);
+        expect(startBatchSeparateProductConflict(p, runProduct)).toBe(true);
+    });
+
+    it('names the conflicting option in the picker, in the one wording', () => {
+        const distinct = packaging('complete', { tally_item: otherItem });
+        const ok = packaging('complete', { tally_item: null });
+        const v = variant([distinct, ok]);
+        const p = preview([v], { packaging: { id: distinct.id } });
+
+        const choices = startBatchChoices(p, v.id, runProduct);
+        expect(choices.askPacking).toBe(true);
+        expect(choices.conflictingPackagings).toEqual([
+            { id: distinct.id, words: 'this packing belongs under a separate product' },
+        ]);
+        // And it is NOT folded into the extracted inline rule: that row is
+        // `is_complete` true, so the old contract still says nothing about it.
+        expect(choices.disabledPackagings).toEqual([]);
+    });
+
+    it('is empty — behaviour-preserving — when no product is passed', () => {
+        const distinct = packaging('complete', { tally_item: otherItem });
+        const v = variant([distinct, packaging('complete')]);
+        const p = preview([v], { packaging: { id: distinct.id } });
+
+        expect(startBatchChoices(p, v.id).conflictingPackagings).toEqual([]);
+        expect(startBatchSeparateProductConflict(p, undefined)).toBe(false);
+        expect(startBatchSeparateProductConflict(undefined, runProduct)).toBe(false);
+    });
+
+    it('does not fire while the packing choice is still open — nothing resolved is not a conflict', () => {
+        const distinct = packaging('complete', { tally_item: otherItem });
+        const p = preview([variant([distinct, packaging('complete')])], { packaging: null });
+
+        expect(startBatchSeparateProductConflict(p, runProduct)).toBe(false);
     });
 });

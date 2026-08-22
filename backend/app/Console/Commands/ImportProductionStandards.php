@@ -52,6 +52,18 @@ class ImportProductionStandards extends Command
             }
         }
 
+        $separateProductRefusals = array_merge(...array_map(
+            fn ($v) => array_map(fn (string $w) => "  · {$w}", $v['separate_product_refusals'] ?? []),
+            $result['variants'],
+        ));
+        if ($separateProductRefusals !== []) {
+            $this->newLine();
+            $this->warn('Standards NOT attached (the packing posts as its own Tally stock item — DEC-20260821-001):');
+            foreach ($separateProductRefusals as $line) {
+                $this->line($line);
+            }
+        }
+
         $unresolved = array_filter($result['variants'], fn ($v) => $v['status'] === 'unresolved');
         if ($unresolved !== []) {
             $this->warn('Unresolved variants (need a factory answer):');

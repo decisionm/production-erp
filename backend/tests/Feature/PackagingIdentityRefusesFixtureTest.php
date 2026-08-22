@@ -115,17 +115,44 @@ class PackagingIdentityRefusesFixtureTest extends TestCase
 
     public function test_a_real_item_is_still_accepted(): void
     {
-        // The control: nothing about the refusal touches a real Tally item.
+        // The control: nothing about the FIXTURE refusal touches a real Tally
+        // item. The real item it is stated with is the standard's own product
+        // — one product, one Tally item, stated twice — which is what
+        // DEC-20260821-001 leaves as the only distinct-looking value a packing
+        // may still be pointed at.
+        $this->postJson("/api/v1/production/standards/{$this->standard->id}/packagings", [
+            'mode' => 'direct_box', 'nos_per_box' => 300, 'item_id' => $this->bottle->id,
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.tally_item.id', $this->bottle->id);
+
+        $this->putJson("/api/v1/production/standards/{$this->standard->id}/packagings/{$this->pouchPacking->id}", [
+            'mode' => 'pouch', 'nos_per_pouch' => 130, 'pouches_per_box' => 4, 'item_id' => $this->bottle->id,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.tally_item.id', $this->bottle->id);
+    }
+
+    public function test_a_real_item_of_another_product_is_refused_for_a_different_reason(): void
+    {
+        // The boundary between the two refusals, stated where it can be
+        // confused: `realIdentity` is a perfectly good Tally item and NOT a
+        // fixture, so the fixture rule has nothing to say about it. It is
+        // refused anyway, and by DEC-20260821-001 — because it names a
+        // different product from the standard's.
         $this->postJson("/api/v1/production/standards/{$this->standard->id}/packagings", [
             'mode' => 'direct_box', 'nos_per_box' => 300, 'item_id' => $this->realIdentity->id,
         ])
-            ->assertCreated()
-            ->assertJsonPath('data.tally_item.id', $this->realIdentity->id);
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('item_id');
 
-        $this->putJson("/api/v1/production/standards/{$this->standard->id}/packagings/{$this->pouchPacking->id}", [
-            'mode' => 'pouch', 'nos_per_pouch' => 130, 'pouches_per_box' => 4, 'item_id' => $this->realIdentity->id,
-        ])
-            ->assertOk()
-            ->assertJsonPath('data.tally_item.id', $this->realIdentity->id);
+        $this->assertStringContainsString(
+            'separate finished product',
+            (string) $this->postJson("/api/v1/production/standards/{$this->standard->id}/packagings", [
+                'mode' => 'direct_box', 'nos_per_box' => 300, 'item_id' => $this->realIdentity->id,
+            ])->json('errors.item_id.0'),
+        );
+
+        $this->assertDatabaseMissing('production_standard_packagings', ['item_id' => $this->realIdentity->id]);
     }
 }

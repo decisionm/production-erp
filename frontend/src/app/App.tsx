@@ -25,12 +25,10 @@ import CartonTracePage from '@/features/production/pages/CartonTracePage';
 import FactoryDayBinPage from '@/features/production/pages/FactoryDayBinPage';
 import MaterialRequestsPage from '@/features/material-flow/pages/MaterialRequestsPage';
 import StoreIssueQueuePage from '@/features/material-flow/pages/StoreIssueQueuePage';
-import MoldsPage from '@/features/production/pages/MoldsPage';
 import MrpPage from '@/features/production/pages/MrpPage';
 import ProductionReportsPage from '@/features/production/pages/ReportsPage';
 import ReworkOrdersPage from '@/features/production/pages/ReworkOrdersPage';
 import RoutingsPage from '@/features/production/pages/RoutingsPage';
-import ScrapReasonsPage from '@/features/production/pages/ScrapReasonsPage';
 import ProductionConfigurationPage from '@/features/production/pages/ProductionConfigurationPage';
 import LiveMonitorPage from '@/features/production/pages/LiveMonitorPage';
 import ShiftProductionEntryPage from '@/features/production/pages/ShiftProductionEntryPage';
@@ -122,8 +120,17 @@ export default function App() {
                                     <Route path="/production/mrp" element={<MrpPage />} />
                                     <Route path="/production/capacity" element={<CapacityPlanPage />} />
                                     <Route path="/production/subcontract-orders" element={<SubcontractOrdersPage />} />
-                                    <Route path="/production/scrap-reasons" element={<ScrapReasonsPage />} />
-                                    <Route path="/production/molds" element={<MoldsPage />} />
+                                    {/* Scrap Reasons and Molds are TABS of Production
+                                        Configuration now, not pages of their own. Both
+                                        URLs are kept and both keep their query string —
+                                        see ProductionConfigurationRedirect below for
+                                        why that matters even where no caller is known
+                                        to send one today. */}
+                                    <Route
+                                        path="/production/scrap-reasons"
+                                        element={<ProductionConfigurationRedirect tab="scrap" />}
+                                    />
+                                    <Route path="/production/molds" element={<ProductionConfigurationRedirect tab="molds" />} />
                                     <Route path="/production/shifts" element={<ShiftsPage />} />
                                     <Route path="/production/shift-production" element={<ShiftProductionEntryPage />} />
                                     <Route path="/production/live-monitor" element={<LiveMonitorPage />} />
@@ -141,7 +148,10 @@ export default function App() {
                                         query string that MUST survive the hop, which is
                                         why this is a component and not the plain
                                         <Navigate> used for Work Centers above. */}
-                                    <Route path="/production/standards" element={<ProductStandardsRedirect />} />
+                                    <Route
+                                        path="/production/standards"
+                                        element={<ProductionConfigurationRedirect tab="products" />}
+                                    />
                                     {/* The central factory day bin (a warehouse). The
                                         per-machine bag-level bin bay below it is the
                                         optional detail, not the main path. */}
@@ -215,10 +225,30 @@ export default function App() {
 }
 
 /**
- * The retired Product Standards URL, kept alive with its query string intact.
+ * Where a retired configuration URL lands, with its query string intact.
  *
- * A plain <Navigate to="…?tab=products"> would have been shorter and wrong.
- * Two real callers send a user to /production/standards carrying state:
+ * Exported and pure so the contract is testable without a router: given the
+ * incoming `search` and a target tab, this is the URL the reader ends up on.
+ *
+ * `set`, not `append`: an incoming `?tab=` is OVERWRITTEN, never duplicated.
+ * That is the case that actually bites — /production/molds?tab=products is a
+ * link somebody can plausibly hand-edit or copy out of a stale note, and a URL
+ * carrying two `tab` values resolves to whichever URLSearchParams reads first,
+ * which is not a thing to leave to luck.
+ */
+export function productionConfigurationTarget(search: string, tab: string): string {
+    const params = new URLSearchParams(search);
+    params.set('tab', tab);
+
+    return `/production/configuration?${params.toString()}`;
+}
+
+/**
+ * A retired configuration URL, kept alive with its query string intact.
+ *
+ * A plain <Navigate to="…?tab=x"> would have been shorter and wrong for
+ * /production/standards, which is where this started. Two real callers send a
+ * user to /production/standards carrying state:
  *
  *  - a blocked Start Batch (startBatchResume's `phase=configure` params),
  *    which is how a supervisor gets back to the batch they were starting;
@@ -229,11 +259,14 @@ export default function App() {
  * on a full, ready-filtered table with no way back to their batch, which is
  * worse than an error. So the incoming search is preserved and `tab` is
  * merged in on top of it.
+ *
+ * /production/scrap-reasons and /production/molds have no such caller today.
+ * They use the same component anyway: the cost is nothing, and the failure it
+ * prevents is silent. /production/work-centers stays a bare <Navigate> — it is
+ * pinned as a redirect by App.routes.test.tsx and has no state to carry.
  */
-function ProductStandardsRedirect() {
+function ProductionConfigurationRedirect({ tab }: { tab: string }) {
     const { search } = useLocation();
-    const params = new URLSearchParams(search);
-    params.set('tab', 'products');
 
-    return <Navigate to={`/production/configuration?${params.toString()}`} replace />;
+    return <Navigate to={productionConfigurationTarget(search, tab)} replace />;
 }

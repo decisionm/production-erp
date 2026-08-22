@@ -23,7 +23,9 @@ import { useSearchParams } from 'react-router-dom';
 import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/configuration';
 import { listAllWarehouses } from '@/features/inventory/api';
 import PackingMaterialsTab from '@/features/production/components/PackingMaterialsTab';
+import MoldsPage from '@/features/production/pages/MoldsPage';
 import ProductStandardsPage from '@/features/production/pages/ProductStandardsPage';
+import ScrapReasonsPage from '@/features/production/pages/ScrapReasonsPage';
 import { hasManageAccess } from '@/features/auth/permissions';
 import { showApiError } from '@/lib/showApiError';
 import { useAuthStore } from '@/features/auth/store';
@@ -58,19 +60,61 @@ import type { DowntimeReason, ImportResult, WorkCenter } from '@/features/produc
  * against exactly the same endpoints and the same permissions. Only the door
  * changed — /production/standards still resolves, as a redirect that keeps its
  * query string (see App.tsx).
+ *
+ * Scrap Reasons and Molds joined on the same terms: both were Production
+ * menu entries of their own, and both are masters the Shift Floor selects
+ * from — a scrap reason on a rejection line, a mould on a mould change — so
+ * they sit with the other masters. Same components, same endpoints, same
+ * permissions; the menu lines went, the screens did not.
  */
 
 /**
- * Tab keys, in tab order. `?tab=` accepts exactly these; anything else lands
- * on the default.
+ * The tabs, in tab order. `?tab=` accepts exactly these keys; anything else
+ * lands on the default.
  *
- * `products` is the default because it answers the question the factory
- * actually asks this page ("can this product run, and if not, what is
- * missing?"). `machines` is still addressable by name, which is what the
- * retired /production/work-centers URL redirects to.
+ * WHY EACH ONE SITS WHERE IT DOES, so the next person to add a tab has a rule
+ * rather than a list: the product half first, then the machine half, then the
+ * consumable/reason masters the floor picks from, then the factory-wide rules,
+ * then the bulk door in.
+ *
+ *  - `molds` follows `machines` because a mould is what gets mounted INTO one;
+ *    reading the two apart is what made the old separate menu entry confusing.
+ *  - `scrap` follows `downtime` because they are the same kind of thing — the
+ *    two reason-code lists the Shift Floor picks from — and a supervisor
+ *    looking for one is as likely to be looking for the other.
+ *
+ * Each entry renders the SAME component the standalone screen rendered, with
+ * no wrapper and no added gate: `machines` is the only tab that checks
+ * `machine-master`, and it checks it inside itself exactly as before.
+ *
+ * `render` rather than a prebuilt element so the children are constructed per
+ * render, as they were when this list was inline.
  */
-const TAB_KEYS = ['products', 'machines', 'packing', 'downtime', 'settings', 'import'] as const;
-type TabKey = (typeof TAB_KEYS)[number];
+export const PRODUCTION_CONFIG_TABS = [
+    { key: 'products', label: 'Product Standards', render: () => <ProductStandardsPage embedded /> },
+    { key: 'machines', label: 'Machines & Capabilities', render: () => <MachinesTab /> },
+    { key: 'molds', label: 'Molds', render: () => <MoldsPage embedded /> },
+    // The packing-material master's own screen. Until it existed the only
+    // control over "which Tally item is this spec" was the completion
+    // drawer's per-batch picker, which saves nothing — a wrong mapping was
+    // visible on every voucher and correctable on none.
+    { key: 'packing', label: 'Packing Materials', render: () => <PackingMaterialsTab /> },
+    { key: 'downtime', label: 'Downtime Reasons', render: () => <DowntimeReasonsTab /> },
+    { key: 'scrap', label: 'Scrap Reasons', render: () => <ScrapReasonsPage embedded /> },
+    { key: 'settings', label: 'Factory Rules', render: () => <SettingsTab /> },
+    { key: 'import', label: 'Import from Workbook', render: () => <ImportTab /> },
+] as const;
+
+const TAB_KEYS: readonly TabKey[] = PRODUCTION_CONFIG_TABS.map((tab) => tab.key);
+type TabKey = (typeof PRODUCTION_CONFIG_TABS)[number]['key'];
+
+/**
+ * A LITERAL, deliberately not `TAB_KEYS[0]`. `products` is the default because
+ * it answers the question the factory actually asks this page ("can this
+ * product run, and if not, what is missing?") — not because it happens to be
+ * listed first. Deriving it would silently move the landing tab the day
+ * somebody reorders the list above.
+ */
 const DEFAULT_TAB: TabKey = 'products';
 
 export default function ProductionConfigurationPage() {
@@ -87,9 +131,9 @@ export default function ProductionConfigurationPage() {
             <Typography.Title level={3}>Production Configuration</Typography.Title>
             <Typography.Paragraph type="secondary" style={{ maxWidth: 820 }}>
                 Everything the factory is set up with, in one place. Products and what they run to, the
-                machines and what each one can do, the downtime reasons the floor picks from, and the
-                factory-wide rules. Nothing here moves stock or posts to Tally — it only decides what the
-                shop floor is allowed to do.
+                machines and what each one can do, the moulds that mount into them, the downtime and
+                scrap reasons the floor picks from, and the factory-wide rules. Nothing here moves stock
+                or posts to Tally — it only decides what the shop floor is allowed to do.
             </Typography.Paragraph>
 
             <Tabs
@@ -101,19 +145,11 @@ export default function ProductionConfigurationPage() {
                     // cost one Back press each to leave the page.
                     setSearchParams(next, { replace: true });
                 }}
-                items={[
-                    { key: 'products', label: 'Product Standards', children: <ProductStandardsPage embedded /> },
-                    { key: 'machines', label: 'Machines & Capabilities', children: <MachinesTab /> },
-                    // The packing-material master's own screen. Until it
-                    // existed the only control over "which Tally item is this
-                    // spec" was the completion drawer's per-batch picker,
-                    // which saves nothing — a wrong mapping was visible on
-                    // every voucher and correctable on none.
-                    { key: 'packing', label: 'Packing Materials', children: <PackingMaterialsTab /> },
-                    { key: 'downtime', label: 'Downtime Reasons', children: <DowntimeReasonsTab /> },
-                    { key: 'settings', label: 'Factory Rules', children: <SettingsTab /> },
-                    { key: 'import', label: 'Import from Workbook', children: <ImportTab /> },
-                ]}
+                items={PRODUCTION_CONFIG_TABS.map((tab) => ({
+                    key: tab.key,
+                    label: tab.label,
+                    children: tab.render(),
+                }))}
             />
         </div>
     );

@@ -88,16 +88,23 @@ class PackagingIdentityOnlyTest extends TestCase
     {
         $user = $this->actingAsProduction();
 
-        $this->patchJson($this->identityUrl(), ['item_id' => $this->tallyIdentity->id])
+        // Stated with the standard's OWN product. What this test is about is
+        // that an identity write touches no count; WHICH identity may be
+        // written is DEC-20260821-001's question, and since that record a
+        // NEW identity naming a different item is refused (see
+        // SeparateProductForDistinctPackingTest). $this->tallyIdentity is
+        // exactly such a different item, so it is used below only where the
+        // route is expected to refuse.
+        $this->patchJson($this->identityUrl(), ['item_id' => $this->bottle->id])
             ->assertOk()
             ->assertJsonPath('data.id', $this->inconsistentPouch->id)
-            ->assertJsonPath('data.tally_item.id', $this->tallyIdentity->id)
+            ->assertJsonPath('data.tally_item.id', $this->bottle->id)
             ->assertJsonPath('data.nos_per_pouch', 105)
             ->assertJsonPath('data.pouches_per_box', 5)
             ->assertJsonPath('data.nos_per_box', 520);
 
         $row = $this->inconsistentPouch->fresh();
-        $this->assertSame($this->tallyIdentity->id, (int) $row->item_id);
+        $this->assertSame($this->bottle->id, (int) $row->item_id);
         $this->assertSame(520, (int) $row->nos_per_box, 'the sheet\'s 520 must survive an identity-only link');
         $this->assertSame(105, (int) $row->nos_per_pouch);
         $this->assertSame(5, (int) $row->pouches_per_box);
@@ -127,7 +134,7 @@ class PackagingIdentityOnlyTest extends TestCase
         // A client that sends counts to the identity route is ignored on the
         // counts, not obeyed — the route's contract is identity only.
         $this->patchJson($this->identityUrl(), [
-            'item_id' => $this->tallyIdentity->id,
+            'item_id' => $this->bottle->id,
             'nos_per_pouch' => 104, 'pouches_per_box' => 5, 'nos_per_box' => 999, 'mode' => 'tray',
         ])->assertOk();
 
@@ -228,11 +235,11 @@ class PackagingIdentityOnlyTest extends TestCase
         // the default flag) is edited: the mode and the same inner counts.
         $this->putJson("/api/v1/production/standards/{$this->standard->id}/packagings/{$this->inconsistentPouch->id}", [
             'mode' => 'pouch', 'nos_per_pouch' => 105, 'pouches_per_box' => 5,
-            'item_id' => $this->tallyIdentity->id,
+            'item_id' => $this->bottle->id,
         ])
             ->assertOk()
             ->assertJsonPath('data.nos_per_box', 520)
-            ->assertJsonPath('data.tally_item.id', $this->tallyIdentity->id);
+            ->assertJsonPath('data.tally_item.id', $this->bottle->id);
 
         $this->assertSame(520, (int) $this->inconsistentPouch->fresh()->nos_per_box);
     }

@@ -15,6 +15,12 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     // The Tally item THIS packing's production posts as (DEC-20260810-003).
     // Null = no identity of its own — the run uses the product's item and
     // the screen says so; an unknown identity stays editable, never guessed.
+    // READ, still exactly as above: this column is how every row already
+    // written, and every voucher already posted, is explained. WRITE, since
+    // DEC-20260821-001: a NEW value naming a different item from the
+    // standard's product is refused, because that packing is a separate
+    // finished product now, not a second identity under this one. Stored
+    // rows are left exactly as they are.
     'item_id', 'item_set_by', 'item_set_at',
 ])]
 class ProductionStandardPackaging extends Model
@@ -74,6 +80,34 @@ class ProductionStandardPackaging extends Model
     public function tallyItem(): BelongsTo
     {
         return $this->belongsTo(Item::class, 'item_id');
+    }
+
+    /**
+     * THE SAME RELATION, ARCHIVED ROWS INCLUDED — a READ for surfaces whose
+     * job is to explain a stored `item_id`, never one that acts on it.
+     *
+     * `tallyItem` above deliberately hides a soft-deleted item, and stays
+     * that way: every surface that PROPOSES an identity, resolves what a run
+     * will post as, or decides whether a voucher can name a row must see a
+     * retired item as absent. `identityFor()` is built on it for exactly that
+     * reason and is not touched.
+     *
+     * But `item_id` outlives the item row. Item soft-deletes, and archiving
+     * one does not blank the packagings pointing at it — so a packing can
+     * carry a perfectly real, stored identity whose item row is retired. A
+     * screen that reports THAT column as a finding (the configuration
+     * review's separate-product row) has to be able to name what the column
+     * says; reading the hiding relation there prints "no Tally identity" over
+     * an identity that is plainly set, which is simply false.
+     *
+     * Narrow on purpose, and this is the whole reason it is a second relation
+     * rather than a `withTrashed()` on the first: nothing that decides
+     * anything may reach a retired item through it. It is eager-loadable, so
+     * a list reads it in one query beside `tallyItem` rather than one per row.
+     */
+    public function tallyItemIncludingArchived(): BelongsTo
+    {
+        return $this->belongsTo(Item::class, 'item_id')->withTrashed();
     }
 
     /**
