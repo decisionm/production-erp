@@ -97,7 +97,11 @@ import {
     machineFloorState,
     type MachineFloorState,
 } from '@/features/production/shiftFloorSummary';
-import { packagingForCompletion, SEPARATE_PRODUCT_REQUIRED_DETAIL } from '@/features/production/productStandardsConfig';
+import {
+    packagingForCompletion,
+    SEPARATE_PRODUCT_REQUIRED_DETAIL,
+    SEPARATE_PRODUCT_START_REFUSED,
+} from '@/features/production/productStandardsConfig';
 import { cavityPrefill } from '@/features/production/startBatchCavities';
 import { chosenStartVariant, mouldLabel, startBatchChoices, startBatchSeparateProductConflict, startBatchTallyIdentity } from '@/features/production/startBatchChoices';
 import { expectedOutput, netRunningHours } from '@/features/production/expectedOutput';
@@ -6422,7 +6426,7 @@ export default function ShiftProductionEntryPage() {
                                         showIcon
                                         style={{ marginBottom: 16 }}
                                         message="This packing belongs under a separate product"
-                                        description={SEPARATE_PRODUCT_REQUIRED_DETAIL}
+                                        description={`${SEPARATE_PRODUCT_REQUIRED_DETAIL} ${SEPARATE_PRODUCT_START_REFUSED}`}
                                     />
                                 )}
                                 {choices.askPacking && chosen && (

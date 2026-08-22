@@ -57,6 +57,39 @@ class ProductionStandard extends Model
         return $this->belongsTo(Item::class);
     }
 
+    /**
+     * THE SAME RELATION, ARCHIVED ROWS INCLUDED — a READ for the one surface
+     * whose job is to explain a stored `item_id`, never one that acts on it.
+     *
+     * The twin of `ProductionStandardPackaging::tallyItemIncludingArchived`,
+     * added for the same defect at the other end of the same relation, and
+     * deliberately as narrow.
+     *
+     * `item` above hides a soft-deleted product and STAYS that way. It feeds
+     * `identityFor()`'s product fallback for the older configuration-review
+     * lists, the standards workspace, the duplicate-variant exception and the
+     * packaging identity writers — everything that proposes an identity or
+     * resolves what a run will post as must keep seeing a retired product as
+     * absent. None of that is touched.
+     *
+     * But `production_standards.item_id` outlives the item row: `Item`
+     * soft-deletes, and archiving one does not blank the standards pointing
+     * at it. The separate-product review row judges THAT COLUMN — via
+     * `identityConflictsWithProduct`, which reads `item_id` directly — so a
+     * standard whose product has since been retired still raises the row,
+     * correctly. Naming the product through the hiding relation there printed
+     * "under the product no Tally identity" over a product that is plainly
+     * recorded, which is false in exactly the way the packaging end already
+     * was.
+     *
+     * Eager-loadable, so the review reads it in one query beside `item`
+     * rather than one per standard.
+     */
+    public function itemIncludingArchived(): BelongsTo
+    {
+        return $this->belongsTo(Item::class, 'item_id')->withTrashed();
+    }
+
     public function packagings(): HasMany
     {
         return $this->hasMany(ProductionStandardPackaging::class);
