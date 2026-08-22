@@ -565,8 +565,12 @@ exists to prevent. The correct reading:
   DEC-20260821-001 rewrites nothing already posted.
 - **Correctly identified 520 pouch production may continue** under its own
   product identity, unaffected by any of this.
-- **Corrected 2026-08-23: a forward guard now exists in code, and it does NOT
-  reach this case.** The separate-product work refuses, at Start Batch, a
+- **Corrected 2026-08-23: a forward guard exists on the product-split branch
+  (PRs #10–#13, unmerged), and it does NOT reach this case.** This entry has
+  been burned by a "now exists" once already — see the 2026-08-11 correction
+  above — so the guard is named against the branch that carries it, not
+  against a date. On `main`, and on live, there is no such guard at all.
+  Where the branch does run, it refuses, at Start Batch, a
   packing whose OWN Tally identity names a different stock item from the
   product being run, and lists the same pairs in the configuration review.
   Two limits keep the 490 tray outside it. Neither is a defect — both are
@@ -577,8 +581,10 @@ exists to prevent. The correct reading:
     raises nothing and still resolves to the product's own item: a new 490
     tray batch continues to fall back to the 520 pouch identity — the exact
     outcome this entry says must not happen. The configuration review does not
-    surface these rows either; their resolved identity is the pouch product's,
-    which is present and carries a GUID, so it does not read as missing.
+    surface these rows on the identity gap either: `packaging_no_identity`
+    keys on the RESOLVED identity, which for a NULL row is the product's own
+    item — so wherever that item carries a Tally GUID, nothing reads as
+    missing. (Whether it does is a live fact, not counted here.)
   - **The guard is forward-only, at Start Batch.** It deliberately does not
     fire at completion or amendment, so an entry recorded before the rule
     stays completable. Of "selected, completed or queued" above, only
