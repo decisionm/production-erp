@@ -565,16 +565,34 @@ exists to prevent. The correct reading:
   DEC-20260821-001 rewrites nothing already posted.
 - **Correctly identified 520 pouch production may continue** under its own
   product identity, unaffected by any of this.
-- **This documentation decision does not itself change running code.** The
-  shipped application enforces no such block today — the five already-configured
-  490 packing rows above remain exactly as they are, Tally identity NULL. A
-  separate, guarded code PR is still required to make the shipped application
-  refuse a new 490 tray batch under the 520 pouch identity; neither this entry
-  nor DEC-20260821-001 has done that.
+- **Corrected 2026-08-23: a forward guard now exists in code, and it does NOT
+  reach this case.** The separate-product work refuses, at Start Batch, a
+  packing whose OWN Tally identity names a different stock item from the
+  product being run, and lists the same pairs in the configuration review.
+  Two limits keep the 490 tray outside it. Neither is a defect — both are
+  deliberate — but neither may be read as the 490 being protected:
+  - **The five 490 packing rows above carry Tally identity NULL.** The
+    predicate is a DISTINCT, non-null identity
+    (`ProductVariantService::identityConflictsWithProduct`), so a NULL row
+    raises nothing and still resolves to the product's own item: a new 490
+    tray batch continues to fall back to the 520 pouch identity — the exact
+    outcome this entry says must not happen. The configuration review does not
+    surface these rows either; their resolved identity is the pouch product's,
+    which is present and carries a GUID, so it does not read as missing.
+  - **The guard is forward-only, at Start Batch.** It deliberately does not
+    fire at completion or amendment, so an entry recorded before the rule
+    stays completable. Of "selected, completed or queued" above, only
+    selection is guarded, and only for the distinct-identity shape.
+- **So the block this entry describes is not in force.** Nothing shipped
+  refuses a new 490 tray batch under the 520 pouch identity, and the five
+  packing rows remain exactly as they are, Tally identity NULL. Closing that
+  needs the two identity answers above first: a guard cannot be keyed to a
+  Tally stock item nobody has named, and no agent may name one.
 
 *Open since 2026-08-10; evidence corrected and extended 2026-08-11;
 design half resolved by DEC-20260821-001 on 2026-08-21, the two identity
-questions above still open; the posting block clarified 2026-08-21.*
+questions above still open; the posting block clarified 2026-08-21; the
+shipped guard's actual reach corrected 2026-08-23.*
 
 ## Q34 · HRMS/payroll policy — the seeded defaults are conventions, not the factory's rules
 
