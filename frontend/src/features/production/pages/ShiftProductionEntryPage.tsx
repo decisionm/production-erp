@@ -9069,7 +9069,7 @@ export default function ShiftProductionEntryPage() {
                     <Form.Item
                         label="Mold Going In"
                         validateStatus={moldChangeForm.formState.errors.changed_to_mold_id ? 'error' : ''}
-                        help={moldChangeForm.formState.errors.changed_to_mold_id?.message ?? (moldOptions.length === 0 ? 'No active molds — add one on the Molds page.' : undefined)}
+                        help={moldChangeForm.formState.errors.changed_to_mold_id?.message ?? (moldOptions.length === 0 ? 'No active molds — add one on Production Configuration → Molds.' : undefined)}
                     >
                         <Controller
                             name="changed_to_mold_id"

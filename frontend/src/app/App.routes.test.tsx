@@ -2,7 +2,7 @@ import { Children, isValidElement } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import { Navigate, Route } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
-import App from './App';
+import App, { productionConfigurationTarget } from './App';
 
 /**
  * THE ROUTE TABLE IS A CONTRACT (Phase 7 regression smoke, P7-05).
@@ -110,13 +110,32 @@ const ROUTE_TABLE = [
  * The routes whose element is a bare <Navigate>, not a page: the retired
  * Work Centers URL and the catch-all. Named so a redirect quietly becoming
  * a page (or a page quietly becoming a redirect) is a diff someone reads.
- * /production/standards is NOT here on purpose — its redirect is a
- * component (ProductStandardsRedirect) because it must carry the incoming
- * query string, so it reads as a page to this check.
+ *
+ * THREE retired URLs are deliberately NOT here — /production/standards,
+ * /production/scrap-reasons and /production/molds. Each redirects through a
+ * COMPONENT (ProductionConfigurationRedirect) because it must carry the
+ * incoming query string, so all three read as a page to this check. Do not
+ * "fix" that by adding them: the check below would go red. What they
+ * actually redirect to is pinned separately, in "the retired production
+ * configuration URLs".
  */
 const REDIRECT_ROUTES = ['/production/work-centers', '*'];
 
-type RouteProps = { path?: string; element?: ReactNode; children?: ReactNode };
+/**
+ * The retired URLs that now land on a Production Configuration tab, and the
+ * tab each one must land on.
+ *
+ * Wired-up-ness is the thing worth pinning here. `productionConfigurationTarget`
+ * being correct proves nothing about App.tsx passing it the right tab — the
+ * pure function is just as happy sending /production/molds to the scrap tab.
+ */
+const CONFIG_REDIRECTS: { path: string; tab: string }[] = [
+    { path: '/production/scrap-reasons', tab: 'scrap' },
+    { path: '/production/molds', tab: 'molds' },
+    { path: '/production/standards', tab: 'products' },
+];
+
+type RouteProps = { path?: string; element?: ReactNode; children?: ReactNode; tab?: string };
 
 type FoundRoute = { path: string; element: ReactNode };
 
@@ -170,6 +189,70 @@ describe('the route table', () => {
             .map((route) => `${route.path} → ${elementKind(route.element)}`);
 
         expect(wrong).toEqual([]);
+    });
+});
+
+/**
+ * THE RETIRED PRODUCTION CONFIGURATION URLs.
+ *
+ * Three menu entries became three tabs. The URLs outlive the menu entries
+ * because bookmarks and printed wall notes still point at them, and because
+ * /production/standards in particular has two in-app deep links carrying
+ * state (the blocked-Start-Batch return trip, the Tally failure links; see
+ * App.tsx). No such caller is known for /production/scrap-reasons or
+ * /production/molds — they take the same redirect anyway, because a redirect
+ * that drops a query string is worse than a 404: it lands the reader on a
+ * plausible-looking screen with their context silently gone.
+ *
+ * Both halves are pinned: the target URL the redirect computes, and the fact
+ * that App.tsx hands each path the right tab.
+ */
+describe('the retired production configuration URLs', () => {
+    const routes: FoundRoute[] = [];
+    collectRoutes(App(), routes);
+
+    it.each(CONFIG_REDIRECTS)('routes $path to the $tab tab', ({ path, tab }) => {
+        const route = routes.find((r) => r.path === path);
+        expect(route, `${path} is not in the route table`).toBeDefined();
+        const element = route!.element;
+        expect(isValidElement(element)).toBe(true);
+        expect((element as ReactElement<RouteProps>).props.tab).toBe(tab);
+    });
+
+    it.each(CONFIG_REDIRECTS)('carries an existing query string to $tab', ({ tab }) => {
+        const target = productionConfigurationTarget('?view=incomplete&missing_tally=1', tab);
+        const params = new URLSearchParams(target.split('?')[1]);
+
+        expect(target.split('?')[0]).toBe('/production/configuration');
+        expect(params.get('view')).toBe('incomplete');
+        expect(params.get('missing_tally')).toBe('1');
+        expect(params.get('tab')).toBe(tab);
+    });
+
+    it.each(CONFIG_REDIRECTS)('overwrites an incoming tab rather than duplicating it, for $tab', ({ tab }) => {
+        const target = productionConfigurationTarget('?tab=settings&keep=me', tab);
+        const params = new URLSearchParams(target.split('?')[1]);
+
+        // getAll, not get: two `tab` values would still read correctly through
+        // `get` if the target happened to come first, and that is exactly the
+        // bug this pins.
+        expect(params.getAll('tab')).toEqual([tab]);
+        expect(params.get('keep')).toBe('me');
+    });
+
+    it('preserves the blocked Start Batch resume parameters intact', () => {
+        const resume = '?phase=configure&resume_item_id=42&resume_work_center_id=7';
+        const target = productionConfigurationTarget(resume, 'products');
+        const params = new URLSearchParams(target.split('?')[1]);
+
+        expect(params.get('phase')).toBe('configure');
+        expect(params.get('resume_item_id')).toBe('42');
+        expect(params.get('resume_work_center_id')).toBe('7');
+        expect(params.get('tab')).toBe('products');
+    });
+
+    it('still produces a tab when nothing came in', () => {
+        expect(productionConfigurationTarget('', 'molds')).toBe('/production/configuration?tab=molds');
     });
 });
 
