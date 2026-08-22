@@ -66,6 +66,45 @@ class CustomerService
      * customer master is not the authoritative book and archiving one mutates
      * nothing there (DEC-20260817-002 rule 4).
      *
+     * AND ONE OF THE FIVE COUNTS THE PRESENT WHERE THE RULE ASKS ABOUT THE
+     * PAST. DEC-20260817-002 §5: "'ever used' means historical references ...
+     * not merely current foreign keys", and where past use cannot be safely
+     * proven the system REFUSES. Four of these columns are write-once in
+     * practice, so their current value IS their history:
+     *
+     *   sales_orders / invoices     documents; no update path sets customer_id
+     *   quotations.customer_id      derived from the opportunity at creation
+     *                               (QuotationService) and never re-set
+     *   leads.converted_customer_id written once, at conversion
+     *
+     * `opportunities.customer_id` is not. Four facts, each checkable:
+     *   * UpdateOpportunityRequest allows `customer_id` on update;
+     *   * OpportunityService::update() is a plain `$opportunity->update()`;
+     *   * Opportunity uses no LogsActivity trait and keeps no previous value;
+     *   * the route is index/store/update only — an opportunity row is never
+     *     destroyed, and nothing cascades into the table (lead_id and
+     *     assigned_to are nullOnDelete, customer_id is restrictOnDelete).
+     *
+     * Put together: every opportunity that has EVER existed is still a row, but
+     * which customer each one pointed at BEFORE is recorded nowhere. So a count
+     * of zero today does not mean zero ever — an opportunity reassigned away
+     * from this customer leaves no trace at all — and this is the exact case
+     * §5 names. The reassignment check below returns the fail-closed verdict
+     * (null) whenever any opportunity exists, and 0 only when the table is
+     * empty, which is the one state in which "never assigned to anyone" is
+     * provable rather than assumed.
+     *
+     * It is deliberately NOT a guess in the other direction either. The
+     * honest narrow answer is available and cheap, so nothing here reasons
+     * from `updated_at` or from what "probably" happened: a second-precision
+     * timestamp comparison would fail OPEN on a same-second edit, and failing
+     * open is the one thing §5 forbids.
+     *
+     * THE FIX THAT WOULD REMOVE THIS: record the reassignment. Once an
+     * opportunity's customer changes are auditable, this check becomes a real
+     * count over that history and unused customers become deletable again.
+     * That is a factory-visible change to the CRM, so it is not made here.
+     *
      * @return list<DependencyCheck>
      */
     protected function dependencyChecks(): array
@@ -77,6 +116,16 @@ class CustomerService
                 ->label('invoice'),
             DependencyCheck::table('opportunities', 'customer_id')
                 ->label('opportunity'),
+            DependencyCheck::callable(
+                // Null = "cannot prove this customer was never on an
+                // opportunity", which blocks exactly like a positive count.
+                // Zero only when no opportunity has ever existed. Reached
+                // through the record's own connection, like every ::table()
+                // check above, rather than through CRM's Eloquent model —
+                // modules do not touch each other's models (CLAUDE.md).
+                fn (Customer $customer): ?int => $customer->getConnection()->table('opportunities')->exists() ? null : 0,
+                'opportunity_reassignment',
+            )->label('an opportunity later reassigned to another customer'),
             DependencyCheck::table('quotations', 'customer_id')
                 ->label('quotation'),
             DependencyCheck::table('leads', 'converted_customer_id')

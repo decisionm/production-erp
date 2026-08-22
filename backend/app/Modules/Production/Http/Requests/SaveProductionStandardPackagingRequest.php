@@ -3,6 +3,8 @@
 namespace App\Modules\Production\Http\Requests;
 
 use App\Modules\Inventory\Models\Item;
+use App\Modules\Production\Http\Requests\Concerns\RefusesSeparateProductIdentity;
+use App\Modules\Production\Models\ProductionStandard;
 use App\Modules\Production\Models\ProductionStandardPackaging;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -10,7 +12,12 @@ use Illuminate\Validation\Validator;
 
 /**
  * Add or edit one packaging variant of a product standard, Tally identity
- * included (DEC-20260810-003).
+ * included (the mechanism from DEC-20260810-003).
+ *
+ * THIS ROUTE IS THE SECOND IDENTITY WRITER, and carries the same
+ * DEC-20260821-001 refusal as PATCH .../identity — a rule enforced on only
+ * one of the two would be bypassable by sending the full save instead. See
+ * RefusesSeparateProductIdentity.
  *
  * The counts follow the standards page's own rule: a packing mode is stated
  * with BOTH of its counts or not at all — a half-stated mode is someone who
@@ -25,6 +32,8 @@ use Illuminate\Validation\Validator;
  */
 class SaveProductionStandardPackagingRequest extends FormRequest
 {
+    use RefusesSeparateProductIdentity;
+
     public function authorize(): bool
     {
         // Route-group middleware ('module:production') already requires
@@ -100,6 +109,24 @@ class SaveProductionStandardPackagingRequest extends FormRequest
                 $validator->errors()->add(
                     'item_id',
                     "\"{$item->name}\" is a local-only fixture; Tally cannot accept it as a posted identity.",
+                );
+            }
+
+            // DEC-20260821-001. Judged only when the payload actually
+            // carries an identity: `item_id` is `sometimes`, and a
+            // counts-only edit that omits the key leaves the stored value
+            // untouched (ProductionStandardPackagingService::attributes
+            // writes item_id only when the key is present), so an omitted
+            // key is not an assignment and must not be read as one.
+            if ($this->has('item_id')) {
+                $standard = $this->route('standard');
+                $packaging = $this->route('packaging');
+
+                $this->refuseSeparateProductIdentity(
+                    $validator,
+                    $standard instanceof ProductionStandard ? $standard : null,
+                    $packaging instanceof ProductionStandardPackaging ? $packaging : null,
+                    $this->input('item_id'),
                 );
             }
         });

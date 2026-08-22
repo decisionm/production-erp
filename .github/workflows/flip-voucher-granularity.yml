@@ -92,26 +92,42 @@ jobs:
             *)     VALUE='shift' ;;
           esac
 
-          PHP='\$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php)'
+          # WHICH SHELL EVALUATES THIS IS THE WHOLE POINT. scripts/pick-php.sh
+          # exists only on the SERVER, so the substitution has to run there,
+          # after the `cd` below — which means the runner must send the six
+          # characters `$(bash ...` as text and not run them itself.
+          #
+          # `\$` does that inside DOUBLE quotes: the runner's shell turns it
+          # into a bare `$`, the server receives `PHP=$(bash ...)` and resolves
+          # it. Inside SINGLE quotes the backslash is not an escape, it is a
+          # character — the server would receive a literal `\$(bash ...)`,
+          # where `\$` is a plain dollar sign followed by an unexpected `(`,
+          # i.e. a shell SYNTAX ERROR rather than a path to PHP. That is what
+          # this line used to be. Every other server-touching workflow uses the
+          # double-quoted form (deploy.yml's maintenance step is the closest
+          # twin) — keep them the same.
+          RESOLVE_PHP="PHP=\$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php)"
 
           if [ "$WRITE_RAW" = "true" ]; then
-            REMOTE="cp .env .env.bak-granularity-flip \
+            REMOTE="$RESOLVE_PHP \
+              && cp .env .env.bak-granularity-flip \
               && if grep -q '^TALLY_VOUCHER_GRANULARITY=' .env; then \
                    sed -i 's/^TALLY_VOUCHER_GRANULARITY=.*/TALLY_VOUCHER_GRANULARITY=$VALUE/' .env; \
                  else \
                    printf '\nTALLY_VOUCHER_GRANULARITY=$VALUE\n' >> .env; \
                  fi \
-              && $PHP artisan optimize:clear \
-              && $PHP artisan config:cache \
-              && $PHP artisan route:cache \
-              && $PHP artisan view:cache \
+              && \$PHP artisan optimize:clear \
+              && \$PHP artisan config:cache \
+              && \$PHP artisan route:cache \
+              && \$PHP artisan view:cache \
               && echo '--- effective config ---' \
-              && $PHP artisan config:show tally-sync.voucher_granularity"
+              && \$PHP artisan config:show tally-sync.voucher_granularity"
           else
-            REMOTE="echo '--- .env line (dry run, nothing written) ---' \
+            REMOTE="$RESOLVE_PHP \
+              && echo '--- .env line (dry run, nothing written) ---' \
               && (grep '^TALLY_VOUCHER_GRANULARITY=' .env || echo 'TALLY_VOUCHER_GRANULARITY absent (default: shift)') \
               && echo '--- effective config ---' \
-              && $PHP artisan config:show tally-sync.voucher_granularity"
+              && \$PHP artisan config:show tally-sync.voucher_granularity"
           fi
 
           ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \

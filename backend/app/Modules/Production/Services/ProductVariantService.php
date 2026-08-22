@@ -6,6 +6,7 @@ use App\Modules\Inventory\Models\Item;
 use App\Modules\Production\Models\ProductionStandard;
 use App\Modules\Production\Models\ProductionStandardPackaging;
 use App\Modules\TallySync\Services\LineMappingResolver;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 
 /**
@@ -95,6 +96,29 @@ class ProductVariantService
         self::MISSING_COUNTS,
         self::MISSING_TALLY_IDENTITY,
     ];
+
+    /**
+     * DEC-20260821-001's refusal, WORDED ONCE — the backend half of the
+     * frontend's SEPARATE_PRODUCT_REQUIRED_DETAIL, and for the same reason
+     * MISSING_VOCABULARY is worded once: a supervisor told one thing on the
+     * floor and another in the office is the failure this module exists to
+     * prevent. Every refusal — Start Batch, the two packaging writers, the
+     * attach endpoint, the importer — states the case in its own first
+     * sentence and then repeats THESE two verbatim.
+     */
+    public const SEPARATE_PRODUCT_REASON = 'A packing that posts as its own Tally stock item is a separate '
+        .'finished product (DEC-20260821-001), not a second identity under this one.';
+
+    /**
+     * What to actually DO, and the reason it starts at Tally rather than at
+     * the Add Item button: a finished item hand-created here carries no Tally
+     * GUID, and an item without a GUID cannot post — so "create a product"
+     * on its own produces a master that looks right and refuses at the
+     * voucher. The real item arrives through the masters pull.
+     */
+    public const SEPARATE_PRODUCT_INSTRUCTION = 'Pull the Tally masters so that stock item is in the catalogue '
+        .'(an item created by hand here carries no Tally GUID and cannot post), create or attach its production '
+        .'standard, then select that product.';
 
     public function __construct(
         private readonly ProductionStandardResolver $resolver,
@@ -382,8 +406,11 @@ class ProductVariantService
 
     /**
      * The item this packing WILL post as: its own Tally identity when it has
-     * one, else the product's — the same rule completion freezes into
-     * finished_item_id (DEC-20260810-003). Null when neither exists.
+     * one, else the product's. This is a READ, and it is unchanged: it is
+     * still the rule completion freezes into finished_item_id, and it is
+     * still how every already-posted voucher is explained (DEC-20260810-003,
+     * superseded for NEW writes by DEC-20260821-001 — see
+     * identityConflictsWithProduct() below). Null when neither exists.
      */
     public function identityFor(ProductionStandardPackaging $packaging, ?Item $product): ?Item
     {
@@ -408,6 +435,136 @@ class ProductVariantService
         return $item !== null
             && $item->tally_stock_item_guid !== null
             && ! $item->isLocalFixture();
+    }
+
+    /**
+     * THE ONE JUDGMENT DEC-20260821-001 ADDS: does this packing's OWN Tally
+     * identity name a DIFFERENT item from the product it is packed under?
+     *
+     * Where Tally carries separate stock items for a product's pouch and tray
+     * packings, the ERP must hold TWO finished-product masters, each mapped
+     * one-to-one to its own Tally stock item — not two packaging identities
+     * under one product. DEC-20260810-003 authorised the second shape; this
+     * record withdraws that authority for anything written from now on.
+     *
+     * The two compliant answers, both of which this returns false for and
+     * both of which must keep working:
+     *
+     *  - `$packagingItemId === null` — INHERITANCE. The packing posts as its
+     *    product (identityFor() above). This is the majority of live rows and
+     *    a guard that fired on it would stop the floor.
+     *  - the two ids are EQUAL — one product, one Tally item, stated twice.
+     *
+     * `$productItemId === null` is also false, and deliberately: an
+     * unattached standard (production_standards.item_id is nullable — an
+     * import the matcher could not place) has no product to conflict with,
+     * and its packing's own identity is the only postable identity it has.
+     * Refusing there would block a configuration write on a row that breaks
+     * no rule. On the batch path the product id is never null — the entry's
+     * item_id is required — so nothing is waived there.
+     *
+     * Ids, not models, because the two configuration writers judge an
+     * INCOMING item_id against a standard before any row exists to hold it,
+     * and static because those judges are FormRequests: the rule is pure
+     * arithmetic on two ids and must not drag this service's dependencies
+     * into request validation.
+     *
+     * This says only whether the relation conflicts. Whether a conflicting
+     * value may still be WRITTEN — an existing legacy row re-saved with the
+     * identity it already carries — is the writers' own exemption, not this
+     * predicate's: fold it in here and the Start Batch guard would inherit
+     * it and let a legacy conflicting packing start new batches.
+     */
+    public static function identityConflictsWithProduct(?int $packagingItemId, ?int $productItemId): bool
+    {
+        return $packagingItemId !== null
+            && $productItemId !== null
+            && $packagingItemId !== $productItemId;
+    }
+
+    /**
+     * THE PRODUCT-SIDE MIRROR of the predicate above, and the reason it had
+     * to exist: the same forbidden relation can be built from EITHER end.
+     *
+     * THE COMPOSED RULE, stated plainly because the two halves read as a
+     * contradiction otherwise. The configuration writers deliberately PERMIT
+     * a distinct identity on a packing while its standard is unattached
+     * (`production_standards.item_id` null — an import the matcher could not
+     * place): there is no product to conflict with yet, and refusing there
+     * would block a write that breaks no rule. That permission is precisely
+     * the precondition for the hole. So the other end has to close it: once
+     * a packing carries an identity of its own, the standard may only ever be
+     * attached to THAT identity. You may say it while unattached; you may
+     * then only attach to what you said.
+     *
+     * Returns the first packing that would be contradicted by attaching
+     * `$candidateProductItemId`, or null when the attachment is compliant.
+     *
+     * TRASHED ROWS COUNT. Packagings soft-delete, and Activate re-validates
+     * nothing, so without them archive-B → attach-to-A → activate-B is a
+     * three-step construction of a NEW mismatch. The converse is NOT guarded
+     * and should not be: archiving and re-activating a packing that was
+     * already conflicting under an already-attached standard is maintenance
+     * of a legacy row, not a new write.
+     *
+     * THIS IS A READ THAT A WRITER ACTS ON, so it must run inside the
+     * writer's own transaction, after that writer has taken the FOR UPDATE
+     * on the standard row — the same lock ProductionStandardPackagingService
+     * takes. Called outside one, it answers about a state another request may
+     * already be changing.
+     *
+     * AND IT IS ITSELF A LOCKING READ, which is not belt-and-braces on top
+     * of that. The standard's row lock buys mutual exclusion; it does not
+     * buy this read freshness. Live runs MySQL at the server default
+     * REPEATABLE READ (nothing pins an isolation level), where a plain
+     * SELECT answers from the snapshot the transaction took at its FIRST
+     * read — and a writer reaches this method well after that: the importer
+     * has already indexed the catalogue and matched its variants. A packing
+     * identity another transaction committed in between would be INVISIBLE,
+     * the conflict check would pass on stale rows and the forbidden pair
+     * would commit despite the lock. A locking read reads the latest
+     * committed version, which is the whole reason for the FOR UPDATE here.
+     *
+     * Narrow and in the same order as everything else: scoped to one
+     * standard's packagings, taken after that standard's row lock — the
+     * order ProductionStandardPackagingService already writes in, so there
+     * is no inversion to deadlock on.
+     *
+     * It does NOT carry the legacy no-op exemption. A writer re-stating the
+     * item a standard is ALREADY attached to is maintaining history, not
+     * making a new assignment, and each writer applies that exemption itself
+     * — for the same reason identityConflictsWithProduct() does not fold it
+     * in: a shared predicate that forgave the legacy case would forgive it
+     * everywhere, including where it must not be forgiven.
+     */
+    public static function firstPackagingConflictingWithProduct(
+        ProductionStandard $standard,
+        ?int $candidateProductItemId,
+    ): ?ProductionStandardPackaging {
+        if ($candidateProductItemId === null) {
+            return null;
+        }
+
+        return self::conflictingPackagingQuery($standard, $candidateProductItemId)->first();
+    }
+
+    /**
+     * The query above, in its own method so the lock it carries is a thing a
+     * test can hold and assert — SQLite drops FOR UPDATE, so a lock that
+     * only ever exists mid-statement cannot be pinned any other way.
+     *
+     * @return Builder<ProductionStandardPackaging>
+     */
+    private static function conflictingPackagingQuery(
+        ProductionStandard $standard,
+        int $candidateProductItemId,
+    ): Builder {
+        return ProductionStandardPackaging::withTrashed()
+            ->where('production_standard_id', $standard->getKey())
+            ->whereNotNull('item_id')
+            ->where('item_id', '!=', $candidateProductItemId)
+            ->orderBy('id')
+            ->lockForUpdate();
     }
 
     /**

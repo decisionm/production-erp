@@ -47,6 +47,10 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
     // (DEC-20260810-003), frozen so a later packaging edit cannot rewrite
     // what a completed batch claims it produced. Null = the product's own
     // item — the pre-feature behaviour, byte for byte.
+    // A row here that names a different item from the entry's own item_id
+    // is HISTORY and stays readable, completable and amendable:
+    // DEC-20260821-001 refuses the relation only where a NEW batch is
+    // started, never on a batch already recorded.
     'finished_item_id',
 ])]
 class ShiftProductionEntry extends Model

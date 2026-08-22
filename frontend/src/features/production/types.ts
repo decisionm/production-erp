@@ -2681,7 +2681,18 @@ export interface ProductVariants {
  * union on purpose: a fourth kind added on the server should fail this
  * typecheck rather than arrive on the panel labelled with its raw slug.
  */
-export type ConfigurationReviewKind = 'packaging_no_identity' | 'packaging_ambiguous' | 'item_provisional_sku';
+export type ConfigurationReviewKind =
+    /**
+     * DEC-20260821-001: this packing carries a Tally identity of its OWN
+     * naming a DIFFERENT item from the product it sits under, which makes it
+     * a separate finished product. EVIDENCE, not a refusal — the row already
+     * exists and may already have posted vouchers. Nothing on the screen
+     * fixes it, so it offers no Link and no candidate (`separate_product`).
+     */
+    | 'packaging_separate_product'
+    | 'packaging_no_identity'
+    | 'packaging_ambiguous'
+    | 'item_provisional_sku';
 
 /**
  * A Tally item offered as a possible identity — matched by exact /
@@ -2706,7 +2717,24 @@ export interface ConfigurationReviewCandidate {
  * Optional: a backend that predates the key leaves the panel to infer it
  * from the row.
  */
-export type ConfigurationReviewFixTarget = 'packaging_item' | 'attach_item' | 'item_sku' | 'name_ambiguity';
+export type ConfigurationReviewFixTarget =
+    | 'packaging_item'
+    | 'attach_item'
+    | 'item_sku'
+    | 'name_ambiguity'
+    /**
+     * ADVISORY and NON-MUTATING (DEC-20260821-001). No endpoint on this
+     * screen closes it: the answer is a Tally stock item in the catalogue —
+     * which only the masters pull puts there — plus a production standard of
+     * its own, and the packing configured under THAT product. Never a link,
+     * and never a "clear the identity": the review is advisory and rewrites
+     * neither the current configuration nor posted history. The stored
+     * identity is the CURRENT configuration's evidence — not the only record
+     * of what already posted, which lives on the completed run's frozen
+     * `finished_item_id` and in the queued voucher's own payload and event
+     * trail, none of which this screen touches.
+     */
+    | 'separate_product';
 
 /** One thing a person has to look at (P5-03). */
 export interface ConfigurationReviewRow {
@@ -2724,8 +2752,19 @@ export interface ConfigurationReviewRow {
      * The item the row is ABOUT: the identity the packing resolves to today
      * (its own, else the product's — null when it resolves to nothing), or
      * the provisional-SKU item itself.
+     *
+     * On `packaging_separate_product` ONLY it is the packing's own stored
+     * identity, and it may name an ARCHIVED catalogue row — the finding is
+     * about the stored column, and a retired item row does not unset it.
      */
     item: { id: number; sku: string | null; name: string } | null;
+    /**
+     * `packaging_separate_product` ONLY — the product the packing currently
+     * sits under, beside `item` (the different thing it posts as). The reader
+     * needs both ends of the relation to see the conflict. Absent on every
+     * kind that predates DEC-20260821-001, whose payloads are unchanged.
+     */
+    product_item?: { id: number; sku: string | null; name: string } | null;
     /** The server's keys for what is missing — same vocabulary as ConfigurationCompleteness.missing. */
     missing: string[];
     ambiguity?: { shared_name_count: number } | null;

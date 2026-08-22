@@ -98,8 +98,8 @@ incident".
 Convert first, verify, then delete:
 
 ```bash
-git show origin/<branch>:tally-sync-agent/package.json   # confirm the version matches
-git tag -a agent-vX.Y.Z origin/<branch> -m "...released SHA, run <id>..."
+git show "${MAIN%%/*}/<branch>":tally-sync-agent/package.json   # confirm the version matches
+git tag -a agent-vX.Y.Z "${MAIN%%/*}/<branch>" -m "...released SHA, run <id>..."
 git push "${MAIN%%/*}" --tags
 ```
 

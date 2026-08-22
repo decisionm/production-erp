@@ -117,16 +117,33 @@ fi
 # plus a host-level .sql denylist), but that is protection owned by an unrelated
 # site and regenerated routinely by WP/caching plugins. $HOME is never web-served.
 #
-# The fallback matters: this runs BEFORE the hard backup gate, with the app
-# already closed. A home directory that cannot be created must not turn a
-# hardening improvement into a 503 — prefer the safe path, never require it.
+# THERE IS NO LONGER A FALLBACK TO ../backups. It was kept at first on the
+# reasoning that a hardening improvement must not cause a 503 — but the thing it
+# fell back TO is the exposure this block exists to end, and "only when something
+# else already went wrong" is exactly when nobody is reading the WARN line. A
+# path under another site's document root is not a safety net; it is the
+# original defect, re-armed silently.
+#
+# Failing instead does not trade the 503 back in, because the workflow asks this
+# same question BEFORE `artisan down` (deploy.yml's "Check the backup directory
+# is writable"): a host that cannot write here fails the run with the floor still
+# serving. Reaching the branch below therefore means the directory became
+# unusable DURING the window — disk quota, most likely — which is a real
+# failure and belongs at the same hard stop as every other backup failure here.
 BACKUP_DIR="${BACKUP_DIR:-$HOME/backups/erp}"
-if ! mkdir -p "$BACKUP_DIR" 2>/dev/null; then
-  echo "WARN: could not create $BACKUP_DIR — falling back to ../backups." >&2
-  echo "      That path may sit under a web document root; check exposure." >&2
-  BACKUP_DIR=../backups
-  mkdir -p "$BACKUP_DIR"
+if ! mkdir -p "$BACKUP_DIR" 2>/dev/null || ! : > "$BACKUP_DIR/.deploy-write-probe" 2>/dev/null; then
+  rm -f "$BACKUP_DIR/.deploy-write-probe" 2>/dev/null || true
+  echo "ERROR: '$BACKUP_DIR' could not be created or written, so no pre-migration backup can be" >&2
+  echo "       taken. The deploy has STOPPED before 'artisan migrate' — the schema is untouched," >&2
+  echo "       but the app is CLOSED and the factory is at 503 until this is fixed and the" >&2
+  echo "       workflow re-run (it is idempotent and takes a fresh backup). Do NOT 'artisan up'" >&2
+  echo "       by hand. This does NOT fall back to ../backups on purpose: on this host that path" >&2
+  echo "       is inside a live WordPress site's document root, and a full dump carries password" >&2
+  echo "       hashes, customers and purchase rates (FC-06). Usual cause is a full disk quota;" >&2
+  echo "       check it, or set BACKUP_DIR to another directory OUTSIDE any web root." >&2
+  exit 1
 fi
+rm -f "$BACKUP_DIR/.deploy-write-probe"
 BACKUP_FILE="$BACKUP_DIR/erp-db-$(date +%Y%m%d-%H%M%S).sql"
 
 echo "==> Backing up '$DB_DATABASE' to $BACKUP_FILE before migrating"

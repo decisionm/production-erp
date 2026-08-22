@@ -739,6 +739,10 @@ Route::prefix('v1')->group(function () {
             // (DEC-20260810-003): add the packing the workbook never carried
             // (the 490/box tray), set or correct each variant's own identity.
             // Same group, so the POST and PUT need production.manage.
+            // Since DEC-20260821-001 an identity naming a DIFFERENT item from
+            // the standard's product is refused here and on the PATCH below —
+            // that packing belongs under its own product. Existing rows are
+            // untouched and still editable for their counts.
             Route::post('standards/{standard}/packagings', [ProductionStandardPackagingController::class, 'store']);
             Route::put('standards/{standard}/packagings/{packaging}', [ProductionStandardPackagingController::class, 'update']);
             // Identity ONLY — item_id and its provenance, never a count. The

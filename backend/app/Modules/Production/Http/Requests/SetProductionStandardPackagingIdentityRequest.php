@@ -3,13 +3,21 @@
 namespace App\Modules\Production\Http\Requests;
 
 use App\Modules\Inventory\Models\Item;
+use App\Modules\Production\Http\Requests\Concerns\RefusesSeparateProductIdentity;
+use App\Modules\Production\Models\ProductionStandard;
+use App\Modules\Production\Models\ProductionStandardPackaging;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
 /**
  * Set or clear ONE packaging variant's own Tally identity — and nothing
- * else (DEC-20260810-003; Phase 5 fix P1-a).
+ * else (the mechanism from DEC-20260810-003; Phase 5 fix P1-a). Since
+ * DEC-20260821-001 the endpoint no longer carries authority to point a
+ * packing at a DIFFERENT product's Tally item — see
+ * RefusesSeparateProductIdentity, applied below. Clearing to null, the
+ * product's own item, and re-sending what a legacy row already carries all
+ * still go through.
  *
  * The full update (SaveProductionStandardPackagingRequest) carries the mode
  * and the counts, and re-deriving a box count from unchanged inner counts
@@ -29,6 +37,8 @@ use Illuminate\Validation\Validator;
  */
 class SetProductionStandardPackagingIdentityRequest extends FormRequest
 {
+    use RefusesSeparateProductIdentity;
+
     public function authorize(): bool
     {
         // Route-group middleware ('module:production') already requires
@@ -74,6 +84,19 @@ class SetProductionStandardPackagingIdentityRequest extends FormRequest
                     "\"{$item->name}\" carries no Tally GUID — it has never been pulled from Tally, so a voucher cannot name it. Pull the masters first, then link.",
                 );
             }
+
+            // DEC-20260821-001, last: a link that would point this packing
+            // at a different product's Tally item is refused whatever else
+            // is true of the item.
+            $standard = $this->route('standard');
+            $packaging = $this->route('packaging');
+
+            $this->refuseSeparateProductIdentity(
+                $validator,
+                $standard instanceof ProductionStandard ? $standard : null,
+                $packaging instanceof ProductionStandardPackaging ? $packaging : null,
+                $this->input('item_id'),
+            );
         });
     }
 }

@@ -97,9 +97,13 @@ import {
     machineFloorState,
     type MachineFloorState,
 } from '@/features/production/shiftFloorSummary';
-import { packagingForCompletion } from '@/features/production/productStandardsConfig';
+import {
+    packagingForCompletion,
+    SEPARATE_PRODUCT_REQUIRED_DETAIL,
+    SEPARATE_PRODUCT_START_REFUSED,
+} from '@/features/production/productStandardsConfig';
 import { cavityPrefill } from '@/features/production/startBatchCavities';
-import { chosenStartVariant, mouldLabel, startBatchChoices, startBatchTallyIdentity } from '@/features/production/startBatchChoices';
+import { chosenStartVariant, mouldLabel, startBatchChoices, startBatchSeparateProductConflict, startBatchTallyIdentity } from '@/features/production/startBatchChoices';
 import { expectedOutput, netRunningHours } from '@/features/production/expectedOutput';
 import { roundPer, useProductionSettings } from '@/features/production/packing';
 import { itemLabel, uomOf } from '@/lib/itemLabel';
@@ -6174,7 +6178,18 @@ export default function ShiftProductionEntryPage() {
                         // backend accepts a start without it (and existing
                         // integrations still may), so this dialog is where
                         // the question is actually put.
-                        || (startColourRequired && !startColour),
+                        || (startColourRequired && !startColour)
+                        // DEC-20260821-001: the resolved packing posts as its
+                        // own Tally stock item, which makes it a separate
+                        // finished product — this batch belongs under that
+                        // product, not this one. Gated on the RESOLVED packing
+                        // rather than on the picker, because the commonest
+                        // shape is a standard with one packing: no radio is
+                        // shown, nothing is disabled, and without this the
+                        // only refusal would arrive after the tap. The server
+                        // refuses it regardless; this stops the wasted tap,
+                        // exactly like the readiness term above.
+                        || startBatchSeparateProductConflict(batchPreview, startItem),
                 }}
                 okText="Start Batch"
                 destroyOnHidden
@@ -6379,12 +6394,41 @@ export default function ShiftProductionEntryPage() {
                         (P5.5-06): Start stays enabled — the batch may proceed
                         with what is known — but nobody starts it unaware. */}
                     {(() => {
-                        const choices = startBatchChoices(batchPreview, selectedStandardId);
+                        const choices = startBatchChoices(batchPreview, selectedStandardId, startItem);
                         const chosen = chosenStartVariant(batchPreview, selectedStandardId);
-                        const disabledWords = new Map(choices.disabledPackagings.map((d) => [d.id, d.words]));
+                        // The union of the two reasons a packing is shown but
+                        // not offered: half-stated counts (the rule this
+                        // picker always had) and, since DEC-20260821-001, a
+                        // packing that posts as its own Tally item and so
+                        // belongs under a separate product. Kept as two
+                        // sources and merged here so the extracted inline
+                        // rule (disabledPackagings) stays exactly what its
+                        // vitest contract says it is.
+                        const disabledWords = new Map([
+                            ...choices.disabledPackagings.map((d) => [d.id, d.words] as const),
+                            ...choices.conflictingPackagings.map((d) => [d.id, d.words] as const),
+                        ]);
                         const picked = chosen?.packagings.find((p) => p.id === selectedPackagingId);
+                        const separateProduct = startBatchSeparateProductConflict(batchPreview, startItem);
                         return (
                             <>
+                                {/* DEC-20260821-001, said before the tap. The
+                                    packing this run resolved to posts as its
+                                    own Tally stock item, so it is a separate
+                                    finished product and the batch belongs
+                                    under that product. Error, not warning:
+                                    unlike the configuration-gaps alert below,
+                                    this batch cannot start at all — the OK
+                                    button is dead and the server refuses it. */}
+                                {separateProduct && (
+                                    <Alert
+                                        type="error"
+                                        showIcon
+                                        style={{ marginBottom: 16 }}
+                                        message="This packing belongs under a separate product"
+                                        description={`${SEPARATE_PRODUCT_REQUIRED_DETAIL} ${SEPARATE_PRODUCT_START_REFUSED}`}
+                                    />
+                                )}
                                 {choices.askPacking && chosen && (
                                     <Form.Item label="How is it packed?">
                                         <Radio.Group
@@ -6413,8 +6457,13 @@ export default function ShiftProductionEntryPage() {
                                             this packing posts as. Only shown when a
                                             packing carries its OWN identity — the
                                             ordinary case posts as the product and
-                                            saying so on every batch would be noise. */}
-                                        {picked?.tally_item?.name && (
+                                            saying so on every batch would be noise.
+                                            NOT shown for a row this modal has already
+                                            struck out: telling a supervisor what a
+                                            packing "posts as" beside the alert saying
+                                            it cannot be run here is the two-vocabularies
+                                            problem this feature exists to avoid. */}
+                                        {picked?.tally_item?.name && !disabledWords.has(picked.id) && (
                                             <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
                                                 Packed this way, production posts to Tally as <b>{picked.tally_item.name}</b>.
                                             </Typography.Text>
@@ -6555,6 +6604,15 @@ export default function ShiftProductionEntryPage() {
                                     the accountant will read back against the voucher. */}
                                 <Descriptions.Item label="Tally identity" span={2}>
                                     {(() => {
+                                        // A conflicting packing reads as a dash here,
+                                        // not as "this packing's own item": that
+                                        // sentence describes a run this modal has
+                                        // already refused, and printing it beside the
+                                        // refusal is the office-versus-floor
+                                        // contradiction (DEC-20260821-001). The alert
+                                        // above carries the reason.
+                                        if (startBatchSeparateProductConflict(batchPreview, startItem)) return '—';
+
                                         const identity = startBatchTallyIdentity(batchPreview, startItem, selectedStandardId);
                                         if (!identity.label) return '—';
                                         return (

@@ -19,7 +19,13 @@
  * the product's).
  */
 
-import { incompleteWordsFromServer, missingWords, tallyIdentityLabel } from '@/features/production/productStandardsConfig';
+import {
+    incompleteWordsFromServer,
+    missingWords,
+    packagingBelongsToSeparateProduct,
+    SEPARATE_PRODUCT_REQUIRED,
+    tallyIdentityLabel,
+} from '@/features/production/productStandardsConfig';
 import type { ConfigurationCompleteness, PackagingTallyItem } from '@/features/production/types';
 
 // ---------------------------------------------------------------------------
@@ -78,6 +84,19 @@ export interface StartBatchChoices {
     askPacking: boolean;
     /** Of the offered packings, the ones shown but not pickable, with the words printed beside each. Empty unless `askPacking`. */
     disabledPackagings: Array<{ id: number; words: string }>;
+    /**
+     * The offered packings that post as a DIFFERENT Tally item from the
+     * product (DEC-20260821-001) — each one a separate product, and none of
+     * them startable here. A SEPARATE list from `disabledPackagings` on
+     * purpose: that field is the extracted inline rule, pinned verbatim
+     * across the 0/1/N matrix, and folding a new reason into it would
+     * silently move a contract the red-before test exists to hold. The
+     * caller disables on the union.
+     *
+     * Empty unless a `product` was passed — an older caller gets exactly the
+     * behaviour it had.
+     */
+    conflictingPackagings: Array<{ id: number; words: string }>;
     /** The configuration pieces the server says this run is missing, in words, in the server's order. Empty = complete or unjudged. */
     gaps: string[];
 }
@@ -103,6 +122,11 @@ export function chosenStartVariant(
 export function startBatchChoices(
     preview: StartBatchPreviewLite | null | undefined,
     chosenStandardId?: number | null,
+    // OPTIONAL, and last, so every existing call keeps its exact behaviour:
+    // without the product there is nothing to compare a packing's identity
+    // against, and `conflictingPackagings` comes back empty rather than
+    // guessed. (DEC-20260821-001.)
+    product?: StartBatchProductLite | null,
 ): StartBatchChoices {
     // Radio 1 — verbatim `(batchPreview?.variants?.length ?? 0) > 1`.
     const askStandard = (preview?.variants?.length ?? 0) > 1;
@@ -120,7 +144,41 @@ export function startBatchChoices(
             .map((p) => ({ id: p.id, words: incompleteWordsFromServer(p) ?? 'incomplete in workbook' }))
         : [];
 
-    return { askStandard, askPacking, disabledPackagings, gaps: gapsFor(preview, chosen) };
+    // Named on EVERY offered packing of the chosen standard, not only when
+    // the packing radio is shown: the commonest shape of this problem is a
+    // standard with a single packing, which the server resolves silently and
+    // which therefore has no radio and nothing to disable. Gating that case
+    // is the Start button's job (startBatchSeparateProductConflict below);
+    // this list is what the radio uses when there IS one.
+    const conflictingPackagings = chosen && product
+        ? chosen.packagings
+            .filter((p) => packagingBelongsToSeparateProduct(p, product))
+            .map((p) => ({ id: p.id, words: SEPARATE_PRODUCT_REQUIRED }))
+        : [];
+
+    return { askStandard, askPacking, disabledPackagings, conflictingPackagings, gaps: gapsFor(preview, chosen) };
+}
+
+/**
+ * Whether the packing this run has actually RESOLVED to belongs under a
+ * separate product — the one verdict the Start button is gated on
+ * (DEC-20260821-001).
+ *
+ * Read from `startBatchPackaging()`, the server's own resolution, so it
+ * answers true in the case the radio cannot: a standard with one packing,
+ * auto-resolved, no question asked and nothing on screen to disable. False
+ * while nothing is resolved — a choice still open is not yet a conflict, and
+ * the picker's own labels carry it in that state.
+ *
+ * Advisory. The backend refuses this start whatever the browser believes.
+ */
+export function startBatchSeparateProductConflict(
+    preview: StartBatchPreviewLite | null | undefined,
+    product: StartBatchProductLite | null | undefined,
+): boolean {
+    if (!preview || !product) return false;
+
+    return packagingBelongsToSeparateProduct(startBatchPackaging(preview), product);
 }
 
 /**
