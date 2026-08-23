@@ -46,10 +46,24 @@ enum MeasurementType: string
     /**
      * Classify a raw unit string as Tally spells it — case and trailing dot
      * included, because Tally's `BASEUNITS` reaches `items.uom` verbatim.
+     *
+     * THE TRAILING DOT IS STRIPPED, not enumerated (23-Aug-2026). The lists
+     * above had spelled out `kg.` and `kgs.` but not `kilogram.` or
+     * `kilograms.`, so `Kilograms.` classified as Unknown while `Kgs.`
+     * classified as Weight — the same enumerate-instead-of-normalise defect
+     * that had Item::hasKgUom() and four private isMassUom() copies
+     * disagreeing, found by the parity test written for that fix.
+     *
+     * Stripping is the fix rather than adding two more entries because it
+     * closes the class of bug instead of the instance: every future unit the
+     * factory adds is covered whether or not somebody remembers the dot. The
+     * dotted entries already in the lists are now redundant and deliberately
+     * left there — removing them would be a second behaviour change riding
+     * along with this one.
      */
     public static function forUom(?string $uom): self
     {
-        $normalised = mb_strtolower(trim((string) $uom));
+        $normalised = rtrim(mb_strtolower(trim((string) $uom)), '.');
 
         if ($normalised === '') {
             return self::Unknown;

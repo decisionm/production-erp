@@ -188,7 +188,7 @@ class BinBayService
                 continue;
             }
 
-            $isMass = $this->isMassUom($component->uom);
+            $isMass = Item::isKgUom($component->uom);
             $expected = $expectedPieces !== null
                 ? bcmul((string) $expectedPieces, (string) $line->quantity_per, 4)
                 : null;
@@ -219,17 +219,5 @@ class BinBayService
             'recipe_source' => 'bom',
             'components' => $components,
         ];
-    }
-
-    /**
-     * Mass UOMs, i.e. the ones the day bin is weighed in. Mirrors
-     * BatchEstimationService::isMassUom deliberately: that method is private
-     * to another service in this module and sharing it would mean editing a
-     * file this workspace does not own — the list is the same three-line
-     * normalisation, and the two must be changed together if it ever grows.
-     */
-    private function isMassUom(?string $uom): bool
-    {
-        return in_array(rtrim(strtolower(trim((string) $uom)), '.'), ['kg', 'kgs', 'kilogram', 'kilograms'], true);
     }
 }

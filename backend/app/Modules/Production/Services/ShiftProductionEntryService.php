@@ -1288,7 +1288,7 @@ class ShiftProductionEntryService
             }
 
             $uom = Item::withTrashed()->find($line['item_id'])?->uom;
-            if ($uom !== null && trim($uom) !== '' && ! $this->isMassUom($uom)) {
+            if ($uom !== null && trim($uom) !== '' && ! Item::isKgUom($uom)) {
                 continue;
             }
 
@@ -3592,7 +3592,7 @@ class ShiftProductionEntryService
 
             $kgPerUnit = '0';
             foreach ($bom->lines as $line) {
-                if ($this->isMassUom($line->component?->uom)) {
+                if (Item::isKgUom($line->component?->uom)) {
                     $kgPerUnit = bcadd($kgPerUnit, (string) $line->quantity_per, 4);
                 }
             }
@@ -3672,7 +3672,7 @@ class ShiftProductionEntryService
         $total = '0';
         foreach ($entry->materialConsumptions as $consumption) {
             $uom = $consumption->item?->uom;
-            if ($uom !== null && trim($uom) !== '' && ! $this->isMassUom($uom)) {
+            if ($uom !== null && trim($uom) !== '' && ! Item::isKgUom($uom)) {
                 continue;
             }
 
@@ -3680,14 +3680,6 @@ class ShiftProductionEntryService
         }
 
         return $total;
-    }
-
-    private function isMassUom(?string $uom): bool
-    {
-        // Tally masters write "Kgs." with a trailing dot — 90+ live items
-        // carry it; without normalization they silently drop out of every
-        // kg-family sum (BOM norms, variance).
-        return in_array(rtrim(strtolower(trim((string) $uom)), '.'), ['kg', 'kgs', 'kilogram', 'kilograms'], true);
     }
 
     /**
