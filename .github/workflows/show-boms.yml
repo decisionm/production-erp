@@ -1,0 +1,89 @@
+name: Show BOMs
+
+# Read-only answer to "which Bills of Material exist on LIVE, and what does
+# each one actually say?", runnable by anyone with repo access, against the
+# LIVE database, at any hour.
+#
+# Prints one line per BOM — its product, name, version, active flag, line
+# count and the kg-per-unit it contributes — then its component lines, and
+# flags any ACTIVE BOM carrying no kg line. That flag is the point: a BOM's
+# only live job is supplying the unit-weight norm a completed shift is
+# compared against (ShiftProductionEntryService sums the kg-bearing lines of
+# the active BOM), so a BOM without one silently provides NO norm and the
+# comparison is absent rather than wrong. No Tally voucher reads a BOM at all.
+#
+# Dev fixtures do not answer this — they are not live-shaped, which is how the
+# 09-Aug shift-rail defect happened — and AGENTS.md requires live data to be
+# counted on the live instance. The command it runs is read-only by
+# construction: SELECTs only, no writes, no options — so this workflow needs
+# no confirmation gates, no dry run, and takes no inputs.
+
+# Least privilege: nothing here writes to the repository. Every workflow uses
+# only checkout, setup-node/php and same-run artifacts, and reaches the server
+# over SSH with a deploy key — never the GITHUB_TOKEN. Without this block the
+# token is repository-default, which on a push-triggered workflow that runs
+# `npm ci` (arbitrary lockfile postinstall) is a write-capable token one
+# compromised transitive dependency away from the pipeline that rsyncs to a
+# live factory. Read is all any of these need.
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: show-boms
+  cancel-in-progress: false
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # ssh-keyscan can exit 0 having collected nothing — check output,
+          # not exit code (the same trap every workflow here guards).
+          # The host intermittently answers nothing: 10 of the last 100 runs failed
+          # here, and EVERY one cleared on a re-run of the SAME commit — it is the
+          # host, not the change. Retrying in-workflow removes that manual re-run.
+          # It does NOT weaken the check: if all three attempts come back empty the
+          # step still fails loudly, which is the state that must never deploy.
+          keys=""
+          for attempt in 1 2 3; do
+            keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+            if [ -n "$keys" ]; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "ssh-keyscan attempt ${attempt} returned no host key; retrying in $((attempt * 10))s"
+              sleep "$((attempt * 10))"
+            fi
+          done
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Re-running usually clears a transient failure."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      - name: Read the BOMs
+        run: |
+          set -o pipefail
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && \$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php) artisan boms:show" \
+            2>&1 | tee boms-output.txt
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Live Bills of Material"
+            echo
+            echo '```'
+            cat boms-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
