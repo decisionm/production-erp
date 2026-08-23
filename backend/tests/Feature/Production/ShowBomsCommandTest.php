@@ -133,13 +133,18 @@ class ShowBomsCommandTest extends TestCase
     /**
      * THE UOM SPELLINGS THE LIVE NORM ACTUALLY COUNTS, pinned one by one.
      *
-     * This is the trap this command was nearly built on. The report must
-     * mirror ShiftProductionEntryService::isMassUom(), which strips a
-     * trailing dot and accepts the kilogram spellings — NOT
-     * Item::hasKgUom(), whose literal set omits "kilogram"/"kilograms".
-     * Tally masters write "Kgs." with a dot on 90+ live items, so a report
-     * built on the wrong predicate would print "no norm" for BOMs that have
-     * one, on live, in exactly the rows that matter most.
+     * This is the trap this command was nearly built on. When it was written
+     * "is this kilograms" had two disagreeing answers, and the report had to
+     * mirror the SERVICES' one — the answer that defines the norm — rather
+     * than Item::hasKgUom(), whose literal set then omitted
+     * "kilogram"/"kilograms". Tally masters write "Kgs." with a dot on 90+
+     * live items, so a report built on the wrong predicate would print "no
+     * norm" for BOMs that have one, on live, in the rows that matter most.
+     *
+     * That divergence is gone: Item::isKgUom() IS the services' answer now,
+     * and this command calls it directly. The spellings stay pinned HERE
+     * anyway — they are the contract the report depends on, so narrowing the
+     * predicate must break the report's own test, not only the model's.
      */
     #[DataProvider('massUomSpellings')]
     public function test_it_counts_every_uom_spelling_the_live_norm_counts(string $uom): void
@@ -173,7 +178,7 @@ class ShowBomsCommandTest extends TestCase
             'kg with the Tally trailing dot' => ['Kg.'],
             'kgs' => ['Kgs'],
             'kgs with the Tally trailing dot' => ['Kgs.'],
-            // The two Item::hasKgUom() would have missed.
+            // The two the old hasKgUom() would have missed, before unification.
             'kilogram' => ['Kilogram'],
             'kilograms' => ['Kilograms'],
         ];

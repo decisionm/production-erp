@@ -4,6 +4,7 @@ namespace App\Modules\Procurement\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
+use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\MaterialBag;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Inventory\Services\TraceabilityService;
@@ -510,7 +511,7 @@ class GoodsReceiptService
                 continue;
             }
 
-            if (! $this->isMassUom($poLine->item?->uom)) {
+            if (! Item::isKgUom($poLine->item?->uom)) {
                 throw ValidationException::withMessages([
                     "lines.{$lineIndex}.lots" => 'Bag lots are only supported for items measured in kg.',
                 ]);
@@ -655,15 +656,6 @@ class GoodsReceiptService
         $this->trace->decorateReceipts([$receipt]);
 
         return $receipt;
-    }
-
-    private function isMassUom(?string $uom): bool
-    {
-        return in_array(
-            rtrim(strtolower(trim((string) $uom)), '.'),
-            ['kg', 'kgs', 'kilogram', 'kilograms'],
-            true,
-        );
     }
 
     private function recomputeOrderStatus(PurchaseOrder $order): void

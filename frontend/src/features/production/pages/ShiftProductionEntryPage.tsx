@@ -576,12 +576,16 @@ function packingUnitLabel(unit: string): string {
  * Does this material's own UOM put it in the KILOGRAM family — i.e. may its
  * quantity be added to a figure printed in kg?
  *
- * Mirrors the backend's isMassUom() exactly, and it has to: the pre-submit
- * memo is a preview of numbers the server is about to compute, and a preview
- * that answers a different question is worse than no preview. Lowercased,
- * trailing dot stripped, because Tally's masters spell it "Kgs." on 90+ live
- * items and an un-normalised compare drops every one of them out of the kg
- * sums.
+ * Mirrors the backend's Item::isKgUom() exactly, and it has to: the
+ * pre-submit memo is a preview of numbers the server is about to compute, and
+ * a preview that answers a different question is worse than no preview.
+ * Lowercased, trailing dot stripped, because Tally's masters spell it "Kgs."
+ * on 90+ live items and an un-normalised compare drops every one of them out
+ * of the kg sums.
+ *
+ * (This named the backend's isMassUom() until 23-Aug-2026, when the four
+ * private copies of that method became one definition on the Item model. The
+ * name here follows it; the predicate is unchanged on both sides.)
  *
  * Blank/unknown counts as kg, deliberately — the same fail-safe direction the
  * server takes (ConsumptionVarianceTest: "a consumption line whose master has

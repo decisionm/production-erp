@@ -167,7 +167,7 @@ class BatchEstimationService
                     'quantity' => $pieces !== null
                         ? bcmul((string) $pieces, (string) $line->quantity_per, 4)
                         : '0',
-                    'is_mass' => $this->isMassUom($component->uom),
+                    'is_mass' => Item::isKgUom($component->uom),
                 ];
             }
 
@@ -196,10 +196,5 @@ class BatchEstimationService
         }
 
         return bcdiv((string) $start->diffInMinutes($end), '60', 4);
-    }
-
-    private function isMassUom(?string $uom): bool
-    {
-        return in_array(rtrim(strtolower(trim((string) $uom)), '.'), ['kg', 'kgs', 'kilogram', 'kilograms'], true);
     }
 }

@@ -47,9 +47,24 @@ class Item extends Model
      * them. Bottles/caps are the Nos family ('NOS', 'Nos', 'Nos.') and must
      * never match.
      *
+     * THE ENUMERATED FORM EXISTS FOR SQL ONLY. scopeKgUom() matches this list
+     * literally because the two engines this runs on spell a trailing-dot
+     * strip differently (MySQL `TRIM(TRAILING '.' FROM …)`, SQLite
+     * `rtrim(x,'.')`), and a dialect branch inside a scope is a worse bug
+     * surface than a longer list. PHP-side callers must use isKgUom(), which
+     * normalises instead of enumerating; KgUomParityTest pins the two to the
+     * same answer on every spelling.
+     *
+     * 'kilogram(s)' JOINED THIS LIST 23-Aug-2026. It was already accepted by
+     * the four private isMassUom() copies this class now replaces, so the
+     * list was the odd one out, not the addition — see isKgUom().
+     *
      * @var list<string>
      */
-    public const KG_UOM_VARIANTS = ['kg', 'kg.', 'kgs', 'kgs.'];
+    public const KG_UOM_VARIANTS = [
+        'kg', 'kg.', 'kgs', 'kgs.',
+        'kilogram', 'kilogram.', 'kilograms', 'kilograms.',
+    ];
 
     /**
      * Items whose unit is a kg-family spelling — the only signal this
@@ -103,10 +118,71 @@ class Item extends Model
         return $query->whereIn(DB::raw('LOWER(TRIM(uom))'), self::KG_UOM_VARIANTS);
     }
 
-    /** PHP-side twin of scopeKgUom(), for rows already in memory. */
+    /**
+     * The PHP-side answer for a row already in memory.
+     *
+     * NOT A TWIN OF scopeKgUom(), and the word was removed on 23-Aug-2026
+     * because it had stopped being true. This delegates to isKgUom(), which
+     * NORMALISES; the scope ENUMERATES against KG_UOM_VARIANTS in SQL. The
+     * two are equal on every spelling Tally can produce, and deliberately
+     * unequal beyond it:
+     *
+     *   "Kgs.."   php=true  sql=false   (PHP rtrim strips a RUN of dots)
+     *   "Kgs.\t"  php=true  sql=false   (PHP trim strips tabs; SQL TRIM only spaces)
+     *
+     * PHP is the superset in both directions of drift, which is the safe way
+     * round: the scope narrows a candidate list, so a row it misses is a row
+     * a screen does not offer — never a wrong number and never a new refusal.
+     * Narrowing PHP to match would flip those inputs accept -> reject, and a
+     * new refusal is the one direction this codebase does not permit a
+     * cleanup to move (see MeasurementType::forUom, where exactly that was
+     * tried and reverted).
+     *
+     * KgUomParityTest pins BOTH: equality across every real spelling, and
+     * these divergences by name, so neither can be mistaken for the other.
+     */
     public function hasKgUom(): bool
     {
-        return in_array(strtolower(trim((string) $this->uom)), self::KG_UOM_VARIANTS, true);
+        return self::isKgUom($this->uom);
+    }
+
+    /**
+     * IS THIS UNIT KILOGRAMS — the one definition, for a raw string.
+     *
+     * Until 23-Aug-2026 this question had two answers that disagreed. Four
+     * services each carried a private isMassUom() (GoodsReceiptService,
+     * ShiftProductionEntryService, BatchEstimationService, BinBayService) —
+     * byte-identical to each other, normalising the trailing dot and
+     * accepting 'kilogram(s)'. hasKgUom() enumerated the dotted spellings and
+     * accepted neither kilogram form. So an item whose Tally unit read
+     * 'Kilograms' contributed to a BOM weight norm and simultaneously failed
+     * hasKgUom(), and nothing anywhere said which was right.
+     *
+     * Resolved TOWARDS the services, deliberately: they are the copies doing
+     * arithmetic on the answer, four of them already agreed, and widening a
+     * filter is the direction that cannot silently drop a real material. The
+     * MeasurementType docblock had already caught this drift and recorded
+     * that live Tally carries only `Kgs.` — so on today's data every spelling
+     * agrees and this is a defensive unification, not a live behaviour change.
+     * That was recorded before this change and is not re-verified by it; the
+     * live UOM spread is a live read.
+     *
+     * NOT MeasurementType::forUom(). That is the broader classifier and the
+     * right one for "is this weighed rather than counted" — but it answers
+     * Weight for grams too, and every caller here SUMS the quantity as
+     * kilograms. Routing them through it would silently turn 0.32 g of
+     * masterbatch into 0.32 kg. Different question, deliberately not merged.
+     */
+    public static function isKgUom(?string $uom): bool
+    {
+        // Normalise rather than enumerate: Tally writes 'Kgs.' with a
+        // trailing dot on 90+ live items, and without this they drop out of
+        // every kg-family sum (BOM norms, variance, receipt weights).
+        return in_array(
+            rtrim(mb_strtolower(trim((string) $uom)), '.'),
+            ['kg', 'kgs', 'kilogram', 'kilograms'],
+            true,
+        );
     }
 
     /**

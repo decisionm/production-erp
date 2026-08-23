@@ -54,7 +54,22 @@ return new class extends Migration
         'shift_material_consumptions' => 'item_id',
     ];
 
-    /** Mirrors Item::KG_UOM_VARIANTS — resin's only native signal. */
+    /**
+     * A FROZEN SNAPSHOT of Item::KG_UOM_VARIANTS as it read on 20-Aug-2026,
+     * NOT a mirror of it — the word "mirrors" stood here until 23-Aug-2026
+     * and became false the day that constant gained the `kilogram(s)`
+     * spellings.
+     *
+     * It stays frozen deliberately. This migration has already run against
+     * the live database; re-pointing it at the live constant would mean a
+     * re-run — or a fresh install replaying history — backfilling a DIFFERENT
+     * set of rows than production actually got, which makes the migration a
+     * liar about what it did. A backfill records a decision taken at a
+     * moment, and the moment does not move.
+     *
+     * If the widened list should also be applied to `is_production_input`,
+     * that is a NEW migration with its own evidence, not an edit here.
+     */
     private const KG_UOM_VARIANTS = ['kg', 'kg.', 'kgs', 'kgs.'];
 
     public function up(): void
