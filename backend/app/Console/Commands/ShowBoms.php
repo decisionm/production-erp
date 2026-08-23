@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Modules\Inventory\Models\Item;
 use App\Modules\Production\Models\Bom;
 use Illuminate\Console\Command;
 
@@ -29,6 +30,15 @@ use Illuminate\Console\Command;
  * Strictly read-only by construction: SELECTs only, no options that write,
  * no state touched — safe against the live database at any hour. It creates
  * nothing, so it needs no dry run and no confirmation gate.
+ *
+ * THE NORM PREDICATE IS Item::isKgUom(), the one definition. This command
+ * shipped (PR #16) carrying a private copy of it, because at that moment
+ * "is this kilograms" had two disagreeing answers and only one of them —
+ * the services' — defined the norm; reporting through the model helper would
+ * have printed "no norm" for a BOM that had one. That divergence is gone:
+ * Item::isKgUom() IS the services' answer now, so the copy was a fifth
+ * spelling of a settled question and is deleted. A report that computes the
+ * norm its own way is the one failure this command must never have.
  */
 class ShowBoms extends Command
 {
@@ -38,36 +48,6 @@ class ShowBoms extends Command
 
     /** Flag for an ACTIVE BOM whose lines contain no mass component. */
     public const string NO_NORM_FLAG = 'NO-KG-LINE-PROVIDES-NO-WEIGHT-NORM';
-
-    /**
-     * MIRRORS ShiftProductionEntryService::isMassUom() DELIBERATELY, and not
-     * Item::hasKgUom(), because the two do not agree and only one of them
-     * defines the norm this report is about.
-     *
-     *   isMassUom()  strips a trailing dot, then matches
-     *                kg | kgs | kilogram | kilograms
-     *   hasKgUom()   matches the literal set kg | kg. | kgs | kgs.
-     *
-     * So an item whose Tally UOM reads "Kilograms" DOES contribute to the
-     * live norm and does NOT satisfy hasKgUom(). Reporting through the model
-     * helper would print "no norm" for a BOM that in fact has one — the one
-     * failure a report like this must never have.
-     *
-     * That divergence is a real latent defect in its own right (scopeKgUom
-     * and every caller of hasKgUom share it), but it belongs to the modules
-     * that own those helpers, not to a read-only report — fixing it here
-     * would mean this command and the shift floor disagreeing during the
-     * window before that fix ships. Raised separately; mirrored faithfully
-     * meanwhile.
-     */
-    private static function countsTowardNorm(?string $uom): bool
-    {
-        return in_array(
-            rtrim(strtolower(trim((string) $uom)), '.'),
-            ['kg', 'kgs', 'kilogram', 'kilograms'],
-            true,
-        );
-    }
 
     public function handle(): int
     {
@@ -108,7 +88,7 @@ class ShowBoms extends Command
             $kgPerUnit = '0';
             $hasKgLine = false;
             foreach ($bom->lines as $line) {
-                if (self::countsTowardNorm($line->component?->uom)) {
+                if (Item::isKgUom($line->component?->uom)) {
                     $hasKgLine = true;
                     $kgPerUnit = bcadd($kgPerUnit, (string) $line->quantity_per, 4);
                 }
@@ -145,7 +125,7 @@ class ShowBoms extends Command
                     $component,
                     (string) $line->quantity_per,
                     $uom,
-                    self::countsTowardNorm($line->component?->uom) ? '  (counts toward the norm)' : '',
+                    Item::isKgUom($line->component?->uom) ? '  (counts toward the norm)' : '',
                 ));
             }
         }
