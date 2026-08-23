@@ -48,7 +48,7 @@ describe('the Production Configuration tabs', () => {
     /**
      * PERMISSION PARITY, structurally.
      *
-     * The two moved masters must render the SAME components their standalone
+     * The moved masters must render the SAME components their standalone
      * pages rendered — no wrapper, no gate, no second code path. Asserting
      * the element type is identity is what proves it: a `machine-master`
      * check (or any other) could only have been added by wrapping these, and

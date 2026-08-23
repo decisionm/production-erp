@@ -131,8 +131,10 @@ describe('the Production menu', () => {
     /**
      * Carton Trace is the only child carrying its own module gate
      * (DEC-20260810-001: Owner / Plant Manager / Accounts, never Supervisor).
-     * Pinned because the two entries removed above sat either side of it, and
-     * a bad edit there is a permission regression that renders fine.
+     * Pinned because the Scrap Reasons and Molds entries sat either side of
+     * it, and a bad edit there is a permission regression that renders fine.
+     * (Shifts, removed later, sat last in the children array — not beside
+     * Carton Trace — so it is not part of that geography.)
      */
     it('gates Carton Trace, and only Carton Trace, at the child level', () => {
         const gated = production?.children?.filter((child) => child.module).map((child) => child.key);

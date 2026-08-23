@@ -69,10 +69,10 @@ import type { DowntimeReason, ImportResult, WorkCenter } from '@/features/produc
  * Same components, same endpoints, same permissions; the menu lines went,
  * the screens did not.
  *
- * Shifts came last (23-Aug-2026) and for the owner's own reason: it was the
- * one master still sitting outside this page, and nothing about a list of
- * three named clock windows explained why it lived in the menu when Molds
- * and Scrap Reasons no longer did.
+ * Shifts came last (23-Aug-2026) and for the same reason: it was the one
+ * master still sitting outside this page, and nothing about a list of named
+ * clock windows explained why it lived in the menu when Molds and Scrap
+ * Reasons no longer did.
  */
 
 /**
@@ -81,20 +81,18 @@ import type { DowntimeReason, ImportResult, WorkCenter } from '@/features/produc
  *
  * WHY EACH ONE SITS WHERE IT DOES, so the next person to add a tab has a rule
  * rather than a list: the product half first, then the machine half, then the
- * consumable/reason masters the floor picks from, then the factory-wide rules,
- * then the bulk door in.
+ * masters the floor picks from — consumables, reason codes, and the shift an
+ * entry is filed under — then the factory-wide rules, then the bulk door in.
  *
  *  - `molds` follows `machines` because a mould is what gets mounted INTO one;
  *    reading the two apart is what made the old separate menu entry confusing.
  *  - `scrap` follows `downtime` because they are the same kind of thing — the
  *    two reason-code lists the Shift Floor picks from — and a supervisor
  *    looking for one is as likely to be looking for the other.
- *  - `shifts` closes the master run, before the factory-wide rules. Every
- *    production entry names a shift, so the floor picks one the way it picks
- *    a mould or a scrap reason — but three shifts describe the factory's
- *    entire day and are then left alone for months, which makes it the most
- *    structural of the masters and puts it last of them rather than beside
- *    the reason codes.
+ *  - `shifts` closes that run rather than sitting beside the reason codes: a
+ *    shift is picked per entry like they are, but it describes WHEN the work
+ *    happened rather than what went into it or what went wrong, which puts it
+ *    at the boundary with the factory-wide rules that follow.
  *
  * Each entry renders the SAME component the standalone screen rendered, with
  * no wrapper and no added gate: `machines` is the only tab that checks
@@ -114,18 +112,6 @@ export const PRODUCTION_CONFIG_TABS = [
     { key: 'packing', label: 'Packing Materials', render: () => <PackingMaterialsTab /> },
     { key: 'downtime', label: 'Downtime Reasons', render: () => <DowntimeReasonsTab /> },
     { key: 'scrap', label: 'Scrap Reasons', render: () => <ScrapReasonsPage embedded /> },
-    // LAST of the floor-picked masters, and immediately before the
-    // factory-wide rules, because a shift is both things at once and the
-    // ordering rule above has to break the tie somewhere.
-    //
-    // It belongs with the masters: every production entry names a shift, so
-    // the floor selects one exactly as it selects a scrap reason or a mould,
-    // and it is the same kind of record as its neighbours — a named row with
-    // Active/Archive/Delete through the shared ConfigurationActionsCell. But
-    // it is the most structural of them (three shifts describe the factory's
-    // whole day, and they are set once and then left alone), which is why it
-    // sits at the END of that run rather than beside the reason codes, and
-    // why `settings` and `import` still follow it per the rule above.
     { key: 'shifts', label: 'Shifts', render: () => <ShiftsPage embedded /> },
     { key: 'settings', label: 'Factory Rules', render: () => <SettingsTab /> },
     { key: 'import', label: 'Import from Workbook', render: () => <ImportTab /> },
