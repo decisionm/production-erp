@@ -118,7 +118,29 @@ class Item extends Model
         return $query->whereIn(DB::raw('LOWER(TRIM(uom))'), self::KG_UOM_VARIANTS);
     }
 
-    /** PHP-side twin of scopeKgUom(), for rows already in memory. */
+    /**
+     * The PHP-side answer for a row already in memory.
+     *
+     * NOT A TWIN OF scopeKgUom(), and the word was removed on 23-Aug-2026
+     * because it had stopped being true. This delegates to isKgUom(), which
+     * NORMALISES; the scope ENUMERATES against KG_UOM_VARIANTS in SQL. The
+     * two are equal on every spelling Tally can produce, and deliberately
+     * unequal beyond it:
+     *
+     *   "Kgs.."   php=true  sql=false   (PHP rtrim strips a RUN of dots)
+     *   "Kgs.\t"  php=true  sql=false   (PHP trim strips tabs; SQL TRIM only spaces)
+     *
+     * PHP is the superset in both directions of drift, which is the safe way
+     * round: the scope narrows a candidate list, so a row it misses is a row
+     * a screen does not offer — never a wrong number and never a new refusal.
+     * Narrowing PHP to match would flip those inputs accept -> reject, and a
+     * new refusal is the one direction this codebase does not permit a
+     * cleanup to move (see MeasurementType::forUom, where exactly that was
+     * tried and reverted).
+     *
+     * KgUomParityTest pins BOTH: equality across every real spelling, and
+     * these divergences by name, so neither can be mistaken for the other.
+     */
     public function hasKgUom(): bool
     {
         return self::isKgUom($this->uom);

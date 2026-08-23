@@ -120,6 +120,44 @@ class KgUomParityTest extends TestCase
     }
 
     /**
+     * WHERE PHP AND SQL DELIBERATELY DISAGREE, pinned by name so the parity
+     * assertions above cannot be read as a claim of total equivalence.
+     *
+     * isKgUom() normalises; scopeKgUom() enumerates in SQL. PHP `rtrim(…,'.')`
+     * strips a RUN of dots and PHP `trim()` strips tabs, while SQL `TRIM()`
+     * strips spaces only and the list carries at most one dot. Tally cannot
+     * produce these strings, so this is drift with no live consequence — but
+     * it is real, and PHP being the SUPERSET is the safe direction: the scope
+     * only ever narrows a candidate list, so a row it misses is a row a screen
+     * does not offer, never a wrong number and never a new refusal.
+     *
+     * Narrowing PHP to match SQL would flip these accept -> reject. That is a
+     * new refusal, which is precisely the mistake this branch already made
+     * once in MeasurementType::forUom() and reverted.
+     */
+    #[DataProvider('phpOnlySpellings')]
+    public function test_php_accepts_what_the_sql_list_cannot_and_that_is_the_safe_direction(string $uom): void
+    {
+        $item = $this->itemWithUom($uom, 'RM-'.md5('div'.$uom));
+
+        $this->assertTrue(Item::isKgUom($uom), 'PHP normalises, so it accepts this.');
+        $this->assertFalse(
+            Item::query()->kgUom()->whereKey($item->id)->exists(),
+            'The SQL scope enumerates, so it does not — pinned deliberately, not a bug to "fix" by narrowing PHP.',
+        );
+    }
+
+    /** @return array<string, array{string}> */
+    public static function phpOnlySpellings(): array
+    {
+        return [
+            'a run of trailing dots' => ['Kgs..'],
+            'three dots' => ['Kg...'],
+            'trailing tab after the dot' => ["Kgs.\t"],
+        ];
+    }
+
+    /**
      * KILOGRAMS AND WEIGHT ARE DIFFERENT QUESTIONS, and merging them would be
      * the obvious "cleanup" for someone who reads only one of the two.
      *
@@ -153,5 +191,40 @@ class KgUomParityTest extends TestCase
     public function test_every_kilogram_spelling_also_classifies_as_weight(string $uom): void
     {
         $this->assertSame(MeasurementType::Weight, MeasurementType::forUom(trim($uom)));
+    }
+
+    /**
+     * THE REFUSAL THIS BRANCH NEARLY SHIPPED, pinned so it cannot come back.
+     *
+     * An earlier revision of this change "fixed" the `Kilograms.` gap by
+     * stripping a trailing dot inside MeasurementType::forUom(). rtrim() runs
+     * before BOTH lookups, so it widened COUNT_UNITS too and moved these four
+     * spellings Unknown -> Count. Unknown permits fractions; Count refuses
+     * them, and permitsFractions() gates three live write paths
+     * (StoreMaterialRequestRequest, StoreStoreIssueRequest,
+     * StoreStoreIssueReturnRequest). A quantity the factory could enter
+     * yesterday would have 422'd today.
+     *
+     * The frontend had already tried the same strip and backed it out for the
+     * same reason — words.ts mirrors COUNT_UNITS verbatim, dotted spellings
+     * and all, and says so. This list is one half of a two-sided contract.
+     *
+     * These must stay Unknown until the frontend mirror changes with them.
+     */
+    public function test_dotted_count_spellings_stay_unknown_and_keep_permitting_fractions(): void
+    {
+        foreach (['piece.', 'pieces.', 'each.', 'ea.'] as $uom) {
+            $type = MeasurementType::forUom($uom);
+
+            $this->assertSame(
+                MeasurementType::Unknown,
+                $type,
+                "{$uom} must stay Unknown — classifying it Count adds a fraction refusal on three live write paths.",
+            );
+            $this->assertTrue(
+                $type->permitsFractions(),
+                "{$uom} must keep permitting fractions; refusing one is a gate that did not exist before.",
+            );
+        }
     }
 }
