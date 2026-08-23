@@ -111,12 +111,12 @@ const ROUTE_TABLE = [
  * Work Centers URL and the catch-all. Named so a redirect quietly becoming
  * a page (or a page quietly becoming a redirect) is a diff someone reads.
  *
- * THREE retired URLs are deliberately NOT here — /production/standards,
- * /production/scrap-reasons and /production/molds. Each redirects through a
- * COMPONENT (ProductionConfigurationRedirect) because it must carry the
- * incoming query string, so all three read as a page to this check. Do not
- * "fix" that by adding them: the check below would go red. What they
- * actually redirect to is pinned separately, in "the retired production
+ * FOUR retired URLs are deliberately NOT here — /production/standards,
+ * /production/scrap-reasons, /production/molds and /production/shifts. Each
+ * redirects through a COMPONENT (ProductionConfigurationRedirect) because it
+ * must carry the incoming query string, so all four read as a page to this
+ * check. Do not "fix" that by adding them: the check below would go red. What
+ * they actually redirect to is pinned separately, in "the retired production
  * configuration URLs".
  */
 const REDIRECT_ROUTES = ['/production/work-centers', '*'];
@@ -133,6 +133,11 @@ const CONFIG_REDIRECTS: { path: string; tab: string }[] = [
     { path: '/production/scrap-reasons', tab: 'scrap' },
     { path: '/production/molds', tab: 'molds' },
     { path: '/production/standards', tab: 'products' },
+    // 23-Aug-2026. Note the UI route retired here shares its string with the
+    // LIVE API path `production/shifts` (features/production/api.ts,
+    // components/configuration/entities.ts), which did not move. Only this
+    // one — the browser URL — redirects.
+    { path: '/production/shifts', tab: 'shifts' },
 ];
 
 type RouteProps = { path?: string; element?: ReactNode; children?: ReactNode; tab?: string };
@@ -195,14 +200,15 @@ describe('the route table', () => {
 /**
  * THE RETIRED PRODUCTION CONFIGURATION URLs.
  *
- * Three menu entries became three tabs. The URLs outlive the menu entries
+ * Four menu entries became four tabs. The URLs outlive the menu entries
  * because bookmarks and printed wall notes still point at them, and because
  * /production/standards in particular has two in-app deep links carrying
  * state (the blocked-Start-Batch return trip, the Tally failure links; see
- * App.tsx). No such caller is known for /production/scrap-reasons or
- * /production/molds — they take the same redirect anyway, because a redirect
- * that drops a query string is worse than a 404: it lands the reader on a
- * plausible-looking screen with their context silently gone.
+ * App.tsx). No such caller is known for /production/scrap-reasons,
+ * /production/molds or /production/shifts — they take the same redirect
+ * anyway, because a redirect that drops a query string is worse than a 404:
+ * it lands the reader on a plausible-looking screen with their context
+ * silently gone.
  *
  * Both halves are pinned: the target URL the redirect computes, and the fact
  * that App.tsx hands each path the right tab.

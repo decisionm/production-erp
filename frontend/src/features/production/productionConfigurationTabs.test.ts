@@ -5,16 +5,17 @@ import MoldsPage from '@/features/production/pages/MoldsPage';
 import { PRODUCTION_CONFIG_TABS } from '@/features/production/pages/ProductionConfigurationPage';
 import ProductStandardsPage from '@/features/production/pages/ProductStandardsPage';
 import ScrapReasonsPage from '@/features/production/pages/ScrapReasonsPage';
+import ShiftsPage from '@/features/production/pages/ShiftsPage';
 
 /**
  * THE PRODUCTION CONFIGURATION TABS ARE ADDRESSABLE (P7-05's sibling).
  *
  * `?tab=<key>` is what the retired /production/standards, /production/
- * work-centers, /production/scrap-reasons and /production/molds URLs redirect
- * to, and what prose elsewhere in the app tells a reader to open. A key that
- * is renamed does not fail the build — the page silently falls back to the
- * default tab, so a deep link lands on Product Standards and looks like it
- * worked. This turns that into a red test.
+ * work-centers, /production/scrap-reasons, /production/molds and
+ * /production/shifts URLs redirect to, and what prose elsewhere in the app
+ * tells a reader to open. A key that is renamed does not fail the build — the
+ * page silently falls back to the default tab, so a deep link lands on
+ * Product Standards and looks like it worked. This turns that into a red test.
  */
 const EXPECTED_TABS = [
     { key: 'products', label: 'Product Standards' },
@@ -23,6 +24,7 @@ const EXPECTED_TABS = [
     { key: 'packing', label: 'Packing Materials' },
     { key: 'downtime', label: 'Downtime Reasons' },
     { key: 'scrap', label: 'Scrap Reasons' },
+    { key: 'shifts', label: 'Shifts' },
     { key: 'settings', label: 'Factory Rules' },
     { key: 'import', label: 'Import from Workbook' },
 ];
@@ -52,15 +54,17 @@ describe('the Production Configuration tabs', () => {
      * check (or any other) could only have been added by wrapping these, and
      * a wrapper is a different `type`.
      *
-     * Neither ScrapReasonsPage nor MoldsPage reads `hasManageAccess` or the
-     * auth store at all — the server is their gate, exactly as before the
-     * move. That is a property of those modules, not of this list, which is
-     * why this test pins the identity rather than restating the claim.
+     * None of ScrapReasonsPage, MoldsPage or ShiftsPage reads
+     * `hasManageAccess` or the auth store at all — the server is their gate,
+     * exactly as before the move. That is a property of those modules, not of
+     * this list, which is why this test pins the identity rather than
+     * restating the claim.
      */
     it.each([
         ['scrap', ScrapReasonsPage],
         ['molds', MoldsPage],
         ['products', ProductStandardsPage],
+        ['shifts', ShiftsPage],
     ])('renders the unwrapped %s page, embedded', (key, Component) => {
         const rendered = tab(key).render();
 

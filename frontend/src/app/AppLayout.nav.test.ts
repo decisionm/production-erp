@@ -103,21 +103,25 @@ describe('the Production menu', () => {
     });
 
     /**
-     * Scrap Reasons and Molds are TABS of Production Configuration now. They
-     * are not children here and must not come back as children: the whole
-     * point of the move was that a supervisor scrolls past fewer setup
+     * Scrap Reasons, Molds and Shifts are TABS of Production Configuration
+     * now. They are not children here and must not come back as children: the
+     * whole point of the move was that a supervisor scrolls past fewer setup
      * screens to reach the ones a shift is actually entered from.
+     *
+     * Shifts joined them on 23-Aug-2026. The line this replaced asserted the
+     * opposite — "still lists Shifts, which did not move" — so it is inverted
+     * here rather than deleted: a test that pinned the old arrangement is the
+     * exact thing that should go red when the arrangement changes, and
+     * silently dropping it would have let Shifts drift back into the menu
+     * with nothing objecting.
      */
     it.each([
         ['Scrap Reasons', '/production/scrap-reasons'],
         ['Molds', '/production/molds'],
+        ['Shifts', '/production/shifts'],
     ])('does not list %s as a child', (label, key) => {
         expect(production?.children?.map((child) => child.label)).not.toContain(label);
         expect(production?.children?.map((child) => child.key)).not.toContain(key);
-    });
-
-    it('still lists Shifts, which did not move', () => {
-        expect(production?.children?.map((child) => child.key)).toContain('/production/shifts');
     });
 
     it('still lists the one configuration destination they moved into', () => {

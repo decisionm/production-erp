@@ -16,7 +16,24 @@ const shiftSchema = z.object({
 });
 type ShiftFormValues = z.infer<typeof shiftSchema>;
 
-export default function ShiftsPage() {
+/**
+ * `embedded` is set when this renders as the Shifts TAB of Production
+ * Configuration, which is now the only way a user reaches it. All it
+ * suppresses is the page-level heading — the tab is already labelled
+ * "Shifts". The paragraph below it STAYS: it explains why a retired shift is
+ * still listed, which is content, not a duplicated title.
+ *
+ * Nothing else is conditional on it: the same queries, the same endpoints,
+ * the same lifecycle actions and the same (absent) client-side permission
+ * gate in both modes. The default keeps the standalone signature working for
+ * anything that still imports this page.
+ *
+ * NOTE for anyone grepping: the UI route `/production/shifts` is retired and
+ * now redirects here, but the API path `production/shifts` (api.ts,
+ * entities.ts) is a DIFFERENT thing that did not move and must not be
+ * touched — the two happen to share a string.
+ */
+export default function ShiftsPage({ embedded = false }: { embedded?: boolean }) {
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState<Shift | null>(null);
     const queryClient = useQueryClient();
@@ -71,8 +88,8 @@ export default function ShiftsPage() {
 
     return (
         <>
-            <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
-                <Typography.Title level={3} style={{ margin: 0 }}>Shifts</Typography.Title>
+            <Space style={{ marginBottom: 16, justifyContent: embedded ? 'flex-end' : 'space-between', width: '100%' }}>
+                {!embedded && <Typography.Title level={3} style={{ margin: 0 }}>Shifts</Typography.Title>}
                 <Button type="primary" onClick={() => setModalOpen(true)}>New Shift</Button>
             </Space>
             <Typography.Paragraph type="secondary">
