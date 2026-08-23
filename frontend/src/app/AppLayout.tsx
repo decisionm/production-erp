@@ -153,14 +153,14 @@ export const allNavItems: readonly NavGroup[] = [
             // name told a supervisor which one owned the setting they were
             // looking for — so this entry now opens a workspace whose tabs are
             // Product Standards, Machines & Capabilities, Molds, Packing
-            // Materials, Downtime Reasons, Scrap Reasons, Factory Rules and
-            // Import from Workbook. Every retired URL still answers as a
-            // redirect (App.tsx), in two flavours: /production/standards,
-            // /production/scrap-reasons and /production/molds go through the
-            // shared query-preserving redirect, so an incoming search string
-            // survives the hop; /production/work-centers is unchanged by this
-            // PR and stays the plain <Navigate> to the machines tab, which
-            // carries no query string.
+            // Materials, Downtime Reasons, Scrap Reasons, Shifts, Factory
+            // Rules and Import from Workbook. Every retired URL still answers
+            // as a redirect (App.tsx), in two flavours: /production/standards,
+            // /production/scrap-reasons, /production/molds and
+            // /production/shifts go through the shared query-preserving
+            // redirect, so an incoming search string survives the hop;
+            // /production/work-centers stays the plain <Navigate> to the
+            // machines tab, which carries no query string.
             { key: '/production/configuration', label: 'Production Configuration' },
             { key: '/production/boms', label: 'Bills of Material' },
             { key: '/production/shift-summary', label: 'Shift Summary' },
@@ -176,16 +176,24 @@ export const allNavItems: readonly NavGroup[] = [
             // entries without first wiring the approval chain into
             // WorkOrderService.
             //
-            // Scrap Reasons and Molds are gone from here too, but for the
-            // opposite reason: they are not withdrawn, they MOVED. Both are
-            // masters the Shift Floor selects from — a scrap reason on a
-            // rejection line, a mould on a mould change — so they belong
-            // beside the other masters in Production Configuration rather
-            // than as two more lines between a supervisor and the pages they
-            // open daily. They are tabs of it now (?tab=scrap, ?tab=molds),
-            // the components and endpoints are unchanged, and the old URLs
+            // Scrap Reasons, Molds and Shifts are gone from here too, but for
+            // the opposite reason: they are not withdrawn, they MOVED. All
+            // three are masters the Shift Floor selects from — a scrap reason
+            // on a rejection line, a mould on a mould change, a shift on
+            // every entry made — so they belong beside the other masters in
+            // Production Configuration rather than as three more lines
+            // between a supervisor and the pages they open daily. They are
+            // tabs of it now (?tab=scrap, ?tab=molds, ?tab=shifts), the
+            // components and endpoints are unchanged, and the old URLs
             // redirect.
-            { key: '/production/shifts', label: 'Shifts' },
+            //
+            // Shifts went last, on 23-Aug-2026: it was the only master left
+            // in this menu after the others moved, and its own screen is the
+            // same shape as theirs — a named list with Active/Archive/Delete
+            // through the shared configuration cell. Nothing about it
+            // justified a separate line once Molds and Scrap Reasons had one
+            // destination. The API path `production/shifts` is untouched by
+            // any of this; only the UI route moved.
         ],
     },
     {

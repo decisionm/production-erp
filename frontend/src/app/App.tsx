@@ -32,7 +32,6 @@ import RoutingsPage from '@/features/production/pages/RoutingsPage';
 import ProductionConfigurationPage from '@/features/production/pages/ProductionConfigurationPage';
 import LiveMonitorPage from '@/features/production/pages/LiveMonitorPage';
 import ShiftProductionEntryPage from '@/features/production/pages/ShiftProductionEntryPage';
-import ShiftsPage from '@/features/production/pages/ShiftsPage';
 import ShiftSummaryPage from '@/features/production/pages/ShiftSummaryPage';
 import SubcontractOrdersPage from '@/features/production/pages/SubcontractOrdersPage';
 import WorkOrdersPage from '@/features/production/pages/WorkOrdersPage';
@@ -120,18 +119,19 @@ export default function App() {
                                     <Route path="/production/mrp" element={<MrpPage />} />
                                     <Route path="/production/capacity" element={<CapacityPlanPage />} />
                                     <Route path="/production/subcontract-orders" element={<SubcontractOrdersPage />} />
-                                    {/* Scrap Reasons and Molds are TABS of Production
-                                        Configuration now, not pages of their own. Both
-                                        URLs are kept and both keep their query string —
-                                        see ProductionConfigurationRedirect below for
-                                        why that matters even where no caller is known
-                                        to send one today. */}
+                                    {/* Scrap Reasons, Molds and Shifts are TABS of
+                                        Production Configuration now, not pages of their
+                                        own. All three URLs are kept and all three keep
+                                        their query string — see
+                                        ProductionConfigurationRedirect below for why that
+                                        matters even where no caller is known to send one
+                                        today. */}
                                     <Route
                                         path="/production/scrap-reasons"
                                         element={<ProductionConfigurationRedirect tab="scrap" />}
                                     />
                                     <Route path="/production/molds" element={<ProductionConfigurationRedirect tab="molds" />} />
-                                    <Route path="/production/shifts" element={<ShiftsPage />} />
+                                    <Route path="/production/shifts" element={<ProductionConfigurationRedirect tab="shifts" />} />
                                     <Route path="/production/shift-production" element={<ShiftProductionEntryPage />} />
                                     <Route path="/production/live-monitor" element={<LiveMonitorPage />} />
                                     {/* The internal carton trace tier (DEC-20260810-001).
@@ -260,10 +260,11 @@ export function productionConfigurationTarget(search: string, tab: string): stri
  * worse than an error. So the incoming search is preserved and `tab` is
  * merged in on top of it.
  *
- * /production/scrap-reasons and /production/molds have no such caller today.
- * They use the same component anyway: the cost is nothing, and the failure it
- * prevents is silent. /production/work-centers stays a bare <Navigate> — it is
- * pinned as a redirect by App.routes.test.tsx and has no state to carry.
+ * /production/scrap-reasons, /production/molds and /production/shifts have no
+ * such caller today. They use the same component anyway: the cost is nothing,
+ * and the failure it prevents is silent. /production/work-centers stays a bare
+ * <Navigate> — it is pinned as a redirect by App.routes.test.tsx and has no
+ * state to carry.
  */
 function ProductionConfigurationRedirect({ tab }: { tab: string }) {
     const { search } = useLocation();

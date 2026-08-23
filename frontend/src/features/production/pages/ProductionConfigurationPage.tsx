@@ -26,6 +26,7 @@ import PackingMaterialsTab from '@/features/production/components/PackingMateria
 import MoldsPage from '@/features/production/pages/MoldsPage';
 import ProductStandardsPage from '@/features/production/pages/ProductStandardsPage';
 import ScrapReasonsPage from '@/features/production/pages/ScrapReasonsPage';
+import ShiftsPage from '@/features/production/pages/ShiftsPage';
 import { hasManageAccess } from '@/features/auth/permissions';
 import { showApiError } from '@/lib/showApiError';
 import { useAuthStore } from '@/features/auth/store';
@@ -61,11 +62,17 @@ import type { DowntimeReason, ImportResult, WorkCenter } from '@/features/produc
  * changed — /production/standards still resolves, as a redirect that keeps its
  * query string (see App.tsx).
  *
- * Scrap Reasons and Molds joined on the same terms: both were Production
- * menu entries of their own, and both are masters the Shift Floor selects
- * from — a scrap reason on a rejection line, a mould on a mould change — so
- * they sit with the other masters. Same components, same endpoints, same
- * permissions; the menu lines went, the screens did not.
+ * Scrap Reasons, Molds and Shifts joined on the same terms: each was a
+ * Production menu entry of its own, and each is a master the Shift Floor
+ * selects from — a scrap reason on a rejection line, a mould on a mould
+ * change, a shift on every entry made — so they sit with the other masters.
+ * Same components, same endpoints, same permissions; the menu lines went,
+ * the screens did not.
+ *
+ * Shifts came last (23-Aug-2026) and for the same reason: it was the one
+ * master still sitting outside this page, and nothing about a list of named
+ * clock windows explained why it lived in the menu when Molds and Scrap
+ * Reasons no longer did.
  */
 
 /**
@@ -74,14 +81,18 @@ import type { DowntimeReason, ImportResult, WorkCenter } from '@/features/produc
  *
  * WHY EACH ONE SITS WHERE IT DOES, so the next person to add a tab has a rule
  * rather than a list: the product half first, then the machine half, then the
- * consumable/reason masters the floor picks from, then the factory-wide rules,
- * then the bulk door in.
+ * masters the floor picks from — consumables, reason codes, and the shift an
+ * entry is filed under — then the factory-wide rules, then the bulk door in.
  *
  *  - `molds` follows `machines` because a mould is what gets mounted INTO one;
  *    reading the two apart is what made the old separate menu entry confusing.
  *  - `scrap` follows `downtime` because they are the same kind of thing — the
  *    two reason-code lists the Shift Floor picks from — and a supervisor
  *    looking for one is as likely to be looking for the other.
+ *  - `shifts` closes that run rather than sitting beside the reason codes: a
+ *    shift is picked per entry like they are, but it describes WHEN the work
+ *    happened rather than what went into it or what went wrong, which puts it
+ *    at the boundary with the factory-wide rules that follow.
  *
  * Each entry renders the SAME component the standalone screen rendered, with
  * no wrapper and no added gate: `machines` is the only tab that checks
@@ -101,6 +112,7 @@ export const PRODUCTION_CONFIG_TABS = [
     { key: 'packing', label: 'Packing Materials', render: () => <PackingMaterialsTab /> },
     { key: 'downtime', label: 'Downtime Reasons', render: () => <DowntimeReasonsTab /> },
     { key: 'scrap', label: 'Scrap Reasons', render: () => <ScrapReasonsPage embedded /> },
+    { key: 'shifts', label: 'Shifts', render: () => <ShiftsPage embedded /> },
     { key: 'settings', label: 'Factory Rules', render: () => <SettingsTab /> },
     { key: 'import', label: 'Import from Workbook', render: () => <ImportTab /> },
 ] as const;
@@ -132,8 +144,9 @@ export default function ProductionConfigurationPage() {
             <Typography.Paragraph type="secondary" style={{ maxWidth: 820 }}>
                 Everything the factory is set up with, in one place. Products and what they run to, the
                 machines and what each one can do, the moulds that mount into them, the downtime and
-                scrap reasons the floor picks from, and the factory-wide rules. Nothing here moves stock
-                or posts to Tally — it only decides what the shop floor is allowed to do.
+                scrap reasons the floor picks from, the shifts a day is worked in, and the factory-wide
+                rules. Nothing here moves stock or posts to Tally — it only decides what the shop floor
+                is allowed to do.
             </Typography.Paragraph>
 
             <Tabs
