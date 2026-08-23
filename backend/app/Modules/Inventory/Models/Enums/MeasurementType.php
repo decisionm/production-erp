@@ -23,6 +23,13 @@ namespace App\Modules\Inventory\Models\Enums;
  * GoodsReceiptService::isMassUom stripped dots and added "kilogram(s)", and the
  * frontend had a fourth copy. Against Tally's actual `Kgs.` all of them agreed,
  * so this is drift caught before it bit, not a live defect.
+ *
+ * That prediction held. On 23-Aug-2026 the kilogram half was consolidated:
+ * the four private isMassUom() copies named above are gone and Item::isKgUom()
+ * is their one definition. This enum was deliberately NOT made that
+ * definition — it answers Weight for GRAMS, and every caller of isKgUom() sums
+ * the quantity AS KILOGRAMS, so routing them here would read 0.32 g of
+ * masterbatch as 0.32 kg. Two questions, two answers, on purpose.
  */
 enum MeasurementType: string
 {

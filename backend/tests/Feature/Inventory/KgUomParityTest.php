@@ -81,6 +81,38 @@ class KgUomParityTest extends TestCase
         ];
     }
 
+    /**
+     * EVERY ENTRY OF THE CONSTANT, driven off the constant itself.
+     *
+     * The providers below are hand-written samples, and a sample cannot see a
+     * NEW entry somebody adds to KG_UOM_VARIANTS — which is exactly the drift
+     * this file claims to pin. Iterating the constant closes that: add a
+     * spelling to the SQL list and forget the PHP predicate, and this goes
+     * red on the entry you added rather than staying green because no sample
+     * happened to name it.
+     */
+    public function test_every_entry_of_the_sql_list_is_accepted_by_the_php_predicate(): void
+    {
+        $this->assertNotEmpty(Item::KG_UOM_VARIANTS);
+
+        foreach (Item::KG_UOM_VARIANTS as $uom) {
+            $item = $this->itemWithUom($uom, 'RM-CONST-'.md5($uom));
+
+            $this->assertTrue(
+                Item::isKgUom($uom),
+                "KG_UOM_VARIANTS carries '{$uom}' but isKgUom() rejects it — the SQL list and the PHP predicate have drifted.",
+            );
+            $this->assertTrue(
+                $item->hasKgUom(),
+                "hasKgUom() rejects '{$uom}', which is in KG_UOM_VARIANTS.",
+            );
+            $this->assertTrue(
+                Item::query()->kgUom()->whereKey($item->id)->exists(),
+                "scopeKgUom() does not select '{$uom}', which is in its own list.",
+            );
+        }
+    }
+
     #[DataProvider('kilogramSpellings')]
     public function test_php_and_sql_agree_that_a_spelling_is_kilograms(string $uom): void
     {
