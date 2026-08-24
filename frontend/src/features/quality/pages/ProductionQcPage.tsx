@@ -118,11 +118,6 @@ export default function ProductionQcPage() {
     return (
         <>
             <Typography.Title level={3} style={{ marginBottom: 4 }}>Production QC</Typography.Title>
-            <Typography.Paragraph type="secondary">
-                Every completed batch waits here for its check before the Plant Manager can approve it. Record how many
-                pieces were reviewed, how many were OK and how many were rejected — rejected pieces become scrap and
-                reduce the production figure that goes on to Tally.
-            </Typography.Paragraph>
 
             {!canReadQueue && (
                 <Alert

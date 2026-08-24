@@ -129,10 +129,6 @@ export default function ShiftSummaryPage() {
     return (
         <>
             <Typography.Title level={3} style={{ marginBottom: 4 }}>Shift Summary</Typography.Title>
-            <Typography.Paragraph type="secondary">
-                Target Production and Power Consumption are the only two numbers here that don&apos;t come from
-                somewhere else — everything below is computed from what was actually logged on the Shift Floor page.
-            </Typography.Paragraph>
 
             <Space direction="vertical" size={16} style={{ width: '100%', marginBottom: 24 }}>
                 <Form layout="inline">

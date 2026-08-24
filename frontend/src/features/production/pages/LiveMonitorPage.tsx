@@ -160,10 +160,6 @@ export default function LiveMonitorPage() {
                     Refreshes every {REFRESH_MS / 1000}s
                 </Typography.Text>
             </Space>
-            <Typography.Paragraph type="secondary">
-                The floor as it stands now — what is running, what is waiting for a signature, and what needs
-                someone. For date-range reporting use <Link to="/production/reports">Reports</Link>.
-            </Typography.Paragraph>
 
             {/* Anything needing a person, said once and at the top. Silent when
                 there is nothing to act on — a banner that is always present

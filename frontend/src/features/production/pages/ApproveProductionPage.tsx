@@ -1573,11 +1573,6 @@ export default function ApproveProductionPage() {
     return (
         <>
             <Typography.Title level={3} style={{ marginBottom: 4 }}>Approve Production</Typography.Title>
-            <Typography.Paragraph type="secondary">
-                Every completed batch passes the chain — Supervisor → Quality → Plant Manager → Accountant —
-                and posts to Tally the moment the Accountant approves. Quality works its own queue
-                (Quality → Production QC); rejection at any stage sends the batch back to the supervisor.
-            </Typography.Paragraph>
 
             <Segmented
                 value={status}

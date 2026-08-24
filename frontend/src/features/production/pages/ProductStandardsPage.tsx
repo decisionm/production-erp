@@ -1987,11 +1987,6 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
                     </Button>
                 </Col>
             </Row>
-            <Typography.Paragraph type="secondary">
-                Every product's whole configuration in one place — the workbook's cavities, weight, cycle time and
-                packing, the Tally item it applies to, the colour it needs, the recipe it consumes and the machines
-                that run it differently. Open a product to see what stands between it and a shift, and to fix it.
-            </Typography.Paragraph>
 
             {/* THE WAY BACK. A supervisor sent here by a blocked Start Batch has
                 a machine standing idle, and the worst outcome of this side trip

@@ -141,13 +141,6 @@ export default function ProductionConfigurationPage() {
     return (
         <div style={{ padding: 24 }}>
             <Typography.Title level={3}>Production Configuration</Typography.Title>
-            <Typography.Paragraph type="secondary" style={{ maxWidth: 820 }}>
-                Everything the factory is set up with, in one place. Products and what they run to, the
-                machines and what each one can do, the moulds that mount into them, the downtime and
-                scrap reasons the floor picks from, the shifts a day is worked in, and the factory-wide
-                rules. Nothing here moves stock or posts to Tally — it only decides what the shop floor
-                is allowed to do.
-            </Typography.Paragraph>
 
             <Tabs
                 activeKey={activeTab}
