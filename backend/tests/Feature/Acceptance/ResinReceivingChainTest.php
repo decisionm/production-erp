@@ -26,7 +26,7 @@ use Tests\TestCase;
  * RESIN, FROM THE PURCHASE ORDER TO THE PRODUCTION FLOOR.
  *
  *   Purchase Order -> GRN (bags scanned) -> Material Lot -> Bags -> RM Store
- *   -> Material Request -> Store Issue -> Production/WIP
+ *   -> Incoming QC release -> Material Request -> Store Issue -> Production/WIP
  *
  * Every link is walked over HTTP, and the two balances that matter are printed
  * at each step (MATERIAL_FLOW_LEDGER_REPORT=1) so the chain can be READ, not
@@ -38,6 +38,10 @@ use Tests\TestCase;
  *    moves RM Store -> Production/WIP and is still stock. Nothing here books a
  *    consumption, and the test asserts the consumed total stays at zero
  *    throughout.
+ *  · QUALITY IS A GATE AT BOTH DOORS. A bag off the lorry is waiting_qc, and
+ *    its kilograms are not production's until Incoming Inspection releases
+ *    them — whether the store types a quantity or scans the bag. The typed
+ *    door used to walk past this, and this chain used to prove it did.
  *  · A BAG BELONGS TO NO MACHINE AND NO BATCH (FC-01). Bags carry identity,
  *    provenance and custody — a lot, a supplier, a GRN, a purchase order, a
  *    warehouse — and never a machine.
@@ -187,6 +191,45 @@ class ResinReceivingChainTest extends TestCase
         $this->assertSame(0, bccomp($this->balance($this->store), '100', 4));
         $this->assertSame(0, bccomp($this->balance($this->wip), '0', 4));
 
+        // --- QUALITY HOLDS THE ARRIVAL, THEN RELEASES IT ---------------------
+        // The bags are born waiting_qc, and until quality dispositions them
+        // their kilograms are on the balance but NOT production's — at either
+        // door. This step used to be missing from the chain, and the typed
+        // handover below walked past the hold and passed. The refusal is
+        // asserted first so the release below is proved to be what opens it.
+        foreach (MaterialBag::all() as $bag) {
+            $this->assertSame('waiting_qc', $bag->status->value,
+                'a bag off the lorry is on incoming-QC hold before anything else');
+        }
+
+        $this->postJson('/api/v1/inventory/store-issues', [
+            'material_request_id' => $request['id'],
+            'lines' => [[
+                'material_request_line_id' => $request['lines'][0]['id'],
+                'item_id' => $this->resin->id,
+                'quantity' => '75',
+            ]],
+        ])->assertStatus(422);
+
+        $this->assertSame(0, bccomp($this->balance($this->store), '100', 4),
+            'the refused handover moved nothing');
+        $this->assertSame(0, bccomp($this->balance($this->wip), '0', 4));
+
+        $grnLineId = GoodsReceiptNoteLine::query()->latest('id')->value('id');
+        $this->postJson('/api/v1/quality/incoming-inspections', [
+            'goods_receipt_note_line_id' => $grnLineId,
+            'inspected_quantity' => '100',
+            'accepted_quantity' => '100',
+            'rejected_quantity' => '0',
+            'inspection_date' => '2026-08-18',
+        ])->assertCreated();
+
+        $this->record('4 · quality released the arrival');
+
+        // Releasing moves nothing either — it only lifts the hold.
+        $this->assertSame(0, bccomp($this->balance($this->store), '100', 4));
+        $this->assertSame(0, bccomp($this->balance($this->wip), '0', 4));
+
         // --- THE STORE HANDS OVER -------------------------------------------
         $this->postJson('/api/v1/inventory/store-issues', [
             'material_request_id' => $request['id'],
@@ -197,7 +240,7 @@ class ResinReceivingChainTest extends TestCase
             ]],
         ])->assertCreated();
 
-        $this->record('4 · store issue — 75 kg handed over');
+        $this->record('5 · store issue — 75 kg handed over');
 
         // --- WHAT THE BOOKS NOW SAY -----------------------------------------
         $this->assertSame(0, bccomp($this->balance($this->store), '25', 4));
