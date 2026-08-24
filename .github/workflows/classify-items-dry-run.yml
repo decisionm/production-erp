@@ -1,0 +1,100 @@
+name: Classify items (dry run)
+
+# THE DRY RUN ONLY. What category the evidence already in the database would
+# propose for each unclassified item, and why — read against LIVE, writing
+# nothing.
+#
+# Asked for 24-Aug-2026, when items:summary returned 624 of 624 active items
+# with NO category. That column is what the purchase-order, sales-order and
+# material-request rules read, so with every row NULL none of the three can
+# act on anything.
+#
+# THERE IS NO --write INPUT HERE, AND THAT IS THE DESIGN. The command supports
+# one; this workflow deliberately does not expose it, so dispatching this can
+# never change a row no matter what anyone selects. Applying the proposals is
+# a live master-data change: it goes through its own reviewed workflow with
+# its own confirmation gate, after a person has read this output. AGENTS.md
+# requires the dry run to be read BEFORE the write, and a single workflow with
+# a write toggle makes "read it first" a habit rather than a property.
+#
+# What the command guarantees, verified in its source before this was written:
+#   * dry run is the DEFAULT — it returns before any write unless --write
+#   * an item whose evidence CONTRADICTS itself (packed-with AND produced) is
+#     reported as a conflict and is never written, even with --write. Which
+#     one it really is belongs to the factory.
+#   * a category a PERSON already set is never overwritten. The proposal is
+#     evidence; a human answer outranks it (SOURCE-PRIORITY).
+#
+# Dev fixtures do not answer this — they are not live-shaped, which is how the
+# 09-Aug shift-rail defect happened — and AGENTS.md requires live data to be
+# counted on the live instance.
+
+# Least privilege: nothing here writes to the repository. Every workflow uses
+# only checkout, setup-node/php and same-run artifacts, and reaches the server
+# over SSH with a deploy key — never the GITHUB_TOKEN. Without this block the
+# token is repository-default, which on a push-triggered workflow that runs
+# `npm ci` (arbitrary lockfile postinstall) is a write-capable token one
+# compromised transitive dependency away from the pipeline that rsyncs to a
+# live factory. Read is all any of these need.
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: classify-items-dry-run
+  cancel-in-progress: false
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # ssh-keyscan can exit 0 having collected nothing — check output,
+          # not exit code (the same trap every workflow here guards).
+          # The host intermittently answers nothing: 10 of the last 100 runs failed
+          # here, and EVERY one cleared on a re-run of the SAME commit — it is the
+          # host, not the change. Retrying in-workflow removes that manual re-run.
+          # It does NOT weaken the check: if all three attempts come back empty the
+          # step still fails loudly, which is the state that must never deploy.
+          keys=""
+          for attempt in 1 2 3; do
+            keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+            if [ -n "$keys" ]; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "ssh-keyscan attempt ${attempt} returned no host key; retrying in $((attempt * 10))s"
+              sleep "$((attempt * 10))"
+            fi
+          done
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Re-running usually clears a transient failure."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      - name: Run the classifier, dry run
+        run: |
+          set -o pipefail
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && \$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php) artisan inventory:classify-items" \
+            2>&1 | tee classify-output.txt
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Proposed item categories — DRY RUN, nothing written"
+            echo
+            echo '```'
+            cat classify-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
