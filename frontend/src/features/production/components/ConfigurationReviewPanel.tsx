@@ -130,7 +130,7 @@ const candidateLabel = (c: ConfigurationReviewCandidate): string =>
  * "no Link on a separate-product row" a property of the code, not of the
  * data it is handed.
  */
-const fixTargetOf = (r: ConfigurationReviewRow): ConfigurationReviewFixTarget => {
+export const fixTargetOf = (r: ConfigurationReviewRow): ConfigurationReviewFixTarget => {
     if (r.kind === 'packaging_ambiguous') return 'name_ambiguity';
     if (r.kind === 'packaging_separate_product') return 'separate_product';
     if (r.fix_target) return r.fix_target;
@@ -138,6 +138,63 @@ const fixTargetOf = (r: ConfigurationReviewRow): ConfigurationReviewFixTarget =>
     if (r.packaging) return 'packaging_item';
     return 'attach_item';
 };
+
+/**
+ * WHICH WRITE A LINK ON THIS ROW ACTUALLY PERFORMS — the whole save decision,
+ * as data, before anything is sent.
+ *
+ * Extracted 24-Aug-2026 because the owner asked the right question: "we need
+ * to check if we change those are getting saved". The backend PATCH was
+ * covered twice over (PackagingIdentityOnlyTest, PackagingTallyIdentityTest
+ * assert the row persists and no count moves), and the CELL's rendering was
+ * covered — but the step between them, choosing WHICH endpoint gets WHICH
+ * ids, was asserted nowhere. That is the step where a save silently goes to
+ * the wrong place, and it cannot be tested through a click: this repo's
+ * vitest runs in node with no DOM.
+ *
+ * So the decision is a pure function and the component executes what it
+ * returns. One definition, provable per row shape.
+ *
+ * `none` is not a failure — it is the honest answer for a row that offers no
+ * link at all (a separate-product row, an ambiguous name, a provisional SKU).
+ * Those are handled before any control renders; returning a plan for them
+ * would invent a write nobody offered.
+ */
+export type LinkPlan =
+    | { endpoint: 'packaging_identity'; standardId: number; packagingId: number; itemId: number }
+    | { endpoint: 'attach_item'; standardId: number; itemId: number; confirmRepoint: boolean }
+    | { endpoint: 'none' };
+
+export function linkPlanFor(row: ConfigurationReviewRow, itemId: number): LinkPlan {
+    const target = fixTargetOf(row);
+
+    if (target === 'attach_item') {
+        if (row.standard === null) return { endpoint: 'none' };
+
+        // A standard already pointing at an item makes this a RE-POINT, which
+        // the backend refuses without the flag (DEC-20260810-003) — and which
+        // the UI must confirm first. One condition drives both.
+        return {
+            endpoint: 'attach_item',
+            standardId: row.standard.id,
+            itemId,
+            confirmRepoint: row.item !== null,
+        };
+    }
+
+    if (target === 'packaging_item') {
+        if (row.standard === null || row.packaging === null) return { endpoint: 'none' };
+
+        return {
+            endpoint: 'packaging_identity',
+            standardId: row.standard.id,
+            packagingId: row.packaging.id,
+            itemId,
+        };
+    }
+
+    return { endpoint: 'none' };
+}
 
 /**
  * THE ACTION CELL — what, if anything, a person may do about one row.
@@ -266,6 +323,37 @@ export function ConfigurationReviewFixCell({
     );
 }
 
+/**
+ * Where the collapsed/expanded choice is kept.
+ *
+ * `localStorage` and not a server preference: this is one person's view of
+ * one panel on one browser, it must survive a navigation, and it is worth
+ * exactly zero API surface. Every access is wrapped — a private window, or a
+ * browser set to block site data, THROWS on access rather than returning
+ * null, and a panel that crashes the Product Standards page to remember a
+ * toggle is a far worse bug than a toggle that forgets.
+ */
+const OPEN_PREFERENCE_KEY = 'production.configurationReview.open';
+
+export function readOpenPreference(): boolean {
+    try {
+        // Absent means never chosen, which is COLLAPSED — the default the
+        // owner asked for. Only an explicit 'true' opens it.
+        return window.localStorage.getItem(OPEN_PREFERENCE_KEY) === 'true';
+    } catch {
+        return false;
+    }
+}
+
+function writeOpenPreference(open: boolean): void {
+    try {
+        window.localStorage.setItem(OPEN_PREFERENCE_KEY, open ? 'true' : 'false');
+    } catch {
+        // Nothing to do and nothing worth telling the user: the panel still
+        // works this session, it just will not remember.
+    }
+}
+
 export default function ConfigurationReviewPanel({
     onFindInTable,
 }: {
@@ -276,7 +364,26 @@ export default function ConfigurationReviewPanel({
     const user = useAuthStore((s) => s.user);
     const canManage = hasManageAccess(user, 'production');
 
-    const [open, setOpen] = useState(true);
+    // COLLAPSED ON ARRIVAL, and the choice is remembered (owner request,
+    // 24-Aug-2026: "we have that option of choose the incomplete, complete
+    // and all in the filter button, that is enough").
+    //
+    // The filter directly below this panel already carries the counts —
+    // Production ready / Incomplete / All — so an expanded wall of yellow on
+    // every page load was re-stating the chip beside it. What the filter
+    // CANNOT do is fix a row: this panel is the only place all the waiting
+    // identities are linkable from one screen instead of one drawer each.
+    // So it collapses to a single line rather than being deleted; the
+    // worklist stays one click away.
+    const [open, setOpen] = useState(() => readOpenPreference());
+
+    // Remember it. Hiding this on every visit is the complaint; a hide that
+    // does not survive a navigation is the same complaint with extra steps.
+    const toggleOpen = (next: boolean) => {
+        setOpen(next);
+        writeOpenPreference(next);
+    };
+
     // Chosen candidate per row, keyed by rowKey — never pre-filled.
     const [chosen, setChosen] = useState<Record<string, number | undefined>>({});
 
@@ -327,14 +434,20 @@ export default function ConfigurationReviewPanel({
         onError: (error: any) => showRefusal(error, 'Could not attach this Tally item'),
     });
 
+    // Executes the plan linkPlanFor() returned; it decides nothing itself, so
+    // the tested function and the shipped behaviour cannot drift apart.
     const link = (row: ConfigurationReviewRow, itemId: number) => {
-        if (fixTargetOf(row) === 'attach_item') {
-            if (row.item !== null) {
+        const plan = linkPlanFor(row, itemId);
+
+        if (plan.endpoint === 'none') return;
+
+        if (plan.endpoint === 'attach_item') {
+            if (plan.confirmRepoint) {
                 Modal.confirm({
                     title: 'Change the Tally identity of this product?',
                     okText: 'Change the identity',
                     okButtonProps: { danger: true },
-                    content: `Currently attached to "${row.item.name}". Changing it re-points every FUTURE run of this product at the new item. Completed batches and vouchers already posted keep the identity they recorded — history is never rewritten. The change is noted on the standard with your name.`,
+                    content: `Currently attached to "${row.item?.name ?? ''}". Changing it re-points every FUTURE run of this product at the new item. Completed batches and vouchers already posted keep the identity they recorded — history is never rewritten. The change is noted on the standard with your name.`,
                     // The refusal, if any, is already shown by onError; the
                     // confirm closes either way rather than hanging open.
                     onOk: () => attachProduct.mutateAsync({ row, itemId }).then(() => undefined, () => undefined),
@@ -344,6 +457,7 @@ export default function ConfigurationReviewPanel({
             attachProduct.mutate({ row, itemId });
             return;
         }
+
         linkPackaging.mutate({ row, itemId });
     };
 
@@ -401,7 +515,7 @@ export default function ConfigurationReviewPanel({
             style={{ marginBottom: 16 }}
             message={`Needs review — ${headline} still waiting on a person`}
             action={
-                <Button size="small" onClick={() => setOpen((v) => !v)}>
+                <Button size="small" onClick={() => toggleOpen(! open)}>
                     {open ? 'Hide' : 'Show'}
                 </Button>
             }
