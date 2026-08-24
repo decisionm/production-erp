@@ -1442,3 +1442,87 @@ not proceed is making a document refuse an item until the following are settled:
 not block the nullable column, the honest dry-run classification report, or a
 person recording categories they actually know.
 *Open since 2026-08-21.*
+
+## Q60 · Which ItemCategory does each Tally stock group map to?
+
+`items:summary` read on live 24-Aug-2026 returned **624 active items, 624 of
+them with NO category**. That column is what three document rules read — a
+purchase order may be raised for raw and packing only, a sales order for
+finished goods only, a material request for raw and packing only — so with
+every row NULL none of the three can act on anything.
+
+`inventory:classify-items` proposes a category only where the database already
+holds evidence. Its dry run (same day) proposed **99**: 79 finished goods
+carrying a production standard, 19 packing materials appearing in a packing
+mapping, 1 raw material dosed as a masterbatch. Those 99 were written. The
+remaining **525** carry no such evidence and no tool can classify them.
+
+**But Tally already groups every one of them.** The `All Masters` export
+carries `<PARENT>` on each stock item — 17 groups across all 624. The ERP
+already stores this as `items.item_group_id`, whose own migration records that
+*nothing in the application reads it*. The taxonomy has been there unused.
+
+**PROVENANCE, stated first because it limits what this proves.** The export
+read is from `SWAASHPET POLYMERS PVT LTD Testing`, **not the live company**,
+and every file declares `TALLYREQUEST: Import Data`. It holds exactly 624
+stock items and live holds exactly 624 active items, which is a strong hint
+the two are in step — a hint, not proof. The group NAMES are very unlikely to
+differ between companies, but the counts below should be re-read from a live
+`All Masters` export before anything is written.
+
+**The proposed mapping — an agent's proposal, not a decision:**
+
+| Tally stock group | items | proposed | why |
+|---|---|---|---|
+| Amber Pet Bottle | 123 | `finished_good` | bottles the factory produces |
+| Clear Pet Bottle | 89 | `finished_good` | " |
+| Liquor Pet Bottle | 35 | `finished_good` | " |
+| Milk White Pet Bottle | 29 | `finished_good` | " |
+| Tablet Container | 29 | `finished_good` | " |
+| Green Pet Bottle | 12 | `finished_good` | " |
+| HDPE Bottles & Container | 10 | `finished_good` | " |
+| Orange Pet Bottle | 8 | `finished_good` | " |
+| Finished Goods | 35 | `finished_good` | named as such in Tally |
+| Packing Material | 27 | `packing_material` | named as such in Tally |
+| Carton Box | 15 | `packing_material` | boxes finished goods are packed in |
+| Tray | 9 | `packing_material` | trays finished goods are packed in |
+| Master Batch | 32 | `raw_material` | the colourant, dosed into a run |
+| Raw Material | 11 | `raw_material` | named as such in Tally |
+
+That is **370 finished, 51 packing, 43 raw = 464 of 624**, and none of those
+fourteen rows looks like a judgement call. **Two groups are, and they are the
+question:**
+
+**(a) `Caps & Closures` — 132 items, the single largest group.** Caps,
+closures and measuring cups; purchased, and consumed on a run (the BOM carries
+`28mm Tamper-Evident Cap` as a component). `raw_material` and
+`packing_material` are both defensible: a cap is fitted TO the bottle, a
+measuring cup is packed WITH it, and ItemCategory's own words for packing are
+"what finished goods are packed in or with". What is NOT in doubt is that it
+must be one of those two: `requestableFromStore()` allows only raw and
+packing, so any other answer makes 132 items invisible to a material request.
+The floor asks the store for caps.
+
+**(b) `Scrap` — 16 items** (`PET Scrap - Amber`, `Amber Lumps`, `Film Waste`,
+`Grinding`, …; all Kgs except `Bag Waste`). Scrap is PRODUCED, not purchased —
+FC-02: rejected bottles and lumps are real stock booked inward. So it is an
+output, which points at `finished_good`; but it is not a product the factory
+makes to order, which points at `other`. The consequence decides it, and only
+the owner can: `sellable()` is TRUE for `finished_good` alone, so **if scrap
+is ever to go on a sales order it must be `finished_good`** — and if it is
+`other` it can still be bought and held, but never sold through the ERP.
+
+**The 12 with no Tally group stay NULL, deliberately.** They are a mixed bag —
+`32GB Pen Drive`, `Tally Prime Server`, `Servo Amplifier 0.75KW`, `Inlet
+Filter`, `Mould Release Spray`, two 3D prototype samples, `Plastic Bags Used`,
+a row literally named `Stock`, and two counted bottles. Several are plainly
+`other` (spares, IT), but NULL means "nobody has said yet" and that is the
+honest state for a row nobody has looked at. They are listed here so a person
+can settle them by name rather than by rule.
+
+**Blocks:** applying categories to the 525 the evidence-based classifier
+cannot reach, and therefore purchase-order / sales-order / material-request
+eligibility for most of the catalogue. It does not block the 99 already
+written, which came from evidence rather than from this mapping.
+
+*Open since 2026-08-25.*
