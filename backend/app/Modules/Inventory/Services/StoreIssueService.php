@@ -978,6 +978,15 @@ class StoreIssueService
      *
      * What counts as held, what does not, and why, is documented once, on
      * IncomingQcHold.
+     *
+     * ONE ORDERING GAP, NAMED RATHER THAN LEFT TO BE FOUND: a multi-line
+     * handover takes one bag-lock set PER LINE, in the order the lines
+     * arrived on the form. Two multi-line issues submitted at the same
+     * moment with their materials in opposite order could each hold the bag
+     * set the other is waiting for. Sorting the lines by item_id before the
+     * loop would remove it; that is a change to how a handover is written,
+     * not to the hold, so it is disclosed here rather than made in the same
+     * pass as the hold itself.
      */
     private function assertNotHeldByIncomingQc(int $itemId, int $fromWarehouseId, string $quantity, string $field): void
     {

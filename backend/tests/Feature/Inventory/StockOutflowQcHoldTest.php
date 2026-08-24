@@ -558,27 +558,51 @@ class StockOutflowQcHoldTest extends TestCase
         }
     }
 
-    public function test_nothing_outside_the_guarded_service_writes_a_stock_balance(): void
+    public function test_nothing_outside_the_guarded_service_reaches_for_a_stock_balance_to_write_it(): void
     {
         // THE SWEEP, AS A TEST. The guard is worth exactly as much as the
-        // claim that every outflow passes through it, and that claim is
-        // "StockMovementService is the only writer of stock_balances". A
+        // claim that every outflow passes through it, and that claim rests on
+        // StockMovementService being the only writer of stock_balances. A
         // future service reaching for the table directly would be invisible
-        // to every other test in this file, so it is checked here rather
-        // than trusted.
+        // to every other test in this file, so it is checked rather than
+        // trusted — through the MODEL and through the raw table, because a
+        // DB::table('stock_balances')->decrement() would slip past a grep for
+        // the Eloquent class.
         //
-        // ResetTestData is the one exception and stays one: a console
-        // command that zeroes the whole table to reset a demo instance,
-        // which is not an outflow and has no hold to respect.
+        // WHAT IT CANNOT SEE, said plainly rather than implied away: a write
+        // through a model instance already sitting in a variable
+        // ($balance->update(...) two statements after the query) is beyond a
+        // regex, and is the form StockMovementService's own
+        // increment/decrementBalance use. This is a tripwire for the obvious
+        // route in, not a proof of exhaustiveness — the proof that outflows
+        // are covered is that they all land in decrementBalance, which the
+        // rest of this file exercises door by door.
+        //
+        // ResetTestData is the one expected exception and stays one: a
+        // console command that zeroes the whole table to reset a demo
+        // instance, which is not an outflow and has no hold to respect.
+        // CheckStockLedger reads the raw table and writes nothing, so it does
+        // not appear — if it ever does, it has stopped being read-only.
         $writers = [];
         $root = dirname(__DIR__, 3).'/app';
-        $pattern = '/StockBalance::\s*(?:query\(\)[^;]*?->\s*(?:update|increment|decrement|delete|updateOrCreate)\(|create\(|updateOrCreate\()/s';
+        $patterns = [
+            // A write chained straight off the model.
+            '/StockBalance::\s*(?:query\(\)[^;]*?->\s*(?:update|increment|decrement|delete|updateOrCreate)\(|create\(|updateOrCreate\()/s',
+            // The same thing done past Eloquent entirely.
+            '/DB::table\(\s*[\'"]stock_balances[\'"]\s*\)[^;]*?->\s*(?:update|insert|insertOrIgnore|upsert|delete|truncate|increment|decrement)\(/s',
+        ];
 
         $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($root));
         foreach ($files as $file) {
-            if ($file->isFile() && $file->getExtension() === 'php'
-                && preg_match($pattern, (string) file_get_contents($file->getPathname())) === 1) {
-                $writers[] = str_replace($root.'/', '', $file->getPathname());
+            if (! $file->isFile() || $file->getExtension() !== 'php') {
+                continue;
+            }
+            $source = (string) file_get_contents($file->getPathname());
+            foreach ($patterns as $pattern) {
+                if (preg_match($pattern, $source) === 1) {
+                    $writers[] = str_replace($root.'/', '', $file->getPathname());
+                    break;
+                }
             }
         }
         sort($writers);
