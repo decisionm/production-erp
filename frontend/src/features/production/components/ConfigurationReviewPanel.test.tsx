@@ -2,7 +2,7 @@ import { isValidElement } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import { Button, Select } from 'antd';
 import { describe, expect, it } from 'vitest';
-import { ConfigurationReviewFixCell } from '@/features/production/components/ConfigurationReviewPanel';
+import { ConfigurationReviewFixCell, linkPlanFor, readOpenPreference } from '@/features/production/components/ConfigurationReviewPanel';
 import type { ConfigurationReviewRow } from '@/features/production/types';
 
 /**
@@ -234,5 +234,138 @@ describe('the row kinds that predate the decision are unchanged', () => {
         expect(types).not.toContain(Button);
         expect(types).not.toContain(Select);
         expect(textIn(cell(sku))).toContain('Set the SKU on the item master');
+    });
+});
+
+/**
+ * DOES A LINK ACTUALLY GET SAVED, AND TO THE RIGHT PLACE (owner question,
+ * 24-Aug-2026: "we need to check if we change those are getting saved").
+ *
+ * The two ends of that were already covered and the middle was not. The
+ * backend PATCH is asserted twice over — PackagingIdentityOnlyTest proves the
+ * row persists and no count moves, PackagingTallyIdentityTest asserts the
+ * stored row. The cell's rendering is asserted above. What nothing asserted
+ * was the step between: which endpoint gets which ids. That is precisely
+ * where a save goes silently to the wrong row, and it is untestable through a
+ * click here — this repo's vitest runs in node with no DOM.
+ *
+ * `linkPlanFor` exists so it is testable as data, and the component executes
+ * what it returns rather than deciding again, so the two cannot drift.
+ *
+ * The one thing these tests do NOT prove: that the HTTP call leaves the
+ * browser. Only a real click on live closes that, and it is stated here
+ * rather than implied by a green suite.
+ */
+describe('what a link actually saves', () => {
+    it('sends a packing identity to the packing route, with both ids', () => {
+        expect(linkPlanFor(row({}), 77)).toEqual({
+            endpoint: 'packaging_identity',
+            standardId: 5,
+            packagingId: 9,
+            itemId: 77,
+        });
+    });
+
+    it('sends an unattached standard to the attach route, without asking to confirm', () => {
+        const unattached = row({
+            // The standard-level row: no packaging, so fixTargetOf falls
+            // through to 'attach_item'.
+            kind: 'packaging_no_identity',
+            packaging: null,
+            item: null,
+            fix_target: 'attach_item',
+        });
+
+        expect(linkPlanFor(unattached, 77)).toEqual({
+            endpoint: 'attach_item',
+            standardId: 5,
+            itemId: 77,
+            confirmRepoint: false,
+        });
+    });
+
+    /**
+     * The dangerous one. A standard that already names an item is a RE-POINT:
+     * the backend refuses it without the flag (DEC-20260810-003) and the
+     * person must confirm first. Both hang off `item !== null`, so this pins
+     * that a populated item raises the flag — a plan that re-points silently
+     * would be a wrong Tally identity on every FUTURE run of the product.
+     */
+    it('flags a re-point when the standard already names an item', () => {
+        const attached = row({
+            kind: 'packaging_no_identity',
+            packaging: null,
+            item: { id: 3, sku: 'BTL-P', name: 'Bottle A - Pouch' },
+            fix_target: 'attach_item',
+        });
+
+        expect(linkPlanFor(attached, 77)).toEqual({
+            endpoint: 'attach_item',
+            standardId: 5,
+            itemId: 77,
+            confirmRepoint: true,
+        });
+    });
+
+    /**
+     * Rows that offer no control must plan no write. Asserted per row kind
+     * rather than once, because each reaches `none` down a different branch
+     * and a regression in any one of them would invent a save nobody offered
+     * — on a separate-product row that would be the exact wrong Tally
+     * mapping DEC-20260821-001 exists to prevent.
+     */
+    it.each([
+        ['a separate-product row', SEPARATE_PRODUCT],
+        ['an ambiguous-name row', row({ kind: 'packaging_ambiguous', fix_target: 'name_ambiguity' })],
+        ['a provisional-SKU row', row({ kind: 'item_provisional_sku', standard: null, packaging: null, fix_target: 'item_sku' })],
+    ])('plans no write at all for %s', (_label, r) => {
+        expect(linkPlanFor(r, 77)).toEqual({ endpoint: 'none' });
+    });
+
+    it('plans no write when the row is missing the ids the route needs', () => {
+        expect(linkPlanFor(row({ standard: null }), 77)).toEqual({ endpoint: 'none' });
+        expect(linkPlanFor(row({ packaging: null }), 77)).toEqual({ endpoint: 'none' });
+    });
+});
+
+/**
+ * THE PANEL ARRIVES COLLAPSED (owner request, 24-Aug-2026).
+ *
+ * The filter directly beneath it already carries Production ready /
+ * Incomplete / All with counts, so an expanded panel on every page load was
+ * re-stating the chip beside it. Absent preference means collapsed; only an
+ * explicit 'true' opens it, so a person who never opens it never sees the
+ * table again.
+ */
+describe('the collapsed-by-default preference', () => {
+    const withStorage = (store: Record<string, string> | null) => {
+        const original = globalThis.window;
+        // A private window THROWS on access rather than returning null, which
+        // is the case that must not take the page down with it.
+        (globalThis as { window?: unknown }).window = store === null
+            ? { get localStorage(): never { throw new Error('blocked'); } }
+            : { localStorage: { getItem: (k: string) => store[k] ?? null } };
+
+        try {
+            return readOpenPreference();
+        } finally {
+            (globalThis as { window?: unknown }).window = original;
+        }
+    };
+
+    it('is collapsed when nothing was ever chosen', () => {
+        expect(withStorage({})).toBe(false);
+    });
+
+    it('is collapsed when the person hid it', () => {
+        expect(withStorage({ 'production.configurationReview.open': 'false' })).toBe(false);
+    });
+
+    it('is expanded only on an explicit true', () => {
+        expect(withStorage({ 'production.configurationReview.open': 'true' })).toBe(true);
+    });
+
+    it('is collapsed, not crashed, when storage throws', () => {
+        expect(withStorage(null)).toBe(false);
     });
 });
