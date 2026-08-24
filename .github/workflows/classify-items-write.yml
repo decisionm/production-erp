@@ -1,0 +1,196 @@
+name: Classify items (WRITE)
+
+# Applies the item categories that `inventory:classify-items` proposes from
+# evidence already in the database. This WRITES LIVE MASTER DATA.
+#
+# The read-only twin is "Classify items (dry run)". Run that first, read it,
+# then come here — AGENTS.md requires the dry run to be read BEFORE the write,
+# and this workflow enforces that rather than trusting it (see THE COUNT GATE).
+#
+# WHY A WORKFLOW AND NOT AN SSH SESSION. Same reasoning as every other write
+# workflow here: this must be a deliberate act rather than a deploy side
+# effect, and the only other way to run it is an interactive SSH session —
+# whose repeated password failures trip this host's brute-force protection,
+# which has already broken one deploy. Actions holds a key that works.
+#
+# THREE GATES, ALL OF WHICH MUST PASS:
+#
+#   1. `write` must be true. False runs the dry run and stops — identical to
+#      the read-only workflow, so a mis-click costs nothing.
+#   2. `confirm` must be typed exactly. A checkbox is one stray click; a
+#      phrase is not. Same shape as reset-test-data, the repo's other
+#      typed-confirmation write.
+#   3. THE COUNT GATE. `expected_proposals` must equal the number this run's
+#      OWN dry run proposes. The operator read a number in the dry run; if the
+#      catalogue has changed since — a Tally masters pull adding items, a
+#      person classifying some by hand — the two disagree and the write is
+#      REFUSED rather than applied to a set nobody approved. This is the gate
+#      that makes "read the dry run first" a property instead of a habit.
+#
+# WHAT THE COMMAND ITSELF GUARANTEES, verified in its source:
+#   * an item whose evidence CONTRADICTS itself (packed-with AND produced) is
+#     reported and NEVER written, even here. Which one it really is belongs to
+#     the factory.
+#   * a category a PERSON already set is never overwritten — a human answer
+#     outranks derived evidence (SOURCE-PRIORITY).
+#   * it only ever fills a NULL category. It cannot blank one, and it cannot
+#     change one.
+#
+# NOT COVERED BY ANY GATE HERE, and stated so nobody assumes otherwise: this
+# writes `items.category` and nothing else. It moves no stock, posts no
+# voucher, and touches no batch. There is no undo button — the reverse is a
+# person clearing a category, or a new migration.
+
+# Least privilege: nothing here writes to the repository. Every workflow uses
+# only checkout, setup-node/php and same-run artifacts, and reaches the server
+# over SSH with a deploy key — never the GITHUB_TOKEN. Read is all any of
+# these need.
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      write:
+        description: 'Actually write. Leave false for a dry run that changes nothing.'
+        type: boolean
+        default: false
+      confirm:
+        description: 'To write, type exactly:  CLASSIFY ITEMS  (ignored on a dry run)'
+        type: string
+        default: ''
+      expected_proposals:
+        description: 'The "proposed here" number you read in the dry run, e.g. 99. The write is refused if it no longer matches.'
+        type: string
+        default: ''
+
+concurrency:
+  # Never two of these at once, and never alongside its own dry-run twin.
+  group: classify-items
+  cancel-in-progress: false
+
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+
+    steps:
+      # EVERY input crosses into shell through `env`, never an inline ${{ }}.
+      # An expression is substituted into the script TEXT before bash parses
+      # it, so a value containing shell would already have run by the time any
+      # test looked at it. Through env it is only ever data.
+      - name: Refuse a write without the typed confirmation
+        if: ${{ inputs.write }}
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "$CONFIRM" != "CLASSIFY ITEMS" ]; then
+            echo "::error::Write refused. To write, set write=true AND type CLASSIFY ITEMS in the confirm box. A dry run (write=false) needs no confirmation."
+            exit 1
+          fi
+
+      # Refused, never stripped. A box that quietly deletes what it does not
+      # like turns "12; rm -rf" into "12" and runs it — the refusal is the
+      # feature.
+      - name: Refuse a write without a plain expected count
+        if: ${{ inputs.write }}
+        env:
+          EXPECTED: ${{ inputs.expected_proposals }}
+        run: |
+          case "$EXPECTED" in
+            ''|*[!0-9]*)
+              echo "::error::Write refused. expected_proposals must be the plain number you read in the dry run (digits only), e.g. 99. Got: '$EXPECTED'"
+              exit 1
+              ;;
+          esac
+          echo "::warning::WRITING items.category on the LIVE database, expecting $EXPECTED proposals."
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # The host intermittently answers nothing: retried in-workflow
+          # because every such failure cleared on a re-run of the SAME commit.
+          # It does not weaken the check — three empty answers still fail.
+          keys=""
+          for attempt in 1 2 3; do
+            keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+            if [ -n "$keys" ]; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "ssh-keyscan attempt ${attempt} returned no host key; retrying in $((attempt * 10))s"
+              sleep "$((attempt * 10))"
+            fi
+          done
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Re-running usually clears a transient failure; if not, brute-force protection may have banned the runner."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      # ALWAYS, whether or not this run will write. On a dry run it is the
+      # answer; on a write it is the evidence the count gate checks.
+      - name: Dry run first
+        run: |
+          set -o pipefail
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && \$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php) artisan inventory:classify-items" \
+            2>&1 | tee dry-run.txt
+
+      # THE COUNT GATE. Fails closed in both directions: a mismatch refuses,
+      # and so does an unparseable dry run — if the line cannot be found, the
+      # number cannot be trusted, and writing on a number nobody could read is
+      # exactly the outcome this gate exists to prevent.
+      - name: Refuse if the dry run no longer proposes what was approved
+        if: ${{ inputs.write }}
+        env:
+          EXPECTED: ${{ inputs.expected_proposals }}
+        run: |
+          ACTUAL="$(sed -n 's/^[[:space:]]*proposed here[[:space:]]*\([0-9][0-9]*\).*/\1/p' dry-run.txt | head -1)"
+
+          if [ -z "$ACTUAL" ]; then
+            echo "::error::Write refused. Could not read a 'proposed here' count from the dry run — so the set about to be written cannot be checked against the one you approved. The dry run output is in the summary."
+            exit 1
+          fi
+
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::Write refused. You approved $EXPECTED proposals; this run's dry run proposes $ACTUAL. The catalogue changed since you read it (a masters pull, or somebody classified items by hand). Re-read the dry run and re-dispatch with the new number."
+            exit 1
+          fi
+
+          echo "Count gate passed: dry run proposes $ACTUAL, matching the approved $EXPECTED."
+
+      - name: Write
+        if: ${{ inputs.write }}
+        run: |
+          set -o pipefail
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && \$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php) artisan inventory:classify-items --write" \
+            2>&1 | tee write.txt
+
+      - name: Summarise
+        if: always()
+        env:
+          WRITE_RAW: ${{ inputs.write }}
+          EXPECTED: ${{ inputs.expected_proposals }}
+        run: |
+          {
+            echo "### Classify items"
+            echo
+            echo "write: \`$WRITE_RAW\` · expected_proposals: \`$EXPECTED\`"
+            echo
+            echo "#### Dry run (always runs first)"
+            echo '```'
+            cat dry-run.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+            if [ "$WRITE_RAW" = "true" ]; then
+              echo
+              echo "#### Write"
+              echo '```'
+              cat write.txt 2>/dev/null || echo "(no write output — a gate refused before it ran, or the step failed)"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
