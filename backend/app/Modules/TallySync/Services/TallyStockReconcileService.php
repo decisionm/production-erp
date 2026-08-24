@@ -2,6 +2,7 @@
 
 namespace App\Modules\TallySync\Services;
 
+use App\Modules\Inventory\Exceptions\IncomingQcHoldException;
 use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\StockBalance;
@@ -279,22 +280,39 @@ class TallyStockReconcileService
                     continue;
                 }
 
-                $this->stock->recordIssue(
-                    itemId: (int) $itemId,
-                    warehouseId: (int) $warehouseId,
-                    // bcsub gives a signed string; the movement's quantity is a
-                    // magnitude and its TYPE carries the direction.
-                    quantity: ltrim($difference, '-'),
-                    reference: $reference,
-                    movementDate: $locked->as_of->toDateString(),
-                    notes: $this->movementNote($erp, $wipQuantity, $tally),
-                    createdBy: $userId,
-                    // Tally may hold less than this ledger believes. Refusing
-                    // here would leave the two systems disagreeing at the exact
-                    // point somebody asked them to agree.
-                    allowNegative: true,
-                    purpose: StockMovementPurpose::Reconcile,
-                );
+                try {
+                    $this->stock->recordIssue(
+                        itemId: (int) $itemId,
+                        warehouseId: (int) $warehouseId,
+                        // bcsub gives a signed string; the movement's quantity is a
+                        // magnitude and its TYPE carries the direction.
+                        quantity: ltrim($difference, '-'),
+                        reference: $reference,
+                        movementDate: $locked->as_of->toDateString(),
+                        notes: $this->movementNote($erp, $wipQuantity, $tally),
+                        createdBy: $userId,
+                        // Tally may hold less than this ledger believes. Refusing
+                        // here would leave the two systems disagreeing at the exact
+                        // point somebody asked them to agree.
+                        allowNegative: true,
+                        purpose: StockMovementPurpose::Reconcile,
+                    );
+                } catch (IncomingQcHoldException $e) {
+                    // MATERIAL WAITING FOR INCOMING QC IS NOT DRIFT EITHER.
+                    // Writing this line down would take held kilograms off
+                    // the balance while the bags holding them stay
+                    // `waiting_qc` — the hold would then exceed the balance
+                    // and freeze the item for everybody, over a difference
+                    // that is very likely the hold itself.
+                    //
+                    // Reported as a skipped line rather than thrown: one held
+                    // item must not roll back every other line an operator
+                    // just matched. Same shape as every other skip reason,
+                    // and it names the way out (quality releases the arrival).
+                    $skipped[] = $label.' — '.$e->getMessage();
+
+                    continue;
+                }
 
                 $issued++;
             }

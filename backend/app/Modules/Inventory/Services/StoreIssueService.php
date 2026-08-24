@@ -2,13 +2,10 @@
 
 namespace App\Modules\Inventory\Services;
 
-use App\Modules\Inventory\Models\Enums\MaterialBagStatus;
 use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Models\Enums\StockMovementType;
 use App\Modules\Inventory\Models\Enums\StoreIssueStatus;
 use App\Modules\Inventory\Models\Item;
-use App\Modules\Inventory\Models\MaterialBag;
-use App\Modules\Inventory\Models\MaterialLot;
 use App\Modules\Inventory\Models\MaterialRequest;
 use App\Modules\Inventory\Models\StockBalance;
 use App\Modules\Inventory\Models\StockMovement;
@@ -60,6 +57,7 @@ class StoreIssueService
         private readonly ProductionWipLocationResolver $wip,
         private readonly MaterialBagIssueResolver $bags,
         private readonly MaterialRequestService $requests,
+        private readonly IncomingQcHold $qcHold,
     ) {}
 
     /**
@@ -960,74 +958,30 @@ class StoreIssueService
     }
 
     /**
-     * THE ARRIVAL HOLD, READ AT THE TYPED DOOR TOO.
+     * THE ARRIVAL HOLD, SAID IN THIS LINE'S OWN WORDS.
      *
-     * A bag born on a goods receipt is `waiting_qc` and is not production's
-     * until Incoming Inspection releases it — the owner-confirmed arrival
-     * hold that MaterialBagIssueResolver has always enforced at the scanner.
-     * But a typed line never touches a bag: it names a material, reads the
-     * AGGREGATE stock balance and transfers it. And the balance counts held
-     * kilograms, because the hold lives on the bag, not on the balance. So
-     * 100 kg standing in four un-inspected bags could be typed straight onto
-     * the floor with the four bags left sitting at `waiting_qc` behind it —
-     * the same material, the same store, one door guarded and one open.
+     * The RULE is not here. It is enforced for every outflow at
+     * StockMovementService::decrementBalance, which this handover's transfer
+     * goes through like every other writer — so removing this method would
+     * not reopen the door. What it is for is the SENTENCE: a typed line is
+     * one of several on a form, and a storekeeper needs to be told which
+     * line is the problem and how many kilograms of it may go. The central
+     * refusal is a 422 about an item and a store; this one is a 422 about
+     * `lines.2`, raised BEFORE anything is written, so the whole handover is
+     * refused with the form still readable rather than half-built and rolled
+     * back.
      *
-     * The guard is that one sentence, nothing more: kilograms sitting in
-     * bags this store has on incoming-QC hold are NOT issuable, so
-     * `available = balance − held`. It records nothing, moves nothing and
-     * decides nothing new about the factory.
+     * The arithmetic is the shared one (IncomingQcHold) to the character —
+     * two readings of "how much is held" that could drift apart is exactly
+     * the bug this seam is closing. Same lock, same order: bags, then
+     * balance.
      *
-     * WHAT COUNTS AS HELD, and what deliberately does not:
-     *  · `waiting_qc` bags in this store — held. Their kilograms are on the
-     *    balance and must not leave it.
-     *  · `rejected_qc` bags — NOT held. Their kilograms already left the
-     *    balance through the inspection's Rejections Out issue, and counting
-     *    them again would withhold the same material twice and refuse a
-     *    handover that is genuinely available.
-     *  · the boundary bag an inspection leaves `waiting_qc` (the open
-     *    bag-split question) — held, by falling out of the first rule. That
-     *    is the conservative reading and the one already written into the
-     *    inspection's note.
-     *  · a `waiting_qc` bag with no store recorded against it — held against
-     *    whichever store is being issued from. No code path creates one (a
-     *    lot without a GRN is born `in_store`), so this is fail-closed cover
-     *    for a backfill rather than a live case; the scanner refuses such a
-     *    bag outright for the same reason.
-     *  · an item with no bags at all — nothing held, and the door behaves
-     *    exactly as it did before. No MeasurementType is consulted anywhere
-     *    here: whether counted packaging should carry an arrival hold of its
-     *    own is an OPEN OWNER QUESTION, and reading bag existence rather
-     *    than a unit keeps this change out of that decision.
-     *
-     * `remaining_kg`, never `original_kg` — a part-poured bag holds only
-     * what is still in it. All of it in bcmath: a float has no business
-     * anywhere near a quantity that decides whether material may move.
-     *
-     * LOCK ORDER IS BAGS THEN BALANCE, matching
-     * IncomingInspectionService::dispositionBags (which locks the same bags,
-     * then the balance through its Rejections Out issue). Taken the other way
-     * round the two would deadlock. Holding both for the caller's transaction
-     * is what makes the check honest under concurrency: an inspection
-     * releasing bags and an issue reading them cannot interleave, and two
-     * issues cannot both read the same available kilograms. (`lockForUpdate`
-     * is a no-op on SQLite, so the test suite pins the arithmetic and the
-     * rollback, not the serialisation.)
+     * What counts as held, what does not, and why, is documented once, on
+     * IncomingQcHold.
      */
     private function assertNotHeldByIncomingQc(int $itemId, int $fromWarehouseId, string $quantity, string $field): void
     {
-        $bags = MaterialBag::query()
-            ->whereIn('material_lot_id', MaterialLot::query()->select('id')->where('item_id', $itemId))
-            ->where('status', MaterialBagStatus::WaitingQc->value)
-            ->where(fn ($query) => $query
-                ->where('current_warehouse_id', $fromWarehouseId)
-                ->orWhereNull('current_warehouse_id'))
-            ->lockForUpdate()
-            ->get();
-
-        $held = '0.0000';
-        foreach ($bags as $bag) {
-            $held = bcadd($held, (string) $bag->remaining_kg, 4);
-        }
+        [$held, $bagCount] = $this->qcHold->lockAndSum($itemId, $fromWarehouseId);
 
         if (bccomp($held, '0', 4) !== 1) {
             return;
@@ -1039,10 +993,7 @@ class StoreIssueService
             ->lockForUpdate()
             ->value('quantity');
 
-        $available = bcsub((string) ($balance ?? '0'), $held, 4);
-        if (bccomp($available, '0', 4) === -1) {
-            $available = '0.0000';
-        }
+        $available = $this->qcHold->available((string) ($balance ?? '0'), $held);
 
         if (bccomp($quantity, $available, 4) !== 1) {
             return;
@@ -1058,7 +1009,7 @@ class StoreIssueService
                 $plain($available),
                 Item::query()->find($itemId)?->name ?? 'this material',
                 $plain($held),
-                $bags->count(),
+                $bagCount,
             ),
         ]);
     }

@@ -2,7 +2,9 @@
 
 namespace Tests\Feature\TallySync;
 
+use App\Modules\Inventory\Models\Enums\MaterialBagStatus;
 use App\Modules\Inventory\Models\Item;
+use App\Modules\Inventory\Models\MaterialLot;
 use App\Modules\Inventory\Models\StockBalance;
 use App\Modules\Inventory\Models\StockMovement;
 use App\Modules\Inventory\Models\Warehouse;
@@ -135,6 +137,56 @@ class TallyStockReconcileTest extends TestCase
         $movement = StockMovement::query()->where('reference', 'like', 'TALLY-RECONCILE-%')->sole();
         $this->assertSame(0, bccomp((string) $movement->quantity, '100.0000', 4));
         $this->assertStringNotContainsString('-', (string) $movement->quantity);
+    }
+
+    public function test_a_line_whose_material_is_waiting_for_incoming_qc_is_skipped_not_written_down(): void
+    {
+        app(StockMovementService::class)->recordReceipt(
+            itemId: $this->resin->id, warehouseId: $this->store->id,
+            quantity: '100.0000', unitCost: '90.0000',
+        );
+
+        // ...and every kilogram of it is standing in bags nobody has inspected.
+        $lot = MaterialLot::create([
+            'item_id' => $this->resin->id,
+            'supplier_lot_no' => 'TR-LOT-1',
+            'received_date' => '2026-08-05',
+            'bag_count' => 4,
+            'bag_weight_kg' => '25',
+            'total_received_kg' => '100',
+        ]);
+        for ($seq = 1; $seq <= 4; $seq++) {
+            $lot->bags()->create([
+                'barcode' => "TR-B{$seq}",
+                'original_kg' => '25',
+                'remaining_kg' => '25',
+                'status' => MaterialBagStatus::WaitingQc,
+                'current_warehouse_id' => $this->store->id,
+            ]);
+        }
+
+        // Tally shows less than the ledger. Writing the difference off would
+        // take held kilograms off the balance while the bags holding them stay
+        // on hold — after which the hold exceeds the balance and the material
+        // is frozen for everybody, over a difference that is very likely the
+        // arrival itself.
+        $result = $this->reconcile($this->snapshot('60.0000'));
+
+        $this->assertSame(0, bccomp($this->balance(), '100.0000', 4));
+        $this->assertSame(0, $result['issued']);
+        $this->assertSame(0, StockMovement::query()->where('reference', 'like', 'TALLY-RECONCILE-%')->count());
+
+        // Reported as a skipped line, in the operator's own words — NOT thrown.
+        // One held item must not roll back every other line just matched.
+        $this->assertCount(1, $result['skipped']);
+        $this->assertStringContainsString('waiting for incoming QC', $result['skipped'][0]);
+
+        // And the run still completed: the snapshot is applied, not left
+        // half-done for somebody to guess at.
+        $this->assertSame(
+            TallyStockSnapshot::STATUS_APPLIED,
+            TallyStockSnapshot::query()->latest('id')->value('status'),
+        );
     }
 
     public function test_running_it_twice_on_one_snapshot_is_refused(): void

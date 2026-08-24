@@ -2,6 +2,7 @@
 
 namespace App\Modules\Inventory\Services;
 
+use App\Modules\Inventory\Exceptions\IncomingQcHoldException;
 use App\Modules\Inventory\Exceptions\InsufficientStockException;
 use App\Modules\Inventory\Models\Enums\SerialNumberStatus;
 use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
@@ -45,6 +46,8 @@ use Illuminate\Validation\ValidationException;
  */
 class StockMovementService
 {
+    public function __construct(private readonly IncomingQcHold $qcHold) {}
+
     public function recordReceipt(
         int $itemId,
         int $warehouseId,
@@ -101,6 +104,10 @@ class StockMovementService
      * by-reference rather than part of the return value because the return
      * type is load-bearing for five other callers that read
      * $movement->unit_cost off it.
+     *
+     * IT DOES NOT REACH PAST AN INCOMING-QC HOLD, and that is deliberate —
+     * see decrementBalance(). Material still waiting for QC has not been
+     * consumed by anyone, so there is nothing about it to write down yet.
      */
     public function recordIssue(
         int $itemId,
@@ -116,10 +123,81 @@ class StockMovementService
         ?string &$shortfallKg = null,
         ?StockMovementPurpose $purpose = null,
     ): StockMovement {
+        return $this->writeIssue(
+            $itemId, $warehouseId, $quantity, $reference, $movementDate, $notes,
+            $createdBy, $batchId, $serialNumberId, $allowNegative, $shortfallKg, $purpose,
+            honourIncomingQcHold: true,
+        );
+    }
+
+    /**
+     * THE ONE ISSUE THAT MAY TAKE HELD KILOGRAMS OFF A BALANCE — quality
+     * rejecting an arrival, and nothing else.
+     *
+     * A separate, narrowly named door rather than a flag on recordIssue():
+     * a boolean parameter is something a future caller can pass, and
+     * eventually something a payload can reach. This one names its single
+     * purpose, and the grep for its callers is the whole audit.
+     *
+     * It skips the hold check for TWO reasons, and the second is the
+     * load-bearing one:
+     *
+     *  1. Arithmetic. IncomingInspectionService flips the rejected bags to
+     *     `rejected_qc` BEFORE it calls this, so those kilograms are already
+     *     out of the hold — but a store whose balance has previously been
+     *     driven below its bag total would still refuse a genuine rejection,
+     *     and a rejection is quality telling the truth about material that
+     *     has already failed. It must not be blocked by a stock-record
+     *     problem the QC desk cannot fix.
+     *  2. LOCK ORDER. dispositionBags() holds a lock on the bags of ONE GRN
+     *     line and then issues. Were that issue to take the item-wide
+     *     `waiting_qc` lock this class's guard takes, two inspections
+     *     running on two GRN lines of the same material would each hold
+     *     bags the other is waiting for — a deadlock cycle. Taking NO bag
+     *     lock here removes the cycle; the balance lock, which both still
+     *     take, is enough to keep the two arithmetics apart.
+     *
+     * It is not a bypass in any useful sense: the quantity is not chosen by
+     * anyone, it is the summed remaining_kg of the bags the inspection has
+     * just rejected whole.
+     */
+    public function recordIncomingQcRejectionIssue(
+        int $itemId,
+        int $warehouseId,
+        string $quantity,
+        ?string $reference = null,
+        ?string $movementDate = null,
+        ?string $notes = null,
+        ?int $createdBy = null,
+    ): StockMovement {
+        $ignored = null;
+
+        return $this->writeIssue(
+            $itemId, $warehouseId, $quantity, $reference, $movementDate, $notes,
+            $createdBy, null, null, false, $ignored, null,
+            honourIncomingQcHold: false,
+        );
+    }
+
+    private function writeIssue(
+        int $itemId,
+        int $warehouseId,
+        string $quantity,
+        ?string $reference,
+        ?string $movementDate,
+        ?string $notes,
+        ?int $createdBy,
+        ?int $batchId,
+        ?int $serialNumberId,
+        bool $allowNegative,
+        ?string &$shortfallKg,
+        ?StockMovementPurpose $purpose,
+        bool $honourIncomingQcHold,
+    ): StockMovement {
         $shortfallKg = null;
 
-        return DB::transaction(function () use ($itemId, $warehouseId, $quantity, $reference, $movementDate, $notes, $createdBy, $batchId, $serialNumberId, $allowNegative, &$shortfallKg, $purpose) {
-            [$costAtIssue, $shortfallKg] = $this->decrementBalance($itemId, $warehouseId, $quantity, $allowNegative);
+        return DB::transaction(function () use ($itemId, $warehouseId, $quantity, $reference, $movementDate, $notes, $createdBy, $batchId, $serialNumberId, $allowNegative, &$shortfallKg, $purpose, $honourIncomingQcHold) {
+            [$costAtIssue, $shortfallKg] = $this->decrementBalance($itemId, $warehouseId, $quantity, $allowNegative, $honourIncomingQcHold);
 
             if ($serialNumberId !== null) {
                 SerialNumber::whereKey($serialNumberId)->update([
@@ -178,7 +256,11 @@ class StockMovementService
 
         return DB::transaction(function () use ($itemId, $fromWarehouseId, $toWarehouseId, $quantity, $reference, $movementDate, $notes, $createdBy, $batchId, $serialNumberId, $purpose) {
             // A transfer never runs negative: moving material you do not
-            // have is not a truth about the floor, it is a typo.
+            // have is not a truth about the floor, it is a typo. Nor may it
+            // move kilograms the source store is holding for incoming QC —
+            // otherwise the hold is escaped by relocating the balance to a
+            // store the bags are not in (they never move). decrementBalance()
+            // refuses both.
             [$costAtTransfer] = $this->decrementBalance($itemId, $fromWarehouseId, $quantity);
             $this->incrementBalance($itemId, $toWarehouseId, $quantity, $costAtTransfer);
 
@@ -457,9 +539,67 @@ class StockMovementService
      *                                      onto the movement; kg issued beyond
      *                                      the recorded balance, or null]
      */
-    private function decrementBalance(int $itemId, int $warehouseId, string $quantity, bool $allowNegative = false): array
-    {
+    private function decrementBalance(
+        int $itemId,
+        int $warehouseId,
+        string $quantity,
+        bool $allowNegative = false,
+        bool $honourIncomingQcHold = true,
+    ): array {
+        // THE ARRIVAL HOLD, ENFORCED AT THE BALANCE ITSELF.
+        //
+        // Every outflow in this system ends here: recordIssue() decrements,
+        // and recordTransfer() decrements the source before it increments
+        // the destination. So this one function is where "material waiting
+        // for incoming QC may not leave the store" can be true for ALL of
+        // them at once — the typed store-issue line, the generic
+        // /stock-movements/issues and /transfers writers, a shift
+        // completion's material consumption, a work order, rework,
+        // subcontract, a delivery, maintenance, and anything added later
+        // that reaches for stock without knowing this rule exists.
+        //
+        // Guarding it one door at a time was tried and failed: closing the
+        // typed line left the generic issue open, and closing both left a
+        // TRANSFER able to move held kilograms into a second store where the
+        // bags — which never move — no longer count against them. Laundering
+        // by relocation, with the material never inspected. The hold has to
+        // be read where the balance is written, or it is not enforced.
+        //
+        // AND IT OUTRANKS $allowNegative. That flag exists so a shift's
+        // completion is never refused over a bin the ledger has not caught
+        // up with (config/production.php 'stock'): the resin WAS consumed,
+        // and refusing to write it down does not un-consume it. Held
+        // kilograms are the opposite case — the material is standing in the
+        // store, uninspected, and has NOT been consumed by anyone. Letting
+        // an issue run negative past a hold would write down a consumption
+        // that has not happened yet, so above a hold the refusal wins. With
+        // no hold (held = 0, which is every item that has no bags) the flag
+        // behaves exactly as it always has, to the character.
+        //
+        // BAGS ARE LOCKED BEFORE THE BALANCE, here and in every caller.
+        // IncomingInspectionService::dispositionBags locks its bags and then
+        // reaches the balance through its rejection issue; StoreIssueService
+        // locks the same bags before its own balance read. Nothing takes
+        // them the other way round, so no pair of these can cycle. The one
+        // path that must not take the item-wide bag lock at all —
+        // a rejection issue, which already holds one GRN line's bags — comes
+        // through recordIncomingQcRejectionIssue() and passes false here.
+        $held = '0.0000';
+        $heldBags = 0;
+
+        if ($honourIncomingQcHold) {
+            [$held, $heldBags] = $this->qcHold->lockAndSum($itemId, $warehouseId);
+        }
+
         $balance = $this->lockBalance($itemId, $warehouseId);
+
+        if (bccomp($held, '0', 4) === 1) {
+            $available = $this->qcHold->available($balance->quantity, $held);
+
+            if (bccomp($quantity, $available, 4) === 1) {
+                throw IncomingQcHoldException::forItem($itemId, $warehouseId, $available, $held, $heldBags, $quantity);
+            }
+        }
 
         $shortfall = null;
         if (bccomp($balance->quantity, $quantity, 4) < 0) {

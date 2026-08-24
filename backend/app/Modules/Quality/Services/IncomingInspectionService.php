@@ -171,7 +171,23 @@ class IncomingInspectionService
         if (bccomp($rejectedKg, '0', 4) === 1) {
             $grn = $line->goodsReceiptNote;
             $reference = sprintf('RJO-%s-L%d', $grn->tracking_number ?? "GRN{$grn->id}", $line->id);
-            $this->stock->recordIssue(
+            // THE ONE ISSUE ALLOWED TO TAKE HELD KILOGRAMS OFF A BALANCE,
+            // through the door named for exactly this and nothing else.
+            //
+            // Every other outflow is now refused above an incoming-QC hold
+            // (StockMovementService::decrementBalance). A rejection has to
+            // pass, or quality could never take failed material out of
+            // stock — and the quantity is not anyone's to choose: it is the
+            // summed remaining_kg of the bags flipped to `rejected_qc` two
+            // dozen lines above, so it can be neither inflated by a payload
+            // nor pointed at material this inspection did not just reject.
+            //
+            // It also must not take the item-wide `waiting_qc` lock the
+            // guard takes: this transaction already holds ONE GRN line's
+            // bags, and two inspections on two lines of the same material
+            // would then each wait on bags the other holds. See
+            // recordIncomingQcRejectionIssue() for that reading.
+            $this->stock->recordIncomingQcRejectionIssue(
                 itemId: $line->item_id,
                 warehouseId: $grn->warehouse_id,
                 quantity: $rejectedKg,
