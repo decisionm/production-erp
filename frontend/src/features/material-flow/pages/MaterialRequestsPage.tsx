@@ -251,10 +251,6 @@ export default function MaterialRequestsPage() {
             <Typography.Title level={4} style={{ marginTop: 32 }}>
                 Material available on the production floor
             </Typography.Title>
-            <Typography.Paragraph type="secondary" style={{ marginTop: -8 }}>
-                What is standing in {LOCATION_LABEL.production_wip} right now — already issued by the store and not yet
-                consumed by a batch. This is live stock, not a history of what was asked for.
-            </Typography.Paragraph>
 
             <Table<ProductionFloorStock>
                 rowKey="item_id"
