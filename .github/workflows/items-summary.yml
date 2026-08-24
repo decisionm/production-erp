@@ -1,0 +1,98 @@
+name: Show item summary
+
+# Read-only answer to "what is actually in the item catalogue on LIVE, and
+# how much of it could post to Tally?", runnable by anyone with repo access,
+# against the LIVE database, at any hour.
+#
+# Prints the active/inactive/deleted totals, then a count per ItemCategory —
+# finished goods, raw material, packing material, other, and UNCLASSIFIED as
+# its own row — each split by whether the item could reach a Tally voucher.
+# Then the SKU state, and finally the raw / packing / finished items that
+# cannot post, NAMED rather than merely counted.
+#
+# Two distinctions the output is careful about, because both are easy to get
+# wrong and expensive when wrong:
+#   * "can post" is a GUID AND not a local fixture — the readiness gate's own
+#     predicate. A fixture's missing GUID is deliberate, so counting it as a
+#     gap would be a permanent false positive.
+#   * UNCLASSIFIED is never folded into `other`. NULL means nobody has said
+#     yet; `other` means somebody said "neither raw nor packing". The
+#     purchase-order, sales-order and material-request rules all read that
+#     column, and turning an open question into a stated answer is the one
+#     thing AGENTS.md forbids doing on the factory's behalf.
+#
+# Dev fixtures do not answer this — they are not live-shaped, which is how the
+# 09-Aug shift-rail defect happened — and AGENTS.md requires live data to be
+# counted on the live instance. The command it runs is read-only by
+# construction: SELECTs only, no writes, no options — so this workflow needs
+# no confirmation gates, no dry run, and takes no inputs.
+
+# Least privilege: nothing here writes to the repository. Every workflow uses
+# only checkout, setup-node/php and same-run artifacts, and reaches the server
+# over SSH with a deploy key — never the GITHUB_TOKEN. Without this block the
+# token is repository-default, which on a push-triggered workflow that runs
+# `npm ci` (arbitrary lockfile postinstall) is a write-capable token one
+# compromised transitive dependency away from the pipeline that rsyncs to a
+# live factory. Read is all any of these need.
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: items-summary
+  cancel-in-progress: false
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # ssh-keyscan can exit 0 having collected nothing — check output,
+          # not exit code (the same trap every workflow here guards).
+          # The host intermittently answers nothing: 10 of the last 100 runs failed
+          # here, and EVERY one cleared on a re-run of the SAME commit — it is the
+          # host, not the change. Retrying in-workflow removes that manual re-run.
+          # It does NOT weaken the check: if all three attempts come back empty the
+          # step still fails loudly, which is the state that must never deploy.
+          keys=""
+          for attempt in 1 2 3; do
+            keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+            if [ -n "$keys" ]; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "ssh-keyscan attempt ${attempt} returned no host key; retrying in $((attempt * 10))s"
+              sleep "$((attempt * 10))"
+            fi
+          done
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Re-running usually clears a transient failure."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      - name: Read the item summary
+        run: |
+          set -o pipefail
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && \$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php) artisan items:summary" \
+            2>&1 | tee items-output.txt
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Live item catalogue summary"
+            echo
+            echo '```'
+            cat items-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
