@@ -453,8 +453,15 @@ export default function TallySyncPage() {
             )}
 
             <Typography.Paragraph type="secondary">
-                Vouchers reach Tally through the desktop agent at the factory — nothing here talks to Tally directly.
-                If nothing is syncing, that machine needs to be switched on with Tally open on the right company.
+                {/* The one thing this page cannot show as a number: WHERE to
+                    go when nothing is moving. Kept — a reader is here because
+                    sync is broken, so this is read rather than skipped — and
+                    shortened to the instruction alone. The clause that went
+                    ("nothing here talks to Tally directly") was the REASON
+                    behind it, and reasoning belongs in the repo, not on a
+                    screen somebody is standing at with a problem. */}
+                Vouchers reach Tally through the desktop agent — if nothing is syncing, check that machine is on with
+                Tally open on the right company.
                 <br />
                 {/* Today's picture, whatever the filter bar says — the one line
                     on this page that always covers the whole queue. Read
