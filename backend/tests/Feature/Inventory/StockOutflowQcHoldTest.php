@@ -720,6 +720,15 @@ class StockOutflowQcHoldTest extends TestCase
         // read no bag set at all — only the balance.
         $line = $this->arrival('QH-LOT-W', '100', 4, '25', 'qh-key-d');
 
+        // The table as the ACTIVE connection quotes it — "material_bags" on
+        // sqlite, `material_bags` on MySQL. Asked of the grammar rather than
+        // written out, because a hand-written quote form matches nothing on
+        // the other driver and a matcher that matches nothing turns this
+        // test into a green tautology. (It did: the sqlite-shaped literal
+        // that used to be here failed the MySQL CI leg with zero reads
+        // found, not with a wrong read found.)
+        $bagsTable = DB::connection()->getQueryGrammar()->wrapTable((new MaterialBag)->getTable());
+
         $tables = [];
         DB::listen(function ($query) use (&$tables) {
             $tables[] = $query->sql;
@@ -733,12 +742,22 @@ class StockOutflowQcHoldTest extends TestCase
             'inspection_date' => '2026-08-18',
         ], $this->storeKeeper->id);
 
-        // The one bag read this transaction makes is dispositionBags' own,
-        // narrowed to this GRN line through its lot — never the item-wide
-        // status scan the guard performs.
+        // First: the token matches SOMETHING on this driver. dispositionBags
+        // writes bag statuses, so a matcher that finds no material_bags
+        // statement at all is a broken matcher, not a clean transaction —
+        // and this says so by name instead of failing later as an
+        // arithmetic surprise.
+        $this->assertNotSame([], array_filter($tables, fn (string $sql) => str_contains($sql, $bagsTable)),
+            "no statement mentions {$bagsTable} — the matcher does not fit this driver's identifier quoting");
+
+        // Then the claim itself: the one bag READ this transaction makes is
+        // dispositionBags' own, narrowed to this GRN line through its lot —
+        // never the item-wide status scan the guard performs. The column
+        // name is the discriminator between the two: IncomingQcHold's read
+        // filters material_lot_id + status and never mentions a GRN line.
         $bagReads = array_values(array_filter(
             $tables,
-            fn (string $sql) => str_starts_with($sql, 'select') && str_contains($sql, '"material_bags"'),
+            fn (string $sql) => str_starts_with($sql, 'select') && str_contains($sql, $bagsTable),
         ));
 
         $this->assertCount(1, $bagReads);
