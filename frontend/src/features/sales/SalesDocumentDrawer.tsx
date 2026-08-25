@@ -547,7 +547,12 @@ export default function SalesDocumentDrawer({ target, onClose, onOpen, extra }: 
         resetCancel();
         resetEdit();
         setEditing(null);
-    }, [kind, id, resetCancel, resetEdit]);
+        // `target` too, not just kind/id: `shown` deliberately RETAINS the
+        // last document through the closing animation, so closing and
+        // reopening the SAME order never changes kind or id — and a
+        // half-typed date would still be sitting in the modal when the
+        // drawer came back.
+    }, [target, kind, id, resetCancel, resetEdit]);
 
     function confirmCancel(order: SalesOrder) {
         Modal.confirm({

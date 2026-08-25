@@ -107,7 +107,9 @@ class SalesOrderService
         return SalesOrder::query()
             ->whereIn('status', SalesOrder::OPEN_STATUSES)
             ->whereNotNull('expected_date')
-            ->whereDate('expected_date', '<', SalesOrder::factoryToday())
+            // where(), not whereDate(): expected_date is already a DATE
+            // column, so wrapping it in date() would only cost the index.
+            ->where('expected_date', '<', SalesOrder::factoryToday())
             ->count();
     }
 
