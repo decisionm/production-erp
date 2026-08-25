@@ -52,19 +52,24 @@ use App\Modules\Inventory\Models\MaterialLot;
  * deadlock. (`lockForUpdate` is a no-op on SQLite, so the suite pins the
  * arithmetic and the ORDER of the reads, not a real serialisation.)
  *
- * NO INDEX IS ADDED FOR THIS READ, and that is a decision rather than an
- * oversight. Its predicates are already indexed — `material_bags_status_index`
- * on `status`, the `material_lot_id` foreign-key index, and
- * `material_lots_item_received_index` behind the sub-select — and
+ * NO COMPOSITE INDEX BACKS THIS READ, and leaving it that way is a decision
+ * rather than an oversight. Say the shortfall plainly first: there is no
+ * index matching this predicate SET. Each column is separately covered —
+ * `material_bags_status_index` on `status`, the `material_lot_id`
+ * foreign-key index, `material_lots_item_received_index` behind the
+ * sub-select — but per-column cover is not the same as a well-supported
+ * query, and nobody should read the list above as "this plans well". No
+ * EXPLAIN has been run against live-shaped data to say how it does plan.
+ *
+ * The reason not to add the composite HERE is that this is a `FOR UPDATE`
+ * read. On InnoDB the index the optimiser picks decides WHICH ROWS AND GAPS
+ * ARE LOCKED, so a new index would quietly redraw the very lock footprint
+ * the guard's whole contract is written in — an unmeasured change to the one
+ * thing under review. Two smaller points also cut against rushing it:
  * `waiting_qc` is a TRANSIENT status a bag leaves at inspection, so it stays
- * selective in steady state. What is missing is a tailored composite, and
- * the reason not to add one here is that this is a `FOR UPDATE` read: on
- * InnoDB the index the optimiser picks decides WHICH ROWS AND GAPS ARE
- * LOCKED, so a new composite would quietly redraw the very lock footprint
- * the guard's contract is written in — and `OR current_warehouse_id IS NULL`
- * limits what one would buy anyway. That trade needs an EXPLAIN against
- * live-shaped data, which no session has yet run. Measure first; do not slip
- * it in beside the guard.
+ * a small set in steady state, and `OR current_warehouse_id IS NULL` limits
+ * what a composite ending in that column would buy. Measure first, in its
+ * own change; do not slip it in beside the guard.
  */
 class IncomingQcHold
 {
