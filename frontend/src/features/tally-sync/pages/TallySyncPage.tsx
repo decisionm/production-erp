@@ -15,6 +15,7 @@ import {
     holdCopy,
     instant,
     payloadText,
+    sourceLink,
     statusColor,
     statusLabel,
     voucherDate,
@@ -76,6 +77,39 @@ function resyncMessage(error: unknown): string {
 interface ResyncOutcome {
     ok: boolean;
     message: string;
+}
+
+/**
+ * The queue's Source cell: which ERP record this voucher was built from,
+ * and the way in to it.
+ *
+ * The link is sourceLink()'s and ONLY sourceLink()'s — the drawer's Source
+ * record asks the same function, so the two can never offer a row
+ * different destinations. This cell used to print "Open production
+ * entries" on every row, whatever the voucher was: a Receipt Note sent the
+ * reader to the production entries list.
+ *
+ * Exported and hook-free on purpose (the ConfigurationReviewPanel
+ * precedent): the load-bearing claim here is a NEGATIVE one — no
+ * production link on a non-production row — and a negative claim about
+ * rendering is only worth asserting against the tree this actually
+ * returns. EntrySource.test.tsx calls it as a plain function.
+ */
+export function EntrySourceCell({ entry }: { entry: TallySyncEntry }) {
+    const batch = payloadText(entry, 'batch_number');
+    const shift = payloadText(entry, 'shift');
+    const link = sourceLink(entry);
+
+    return (
+        <Space direction="vertical" size={0}>
+            {batch && <span>Batch {batch}</span>}
+            {!batch && shift && <span>{shift} shift</span>}
+            <Typography.Text type="secondary">
+                {entry.syncable_type} #{entry.syncable_id}
+            </Typography.Text>
+            {link && <Link to={link.to}>{link.label}</Link>}
+        </Space>
+    );
 }
 
 export default function TallySyncPage() {
@@ -790,22 +824,11 @@ export default function TallySyncPage() {
                         ),
                     },
                     {
-                        title: 'Batch / Source',
-                        render: (_, row) => {
-                            const batch = payloadText(row, 'batch_number');
-                            const shift = payloadText(row, 'shift');
-
-                            return (
-                                <Space direction="vertical" size={0}>
-                                    {batch && <span>Batch {batch}</span>}
-                                    {!batch && shift && <span>{shift} shift</span>}
-                                    <Typography.Text type="secondary">
-                                        {row.syncable_type} #{row.syncable_id}
-                                    </Typography.Text>
-                                    <Link to="/production/shift-production">Open production entries</Link>
-                                </Space>
-                            );
-                        },
+                        // Not "Batch / Source": most of the queue is not a
+                        // batch, and the cell says what the row's own source
+                        // record is.
+                        title: 'Source',
+                        render: (_, row) => <EntrySourceCell entry={row} />,
                     },
                     {
                         title: 'Status',
