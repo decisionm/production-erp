@@ -13,6 +13,7 @@ import { useAuthStore } from '@/features/auth/store';
 import MaterialBagLabels from '@/features/inventory/components/MaterialBagLabels';
 import { listAllWarehouses } from '@/features/inventory/api';
 import { createGoodsReceipt, listGoodsReceipts, listPurchaseOrders } from '@/features/procurement/api';
+import { RECEIVABLE_PO_FILTERS, isReceivableOrder } from '@/features/procurement/purchaseOrders';
 import type { GoodsReceiptNote, GoodsReceiptNoteLine, PurchaseOrderSchedule } from '@/features/procurement/types';
 import { useProductionSettings } from '@/features/production/packing';
 import { TallyLinkCell } from '@/features/sales/SalesDocumentDrawer';
@@ -487,15 +488,27 @@ export default function GoodsReceiptsPage() {
         queryKey: ['procurement', 'goods-receipts', isDeepLinked ? 'all' : 'first-page'],
         queryFn: () => listGoodsReceipts(isDeepLinked ? { per_page: 1000 } : undefined),
     });
-    const { data: orders } = useQuery({ queryKey: ['procurement', 'purchase-orders'], queryFn: () => listPurchaseOrders() });
+    // The picker's orders are narrowed SERVER-side (RECEIVABLE_PO_FILTERS) and
+    // asked for at the list's ceiling, not one page. Asked unfiltered, this
+    // list answers the newest 20 — and 21 newer draft or closed orders are
+    // enough to hide an older open one from a receipt clerk entirely. Still
+    // under the ['procurement','purchase-orders'] prefix every lifecycle
+    // action invalidates, so a refresh reaches it as before.
+    const { data: orders } = useQuery({
+        queryKey: ['procurement', 'purchase-orders', 'receivable'],
+        queryFn: () => listPurchaseOrders(RECEIVABLE_PO_FILTERS),
+    });
     const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses', 'all'], queryFn: listAllWarehouses });
     // Phase 6 lot/bag intake renders only when the backend flag is on — with
     // it off (or an older backend) this page is exactly the pre-traceability UI.
     const settings = useProductionSettings();
     const traceabilityEnabled = settings?.traceability_enabled === true;
 
+    // The same predicate the server was asked for, kept as a guard: an older
+    // backend that ignores `status[]` must still never offer a closed or
+    // cancelled order to receive against.
     const receivableOrders = useMemo(
-        () => orders?.data.filter((o) => o.status === 'sent' || o.status === 'partially_received') ?? [],
+        () => orders?.data.filter(isReceivableOrder) ?? [],
         [orders],
     );
     const orderOptions = receivableOrders.map((o) => ({ value: o.id, label: `PO #${o.id} — ${o.vendor.name}` }));
