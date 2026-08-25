@@ -10,6 +10,7 @@ use App\Modules\Quality\Exceptions\InvalidInspectionQuantityException;
 use App\Modules\Quality\Models\Enums\InspectionResult;
 use App\Modules\Quality\Models\IncomingInspection;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -30,6 +31,50 @@ class IncomingInspectionService
             ->with(['goodsReceiptNoteLine.goodsReceiptNote', 'item', 'inspectedBy'])
             ->orderByDesc('id')
             ->paginate($perPage);
+    }
+
+    /**
+     * THE ARRIVAL LINES STILL WAITING FOR AN INSPECTION — the desk's queue.
+     *
+     * READ-ONLY. This method writes nothing, locks nothing and derives no QC
+     * state; it answers one question the shipped code already decides.
+     *
+     * WHAT MAKES A LINE "PENDING", AND WHY IT IS NOT A JUDGEMENT CALL. This
+     * service already refuses a second inspection on a line that has one
+     * ("ONE DISPOSITION PER ARRIVAL LINE", create() above) — so "has no
+     * `incoming_inspections` row" is not a lifecycle state invented here, it
+     * is the exact complement of the refusal the deployed code enforces.
+     * That is the whole of the filter.
+     *
+     * WHAT THIS DELIBERATELY DOES *NOT* FILTER ON. Not `MaterialBagStatus::
+     * WaitingQc`, and not the presence of bags at all. DEC-20260825-001
+     * records the incoming-QC hold and leaves expressly open "whether every
+     * arrival line must wait for QA before the store may issue it or only
+     * named materials". A bag-status filter would answer that open question
+     * silently, in code, by making un-bagged arrivals vanish from the desk's
+     * queue. The owner decides that, not this method.
+     *
+     * NOT PAGINATED, ON PURPOSE. A picker fed from a paginated list showing
+     * the first 20 of a longer set is the defect `pickerFullList.test.ts`
+     * exists to prevent — found live on 12-Aug-2026, when a resin PO could
+     * not be raised because the raw materials were not in the first page.
+     * The queue that says "what is waiting for QC" has to be all of it or it
+     * is lying, so the full set is returned and ordered OLDEST FIRST, which
+     * is the order the desk works it in.
+     */
+    public function pendingLines(): Collection
+    {
+        return GoodsReceiptNoteLine::query()
+            ->with(['goodsReceiptNote', 'item'])
+            // Quality reading its OWN table to exclude the lines it has
+            // already dispositioned; the GRN line itself is read through a
+            // plain relation for the reason this class's docblock gives.
+            ->whereNotExists(fn ($query) => $query
+                ->from('incoming_inspections')
+                ->whereColumn('incoming_inspections.goods_receipt_note_line_id', 'goods_receipt_note_lines.id')
+            )
+            ->orderBy('id')
+            ->get();
     }
 
     /**

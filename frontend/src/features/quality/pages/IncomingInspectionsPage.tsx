@@ -1,22 +1,23 @@
-import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
-import { useMemo, useState } from 'react';
-import { Controller, useForm } from 'react-hook-form';
-import { z } from 'zod';
-import { createIncomingInspection, listIncomingInspections } from '@/features/quality/api';
-import type { IncomingInspection, InspectionResult } from '@/features/quality/types';
-import { listGoodsReceipts } from '@/features/procurement/api';
-
-const inspectionSchema = z.object({
-    goods_receipt_note_line_id: z.number({ error: 'GRN line is required' }),
-    inspected_quantity: z.number().gt(0, 'Must be greater than 0'),
-    accepted_quantity: z.number().min(0),
-    rejected_quantity: z.number().min(0),
-    inspection_date: z.string({ error: 'Inspection date is required' }),
-    notes: z.string().optional(),
-});
-type InspectionFormValues = z.infer<typeof inspectionSchema>;
+import { Alert, Button, DatePicker, Descriptions, Drawer, Empty, Form, Input, Modal, Space, Table, Tag, Typography } from 'antd';
+import dayjs from 'dayjs';
+import { useState } from 'react';
+import {
+    INCOMING_INSPECTIONS_QUERY_KEY,
+    PENDING_INSPECTION_LINES_QUERY_KEY,
+    createIncomingInspection,
+    listIncomingInspections,
+    listPendingIncomingInspectionLines,
+} from '@/features/quality/api';
+import {
+    closedInspectionModal,
+    inspectionPayload,
+    nextInspectionState,
+    serverErrorsFor,
+    validateInspection,
+    type InspectionField,
+} from '@/features/quality/incomingInspection';
+import type { IncomingInspection, InspectionResult, PendingInspectionLine } from '@/features/quality/types';
 
 const resultColor: Record<InspectionResult, string> = {
     pass: 'green',
@@ -24,62 +25,112 @@ const resultColor: Record<InspectionResult, string> = {
     partial: 'gold',
 };
 
+/**
+ * THE INCOMING QUALITY DESK.
+ *
+ * The pending queue comes FIRST because it is the work; the recorded
+ * inspections below it are the record. Every figure, every rule and every
+ * state transition in this page comes from `incomingInspection.ts`, which is
+ * pure and unit-tested — this file is the wiring and the markup, and it holds
+ * no arithmetic and no `Number()` of its own.
+ */
 export default function IncomingInspectionsPage() {
-    const [modalOpen, setModalOpen] = useState(false);
+    const [modal, setModal] = useState(closedInspectionModal);
     const [detailRow, setDetailRow] = useState<IncomingInspection | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['quality', 'incoming-inspections'], queryFn: listIncomingInspections });
-    const { data: receipts } = useQuery({
-        queryKey: ['procurement', 'goods-receipts'],
-        queryFn: () => listGoodsReceipts(),
+    const { data: pending, isLoading: pendingLoading } = useQuery({
+        queryKey: PENDING_INSPECTION_LINES_QUERY_KEY,
+        queryFn: listPendingIncomingInspectionLines,
+    });
+    const { data, isLoading } = useQuery({
+        queryKey: INCOMING_INSPECTIONS_QUERY_KEY,
+        queryFn: listIncomingInspections,
     });
 
-    const lineOptions = useMemo(
-        () =>
-            receipts?.data.flatMap((grn) =>
-                grn.lines.map((line) => ({
-                    value: line.id,
-                    label: `GRN #${grn.id} — ${line.item.sku} — received ${line.quantity}`,
-                })),
-            ) ?? [],
-        [receipts],
-    );
-
-    const { control, handleSubmit, reset, watch, formState: { errors } } = useForm<InspectionFormValues>({
-        resolver: zodResolver(inspectionSchema),
-        defaultValues: { inspected_quantity: 0, accepted_quantity: 0, rejected_quantity: 0 },
-    });
-
-    const [inspected, accepted, rejected] = watch(['inspected_quantity', 'accepted_quantity', 'rejected_quantity']);
-    const preview = useMemo(() => {
-        const i = Number(inspected) || 0;
-        const a = Number(accepted) || 0;
-        const r = Number(rejected) || 0;
-        const balanced = Math.abs(a + r - i) < 0.0001;
-        const result: InspectionResult | null = !balanced ? null : r === 0 ? 'pass' : a === 0 ? 'fail' : 'partial';
-        return { balanced, result };
-    }, [inspected, accepted, rejected]);
+    const validation = validateInspection(modal.values);
 
     const mutation = useMutation({
         mutationFn: createIncomingInspection,
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['quality', 'incoming-inspections'] });
-            setModalOpen(false);
-            reset();
+            // BOTH lists move: the inspected line leaves the queue and the
+            // new record joins the log. Same keys the queries above read, so
+            // an invalidation can never miss its own list.
+            queryClient.invalidateQueries({ queryKey: PENDING_INSPECTION_LINES_QUERY_KEY });
+            queryClient.invalidateQueries({ queryKey: INCOMING_INSPECTIONS_QUERY_KEY });
+            setModal((state) => nextInspectionState(state, { type: 'submitted' }));
         },
-        onError: (error: any) => {
-            Modal.error({ title: 'Could not record inspection', content: error?.response?.data?.message ?? 'Unknown error' });
+        onError: (error: unknown) => {
+            setModal((state) => nextInspectionState(state, { type: 'failed', error }));
         },
     });
+
+    /** Open, or switch rows — one path, so the reset can never be forgotten. */
+    const inspect = (line: PendingInspectionLine) => {
+        mutation.reset();
+        setModal((state) => nextInspectionState(state, { type: 'inspect', line }));
+    };
+
+    const dismiss = (type: 'cancel' | 'close') => {
+        mutation.reset();
+        setModal((state) => nextInspectionState(state, { type }));
+    };
+
+    const change = (field: InspectionField) => (value: string) =>
+        setModal((state) => nextInspectionState(state, { type: 'change', field, value }));
+
+    /** Client message first (it is about what is on screen), then the server's. */
+    const help = (field: InspectionField) => {
+        const messages = [validation.errors[field], ...serverErrorsFor(modal, field)].filter(Boolean);
+        return messages.length > 0 ? messages.join(' ') : undefined;
+    };
+    const status = (field: InspectionField) => (help(field) === undefined ? '' : 'error');
+
+    const quantityField = (field: InspectionField, label: string) => (
+        <Form.Item label={label} validateStatus={status(field)} help={help(field)}>
+            {/* A plain text input, not InputNumber: the operator's decimal
+                string reaches the server unnormalised and unrounded. */}
+            <Input
+                inputMode="decimal"
+                value={modal.values[field]}
+                onChange={(event) => change(field)(event.target.value)}
+            />
+        </Form.Item>
+    );
 
     return (
         <>
             <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
-                <Typography.Title level={3} style={{ margin: 0 }}>Incoming Inspections</Typography.Title>
-                <Button type="primary" onClick={() => setModalOpen(true)}>New Inspection</Button>
+                <Typography.Title level={3} style={{ margin: 0 }}>Incoming Quality</Typography.Title>
             </Space>
 
+            <Typography.Title level={5}>Awaiting inspection ({pending?.length ?? 0})</Typography.Title>
+            <Table<PendingInspectionLine>
+                style={{ marginBottom: 32 }}
+                scroll={{ x: 'max-content' }}
+                rowKey="id"
+                loading={pendingLoading}
+                dataSource={pending}
+                pagination={false}
+                locale={{ emptyText: <Empty description="Nothing waiting for inspection" /> }}
+                columns={[
+                    { title: 'GRN', dataIndex: 'grn_reference', render: (reference: string | null) => reference ?? '—' },
+                    { title: 'Item', render: (_, row) => `${row.item.sku ?? '—'} — ${row.item.name ?? '—'}` },
+                    {
+                        title: 'Received',
+                        align: 'right',
+                        render: (_, row) => `${row.received_quantity}${row.uom ? ` ${row.uom}` : ''}`,
+                    },
+                    {
+                        title: 'Actions',
+                        render: (_, row) => (
+                            <Button type="primary" size="small" onClick={() => inspect(row)}>Inspect</Button>
+                        ),
+                    },
+                ]}
+            />
+
+            <Typography.Title level={5}>Recorded inspections</Typography.Title>
             <Table<IncomingInspection>
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
@@ -126,79 +177,64 @@ export default function IncomingInspectionsPage() {
 
             <Modal
                 maskClosable={false}
-                title="New Incoming Inspection"
-                open={modalOpen}
-                onCancel={() => setModalOpen(false)}
-                onOk={handleSubmit((values) => mutation.mutate(values))}
+                title={modal.line === null ? 'Inspect' : `Inspect ${modal.line.grn_reference ?? ''} — ${modal.line.item.sku ?? ''}`}
+                open={modal.line !== null}
+                onCancel={() => dismiss('cancel')}
+                afterClose={() => dismiss('close')}
+                onOk={() => validation.valid && mutation.mutate(inspectionPayload(modal.values))}
                 confirmLoading={mutation.isPending}
-                okButtonProps={{ disabled: !preview.balanced }}
+                okText="Record inspection"
+                okButtonProps={{ disabled: !validation.valid }}
                 destroyOnHidden
             >
-                <Form layout="vertical">
-                    <Form.Item
-                        label="GRN Line"
-                        validateStatus={errors.goods_receipt_note_line_id ? 'error' : ''}
-                        help={errors.goods_receipt_note_line_id?.message}
-                    >
-                        <Controller
-                            name="goods_receipt_note_line_id"
-                            control={control}
-                            render={({ field }) => (
-                                <Select {...field} options={lineOptions} showSearch optionFilterProp="label" />
-                            )}
-                        />
-                    </Form.Item>
-                    <Form.Item label="Inspected Quantity">
-                        <Controller
-                            name="inspected_quantity"
-                            control={control}
-                            render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />}
-                        />
-                    </Form.Item>
-                    <Form.Item label="Accepted Quantity">
-                        <Controller
-                            name="accepted_quantity"
-                            control={control}
-                            render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />}
-                        />
-                    </Form.Item>
-                    <Form.Item label="Rejected Quantity">
-                        <Controller
-                            name="rejected_quantity"
-                            control={control}
-                            render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />}
-                        />
-                    </Form.Item>
-                    <Form.Item
-                        label="Inspection Date"
-                        validateStatus={errors.inspection_date ? 'error' : ''}
-                        help={errors.inspection_date?.message}
-                    >
-                        <Controller
-                            name="inspection_date"
-                            control={control}
-                            render={({ field }) => (
-                                <DatePicker
-                                    style={{ width: '100%' }}
-                                    onChange={(_, dateString) => field.onChange(dateString || undefined)}
-                                />
-                            )}
-                        />
-                    </Form.Item>
-                    <Form.Item label="Notes">
-                        <Controller name="notes" control={control} render={({ field }) => <Input {...field} />} />
-                    </Form.Item>
+                {modal.line !== null && (
+                    <Form layout="vertical">
+                        <Descriptions column={1} size="small" bordered style={{ marginBottom: 16 }}>
+                            <Descriptions.Item label="GRN">{modal.line.grn_reference ?? '—'}</Descriptions.Item>
+                            <Descriptions.Item label="Item">
+                                {modal.line.item.sku ?? '—'} — {modal.line.item.name ?? '—'}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Received">
+                                {modal.line.received_quantity}{modal.line.uom ? ` ${modal.line.uom}` : ''}
+                            </Descriptions.Item>
+                        </Descriptions>
 
-                    <Alert
-                        type={preview.balanced ? 'success' : 'warning'}
-                        message={
-                            preview.balanced
-                                ? `Result: ${preview.result}`
-                                : 'Accepted + rejected must equal inspected quantity'
-                        }
-                        showIcon
-                    />
-                </Form>
+                        {quantityField('inspected_quantity', 'Inspected')}
+                        {quantityField('accepted_quantity', 'Accepted')}
+                        {quantityField('rejected_quantity', 'Rejected')}
+
+                        <Form.Item
+                            label="Inspection Date"
+                            validateStatus={status('inspection_date')}
+                            help={help('inspection_date')}
+                        >
+                            <DatePicker
+                                style={{ width: '100%' }}
+                                value={modal.values.inspection_date === '' ? null : dayjs(modal.values.inspection_date)}
+                                onChange={(_, dateString) => change('inspection_date')((dateString as string) || '')}
+                            />
+                        </Form.Item>
+                        <Form.Item label="Notes" validateStatus={status('notes')} help={help('notes')}>
+                            <Input
+                                value={modal.values.notes}
+                                onChange={(event) => change('notes')(event.target.value)}
+                            />
+                        </Form.Item>
+
+                        {/* The server's own sentence when it refused without
+                            naming a field — the two quantity rules are
+                            DomainExceptions and carry a message, not keys. */}
+                        {modal.serverError !== null && (
+                            <Alert type="error" showIcon style={{ marginBottom: 12 }} message={modal.serverError.message} />
+                        )}
+
+                        <Alert
+                            type={validation.valid ? 'success' : 'warning'}
+                            showIcon
+                            message={validation.valid ? `Result: ${validation.result}` : 'Accepted + rejected must equal inspected'}
+                        />
+                    </Form>
+                )}
             </Modal>
 
             <Drawer
