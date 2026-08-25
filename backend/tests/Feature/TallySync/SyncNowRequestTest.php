@@ -675,6 +675,44 @@ class SyncNowRequestTest extends TestCase
         $this->assertNull(AgentIdentity::lastCheckedAt(), 'A laptop is not the agent checking in.');
     }
 
+    public function test_a_wildcard_token_does_not_light_the_agent_as_alive(): void
+    {
+        // THE ONE THAT ACTUALLY BIT. createToken($name) with no abilities
+        // argument is Sanctum's DEFAULT and yields ['*'] — exactly what an
+        // external API client gets (CLAUDE.md #3) — and can() answers TRUE
+        // for every ability on such a token. One call from a laptop used to
+        // light the agent green while the factory PC was switched off, and
+        // the page then promised a post "on its next check" that was not
+        // coming. Liveness is judged on the abilities LITERALLY provisioned,
+        // which is deliberately stricter than the authorization test.
+        $staff = $this->userWith('tally-sync.manage', 'finance.manage');
+        $wildcard = $staff->createToken('an external client')->plainTextToken;
+
+        $this->withHeader('Authorization', 'Bearer '.$wildcard)
+            ->getJson('/api/v1/tally-sync/summary')
+            ->assertOk();
+
+        $this->assertNull(
+            AgentIdentity::lastCheckedAt(),
+            'A wildcard token is not the factory PC, and a falsely bright liveness light promises a post nobody will make.',
+        );
+    }
+
+    public function test_a_wildcard_token_is_still_allowed_to_poll(): void
+    {
+        // The other half, and why the liveness predicate is separate rather
+        // than a tightening of the authorization one: a ['*'] token really
+        // CAN poll, and always could. Narrowing AgentIdentity::isAgent to
+        // fix the light would have narrowed FC-06's payload gate with it —
+        // the refusal set this refactor must preserve is the OLD one.
+        $staff = User::factory()->create();
+        $wildcard = $staff->createToken('an external client')->plainTextToken;
+
+        $this->withHeader('Authorization', 'Bearer '.$wildcard)
+            ->getJson('/api/v1/tally-sync/pending')
+            ->assertOk();
+    }
+
     public function test_an_idle_poll_moves_the_check_in_while_last_action_stands_still(): void
     {
         // The exact reason last_checked_at exists: a poll that finds nothing

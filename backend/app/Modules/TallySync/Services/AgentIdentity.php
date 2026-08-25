@@ -100,8 +100,41 @@ final class AgentIdentity
             ->whereNotNull('last_used_at')
             ->orderByDesc('last_used_at')
             ->cursor()
-            ->first(fn (PersonalAccessToken $token) => self::hasAgentAbility($token))
+            ->first(fn (PersonalAccessToken $token) => self::wasProvisionedAsAgent($token))
             ?->last_used_at;
+    }
+
+    /**
+     * Whether this token was PROVISIONED as the agent — its abilities list
+     * literally names one of the agent's.
+     *
+     * DELIBERATELY STRICTER THAN hasAgentAbility(), and the two must not be
+     * merged. They answer different questions:
+     *
+     *   hasAgentAbility  "may this caller poll?"  — authorization. Uses
+     *                    $token->can(), which answers TRUE for a wildcard
+     *                    ['*'] token, and rightly so: such a token really
+     *                    can poll, and narrowing it here would narrow
+     *                    isAgent(), mayReadPurchaseDetails() and FC-06's
+     *                    payload gate along with it.
+     *   this one         "is this the factory PC?" — liveness. A wildcard
+     *                    token is Sanctum's DEFAULT for createToken($name)
+     *                    with no abilities argument, which is exactly what
+     *                    an external API client gets (CLAUDE.md #3). One
+     *                    call from a laptop would otherwise light the agent
+     *                    green while the factory PC is switched off — and
+     *                    the page then promises a post "on its next check,
+     *                    about 90 seconds" that is not coming.
+     *
+     * A falsely BRIGHT liveness light is worse than a dark one: the dark
+     * one sends someone to look at the machine, the bright one sends them
+     * to look in Tally for a voucher that was never posted.
+     */
+    private static function wasProvisionedAsAgent(PersonalAccessToken $token): bool
+    {
+        $abilities = is_array($token->abilities) ? $token->abilities : [];
+
+        return array_intersect(self::ABILITIES, $abilities) !== [];
     }
 
     /** Whether this token carries any of the abilities that make a caller the agent. */

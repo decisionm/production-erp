@@ -81,6 +81,9 @@ export interface SyncNowMessage {
  */
 export function syncNowMessage(result: SyncNowResult, liveness: AgentLiveness): SyncNowMessage {
     const waiting = agentIsWaiting(liveness.state);
+    // Neither a warning nor an all-clear when the agent could not be read:
+    // a green tick over an unmeasured thing is the same lie as a red one.
+    const tone: SyncNowMessage['tone'] = waiting ? 'warning' : liveness.state === 'unavailable' ? 'info' : 'success';
 
     if (result.outcome === 'nothing_queued') {
         return { tone: 'info', text: 'Nothing is queued — there are no vouchers waiting to go to Tally.' };
@@ -96,7 +99,7 @@ export function syncNowMessage(result: SyncNowResult, liveness: AgentLiveness): 
     const freed = `${result.released} voucher${result.released === 1 ? '' : 's'} released.`;
 
     return {
-        tone: waiting ? 'warning' : 'success',
+        tone,
         text: `Requested — ${freed} ${describeQueued(result)} ${collectionClause(liveness)}`,
     };
 }
@@ -155,7 +158,9 @@ export const AGENT_STALE_AFTER_MS = 5 * 60 * 1000;
 
 /**
  * The agent's freshness from its last CHECK-IN (summary.agent.last_checked_at
- * — the newest last_used_at across tokens that can poll).
+ * — the newest last_used_at across tokens PROVISIONED as the agent;
+ * deliberately stricter than "may poll", so a wildcard client token cannot
+ * light this green while the factory PC is off).
  *
  * FOUR STATES, KEPT APART, because they are four different facts and one of
  * them used to be reported as another:

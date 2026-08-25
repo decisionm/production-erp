@@ -216,7 +216,7 @@ describe('syncNowMessage', () => {
         const message = syncNowMessage(result(), unknown);
 
         // Not a warning and not an all-clear: an unmeasured thing.
-        expect(message.tone).toBe('success');
+        expect(message.tone).toBe('info');
         expect(message.text).toContain('could not be read');
         expect(message.text).toContain('watch the Status column');
     });

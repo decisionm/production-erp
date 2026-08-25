@@ -392,7 +392,8 @@ export interface TallySyncSummary {
         last_action_label: string | null;
         /**
          * When the agent last CHECKED IN — the newest last_used_at across
-         * tokens that can poll. A different fact from last_action_at: an
+         * tokens PROVISIONED as the agent (stricter than "may poll": a
+         * wildcard client token must not light this). A different fact from last_action_at: an
          * idle poll delivers nothing and records no event, so an agent can
          * be alive and polling while last_action_at stands still. Null =
          * never checked in, which is not "went quiet". A timestamp only;
