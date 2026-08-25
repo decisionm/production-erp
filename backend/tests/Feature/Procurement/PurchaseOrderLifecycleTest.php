@@ -11,6 +11,7 @@ use App\Modules\Procurement\Models\Enums\PurchaseOrderStatus;
 use App\Modules\Procurement\Models\PurchaseOrder;
 use App\Modules\Procurement\Models\PurchaseOrderRevision;
 use App\Modules\Procurement\Models\Vendor;
+use App\Modules\Procurement\Services\ProcurementDocumentQuery;
 use App\Modules\Procurement\Services\PurchaseOrderService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -520,6 +521,63 @@ class PurchaseOrderLifecycleTest extends TestCase
         // A value that is not a status is refused either way.
         $this->getJson('/api/v1/procurement/purchase-orders?status=shipped')->assertStatus(422)->assertJsonValidationErrors(['status']);
         $this->getJson('/api/v1/procurement/purchase-orders?status[]=draft&status[]=shipped')->assertStatus(422)->assertJsonValidationErrors(['status.1']);
+    }
+
+    /**
+     * REGRESSION — the goods-receipt page's open-order picker.
+     *
+     * It listed purchase orders unfiltered and sieved the answer in the
+     * browser for `sent` / `partially_received`. The unfiltered list is one
+     * page (PER_PAGE_DEFAULT, newest id first), so a factory that has raised
+     * a default page of newer orders since — drafts, short-closes,
+     * cancellations — leaves an older still-open order out of the answer
+     * entirely. There is nothing left to sieve: the arriving material cannot
+     * be booked against its own PO, and the screen says nothing.
+     *
+     * The narrowing has to be the SERVER's. This is the exact query the
+     * picker now sends (frontend RECEIVABLE_PO_FILTERS).
+     */
+    public function test_a_page_of_newer_uncollectable_orders_cannot_hide_an_older_open_one(): void
+    {
+        $this->actAs();
+
+        // The two OLDEST orders are the open ones a receipt may be booked against.
+        $sent = $this->sentOrder();
+        $partial = $this->sentOrder();
+        $this->receive($partial, '40');
+        $this->assertSame(PurchaseOrderStatus::PartiallyReceived, $partial->fresh()->status);
+
+        // Then a full default page of NEWER orders, in every status a receipt
+        // may not be booked against: draft, closed, cancelled.
+        $newer = [];
+        for ($i = 0; $i < 21; $i++) {
+            $newer[] = $this->draftOrder()->id;
+        }
+        $closed = $this->sentOrder();
+        $this->postJson("/api/v1/procurement/purchase-orders/{$closed->id}/close", ['reason' => 'vendor short-shipped'])->assertOk();
+        $cancelled = $this->draftOrder();
+        $this->postJson("/api/v1/procurement/purchase-orders/{$cancelled->id}/cancel", ['reason' => 'raised twice'])->assertOk();
+        $newer[] = $closed->id;
+        $newer[] = $cancelled->id;
+
+        $ids = fn (string $query) => collect($this->getJson("/api/v1/procurement/purchase-orders?{$query}")->assertOk()->json('data'))
+            ->pluck('id')->all();
+
+        // THE DEFECT, stated: unfiltered, the answer is the newest page and
+        // holds NEITHER open order — no client-side filter can recover them.
+        $firstPage = $ids('');
+        $this->assertCount(ProcurementDocumentQuery::PER_PAGE_DEFAULT, $firstPage);
+        $this->assertNotContains($sent->id, $firstPage);
+        $this->assertNotContains($partial->id, $firstPage);
+
+        // THE FIX: asked for both open statuses across the whole list, the
+        // server answers with exactly those two — the older ones included.
+        $open = $ids('status[]=sent&status[]=partially_received&per_page='.ProcurementDocumentQuery::PER_PAGE_MAX);
+        sort($open);
+        $this->assertSame([$sent->id, $partial->id], $open);
+
+        // And nothing that may not be received against comes back with them.
+        $this->assertSame([], array_values(array_intersect($newer, $open)));
     }
 
     public function test_q_matches_the_order_number_and_the_tally_order_number(): void
