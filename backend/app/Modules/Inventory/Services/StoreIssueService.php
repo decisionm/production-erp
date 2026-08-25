@@ -57,6 +57,7 @@ class StoreIssueService
         private readonly ProductionWipLocationResolver $wip,
         private readonly MaterialBagIssueResolver $bags,
         private readonly MaterialRequestService $requests,
+        private readonly IncomingQcHold $qcHold,
     ) {}
 
     /**
@@ -929,6 +930,7 @@ class StoreIssueService
             : $this->soleStoreHolding($itemId, $wip, $field);
 
         $this->assertNotIntoItself($from, $wip, $field);
+        $this->assertNotHeldByIncomingQc($itemId, $from, $quantity, $field);
 
         $created = $issue->lines()->create([
             'material_request_line_id' => $line['material_request_line_id'] ?? null,
@@ -953,6 +955,72 @@ class StoreIssueService
         );
 
         return $created;
+    }
+
+    /**
+     * THE ARRIVAL HOLD, SAID IN THIS LINE'S OWN WORDS.
+     *
+     * The RULE is not here. It is enforced for every outflow at
+     * StockMovementService::decrementBalance, which this handover's transfer
+     * goes through like every other writer — so removing this method would
+     * not reopen the door. What it is for is the SENTENCE: a typed line is
+     * one of several on a form, and a storekeeper needs to be told which
+     * line is the problem and how many kilograms of it may go. The central
+     * refusal is a 422 about an item and a store; this one is a 422 about
+     * `lines.2`, raised BEFORE anything is written, so the whole handover is
+     * refused with the form still readable rather than half-built and rolled
+     * back.
+     *
+     * The arithmetic is the shared one (IncomingQcHold) to the character —
+     * two readings of "how much is held" that could drift apart is exactly
+     * the bug this seam is closing. Same lock, same order: bags, then
+     * balance.
+     *
+     * What counts as held, what does not, and why, is documented once, on
+     * IncomingQcHold.
+     *
+     * ONE ORDERING GAP, NAMED RATHER THAN LEFT TO BE FOUND: a multi-line
+     * handover takes one bag-lock set PER LINE, in the order the lines
+     * arrived on the form. Two multi-line issues submitted at the same
+     * moment with their materials in opposite order could each hold the bag
+     * set the other is waiting for. Sorting the lines by item_id before the
+     * loop would remove it; that is a change to how a handover is written,
+     * not to the hold, so it is disclosed here rather than made in the same
+     * pass as the hold itself.
+     */
+    private function assertNotHeldByIncomingQc(int $itemId, int $fromWarehouseId, string $quantity, string $field): void
+    {
+        [$held, $bagCount] = $this->qcHold->lockAndSum($itemId, $fromWarehouseId);
+
+        if (bccomp($held, '0', 4) !== 1) {
+            return;
+        }
+
+        $balance = StockBalance::query()
+            ->where('item_id', $itemId)
+            ->where('warehouse_id', $fromWarehouseId)
+            ->lockForUpdate()
+            ->value('quantity');
+
+        $available = $this->qcHold->available((string) ($balance ?? '0'), $held);
+
+        if (bccomp($quantity, $available, 4) !== 1) {
+            return;
+        }
+
+        $plain = fn (string $number): string => rtrim(rtrim($number, '0'), '.') ?: '0';
+
+        throw ValidationException::withMessages([
+            $field => sprintf(
+                'Only %s of %s can be handed over from this store — %s of what the balance shows is in %d bag(s) '
+                .'still waiting for incoming QC, and material on hold is not production\'s yet. Quality has to '
+                .'release the arrival first; released bags can also be handed over by scanning them.',
+                $plain($available),
+                Item::query()->find($itemId)?->name ?? 'this material',
+                $plain($held),
+                $bagCount,
+            ),
+        ]);
     }
 
     /**
