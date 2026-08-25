@@ -83,6 +83,11 @@ class DashboardService
         if ($sees('sales')) {
             $summary['sales'] = [
                 'open_sales_orders' => $this->salesOrders->openCount(),
+                // Open orders whose promise date the factory's calendar has
+                // already passed. A wider set than open_sales_orders above
+                // (drafts count here), so it can read higher — it is not a
+                // subset of the figure beside it.
+                'overdue_sales_orders' => $this->salesOrders->overdueOpenCount(),
                 'orders_awaiting_delivery' => $this->deliveries->pendingCount(),
                 'receivables_outstanding' => $this->receivables->outstandingTotal(),
             ];

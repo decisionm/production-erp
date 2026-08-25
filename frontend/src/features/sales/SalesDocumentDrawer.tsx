@@ -1,8 +1,16 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Descriptions, Drawer, Modal, Skeleton, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Alert, Button, DatePicker, Descriptions, Drawer, Form, Input, Modal, Skeleton, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
+import dayjs from 'dayjs';
 import { Link } from 'react-router-dom';
-import { cancelSalesOrder, getDelivery, getInvoice, getSalesOrder } from '@/features/sales/api';
+import { cancelSalesOrder, getDelivery, getInvoice, getSalesOrder, updateSalesOrder } from '@/features/sales/api';
+import {
+    canEditSalesOrder,
+    hasSalesOrderEdits,
+    overdueBadge,
+    salesOrderEditPayload,
+    type SalesOrderEditForm,
+} from '@/features/sales/salesOrder';
 import {
     INVOICED_CAPTION,
     cartonSummary,
@@ -239,7 +247,20 @@ function SalesOrderBody({ order, onOpen }: { order: SalesOrder; onOpen: (target:
                     {order.customer ? `${order.customer.code} — ${order.customer.name}` : '—'}
                 </Descriptions.Item>
                 <Descriptions.Item label="Order Date">{order.order_date}</Descriptions.Item>
-                <Descriptions.Item label="Expected Date">{order.expected_date ?? '—'}</Descriptions.Item>
+                <Descriptions.Item label="Expected Date">
+                    <Space size={6}>
+                        <span>{order.expected_date ?? '—'}</span>
+                        {(() => {
+                            const badge = overdueBadge(order);
+
+                            return badge ? (
+                                <Tag color="red" aria-label={badge.label} style={{ marginInlineEnd: 0 }}>
+                                    {badge.text}
+                                </Tag>
+                            ) : null;
+                        })()}
+                    </Space>
+                </Descriptions.Item>
                 <Descriptions.Item label="Notes">{order.notes ?? '—'}</Descriptions.Item>
                 {order.totals && (
                     <Descriptions.Item label="Quantities">
@@ -496,6 +517,20 @@ export default function SalesDocumentDrawer({ target, onClose, onOpen, extra }: 
         enabled: target !== null,
     });
 
+    // The Edit form, open only while it holds a draft of the two fields the
+    // desk owns. Seeded from the order when the action is taken, so the
+    // payload builder can tell a typed change from an untouched field.
+    const [editing, setEditing] = useState<SalesOrderEditForm | null>(null);
+
+    const editMutation = useMutation({
+        mutationFn: updateSalesOrder,
+        onSuccess: async (updated) => {
+            message.success(`${updated.document_number} saved — the date is a note on the order, nothing was scheduled.`);
+            setEditing(null);
+            await queryClient.invalidateQueries({ queryKey: ['sales', 'sales-orders'] });
+        },
+    });
+
     const cancelMutation = useMutation({
         mutationFn: cancelSalesOrder,
         onSuccess: async (order) => {
@@ -507,9 +542,12 @@ export default function SalesDocumentDrawer({ target, onClose, onOpen, extra }: 
     // A refusal belongs to the order it was refused for — not to the next
     // document opened in this drawer.
     const resetCancel = cancelMutation.reset;
+    const resetEdit = editMutation.reset;
     useEffect(() => {
         resetCancel();
-    }, [kind, id, resetCancel]);
+        resetEdit();
+        setEditing(null);
+    }, [kind, id, resetCancel, resetEdit]);
 
     function confirmCancel(order: SalesOrder) {
         Modal.confirm({
@@ -525,6 +563,9 @@ export default function SalesDocumentDrawer({ target, onClose, onOpen, extra }: 
     }
 
     const order = kind === 'sales_order' ? (data as SalesOrder | undefined) : undefined;
+    // Only what was actually typed: an untouched field is left out, so a
+    // save cannot clobber a note somebody else changed while this was open.
+    const editPayload = order && editing ? salesOrderEditPayload(order, editing) : {};
     const title = shown
         ? documentTitle(shown.kind, data as { id: number; document_number?: string } | undefined, shown.id)
         : 'Document';
@@ -540,6 +581,13 @@ export default function SalesDocumentDrawer({ target, onClose, onOpen, extra }: 
             footer={
                 <Space wrap>
                     <Button onClick={onClose}>Close</Button>
+                    {order && canEditSalesOrder(order) && (
+                        <Button
+                            onClick={() => setEditing({ expected_date: order.expected_date, notes: order.notes })}
+                        >
+                            Edit expected date
+                        </Button>
+                    )}
                     {order?.can_cancel && (
                         <Tooltip title="Allowed only while nothing has been delivered and no invoice exists — the server decides.">
                             <Button danger loading={cancelMutation.isPending} onClick={() => confirmCancel(order)}>
@@ -592,6 +640,57 @@ export default function SalesDocumentDrawer({ target, onClose, onOpen, extra }: 
             {data !== undefined && kind === 'invoice' && <InvoiceBody invoice={data as Invoice} onOpen={onOpen} />}
 
             {data !== undefined ? extra : null}
+
+            {order && editing && (
+                <Modal
+                    open
+                    maskClosable={false}
+                    destroyOnHidden
+                    title={`${order.document_number} — expected date`}
+                    okText="Save"
+                    okButtonProps={{ disabled: !hasSalesOrderEdits(editPayload) }}
+                    confirmLoading={editMutation.isPending}
+                    onOk={() => editMutation.mutate({ id: order.id, payload: editPayload })}
+                    onCancel={() => setEditing(null)}
+                >
+                    <Form layout="vertical">
+                        <Form.Item label="Expected date">
+                            <DatePicker
+                                allowClear
+                                style={{ width: '100%' }}
+                                value={editing.expected_date ? dayjs(editing.expected_date) : null}
+                                // The server refuses a date before the order
+                                // date; the picker refuses to offer one.
+                                disabledDate={(current) =>
+                                    order.order_date ? current.isBefore(dayjs(order.order_date), 'day') : false
+                                }
+                                onChange={(value) =>
+                                    setEditing({
+                                        ...editing,
+                                        expected_date: value ? value.format('YYYY-MM-DD') : null,
+                                    })
+                                }
+                            />
+                        </Form.Item>
+                        <Form.Item label="Notes">
+                            <Input.TextArea
+                                rows={3}
+                                value={editing.notes ?? ''}
+                                onChange={(event) => setEditing({ ...editing, notes: event.target.value })}
+                            />
+                        </Form.Item>
+                    </Form>
+
+                    {editMutation.isError && (
+                        <Alert
+                            type="warning"
+                            showIcon
+                            message="Not saved"
+                            description={apiMessage(editMutation.error, 'The order could not be saved.')}
+                        />
+                    )}
+                </Modal>
+            )}
         </Drawer>
     );
 }

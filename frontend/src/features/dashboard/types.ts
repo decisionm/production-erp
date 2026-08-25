@@ -62,6 +62,12 @@ export interface DashboardSummary {
     };
     sales?: {
         open_sales_orders: number;
+        /**
+         * Open orders whose expected date the factory's calendar (IST) has
+         * already passed. A WIDER set than open_sales_orders — drafts count
+         * here — so it can read higher than the figure beside it.
+         */
+        overdue_sales_orders: number;
         orders_awaiting_delivery: number;
         receivables_outstanding: string;
     };

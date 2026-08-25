@@ -15,6 +15,7 @@ import {
     listSalesOrders,
 } from '@/features/sales/api';
 import { hasActiveFilters } from '@/features/sales/filters';
+import { expectedDateCell, overdueBadge } from '@/features/sales/salesOrder';
 import SalesDocumentDrawer from '@/features/sales/SalesDocumentDrawer';
 import SalesFilterBar from '@/features/sales/SalesFilterBar';
 import TallyMirrorPanel from '@/features/sales/TallyMirrorPanel';
@@ -552,6 +553,29 @@ export default function SalesOrdersPage() {
                     },
                     { title: 'Customer', render: (_, row) => row.customer?.name ?? '—' },
                     { title: 'Order Date', dataIndex: 'order_date' },
+                    {
+                        // The promise date the order carries, and whether the
+                        // factory's calendar has already passed it — the
+                        // server's own flag (IST), never the browser's clock.
+                        // The badge says the word, so the colour is not the
+                        // only thing carrying it.
+                        title: 'Expected Date',
+                        render: (_, row) => {
+                            const cell = expectedDateCell(row);
+                            const badge = overdueBadge(row);
+
+                            return (
+                                <Space size={6}>
+                                    <span style={numeric}>{cell.text}</span>
+                                    {badge && (
+                                        <Tag color="red" aria-label={badge.label} style={{ marginInlineEnd: 0 }}>
+                                            {badge.text}
+                                        </Tag>
+                                    )}
+                                </Space>
+                            );
+                        },
+                    },
                     { title: 'Lines', render: (_, row) => row.lines.length },
                     {
                         title: (

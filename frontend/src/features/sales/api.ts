@@ -2,6 +2,7 @@ import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
 import { unwrapMirrorResponse, unwrapShowResponse } from './drawer';
 import { buildSalesQuery } from './filters';
+import type { SalesOrderEditPayload } from './salesOrder';
 import type {
     Customer,
     Delivery,
@@ -72,6 +73,24 @@ export async function listSalesOrders(filters: SalesListFilters = {}): Promise<P
 export async function getSalesOrder(id: number): Promise<SalesOrder> {
     const { data } = await api.get<{ data: SalesOrder; trace?: SalesOrder['trace'] }>(`/sales/sales-orders/${id}`);
     return unwrapShowResponse(data) as SalesOrder;
+}
+
+/**
+ * Change a sales order's expected date and/or notes — the only two fields
+ * this endpoint takes, and only while the order is draft or confirmed (422
+ * with `code: not_editable` otherwise). An ABSENT key leaves the stored
+ * value alone; an explicit null clears it, which is how the date is
+ * removed. Moves no stock, raises no document, queues nothing for Tally.
+ */
+export async function updateSalesOrder({
+    id,
+    payload,
+}: {
+    id: number;
+    payload: SalesOrderEditPayload;
+}): Promise<SalesOrder> {
+    const { data } = await api.put<{ data: SalesOrder }>(`/sales/sales-orders/${id}`, payload);
+    return data.data;
 }
 
 /**

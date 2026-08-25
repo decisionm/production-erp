@@ -41,7 +41,18 @@ export interface SalesOrder {
     status: SalesOrderStatus;
     customer: Customer;
     order_date: string;
+    /**
+     * The customer's promise date — typed by hand on the order, never
+     * derived. It is not a production ETA: nothing schedules against it.
+     */
     expected_date: string | null;
+    /**
+     * Whether that promise date is already past on the FACTORY's calendar
+     * (IST) while the order is still open. The server derives it on every
+     * read; the browser's clock is never consulted and the flag is stored
+     * nowhere.
+     */
+    is_overdue: boolean;
     notes: string | null;
     lines: SalesOrderLine[];
     /** Quantities across every line, as decimal strings (4dp) — never parsed for arithmetic here. */
@@ -54,6 +65,12 @@ export interface SalesOrder {
      * button reads this; it never re-derives the rule client-side.
      */
     can_cancel: boolean;
+    /**
+     * Whether the expected date and notes may be changed RIGHT NOW (draft
+     * or confirmed), by the same rule the server enforces. The Edit action
+     * reads this; it never re-derives the rule client-side.
+     */
+    can_edit: boolean;
     created_at: string;
     /** The chain below this order — ONLY on GET /sales/sales-orders/{id}, never on the list. */
     trace?: SalesOrderTrace;

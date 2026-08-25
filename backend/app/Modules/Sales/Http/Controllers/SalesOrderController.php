@@ -5,6 +5,7 @@ namespace App\Modules\Sales\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Sales\Http\Requests\ListSalesOrdersRequest;
 use App\Modules\Sales\Http\Requests\StoreSalesOrderRequest;
+use App\Modules\Sales\Http\Requests\UpdateSalesOrderRequest;
 use App\Modules\Sales\Http\Resources\SalesOrderResource;
 use App\Modules\Sales\Models\SalesOrder;
 use App\Modules\Sales\Services\SalesDocumentQuery;
@@ -35,6 +36,18 @@ class SalesOrderController extends Controller
         $order = $this->orders->create($request->validated(), $request->user()?->id);
 
         return SalesOrderResource::make($order);
+    }
+
+    /**
+     * The expected date and the notes — nothing else. A body naming a
+     * status, a customer or lines changes none of them: the request
+     * validates only these two keys and the service copies only these two
+     * across. Refused with a 422 (`code: not_editable`) once the order is
+     * past draft/confirmed.
+     */
+    public function update(UpdateSalesOrderRequest $request, SalesOrder $salesOrder): SalesOrderResource
+    {
+        return SalesOrderResource::make($this->orders->update($salesOrder, $request->validated()));
     }
 
     public function confirm(SalesOrder $salesOrder): SalesOrderResource

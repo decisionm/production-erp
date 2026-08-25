@@ -534,6 +534,11 @@ export default function DashboardPage() {
                                     to="/sales/sales-orders"
                                 />
                                 <LedgerCell
+                                    figure={String(summary.sales.overdue_sales_orders)}
+                                    label="Past expected date"
+                                    to="/sales/sales-orders"
+                                />
+                                <LedgerCell
                                     figure={String(summary.sales.orders_awaiting_delivery)}
                                     label="Awaiting delivery"
                                     to="/sales/deliveries"

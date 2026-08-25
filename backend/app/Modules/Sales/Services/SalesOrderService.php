@@ -3,6 +3,7 @@
 namespace App\Modules\Sales\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
+use App\Modules\Sales\Exceptions\SalesOrderLifecycleException;
 use App\Modules\Sales\Models\Enums\SalesOrderStatus;
 use App\Modules\Sales\Models\SalesOrder;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -88,6 +89,29 @@ class SalesOrderService
     }
 
     /**
+     * How many OPEN orders carry a promise date the factory's calendar has
+     * already passed — the dashboard's one number for it.
+     *
+     * The same two rules SalesOrder::isOverdue() applies, expressed in SQL:
+     * the same open-status set (draft included — a draft can carry a date
+     * too) and the same IST "today", computed in PHP and bound in. Never
+     * CURDATE(): MySQL's today is the server's, and this factory's day is
+     * IST while the app clock is UTC.
+     *
+     * Deliberately NOT the same set as openCount() above, which is the
+     * confirmed order book (drafts excluded) — so this figure can read
+     * higher than "Open sales orders" beside it. See the PR body.
+     */
+    public function overdueOpenCount(): int
+    {
+        return SalesOrder::query()
+            ->whereIn('status', SalesOrder::OPEN_STATUSES)
+            ->whereNotNull('expected_date')
+            ->whereDate('expected_date', '<', SalesOrder::factoryToday())
+            ->count();
+    }
+
+    /**
      * Open orders with their lines, soonest promise first (undated last) —
      * the dashboard's order-book read.
      *
@@ -130,6 +154,58 @@ class SalesOrderService
 
             return $this->decorate($order);
         });
+    }
+
+    /**
+     * Change the customer's promise date and/or the desk's notes on an
+     * order the factory has not started working through yet — the ONLY
+     * write this endpoint does.
+     *
+     * `expected_date` stays a manually owned field of the order: nothing
+     * derives it, and a change here schedules nothing. It moves no stock,
+     * touches no delivery or invoice, and queues nothing for Tally — real
+     * sales are invoiced in Tally (DEC-20260809-003).
+     *
+     * KEY PRESENCE, NOT VALUE: an absent `expected_date` leaves the stored
+     * one alone; an explicit null clears it. `isset()` would read those two
+     * requests as the same one.
+     *
+     * Judged and written under a row lock, like cancel(): a dispatch
+     * committing between a plain read and the write would let an order that
+     * has already shipped take a new promise date.
+     *
+     * @param  array{expected_date?: string|null, notes?: string|null}  $data
+     */
+    public function update(SalesOrder $order, array $data): SalesOrder
+    {
+        $updated = DB::transaction(function () use ($order, $data) {
+            $fresh = SalesOrder::query()
+                ->whereKey($order->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if (! $fresh->isEditable()) {
+                throw SalesOrderLifecycleException::notEditable($fresh);
+            }
+
+            // Copied across a key at a time, never spread: the model is
+            // fillable for customer_id, status, order_date and created_by
+            // too, and none of those is this endpoint's to write.
+            $changes = [];
+            foreach (['expected_date', 'notes'] as $field) {
+                if (array_key_exists($field, $data)) {
+                    $changes[$field] = $data[$field];
+                }
+            }
+
+            if ($changes !== []) {
+                $fresh->update($changes);
+            }
+
+            return $fresh;
+        });
+
+        return $this->decorate($updated);
     }
 
     public function confirm(SalesOrder $order): SalesOrder
