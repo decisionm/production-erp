@@ -71,9 +71,9 @@ describe('canRequestSyncNow', () => {
 });
 
 describe('SYNC_NOW_CONFIRM', () => {
-    it('says what the press does, and what it does not read', () => {
-        expect(SYNC_NOW_CONFIRM.body).toContain('next check');
-        expect(SYNC_NOW_CONFIRM.body).toContain('does not read anything from Tally');
+    it('asks in operational words, with no explanatory paragraph', () => {
+        expect(SYNC_NOW_CONFIRM.title).toBe('Post queued vouchers now?');
+        expect(SYNC_NOW_CONFIRM.body).toBe('A running shift sends as-is; later approvals create a follow-up voucher.');
     });
 
     it('warns that a running shift is sent as it stands', () => {
@@ -135,7 +135,7 @@ describe('agentLiveness', () => {
         expect(labels).toEqual([
             'Agent checked in just now',
             'Agent last checked in 10 min ago',
-            'Agent has never checked in',
+            'Agent has never run',
             'Agent status unknown',
         ]);
         for (const label of labels) {
@@ -170,10 +170,10 @@ describe('syncNowMessage', () => {
 
         expect(message.tone).toBe('success');
         expect(message.text).toContain('Requested');
-        expect(message.text).toContain('2 vouchers released');
-        expect(message.text).toContain('3 waiting to be collected');
-        expect(message.text).toContain('1 already with the agent');
-        expect(message.text).toContain('about 90 seconds');
+        expect(message.text).toContain('2 released');
+        expect(message.text).toContain('3 waiting');
+        expect(message.text).toContain('1 with agent');
+        expect(message.text).toContain('Agent live.');
     });
 
     it('says plainly when nothing was being held back', () => {
@@ -182,8 +182,8 @@ describe('syncNowMessage', () => {
             live,
         );
 
-        expect(message.text).toContain('Nothing was being held back');
-        expect(message.text).toContain('3 waiting to be collected');
+        expect(message.text).toContain('Nothing held back');
+        expect(message.text).toContain('3 waiting');
     });
 
     it('says the queue is empty rather than dressing it as a failure', () => {
@@ -193,7 +193,7 @@ describe('syncNowMessage', () => {
         );
 
         expect(message.tone).toBe('info');
-        expect(message.text).toBe('Nothing is queued — there are no vouchers waiting to go to Tally.');
+        expect(message.text).toBe('No vouchers queued.');
     });
 
     it('warns, and says the request waits, when the agent is not there', () => {
@@ -203,13 +203,13 @@ describe('syncNowMessage', () => {
         const stale = syncNowMessage(result(), quiet);
         expect(stale.tone).toBe('warning');
         expect(stale.text).toContain('last checked in 1 hr ago');
-        expect(stale.text).toContain('nothing will post until it checks in again');
-        expect(stale.text).toContain('The request is saved and waits');
+        expect(stale.text).toContain('Agent offline');
+        expect(stale.text).toContain('request waits');
 
         const none = syncNowMessage(result(), never);
         expect(none.tone).toBe('warning');
-        expect(none.text).toContain('No sync agent has ever checked in');
-        expect(none.text).toContain('The request is saved and waits');
+        expect(none.text).toContain('Agent has never run');
+        expect(none.text).toContain('request waits');
     });
 
     it('admits it does not know when the agent could not be read', () => {
@@ -217,11 +217,11 @@ describe('syncNowMessage', () => {
 
         // Not a warning and not an all-clear: an unmeasured thing.
         expect(message.tone).toBe('info');
-        expect(message.text).toContain('could not be read');
-        expect(message.text).toContain('watch the Status column');
+        expect(message.text).toContain('Agent status unknown.');
     });
 
-    it('gets the singular right for one voucher', () => {
-        expect(syncNowMessage(result({ released: 1, queued_total: 1 }), live).text).toContain('1 voucher released');
+    it('reports the released count exactly', () => {
+        expect(syncNowMessage(result({ released: 1, queued_total: 1 }), live).text).toContain('1 released.');
+        expect(syncNowMessage(result({ released: 2, queued_total: 2 }), live).text).toContain('2 released.');
     });
 });

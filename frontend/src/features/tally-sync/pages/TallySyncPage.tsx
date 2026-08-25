@@ -458,12 +458,12 @@ export default function TallySyncPage() {
                     <Tooltip
                         title={
                             liveness.state === 'stale'
-                                ? 'The factory PC checks in roughly every 90 seconds. This one has not for over five minutes — it may be switched off.'
+                                ? 'Agent offline'
                                 : liveness.state === 'never'
-                                    ? 'No sync agent has ever authenticated against this ERP. Nothing can reach Tally until one is installed and running.'
+                                    ? 'Agent has never run'
                                     : liveness.state === 'unavailable'
-                                        ? 'The summary could not be read, so this page does not know whether the agent is running.'
-                                        : 'The factory PC is checking in normally.'
+                                        ? 'Agent status unknown'
+                                        : ''
                         }
                     >
                         <Typography.Text
@@ -481,7 +481,7 @@ export default function TallySyncPage() {
                         nobody on the floor can answer. The server refuses
                         the request either way. */}
                     {maySyncNow && (
-                        <Tooltip title="Ask the factory PC to post everything already queued on its next check. Reads nothing from Tally.">
+                        <Tooltip title="Post queued vouchers now">
                             <Button type="primary" loading={syncingNow} disabled={busy} onClick={confirmSyncNow}>
                                 Sync Now
                             </Button>
@@ -506,16 +506,11 @@ export default function TallySyncPage() {
                     type="error"
                     showIcon
                     style={{ marginBottom: 16 }}
-                    message={<strong>Could not load the sync queue</strong>}
+                    message={<strong>Queue unavailable</strong>}
                     description={
                         <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                            <span>
-                                This page cannot tell you whether any vouchers failed — an empty list below means
-                                nothing was read, NOT that everything is in Tally. Check the connection, or that
-                                this login has Tally Sync access, and try again.
-                            </span>
                             <Button danger type="primary" loading={isFetching} onClick={() => refetch()}>
-                                Try again
+                                Retry
                             </Button>
                         </Space>
                     }
@@ -530,27 +525,24 @@ export default function TallySyncPage() {
                     message={
                         <strong>
                             {failed.length === 1
-                                ? '1 voucher failed — Tally has not received it'
-                                : `${failed.length} vouchers failed — Tally has not received them`}
+                                ? '1 failed — not in Tally'
+                                : `${failed.length} failed — not in Tally`}
                         </strong>
                     }
                     description={
                         <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                            <span>
-                                These numbers are in the ERP but NOT in the accountant's books. Read the reason on
-                                each row below, fix it, then Resync. Failed vouchers are listed first.
-                            </span>
+                            <span>Open row → Fix → Resync.</span>
+                            {/* Numbers, not prose, but they stay: without them
+                                the count above reads as a total when it is a
+                                floor. */}
                             {truncated && (
                                 <span>
-                                    Holding {entries.length} of {total}
-                                    {filtersActive ? ' matching' : ''} vouchers (all failed and pending first) —
-                                    the rest were not fetched.
+                                    Showing {entries.length} of {total} — rest not fetched.
                                 </span>
                             )}
                             {failedElsewhere > 0 && (
                                 <span>
-                                    {failedElsewhere} more failed voucher{failedElsewhere === 1 ? '' : 's'} sit outside
-                                    these filters.
+                                    {failedElsewhere} more failed outside filters.
                                 </span>
                             )}
                             <Button danger type="primary" loading={resyncingAll} onClick={resyncAllFailed}>
@@ -936,7 +928,7 @@ export default function TallySyncPage() {
                                 return (
                                     <Space>
                                         {view}
-                                        <Tooltip title="Send this shift's voucher to Tally without waiting for the shift end / quiet period. Press View first to see exactly what will post.">
+                                        <Tooltip title="Send shift now (skip hold)">
                                             <Button
                                                 size="small"
                                                 loading={releasingId === row.id}

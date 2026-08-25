@@ -34,26 +34,18 @@ export function canRequestSyncNow(user: User | null): boolean {
 }
 
 /**
- * The confirmation, in plain words — required because pressing this is an
- * outward business action: it can put vouchers into the accountant's live
- * books minutes later.
+ * The confirmation — required because pressing this is an outward business
+ * action: it can put vouchers into the accountant's live books minutes later.
  *
- * The second sentence is the consequence a person genuinely cannot guess
- * and would otherwise discover in Tally. A shift voucher is held so the
- * whole shift's approvals can merge into ONE voucher (DEC-20260807-011);
- * sending it mid-shift closes that merge window, and every approval after
- * it lands in a -2 / -3 follow-up voucher. That is exactly what the
- * per-voucher "Release now" has always done, and it is what the accountant
- * is choosing here — so it is said before the click, not after.
+ * The body carries the one consequence a person genuinely cannot guess and
+ * would otherwise discover in Tally. A shift voucher is held so the whole
+ * shift's approvals can merge into ONE voucher (DEC-20260807-011); sending
+ * it mid-shift closes that merge window, and every approval after it lands
+ * in a -2 / -3 follow-up voucher.
  */
 export const SYNC_NOW_CONFIRM = {
-    title: 'Send the queued vouchers now?',
-    body:
-        'This asks the factory PC to post everything already queued on its next check (about 90 seconds). '
-        + 'It does not read anything from Tally.'
-        + '\n\n'
-        + 'A shift still running will be sent as it stands — approvals made after this go into a separate '
-        + 'follow-up voucher instead of joining this one.',
+    title: 'Post queued vouchers now?',
+    body: 'A running shift sends as-is; later approvals create a follow-up voucher.',
     ok: 'Send them now',
     cancel: 'Not yet',
 } as const;
@@ -86,22 +78,25 @@ export function syncNowMessage(result: SyncNowResult, liveness: AgentLiveness): 
     const tone: SyncNowMessage['tone'] = waiting ? 'warning' : liveness.state === 'unavailable' ? 'info' : 'success';
 
     if (result.outcome === 'nothing_queued') {
-        return { tone: 'info', text: 'Nothing is queued — there are no vouchers waiting to go to Tally.' };
+        return { tone: 'info', text: 'No vouchers queued.' };
     }
 
     if (result.outcome === 'already_queued') {
         return {
             tone: waiting ? 'warning' : 'info',
-            text: `Nothing was being held back. ${describeQueued(result)} ${collectionClause(liveness)}`,
+            text: sentence(['Nothing held back.', describeQueued(result), collectionClause(liveness)]),
         };
     }
 
-    const freed = `${result.released} voucher${result.released === 1 ? '' : 's'} released.`;
-
     return {
         tone,
-        text: `Requested — ${freed} ${describeQueued(result)} ${collectionClause(liveness)}`,
+        text: sentence([`Requested — ${result.released} released.`, describeQueued(result), collectionClause(liveness)]),
     };
+}
+
+/** The non-empty fragments, one space apart. */
+function sentence(parts: string[]): string {
+    return parts.filter((part) => part !== '').join(' ');
 }
 
 /** What is now waiting, and what is already in the agent's hands. */
@@ -109,25 +104,23 @@ function describeQueued(result: SyncNowResult): string {
     const parts: string[] = [];
 
     const waiting = result.released + result.already_queued;
-    if (waiting > 0) parts.push(`${waiting} waiting to be collected`);
-    if (result.with_agent > 0) parts.push(`${result.with_agent} already with the agent`);
+    if (waiting > 0) parts.push(`${waiting} waiting`);
+    if (result.with_agent > 0) parts.push(`${result.with_agent} with agent`);
 
     return parts.length > 0 ? `${parts.join(', ')}.` : '';
 }
 
-/** When — and whether — the factory PC is expected to take them. */
+/** Whether the factory PC is there to take them — and if not, that it waits. */
 function collectionClause(liveness: AgentLiveness): string {
     switch (liveness.state) {
         case 'fresh':
-            return 'The factory PC will collect on its next check, about 90 seconds.';
+            return 'Agent live.';
         case 'stale':
-            return `The factory PC last checked in ${liveness.label} — nothing will post until it checks in again. `
-                + 'The request is saved and waits.';
+            return `Agent offline (last checked in ${liveness.label}) — request waits.`;
         case 'never':
-            return 'No sync agent has ever checked in, so nothing will post until one is running. '
-                + 'The request is saved and waits.';
+            return 'Agent has never run — request waits.';
         case 'unavailable':
-            return 'Whether the factory PC is running could not be read here — watch the Status column for a collection.';
+            return 'Agent status unknown.';
     }
 }
 
@@ -207,7 +200,7 @@ export function agentLivenessLabel(liveness: AgentLiveness): string {
         case 'stale':
             return `Agent last checked in ${liveness.label}`;
         case 'never':
-            return 'Agent has never checked in';
+            return 'Agent has never run';
         case 'unavailable':
             return 'Agent status unknown';
     }
