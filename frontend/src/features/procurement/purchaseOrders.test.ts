@@ -1,8 +1,11 @@
+import axios from 'axios';
 import { describe, expect, it } from 'vitest';
 import {
     ACTION_LABELS,
     CONSUMPTION_NONE_WORDS,
     PURCHASE_ORDER_STATUSES,
+    RECEIVABLE_PO_FILTERS,
+    RECEIVABLE_PO_STATUSES,
     amendFormDefaults,
     buildPurchaseOrderQuery,
     canLabels,
@@ -10,9 +13,11 @@ import {
     filtersFromSearchParams,
     flattenTrace,
     hasActiveFilters,
+    isReceivableOrder,
     lifecycleNote,
     loadWords,
     lotLoadSummary,
+    MAX_PER_PAGE,
     poNumber,
     rateCell,
     reconcileReceipts,
@@ -461,6 +466,67 @@ describe('buildPurchaseOrderQuery', () => {
     it('a per_page above the list\'s ceiling (1000) is not sent', () => {
         expect(buildPurchaseOrderQuery({ per_page: 1000 })).toEqual({ per_page: 1000 });
         expect(buildPurchaseOrderQuery({ per_page: 1001 })).toEqual({});
+    });
+});
+
+/**
+ * REGRESSION — the GRN page's open-order picker.
+ *
+ * It used to call listPurchaseOrders() with no filters and sieve the answer
+ * in the browser. The unfiltered list is the newest 20 rows, so once 21
+ * newer draft/closed/cancelled orders existed, an older still-open one was
+ * simply not in the answer to sieve: the receipt clerk could not pick it and
+ * nothing on screen said it existed. The narrowing has to reach the server.
+ */
+describe('the open-order picker asks the SERVER for the open orders', () => {
+    it('names both receivable statuses and takes the whole list, not the newest page', () => {
+        expect(RECEIVABLE_PO_STATUSES).toEqual(['sent', 'partially_received']);
+        expect(buildPurchaseOrderQuery(RECEIVABLE_PO_FILTERS)).toEqual({
+            status: ['sent', 'partially_received'],
+            per_page: 1000,
+        });
+        // Not a page number and not a truncating page size: no `page`, and
+        // per_page at the list's own ceiling.
+        expect(RECEIVABLE_PO_FILTERS.page).toBeUndefined();
+        expect(RECEIVABLE_PO_FILTERS.per_page).toBe(MAX_PER_PAGE);
+    });
+
+    it('serializes to the status[] query the backend whereIn reads', () => {
+        const uri = decodeURIComponent(
+            axios.getUri({ url: '/procurement/purchase-orders', params: buildPurchaseOrderQuery(RECEIVABLE_PO_FILTERS) }),
+        );
+        expect(uri).toBe('/procurement/purchase-orders?status[]=sent&status[]=partially_received&per_page=1000');
+    });
+
+    it('never asks for draft, closed or cancelled', () => {
+        for (const status of ['draft', 'closed', 'cancelled'] as const) {
+            expect(RECEIVABLE_PO_STATUSES).not.toContain(status);
+            expect(isReceivableOrder({ status })).toBe(false);
+        }
+        expect(isReceivableOrder({ status: 'sent' })).toBe(true);
+        expect(isReceivableOrder({ status: 'partially_received' })).toBe(true);
+    });
+
+    it('21 newer non-receivable orders do not push an older open one out of the picker', () => {
+        // Ids descend as the server sorts them (newest first): the two open
+        // orders are the OLDEST rows here, past where a 20-row page ends.
+        const olderOpen = [
+            { id: 2, status: 'sent' as const },
+            { id: 1, status: 'partially_received' as const },
+        ];
+        const newerClosed = Array.from({ length: 21 }, (_, i) => ({
+            id: 100 - i,
+            status: (['draft', 'closed', 'cancelled'] as const)[i % 3],
+        }));
+        const server = [...newerClosed, ...olderOpen];
+
+        // What the OLD call got back — the newest 20 rows — held neither.
+        const oldFirstPage = server.slice(0, 20);
+        expect(oldFirstPage.filter(isReceivableOrder)).toEqual([]);
+
+        // The narrowed call is answered with the open orders themselves.
+        const narrowed = server.filter(isReceivableOrder).slice(0, RECEIVABLE_PO_FILTERS.per_page);
+        expect(narrowed.map((o) => o.id)).toEqual([2, 1]);
     });
 });
 

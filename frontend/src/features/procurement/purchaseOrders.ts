@@ -484,6 +484,43 @@ const NUMBER_KEYS: readonly (keyof PurchaseOrderListFilters)[] = ['vendor_id', '
 /** ListProcurementDocumentsRequest's ceiling — 1000, not Sales' 100 (the `?po=` deep links relied on it). */
 export const MAX_PER_PAGE = 1000;
 
+/**
+ * The two statuses a goods receipt may be booked against: an order that has
+ * been sent, and one already part-received. Draft is not yet with the
+ * vendor; closed and cancelled are done. ONE spelling, so the server-side
+ * query the GRN picker asks for and the guard over what comes back cannot
+ * drift apart.
+ */
+export const RECEIVABLE_PO_STATUSES: readonly PurchaseOrderStatus[] = ['sent', 'partially_received'];
+
+/**
+ * What the GRN page's order picker asks the server for.
+ *
+ * The narrowing has to happen SERVER-side. An unfiltered call answers the
+ * newest 20 (ProcurementDocumentQuery::PER_PAGE_DEFAULT); filtering those 20
+ * in the browser cannot recover an older open order that 21 newer draft or
+ * closed ones have already pushed off the page — it is simply absent, with
+ * nothing on screen saying so. Same defect the vendor and item pickers had
+ * (listAllVendors), same cure: name the statuses, and ask at the list's
+ * ceiling (MAX_PER_PAGE) rather than one page of 20.
+ *
+ * That ceiling is a bound, not "everything": this is the first 1000 OPEN
+ * orders, not all of them. 1000 simultaneously-open POs is not a state this
+ * factory reaches, and it is the largest page the server will serve — but if
+ * it ever were reached, the cure is paging here, not a bigger number.
+ *
+ * Frozen: it is shared across every render of the picker, and read-only.
+ */
+export const RECEIVABLE_PO_FILTERS: PurchaseOrderListFilters = Object.freeze({
+    status: [...RECEIVABLE_PO_STATUSES],
+    per_page: MAX_PER_PAGE,
+});
+
+/** Is this order one a receipt may be booked against? The predicate behind RECEIVABLE_PO_STATUSES. */
+export function isReceivableOrder(order: { status: PurchaseOrderStatus | string }): boolean {
+    return (RECEIVABLE_PO_STATUSES as readonly string[]).includes(order.status);
+}
+
 /** The columns ListPurchaseOrdersRequest sorts on, besides id. */
 const SORT_FIELDS: readonly string[] = ['id', 'order_date', 'expected_date'];
 
