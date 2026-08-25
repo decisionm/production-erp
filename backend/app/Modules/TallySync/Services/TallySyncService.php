@@ -1659,6 +1659,12 @@ class TallySyncService
                 ->filter(fn (TallySyncEntry $entry) => $this->releaseGate->withholds($entry))
                 ->values();
 
+            // The ids reported below are the ones this UPDATE lands on, and
+            // the two cannot diverge: withholds() only ever answers true for
+            // a row whose released_at is null, and these rows are locked for
+            // the duration. The whereNull is kept anyway — it is what makes
+            // the second click a no-op rather than a re-stamp on a driver
+            // (or a test) where the lock is not real.
             $releasedIds = $held->pluck('id')->all();
 
             if ($releasedIds !== []) {
