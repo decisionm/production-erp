@@ -537,7 +537,8 @@ export default function TallySyncPage() {
                                 floor. */}
                             {truncated && (
                                 <span>
-                                    Showing {entries.length} of {total} — rest not fetched.
+                                    Showing {entries.length} of {total}{filtersActive ? ' matching' : ''} — rest
+                                    not fetched.
                                 </span>
                             )}
                             {failedElsewhere > 0 && (
