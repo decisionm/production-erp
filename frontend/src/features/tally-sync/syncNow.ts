@@ -44,9 +44,9 @@ export function canRequestSyncNow(user: User | null): boolean {
  * in a -2 / -3 follow-up voucher.
  */
 export const SYNC_NOW_CONFIRM = {
-    title: 'Post queued vouchers now?',
-    body: 'A running shift sends as-is; later approvals create a follow-up voucher.',
-    ok: 'Send them now',
+    title: 'Release queued vouchers?',
+    body: 'A running shift is released as it stands; later approvals create a follow-up voucher.',
+    ok: 'Release now',
     cancel: 'Not yet',
 } as const;
 

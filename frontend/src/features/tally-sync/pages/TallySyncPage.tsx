@@ -481,7 +481,7 @@ export default function TallySyncPage() {
                         nobody on the floor can answer. The server refuses
                         the request either way. */}
                     {maySyncNow && (
-                        <Tooltip title="Post queued vouchers now">
+                        <Tooltip title="Release queued vouchers for the next agent check">
                             <Button type="primary" loading={syncingNow} disabled={busy} onClick={confirmSyncNow}>
                                 Sync Now
                             </Button>

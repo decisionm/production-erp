@@ -72,8 +72,8 @@ describe('canRequestSyncNow', () => {
 
 describe('SYNC_NOW_CONFIRM', () => {
     it('asks in operational words, with no explanatory paragraph', () => {
-        expect(SYNC_NOW_CONFIRM.title).toBe('Post queued vouchers now?');
-        expect(SYNC_NOW_CONFIRM.body).toBe('A running shift sends as-is; later approvals create a follow-up voucher.');
+        expect(SYNC_NOW_CONFIRM.title).toBe('Release queued vouchers?');
+        expect(SYNC_NOW_CONFIRM.body).toBe('A running shift is released as it stands; later approvals create a follow-up voucher.');
     });
 
     it('warns that a running shift is sent as it stands', () => {
