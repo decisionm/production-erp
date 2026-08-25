@@ -21,6 +21,7 @@ use App\Modules\TallySync\Models\TallySyncEntry;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -1588,6 +1589,127 @@ class TallySyncService
         ], actor: $actor);
 
         return $entry;
+    }
+
+    /**
+     * The Tally Sync page's "Sync Now" — DEC-20260825-002.
+     *
+     * WHAT IT IS: a REQUEST that the outbound vouchers ALREADY QUEUED in
+     * this ERP go out on the agent's next poll. It is the queue-wide form
+     * of releaseNow() above, which DEC-20260807-011 already grants the
+     * accountant per voucher, and it is built out of exactly that act —
+     * same released_at/released_by columns, same voucher.released history
+     * row — so the agent needs no new endpoint, no new payload key and no
+     * version bump to honour it. The 90-second poll and the delivered_at
+     * double-post guard are untouched.
+     *
+     * WHAT IT IS NOT. It never talks to Tally: nothing here posts,
+     * delivers, acknowledges or fails a voucher, and nothing here pulls
+     * masters or stock FROM Tally — only the local agent does any of that,
+     * and only through TallySyncAgentController. It creates no queue entry,
+     * so it can never create a voucher; the most it can do to a row is
+     * stamp released_at on one the gate is holding.
+     *
+     * THE ELIGIBLE SET IS THE GATE'S, NOT A SECOND OPINION. Exactly the
+     * pending rows ShiftVoucherReleaseGate::withholds() is holding right
+     * now are freed, which is what keeps failed, dismissed, synced,
+     * already-delivered, already-released and batch-mode rows out without
+     * this method re-deriving any of those conditions (see the gate's own
+     * first guard). Ordinary pending rows are left alone deliberately:
+     * they are already deliverable, and the next poll was always going to
+     * take them.
+     *
+     * OFFLINE. There is nothing to push to. If the agent is not running,
+     * the freed vouchers simply sit as deliverable until it polls again;
+     * the request is recorded either way, and the caller is told what is
+     * queued rather than that anything posted.
+     *
+     * DOUBLE CLICKS. One transaction, the pending rows SELECTed FOR UPDATE
+     * — the same lock pending() takes, so a click and an in-flight poll
+     * serialise against each other on MySQL — and the UPDATE guarded by
+     * whereNull('released_at'). A second click therefore finds nothing
+     * held, frees nothing and reports already_queued: the EFFECT
+     * coalesces. The audit does not: every press writes its own
+     * sync.requested row, because "who asked, and when" is the question a
+     * button on the live books has to be able to answer, and two presses
+     * really were two presses.
+     *
+     * @param  int|null  $userId  stamped on released_by, exactly as releaseNow does
+     * @param  Authenticatable|null  $actor  the person pressing it — on every history row written here
+     * @return array{
+     *     outcome: 'released'|'already_queued'|'nothing_queued',
+     *     requested_at: string,
+     *     released: int,
+     *     released_entry_ids: list<int>,
+     *     already_queued: int,
+     *     with_agent: int,
+     *     queued_total: int,
+     * }
+     */
+    public function requestSyncNow(?int $userId = null, ?Authenticatable $actor = null): array
+    {
+        return DB::transaction(function () use ($userId, $actor) {
+            $queued = TallySyncEntry::query()
+                ->where('status', TallySyncStatus::Pending)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get();
+
+            $held = $queued
+                ->filter(fn (TallySyncEntry $entry) => $this->releaseGate->withholds($entry))
+                ->values();
+
+            $releasedIds = $held->pluck('id')->all();
+
+            if ($releasedIds !== []) {
+                TallySyncEntry::query()
+                    ->whereIn('id', $releasedIds)
+                    ->whereNull('released_at')
+                    ->update(['released_at' => now(), 'released_by' => $userId]);
+            }
+
+            // One voucher.released per freed voucher, in the SAME shape
+            // releaseNow() writes — the drawer's timeline must read the
+            // same whether the accountant freed this voucher from its own
+            // row or from the queue-wide button.
+            foreach ($held as $entry) {
+                $this->events->record(TallySyncEventKind::VoucherReleased, $entry, [
+                    'voucher_number' => $entry->payload['voucher_number'] ?? null,
+                    'released_by_request' => true,
+                ], actor: $actor);
+            }
+
+            // Pending and not held: already deliverable. Split by whether
+            // the agent has it, so the page can say "waiting to be
+            // collected" and "with the agent" as the different things they
+            // are instead of one hopeful number.
+            $notHeld = $queued->reject(fn (TallySyncEntry $entry) => in_array($entry->id, $releasedIds, true));
+            $withAgent = $notHeld->filter(fn (TallySyncEntry $entry) => $entry->delivered_at !== null)->count();
+            $alreadyQueued = $notHeld->count() - $withAgent;
+
+            $result = [
+                'outcome' => match (true) {
+                    $releasedIds !== [] => 'released',
+                    $queued->isNotEmpty() => 'already_queued',
+                    default => 'nothing_queued',
+                },
+                'requested_at' => now()->toIso8601String(),
+                'released' => count($releasedIds),
+                'released_entry_ids' => $releasedIds,
+                'already_queued' => $alreadyQueued,
+                'with_agent' => $withAgent,
+                'queued_total' => $queued->count(),
+            ];
+
+            $this->events->record(
+                TallySyncEventKind::SyncRequested,
+                null,
+                Arr::except($result, ['requested_at']),
+                actor: $actor,
+            );
+
+            return $result;
+        });
     }
 
     /**

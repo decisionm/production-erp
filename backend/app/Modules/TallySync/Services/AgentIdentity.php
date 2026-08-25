@@ -3,6 +3,7 @@
 namespace App\Modules\TallySync\Services;
 
 use App\Models\User;
+use Carbon\CarbonInterface;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Laravel\Sanctum\PersonalAccessToken;
 
@@ -65,6 +66,57 @@ final class AgentIdentity
     }
 
     /**
+     * When the agent last CHECKED IN — the newest last_used_at across every
+     * token that carries an agent ability, which Sanctum's guard stamps on
+     * each authenticated request (Guard::updateLastUsedAt).
+     *
+     * A DIFFERENT QUESTION from the Control Center's "Agent last action",
+     * and the reason this exists: a poll that finds nothing to deliver
+     * records no event, so last_action_at can stand still all night on an
+     * agent that is alive and polling every 90 seconds. A token's
+     * last_used_at moves on that poll.
+     *
+     * JUDGED ON ABILITIES, exactly as isAgent() and the poll endpoint are —
+     * not on which user owns the token. AgentTokenService issues every
+     * token to one service user by convention, but the /pending gate is
+     * ability-based, so a token that CAN poll is an agent that really did
+     * check in. Keying this on the service user instead would let a real,
+     * actively-polling agent read as "never checked in", and a liveness
+     * light is worst when it is falsely dark.
+     *
+     * NULL means no such token has ever been used — "never", never "down".
+     * The caller must keep those apart.
+     *
+     * Names nothing: the answer is a timestamp, never a token id, a token
+     * name, or the abilities on it.
+     */
+    public static function lastCheckedAt(): ?CarbonInterface
+    {
+        // Prefiltered to tokens that have been used at all — the set is one
+        // row per factory install in practice, and can() is the same check
+        // token() makes, so there is one definition of "agent ability" in
+        // this class rather than a second SQL rendering of it.
+        return PersonalAccessToken::query()
+            ->whereNotNull('last_used_at')
+            ->orderByDesc('last_used_at')
+            ->cursor()
+            ->first(fn (PersonalAccessToken $token) => self::hasAgentAbility($token))
+            ?->last_used_at;
+    }
+
+    /** Whether this token carries any of the abilities that make a caller the agent. */
+    private static function hasAgentAbility(PersonalAccessToken $token): bool
+    {
+        foreach (self::ABILITIES as $ability) {
+            if ($token->can($ability)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * The agent's token when $actor is the agent, else null — the name on
      * it is the installation's label.
      */
@@ -76,12 +128,6 @@ final class AgentIdentity
             return null;
         }
 
-        foreach (self::ABILITIES as $ability) {
-            if ($token->can($ability)) {
-                return $token;
-            }
-        }
-
-        return null;
+        return self::hasAgentAbility($token) ? $token : null;
     }
 }
