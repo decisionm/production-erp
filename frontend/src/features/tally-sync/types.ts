@@ -390,9 +390,53 @@ export interface TallySyncSummary {
         last_action_at: string | null;
         last_action_event: string | null;
         last_action_label: string | null;
+        /**
+         * When the agent last CHECKED IN — the newest last_used_at across
+         * tokens that can poll. A different fact from last_action_at: an
+         * idle poll delivers nothing and records no event, so an agent can
+         * be alive and polling while last_action_at stands still. Null =
+         * never checked in, which is not "went quiet". A timestamp only;
+         * the token behind it is never named.
+         */
+        last_checked_at: string | null;
     };
     last_synced_at: string | null;
     last_masters_pull_at: string | null;
+    /**
+     * The distinct RAW tally_voucher_type labels the queue holds, for the
+     * type filter. Raw, because that is the column the server filter
+     * matches — a batch production voucher is 'Manufacturing Journal' here
+     * and posts as a Stock Journal on the wire. Unfiltered by the request's
+     * own filters, unlike every count beside it, so the dropdown cannot
+     * narrow to the one value already chosen.
+     */
+    voucher_types: string[];
+}
+
+/**
+ * POST /tally-sync/sync-now — the answer to a "Sync Now" press
+ * (DEC-20260825-002).
+ *
+ * NOTHING HERE MEANS "POSTED". The request frees the vouchers the release
+ * gate was holding so the agent's NEXT poll can collect them; only the
+ * agent posts to Tally, and only the queue's own Status / Last activity
+ * report what it did. `outcome` is the stable word for what happened:
+ *
+ *   released       vouchers were being held and are now free to go
+ *   already_queued nothing was held; what is queued was already on its way
+ *   nothing_queued the queue is empty — a true answer, not an error
+ */
+export interface SyncNowResult {
+    outcome: 'released' | 'already_queued' | 'nothing_queued';
+    requested_at: string;
+    released: number;
+    released_entry_ids: number[];
+    /** Pending, not held, not yet collected — already deliverable before the press. */
+    already_queued: number;
+    /** Pending and already in the agent's hands, waiting on Tally's answer. */
+    with_agent: number;
+    queued_total: number;
+    agent: { last_checked_at: string | null };
 }
 
 export interface AgentToken {

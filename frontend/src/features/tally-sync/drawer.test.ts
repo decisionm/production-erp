@@ -12,6 +12,7 @@ import {
     snapshotXmlDecision,
     sourceLink,
     timelineItems,
+    voucherDate,
     voucherStockLines,
 } from './drawer';
 import type { TallySyncEntry, TallySyncSnapshot, TimelineItem } from './types';
@@ -173,6 +174,55 @@ describe('timelineItems', () => {
     it('is empty for a missing timeline rather than throwing', () => {
         expect(timelineItems(undefined)).toEqual([]);
         expect(timelineItems(null)).toEqual([]);
+    });
+});
+
+describe('voucherDate', () => {
+    it('renders the voucher\'s own calendar date, literally', () => {
+        expect(voucherDate('2026-07-23')).toBe('23 Jul 2026');
+        expect(voucherDate('2026-01-01')).toBe('01 Jan 2026');
+        expect(voucherDate('2026-12-31')).toBe('31 Dec 2026');
+    });
+
+    it('does not shift by a timezone — the hazard is real and this is immune to it', () => {
+        // THE BUG THIS EXISTS TO PREVENT, demonstrated rather than asserted
+        // about: new Date('2026-07-23') is UTC MIDNIGHT, so anywhere west of
+        // Greenwich it is still the 22nd, and an accountant reconciling the
+        // 23rd would be shown the wrong day — one that disagrees with the
+        // voucher sitting in Tally.
+        const throughADate = (tz: string) =>
+            new Date('2026-07-23').toLocaleDateString('en-GB', {
+                timeZone: tz,
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+            });
+
+        expect(throughADate('Pacific/Midway')).toBe('22 Jul 2026');   // the bug, west of UTC
+        expect(throughADate('Pacific/Kiritimati')).toBe('23 Jul 2026'); // fine, east of UTC
+
+        // Ours reads the string, so there is no instant to be west or east
+        // of: the same answer at either end of the offset range.
+        expect(voucherDate('2026-07-23')).toBe('23 Jul 2026');
+    });
+
+    it('is an em dash when there is no date — never today, never a guess', () => {
+        expect(voucherDate(null)).toBe('—');
+        expect(voucherDate(undefined)).toBe('—');
+        expect(voucherDate('')).toBe('—');
+    });
+
+    it('shows anything that is not a plain date exactly as it came', () => {
+        // Reinterpreting it would be inventing a factory value out of a
+        // shape nobody promised.
+        expect(voucherDate('2026-07-23T10:00:00Z')).toBe('2026-07-23T10:00:00Z');
+        expect(voucherDate('23/07/2026')).toBe('23/07/2026');
+        expect(voucherDate('not a date')).toBe('not a date');
+    });
+
+    it('passes a month outside 1-12 through rather than naming it', () => {
+        expect(voucherDate('2026-13-01')).toBe('2026-13-01');
+        expect(voucherDate('2026-00-01')).toBe('2026-00-01');
     });
 });
 

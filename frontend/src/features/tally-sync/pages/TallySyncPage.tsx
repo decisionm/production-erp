@@ -8,6 +8,7 @@ import {
     getTallySyncSummary,
     listAllTallySyncEntries,
     releaseTallySyncEntry,
+    requestTallySyncNow,
     retryTallySyncEntry,
 } from '@/features/tally-sync/api';
 import {
@@ -16,17 +17,29 @@ import {
     payloadText,
     statusColor,
     statusLabel,
+    voucherDate,
     voucherNumber,
     showsFixedAfterFailures,
 } from '@/features/tally-sync/drawer';
 import EntryDrawer from '@/features/tally-sync/EntryDrawer';
 import {
+    businessDatePresets,
     catalogueNote,
     categoryFilterOptions,
     categoryLabel,
     hasActiveFilters,
     unclassifiedCount,
+    voucherTypeFilterOptions,
 } from '@/features/tally-sync/filters';
+import {
+    agentLiveness,
+    agentLivenessLabel,
+    canRequestSyncNow,
+    SYNC_NOW_CONFIRM,
+    syncNowMessage,
+    type SyncNowMessage,
+} from '@/features/tally-sync/syncNow';
+import { useAuthStore } from '@/features/auth/store';
 import type { TallySyncEntry, TallySyncEntryFilters, TallySyncStatus } from '@/features/tally-sync/types';
 
 /** The status filter's choices — the same words the Status column uses. */
@@ -116,6 +129,30 @@ export default function TallySyncPage() {
     const [dismissingId, setDismissingId] = useState<number | null>(null);
     const [resyncingAll, setResyncingAll] = useState(false);
     const [report, setReport] = useState<{ id: number; voucher: string; ok: boolean; message: string }[] | null>(null);
+    // "Sync Now" (DEC-20260825-002): whether a press is in flight, and the
+    // honest sentence about the last one. Kept on the page — not a toast —
+    // for the same reason the per-row outcomes are: the answer names what
+    // is waiting and on whom, and it has to still be there when the person
+    // looks back up from Tally.
+    const [syncingNow, setSyncingNow] = useState(false);
+    const [syncNowOutcome, setSyncNowOutcome] = useState<SyncNowMessage | null>(null);
+
+    // Whether to DRAW the button. The server enforces the same rule and
+    // 403s regardless (SyncNowAuthority) — this only decides whether a
+    // login who may not press it is shown a control that would refuse them.
+    const user = useAuthStore((state) => state.user);
+    const maySyncNow = canRequestSyncNow(user);
+
+    // A slow tick so "checked in 4 min ago" ages on screen instead of
+    // freezing at whatever it said when the page last rendered. 30s is well
+    // under the 5-minute stale boundary, so the light cannot sit green over
+    // an agent that crossed it a while ago.
+    const [clock, setClock] = useState(() => Date.now());
+    useEffect(() => {
+        const tick = setInterval(() => setClock(Date.now()), 30_000);
+
+        return () => clearInterval(tick);
+    }, []);
     // ?entry=41 — a sales document's Tally column (or any other page)
     // linking straight to one voucher. Read once, on load: the drawer opens
     // on that id whether or not the row is on this page — EntryDrawer asks
@@ -301,6 +338,51 @@ export default function TallySyncPage() {
     }
 
     /**
+     * How alive the factory PC is, from its last check-in. `unavailable`
+     * — not "never" — while the summary has not answered or failed: the
+     * page does not know, and a red light over a measurement nobody made
+     * is as wrong as a green one.
+     */
+    const liveness = agentLiveness(summary?.agent.last_checked_at, clock, !!summary && !summaryError);
+
+    /**
+     * "Sync Now" — DEC-20260825-002. Behind a confirm because the press is
+     * an OUTWARD act: within about ninety seconds it can put vouchers into
+     * the accountant's live books. The dialog says what it does, says that
+     * it reads nothing from Tally, and — the part nobody can guess — says
+     * that a shift still running will be sent as it stands, with later
+     * approvals landing in a follow-up voucher.
+     */
+    function confirmSyncNow() {
+        Modal.confirm({
+            title: SYNC_NOW_CONFIRM.title,
+            content: <div style={{ whiteSpace: 'pre-line' }}>{SYNC_NOW_CONFIRM.body}</div>,
+            okText: SYNC_NOW_CONFIRM.ok,
+            cancelText: SYNC_NOW_CONFIRM.cancel,
+            onOk: () => syncNow(),
+        });
+    }
+
+    async function syncNow() {
+        setSyncingNow(true);
+        setSyncNowOutcome(null);
+        try {
+            const result = await requestTallySyncNow();
+            // Worded from the SERVER's own read of the agent at the moment
+            // of the request, not from this page's cached summary — the
+            // difference is exactly the case where the factory PC went off
+            // since the last refresh. Never says "sent": nothing has
+            // reached Tally yet, and the Status column is what will say so.
+            setSyncNowOutcome(syncNowMessage(result, agentLiveness(result.agent.last_checked_at, Date.now())));
+        } catch (error) {
+            setSyncNowOutcome({ tone: 'warning', text: resyncMessage(error) });
+        } finally {
+            setSyncingNow(false);
+            await queryClient.invalidateQueries({ queryKey: ['tally-sync', 'entries'] });
+        }
+    }
+
+    /**
      * Retry every failed voucher, ONE AT A TIME.
      *
      * Three things this deliberately does not do: fire them in parallel (the
@@ -342,17 +424,82 @@ export default function TallySyncPage() {
     return (
         <>
             {/* Failed rows carry a red wash as well as a red tag — scanned from
-                across the room, colour is what gets noticed, not wording. */}
-            <style>{'.tally-sync-failed-row > td { background: #fff1f0 !important; }'}</style>
+                across the room, colour is what gets noticed, not wording. The
+                hold and failed colours are the ones the floor already reads;
+                nothing below changes them.
 
-            <Space style={{ width: '100%', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                Under 768px the header and the filter bar stop sitting side by
+                side and stack full-width: on a phone in the office, controls
+                squeezed into a 90px column are unusable, and this page is one
+                an accountant does open on a phone to check whether a voucher
+                went. */}
+            <style>{`
+                .tally-sync-failed-row > td { background: #fff1f0 !important; }
+                .tally-sync-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+                .tally-sync-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+                @media (max-width: 768px) {
+                    .tally-sync-header, .tally-sync-actions { flex-direction: column; align-items: stretch; }
+                    .tally-sync-actions > * { width: 100%; }
+                    .tally-sync-filters > .ant-space-item { width: 100%; }
+                    .tally-sync-filters > .ant-space-item > * { width: 100% !important; }
+                }
+            `}</style>
+
+            <div className="tally-sync-header">
                 <Typography.Title level={3} style={{ marginBottom: 8 }}>
                     Tally Sync
                 </Typography.Title>
-                <Button onClick={() => Promise.all([refetch(), refetchSummary()])} loading={isFetching && !busy}>
-                    Refresh
-                </Button>
-            </Space>
+                <div className="tally-sync-actions">
+                    {/* The freshness of the factory PC, beside the control
+                        that reloads this page — compact, because it is a
+                        header, and worded so "never checked in" and "we
+                        could not find out" never read as each other. Says
+                        nothing about which token or what it may do. */}
+                    <Tooltip
+                        title={
+                            liveness.state === 'stale'
+                                ? 'The factory PC checks in roughly every 90 seconds. This one has not for over five minutes — it may be switched off.'
+                                : liveness.state === 'never'
+                                    ? 'No sync agent has ever authenticated against this ERP. Nothing can reach Tally until one is installed and running.'
+                                    : liveness.state === 'unavailable'
+                                        ? 'The summary could not be read, so this page does not know whether the agent is running.'
+                                        : 'The factory PC is checking in normally.'
+                        }
+                    >
+                        <Typography.Text
+                            type={liveness.state === 'fresh' ? 'secondary' : liveness.state === 'stale' ? 'warning' : 'secondary'}
+                            style={{ fontSize: 12, whiteSpace: 'nowrap' }}
+                        >
+                            {agentLivenessLabel(liveness)}
+                        </Typography.Text>
+                    </Tooltip>
+                    <Button onClick={() => Promise.all([refetch(), refetchSummary()])} loading={isFetching && !busy}>
+                        Refresh
+                    </Button>
+                    {/* Owner/Accounts only. Absent — not disabled — for
+                        everyone else: a greyed control invites a question
+                        nobody on the floor can answer. The server refuses
+                        the request either way. */}
+                    {maySyncNow && (
+                        <Tooltip title="Ask the factory PC to post everything already queued on its next check. Reads nothing from Tally.">
+                            <Button type="primary" loading={syncingNow} disabled={busy} onClick={confirmSyncNow}>
+                                Sync Now
+                            </Button>
+                        </Tooltip>
+                    )}
+                </div>
+            </div>
+
+            {syncNowOutcome && (
+                <Alert
+                    type={syncNowOutcome.tone}
+                    showIcon
+                    closable
+                    onClose={() => setSyncNowOutcome(null)}
+                    style={{ marginBottom: 16 }}
+                    message={syncNowOutcome.text}
+                />
+            )}
 
             {isError && (
                 <Alert
@@ -514,7 +661,7 @@ export default function TallySyncPage() {
 
             {/* The filter bar. Every control writes straight into `filters`,
                 which is the query key — the server does the narrowing. */}
-            <Space wrap style={{ marginBottom: 12 }}>
+            <Space wrap className="tally-sync-filters" style={{ marginBottom: 12 }}>
                 <Select<TallySyncStatus[]>
                     mode="multiple"
                     allowClear
@@ -537,9 +684,35 @@ export default function TallySyncPage() {
                     value={filters.category ?? []}
                     onChange={(value) => setFilter('category', value.length > 0 ? value : undefined)}
                 />
+                {/* The voucher type as the QUEUE labels it (the raw
+                    tally_voucher_type the server filter matches), offered
+                    from the types the queue actually holds. A type filter
+                    and nothing else: no party, no supplier, no rate, no
+                    amount and no payload is filterable or enumerable from
+                    this bar — those are FC-06 questions. */}
+                <Select<string[]>
+                    mode="multiple"
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    placeholder="Any voucher type"
+                    style={{ minWidth: 220 }}
+                    options={voucherTypeFilterOptions(summary?.voucher_types)}
+                    value={filters.voucher_type ?? []}
+                    onChange={(value) => setFilter('voucher_type', value.length > 0 ? value : undefined)}
+                />
                 <DatePicker.RangePicker
                     allowEmpty={[true, true]}
                     placeholder={['Voucher date from', 'to']}
+                    // Today / Yesterday / Last 7 days, computed from the
+                    // FACTORY's day (the same date the counts above are
+                    // bucketed by), never the browser's — at 00:30 IST
+                    // those are different dates and the presets would
+                    // silently disagree with the header.
+                    presets={businessDatePresets(summary?.today.date).map((preset) => ({
+                        label: preset.label,
+                        value: [dayjs(preset.from), dayjs(preset.to)] as [dayjs.Dayjs, dayjs.Dayjs],
+                    }))}
                     value={[filters.from ? dayjs(filters.from) : null, filters.to ? dayjs(filters.to) : null]}
                     onChange={(_, dateStrings) => {
                         // Business dates (the voucher's date in Tally), not
@@ -571,7 +744,12 @@ export default function TallySyncPage() {
             </Space>
 
             <Table<TallySyncEntry>
+                // max-content so no column is squeezed to an unreadable
+                // width; the header sticks so the column names stay put
+                // while an accountant scrolls a long day's queue.
                 scroll={{ x: 'max-content' }}
+                sticky
+                size="middle"
                 rowKey="id"
                 loading={isLoading}
                 dataSource={entries}
@@ -594,6 +772,18 @@ export default function TallySyncPage() {
                                     </Tooltip>
                                 )}
                             </Space>
+                        ),
+                    },
+                    {
+                        // THE VOUCHER'S OWN DATE — the day this document
+                        // carries in Tally's books, which is the day an
+                        // accountant reconciles by. Rendered from the
+                        // string, never through a Date: "2026-07-23" is the
+                        // 23rd everywhere, and parsing it as an instant
+                        // shows a viewer west of Greenwich the 22nd.
+                        title: 'Voucher date',
+                        render: (_, row) => (
+                            <span style={{ whiteSpace: 'nowrap' }}>{voucherDate(row.business_date)}</span>
                         ),
                     },
                     {
@@ -691,24 +881,50 @@ export default function TallySyncPage() {
                         },
                     },
                     {
+                        // WHERE THIS VOUCHER HAS GOT TO, scannable down the
+                        // column: the FURTHEST point it has reached reads
+                        // first and in full weight, so an eye running down
+                        // the page sorts "In Tally" from "Collected" from
+                        // "Not collected" without reading a word twice.
+                        //
+                        // Nothing is hidden to achieve that. Queued is still
+                        // there — smaller and muted, because it is the one
+                        // stamp every row has and so the one that
+                        // distinguishes nothing — and a voucher that reached
+                        // Tally still shows when the agent collected it,
+                        // which is the pair a person needs when a post took
+                        // a suspiciously long time. Both stay on one line
+                        // each so the column cannot reflow into a paragraph.
                         title: 'Last activity',
                         render: (_, row) => (
-                            <Space direction="vertical" size={0}>
-                                {row.synced_at && <span>In Tally {instant(row.synced_at)}</span>}
+                            <Space direction="vertical" size={0} style={{ whiteSpace: 'nowrap' }}>
+                                {row.synced_at && <span><strong>In Tally</strong> {instant(row.synced_at)}</span>}
                                 {!row.synced_at && row.delivered_at && (
                                     <Tooltip title="The agent has taken this voucher but has not reported back yet.">
-                                        <span>Collected {instant(row.delivered_at)}</span>
+                                        <span><strong>Collected</strong> {instant(row.delivered_at)}</span>
                                     </Tooltip>
                                 )}
                                 {!row.synced_at && !row.delivered_at && (
-                                    <Typography.Text type="secondary">Not collected yet</Typography.Text>
+                                    <Typography.Text type="secondary"><strong>Not collected yet</strong></Typography.Text>
                                 )}
-                                <Typography.Text type="secondary">Queued {instant(row.created_at)}</Typography.Text>
+                                {row.synced_at && row.delivered_at && (
+                                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                        Collected {instant(row.delivered_at)}
+                                    </Typography.Text>
+                                )}
+                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                    Queued {instant(row.created_at)}
+                                </Typography.Text>
                             </Space>
                         ),
                     },
                     {
+                        // Pinned right so the buttons are reachable on a
+                        // 375px phone without scrolling the whole table
+                        // across first — this column is the reason someone
+                        // opens the page on a phone at all.
                         title: 'Actions',
+                        fixed: 'right',
                         render: (_, row) => {
                             const view = (
                                 <Button size="small" onClick={() => setViewingId(row.id)}>

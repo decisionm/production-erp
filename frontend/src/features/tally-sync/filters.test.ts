@@ -2,11 +2,13 @@ import axios from 'axios';
 import { describe, expect, it } from 'vitest';
 import {
     buildEntryQuery,
+    businessDatePresets,
     catalogueNote,
     categoryFilterOptions,
     categoryLabel,
     hasActiveFilters,
     unclassifiedCount,
+    voucherTypeFilterOptions,
 } from './filters';
 import type { TallySyncCategoryCount, TallyTransactionCategory } from './types';
 
@@ -248,5 +250,78 @@ describe('catalogueNote', () => {
             'Synthetic Voucher: ERP-originated version planned',
             'Sales Order: no such voucher type in Tally',
         ]);
+    });
+});
+
+describe('voucherTypeFilterOptions', () => {
+    it('offers the RAW voucher-type labels the queue holds, in the server\'s order', () => {
+        // Raw, because tally_voucher_type is the column the server filter
+        // matches. "Manufacturing Journal" posts to Tally as a Stock
+        // Journal — offering the WIRE type here would be a filter that
+        // always returns nothing.
+        expect(voucherTypeFilterOptions(['Manufacturing Journal', 'Sales', 'Stock Journal'])).toEqual([
+            { value: 'Manufacturing Journal', label: 'Manufacturing Journal' },
+            { value: 'Sales', label: 'Sales' },
+            { value: 'Stock Journal', label: 'Stock Journal' },
+        ]);
+    });
+
+    it('is empty before the summary answers rather than inventing a list', () => {
+        expect(voucherTypeFilterOptions(undefined)).toEqual([]);
+        expect(voucherTypeFilterOptions(null)).toEqual([]);
+        expect(voucherTypeFilterOptions([])).toEqual([]);
+    });
+
+    it('drops blanks so no option can select nothing', () => {
+        expect(voucherTypeFilterOptions(['Sales', '', '   '])).toEqual([{ value: 'Sales', label: 'Sales' }]);
+    });
+
+    it('reaches the URL as the array Laravel reads, through the allowlist', () => {
+        expect(buildEntryQuery({ voucher_type: ['Sales', 'Journal'] })).toEqual({ voucher_type: ['Sales', 'Journal'] });
+        expect(hasActiveFilters({ voucher_type: ['Sales'] })).toBe(true);
+        expect(hasActiveFilters({ voucher_type: [] })).toBe(false);
+    });
+});
+
+describe('businessDatePresets', () => {
+    it('offers Today, Yesterday and Last 7 days from the factory day it is given', () => {
+        expect(businessDatePresets('2026-08-25')).toEqual([
+            { label: 'Today', from: '2026-08-25', to: '2026-08-25' },
+            { label: 'Yesterday', from: '2026-08-24', to: '2026-08-24' },
+            // Seven dates ENDING today — the ordinary reading of the phrase.
+            { label: 'Last 7 days', from: '2026-08-19', to: '2026-08-25' },
+        ]);
+    });
+
+    it('crosses a month boundary correctly', () => {
+        const [, yesterday, week] = businessDatePresets('2026-09-01');
+        expect(yesterday).toEqual({ label: 'Yesterday', from: '2026-08-31', to: '2026-08-31' });
+        expect(week.from).toBe('2026-08-26'); // 7 dates: Aug 26 … Sep 1
+    });
+
+    it('crosses a year boundary correctly', () => {
+        const [, yesterday, week] = businessDatePresets('2026-01-01');
+        expect(yesterday.from).toBe('2025-12-31');
+        expect(week.from).toBe('2025-12-26');
+    });
+
+    it('handles a leap day without drifting', () => {
+        const [, yesterday] = businessDatePresets('2028-03-01');
+        expect(yesterday.from).toBe('2028-02-29');
+    });
+
+    it('is empty until the factory day is known, rather than guessing from the browser clock', () => {
+        // The browser's day and the factory's are different dates at 00:30
+        // IST, and a preset that quietly disagreed with the counts above it
+        // would be worse than no preset.
+        expect(businessDatePresets(undefined)).toEqual([]);
+        expect(businessDatePresets(null)).toEqual([]);
+        expect(businessDatePresets('')).toEqual([]);
+        expect(businessDatePresets('25/08/2026')).toEqual([]);
+    });
+
+    it('produces ranges the query builder sends unchanged', () => {
+        const [today] = businessDatePresets('2026-08-25');
+        expect(buildEntryQuery({ from: today.from, to: today.to })).toEqual({ from: '2026-08-25', to: '2026-08-25' });
     });
 });

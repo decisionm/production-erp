@@ -1,7 +1,14 @@
 import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
 import { buildEntryQuery } from './filters';
-import type { AgentToken, TallySettings, TallySyncEntry, TallySyncEntryFilters, TallySyncSummary } from './types';
+import type {
+    AgentToken,
+    SyncNowResult,
+    TallySettings,
+    TallySyncEntry,
+    TallySyncEntryFilters,
+    TallySyncSummary,
+} from './types';
 
 /**
  * One page of the queue, server-filtered.
@@ -118,6 +125,22 @@ export async function dismissTallySyncEntry(id: number): Promise<TallySyncEntry>
 /** The accountant's "Release now" on a held shift voucher (DEC-20260807-011). */
 export async function releaseTallySyncEntry(id: number): Promise<TallySyncEntry> {
     const { data } = await api.post<{ data: TallySyncEntry }>(`/tally-sync/entries/${id}/release`);
+    return data.data;
+}
+
+/**
+ * "Sync Now" (DEC-20260825-002) — ask the vouchers already queued to go out
+ * on the agent's next poll. Owner/Accounts only; the server 403s anyone
+ * else regardless of what the page drew.
+ *
+ * THE ONLY FUNCTION IN THIS FILE THAT REACHES THIS ENDPOINT. Refresh on the
+ * page calls listAllTallySyncEntries + getTallySyncSummary and nothing
+ * else, so no reload can post a voucher as a side effect (api.test.ts pins
+ * that). This one is called from the confirmation dialog's OK and nowhere
+ * else.
+ */
+export async function requestTallySyncNow(): Promise<SyncNowResult> {
+    const { data } = await api.post<{ data: SyncNowResult }>('/tally-sync/sync-now');
     return data.data;
 }
 

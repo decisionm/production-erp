@@ -81,6 +81,38 @@ export function instant(value: string | null | undefined): string {
     });
 }
 
+/** Month names for voucherDate(); index 0 is January. */
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * THE VOUCHER'S OWN DATE, rendered literally — the date this document
+ * carries in Tally's books (payload.voucher_date, surfaced as
+ * `business_date`).
+ *
+ * NO Date, NO dayjs, ON PURPOSE. A voucher date is a calendar date the
+ * factory decided, not an instant: it is stored as "2026-07-23" and it is
+ * the 23rd in every timezone on earth. `new Date('2026-07-23')` parses that
+ * as UTC MIDNIGHT, so a viewer west of Greenwich renders the 22nd — an
+ * accountant reconciling a day would be looking at the wrong day, and the
+ * screen would disagree with the voucher in Tally. Splitting the string
+ * cannot do that.
+ *
+ * Anything that is not a plain YYYY-MM-DD is shown as it came rather than
+ * reinterpreted, and a missing date is an em dash — never today's, never a
+ * guess.
+ */
+export function voucherDate(value: string | null | undefined): string {
+    if (!value) return '—';
+
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+    if (!match) return value;
+
+    const [, year, month, day] = match;
+    const name = MONTHS[Number(month) - 1];
+
+    return name ? `${day} ${name} ${year}` : value;
+}
+
 /**
  * The hold copy — one tag and one line under it — worded once for the
  * Status column and the drawer's Release section. A held shift voucher is
