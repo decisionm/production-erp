@@ -15,12 +15,20 @@ class StockMovementController extends Controller
 {
     public function __construct(private readonly StockMovementService $stock) {}
 
+    /**
+     * THE FIFTH INVENTORY LIST, reading its filters the same way the other
+     * four do. It hand-rolled all three and had both defects those readers
+     * exist to close: `(int) ['5']` is 1, so `?item_id[]=5` answered with
+     * ITEM 1's movements and said nothing, and `(int) ['50']` is 1 too, so
+     * `?per_page[]=50` served ONE ROW PER PAGE — the "list looks empty"
+     * shape `perPage()` was written for.
+     */
     public function index(Request $request): AnonymousResourceCollection
     {
         return StockMovementResource::collection($this->stock->paginateMovements(
-            itemId: $request->integer('item_id') ?: null,
-            warehouseId: $request->integer('warehouse_id') ?: null,
-            perPage: $request->integer('per_page') ?: 20,
+            itemId: $this->filterId($request, 'item_id'),
+            warehouseId: $this->filterId($request, 'warehouse_id'),
+            perPage: $this->perPage($request),
         ));
     }
 

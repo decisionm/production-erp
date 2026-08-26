@@ -25,7 +25,17 @@ export default function BatchesPage() {
     const [barcodeBatch, setBarcodeBatch] = useState<Batch | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['inventory', 'batches'], queryFn: () => listBatches() });
+    // Server-side paging and a server-side search. The table read the first
+    // twenty batches — newest first — so every older lot was invisible, and a
+    // browser-side filter over those twenty could not find one either.
+    const [page, setPage] = useState(1);
+    const [perPage, setPerPage] = useState(20);
+    const [search, setSearch] = useState('');
+
+    const { data, isLoading } = useQuery({
+        queryKey: ['inventory', 'batches', page, perPage, search],
+        queryFn: () => listBatches({ page, per_page: perPage, search: search || undefined }),
+    });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
     const itemOptions = items?.data.filter((i) => i.tracking_type === 'batch').map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
 
@@ -57,7 +67,18 @@ export default function BatchesPage() {
         <>
             <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
                 <Typography.Title level={3} style={{ margin: 0 }}>Batches</Typography.Title>
-                <Button type="primary" onClick={() => setModalOpen(true)}>New Batch</Button>
+                <Space>
+                    <Input.Search
+                        allowClear
+                        placeholder="Batch number or item"
+                        style={{ width: 260 }}
+                        onSearch={(value) => {
+                            setSearch(value.trim());
+                            setPage(1);
+                        }}
+                    />
+                    <Button type="primary" onClick={() => setModalOpen(true)}>New Batch</Button>
+                </Space>
             </Space>
             <Typography.Paragraph type="secondary">
                 Only items with tracking type &quot;Batch / Lot&quot; can have batches — set that on the Items page first.
@@ -68,7 +89,18 @@ export default function BatchesPage() {
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                pagination={{
+                    current: page,
+                    pageSize: perPage,
+                    total: data?.meta?.total ?? data?.data?.length ?? 0,
+                    showSizeChanger: true,
+                    pageSizeOptions: [20, 50, 100, 200],
+                    showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} batches`,
+                    onChange: (nextPage, nextSize) => {
+                        setPage(nextPage);
+                        setPerPage(nextSize);
+                    },
+                }}
                 columns={[
                     { title: 'Item', render: (_, row) => itemLabel(row.item) },
                     { title: 'Batch Number', dataIndex: 'batch_number' },
