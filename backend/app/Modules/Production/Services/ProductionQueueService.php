@@ -3,6 +3,7 @@
 namespace App\Modules\Production\Services;
 
 use App\Modules\Production\Models\ProductionRequest;
+use Illuminate\Support\Facades\DB;
 
 /**
  * WHAT THE FLOOR IS OWED, AND WHO IS WAITING FOR IT — the read behind the
@@ -59,23 +60,40 @@ class ProductionQueueService
      */
     public function queue(): array
     {
-        $plan = $this->planning->plan();
+        /*
+         * ONE SNAPSHOT, NOT TWO READS. The dates and the rows come from two
+         * separate reads of the same open-request set — plan() walks the queue
+         * to work out what is ahead of what, then queue() reads the rows. A
+         * reorder, start or cancellation committing BETWEEN them pairs the old
+         * queue's estimates with the new queue's rows, and the screen quotes a
+         * queued_ahead and a readiness date for an order it is no longer
+         * showing (Codex, eb1cfb8). Wrapping both in one transaction is what
+         * makes the database hand them the same view: REPEATABLE READ opens
+         * the consistent snapshot at the first read on the live MySQL, and a
+         * transaction is a consistent read on SQLite too.
+         *
+         * Still a READ. Nothing inside writes, locks or updates — the
+         * transaction exists only to fix what both reads see.
+         */
+        return DB::transaction(function (): array {
+            $plan = $this->planning->plan();
 
-        // Keyed by sales order line — safe as a 1:1 lookup because
-        // createFromShortfall enforces ONE OPEN REQUEST PER LINE under the
-        // line's own lock, and both this queue and plan() read `open()`.
-        $estimates = [];
-        foreach ($plan['data'] as $row) {
-            $estimates[(int) $row['line_id']] = $row;
-        }
+            // Keyed by sales order line — safe as a 1:1 lookup because
+            // createFromShortfall enforces ONE OPEN REQUEST PER LINE under the
+            // line's own lock, and both this queue and plan() read `open()`.
+            $estimates = [];
+            foreach ($plan['data'] as $row) {
+                $estimates[(int) $row['line_id']] = $row;
+            }
 
-        $rows = [];
+            $rows = [];
 
-        foreach ($this->requests->queue() as $request) {
-            $rows[] = $this->row($request, $estimates[(int) $request->sales_order_line_id] ?? null);
-        }
+            foreach ($this->requests->queue() as $request) {
+                $rows[] = $this->row($request, $estimates[(int) $request->sales_order_line_id] ?? null);
+            }
 
-        return ['data' => $rows, 'basis' => $plan['basis']];
+            return ['data' => $rows, 'basis' => $plan['basis']];
+        });
     }
 
     // ---- internals --------------------------------------------------------
