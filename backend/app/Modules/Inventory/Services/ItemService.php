@@ -114,6 +114,19 @@ class ItemService
             DependencyCheck::table('day_bin_movements', 'item_id')->label('day bin movement'),
             DependencyCheck::table('material_request_lines', 'item_id')->label('material request line'),
             DependencyCheck::table('store_issue_lines', 'item_id')->label('store issue line'),
+            // A BASE PRODUCT WITH VARIANTS STILL POINTING AT IT
+            // (DEC-20260821-001). The column RESTRICTs, so the database
+            // would refuse — but as a QueryException inside the delete
+            // transaction, i.e. a 500. Declared here so the refusal is the
+            // contract's 422-with-counts, exactly as this docblock's
+            // RESTRICT paragraph requires of every referencing column.
+            // includeTrashed for the reason the ARCHIVED CHILDREN paragraph
+            // above gives: `items` soft-deletes, an archived variant is
+            // still a physical row, and a RESTRICT blocks on it just the
+            // same. Coded `pack_variants` rather than the derived `items`,
+            // because the 422's key must not read as "this item".
+            DependencyCheck::table('items', 'variant_of_item_id', 'pack_variants')
+                ->label('pack variant')->includeTrashed(),
 
             // Soft-deleting children: an archived one still blocks, because it
             // is still a physical row the database would act on.
@@ -188,6 +201,11 @@ class ItemService
     public function paginate(int $perPage = 20): LengthAwarePaginator
     {
         return Item::query()
+            // The item list renders the Tally stock group per row. Two
+            // columns, eager-loaded, so a 20-row page is two queries rather
+            // than twenty-one — the catalogue is ~644 rows and this list is
+            // the screen everybody opens first.
+            ->with('group:id,name')
             ->orderBy('name')
             ->paginate($perPage);
     }

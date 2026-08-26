@@ -63,6 +63,21 @@ interface NavGroup {
  * is the whole rule: the specified prefix is fixed, Tally Sync is last, and
  * nothing unspecified was resequenced on an agent's judgement.
  *
+ * TALLY SYNC WAS PROPOSED FOR A MOVE on 26-Aug-2026 — directly after Payroll
+ * — by the Phase 3 build spec, and it HAS NOT MOVED. The position it would
+ * have left is a 21-Aug owner request, so the move is a REVERSAL of a
+ * recorded pin, and a build spec is not owner authority (AGENTS.md: an agent
+ * proposes, the owner decides; a changed decision is a NEW record). The
+ * question is parked in docs/factory/PENDING-OWNER-QUESTIONS.md — "Where
+ * should Tally Sync sit in the sidebar?", deliberately named rather than
+ * numbered, because that file assigns question numbers at MERGE time and a
+ * number written here would quietly point at somebody else's question after
+ * a re-mint — and the 21-Aug order stands until it is answered. Nothing
+ * here is to be
+ * resequenced on the strength of the spec alone — if the owner confirms the
+ * new position, move this entry to directly after Payroll and move
+ * 'Tally Sync' in AppLayout.nav.test.ts's CONFIGURED_ORDER with it.
+ *
  * Downloads, Help and Administration stay after Tally Sync, below the
  * divider `menuItems` inserts: they are utilities, not modules.
  *
@@ -95,16 +110,19 @@ export const allNavItems: readonly NavGroup[] = [
         label: 'Inventory',
         module: 'inventory',
         children: [
-            { key: '/inventory/items', label: 'Items' },
-            { key: '/inventory/warehouses', label: 'Warehouses' },
+            // DAILY-USE FIRST, masters after — the same floor-first rule the
+            // Production group already follows. The item master is where a
+            // product's identity is fixed, so it opens the group; Stock and
+            // the label bench are what a storekeeper touches every day;
+            // Warehouses is setup and sits below them.
+            { key: '/inventory/items', label: 'Item Master' },
             { key: '/inventory/stock', label: 'Stock' },
-            { key: '/inventory/material-lots', label: 'Material Receipts & Bag Labels' },
-            { key: '/inventory/batches', label: 'Batches' },
-            { key: '/inventory/serial-numbers', label: 'Serial Numbers' },
+            { key: '/inventory/material-lots', label: 'Barcode & Labels' },
             // The STORE's queue (Phase 7.5): what production has asked for,
             // fulfilled — in part or in full — here. Issuing is not
             // consuming: it moves stock into Production/WIP.
             { key: '/inventory/store-issue-queue', label: 'Store Issue Queue' },
+            { key: '/inventory/warehouses', label: 'Warehouses' },
             // SALES ORDER FULFILMENT, the store's half: which customer lines
             // are waiting on stock, and when the floor could have what is
             // short. Under Inventory rather than Sales because holding stock
@@ -113,6 +131,18 @@ export const allNavItems: readonly NavGroup[] = [
             // Neither screen moves stock and neither gates dispatch (Q27).
             { key: '/inventory/fulfilment', label: 'Store Fulfilment' },
             { key: '/inventory/planning', label: 'Fulfilment Planning' },
+            // Batches and Serial Numbers are NOT children here any more, and
+            // they are not withdrawn either: both routes stay mounted and both
+            // pages still work. They are per-item identity registers opened
+            // while working a stock line, not destinations of their own — the
+            // Stock page's toolbar links to both, which is where someone
+            // needing a batch or a serial number already is. Do not re-add
+            // them here without moving those links out of that toolbar first.
+            //
+            // NO Stock Movements entry: there is no such page. The movement
+            // ledger is read through the Stock page's per-row history drawer
+            // (/inventory/stock-movements is an API path only), and a menu
+            // line pointing at a route App.tsx does not mount is a dead link.
         ],
     },
     {
@@ -308,6 +338,10 @@ export const allNavItems: readonly NavGroup[] = [
             { key: '/maintenance/reliability', label: 'Reliability Report' },
         ],
     },
+    // LAST OF THE MODULES, per the 21-Aug owner request. The 26-Aug build
+    // spec asked for it directly after Payroll; that is a reversal of an
+    // owner pin, so it is parked as an owner question and NOT applied —
+    // see this file's header.
     {
         key: 'tally-sync',
         icon: <SyncOutlined />,

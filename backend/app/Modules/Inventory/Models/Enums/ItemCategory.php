@@ -56,6 +56,37 @@ enum ItemCategory: string
      */
     case Other = 'other';
 
+    /*
+     * ---- ADDED 26-Aug-2026, ADDITIVELY -----------------------------------
+     *
+     * Three cases, and NOT ONE LINE of the four above changed with them —
+     * `purchasable()`, `sellable()` and `requestableFromStore()` are written
+     * as comparisons against named cases, so a new case falls out of each as
+     * purchasable, not sellable, and not requestable from the store. That is
+     * the existing behaviour preserved exactly, which is what Q59 being OPEN
+     * requires: which categories each document may use is the OWNER'S
+     * answer, and nothing here may pre-empt it by widening or narrowing an
+     * eligibility rule on the way past.
+     *
+     * They exist because `Other` had been carrying three unrelated meanings
+     * at once ("consumables, spares, tooling, stationery" — its own
+     * docblock) and a half-made bottle had no case at all. Naming them
+     * separately costs nothing while enforcement is off, and is the
+     * difference between a real answer and a shrug once it is on.
+     *
+     * A category being AVAILABLE is not a category being ASSIGNED. Nothing
+     * classifies an item into one of these; a person does.
+     */
+
+    /** A half-made thing: moulded and not yet packed, or held between operations. */
+    case WorkInProgress = 'work_in_progress';
+
+    /** Bought, and used up in running the plant — oil, gloves, cleaning agents, stationery. */
+    case Consumable = 'consumable';
+
+    /** A spare part, a mould insert, a tool — bought, kept, and fitted rather than consumed. */
+    case SpareTooling = 'spare_tooling';
+
     /** May this item be bought on a purchase order? */
     public function purchasable(): bool
     {
@@ -74,7 +105,14 @@ enum ItemCategory: string
         return $this === self::RawMaterial || $this === self::PackingMaterial;
     }
 
-    /** The word a refusal uses, so a message reads like a sentence. */
+    /**
+     * The word a refusal uses, so a message reads like a sentence.
+     *
+     * EVERY CASE GETS AN ARM. This is a `match` with no default, so a case
+     * added above and forgotten here is an UnhandledMatchError at the moment
+     * a refusal tries to name it — i.e. inside the very message that was
+     * supposed to explain something.
+     */
     public function label(): string
     {
         return match ($this) {
@@ -82,6 +120,9 @@ enum ItemCategory: string
             self::PackingMaterial => 'a packing material',
             self::FinishedGood => 'a finished good',
             self::Other => 'a consumable or spare',
+            self::WorkInProgress => 'work in progress',
+            self::Consumable => 'a consumable',
+            self::SpareTooling => 'a spare or tooling item',
         };
     }
 }

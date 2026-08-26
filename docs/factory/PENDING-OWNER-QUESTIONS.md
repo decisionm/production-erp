@@ -39,9 +39,9 @@ estimation version). Q53 is the Phase 7.6 configuration-lifecycle branch's
 (four selection-rule deferrals); Q54 is the Phase 7.5 material-flow branch's
 (five material-flow questions). Q61-Q62 are claimed by the sales-order
 fulfilment branch (may the ERP emit a Tally Sales Order voucher; the
-contested-stock hold rule). Q63-Q65 are claimed by the product-identity
-branch (Tally GRN usage; purchases without POs; sync cadence). New
-questions continue from Q66.
+contested-stock hold rule). Q63-Q66 are claimed by the product-identity
+branch (Tally GRN usage; purchases without POs; sync cadence; the Tally Sync
+sidebar position). New questions continue from Q67.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 DEC-20260809-002/-003 landed with PR #155 (the finance-pull discovery
@@ -1671,3 +1671,40 @@ voucher may leave regardless of any polling interval.
 the queue page, filters, retry/dismiss/release, or Sync Now, which work
 the same under either cadence.
 *Open since 2026-08-26.*
+
+## Q66 · Where should Tally Sync sit in the sidebar?
+
+On 21-Aug-2026 the owner named the module order one by one and put **Tally
+Sync LAST of the modules** — after CRM, Finance and Maintenance. That
+arrangement is pinned by `frontend/src/app/AppLayout.nav.test.ts`, which
+exists for this and nothing else.
+
+The 26-Aug product-identity build spec asked for Tally Sync to move to
+**directly after Payroll**, i.e. immediately after the specified prefix and
+before the unspecified "etc." group. That is a reversal of the 21-Aug
+request, and a build spec is not owner authority: AGENTS.md makes the owner
+the only authority for this, and a changed decision has to be a new record
+rather than a quiet re-sort. No decision record covers either position — the
+21-Aug order lives only in that test's docblock — so nothing here has been
+promoted to a fact.
+
+What this asks: does Tally Sync stay last of the modules (21-Aug), or move
+to directly after Payroll (26-Aug spec)? Nothing else about the sidebar is
+in question — CRM, Finance and Maintenance keep their relative order either
+way, and the Downloads/Help/Administration utilities stay below the divider
+regardless. Worth noting for the answer: an accountant is the heaviest user
+of Tally Sync and reaches it several times a day, which is the case for
+moving it up; against it, the 21-Aug order was given deliberately and the
+factory has been using it for a week.
+
+**Blocks:** the Tally Sync entry's position, and nothing else. The move is
+NOT applied — the 21-Aug order stands, and the Phase 3 Inventory-menu
+regrouping in the same spec is unaffected and did ship (no owner pin covers
+the Inventory group's internal child order).
+
+Where the answer lands: `frontend/src/app/AppLayout.tsx` (the `allNavItems`
+entry and its header docblock) and `frontend/src/app/AppLayout.nav.test.ts`
+(`CONFIGURED_ORDER`). Both refer to this question BY NAME rather than by
+number, because this file re-mints question numbers at merge — so a re-mint
+of this entry needs no code edit.
+*Open since 2026-08-27.*

@@ -11,7 +11,11 @@ import type {
     FulfilmentPlanningResult,
     FulfilmentQueueFilters,
     FulfilmentQueueRow,
+    IdentityItem,
     Item,
+    ItemCategoryValue,
+    ItemIdentityFilters,
+    ItemIdentityHealth,
     ItemTrackingType,
     SerialNumber,
     StockBalance,
@@ -79,6 +83,18 @@ export interface CreateItemPayload {
     standard_cycle_time?: number | null;
     standard_cavities?: number | null;
     tracking_type?: ItemTrackingType;
+    // Identity (Phase 2). `name` stays the Tally wire key and is not one of
+    // these — display_name is the ERP-facing label beside it, and the variant
+    // link is the DEC-20260821-001 relation between separate pack masters.
+    display_name?: string | null;
+    variant_of_item_id?: number | null;
+    variant_label?: string | null;
+    /**
+     * The owner's classification. Sent only when the screen actually had one
+     * to send — `undefined` is dropped by JSON.stringify, which is how a save
+     * from a screen that never saw a category cannot blank one.
+     */
+    category?: ItemCategoryValue | null;
 }
 
 export async function createItem(payload: CreateItemPayload): Promise<Item> {
@@ -91,6 +107,38 @@ export type UpdateItemPayload = Partial<CreateItemPayload> & { is_active?: boole
 export async function updateItem(id: number, payload: UpdateItemPayload): Promise<Item> {
     const { data } = await api.put<{ data: Item }>(`/inventory/items/${id}`, payload);
     return data.data;
+}
+
+// ------------------------------------------------------- item identity ----
+
+/**
+ * WHAT IS WRONG WITH THE ITEM MASTER, counted per warning class.
+ *
+ * A READ. It classifies nothing, merges nothing and writes nothing — Q43, Q59
+ * and Q60 are open, so this endpoint's whole job is to say where a person
+ * should look. Every class comes back, zeros included.
+ */
+export async function getIdentityHealth(): Promise<ItemIdentityHealth> {
+    const { data } = await api.get<{ data: ItemIdentityHealth }>('/inventory/identity/health');
+    return data.data;
+}
+
+/**
+ * One page of items carrying a warning, or — with no class named — every item
+ * tripping any of them, which is what the review opens on.
+ *
+ * Server-side, and server-paged: the whole point of the badge filter is that
+ * it reaches rows nowhere near the page a browser-side filter can see. A class
+ * the server does not know is a 422 rather than an empty table, so the filter
+ * value must be one of the stable keys or absent — never a sentinel.
+ */
+export async function listIdentityItems(
+    filters: ItemIdentityFilters = {},
+): Promise<Paginated<IdentityItem>> {
+    const { data } = await api.get<Paginated<IdentityItem>>('/inventory/identity/items', {
+        params: { warning: filters.warning, page: filters.page, per_page: filters.per_page },
+    });
+    return data;
 }
 
 export async function listWarehouses(params?: ListParams): Promise<Paginated<Warehouse>> {

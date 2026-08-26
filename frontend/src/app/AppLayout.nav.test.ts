@@ -42,6 +42,16 @@ const CONFIGURED_ORDER = [
     'CRM',
     'Finance',
     'Maintenance',
+    // TALLY SYNC STAYS LAST OF THE MODULES. The 26-Aug Phase 3 build spec
+    // asked for it directly after Payroll; the position it would leave is
+    // the 21-Aug owner request this file exists to pin, so that ask is a
+    // REVERSAL of an owner pin and a build spec is not owner authority
+    // (AGENTS.md). It is parked in docs/factory/PENDING-OWNER-QUESTIONS.md
+    // as "Where should Tally Sync sit in the sidebar?" — named, not
+    // numbered, because that file re-mints question numbers at merge — and
+    // NOT applied. If the owner confirms the new position, move this line to
+    // sit directly after 'Payroll' and move the entry in AppLayout.tsx with
+    // it — do not resequence either one without that answer.
     'Tally Sync',
     // Utilities, below the divider AppLayout inserts before Downloads.
     'Downloads',
@@ -92,6 +102,40 @@ describe('the sidebar', () => {
         // that is deliberate (see the comments on those entries) and is
         // pinned here so a stray gate on one of them is a red test.
         expect(buildNavItems(null).map((item) => item.label)).toEqual(['Dashboard', 'Downloads', 'Help']);
+    });
+});
+
+describe('the Inventory menu', () => {
+    const inventory = allNavItems.find((item) => item.key === 'inventory');
+
+    /**
+     * Batches and Serial Numbers left this menu on 26-Aug-2026 and must not
+     * drift back: they are per-item identity registers opened from a stock
+     * line, and the Stock page's toolbar is what links to them now. Pinned the
+     * way the Production group pins its own removals — a test that goes red
+     * when the arrangement changes is the point.
+     */
+    it.each([
+        ['Batches', '/inventory/batches'],
+        ['Serial Numbers', '/inventory/serial-numbers'],
+    ])('does not list %s as a child', (label, key) => {
+        expect(inventory?.children?.map((child) => child.label)).not.toContain(label);
+        expect(inventory?.children?.map((child) => child.key)).not.toContain(key);
+    });
+
+    it('still lists the Stock page those links live on', () => {
+        expect(inventory?.children?.map((child) => child.key)).toContain('/inventory/stock');
+    });
+
+    /**
+     * Every child of this group must point at a route App.tsx actually
+     * mounts. This is the guard against the omission that came up while
+     * reordering: there is no Stock Movements page — the ledger is the Stock
+     * page's history drawer — and a menu line for one would render fine and
+     * 404 on click.
+     */
+    it('lists no entry for a Stock Movements page that does not exist', () => {
+        expect(inventory?.children?.map((child) => child.key)).not.toContain('/inventory/stock-movements');
     });
 });
 

@@ -10,12 +10,14 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 #[Fillable([
-    'sku', 'sku_provisional', 'name', 'description', 'uom', 'hsn_sac_code', 'reorder_level',
+    'sku', 'sku_provisional', 'name', 'display_name', 'description', 'uom', 'hsn_sac_code', 'reorder_level',
+    'variant_of_item_id', 'variant_label',
     'nominal_weight_grams', 'nos_per_tray', 'trays_per_box', 'nos_per_box',
     'nos_per_pouch', 'pouches_per_box',
     'colour', 'standard_cycle_time', 'standard_cavities',
@@ -263,6 +265,49 @@ class Item extends Model
     public function group(): BelongsTo
     {
         return $this->belongsTo(ItemGroup::class, 'item_group_id');
+    }
+
+    /**
+     * The BASE product this item is a pack variant of, or null when this
+     * item IS a base (DEC-20260821-001). Exactly one level deep — a variant
+     * of a variant is refused on the way in (see
+     * `App\Modules\Inventory\Http\Requests\Concerns\ValidatesVariantLink`,
+     * named in full rather than imported: the domain layer carries no
+     * dependency on Http, not even a nominal one for a docblock), so this
+     * relation never needs walking.
+     */
+    public function variantOf(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'variant_of_item_id');
+    }
+
+    /** The pack variants that name this item as their base. Empty on a variant, by the same rule. */
+    public function variants(): HasMany
+    {
+        return $this->hasMany(self::class, 'variant_of_item_id');
+    }
+
+    /**
+     * The identity ROOT of this item's variant group — itself when it is a
+     * base, its base when it is a variant. One level, no walk, for the same
+     * reason variantOf() needs none.
+     */
+    public function variantRootId(): int
+    {
+        return (int) ($this->variant_of_item_id ?? $this->getKey());
+    }
+
+    /**
+     * The name a PERSON should be shown. `name` is Tally's wire key and is
+     * locked to Tally's spelling; `display_name` is the ERP's own label when
+     * somebody has given one. Never the other way round — nothing that
+     * builds a voucher may call this.
+     */
+    public function displayName(): string
+    {
+        $chosen = trim((string) $this->display_name);
+
+        return $chosen !== '' ? $chosen : (string) $this->name;
     }
 
     /** True when this item originated from a Tally masters pull (§3 split-ownership). */

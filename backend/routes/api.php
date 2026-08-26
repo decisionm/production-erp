@@ -25,6 +25,7 @@ use App\Modules\HRMS\Http\Controllers\LeaveTypeController;
 use App\Modules\Inventory\Http\Controllers\BatchController;
 use App\Modules\Inventory\Http\Controllers\FulfilmentController;
 use App\Modules\Inventory\Http\Controllers\ItemController;
+use App\Modules\Inventory\Http\Controllers\ItemIdentityController;
 use App\Modules\Inventory\Http\Controllers\MaterialBagController;
 use App\Modules\Inventory\Http\Controllers\MaterialLotController;
 use App\Modules\Inventory\Http\Controllers\MaterialLotCostVersionController;
@@ -190,6 +191,22 @@ Route::prefix('v1')->group(function () {
             Route::post('items/{item}/archive', [ItemController::class, 'archive']);
             Route::post('items/{item}/activate', [ItemController::class, 'activate']);
             Route::apiResource('items', ItemController::class)->only(['index', 'store', 'update', 'show', 'destroy']);
+
+            /*
+             * THE ITEM MASTER'S IDENTITY REVIEW — read-only, both of them.
+             *
+             * Under `identity/` rather than as `items/health` and
+             * `items/warnings` so neither word can ever be read as an item
+             * id, the same reason `fulfilment/queue` sits under a segment.
+             *
+             * Inside this group, so a GET needs `inventory.view` and nothing
+             * new: these endpoints report on the catalogue anybody who can
+             * see the catalogue is already looking at, and they change
+             * nothing — the warnings they carry are surfaces for OPEN owner
+             * questions (Q43, Q59, Q60), never rules.
+             */
+            Route::get('identity/health', [ItemIdentityController::class, 'health']);
+            Route::get('identity/items', [ItemIdentityController::class, 'items']);
 
             Route::post('warehouses/{warehouse}/archive', [WarehouseController::class, 'archive']);
             Route::post('warehouses/{warehouse}/activate', [WarehouseController::class, 'activate']);
