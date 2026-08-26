@@ -101,4 +101,14 @@ class UpdateItemRequest extends FormRequest
             }
         });
     }
+
+    /**
+     * @param  array<string, mixed>|int|string|null  $key
+     * @param  mixed  $default
+     * @return array<string, mixed>
+     */
+    public function validated($key = null, $default = null): array
+    {
+        return $this->prepareVariantLabelForUnlink(parent::validated($key, $default));
+    }
 }

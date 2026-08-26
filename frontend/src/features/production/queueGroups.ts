@@ -30,7 +30,11 @@ import type { ProductionQueueRow } from '@/features/production/types';
 
 /** A product, every open request for it, and what can honestly be said about the set. */
 export interface ProductionQueueGroup {
-    /** Stable across renders — the item id, or the request id when the row carries no item. */
+    /**
+     * Stable across renders. Keyed by the run's FIRST request, because one
+     * product can hold several runs in the queue and two groups sharing a key
+     * render as one.
+     */
     key: string;
     item: ProductionQueueRow['item'];
     /** The requests, in the server's queue order. Never empty. */
@@ -79,29 +83,51 @@ export function sumQuantities(values: Array<string | null | undefined>): string 
 }
 
 /**
- * Group the queue by product, preserving the server's order.
+ * Group CONTIGUOUS runs of the same product, preserving the server's order.
  *
- * A row with no item cannot be grouped with anything — it becomes its own
- * group keyed by request id rather than being folded into a shared "unknown
- * product" bucket, which would claim two unrelated jobs are the same setup.
+ * Contiguous is the whole rule, and it is a correctness one. The queue order
+ * IS the schedule — strict request order with a person reordering, which Q62
+ * leaves with the owner — so a group may only ever fold rows that already sit
+ * next to each other. Reaching past an intervening product to collect a later
+ * request for this one would print priority 3 above priority 2 and quietly
+ * make a scheduling decision nobody approved; the reorder arrows, which write
+ * the flat order, would then disagree with what the screen shows.
+ *
+ * So one product can hold several groups, and the key is the run's first
+ * request — not the item — because two groups sharing a key render as one.
+ *
+ * A row with no item cannot be grouped with anything: it becomes its own
+ * group rather than joining a shared "unknown product" bucket, which would
+ * claim two unrelated jobs are the same setup.
  */
 export function groupQueueByProduct(rows: ProductionQueueRow[]): ProductionQueueGroup[] {
-    const order: string[] = [];
-    const byKey = new Map<string, ProductionQueueRow[]>();
+    const groups: ProductionQueueGroup[] = [];
+    let run: ProductionQueueRow[] = [];
+
+    const closeRun = () => {
+        if (run.length > 0) {
+            groups.push(summarise(`request-${run[0].id}`, run));
+            run = [];
+        }
+    };
 
     for (const row of rows) {
-        const key = row.item === null ? `request-${row.id}` : `item-${row.item.id}`;
-        const existing = byKey.get(key);
+        const previous = run[run.length - 1];
+        const continuesRun = previous !== undefined
+            && row.item !== null
+            && previous.item !== null
+            && previous.item.id === row.item.id;
 
-        if (existing === undefined) {
-            order.push(key);
-            byKey.set(key, [row]);
-        } else {
-            existing.push(row);
+        if (! continuesRun) {
+            closeRun();
         }
+
+        run.push(row);
     }
 
-    return order.map((key) => summarise(key, byKey.get(key) as ProductionQueueRow[]));
+    closeRun();
+
+    return groups;
 }
 
 function summarise(key: string, rows: ProductionQueueRow[]): ProductionQueueGroup {

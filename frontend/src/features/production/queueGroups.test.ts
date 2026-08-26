@@ -53,16 +53,47 @@ describe('sumQuantities', () => {
 describe('groupQueueByProduct', () => {
     it('keeps the server order — of the groups, and inside them', () => {
         const bottle = row({ id: 1, priority: 1 });
+        const bottleAgain = row({ id: 2, priority: 2 });
+        const jar = row({ id: 3, priority: 3, item: { id: 9, sku: 'JAR-1L', name: '1L Jar' } });
+
+        const groups = groupQueueByProduct([bottle, bottleAgain, jar]);
+
+        // The bottle group leads because ITS first request does — grouping
+        // must not re-sort the thing the reorder buttons write.
+        // Keyed by the run's first request: one product can hold several runs.
+        expect(groups.map((group) => group.key)).toEqual(['request-1', 'request-3']);
+        expect(groups[0].rows.map((r) => r.id)).toEqual([1, 2]);
+        expect(groups[0].priority).toBe(1);
+    });
+
+    it('does NOT reach past another product to fold a later request in', () => {
+        // The queue order IS the schedule (Q62 leaves the rule with the owner:
+        // strict request order, reordered by a person). Bottle at 1, jar at 2,
+        // bottle again at 3: folding request 3 up beside request 1 would show
+        // the floor priority 3 before priority 2 and make a scheduling choice
+        // nobody approved. Only a CONTIGUOUS run is one setup.
+        const bottle = row({ id: 1, priority: 1 });
         const jar = row({ id: 2, priority: 2, item: { id: 9, sku: 'JAR-1L', name: '1L Jar' } });
         const bottleAgain = row({ id: 3, priority: 3 });
 
         const groups = groupQueueByProduct([bottle, jar, bottleAgain]);
 
-        // The bottle group leads because ITS first request does — grouping
-        // must not re-sort the thing the reorder buttons write.
-        expect(groups.map((group) => group.key)).toEqual(['item-7', 'item-9']);
-        expect(groups[0].rows.map((r) => r.id)).toEqual([1, 3]);
-        expect(groups[0].priority).toBe(1);
+        expect(groups).toHaveLength(3);
+        expect(groups.map((group) => group.rows.map((r) => r.id))).toEqual([[1], [2], [3]]);
+        // Two groups for one product need distinct keys, or React renders one.
+        expect(new Set(groups.map((group) => group.key)).size).toBe(3);
+        expect(groups.map((group) => group.priority)).toEqual([1, 2, 3]);
+    });
+
+    it('groups a contiguous run of the same product', () => {
+        const groups = groupQueueByProduct([
+            row({ id: 1, priority: 1 }),
+            row({ id: 2, priority: 2 }),
+            row({ id: 3, priority: 3, item: { id: 9, sku: 'JAR-1L', name: '1L Jar' } }),
+            row({ id: 4, priority: 4 }),
+        ]);
+
+        expect(groups.map((group) => group.rows.map((r) => r.id))).toEqual([[1, 2], [3], [4]]);
     });
 
     it('sums the quantities across customers', () => {

@@ -45,6 +45,8 @@ trait ValidatesVariantLink
             return;
         }
 
+        $this->validateVariantLabelNeedsALink($validator, $item);
+
         if (! $this->has('variant_of_item_id')) {
             return;
         }
@@ -53,7 +55,8 @@ trait ValidatesVariantLink
 
         if ($targetId === null || $targetId === '') {
             // Clearing the link is always allowed: it makes this item a base,
-            // which is the state every item starts in.
+            // which is the state every item starts in. The LABEL does not
+            // survive it — see prepareVariantLabelForUnlink().
             return;
         }
 
@@ -110,5 +113,54 @@ trait ValidatesVariantLink
                     .', so it cannot become a variant itself. Repoint those first.',
             );
         }
+    }
+
+    /**
+     * A LABEL WITHOUT A LINK IS A LABEL ABOUT NOTHING.
+     *
+     * `variant_label` names WHICH pack variant an item is — "840/box pouch"
+     * only means something once the item points at the base product it varies
+     * from. Offered alone it is refused rather than stored, because a stored
+     * one is invisible (the list renders labels for linked variants only) and
+     * comes back to life the day somebody links the item, carrying a packing
+     * identity nobody chose in this edit.
+     */
+    private function validateVariantLabelNeedsALink(Validator $validator, ?Item $item): void
+    {
+        if (! $this->filled('variant_label')) {
+            return;
+        }
+
+        $linkAfterThisWrite = $this->has('variant_of_item_id')
+            ? $this->input('variant_of_item_id')
+            : $item?->variant_of_item_id;
+
+        if ($linkAfterThisWrite === null || $linkAfterThisWrite === '') {
+            $validator->errors()->add(
+                'variant_label',
+                'A pack-variant label needs the variant link it describes. Point this item at its base product, or leave the label empty.',
+            );
+        }
+    }
+
+    /**
+     * Clearing the link clears the label with it, even when the payload never
+     * mentions the label. The pair is one fact — "this item is the 840/box
+     * pouch OF that product" — and half of it is not a smaller truth, it is a
+     * stale one waiting to be relinked. The migration and ItemResource both
+     * describe a base product as carrying null for both fields; this is what
+     * keeps that true.
+     */
+    protected function prepareVariantLabelForUnlink(array $validated): array
+    {
+        if (! array_key_exists('variant_of_item_id', $validated)) {
+            return $validated;
+        }
+
+        if ($validated['variant_of_item_id'] === null || $validated['variant_of_item_id'] === '') {
+            $validated['variant_label'] = null;
+        }
+
+        return $validated;
     }
 }
