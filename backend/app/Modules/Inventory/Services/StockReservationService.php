@@ -336,13 +336,8 @@ class StockReservationService
         // locked here — the delivery that called us already holds it, and
         // taking it again from further down the order is how a deadlock is
         // built.
-        $holds = StockReservation::query()
-            ->active()
-            ->where('sales_order_line_id', $line->getKey())
+        $holds = self::activeLineHoldsLockedQuery($line->getKey())
             ->where('warehouse_id', $warehouseId)
-            ->orderBy('created_at')
-            ->orderBy('id')
-            ->lockForUpdate()
             ->get();
 
         $remaining = bcadd($quantity, '0', 4);
@@ -370,8 +365,12 @@ class StockReservationService
 
         if (bccomp((string) $fresh->quantity_delivered, (string) $fresh->quantity, 4) >= 0) {
             // The line is finished. Whatever it still holds is holding stock
-            // away from orders that can still use it.
-            foreach ($this->activeForLine((int) $fresh->id) as $leftover) {
+            // away from orders that can still use it — fetched UNDER LOCK
+            // (Cursor review, PR #33): the consume loop above locked only
+            // the matching-warehouse holds, and a release()/repoint()
+            // interleaving here would have its arithmetic overwritten by an
+            // unlocked giveUp() racing it.
+            foreach (self::activeLineHoldsLockedQuery((int) $fresh->id)->get() as $leftover) {
                 $this->giveUp($leftover, $leftover->outstandingQuantity(), 'line_fulfilled', null);
             }
         }
@@ -519,6 +518,23 @@ class StockReservationService
             ->where('warehouse_id', $warehouseId)
             ->lockForUpdate()
             ->first();
+    }
+
+    /**
+     * A line's active holds, oldest first, LOCKED — the one query both the
+     * consume loop and the leftover cleanup read through, pinnable like the
+     * order/line locks above (SQLite drops FOR UPDATE).
+     *
+     * @return Builder<StockReservation>
+     */
+    public static function activeLineHoldsLockedQuery(int $salesOrderLineId)
+    {
+        return StockReservation::query()
+            ->active()
+            ->where('sales_order_line_id', $salesOrderLineId)
+            ->orderBy('created_at')
+            ->orderBy('id')
+            ->lockForUpdate();
     }
 
     private function lockReservation(int $id): StockReservation

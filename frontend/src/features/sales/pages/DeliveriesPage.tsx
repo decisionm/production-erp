@@ -145,6 +145,11 @@ export default function DeliveriesPage() {
         queryClient.invalidateQueries({ queryKey: ['sales', 'deliveries'] });
         queryClient.invalidateQueries({ queryKey: ['sales', 'sales-orders'] });
         queryClient.invalidateQueries({ queryKey: ['inventory', 'stock-balances'] });
+        // A dispatch SPENDS holds and can retire a production request, so
+        // the store queue, the planning board and the floor's worklist are
+        // all stale the moment it posts (Cursor review, PR #33).
+        queryClient.invalidateQueries({ queryKey: ['inventory', 'fulfilment'] });
+        queryClient.invalidateQueries({ queryKey: ['production', 'requests'] });
     };
 
     const mutation = useMutation({

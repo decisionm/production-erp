@@ -15,6 +15,7 @@ use App\Modules\Sales\Models\Customer;
 use App\Modules\Sales\Models\Enums\SalesOrderStatus;
 use App\Modules\Sales\Models\SalesOrder;
 use App\Modules\Sales\Models\SalesOrderLine;
+use App\Modules\Sales\Services\DeliveryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
@@ -196,6 +197,20 @@ class DeliverySpendsTheHoldTest extends TestCase
 
         $this->assertSame('100.0000', $this->balance($this->fg));
         $this->assertSame(SalesOrderStatus::Completed, $order->fresh()->status);
+    }
+
+    /**
+     * THE DISPATCH'S HEAD LOCKS ARE PINNED (Cursor finding 1, PR #33):
+     * create() takes the order row then its lines FOR UPDATE — the same two
+     * locks reserve()/send-to-production take — so a hold can never be
+     * judged against a quantity_delivered a concurrent dispatch is mid-way
+     * through moving. SQLite drops FOR UPDATE, so the lock is asserted on
+     * the builders themselves.
+     */
+    public function test_the_dispatch_takes_the_order_and_line_locks(): void
+    {
+        $this->assertTrue(DeliveryService::orderLockQuery(1)->toBase()->lock);
+        $this->assertTrue(DeliveryService::lineLockQuery(1)->toBase()->lock);
     }
 
     // ---- fixtures ----------------------------------------------------------

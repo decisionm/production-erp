@@ -13,6 +13,7 @@ use App\Modules\Sales\Exceptions\OverDeliveryException;
 use App\Modules\Sales\Models\Delivery;
 use App\Modules\Sales\Models\Enums\SalesOrderStatus;
 use App\Modules\Sales\Models\SalesOrder;
+use App\Modules\Sales\Models\SalesOrderLine;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -124,7 +125,15 @@ class DeliveryService
     public function create(array $data, ?int $createdBy): Delivery
     {
         return DB::transaction(function () use ($data, $createdBy) {
-            $order = SalesOrder::with('lines')->findOrFail($data['sales_order_id']);
+            // HEAD OF THE GLOBAL LOCK ORDER (Cursor review, PR #33): the
+            // dispatch takes the SAME order-then-lines locks that reserve()
+            // and send-to-production take, so the demand cap over there can
+            // never be judged against a quantity_delivered this dispatch is
+            // mid-way through moving — a hold committed onto a line this
+            // delivery just finished would be an orphan on a shipped line.
+            // The balance lock (recordIssue) still comes after, in order.
+            $order = self::orderLockQuery((int) $data['sales_order_id'])->firstOrFail();
+            $order->setRelation('lines', self::lineLockQuery((int) $order->id)->get());
 
             if (! in_array($order->status, [SalesOrderStatus::Confirmed, SalesOrderStatus::PartiallyDelivered], true)) {
                 throw InvalidStatusTransitionException::make('sales order', $order->status->value, 'delivered');
@@ -297,6 +306,26 @@ class DeliveryService
      * @param  array<int, string>  $codes
      * @return array<int, array{sales_order_line_id: int, quantity: string}>
      */
+    /**
+     * The dispatch's head locks, in their own methods so the lock each
+     * carries is a thing a test can pin — SQLite drops FOR UPDATE (the
+     * conflictingPackagingQuery precedent). These serialise a dispatch
+     * against reserve()/repoint()/send-to-production, which take the same
+     * two locks in the same order.
+     *
+     * @return Builder<SalesOrder>
+     */
+    public static function orderLockQuery(int $salesOrderId)
+    {
+        return SalesOrder::query()->whereKey($salesOrderId)->lockForUpdate();
+    }
+
+    /** @return Builder<SalesOrderLine> */
+    public static function lineLockQuery(int $salesOrderId)
+    {
+        return SalesOrderLine::query()->where('sales_order_id', $salesOrderId)->lockForUpdate();
+    }
+
     private function linesFromCartons(SalesOrder $order, array $codes, int $deliveryId): array
     {
         $byLine = [];

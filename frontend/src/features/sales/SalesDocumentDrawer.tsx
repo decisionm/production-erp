@@ -501,6 +501,11 @@ export default function SalesDocumentDrawer({ target, onClose, onOpen, extra }: 
         onSuccess: async (order) => {
             message.success(`${order.document_number ?? documentTitle('sales_order', order)} cancelled — no stock moved and nothing was queued for Tally.`);
             await queryClient.invalidateQueries({ queryKey: ['sales', 'sales-orders'] });
+            // Cancelling released every hold and withdrew the line's open
+            // production requests (SalesOrderService::cancel), so the store
+            // queue and the floor's worklist changed too (Cursor, PR #33).
+            await queryClient.invalidateQueries({ queryKey: ['inventory', 'fulfilment'] });
+            await queryClient.invalidateQueries({ queryKey: ['production', 'requests'] });
         },
     });
 

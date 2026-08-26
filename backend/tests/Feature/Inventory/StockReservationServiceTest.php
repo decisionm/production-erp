@@ -380,6 +380,9 @@ class StockReservationServiceTest extends TestCase
     {
         $this->assertTrue(StockReservationService::openOrderQuery(1)->toBase()->lock);
         $this->assertTrue(StockReservationService::lineQuery(1)->toBase()->lock);
+        // The consume loop AND the leftover cleanup both read through this
+        // one — an unlocked leftover pass was Cursor finding 2 on PR #33.
+        $this->assertTrue(StockReservationService::activeLineHoldsLockedQuery(1)->toBase()->lock);
     }
 
     public function test_a_cancelled_order_cannot_hold_stock(): void
