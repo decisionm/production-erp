@@ -2,12 +2,15 @@
 
 namespace App\Modules\Inventory\Http\Requests;
 
+use App\Modules\Inventory\Http\Requests\Concerns\ValidatesTrackingIdentity;
 use App\Rules\PlainDecimal;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 class StoreStockReceiptRequest extends FormRequest
 {
+    use ValidatesTrackingIdentity;
+
     public function authorize(): bool
     {
         return true;
@@ -30,5 +33,14 @@ class StoreStockReceiptRequest extends FormRequest
             'movement_date' => ['nullable', 'date'],
             'notes' => ['nullable', 'string'],
         ];
+    }
+
+    /**
+     * Nothing to check against: the serial number is ARRIVING, so it has no
+     * current location the payload could disagree with.
+     */
+    protected function currentWarehouseKey(): ?string
+    {
+        return null;
     }
 }

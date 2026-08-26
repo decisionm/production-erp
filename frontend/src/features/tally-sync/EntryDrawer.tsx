@@ -222,6 +222,35 @@ export default function EntryDrawer({
     );
 }
 
+/**
+ * The drawer's Source record: which ERP record this voucher was built
+ * from, and the way in to it.
+ *
+ * The link is sourceLink()'s, the same call the queue table's Source cell
+ * makes — one matrix, so the drawer and the row behind it cannot send a
+ * reader to two different places (or one of them nowhere).
+ *
+ * Exported and hook-free for the same reason EntrySourceCell is: the tree
+ * it returns is what a test can read, and EntryBody around it cannot be
+ * called as a plain function (it holds state).
+ */
+export function EntrySourceRecord({ entry }: { entry: TallySyncEntry }) {
+    const batch = payloadText(entry, 'batch_number');
+    const shift = payloadText(entry, 'shift');
+    const link = sourceLink(entry);
+
+    return (
+        <Space direction="vertical" size={0}>
+            <span>
+                {entry.syncable_type} #{entry.syncable_id}
+            </span>
+            {batch && <span>Batch {batch}</span>}
+            {!batch && shift && <span>{shift} shift</span>}
+            {link && <Link to={link.to}>{link.label}</Link>}
+        </Space>
+    );
+}
+
 function EntryBody({
     entry,
     detailLoading,
@@ -233,7 +262,6 @@ function EntryBody({
 }) {
     const [showRaw, setShowRaw] = useState(false);
     const flags = entry.flags ?? {};
-    const link = sourceLink(entry);
     const wireType = entry.category?.wire_voucher_type ?? entry.tally_voucher_type;
     const pendingDetail = detailLoading ? (
         <Typography.Text type="secondary">Loading from the ERP…</Typography.Text>
@@ -302,18 +330,7 @@ function EntryBody({
                     {
                         key: 'syncable',
                         label: 'Source record',
-                        children: (
-                            <Space direction="vertical" size={0}>
-                                <span>
-                                    {entry.syncable_type} #{entry.syncable_id}
-                                </span>
-                                {payloadText(entry, 'batch_number') && <span>Batch {payloadText(entry, 'batch_number')}</span>}
-                                {!payloadText(entry, 'batch_number') && payloadText(entry, 'shift') && (
-                                    <span>{payloadText(entry, 'shift')} shift</span>
-                                )}
-                                {link && <Link to={link.to}>{link.label}</Link>}
-                            </Space>
-                        ),
+                        children: <EntrySourceRecord entry={entry} />,
                     },
                     {
                         key: 'category',

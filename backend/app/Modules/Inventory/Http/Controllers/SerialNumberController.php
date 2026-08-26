@@ -14,9 +14,15 @@ class SerialNumberController extends Controller
 {
     public function __construct(private readonly SerialNumberService $serialNumbers) {}
 
+    /** Same four parameters as the batch list, for the same reasons. */
     public function index(Request $request): AnonymousResourceCollection
     {
-        return SerialNumberResource::collection($this->serialNumbers->paginate($request->integer('item_id') ?: null));
+        return SerialNumberResource::collection($this->serialNumbers->paginate(
+            itemId: $this->filterId($request, 'item_id'),
+            perPage: $this->perPage($request),
+            search: $this->searchTerm($request),
+            code: $this->searchTerm($request, 'code'),
+        ));
     }
 
     public function store(StoreSerialNumberRequest $request): SerialNumberResource

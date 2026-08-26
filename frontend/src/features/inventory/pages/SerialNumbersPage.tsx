@@ -30,7 +30,16 @@ export default function SerialNumbersPage() {
     const [barcodeSerial, setBarcodeSerial] = useState<SerialNumber | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['inventory', 'serial-numbers'], queryFn: () => listSerialNumbers() });
+    // Server-side paging and search, for the reason the batch list has them:
+    // the table showed the newest twenty and nothing said there were more.
+    const [page, setPage] = useState(1);
+    const [perPage, setPerPage] = useState(20);
+    const [search, setSearch] = useState('');
+
+    const { data, isLoading } = useQuery({
+        queryKey: ['inventory', 'serial-numbers', page, perPage, search],
+        queryFn: () => listSerialNumbers({ page, per_page: perPage, search: search || undefined }),
+    });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
     const itemOptions = items?.data.filter((i) => i.tracking_type === 'serial').map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
 
@@ -62,7 +71,18 @@ export default function SerialNumbersPage() {
         <>
             <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
                 <Typography.Title level={3} style={{ margin: 0 }}>Serial Numbers</Typography.Title>
-                <Button type="primary" onClick={() => setModalOpen(true)}>Register Serial Number</Button>
+                <Space>
+                    <Input.Search
+                        allowClear
+                        placeholder="Serial number or item"
+                        style={{ width: 260 }}
+                        onSearch={(value) => {
+                            setSearch(value.trim());
+                            setPage(1);
+                        }}
+                    />
+                    <Button type="primary" onClick={() => setModalOpen(true)}>Register Serial Number</Button>
+                </Space>
             </Space>
             <Typography.Paragraph type="secondary">
                 Only items with tracking type &quot;Serial Number&quot; can have serial numbers — set that on the
@@ -75,7 +95,18 @@ export default function SerialNumbersPage() {
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                pagination={{
+                    current: page,
+                    pageSize: perPage,
+                    total: data?.meta?.total ?? data?.data?.length ?? 0,
+                    showSizeChanger: true,
+                    pageSizeOptions: [20, 50, 100, 200],
+                    showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} serial numbers`,
+                    onChange: (nextPage, nextSize) => {
+                        setPage(nextPage);
+                        setPerPage(nextSize);
+                    },
+                }}
                 columns={[
                     { title: 'Item', render: (_, row) => itemLabel(row.item) },
                     { title: 'Serial Number', dataIndex: 'serial_number' },

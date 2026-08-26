@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Modules\TallySync\Http\Requests\ListTallySyncEntriesRequest;
 use App\Modules\TallySync\Http\Resources\TallySyncEntryResource;
 use App\Modules\TallySync\Models\TallySyncEntry;
+use App\Modules\TallySync\Services\AgentIdentity;
+use App\Modules\TallySync\Services\SyncNowAuthority;
 use App\Modules\TallySync\Services\TallySyncQueryService;
 use App\Modules\TallySync\Services\TallySyncService;
 use Illuminate\Http\JsonResponse;
@@ -104,5 +106,45 @@ class TallySyncController extends Controller
     public function release(Request $request, TallySyncEntry $tallySyncEntry): TallySyncEntryResource
     {
         return TallySyncEntryResource::make($this->sync->releaseNow($tallySyncEntry, $request->user()?->id, $request->user()));
+    }
+
+    /**
+     * "Sync Now" — DEC-20260825-002. A REQUEST that the vouchers already
+     * queued in this ERP go out on the agent's next poll; the service
+     * (requestSyncNow) does the whole of it in one transaction and reaches
+     * Tally in no way whatsoever.
+     *
+     * OWNER/ACCOUNTS, SERVER-SIDE. The route group already demands
+     * tally-sync.manage for a POST; SyncNowAuthority adds the Owner/Accounts
+     * half the owner named, spelled the way FC-06 already spells it. 403,
+     * not a hidden button: the page hides the control for a reader who may
+     * not press it, and a hidden button is a courtesy, never the gate.
+     *
+     * ALWAYS 200 WHEN IT RAN. "Nothing is queued" and "everything queued was
+     * already on its way" are true, useful answers, not errors — the body's
+     * `outcome` says which of the three happened
+     * (released | already_queued | nothing_queued) and the counts say how
+     * much. The only failure codes here are the authorization ones.
+     */
+    public function syncNow(Request $request): JsonResponse
+    {
+        abort_unless(
+            SyncNowAuthority::mayRequest($request->user()),
+            403,
+            'Sync Now is limited to Owner/Accounts logins. Ask the owner or Accounts to send the queue.',
+        );
+
+        $result = $this->sync->requestSyncNow($request->user()?->id, $request->user());
+
+        return response()->json([
+            'data' => $result + [
+                // The liveness the page needs to word its answer honestly:
+                // a request made while the agent has not checked in for
+                // hours has NOT posted anything, and must not read as if it
+                // had. A timestamp only — never which token, never its
+                // abilities.
+                'agent' => ['last_checked_at' => AgentIdentity::lastCheckedAt()?->toIso8601String()],
+            ],
+        ]);
     }
 }

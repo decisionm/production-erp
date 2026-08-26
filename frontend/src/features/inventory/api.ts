@@ -20,6 +20,31 @@ import type {
     Warehouse,
 } from './types';
 
+/**
+ * What every inventory list accepts. `search` is answered by the SERVER, so a
+ * needle past the current page still finds its row — the whole point of these
+ * being here rather than a `.filter()` over `data`.
+ *
+ * `code` is a different question, not a stricter `search`: it matches the
+ * WHOLE batch number or serial number. A substring search is still served a
+ * page at a time, so a scanned `LOT-4` behind sixty newer numbers that merely
+ * contain it is not on the page that comes back. Only the batch and serial
+ * lists answer it — see findBatchesByCode / findSerialNumbersByCode.
+ */
+export interface ListParams {
+    page?: number;
+    per_page?: number;
+    search?: string;
+    code?: string;
+}
+
+/**
+ * The page size a picker asks for when it needs the COMPLETE set rather than a
+ * screenful. The server clamps at 1,000 (App\Http\Controllers\Controller::perPage),
+ * so this is the real ceiling and not a wish — a bounded read, never "all rows".
+ */
+export const FULL_LIST_PER_PAGE = 1000;
+
 export async function listItems(): Promise<Paginated<Item>> {
     const { data } = await api.get<Paginated<Item>>('/inventory/items');
     return data;
@@ -68,14 +93,16 @@ export async function updateItem(id: number, payload: UpdateItemPayload): Promis
     return data.data;
 }
 
-export async function listWarehouses(): Promise<Paginated<Warehouse>> {
-    const { data } = await api.get<Paginated<Warehouse>>('/inventory/warehouses');
+export async function listWarehouses(params?: ListParams): Promise<Paginated<Warehouse>> {
+    const { data } = await api.get<Paginated<Warehouse>>('/inventory/warehouses', { params });
     return data;
 }
 
 /** Full reference list for a picker (all rows, not the default first page). */
 export async function listAllWarehouses(): Promise<Paginated<Warehouse>> {
-    const { data } = await api.get<Paginated<Warehouse>>('/inventory/warehouses', { params: { per_page: 1000 } });
+    const { data } = await api.get<Paginated<Warehouse>>('/inventory/warehouses', {
+        params: { per_page: FULL_LIST_PER_PAGE },
+    });
     return data;
 }
 
@@ -96,9 +123,20 @@ export async function updateWarehouse(id: number, payload: UpdateWarehousePayloa
     return data.data;
 }
 
-export async function listStockBalances(): Promise<Paginated<StockBalance>> {
-    const { data } = await api.get<Paginated<StockBalance>>('/inventory/stock-balances');
+export async function listStockBalances(
+    params?: ListParams & { item_id?: number },
+): Promise<Paginated<StockBalance>> {
+    const { data } = await api.get<Paginated<StockBalance>>('/inventory/stock-balances', { params });
     return data;
+}
+
+/**
+ * Every balance for ONE item, asked for by id — what an item's own page shows.
+ * Never filter the general list client-side for this: that list is paged, so
+ * past twenty balances the item's own stock simply is not in the response.
+ */
+export async function listItemStockBalances(itemId: number): Promise<Paginated<StockBalance>> {
+    return listStockBalances({ item_id: itemId, per_page: FULL_LIST_PER_PAGE });
 }
 
 export async function listStockMovements(params?: {
@@ -157,11 +195,36 @@ export async function recordTransfer(payload: TransferPayload): Promise<StockMov
     return data.data;
 }
 
-export async function listBatches(itemId?: number): Promise<Paginated<Batch>> {
-    const { data } = await api.get<Paginated<Batch>>('/inventory/batches', {
-        params: itemId ? { item_id: itemId } : undefined,
-    });
+export async function listBatches(params?: ListParams & { item_id?: number }): Promise<Paginated<Batch>> {
+    const { data } = await api.get<Paginated<Batch>>('/inventory/batches', { params });
     return data;
+}
+
+/**
+ * Every batch of ONE item — what the Stock page's Batch picker offers.
+ *
+ * The picker used to read the default first page of the WHOLE batch list and
+ * then filter it by item in the browser, so a batch that was not among the
+ * newest twenty could not be selected at all, and nothing said a row was
+ * missing. Scoped and bounded: complete for the item, never "every batch".
+ */
+export async function listAllBatches(itemId: number): Promise<Paginated<Batch>> {
+    return listBatches({ item_id: itemId, per_page: FULL_LIST_PER_PAGE });
+}
+
+/**
+ * ONE SCANNED BATCH NUMBER, RESOLVED BY THE SERVER.
+ *
+ * The scanner used to ask `?search=<code>&per_page=50` and pick the exact
+ * match out of the reply, which quietly made the answer depend on how many
+ * OTHER numbers contain the scanned one. Sixty of them and the real row is on
+ * page two: "no batch matches", for a barcode this system printed.
+ *
+ * `code` matches the whole value, so a handful of rows is the most this can
+ * return; the page ceiling is passed anyway so no cap is left to reason about.
+ */
+export async function findBatchesByCode(code: string): Promise<Paginated<Batch>> {
+    return listBatches({ code, per_page: FULL_LIST_PER_PAGE });
 }
 
 export interface CreateBatchPayload {
@@ -182,11 +245,21 @@ export async function getBatchLedger(batchId: number): Promise<BatchLedger> {
     return data.data;
 }
 
-export async function listSerialNumbers(itemId?: number): Promise<Paginated<SerialNumber>> {
-    const { data } = await api.get<Paginated<SerialNumber>>('/inventory/serial-numbers', {
-        params: itemId ? { item_id: itemId } : undefined,
-    });
+export async function listSerialNumbers(
+    params?: ListParams & { item_id?: number },
+): Promise<Paginated<SerialNumber>> {
+    const { data } = await api.get<Paginated<SerialNumber>>('/inventory/serial-numbers', { params });
     return data;
+}
+
+/** Every serial number of ONE item — the Stock page's Serial picker, same rule as above. */
+export async function listAllSerialNumbers(itemId: number): Promise<Paginated<SerialNumber>> {
+    return listSerialNumbers({ item_id: itemId, per_page: FULL_LIST_PER_PAGE });
+}
+
+/** One scanned serial number, resolved by the server — same rule as above. */
+export async function findSerialNumbersByCode(code: string): Promise<Paginated<SerialNumber>> {
+    return listSerialNumbers({ code, per_page: FULL_LIST_PER_PAGE });
 }
 
 export interface CreateSerialNumberPayload {

@@ -40,6 +40,14 @@ const PAGED_LIST_FUNCTIONS = [
     'listVendors',
     'listEmployees',
     'listScrapReasons',
+    // Added 25-Aug-2026. The Stock page's Batch and Serial Number pickers were
+    // the same defect one layer down: both were fed from the default first
+    // page and then FILTERED CLIENT-SIDE by the chosen item, so a batch that
+    // was not in the newest twenty rows could not be selected at all — and the
+    // barcode scanner, matching against the same twenty, answered "no batch
+    // matches" for a batch that plainly exists.
+    'listBatches',
+    'listSerialNumbers',
 ];
 
 /**
@@ -50,6 +58,8 @@ const PAGED_LIST_FUNCTIONS = [
 const TABLE_PAGES = [
     'inventory/pages/WarehousesPage.tsx',
     'inventory/pages/ItemsPage.tsx',
+    'inventory/pages/BatchesPage.tsx',
+    'inventory/pages/SerialNumbersPage.tsx',
     'procurement/pages/VendorsPage.tsx',
     'hrms/pages/EmployeesPage.tsx',
     'production/pages/ScrapReasonsPage.tsx',
@@ -66,9 +76,12 @@ describe('pickers read the full list', () => {
     });
 
     it.each(PAGED_LIST_FUNCTIONS)('no page feeds a useQuery from %s', (fn) => {
-        // `queryFn: listItems` — the exact shape that caused the bug. A thunk
-        // passing explicit paging is a deliberate act and not what this guards.
-        const pattern = new RegExp(`queryFn:\\s*${fn}\\b`);
+        // `queryFn: listItems` — the exact shape that caused the bug — AND
+        // `queryFn: () => listItems()`, the argument-less thunk, which is the
+        // same read wearing an arrow function and is how the Stock page's
+        // batch and serial pickers hid. A thunk that PASSES something
+        // (`() => listBatches(itemId)`) is a deliberate act and not guarded.
+        const pattern = new RegExp(`queryFn:\\s*(${fn}\\b|\\(\\)\\s*=>\\s*${fn}\\(\\s*\\))`);
 
         const offenders = Object.entries(SOURCES)
             .filter(([path]) => isConsumer(path))
@@ -90,6 +103,8 @@ describe('pickers read the full list', () => {
             listVendors: '../features/procurement/api.ts',
             listEmployees: '../features/hrms/api.ts',
             listScrapReasons: '../features/production/api.ts',
+            listBatches: '../features/inventory/api.ts',
+            listSerialNumbers: '../features/inventory/api.ts',
         };
 
         for (const [fn, module] of Object.entries(modules)) {

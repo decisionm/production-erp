@@ -39,7 +39,10 @@ class WarehouseController extends Controller
 
     public function index(Request $request): AnonymousResourceCollection
     {
-        return WarehouseResource::collection($this->warehouses->paginate($this->perPage($request)));
+        return WarehouseResource::collection($this->warehouses->paginate(
+            $this->perPage($request),
+            $this->searchTerm($request),
+        ));
     }
 
     /**
