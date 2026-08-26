@@ -4,6 +4,7 @@ namespace Tests\Feature\Inventory;
 
 use App\Models\User;
 use App\Modules\Inventory\Http\Requests\StoreStockIssueRequest;
+use App\Modules\Inventory\Http\Requests\StoreStockReceiptRequest;
 use App\Modules\Inventory\Http\Requests\StoreStockTransferRequest;
 use App\Modules\Inventory\Models\Batch;
 use App\Modules\Inventory\Models\Enums\ItemTrackingType;
@@ -706,6 +707,232 @@ class TrackingIdentityIntegrityTest extends TestCase
     }
 
     /**
+     * THE RACE THE STATUS CONDITION COULD NOT SEE: A TRANSFER AND AN ISSUE OF
+     * THE SAME UNIT, and the leak is permanent.
+     *
+     * Both earlier race tests pit a writer against ITSELF — two issues, or two
+     * transfers. Each was closed by a condition that the first write falsifies
+     * for the second: an issue flips the status, a transfer moves the
+     * warehouse. Crossing the two doors defeats both halves at once:
+     *
+     *   door(transfer RM→FG)  approves — the unit is in stock, in RM-STORE
+     *   door(issue from RM)   approves — the same two facts, still true
+     *   write(transfer)       commits: warehouse_id = FG, status STILL in_stock
+     *   write(issue)          consumeSerial checks the STATUS ONLY — in_stock,
+     *                         so it matches, so RM-STORE is debited a second
+     *                         time for a unit that is standing in FG-STORE.
+     *
+     * WHAT MAKES IT WORSE THAN A DOUBLE ISSUE. A double issue at least leaves
+     * the total wrong in one store. This one splits: RM-STORE is down 2 for a
+     * unit that left it once and FG-STORE is up 1, so the per-store balances
+     * are permanently out by one in OPPOSITE directions and the item total
+     * still looks short by exactly the phantom. No later count reconciles it,
+     * because no single store's number is the whole error.
+     *
+     * BALANCE 5, NOT 1, FOR THE USUAL REASON — four other units of the same
+     * material give the quantity check stock to spare, so the second debit
+     * goes through in silence instead of dying on InsufficientStockException.
+     */
+    public function test_a_transfer_then_an_issue_of_one_unit_debits_the_source_store_once(): void
+    {
+        $stock = app(StockMovementService::class);
+        $serial = $this->receivedSerial('SN-TX-THEN-ISSUE', $this->store);
+        $stock->recordReceipt($this->serialTracked->id, $this->store->id, '4', '500');
+
+        // Both doors judge the unit where it still is: in stock, in RM-STORE.
+        $this->assertTrue($this->doorApproves([
+            'item_id' => $this->serialTracked->id,
+            'from_warehouse_id' => $this->store->id,
+            'to_warehouse_id' => $this->farStore->id,
+            'quantity' => '1',
+            'serial_number_id' => $serial->id,
+        ]), 'the transfer was refused at the door');
+
+        $this->assertTrue($this->issueDoorApproves([
+            'item_id' => $this->serialTracked->id,
+            'warehouse_id' => $this->store->id,
+            'quantity' => '1',
+            'serial_number_id' => $serial->id,
+        ]), 'the issue was refused at the door before any write');
+
+        $stock->recordTransfer(
+            $this->serialTracked->id, $this->store->id, $this->farStore->id, '1',
+            serialNumberId: $serial->id,
+        );
+
+        try {
+            $stock->recordIssue($this->serialTracked->id, $this->store->id, '1', serialNumberId: $serial->id);
+            $this->fail('a unit standing in FG-STORE was issued out of RM-STORE');
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey('serial_number_id', $exception->errors());
+        }
+
+        // THE BALANCES ARE THE REGRESSION, not the exception. On the parent
+        // commit this reads 3.0000 / 1.0000 — the permanent per-store split.
+        $this->assertSame('4.0000', $this->quantityAt($this->store), 'RM-STORE was debited twice for one unit');
+        $this->assertSame('1.0000', $this->quantityAt($this->farStore), 'FG-STORE lost the unit it received');
+        $this->assertSame(
+            0,
+            $serial->movements()->where('type', StockMovementType::Issue)->count(),
+            'the refused issue still wrote an Issue movement',
+        );
+
+        $fresh = $serial->fresh();
+        $this->assertSame(SerialNumberStatus::InStock, $fresh->status, 'the refused issue still consumed the unit');
+        $this->assertSame($this->farStore->id, $fresh->warehouse_id, 'the refused issue moved the unit off FG-STORE');
+    }
+
+    /**
+     * AN ISSUE FROM A STORE THE UNIT HAS LEFT IS REFUSED ON ITS OWN — the same
+     * guard without the race, so a reader can see the rule rather than the
+     * interleaving. The door already refuses this; what is pinned here is that
+     * the WRITER does too, for a caller that reaches it directly.
+     */
+    public function test_the_writer_refuses_an_issue_from_a_store_the_unit_has_left(): void
+    {
+        $stock = app(StockMovementService::class);
+        $serial = $this->receivedSerial('SN-LEFT-STORE', $this->store);
+
+        // RM-STORE keeps four other units, so the quantity check has stock to
+        // spare and only the unit's own guard can refuse this. At balance 0
+        // the refusal would be arithmetic that has nothing to do with the
+        // barcode, and the test would pass on the unfixed code.
+        $stock->recordReceipt($this->serialTracked->id, $this->store->id, '4', '500');
+
+        $stock->recordTransfer(
+            $this->serialTracked->id, $this->store->id, $this->farStore->id, '1',
+            serialNumberId: $serial->id,
+        );
+
+        try {
+            $stock->recordIssue($this->serialTracked->id, $this->store->id, '1', serialNumberId: $serial->id);
+            $this->fail('the writer issued a unit out of a store it had already left');
+        } catch (ValidationException $exception) {
+            // "already left that store" and "not in stock" are different facts
+            // about the same barcode, exactly as relocateSerial distinguishes
+            // them — the person holding the box needs to know which.
+            $this->assertStringContainsString(
+                'already left',
+                $exception->errors()['serial_number_id'][0],
+                'a unit that moved was reported as not in stock, which is false',
+            );
+        }
+
+        $this->assertSame('4.0000', $this->quantityAt($this->store), 'the refused issue still took a unit off RM-STORE');
+    }
+
+    /**
+     * NAMING THE SOURCE STORE MUST NOT NARROW THE ISSUE DOOR EITHER — the twin
+     * of test_a_unit_with_no_recorded_location_still_transfers.
+     *
+     * judgeLeaving tolerates a unit with NO recorded location on an issue just
+     * as it does on a transfer, and the writer's new source-store condition
+     * keeps exactly that tolerance. Without the `whereNull` arm this fix would
+     * have turned a passing path into a 422 for every unit nobody ever
+     * stamped with a warehouse — a new refusal wearing a race fix's clothes.
+     */
+    public function test_a_unit_with_no_recorded_location_still_issues(): void
+    {
+        $stock = app(StockMovementService::class);
+        $stock->recordReceipt($this->serialTracked->id, $this->store->id, '5', '500');
+
+        $serial = SerialNumber::create([
+            'item_id' => $this->serialTracked->id,
+            'serial_number' => 'SN-NOWHERE-ISSUE',
+            'status' => SerialNumberStatus::InStock,
+            'warehouse_id' => null,
+        ]);
+
+        $stock->recordIssue($this->serialTracked->id, $this->store->id, '1', serialNumberId: $serial->id);
+
+        $this->assertSame(SerialNumberStatus::Consumed, $serial->fresh()->status);
+        $this->assertSame('4.0000', $this->quantityAt($this->store));
+    }
+
+    /**
+     * ONE PHYSICAL UNIT ARRIVES ONCE — the receipt half, which had NO writer
+     * guard at all.
+     *
+     * judgeArriving refuses a serial number that is already in stock, but it
+     * reads the row BEFORE the transaction opens. Two receipts of one
+     * registered, never-received unit therefore both saw `registered`, both
+     * were approved, and the update inside the transaction was unconditional:
+     * two Receipt movements, the balance up by two, for one unit that arrived
+     * once. The serial row still reads `in_stock` in one store, so nothing on
+     * the unit records the second kilogram — it is pure phantom stock.
+     */
+    public function test_the_writer_refuses_a_second_receipt_of_a_unit_already_in_stock(): void
+    {
+        $stock = app(StockMovementService::class);
+        $serial = $this->registeredSerial('SN-IN-TWICE');
+
+        $stock->recordReceipt($this->serialTracked->id, $this->store->id, '1', '500', serialNumberId: $serial->id);
+
+        try {
+            $stock->recordReceipt($this->serialTracked->id, $this->store->id, '1', '500', serialNumberId: $serial->id);
+            $this->fail('the writer received one physical unit twice');
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey('serial_number_id', $exception->errors());
+        }
+
+        $this->assertSame('1.0000', $this->quantityAt($this->store), 'the store was credited twice for one unit');
+        $this->assertSame(
+            1,
+            $serial->movements()->where('type', StockMovementType::Receipt)->count(),
+            'the unit picked up a second receipt movement',
+        );
+    }
+
+    /**
+     * THE SAME RACE IN THE ORDER TWO CONCURRENT REQUESTS HIT THE DATABASE:
+     * door(A), door(B), write(A), write(B).
+     *
+     * The interleaving is the point. Both approvals are honest — at the
+     * moment each was judged the unit really was `registered` and not in
+     * stock — which is exactly why the door cannot be the guard.
+     *
+     * A SECOND STORE, NOT THE SAME ONE. Receiving the second copy into
+     * FG-STORE is the shape that hurts most: the balance is credited in a
+     * store the unit is not in, while the serial row keeps pointing at
+     * RM-STORE, so no per-unit read ever contradicts the extra kilogram.
+     */
+    public function test_two_receipts_that_both_passed_the_door_bring_one_unit_in_once(): void
+    {
+        $stock = app(StockMovementService::class);
+        $serial = $this->registeredSerial('SN-IN-RACE');
+
+        $payload = [
+            'item_id' => $this->serialTracked->id,
+            'warehouse_id' => $this->store->id,
+            'quantity' => '1',
+            'unit_cost' => '500',
+            'serial_number_id' => $serial->id,
+        ];
+
+        $this->assertTrue($this->receiptDoorApproves($payload), 'the first receipt was refused at the door');
+        $this->assertTrue($this->receiptDoorApproves($payload), 'the second receipt was refused at the door before any write');
+
+        $stock->recordReceipt($this->serialTracked->id, $this->store->id, '1', '500', serialNumberId: $serial->id);
+
+        try {
+            $stock->recordReceipt($this->serialTracked->id, $this->farStore->id, '1', '500', serialNumberId: $serial->id);
+            $this->fail('two approved requests brought one physical unit in twice');
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey('serial_number_id', $exception->errors());
+        }
+
+        $this->assertSame('1.0000', $this->quantityAt($this->store));
+        $this->assertFalse(
+            StockBalance::query()
+                ->where('item_id', $this->serialTracked->id)
+                ->where('warehouse_id', $this->farStore->id)
+                ->exists(),
+            'FG-STORE was credited for a unit that never arrived there',
+        );
+        $this->assertSame($this->store->id, $serial->fresh()->warehouse_id);
+    }
+
+    /**
      * A RECEIPT IS DELIBERATELY NOT GUARDED THE SAME WAY. Whether a consumed
      * unit may come back in is an open question about returns that the factory
      * has not answered, and refusing it in the writer would be answering it.
@@ -729,6 +956,15 @@ class TrackingIdentityIntegrityTest extends TestCase
         );
 
         $this->assertSame(SerialNumberStatus::InStock, $serial->fresh()->status);
+
+        // AND THE RETURN REALLY LANDED. The receipt's compare-and-swap refuses
+        // a SECOND arrival of a unit that is already in stock; a swap written
+        // one notch too tight — keyed on `registered` rather than on "not in
+        // stock" — would refuse this consumed unit too and answer the returns
+        // question by accident. The balance is what proves it did not: 5 in,
+        // 1 issued, 1 back.
+        $this->assertSame('5.0000', $this->quantityAt($this->store), 'the returned unit never reached the balance');
+        $this->assertSame($this->store->id, $serial->fresh()->warehouse_id);
     }
 
     /**
@@ -792,6 +1028,11 @@ class TrackingIdentityIntegrityTest extends TestCase
     private function issueDoorApproves(array $payload): bool
     {
         return $this->doorApprovesVia(StoreStockIssueRequest::class, $payload);
+    }
+
+    private function receiptDoorApproves(array $payload): bool
+    {
+        return $this->doorApprovesVia(StoreStockReceiptRequest::class, $payload);
     }
 
     /** @param  class-string<FormRequest>  $requestClass */

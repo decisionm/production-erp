@@ -18,7 +18,7 @@ class SerialNumberController extends Controller
     public function index(Request $request): AnonymousResourceCollection
     {
         return SerialNumberResource::collection($this->serialNumbers->paginate(
-            itemId: $request->integer('item_id') ?: null,
+            itemId: $this->filterId($request, 'item_id'),
             perPage: $this->perPage($request),
             search: $this->searchTerm($request),
             code: $this->searchTerm($request, 'code'),

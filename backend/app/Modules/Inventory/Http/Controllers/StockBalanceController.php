@@ -27,7 +27,7 @@ class StockBalanceController extends Controller
         return StockBalanceResource::collection($this->stock->paginateBalances(
             perPage: $this->perPage($request),
             search: $this->searchTerm($request),
-            itemId: $request->integer('item_id') ?: null,
+            itemId: $this->filterId($request, 'item_id'),
         ));
     }
 }

@@ -69,10 +69,7 @@ class StockMovementService
             $this->incrementBalance($itemId, $warehouseId, $quantity, $unitCost);
 
             if ($serialNumberId !== null) {
-                SerialNumber::whereKey($serialNumberId)->update([
-                    'status' => SerialNumberStatus::InStock,
-                    'warehouse_id' => $warehouseId,
-                ]);
+                $this->stockSerial($serialNumberId, $warehouseId);
             }
 
             return StockMovement::create([
@@ -207,7 +204,7 @@ class StockMovementService
             [$costAtIssue, $shortfallKg] = $this->decrementBalance($itemId, $warehouseId, $quantity, $allowNegative, $honourIncomingQcHold);
 
             if ($serialNumberId !== null) {
-                $this->consumeSerial($serialNumberId);
+                $this->consumeSerial($serialNumberId, $warehouseId);
             }
 
             return StockMovement::create([
@@ -591,6 +588,51 @@ class StockMovementService
     }
 
     /**
+     * A UNIT ARRIVES ONCE — the receipt's half, and it had NO writer guard at
+     * all until now.
+     *
+     * judgeArriving refuses a serial number that is already in stock, but it
+     * reads the row BEFORE the transaction opens, so what it proves is where
+     * the unit was A MOMENT AGO. The update inside the transaction was
+     * unconditional, so two receipts of one registered, never-received unit
+     * both saw `registered`, both were approved, and both wrote: two Receipt
+     * movements and the balance up by two for a unit that arrived once. The
+     * serial row still reads `in_stock` in one store afterwards, so nothing
+     * about the UNIT records the second kilogram — it is pure phantom stock,
+     * and worse than the issue race because no per-unit read contradicts it.
+     *
+     * `where('status', '!=', InStock)` IS THE WHOLE POINT, and the operator is
+     * chosen for what it does NOT decide. Keyed on `= registered` this swap
+     * would also refuse a CONSUMED unit coming back — which is the open
+     * returns question, answered by accident in the writer. Spelled as "not
+     * already in stock" it refuses exactly what judgeArriving refuses, no
+     * more: a second arrival of a unit that is already standing somewhere.
+     * Consumed → InStock, Scrapped → InStock and Sold → InStock all still
+     * pass, still undecided, still the factory's call.
+     *
+     * `status` is NOT NULL with a `registered` default (the 19-Jul migration),
+     * so there is no row for which `!=` is silently false; and
+     * assertIdentityBelongsToItem() has already proved the row exists before
+     * the transaction opened, so a zero affected-row count here means one
+     * thing only.
+     */
+    private function stockSerial(int $serialNumberId, int $warehouseId): void
+    {
+        $changed = SerialNumber::whereKey($serialNumberId)
+            ->where('status', '!=', SerialNumberStatus::InStock)
+            ->update([
+                'status' => SerialNumberStatus::InStock,
+                'warehouse_id' => $warehouseId,
+            ]);
+
+        if ($changed === 0) {
+            throw ValidationException::withMessages([
+                'serial_number_id' => 'That serial number is already in stock, so it cannot be received again.',
+            ]);
+        }
+    }
+
+    /**
      * A UNIT LEAVES STOCK ONCE — the second half of the identity invariant,
      * and the half that needs the WRITE ITSELF to be the check.
      *
@@ -609,27 +651,64 @@ class StockMovementService
      * of silently overwriting. Every OTHER writer in the app — delivery,
      * rework, work orders, subcontract, maintenance, production, Tally
      * reconcile, goods receipt — passes no serial number at all
-     * (StockMovementController is the only caller that does), so this is a
-     * no-op for them rather than a new gate.
+     * (StockMovementController is the only caller that does, verified by
+     * grepping `serialNumberId:` across app/), so this is a no-op for them
+     * rather than a new gate.
      *
-     * RECEIPTS ARE DELIBERATELY NOT GUARDED HERE. Whether a consumed or
-     * scrapped unit may come back in is a real question about returns that
-     * the factory has not answered, and refusing it in the writer would be
-     * answering it. The receipt door refuses only the already-in-stock case,
-     * where re-receiving silently teleports the one row.
+     * THE SOURCE STORE IS IN THE CONDITION TOO, and the status alone was not
+     * enough — this is the hole a status-only condition cannot see. Both
+     * earlier races pit a writer against ITSELF, and each is closed by
+     * something the first write falsifies: an issue changes the status, a
+     * transfer changes the warehouse. CROSS A TRANSFER WITH AN ISSUE and
+     * neither half holds:
+     *
+     *   door(transfer RM→FG)  approves — in stock, in RM-STORE
+     *   door(issue from RM)   approves — the same two facts, still true
+     *   write(transfer)       commits warehouse_id = FG; the status is STILL
+     *                         `in_stock`, because a transfer never changes it
+     *   write(issue)          a status-only condition MATCHES, so RM-STORE is
+     *                         debited a second time for a unit standing in FG
+     *
+     * The damage is worse than a double issue and does not self-correct: RM
+     * ends up short by one and FG long by one, so no single store's count is
+     * the whole error and no later reconciliation finds it. Naming the source
+     * is what makes the second write false — the row now has to be in the
+     * store it is being taken out of.
+     *
+     * The `whereNull` arm keeps judgeLeaving's EXACT tolerance: a unit with no
+     * recorded location is let through rather than newly refused here. That
+     * arm is the difference between a race fix and a new gate, and
+     * test_a_unit_with_no_recorded_location_still_issues is what holds it.
+     *
+     * RECEIPTS ARE GUARDED SEPARATELY AND MORE NARROWLY — see recordReceipt().
+     * Whether a consumed or scrapped unit may come back in is a real question
+     * about returns that the factory has not answered, so the receipt refuses
+     * only the already-in-stock case and leaves that question open.
      */
-    private function consumeSerial(int $serialNumberId): void
+    private function consumeSerial(int $serialNumberId, int $fromWarehouseId): void
     {
         $changed = SerialNumber::whereKey($serialNumberId)
             ->where('status', SerialNumberStatus::InStock)
+            ->where(fn ($q) => $q->whereNull('warehouse_id')->orWhere('warehouse_id', $fromWarehouseId))
             ->update([
                 'status' => SerialNumberStatus::Consumed,
                 'warehouse_id' => null,
             ]);
 
         if ($changed === 0) {
+            // Which condition failed is the whole answer for the person
+            // holding the box, exactly as in relocateSerial(): "already
+            // issued" and "already moved somewhere else" are different facts
+            // about the same barcode, and telling a storekeeper a unit is not
+            // in stock when it is standing in the next room is simply false.
+            $stillInStock = SerialNumber::whereKey($serialNumberId)
+                ->where('status', SerialNumberStatus::InStock)
+                ->exists();
+
             throw ValidationException::withMessages([
-                'serial_number_id' => 'That serial number is not in stock, so it cannot be issued.',
+                'serial_number_id' => $stillInStock
+                    ? 'That serial number has already left that store, so it cannot be issued from it.'
+                    : 'That serial number is not in stock, so it cannot be issued.',
             ]);
         }
     }
@@ -693,9 +772,10 @@ class StockMovementService
      * writers including the receipt, and the receipt is the point. Were the
      * receipt to keep taking the balance first and reach the serial row only
      * at its update, a receipt and an issue of the same unit would hold each
-     * other's next lock — a real cycle. The receipt's lock adds no refusal
-     * and so decides nothing about returns (see consumeSerial); it only fixes
-     * the order.
+     * other's next lock — a real cycle. The lock's job here is the ORDER, not
+     * the refusal: what the receipt may and may not do is decided by
+     * stockSerial(), which refuses only a second arrival of an already
+     * in-stock unit and so still decides nothing about returns.
      */
     private function lockSerial(?int $serialNumberId): void
     {
