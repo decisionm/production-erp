@@ -12,6 +12,7 @@ use App\Modules\Procurement\Models\PurchaseOrderLine;
 use App\Modules\Procurement\Models\Vendor;
 use App\Modules\Quality\Models\IncomingInspection;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Spatie\Permission\Models\Permission;
@@ -39,12 +40,19 @@ use Tests\TestCase;
  *     FIGURES REPORTED, and this file says so in executable form rather than
  *     in prose: received 123450 / inspected 123450 and received 1000000 /
  *     inspected 1000000 both post cleanly, on the parent commit and on this
- *     one. What IS measurable is narrower: PHP's float->string loses
- *     digits past precision 14, so a JSON *number* reaches bcmath altered.
- *     Whether that becomes a false refusal depends on the database storing
- *     the received side exactly — SQLite (this suite) does not, so it cannot
- *     be shown here, and the test below measures the former and says so
- *     about the latter rather than asserting a contrast it never runs.
+ *     one, on both drivers.
+ *
+ *  4. A JSON *NUMBER* DOES LOSE THE FIGURE, AND AT EQUALITY THAT IS A FALSE
+ *     REFUSAL. PHP's float->string precision of 14 drops a digit before any
+ *     validation rule runs, so 12345678901.2345 reaches bcmath as the larger
+ *     12345678901.235. The precision loss itself is pinned driver-
+ *     independently, off the refusal message, which echoes what bcmath saw.
+ *     The refusal-at-exact-equality needs the received side stored exactly,
+ *     which is MySQL and the live instance but not SQLite's float-affinity
+ *     `decimal(15,4)` — so that one test gates on the value the column
+ *     actually kept and is proven by ci.yml's `app-mysql` leg, which a PR
+ *     must pass alongside `app`. The parent commit could only reason about
+ *     this step and said so; it is now measured.
  *
  * The route is /api/v1/quality/incoming-inspections/pending
  * (IncomingInspectionController::pending → IncomingInspectionService::
@@ -335,30 +343,28 @@ class IncomingInspectionPendingQueueTest extends TestCase
     }
 
     /**
-     * WHAT IS ACTUALLY MEASURED ABOUT THE PRECISION BOUNDARY — no more.
+     * THE LOAD-BEARING PROOF, AND IT RUNS ON EVERY DRIVER.
      *
-     * The VERIFIED fact is one line of PHP: a JSON number is decoded to a
-     * float, and a float carrying more significant digits than PHP's default
-     * precision of 14 stringifies short. `json_decode('12345678901.2345')`
-     * reaches bcmath as the string `12345678901.235` — a DIFFERENT figure
-     * from the one the operator typed, and a larger one.
+     * The inspected quantity NEVER touches the database on its way to the
+     * comparison: `create()` takes it from the request, casts it to string,
+     * hands it to `bccomp`, and `exceedsReceived()` echoes that same string
+     * verbatim into the 422. So the refusal message is a direct read of what
+     * bcmath actually saw — independent of what the column can store.
      *
-     * WHAT IS NOT VERIFIED HERE, STATED PLAINLY. Whether that shortened
-     * figure produces a false "exceeds received" refusal depends on the
-     * database storing the received quantity exactly. This suite runs SQLite
-     * (phpunit.xml), where `decimal(15,4)` is float-affinity and the STORED
-     * side rounds identically — both sides move together, the compare comes
-     * out equal, and the request succeeds. So the false rejection cannot be
-     * demonstrated on this database, and this test does not pretend to
-     * demonstrate it: it asserts what actually happens here, which is 201 for
-     * both spellings.
+     * Which makes the two spellings of ONE figure measurable side by side,
+     * against a received quantity (`100`) both spellings plainly exceed:
      *
-     * WHAT IS FIXED REGARDLESS. The decimal STRING is never converted at all,
-     * so it reaches bcmath as typed and comes back as stored, whatever the
-     * database underneath. That is why the rebuilt page sends strings, and it
-     * is what this pins.
+     *   STRING  '12345678901.2345'  reaches bcmath as  12345678901.2345
+     *   NUMBER   12345678901.2345   reaches bcmath as  12345678901.235
+     *
+     * Sixteen significant digits survive the string; the JSON number is a
+     * float by the time PHP hands it to the validator, and PHP's float→string
+     * precision of 14 has already dropped a digit and rounded UP — before any
+     * rule in StoreIncomingInspectionRequest can look at it. This is why the
+     * rebuilt Incoming Quality page sends decimal STRINGS and does its own
+     * arithmetic on scaled BigInts, and it is what that decision rests on.
      */
-    public function test_a_decimal_string_reaches_bcmath_unaltered(): void
+    public function test_a_decimal_string_reaches_bcmath_unaltered_where_a_json_number_does_not(): void
     {
         $this->actingAsQuality();
 
@@ -366,23 +372,100 @@ class IncomingInspectionPendingQueueTest extends TestCase
         $this->assertSame('12345678901.235', (string) json_decode('12345678901.2345'));
         $this->assertSame('1.0E+20', (string) json_decode('1e20'));
 
-        $line = $this->arrivalLine('12345678901.2345', 'IQ-PREC');
-        $stored = $line->fresh()->quantity;
+        $asString = $this->arrivalLine('100', 'IQ-PREC-STR');
+        $this->inspect($asString, [
+            'inspected_quantity' => '12345678901.2345',
+            'accepted_quantity' => '12345678901.2345',
+        ])->assertStatus(422)->assertJsonPath(
+            'message',
+            'Cannot inspect more than the quantity received on this line: received 100.0000, inspected 12345678901.2345.',
+        );
 
-        // The string the page now sends: through untouched, echoed exactly.
-        $this->inspect($line, ['inspected_quantity' => $stored, 'accepted_quantity' => $stored])
-            ->assertCreated()
-            ->assertJsonPath('data.inspected_quantity', $stored);
-
-        // And the float leg, for the record: on SQLite it also succeeds,
-        // because the stored side rounded the same way. Asserted so that a
-        // future move to MySQL in CI turns this into a real, visible
-        // difference instead of a silent one.
-        $float = $this->arrivalLine('12345678901.2345', 'IQ-PREC2');
-        $this->inspect($float, [
+        $asNumber = $this->arrivalLine('100', 'IQ-PREC-NUM');
+        $this->inspect($asNumber, [
             'inspected_quantity' => 12345678901.2345,
             'accepted_quantity' => 12345678901.2345,
-        ])->assertCreated();
+        ])->assertStatus(422)->assertJsonPath(
+            'message',
+            'Cannot inspect more than the quantity received on this line: received 100.0000, inspected 12345678901.235.',
+        );
+
+        $this->assertSame(0, IncomingInspection::query()->count());
+    }
+
+    /**
+     * A JSON NUMBER INSIDE THE SAFE RANGE IS NOT BROKEN — the bound, stated.
+     *
+     * The loss above is not "numbers are wrong"; it is "numbers past PHP's
+     * float→string precision of 14 are wrong". A figure a storekeeper
+     * actually writes — here 123450.5, six significant digits at one decimal
+     * place — round-trips through the float and posts exactly. That is the
+     * whole of what a numeric body can promise, so this test says exactly
+     * that much and the test above says where it stops.
+     */
+    public function test_a_json_number_within_float_precision_posts_exactly(): void
+    {
+        $this->actingAsQuality();
+        $line = $this->arrivalLine('123450.5000', 'IQ-PREC-SAFE');
+
+        $this->inspect($line, [
+            'inspected_quantity' => 123450.5,
+            'accepted_quantity' => 123450.5,
+        ])->assertCreated()
+            ->assertJsonPath('data.inspected_quantity', '123450.5000')
+            ->assertJsonPath('data.accepted_quantity', '123450.5000')
+            ->assertJsonPath('data.rejected_quantity', '0.0000');
+    }
+
+    /**
+     * THE FALSE REFUSAL AT EXACT EQUALITY — reproduced, on the database the
+     * factory actually runs.
+     *
+     * The parent commit could only reason about this step and said so. It is
+     * now observed: where `decimal(15,4)` stores 12345678901.2345 exactly,
+     * a JSON *number* of that same figure arrives as the larger
+     * 12345678901.235 and the arrival is refused for being more than itself.
+     * The STRING spelling of the identical figure is accepted on the same
+     * data — which is the fix, not a workaround.
+     *
+     * GATED ON WHAT THE COLUMN ACTUALLY KEPT, not on a driver name. SQLite
+     * (phpunit.xml's default, and CI's `app` leg) gives `decimal(15,4)` float
+     * affinity, so the RECEIVED side is already rounded to 12345678901.2350
+     * before the comparison — both sides move together and the contrast
+     * cannot exist there. CI's `app-mysql` leg and the live instance store it
+     * exactly, and a PR must pass both legs, so this is proven on every run.
+     * The precision contract itself is driver-independent and pinned above.
+     */
+    public function test_a_json_number_is_refused_against_a_column_that_stored_the_figure_exactly(): void
+    {
+        $this->actingAsQuality();
+
+        $line = $this->arrivalLine('12345678901.2345', 'IQ-PREC-EXACT');
+        $stored = $line->fresh()->quantity;
+
+        if ($stored !== '12345678901.2345') {
+            $this->markTestSkipped(
+                'this connection ('.DB::connection()->getDriverName().') stored '
+                .$stored.' — its decimal(15,4) is float-affinity, so the received side is already rounded and '
+                .'the false refusal cannot exist. Proven on the MySQL leg, which a PR must also pass.'
+            );
+        }
+
+        // The number: refused for being exactly what was received.
+        $this->inspect($line, [
+            'inspected_quantity' => 12345678901.2345,
+            'accepted_quantity' => 12345678901.2345,
+        ])->assertStatus(422)->assertJsonPath(
+            'message',
+            'Cannot inspect more than the quantity received on this line: received 12345678901.2345, inspected 12345678901.235.',
+        );
+        $this->assertSame(0, IncomingInspection::query()->count());
+
+        // The string the page now sends: same figure, same row, accepted and
+        // echoed back character for character.
+        $this->inspect($line, ['inspected_quantity' => $stored, 'accepted_quantity' => $stored])
+            ->assertCreated()
+            ->assertJsonPath('data.inspected_quantity', '12345678901.2345');
     }
 
     // =====================================================================

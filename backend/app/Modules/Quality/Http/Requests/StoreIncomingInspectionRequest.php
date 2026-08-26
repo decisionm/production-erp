@@ -60,13 +60,17 @@ class StoreIncomingInspectionRequest extends FormRequest
              * PHP's float→string precision of 14 is already lossy by the time
              * validation runs: json_decode('12345678901.2345') stringifies to
              * '12345678901.235', which is MORE than was received and is
-             * therefore refused at exact equality. The digits are gone before
-             * any rule here can look at them. The fix for that is the caller
-             * sending a decimal STRING, which the rebuilt Incoming Quality
-             * page now does, and which
+             * therefore refused at exact equality — measured on MySQL, where
+             * the column stores the received side exactly. The digits are gone
+             * before any rule here can look at them. The fix for that is the
+             * caller sending a decimal STRING, which the rebuilt Incoming
+             * Quality page now does, and which
              * IncomingInspectionPendingQueueTest::
-             * test_a_decimal_string_survives_where_a_json_float_would_not
-             * pins from both sides.
+             * test_a_decimal_string_reaches_bcmath_unaltered_where_a_json_number_does_not
+             * pins from both sides on every driver, with
+             * ..._refused_against_a_column_that_stored_the_figure_exactly
+             * showing the false refusal itself on the database the factory
+             * runs.
              */
             'inspected_quantity' => ['required', 'numeric', 'gt:0', 'max:'.self::DECIMAL_15_4_MAX, new PlainDecimal],
             'accepted_quantity' => ['required', 'numeric', 'min:0', 'max:'.self::DECIMAL_15_4_MAX, new PlainDecimal],
