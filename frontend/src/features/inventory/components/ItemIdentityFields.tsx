@@ -1,4 +1,4 @@
-import { Button, Form, Input, Select, Space, Tag, Tooltip } from 'antd';
+import { Form, Input, Select, Space, Tag, Tooltip } from 'antd';
 import { type Control, Controller, useWatch } from 'react-hook-form';
 import { CATEGORY_UNCLASSIFIED, type ItemFormValues } from '@/features/inventory/itemForm';
 import {
@@ -18,25 +18,27 @@ import { itemLabel } from '@/lib/itemLabel';
  * label never costs a rename that would break posting.
  *
  * The category suggestion is DERIVED FROM THE ITEM'S TALLY STOCK GROUP and is
- * offered as a button, never as a pre-filled value. Q60 (which group means
- * which category) is an open owner question — the two groups it explicitly
- * leaves open, Scrap and Caps & Closures, arrive here as `null` and this
- * component shows nothing at all for them. A suggestion the user did not press
- * is not a classification.
+ * SHOWN, never applied — not pre-filled, and not one click away either. Q60
+ * (which group means which category) is an open owner question, and AGENTS.md
+ * puts a factory classification with the owner: an agent proposes, the owner
+ * decides. A button would have let a storekeeper turn an agent's inference —
+ * including the one this build itself marks low-confidence — into master data
+ * without that decision (Codex, 12766d3). Reading the group and choosing the
+ * category yourself is the whole difference, so the picker is the only way in.
+ * The two groups Q60 explicitly leaves open, Scrap and Caps & Closures, arrive
+ * here as `null` and this component shows nothing at all for them.
  */
 export function ItemIdentityFields({
     control,
     baseItems,
     suggestedCategory,
     suggestionConfidence,
-    onApplySuggestion,
 }: {
     control: Control<ItemFormValues>;
     /** Base products only — a variant is never the parent of another variant. */
     baseItems: Item[];
     suggestedCategory: ItemCategoryValue | null | undefined;
     suggestionConfidence: SuggestionConfidence | null | undefined;
-    onApplySuggestion: (category: ItemCategoryValue) => void;
 }) {
     const category = useWatch({ control, name: 'category' });
 
@@ -138,9 +140,7 @@ export function ItemIdentityFields({
                 {showSuggestion ? (
                     <Space size={4} style={{ marginTop: 6 }}>
                         <Tag bordered={false}>Tally group</Tag>
-                        <Button size="small" onClick={() => onApplySuggestion(suggestion)}>
-                            {categoryLabel(suggestion)}
-                        </Button>
+                        <Tag bordered={false}>{categoryLabel(suggestion)}</Tag>
                         {/* A judgement call has to say so, or it reads as a
                             finding. `firm` says nothing — a suggestion is
                             already only a suggestion. */}

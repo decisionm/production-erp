@@ -11,6 +11,8 @@ use App\Support\Configuration\ManagesConfigurationLifecycle;
 use Closure;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class ItemService
 {
@@ -239,9 +241,54 @@ class ItemService
             $data['sku_provisional'] = false;
         }
 
-        $item->update($data);
+        if (! array_key_exists('variant_of_item_id', $data) || $data['variant_of_item_id'] === null) {
+            $item->update($data);
 
-        return $item;
+            return $item;
+        }
+
+        /*
+         * THE ONE-LEVEL RULE, RE-CHECKED UNDER A LOCK.
+         *
+         * ValidatesVariantLink refuses the three shapes that build a chain,
+         * but it reads before the write and holds nothing. Two editors
+         * submitting A -> B and B -> A at the same moment each see a target
+         * with no link and an item with no variants; both validations pass and
+         * the pair lands as a cycle, which Item::variantRootId()'s "one level,
+         * no walk" and the identity grouping both assume cannot exist.
+         *
+         * So the losing write re-reads the same two facts with the rows
+         * locked, and refuses. Only a link WRITE takes this path — clearing a
+         * link and every unrelated edit stay the plain update they were.
+         */
+        return DB::transaction(function () use ($item, $data): Item {
+            $targetId = (int) $data['variant_of_item_id'];
+
+            $target = Item::query()->whereKey($targetId)->lockForUpdate()->first();
+            $locked = Item::query()->whereKey($item->getKey())->lockForUpdate()->first();
+
+            if ($target === null || $locked === null) {
+                throw ValidationException::withMessages([
+                    'variant_of_item_id' => 'That base product no longer exists.',
+                ]);
+            }
+
+            if ($target->variant_of_item_id !== null) {
+                throw ValidationException::withMessages([
+                    'variant_of_item_id' => "\"{$target->displayName()}\" became a pack variant while this was being edited. Point this item at the BASE product they both vary from.",
+                ]);
+            }
+
+            if ($locked->variants()->withTrashed()->exists()) {
+                throw ValidationException::withMessages([
+                    'variant_of_item_id' => "\"{$locked->displayName()}\" became the base product for another pack variant while this was being edited, so it cannot become a variant itself.",
+                ]);
+            }
+
+            $item->update($data);
+
+            return $item;
+        });
     }
 
     /**

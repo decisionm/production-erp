@@ -16,6 +16,7 @@ import {
 import { type ProductionQueueGroup, groupQueueByProduct } from '@/features/production/queueGroups';
 import type { ProductionQueueRow, ProductionRequestStatus } from '@/features/production/types';
 import { formatDate } from '@/lib/datetime';
+import { itemDisplayName } from '@/features/inventory/itemIdentity';
 import { itemLabel } from '@/lib/itemLabel';
 
 /**
@@ -396,7 +397,22 @@ export default function ProductionQueuePage() {
                         title: 'Product',
                         render: (_, group) => (
                             <Space direction="vertical" size={0}>
-                                <strong>{itemLabel(group.item)}</strong>
+                                {/* The ERP's own label when the factory set
+                                    one — that is what display_name is for —
+                                    with Tally's wire name as the fallback. */}
+                                <strong>
+                                    {itemLabel(
+                                        group.item === null
+                                            ? null
+                                            : {
+                                                sku: group.item.sku,
+                                                name: itemDisplayName({
+                                                    name: group.item.name ?? '',
+                                                    display_name: group.item.display_name ?? null,
+                                                }),
+                                            },
+                                    )}
+                                </strong>
                                 <Typography.Text type="secondary" style={caption}>
                                     {group.rows.length} order{group.rows.length === 1 ? '' : 's'}
                                 </Typography.Text>

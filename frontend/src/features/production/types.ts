@@ -3256,7 +3256,8 @@ export interface ProductionRequest {
     /** Dense and 1-based, rewritten wholesale by reorder(). */
     priority: number;
     status: ProductionRequestStatus;
-    item: { id: number; sku: string | null; name: string | null } | null;
+    /** `name` is Tally's wire key; `display_name` is the ERP's own label, null when nobody set one. */
+    item: { id: number; sku: string | null; name: string | null; display_name?: string | null } | null;
     /** Decimal string, 4dp — the same precision the order line and its holds carry. */
     quantity: string;
     sales_order_line_id: number;

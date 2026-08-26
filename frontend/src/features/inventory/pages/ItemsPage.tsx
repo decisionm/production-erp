@@ -456,7 +456,6 @@ export default function ItemsPage() {
                         baseItems={baseItems}
                         suggestedCategory={editingItem?.suggested_category}
                         suggestionConfidence={editingItem?.suggested_category_confidence}
-                        onApplySuggestion={(value) => setEditValue('category', value, { shouldDirty: true })}
                     />
 
                     <Form.Item label="UOM" validateStatus={editErrors.uom ? 'error' : ''} help={editErrors.uom?.message}>

@@ -272,6 +272,40 @@ class ProductionQueueEndpointTest extends TestCase
 
     // ---- the OR-gate, both ways ------------------------------------------------
 
+    /**
+     * The floor reads the ERP's name for a product, not Tally's wire key.
+     *
+     * `display_name` exists so a floor-readable label never costs a rename
+     * that would break posting — a label the floor's own screen cannot see is
+     * the field doing nothing (Codex, 12766d3). The wire name travels with it,
+     * because the store and the accountant still speak Tally's.
+     */
+    public function test_the_queue_carries_the_erp_display_name_beside_the_tally_name(): void
+    {
+        $this->bottle->update(['display_name' => '500ml bottle — clear']);
+        $this->request($this->bottle, '20000', '20000');
+
+        $this->actingWith(['production.view']);
+
+        $this->getJson('/api/v1/production/queue')
+            ->assertOk()
+            ->assertJsonPath('data.0.item.display_name', '500ml bottle — clear')
+            ->assertJsonPath('data.0.item.name', '500ml PET Bottle')
+            ->assertJsonPath('data.0.item.sku', 'BTL-500');
+    }
+
+    /** An item with no ERP name says so with null, never by echoing Tally's. */
+    public function test_an_item_without_a_display_name_reports_null(): void
+    {
+        $this->request($this->bottle, '20000', '20000');
+
+        $this->actingWith(['production.view']);
+
+        $this->getJson('/api/v1/production/queue')
+            ->assertOk()
+            ->assertJsonPath('data.0.item.display_name', null);
+    }
+
     public function test_both_desks_read_the_queue(): void
     {
         $this->request($this->bottle, '20000', '20000');

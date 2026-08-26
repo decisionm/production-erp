@@ -46,7 +46,12 @@ class ProductionRequestResource extends JsonResource
                 ? [
                     'id' => (int) $productionRequest->item->id,
                     'sku' => $productionRequest->item->sku,
+                    // Tally's wire key, which the store and the accountant
+                    // speak — and beside it the ERP's own label, so the floor
+                    // reads the product the way the factory says it rather
+                    // than the way a voucher has to spell it.
                     'name' => $productionRequest->item->name,
+                    'display_name' => $productionRequest->item->display_name,
                 ]
                 : null,
 

@@ -58,7 +58,7 @@ class ProductionRequestService
     {
         $requests = ProductionRequest::query()
             ->open()
-            ->with(['item:id,sku,name,uom', 'salesOrderLine.salesOrder.customer:id,name', 'requestedBy:id,name'])
+            ->with(['item:id,sku,name,display_name,uom', 'salesOrderLine.salesOrder.customer:id,name', 'requestedBy:id,name'])
             ->orderBy('priority')
             ->orderBy('id')
             ->get();
