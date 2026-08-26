@@ -790,7 +790,15 @@ class StockMovementService
         // AND THE SERIAL ROW IS LOCKED BEFORE BOTH — by lockSerial(), first
         // statement of all three writers' transactions, receipt included, so
         // no writer reaches a serial row while already holding a balance.
-        // Callers that pass no serial number simply start one rung down.
+        //
+        // The one caller that could invert this is StoreIssueService, which
+        // takes its bag locks BEFORE calling recordIssue/recordTransfer and
+        // would therefore run bags → serial → balance. It passes no serial
+        // number on any of those calls (StockMovementController is the only
+        // caller in the app that does), so the two orders never meet. That is
+        // the premise this ordering rests on, not a coincidence: a future
+        // typed-line writer that wants to name a unit has to take the serial
+        // row before its bags.
         $held = '0.0000';
         $heldBags = 0;
 
