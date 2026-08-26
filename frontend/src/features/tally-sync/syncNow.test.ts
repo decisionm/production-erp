@@ -120,6 +120,11 @@ describe('RELEASE_ONE_CONFIRM', () => {
         // it used to fire the release on that tap with no way back.
         expect(RELEASE_ONE_CONFIRM.title('SPE-42')).toBe('Release SPE-42 now?');
         expect(RELEASE_ONE_CONFIRM.title('Stock Journal 7')).toContain('Stock Journal 7');
+        // The rows this button appears on are HELD ones — pending, never
+        // posted — so the name comes from the payload the ERP built, and
+        // from voucherNumber()'s `#<id>` fallback when a payload carries
+        // none. The title has to identify the row in that case too.
+        expect(RELEASE_ONE_CONFIRM.title('#42')).toBe('Release #42 now?');
     });
 
     it('carries the same consequence as the queue-wide press, without the queue', () => {
