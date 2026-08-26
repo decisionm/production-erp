@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Checkbox, DatePicker, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import dayjs from 'dayjs';
@@ -8,25 +9,40 @@ import {
     getTallySyncSummary,
     listAllTallySyncEntries,
     releaseTallySyncEntry,
+    requestTallySyncNow,
     retryTallySyncEntry,
 } from '@/features/tally-sync/api';
 import {
     holdCopy,
     instant,
     payloadText,
+    sourceLink,
     statusColor,
     statusLabel,
+    voucherDate,
     voucherNumber,
     showsFixedAfterFailures,
 } from '@/features/tally-sync/drawer';
 import EntryDrawer from '@/features/tally-sync/EntryDrawer';
 import {
+    businessDatePresets,
     catalogueNote,
     categoryFilterOptions,
     categoryLabel,
     hasActiveFilters,
     unclassifiedCount,
+    voucherTypeFilterOptions,
 } from '@/features/tally-sync/filters';
+import {
+    agentLiveness,
+    agentLivenessLabel,
+    canRequestSyncNow,
+    RELEASE_ONE_CONFIRM,
+    SYNC_NOW_CONFIRM,
+    syncNowMessage,
+    type SyncNowMessage,
+} from '@/features/tally-sync/syncNow';
+import { useAuthStore } from '@/features/auth/store';
 import type { TallySyncEntry, TallySyncEntryFilters, TallySyncStatus } from '@/features/tally-sync/types';
 
 /** The status filter's choices — the same words the Status column uses. */
@@ -63,6 +79,67 @@ function resyncMessage(error: unknown): string {
 interface ResyncOutcome {
     ok: boolean;
     message: string;
+}
+
+/**
+ * The queue's Source cell: which ERP record this voucher was built from,
+ * and the way in to it.
+ *
+ * The link is sourceLink()'s and ONLY sourceLink()'s — the drawer's Source
+ * record asks the same function, so the two can never offer a row
+ * different destinations. This cell used to print "Open production
+ * entries" on every row, whatever the voucher was: a Receipt Note sent the
+ * reader to the production entries list.
+ *
+ * Exported and hook-free on purpose (the ConfigurationReviewPanel
+ * precedent): the load-bearing claim here is a NEGATIVE one — no
+ * production link on a non-production row — and a negative claim about
+ * rendering is only worth asserting against the tree this actually
+ * returns. EntrySource.test.tsx calls it as a plain function.
+ */
+export function EntrySourceCell({ entry }: { entry: TallySyncEntry }) {
+    const batch = payloadText(entry, 'batch_number');
+    const shift = payloadText(entry, 'shift');
+    const link = sourceLink(entry);
+
+    return (
+        <Space direction="vertical" size={0}>
+            {batch && <span>Batch {batch}</span>}
+            {!batch && shift && <span>{shift} shift</span>}
+            <Typography.Text type="secondary">
+                {entry.syncable_type} #{entry.syncable_id}
+            </Typography.Text>
+            {link && <Link to={link.to}>{link.label}</Link>}
+        </Space>
+    );
+}
+
+/**
+ * Whether the queue could not be read AT ALL — a failed request with no
+ * rows to fall back on.
+ *
+ * NOT bare `isError`. A background refetch that fails leaves the rows the
+ * person is already looking at in place, and pulling those out from under
+ * them would lose real information over a transient failure. What must
+ * never happen is the other case: the request failed, nothing is held, and
+ * the page draws an empty table under the red alert — "no vouchers" is a
+ * measurement, and the page did not make it.
+ */
+export function queueUnavailable(isError: boolean, rowCount: number): boolean {
+    return isError && rowCount === 0;
+}
+
+/**
+ * The queue table, or NOTHING — never an empty one — when the queue could
+ * not be read.
+ *
+ * Exported and hook-free for the same reason EntrySourceCell is: the claim
+ * is a negative one about what is rendered, and a negative claim is only
+ * worth asserting against the tree this actually returns
+ * (QueueTableSection.test.tsx walks it for an antd Table by reference).
+ */
+export function QueueTableSection({ unavailable, children }: { unavailable: boolean; children: ReactNode }) {
+    return unavailable ? null : <>{children}</>;
 }
 
 export default function TallySyncPage() {
@@ -116,6 +193,30 @@ export default function TallySyncPage() {
     const [dismissingId, setDismissingId] = useState<number | null>(null);
     const [resyncingAll, setResyncingAll] = useState(false);
     const [report, setReport] = useState<{ id: number; voucher: string; ok: boolean; message: string }[] | null>(null);
+    // "Sync Now" (DEC-20260825-002): whether a press is in flight, and the
+    // honest sentence about the last one. Kept on the page — not a toast —
+    // for the same reason the per-row outcomes are: the answer names what
+    // is waiting and on whom, and it has to still be there when the person
+    // looks back up from Tally.
+    const [syncingNow, setSyncingNow] = useState(false);
+    const [syncNowOutcome, setSyncNowOutcome] = useState<SyncNowMessage | null>(null);
+
+    // Whether to DRAW the button. The server enforces the same rule and
+    // 403s regardless (SyncNowAuthority) — this only decides whether a
+    // login who may not press it is shown a control that would refuse them.
+    const user = useAuthStore((state) => state.user);
+    const maySyncNow = canRequestSyncNow(user);
+
+    // A slow tick so "checked in 4 min ago" ages on screen instead of
+    // freezing at whatever it said when the page last rendered. 30s is well
+    // under the 5-minute stale boundary, so the light cannot sit green over
+    // an agent that crossed it a while ago.
+    const [clock, setClock] = useState(() => Date.now());
+    useEffect(() => {
+        const tick = setInterval(() => setClock(Date.now()), 30_000);
+
+        return () => clearInterval(tick);
+    }, []);
     // ?entry=41 — a sales document's Tally column (or any other page)
     // linking straight to one voucher. Read once, on load: the drawer opens
     // on that id whether or not the row is on this page — EntryDrawer asks
@@ -264,6 +365,26 @@ export default function TallySyncPage() {
     }
 
     /**
+     * The pause in front of that override. Release now sits beside View in
+     * a dense row strip and again in the drawer, and a mis-tap used to be
+     * the whole act — the voucher was freed for the next poll before the
+     * finger left the screen, and nothing puts it back. The dialog names
+     * the voucher, which is the part that catches a wrong row.
+     *
+     * Both places that offer the button go through here; releaseOne() is
+     * unchanged and still does the release and the reporting.
+     */
+    function confirmRelease(entry: TallySyncEntry) {
+        Modal.confirm({
+            title: RELEASE_ONE_CONFIRM.title(voucherNumber(entry)),
+            content: RELEASE_ONE_CONFIRM.body,
+            okText: RELEASE_ONE_CONFIRM.ok,
+            cancelText: RELEASE_ONE_CONFIRM.cancel,
+            onOk: () => releaseOne(entry),
+        });
+    }
+
+    /**
      * Write a failed voucher off for good. Behind a confirm because it is
      * the one action on this page that is meant to be final: "never sent to
      * Tally" is a promise the backend then enforces (a dismissed voucher is
@@ -296,6 +417,51 @@ export default function TallySyncPage() {
             setOutcomes((prev) => ({ ...prev, [entry.id]: { ok: false, message: resyncMessage(error) } }));
         } finally {
             setDismissingId(null);
+            await queryClient.invalidateQueries({ queryKey: ['tally-sync', 'entries'] });
+        }
+    }
+
+    /**
+     * How alive the factory PC is, from its last check-in. `unavailable`
+     * — not "never" — while the summary has not answered or failed: the
+     * page does not know, and a red light over a measurement nobody made
+     * is as wrong as a green one.
+     */
+    const liveness = agentLiveness(summary?.agent.last_checked_at, clock, !!summary && !summaryError);
+
+    /**
+     * "Sync Now" — DEC-20260825-002. Behind a confirm because the press is
+     * an OUTWARD act: within about ninety seconds it can put vouchers into
+     * the accountant's live books. The dialog says what it does, says that
+     * it reads nothing from Tally, and — the part nobody can guess — says
+     * that a shift still running will be sent as it stands, with later
+     * approvals landing in a follow-up voucher.
+     */
+    function confirmSyncNow() {
+        Modal.confirm({
+            title: SYNC_NOW_CONFIRM.title,
+            content: <div style={{ whiteSpace: 'pre-line' }}>{SYNC_NOW_CONFIRM.body}</div>,
+            okText: SYNC_NOW_CONFIRM.ok,
+            cancelText: SYNC_NOW_CONFIRM.cancel,
+            onOk: () => syncNow(),
+        });
+    }
+
+    async function syncNow() {
+        setSyncingNow(true);
+        setSyncNowOutcome(null);
+        try {
+            const result = await requestTallySyncNow();
+            // Worded from the SERVER's own read of the agent at the moment
+            // of the request, not from this page's cached summary — the
+            // difference is exactly the case where the factory PC went off
+            // since the last refresh. Never says "sent": nothing has
+            // reached Tally yet, and the Status column is what will say so.
+            setSyncNowOutcome(syncNowMessage(result, agentLiveness(result.agent.last_checked_at, Date.now())));
+        } catch (error) {
+            setSyncNowOutcome({ tone: 'warning', text: resyncMessage(error) });
+        } finally {
+            setSyncingNow(false);
             await queryClient.invalidateQueries({ queryKey: ['tally-sync', 'entries'] });
         }
     }
@@ -342,33 +508,93 @@ export default function TallySyncPage() {
     return (
         <>
             {/* Failed rows carry a red wash as well as a red tag — scanned from
-                across the room, colour is what gets noticed, not wording. */}
-            <style>{'.tally-sync-failed-row > td { background: #fff1f0 !important; }'}</style>
+                across the room, colour is what gets noticed, not wording. The
+                hold and failed colours are the ones the floor already reads;
+                nothing below changes them.
 
-            <Space style={{ width: '100%', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                Under 768px the header and the filter bar stop sitting side by
+                side and stack full-width: on a phone in the office, controls
+                squeezed into a 90px column are unusable, and this page is one
+                an accountant does open on a phone to check whether a voucher
+                went. */}
+            <style>{`
+                .tally-sync-failed-row > td { background: #fff1f0 !important; }
+                .tally-sync-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+                .tally-sync-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+                @media (max-width: 768px) {
+                    .tally-sync-header, .tally-sync-actions { flex-direction: column; align-items: stretch; }
+                    .tally-sync-actions > * { width: 100%; }
+                    .tally-sync-filters > .ant-space-item { width: 100%; }
+                    .tally-sync-filters > .ant-space-item > * { width: 100% !important; }
+                }
+            `}</style>
+
+            <div className="tally-sync-header">
                 <Typography.Title level={3} style={{ marginBottom: 8 }}>
                     Tally Sync
                 </Typography.Title>
-                <Button onClick={() => Promise.all([refetch(), refetchSummary()])} loading={isFetching && !busy}>
-                    Refresh
-                </Button>
-            </Space>
+                <div className="tally-sync-actions">
+                    {/* The freshness of the factory PC, beside the control
+                        that reloads this page — compact, because it is a
+                        header, and worded so "never checked in" and "we
+                        could not find out" never read as each other. Says
+                        nothing about which token or what it may do. */}
+                    <Tooltip
+                        title={
+                            liveness.state === 'stale'
+                                ? 'Agent offline'
+                                : liveness.state === 'never'
+                                    ? 'Agent has never run'
+                                    : liveness.state === 'unavailable'
+                                        ? 'Agent status unknown'
+                                        : ''
+                        }
+                    >
+                        <Typography.Text
+                            type={liveness.state === 'fresh' ? 'secondary' : liveness.state === 'stale' ? 'warning' : 'secondary'}
+                            style={{ fontSize: 12, whiteSpace: 'nowrap' }}
+                        >
+                            {agentLivenessLabel(liveness)}
+                        </Typography.Text>
+                    </Tooltip>
+                    <Button onClick={() => Promise.all([refetch(), refetchSummary()])} loading={isFetching && !busy}>
+                        Refresh
+                    </Button>
+                    {/* Owner/Accounts only. Absent — not disabled — for
+                        everyone else: a greyed control invites a question
+                        nobody on the floor can answer. The server refuses
+                        the request either way. */}
+                    {maySyncNow && (
+                        <Tooltip title="Release queued vouchers for the next agent check">
+                            <Button type="primary" loading={syncingNow} disabled={busy} onClick={confirmSyncNow}>
+                                Sync Now
+                            </Button>
+                        </Tooltip>
+                    )}
+                </div>
+            </div>
+
+            {syncNowOutcome && (
+                <Alert
+                    type={syncNowOutcome.tone}
+                    showIcon
+                    closable
+                    onClose={() => setSyncNowOutcome(null)}
+                    style={{ marginBottom: 16 }}
+                    message={syncNowOutcome.text}
+                />
+            )}
 
             {isError && (
                 <Alert
                     type="error"
                     showIcon
                     style={{ marginBottom: 16 }}
-                    message={<strong>Could not load the sync queue</strong>}
+                    message={<strong>Queue unavailable</strong>}
                     description={
                         <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                            <span>
-                                This page cannot tell you whether any vouchers failed — an empty list below means
-                                nothing was read, NOT that everything is in Tally. Check the connection, or that
-                                this login has Tally Sync access, and try again.
-                            </span>
                             <Button danger type="primary" loading={isFetching} onClick={() => refetch()}>
-                                Try again
+                                Retry
                             </Button>
                         </Space>
                     }
@@ -383,27 +609,25 @@ export default function TallySyncPage() {
                     message={
                         <strong>
                             {failed.length === 1
-                                ? '1 voucher failed — Tally has not received it'
-                                : `${failed.length} vouchers failed — Tally has not received them`}
+                                ? '1 failed — not in Tally'
+                                : `${failed.length} failed — not in Tally`}
                         </strong>
                     }
                     description={
                         <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                            <span>
-                                These numbers are in the ERP but NOT in the accountant's books. Read the reason on
-                                each row below, fix it, then Resync. Failed vouchers are listed first.
-                            </span>
+                            <span>Open row → Fix → Resync.</span>
+                            {/* Numbers, not prose, but they stay: without them
+                                the count above reads as a total when it is a
+                                floor. */}
                             {truncated && (
                                 <span>
-                                    Holding {entries.length} of {total}
-                                    {filtersActive ? ' matching' : ''} vouchers (all failed and pending first) —
-                                    the rest were not fetched.
+                                    Showing {entries.length} of {total}{filtersActive ? ' matching' : ''} — rest
+                                    not fetched.
                                 </span>
                             )}
                             {failedElsewhere > 0 && (
                                 <span>
-                                    {failedElsewhere} more failed voucher{failedElsewhere === 1 ? '' : 's'} sit outside
-                                    these filters.
+                                    {failedElsewhere} more failed outside filters.
                                 </span>
                             )}
                             <Button danger type="primary" loading={resyncingAll} onClick={resyncAllFailed}>
@@ -514,7 +738,7 @@ export default function TallySyncPage() {
 
             {/* The filter bar. Every control writes straight into `filters`,
                 which is the query key — the server does the narrowing. */}
-            <Space wrap style={{ marginBottom: 12 }}>
+            <Space wrap className="tally-sync-filters" style={{ marginBottom: 12 }}>
                 <Select<TallySyncStatus[]>
                     mode="multiple"
                     allowClear
@@ -537,9 +761,35 @@ export default function TallySyncPage() {
                     value={filters.category ?? []}
                     onChange={(value) => setFilter('category', value.length > 0 ? value : undefined)}
                 />
+                {/* The voucher type as the QUEUE labels it (the raw
+                    tally_voucher_type the server filter matches), offered
+                    from the types the queue actually holds. A type filter
+                    and nothing else: no party, no supplier, no rate, no
+                    amount and no payload is filterable or enumerable from
+                    this bar — those are FC-06 questions. */}
+                <Select<string[]>
+                    mode="multiple"
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    placeholder="Any voucher type"
+                    style={{ minWidth: 220 }}
+                    options={voucherTypeFilterOptions(summary?.voucher_types)}
+                    value={filters.voucher_type ?? []}
+                    onChange={(value) => setFilter('voucher_type', value.length > 0 ? value : undefined)}
+                />
                 <DatePicker.RangePicker
                     allowEmpty={[true, true]}
                     placeholder={['Voucher date from', 'to']}
+                    // Today / Yesterday / Last 7 days, computed from the
+                    // FACTORY's day (the same date the counts above are
+                    // bucketed by), never the browser's — at 00:30 IST
+                    // those are different dates and the presets would
+                    // silently disagree with the header.
+                    presets={businessDatePresets(summary?.today.date).map((preset) => ({
+                        label: preset.label,
+                        value: [dayjs(preset.from), dayjs(preset.to)] as [dayjs.Dayjs, dayjs.Dayjs],
+                    }))}
                     value={[filters.from ? dayjs(filters.from) : null, filters.to ? dayjs(filters.to) : null]}
                     onChange={(_, dateStrings) => {
                         // Business dates (the voucher's date in Tally), not
@@ -570,212 +820,249 @@ export default function TallySyncPage() {
                 )}
             </Space>
 
-            <Table<TallySyncEntry>
-                scroll={{ x: 'max-content' }}
-                rowKey="id"
-                loading={isLoading}
-                dataSource={entries}
-                pagination={{ defaultPageSize: 25, showSizeChanger: true }}
-                rowClassName={(row) => (row.status === 'failed' ? 'tally-sync-failed-row' : '')}
-                columns={[
-                    {
-                        title: 'Voucher',
-                        render: (_, row) => (
-                            <Space direction="vertical" size={0}>
-                                <strong>{voucherNumber(row)}</strong>
-                                <Typography.Text type="secondary">{row.tally_voucher_type}</Typography.Text>
-                                {/* The agent's builder for this type says, in
-                                    its own docblock, that it is unvalidated
-                                    (Sales, DEC-20260809-003) — said on the
-                                    row, in the backend's words on hover. */}
-                                {row.flags?.unvalidated_builder && (
-                                    <Tooltip title={row.flags.unvalidated_builder.note}>
-                                        <Tag color="warning" style={{ marginTop: 2 }}>unvalidated builder</Tag>
-                                    </Tooltip>
-                                )}
-                            </Space>
-                        ),
-                    },
-                    {
-                        title: 'Category',
-                        render: (_, row) => (
-                            // categoryLabel() adds "· posts as Stock Journal"
-                            // where the ERP's label is not what Tally receives
-                            // — the row must never send anyone looking for a
-                            // voucher type the books do not contain.
-                            <div style={{ maxWidth: 260, whiteSpace: 'normal' }}>{categoryLabel(row.category)}</div>
-                        ),
-                    },
-                    {
-                        title: 'Batch / Source',
-                        render: (_, row) => {
-                            const batch = payloadText(row, 'batch_number');
-                            const shift = payloadText(row, 'shift');
-
-                            return (
+            {/* No table at all when the queue could not be read — an empty
+                grid under the red alert reads as "nothing queued", which is
+                a count nobody took. Stale rows from a failed refetch stay. */}
+            <QueueTableSection unavailable={queueUnavailable(isError, entries.length)}>
+                <Table<TallySyncEntry>
+                    // max-content so no column is squeezed to an unreadable
+                    // width; the header sticks so the column names stay put
+                    // while an accountant scrolls a long day's queue.
+                    scroll={{ x: 'max-content' }}
+                    sticky
+                    size="middle"
+                    rowKey="id"
+                    loading={isLoading}
+                    dataSource={entries}
+                    pagination={{ defaultPageSize: 25, showSizeChanger: true }}
+                    rowClassName={(row) => (row.status === 'failed' ? 'tally-sync-failed-row' : '')}
+                    columns={[
+                        {
+                            title: 'Voucher',
+                            render: (_, row) => (
                                 <Space direction="vertical" size={0}>
-                                    {batch && <span>Batch {batch}</span>}
-                                    {!batch && shift && <span>{shift} shift</span>}
-                                    <Typography.Text type="secondary">
-                                        {row.syncable_type} #{row.syncable_id}
-                                    </Typography.Text>
-                                    <Link to="/production/shift-production">Open production entries</Link>
-                                </Space>
-                            );
-                        },
-                    },
-                    {
-                        title: 'Status',
-                        render: (_, row) =>
-                            row.hold ? (
-                                // A held shift voucher is deliberately not with
-                                // the agent yet (DEC-20260807-011) — different
-                                // claim from "waiting for agent", which reads
-                                // as "the factory machine should have taken
-                                // this already".
-                                <Space direction="vertical" size={0}>
-                                    <Tag color="blue">{holdCopy(row.hold).tag}</Tag>
-                                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                        {holdCopy(row.hold).detail}
-                                    </Typography.Text>
-                                </Space>
-                            ) : (
-                                <Tag color={statusColor[row.status]}>{statusLabel[row.status]}</Tag>
-                            ),
-                    },
-                    {
-                        title: 'Tries',
-                        dataIndex: 'attempts',
-                        align: 'right',
-                    },
-                    {
-                        title: 'What Tally said',
-                        render: (_, row) => {
-                            const outcome = outcomes[row.id];
-
-                            return (
-                                <div style={{ maxWidth: 380, whiteSpace: 'normal' }}>
-                                    {row.error_message ? (
-                                        <>
-                                            <Typography.Text type="danger">{row.error_message}</Typography.Text>
-                                            {row.fix && (
-                                                <div style={{ marginTop: 4 }}>
-                                                    <Typography.Text style={{ fontSize: 12 }}>
-                                                        {row.fix.sentence}{' '}
-                                                        <Link to={row.fix.path}>Open the fix</Link>
-                                                    </Typography.Text>
-                                                </div>
-                                            )}
-                                        </>
-                                    ) : row.error_withheld ? (
-                                        // Withheld, not absent — the row DID fail; a bare "—" here
-                                        // would read as "no error" (FC-06, second half).
-                                        <Typography.Text type="warning">{row.error_withheld}</Typography.Text>
-                                    ) : (
-                                        <Typography.Text type="secondary">—</Typography.Text>
+                                    <strong>{voucherNumber(row)}</strong>
+                                    <Typography.Text type="secondary">{row.tally_voucher_type}</Typography.Text>
+                                    {/* The agent's builder for this type says, in
+                                        its own docblock, that it is unvalidated
+                                        (Sales, DEC-20260809-003) — said on the
+                                        row, in the backend's words on hover. */}
+                                    {row.flags?.unvalidated_builder && (
+                                        <Tooltip title={row.flags.unvalidated_builder.note}>
+                                            <Tag color="warning" style={{ marginTop: 2 }}>unvalidated builder</Tag>
+                                        </Tooltip>
                                     )}
-                                    {showsFixedAfterFailures(row) && (
-                                        <Typography.Text type="success" style={{ display: 'block', fontSize: 12 }}>
-                                            Fixed after {row.resolution_log!.length} failed attempt{row.resolution_log!.length > 1 ? 's' : ''} — payload regenerated from current mappings.
+                                </Space>
+                            ),
+                        },
+                        {
+                            // THE VOUCHER'S OWN DATE — the day this document
+                            // carries in Tally's books, which is the day an
+                            // accountant reconciles by. Rendered from the
+                            // string, never through a Date: "2026-07-23" is the
+                            // 23rd everywhere, and parsing it as an instant
+                            // shows a viewer west of Greenwich the 22nd.
+                            title: 'Voucher date',
+                            render: (_, row) => (
+                                <span style={{ whiteSpace: 'nowrap' }}>{voucherDate(row.business_date)}</span>
+                            ),
+                        },
+                        {
+                            title: 'Category',
+                            render: (_, row) => (
+                                // categoryLabel() adds "· posts as Stock Journal"
+                                // where the ERP's label is not what Tally receives
+                                // — the row must never send anyone looking for a
+                                // voucher type the books do not contain.
+                                <div style={{ maxWidth: 260, whiteSpace: 'normal' }}>{categoryLabel(row.category)}</div>
+                            ),
+                        },
+                        {
+                            // Not "Batch / Source": most of the queue is not a
+                            // batch, and the cell says what the row's own source
+                            // record is.
+                            title: 'Source',
+                            render: (_, row) => <EntrySourceCell entry={row} />,
+                        },
+                        {
+                            title: 'Status',
+                            render: (_, row) =>
+                                row.hold ? (
+                                    // A held shift voucher is deliberately not with
+                                    // the agent yet (DEC-20260807-011) — different
+                                    // claim from "waiting for agent", which reads
+                                    // as "the factory machine should have taken
+                                    // this already".
+                                    <Space direction="vertical" size={0}>
+                                        <Tag color="blue">{holdCopy(row.hold).tag}</Tag>
+                                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                            {holdCopy(row.hold).detail}
+                                        </Typography.Text>
+                                    </Space>
+                                ) : (
+                                    <Tag color={statusColor[row.status]}>{statusLabel[row.status]}</Tag>
+                                ),
+                        },
+                        {
+                            title: 'Tries',
+                            dataIndex: 'attempts',
+                            align: 'right',
+                        },
+                        {
+                            title: 'What Tally said',
+                            render: (_, row) => {
+                                const outcome = outcomes[row.id];
+
+                                return (
+                                    <div style={{ maxWidth: 380, whiteSpace: 'normal' }}>
+                                        {row.error_message ? (
+                                            <>
+                                                <Typography.Text type="danger">{row.error_message}</Typography.Text>
+                                                {row.fix && (
+                                                    <div style={{ marginTop: 4 }}>
+                                                        <Typography.Text style={{ fontSize: 12 }}>
+                                                            {row.fix.sentence}{' '}
+                                                            <Link to={row.fix.path}>Open the fix</Link>
+                                                        </Typography.Text>
+                                                    </div>
+                                                )}
+                                            </>
+                                        ) : row.error_withheld ? (
+                                            // Withheld, not absent — the row DID fail; a bare "—" here
+                                            // would read as "no error" (FC-06, second half).
+                                            <Typography.Text type="warning">{row.error_withheld}</Typography.Text>
+                                        ) : (
+                                            <Typography.Text type="secondary">—</Typography.Text>
+                                        )}
+                                        {showsFixedAfterFailures(row) && (
+                                            <Typography.Text type="success" style={{ display: 'block', fontSize: 12 }}>
+                                                Fixed after {row.resolution_log!.length} failed attempt{row.resolution_log!.length > 1 ? 's' : ''} — payload regenerated from current mappings.
+                                            </Typography.Text>
+                                        )}
+                                        {outcome && (
+                                            <div style={{ marginTop: 4 }}>
+                                                <Typography.Text type={outcome.ok ? 'success' : 'warning'}>
+                                                    {outcome.message}
+                                                </Typography.Text>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            },
+                        },
+                        {
+                            // WHERE THIS VOUCHER HAS GOT TO, scannable down the
+                            // column: the FURTHEST point it has reached reads
+                            // first and in full weight, so an eye running down
+                            // the page sorts "In Tally" from "Collected" from
+                            // "Not collected" without reading a word twice.
+                            //
+                            // Nothing is hidden to achieve that. Queued is still
+                            // there — smaller and muted, because it is the one
+                            // stamp every row has and so the one that
+                            // distinguishes nothing — and a voucher that reached
+                            // Tally still shows when the agent collected it,
+                            // which is the pair a person needs when a post took
+                            // a suspiciously long time. Both stay on one line
+                            // each so the column cannot reflow into a paragraph.
+                            title: 'Last activity',
+                            render: (_, row) => (
+                                <Space direction="vertical" size={0} style={{ whiteSpace: 'nowrap' }}>
+                                    {row.synced_at && <span><strong>In Tally</strong> {instant(row.synced_at)}</span>}
+                                    {!row.synced_at && row.delivered_at && (
+                                        <Tooltip title="The agent has taken this voucher but has not reported back yet.">
+                                            <span><strong>Collected</strong> {instant(row.delivered_at)}</span>
+                                        </Tooltip>
+                                    )}
+                                    {!row.synced_at && !row.delivered_at && (
+                                        <Typography.Text type="secondary"><strong>Not collected yet</strong></Typography.Text>
+                                    )}
+                                    {row.synced_at && row.delivered_at && (
+                                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                            Collected {instant(row.delivered_at)}
                                         </Typography.Text>
                                     )}
-                                    {outcome && (
-                                        <div style={{ marginTop: 4 }}>
-                                            <Typography.Text type={outcome.ok ? 'success' : 'warning'}>
-                                                {outcome.message}
-                                            </Typography.Text>
-                                        </div>
-                                    )}
-                                </div>
-                            );
+                                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                        Queued {instant(row.created_at)}
+                                    </Typography.Text>
+                                </Space>
+                            ),
                         },
-                    },
-                    {
-                        title: 'Last activity',
-                        render: (_, row) => (
-                            <Space direction="vertical" size={0}>
-                                {row.synced_at && <span>In Tally {instant(row.synced_at)}</span>}
-                                {!row.synced_at && row.delivered_at && (
-                                    <Tooltip title="The agent has taken this voucher but has not reported back yet.">
-                                        <span>Collected {instant(row.delivered_at)}</span>
-                                    </Tooltip>
-                                )}
-                                {!row.synced_at && !row.delivered_at && (
-                                    <Typography.Text type="secondary">Not collected yet</Typography.Text>
-                                )}
-                                <Typography.Text type="secondary">Queued {instant(row.created_at)}</Typography.Text>
-                            </Space>
-                        ),
-                    },
-                    {
-                        title: 'Actions',
-                        render: (_, row) => {
-                            const view = (
-                                <Button size="small" onClick={() => setViewingId(row.id)}>
-                                    View
-                                </Button>
-                            );
+                        {
+                            // Pinned right so the buttons are reachable on a
+                            // 375px phone without scrolling the whole table
+                            // across first — this column is the reason someone
+                            // opens the page on a phone at all.
+                            title: 'Actions',
+                            fixed: 'right',
+                            render: (_, row) => {
+                                const view = (
+                                    <Button size="small" onClick={() => setViewingId(row.id)}>
+                                        View
+                                    </Button>
+                                );
 
-                            if (row.hold) {
+                                if (row.hold) {
+                                    return (
+                                        <Space>
+                                            {view}
+                                            <Tooltip title="Send shift now (skip hold)">
+                                                <Button
+                                                    size="small"
+                                                    loading={releasingId === row.id}
+                                                    disabled={busy && releasingId !== row.id}
+                                                    onClick={() => confirmRelease(row)}
+                                                >
+                                                    Release now
+                                                </Button>
+                                            </Tooltip>
+                                        </Space>
+                                    );
+                                }
+
                                 return (
                                     <Space>
                                         {view}
-                                        <Tooltip title="Send this shift's voucher to Tally without waiting for the shift end / quiet period. Press View first to see exactly what will post.">
+                                        {row.status === 'failed' && (
                                             <Button
+                                                danger
                                                 size="small"
-                                                loading={releasingId === row.id}
-                                                disabled={busy && releasingId !== row.id}
-                                                onClick={() => releaseOne(row)}
+                                                loading={retryingId === row.id}
+                                                disabled={busy && retryingId !== row.id}
+                                                onClick={() => resyncOne(row)}
                                             >
-                                                Release now
+                                                Resync
                                             </Button>
-                                        </Tooltip>
+                                        )}
+                                        {row.status === 'failed' && (
+                                            <Tooltip title="Write this voucher off — it will never be sent to Tally. For dead vouchers (demo data) that must not reach the books.">
+                                                <Button
+                                                    size="small"
+                                                    loading={dismissingId === row.id}
+                                                    disabled={busy && dismissingId !== row.id}
+                                                    onClick={() => confirmDismiss(row)}
+                                                >
+                                                    Dismiss
+                                                </Button>
+                                            </Tooltip>
+                                        )}
                                     </Space>
                                 );
-                            }
-
-                            return (
-                                <Space>
-                                    {view}
-                                    {row.status === 'failed' && (
-                                        <Button
-                                            danger
-                                            size="small"
-                                            loading={retryingId === row.id}
-                                            disabled={busy && retryingId !== row.id}
-                                            onClick={() => resyncOne(row)}
-                                        >
-                                            Resync
-                                        </Button>
-                                    )}
-                                    {row.status === 'failed' && (
-                                        <Tooltip title="Write this voucher off — it will never be sent to Tally. For dead vouchers (demo data) that must not reach the books.">
-                                            <Button
-                                                size="small"
-                                                loading={dismissingId === row.id}
-                                                disabled={busy && dismissingId !== row.id}
-                                                onClick={() => confirmDismiss(row)}
-                                            >
-                                                Dismiss
-                                            </Button>
-                                        </Tooltip>
-                                    )}
-                                </Space>
-                            );
+                            },
                         },
-                    },
-                ]}
-                expandable={{
-                    expandedRowRender: (row) => (
-                        <>
-                            <Typography.Text type="secondary">
-                                Exactly what the agent was given to post:
-                            </Typography.Text>
-                            <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{JSON.stringify(row.payload, null, 2)}</pre>
-                        </>
-                    ),
-                }}
-            />
+                    ]}
+                    expandable={{
+                        expandedRowRender: (row) => (
+                            <>
+                                <Typography.Text type="secondary">
+                                    Exactly what the agent was given to post:
+                                </Typography.Text>
+                                <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{JSON.stringify(row.payload, null, 2)}</pre>
+                            </>
+                        ),
+                    }}
+                />
+            </QueueTableSection>
 
             {/* The honesty line: what this table can NEVER show. These are
                 the accountant's own transactions — never counted here, never
@@ -802,7 +1089,7 @@ export default function TallySyncPage() {
                 releasingId={releasingId}
                 dismissingId={dismissingId}
                 onResync={resyncOne}
-                onRelease={releaseOne}
+                onRelease={confirmRelease}
                 onDismiss={confirmDismiss}
             />
 

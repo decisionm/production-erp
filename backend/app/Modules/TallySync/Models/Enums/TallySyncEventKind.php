@@ -43,6 +43,20 @@ enum TallySyncEventKind: string
     /** A person released a held shift voucher ahead of the gate. */
     case VoucherReleased = 'voucher.released';
 
+    /**
+     * A person pressed the ERP page's "Sync Now" — DEC-20260825-002's
+     * queue-wide request that what is already queued go out on the agent's
+     * next poll. Carries NO entry id: the request is about the queue, not
+     * about one voucher, and the vouchers it actually frees get their own
+     * voucher.released rows on their own timelines.
+     *
+     * Recorded on EVERY press, including the ones that free nothing — a
+     * request made while the agent is offline, or with nothing held, would
+     * otherwise leave no trace at all, and "who asked, and when" is the
+     * whole audit question for a button that reaches the live books.
+     */
+    case SyncRequested = 'sync.requested';
+
     /** Tally → ERP: a masters pull landed. */
     case MastersReceived = 'masters.received';
 

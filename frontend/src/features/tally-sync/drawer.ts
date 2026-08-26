@@ -81,6 +81,38 @@ export function instant(value: string | null | undefined): string {
     });
 }
 
+/** Month names for voucherDate(); index 0 is January. */
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * THE VOUCHER'S OWN DATE, rendered literally — the date this document
+ * carries in Tally's books (payload.voucher_date, surfaced as
+ * `business_date`).
+ *
+ * NO Date, NO dayjs, ON PURPOSE. A voucher date is a calendar date the
+ * factory decided, not an instant: it is stored as "2026-07-23" and it is
+ * the 23rd in every timezone on earth. `new Date('2026-07-23')` parses that
+ * as UTC MIDNIGHT, so a viewer west of Greenwich renders the 22nd — an
+ * accountant reconciling a day would be looking at the wrong day, and the
+ * screen would disagree with the voucher in Tally. Splitting the string
+ * cannot do that.
+ *
+ * Anything that is not a plain YYYY-MM-DD is shown as it came rather than
+ * reinterpreted, and a missing date is an em dash — never today's, never a
+ * guess.
+ */
+export function voucherDate(value: string | null | undefined): string {
+    if (!value) return '—';
+
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+    if (!match) return value;
+
+    const [, year, month, day] = match;
+    const name = MONTHS[Number(month) - 1];
+
+    return name ? `${day} ${name} ${year}` : value;
+}
+
 /**
  * The hold copy — one tag and one line under it — worded once for the
  * Status column and the drawer's Release section. A held shift voucher is
@@ -294,18 +326,81 @@ export function timelineItems(rows: readonly TimelineItem[] | null | undefined):
 // ---- ERP source -------------------------------------------------------------
 
 /**
- * Where the ERP side of this voucher lives — the same "Open production
- * entries" link the table's Batch / Source cell has always shown, offered
- * only for a production voucher (by module, or by a Shift-shaped syncable
- * the classifier could not place). A Sales or Receipt Note voucher gets no
- * link rather than a wrong one.
+ * One row of the source matrix below: what the link says, and where it
+ * goes. `to` is a plain path for a destination that needs no id (the
+ * production entries list), or a function of the entry's `syncable_id` for
+ * a page that opens ONE document.
+ */
+interface SourceTarget {
+    label: string;
+    to: string | ((id: number) => string);
+}
+
+/**
+ * WHERE THE ERP SIDE OF A VOUCHER LIVES — the whole table, once, keyed on
+ * the CATEGORY KEY the server sends (TallyTransactionCategory's value) and
+ * on nothing else.
+ *
+ * The table is exact: a key that is not written here gets NO link. That is
+ * the point of it. The queue holds seven ERP-built categories and the
+ * catalogue names more that live in the accountant's books, and a resolver
+ * that reasoned about a row instead of looking it up is how `receipt`
+ * (the accountant's Receipt voucher, which the ERP does not mirror) ends
+ * up pointed at the goods-receipts page. So: `journal`, every Tally-only
+ * key, `sales_order` and `unknown` are absent on purpose, not forgotten.
+ *
+ * THE MORPH IS NOT CONSULTED. It used to be — a Shift-shaped syncable was
+ * read as production whatever its category said — and that is exactly the
+ * guess this table exists to stop: the classifier returns Unknown for a
+ * label/morph mismatch (TransactionClassifier), and an Unknown row must
+ * offer no destination rather than a plausible one.
+ *
+ * The query spellings are the destination pages' own, not invented here:
+ *   `?grn=`      GoodsReceiptsPage reads it (`searchParams.get('grn')`)
+ *   `?open=`     usePurchaseOrderListParams reads it (`?po=` is its legacy alias)
+ *   `?open=INV-` / `?open=DN-`  useSalesListParams via parseDocumentRef —
+ *                the same string sales/filters.ts documentPath() builds, and
+ *                EntrySource.test.tsx pins the two against each other.
+ */
+const SOURCE_BY_CATEGORY = new Map<string, SourceTarget>([
+    // A Map, not an object literal: the key arrives off the wire, and a
+    // plain object answers `constructor` and `toString` out of its
+    // prototype — a lookup that must mean "no such category" returning a
+    // function is how a resolver throws on data instead of refusing it.
+    //
+    // Both production categories — per shift and per batch — land on the
+    // one list the floor opens; it carries no id, so it is offered
+    // whatever the syncable id is.
+    ['production_stock_journal_shift', { label: 'Open production entries', to: '/production/shift-production' }],
+    ['production_stock_journal_batch', { label: 'Open production entries', to: '/production/shift-production' }],
+    ['receipt_note', { label: 'Open the goods receipt', to: (id) => `/procurement/goods-receipts?grn=${id}` }],
+    ['purchase_order', { label: 'Open the purchase order', to: (id) => `/procurement/purchase-orders?open=${id}` }],
+    ['sales_invoice', { label: 'Open the invoice', to: (id) => `/sales/invoices?open=INV-${id}` }],
+    ['delivery_note', { label: 'Open the delivery note', to: (id) => `/sales/deliveries?open=DN-${id}` }],
+]);
+
+/**
+ * The ERP record behind ONE voucher, as a link — the same answer for the
+ * queue's Source cell and the drawer's Source record, because both ask
+ * this and nothing else.
+ *
+ * Null is a real answer and the common one: a category with no row in the
+ * matrix (a Journal, an accountant's own voucher type, an unclassified
+ * row), or an id a document page could not be opened with. A page that
+ * opens one document is only linked with a POSITIVE WHOLE id — `?grn=0`
+ * or `?open=INV--3` would send a person to a page that finds nothing and
+ * reads as "the document is gone". The production list takes no id, so an
+ * unusable id cannot cost it its link.
  */
 export function sourceLink(entry: TallySyncEntry): { to: string; label: string } | null {
-    const production = entry.category?.source_module === 'production'
-        || entry.syncable_type === 'Shift'
-        || entry.syncable_type === 'ShiftProductionEntry';
+    const target = SOURCE_BY_CATEGORY.get(entry.category?.key ?? '');
 
-    return production ? { to: '/production/shift-production', label: 'Open production entries' } : null;
+    if (!target) return null;
+    if (typeof target.to === 'string') return { to: target.to, label: target.label };
+
+    const id = entry.syncable_id;
+
+    return Number.isInteger(id) && id > 0 ? { to: target.to(id), label: target.label } : null;
 }
 
 /** The short name of each counted mapping state, for the summary row's tags. */
