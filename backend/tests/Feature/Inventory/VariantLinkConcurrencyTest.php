@@ -107,6 +107,65 @@ class VariantLinkConcurrencyTest extends TestCase
         $this->assertMatchesRegularExpression('/order by "?id"? asc/i', $reads[0]);
     }
 
+    /**
+     * CREATING a variant loses the race the same way UPDATING one does.
+     *
+     * One request creates C -> A while another points A -> B. Both
+     * validations see A as an unlinked base; only the update was taking the
+     * locked path, so the create lands afterwards and leaves C -> A -> B
+     * (Codex, 5543e21). The create re-checks under the target's lock too.
+     */
+    public function test_creating_a_variant_of_an_item_that_became_a_variant_is_refused(): void
+    {
+        $service = app(ItemService::class);
+
+        $base = $this->item('SYN-BASE');
+        $a = $this->item('SYN-A');
+
+        // The other editor won: A is a variant now.
+        $a->update(['variant_of_item_id' => $base->id]);
+
+        $this->expectException(ValidationException::class);
+
+        $service->create([
+            'sku' => 'SYN-C',
+            'name' => 'Synthetic C',
+            'uom' => 'Nos.',
+            'variant_of_item_id' => $a->id,
+        ]);
+    }
+
+    public function test_creating_a_variant_of_a_real_base_still_goes_through(): void
+    {
+        $service = app(ItemService::class);
+
+        $base = $this->item('SYN-BASE');
+
+        $created = $service->create([
+            'sku' => 'SYN-TRAY',
+            'name' => 'Synthetic Tray',
+            'uom' => 'Nos.',
+            'variant_of_item_id' => $base->id,
+            'variant_label' => '490/box tray',
+        ]);
+
+        $this->assertSame($base->id, $created->variant_of_item_id);
+        $this->assertSame('490/box tray', $created->variant_label);
+    }
+
+    public function test_creating_a_plain_item_takes_no_lock_path(): void
+    {
+        $service = app(ItemService::class);
+
+        $created = $service->create([
+            'sku' => 'SYN-PLAIN',
+            'name' => 'Synthetic Plain',
+            'uom' => 'Nos.',
+        ]);
+
+        $this->assertNull($created->variant_of_item_id);
+    }
+
     public function test_a_legitimate_link_still_goes_through(): void
     {
         $service = app(ItemService::class);

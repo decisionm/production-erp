@@ -221,12 +221,52 @@ class ItemService
     {
         // Explicit here rather than relying on the DB column default: Eloquent's
         // create() doesn't re-fetch DB-applied defaults into the returned model.
-        return Item::create([
+        $attributes = [
             'reorder_level' => 0,
             'tracking_type' => 'none',
             'is_active' => true,
             ...$data,
-        ]);
+        ];
+
+        if (($attributes['variant_of_item_id'] ?? null) === null) {
+            return Item::create($attributes);
+        }
+
+        /*
+         * A NEW VARIANT LOSES THE RACE THE SAME WAY AN EDITED ONE DOES.
+         * One request creates C -> A while another points A -> B: both
+         * validations see A as an unlinked base, and if only the update
+         * locked, the create lands afterwards and leaves C -> A -> B
+         * (Codex, 5543e21). A brand-new row has no variants of its own, so
+         * the target's own link is the whole invariant here.
+         */
+        return DB::transaction(function () use ($attributes): Item {
+            $this->assertTargetIsStillABase((int) $attributes['variant_of_item_id']);
+
+            return Item::create($attributes);
+        });
+    }
+
+    /**
+     * Re-read the base under its own lock and refuse if it stopped being one.
+     */
+    private function assertTargetIsStillABase(int $targetId): Item
+    {
+        $target = Item::query()->whereKey($targetId)->lockForUpdate()->first();
+
+        if ($target === null) {
+            throw ValidationException::withMessages([
+                'variant_of_item_id' => 'That base product no longer exists.',
+            ]);
+        }
+
+        if ($target->variant_of_item_id !== null) {
+            throw ValidationException::withMessages([
+                'variant_of_item_id' => "\"{$target->displayName()}\" became a pack variant while this was being edited. Point this item at the BASE product they both vary from.",
+            ]);
+        }
+
+        return $target;
     }
 
     public function update(Item $item, array $data): Item
