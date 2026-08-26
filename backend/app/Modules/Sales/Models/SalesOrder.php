@@ -14,6 +14,23 @@ use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 class SalesOrder extends Model
 {
     /**
+     * The statuses an order is still OPEN in — the only ones an unmet
+     * promise date can be late for. A completed or cancelled order is never
+     * overdue: its date is history, not a promise still standing.
+     */
+    public const OPEN_STATUSES = [
+        SalesOrderStatus::Draft,
+        SalesOrderStatus::Confirmed,
+        SalesOrderStatus::PartiallyDelivered,
+    ];
+
+    /** The statuses whose expected date and notes may still be changed. */
+    public const EDITABLE_STATUSES = [
+        SalesOrderStatus::Draft,
+        SalesOrderStatus::Confirmed,
+    ];
+
+    /**
      * The show endpoint's trace (deliveries with cartons and Tally links,
      * invoices with Tally links), set by SalesOrderService::show() and read
      * by SalesOrderResource. A plain property, not an attribute: it is never
@@ -135,6 +152,49 @@ class SalesOrder extends Model
         }
 
         return $this->invoicesCount() === 0;
+    }
+
+    /**
+     * THE EDIT RULE, in one place — SalesOrderService::update() enforces it
+     * and SalesOrderResource::can_edit reports it, so the drawer's button
+     * and the server's refusal can never disagree. The expected date and
+     * the notes belong to the desk while the order is still draft or
+     * confirmed; from the first dispatch onwards they are history.
+     */
+    public function isEditable(): bool
+    {
+        return in_array($this->status, self::EDITABLE_STATUSES, true);
+    }
+
+    /**
+     * Is this order's promise date already past, on the FACTORY's calendar?
+     *
+     * Derived on every read and persisted nowhere — an order becomes
+     * overdue by the clock moving, not by anything being written to it.
+     *
+     * The app clock is UTC and the factory's day is IST (CLAUDE.md: never
+     * compare now() against a wall-clock value without localising it
+     * first). Judged today-against-today as ISO date strings, which sort
+     * lexicographically — so at 19:00 UTC, when the factory is already on
+     * the next morning, yesterday's promise reads overdue here too.
+     */
+    public function isOverdue(): bool
+    {
+        if ($this->expected_date === null) {
+            return false;
+        }
+
+        if (! in_array($this->status, self::OPEN_STATUSES, true)) {
+            return false;
+        }
+
+        return $this->expected_date->toDateString() < self::factoryToday();
+    }
+
+    /** Today on the factory's wall clock, as an ISO date — the one "today" every overdue read uses. */
+    public static function factoryToday(): string
+    {
+        return now()->setTimezone(config('tally-sync.factory_timezone'))->toDateString();
     }
 
     private function sumLines(string $column): string

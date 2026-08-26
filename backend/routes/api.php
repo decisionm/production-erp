@@ -396,7 +396,11 @@ Route::prefix('v1')->group(function () {
 
             // index takes the ListSalesOrdersRequest filters; show carries the
             // document's trace (deliveries with cartons, invoices, Tally links).
-            Route::apiResource('sales-orders', SalesOrderController::class)->only(['index', 'store', 'show']);
+            // update takes ONLY expected_date and notes, and only while the
+            // order is draft or confirmed (422 otherwise) — the promise date
+            // is typed by hand, never derived, and changing it moves no
+            // stock and queues nothing for Tally.
+            Route::apiResource('sales-orders', SalesOrderController::class)->only(['index', 'store', 'show', 'update']);
             Route::post('sales-orders/{sales_order}/confirm', [SalesOrderController::class, 'confirm']);
             // Cancel: draft/confirmed, nothing delivered, nothing invoiced —
             // else 422. Touches no stock, queues nothing for Tally.
