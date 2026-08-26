@@ -39,9 +39,9 @@ estimation version). Q53 is the Phase 7.6 configuration-lifecycle branch's
 (four selection-rule deferrals); Q54 is the Phase 7.5 material-flow branch's
 (five material-flow questions). Q61-Q62 are claimed by the sales-order
 fulfilment branch (may the ERP emit a Tally Sales Order voucher; the
-contested-stock hold rule). Q63-Q64 are claimed by the product-identity
-branch (Tally GRN usage; purchases without POs). New questions continue
-from Q65.
+contested-stock hold rule). Q63-Q65 are claimed by the product-identity
+branch (Tally GRN usage; purchases without POs; sync cadence). New
+questions continue from Q66.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 DEC-20260809-002/-003 landed with PR #155 (the finance-pull discovery
@@ -1649,4 +1649,25 @@ preceded it — but presumption is not a decision.)
 
 **Blocks:** whether the goods-receipt screen may offer "receive without
 order". Receipt AGAINST an open PO is unaffected and proceeds either way.
+*Open since 2026-08-26.*
+
+## Q65 · Should Tally sync run on a clock (e.g. three times a day)?
+
+Sync today is CONTINUOUS: the factory-PC agent polls the ERP roughly every
+90 seconds, and shift production vouchers are additionally gated by the
+shift-end release window (with a person's Sync Now for the impatient case,
+DEC-20260825-002). A request has been made for a SCHEDULED cadence —
+three runs per day — instead.
+
+The two designs serve different instincts: continuous sync means Tally is
+never more than minutes behind and a failure surfaces the same hour it
+happens; a 3x/day clock means the accountant sees predictable batches
+arrive at known times, and nothing lands mid-entry while they work. They
+cannot both govern. Moving to a clock would also have to say what happens
+to the shift-end release gate, which currently decides WHEN a production
+voucher may leave regardless of any polling interval.
+
+**Blocks:** any change to the agent's polling design. It does not block
+the queue page, filters, retry/dismiss/release, or Sync Now, which work
+the same under either cadence.
 *Open since 2026-08-26.*
