@@ -85,6 +85,8 @@ class EveryListFilterRefusesAnArrayTest extends TestCase
             'stock balances search' => ['/api/v1/inventory/stock-balances', 'search'],
             'stock balances item_id' => ['/api/v1/inventory/stock-balances', 'item_id'],
             'warehouses search' => ['/api/v1/inventory/warehouses', 'search'],
+            'stock movements item_id' => ['/api/v1/inventory/stock-movements', 'item_id'],
+            'stock movements warehouse_id' => ['/api/v1/inventory/stock-movements', 'warehouse_id'],
         ];
     }
 
@@ -129,6 +131,8 @@ class EveryListFilterRefusesAnArrayTest extends TestCase
         $this->getJson('/api/v1/inventory/serial-numbers')->assertOk();
         $this->getJson('/api/v1/inventory/stock-balances')->assertOk();
         $this->getJson('/api/v1/inventory/warehouses')->assertOk();
+        $this->getJson('/api/v1/inventory/stock-movements')->assertOk();
+        $this->getJson("/api/v1/inventory/stock-movements?item_id={$this->item->id}")->assertOk();
     }
 
     /**

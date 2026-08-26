@@ -47,6 +47,14 @@ abstract class Controller
      * The `item_id`-style filter on a list endpoint. `?:` keeps the tolerance
      * every caller already had — `item_id=0` and `item_id=abc` both mean "no
      * filter", as they always did — and only the array case is new.
+     *
+     * ONE THING DID NARROW, said here rather than left for a reviewer to find
+     * in the diff: this reads `query()`, where `$request->integer()` read
+     * `data()` — all input, body included. Every caller is a GET list whose
+     * clients send query strings (axios `params`, and `getJson` in the suite),
+     * and `perPage()`/`searchTerm()` above have always been query-only, so
+     * this makes the four filters on one endpoint agree rather than changing
+     * what any real request means.
      */
     protected function filterId(Request $request, string $key): ?int
     {
