@@ -21,8 +21,8 @@ use Tests\TestCase;
 /**
  * THE INCOMING-QC DESK'S QUEUE, AND WHAT IT IS ALLOWED TO SAY.
  *
- * Three separate defects are pinned here, all of them found by running the
- * code rather than reading it:
+ * Four findings are pinned here — three defects and one non-reproduction, all
+ * of them found by running the code rather than reading it:
  *
  *  1. THE QUEUE DID NOT EXIST. The page fed its GRN-line picker from
  *     `listGoodsReceipts()` — page one of twenty receipts — under
