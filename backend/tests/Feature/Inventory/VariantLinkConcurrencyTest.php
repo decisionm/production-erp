@@ -209,6 +209,36 @@ class VariantLinkConcurrencyTest extends TestCase
         $this->assertSame('812/box pouch', $variant->fresh()->variant_label);
     }
 
+    /**
+     * The SERVICE keeps the link/label pair whole, not just the FormRequest.
+     *
+     * `prepareVariantLabelForUnlink` runs in the request layer, so a caller
+     * that reaches the service directly — a command, a sync, a future
+     * controller — could unlink and set a label in one payload and leave a
+     * base product wearing a variant label. The invariant belongs to the
+     * write, so the write enforces it: clearing the link clears the label
+     * whatever the payload says.
+     */
+    public function test_unlinking_through_the_service_drops_a_label_sent_with_it(): void
+    {
+        $service = app(ItemService::class);
+
+        $base = $this->item('SYN-BASE');
+        $variant = $this->item('SYN-POUCH', [
+            'variant_of_item_id' => $base->id,
+            'variant_label' => '840/box pouch',
+        ]);
+
+        $service->update($variant, [
+            'variant_of_item_id' => null,
+            'variant_label' => '840/box pouch',
+        ]);
+
+        $fresh = $variant->fresh();
+        $this->assertNull($fresh->variant_of_item_id);
+        $this->assertNull($fresh->variant_label);
+    }
+
     public function test_a_legitimate_link_still_goes_through(): void
     {
         $service = app(ItemService::class);

@@ -308,6 +308,18 @@ class ItemService
                 });
             }
 
+            /*
+             * CLEARING THE LINK CLEARS THE LABEL, at the write. The request
+             * layer already does this (prepareVariantLabelForUnlink), but the
+             * pair is one fact and the invariant belongs to whoever writes it
+             * — a command, a sync or a future controller reaching the service
+             * directly must not be able to leave a base product wearing a
+             * variant label.
+             */
+            if (array_key_exists('variant_of_item_id', $data) && $data['variant_of_item_id'] === null) {
+                $data['variant_label'] = null;
+            }
+
             $item->update($data);
 
             return $item;
