@@ -103,7 +103,7 @@ describe('prefill', () => {
         // as MORE than was received and is refused at exact equality. That
         // premise is pinned in the backend suite
         // (IncomingInspectionPendingQueueTest::
-        //  test_a_decimal_string_survives_where_a_json_float_would_not).
+        //  test_a_decimal_string_reaches_bcmath_unaltered_where_a_json_number_does_not).
         const payload = inspectionPayload(values);
         expect(payload.inspected_quantity).toBe('12345678901.2345');
         expect(typeof payload.inspected_quantity).toBe('string');

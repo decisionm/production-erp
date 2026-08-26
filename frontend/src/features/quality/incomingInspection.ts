@@ -14,13 +14,15 @@ import type { PendingInspectionLine } from './types';
  *    SERVER side: PHP decodes a JSON number to a float, and `(string)` on a
  *    float renders at PHP's default precision of 14, so `12345678901.2345`
  *    reaches bcmath as `12345678901.235` — a larger figure than the operator
- *    typed. (That much is measured, in the backend suite. Whether it then
- *    reads as MORE than was received, and so refuses an arrival for being
- *    exactly itself, depends on the database holding the received side
- *    exactly; the SQLite test DB does not, so that step is reasoned, not
- *    observed.) Sending the operator's decimal STRING removes the conversion
- *    entirely and the question with it. The comparisons below are exact too,
- *    done on scaled BigInts at the column's own scale of 4.
+ *    typed. (That much is measured, in the backend suite. So is the
+ *    consequence, on the unconditional MySQL CI leg where the column holds
+ *    the received side exactly:
+ *    `test_a_json_number_is_refused_against_a_column_that_stored_the_figure_exactly`
+ *    sees a JSON number refused for being MORE than itself, and the decimal
+ *    string the page now sends accepted on the same row.) Sending the
+ *    operator's decimal STRING removes the conversion entirely and the
+ *    question with it. The comparisons below are exact too, done on scaled
+ *    BigInts at the column's own scale of 4.
  *
  * 2. RESET HAS TO BE TOTAL, AND PROVABLE. "Row A's numbers appeared under
  *    row B" is a state-transition bug, and a state-transition bug argued
