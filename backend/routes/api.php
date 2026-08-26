@@ -478,6 +478,16 @@ Route::prefix('v1')->group(function () {
                 Route::post('entries/{tally_sync_entry}/retry', [TallySyncController::class, 'retry']);
                 Route::post('entries/{tally_sync_entry}/dismiss', [TallySyncController::class, 'dismiss']);
                 Route::post('entries/{tally_sync_entry}/release', [TallySyncController::class, 'release']);
+                // "Sync Now" (DEC-20260825-002) — the queue-wide form of
+                // the release above: ask what is already queued to go out
+                // on the agent's next poll. Registered ahead of nothing
+                // parameterised and named with a literal segment that no
+                // entry id can be read as. Owner/Accounts only, enforced
+                // INSIDE the controller (SyncNowAuthority) on top of the
+                // tally-sync.manage this group already requires for a POST.
+                // It talks to Tally in no way at all: no post, no ack, no
+                // masters pull.
+                Route::post('sync-now', [TallySyncController::class, 'syncNow']);
 
                 Route::get('agent-tokens', [TallySyncAgentTokenController::class, 'index']);
                 Route::post('agent-tokens', [TallySyncAgentTokenController::class, 'store']);

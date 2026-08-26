@@ -12,6 +12,7 @@ import {
     snapshotXmlDecision,
     sourceLink,
     timelineItems,
+    voucherDate,
     voucherStockLines,
 } from './drawer';
 import type { TallySyncEntry, TallySyncSnapshot, TimelineItem } from './types';
@@ -176,6 +177,55 @@ describe('timelineItems', () => {
     });
 });
 
+describe('voucherDate', () => {
+    it('renders the voucher\'s own calendar date, literally', () => {
+        expect(voucherDate('2026-07-23')).toBe('23 Jul 2026');
+        expect(voucherDate('2026-01-01')).toBe('01 Jan 2026');
+        expect(voucherDate('2026-12-31')).toBe('31 Dec 2026');
+    });
+
+    it('does not shift by a timezone — the hazard is real and this is immune to it', () => {
+        // THE BUG THIS EXISTS TO PREVENT, demonstrated rather than asserted
+        // about: new Date('2026-07-23') is UTC MIDNIGHT, so anywhere west of
+        // Greenwich it is still the 22nd, and an accountant reconciling the
+        // 23rd would be shown the wrong day — one that disagrees with the
+        // voucher sitting in Tally.
+        const throughADate = (tz: string) =>
+            new Date('2026-07-23').toLocaleDateString('en-GB', {
+                timeZone: tz,
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+            });
+
+        expect(throughADate('Pacific/Midway')).toBe('22 Jul 2026');   // the bug, west of UTC
+        expect(throughADate('Pacific/Kiritimati')).toBe('23 Jul 2026'); // fine, east of UTC
+
+        // Ours reads the string, so there is no instant to be west or east
+        // of: the same answer at either end of the offset range.
+        expect(voucherDate('2026-07-23')).toBe('23 Jul 2026');
+    });
+
+    it('is an em dash when there is no date — never today, never a guess', () => {
+        expect(voucherDate(null)).toBe('—');
+        expect(voucherDate(undefined)).toBe('—');
+        expect(voucherDate('')).toBe('—');
+    });
+
+    it('shows anything that is not a plain date exactly as it came', () => {
+        // Reinterpreting it would be inventing a factory value out of a
+        // shape nobody promised.
+        expect(voucherDate('2026-07-23T10:00:00Z')).toBe('2026-07-23T10:00:00Z');
+        expect(voucherDate('23/07/2026')).toBe('23/07/2026');
+        expect(voucherDate('not a date')).toBe('not a date');
+    });
+
+    it('passes a month outside 1-12 through rather than naming it', () => {
+        expect(voucherDate('2026-13-01')).toBe('2026-13-01');
+        expect(voucherDate('2026-00-01')).toBe('2026-00-01');
+    });
+});
+
 describe('eventLabel', () => {
     it('names the known events for a person and passes an unknown one through', () => {
         expect(eventLabel('voucher.enqueued')).toBe('Queued');
@@ -236,13 +286,173 @@ describe('holdCopy', () => {
     });
 });
 
+/**
+ * THE SOURCE MATRIX, KEY BY KEY.
+ *
+ * The queue's Source cell used to print "Open production entries" on every
+ * row it drew, and the drawer decided separately — by module, or by a
+ * Shift-shaped morph. So a Receipt Note offered the production entries
+ * list, and an unclassified voucher that happened to hang off a Shift was
+ * given a destination nobody had checked.
+ *
+ * What replaces it is a table keyed on the CATEGORY KEY alone, and this is
+ * the exhaustive read of it: every key TallyTransactionCategory can send
+ * (backend Models/Enums/TallyTransactionCategory.php — 15 cases, listed
+ * here in the enum's own order, the App.routes.test.tsx precedent for
+ * pinning a table by hand), each with the one answer it is allowed.
+ *
+ * The fixtures below carry a category key and NOTHING ELSE that could
+ * betray the row: `source_module` is null and the morph is a name the
+ * matrix has never heard of. Anything that resolves, resolved on the key.
+ */
+const CATEGORY_KEYS = [
+    'production_stock_journal_shift',
+    'production_stock_journal_batch',
+    'sales_invoice',
+    'delivery_note',
+    'receipt_note',
+    'journal',
+    'purchase_order',
+    'purchase',
+    'payment',
+    'receipt',
+    'contra',
+    'credit_note',
+    'debit_note',
+    'sales_order',
+    'unknown',
+] as const;
+
+type CategoryKey = (typeof CATEGORY_KEYS)[number];
+
+/** What each key must resolve to for syncable_id 4 — null where NO link may be offered. */
+const SOURCE_MATRIX: Record<CategoryKey, { to: string; label: string } | null> = {
+    // Two keys, one destination: shift and batch production both go to the
+    // list the floor opens, which takes no id.
+    production_stock_journal_shift: { to: '/production/shift-production', label: 'Open production entries' },
+    production_stock_journal_batch: { to: '/production/shift-production', label: 'Open production entries' },
+    sales_invoice: { to: '/sales/invoices?open=INV-4', label: 'Open the invoice' },
+    delivery_note: { to: '/sales/deliveries?open=DN-4', label: 'Open the delivery note' },
+    receipt_note: { to: '/procurement/goods-receipts?grn=4', label: 'Open the goods receipt' },
+    // The ERP posts its own Journals, but there is no one screen a Journal
+    // voucher's row opens — so no link, rather than a plausible one.
+    journal: null,
+    purchase_order: { to: '/procurement/purchase-orders?open=4', label: 'Open the purchase order' },
+    // Every category below lives in the accountant's books or nowhere: the
+    // ERP originates none of them, so none has an ERP record to open. Note
+    // `receipt` in particular — the accountant's Receipt voucher, which is
+    // NOT a goods receipt and must never be pointed at one.
+    purchase: null,
+    payment: null,
+    receipt: null,
+    contra: null,
+    credit_note: null,
+    debit_note: null,
+    sales_order: null,
+    unknown: null,
+};
+
+/** An entry whose ONLY clue to its source is the category key. */
+const keyed = (key: string, over: Partial<TallySyncEntry> = {}): TallySyncEntry =>
+    entry({
+        syncable_id: 4,
+        syncable_type: 'SomeUnknownMorph',
+        ...over,
+        category: { ...entry().category, key, source_module: null, ...(over.category ?? {}) },
+    });
+
 describe('sourceLink', () => {
-    it('sends a production voucher to the production entries and nothing else anywhere', () => {
-        expect(sourceLink(entry())).toEqual({ to: '/production/shift-production', label: 'Open production entries' });
-        expect(sourceLink(entry({
-            syncable_type: 'Invoice',
-            category: { ...entry().category, key: 'sales_invoice', source_module: 'sales' },
-        }))).toBeNull();
+    it('answers on the category key alone, for every key the server can send', () => {
+        expect(Object.keys(SOURCE_MATRIX)).toEqual([...CATEGORY_KEYS]);
+
+        for (const key of CATEGORY_KEYS) {
+            expect(sourceLink(keyed(key)), key).toEqual(SOURCE_MATRIX[key]);
+        }
+    });
+
+    it('offers a link for exactly six keys — the rest of the catalogue gets none', () => {
+        const linked = CATEGORY_KEYS.filter((key) => sourceLink(keyed(key)) !== null);
+
+        expect(linked).toEqual([
+            'production_stock_journal_shift',
+            'production_stock_journal_batch',
+            'sales_invoice',
+            'delivery_note',
+            'receipt_note',
+            'purchase_order',
+        ]);
+    });
+
+    it('sends no non-production category anywhere near the production list', () => {
+        const production = CATEGORY_KEYS.filter((key) => key.startsWith('production_'));
+
+        for (const key of CATEGORY_KEYS.filter((key) => !production.includes(key))) {
+            expect(sourceLink(keyed(key))?.to ?? '', key).not.toContain('/production/');
+        }
+    });
+
+    it('does not read the morph — a Shift-shaped syncable the classifier could not place gets nothing', () => {
+        // A REAL pairing, not a hypothetical: the classifier returns Unknown
+        // whenever a label and a morph disagree, and the first shift vouchers
+        // were relabelled 'Manufacturing Journal' server-side to ride an older
+        // agent's builder (PR #149). The old resolver read the morph and gave
+        // those rows the production link on a guess; this is the behaviour
+        // change, pinned deliberately.
+        expect(sourceLink(keyed('unknown', { syncable_type: 'Shift' }))).toBeNull();
+        expect(sourceLink(keyed('unknown', { syncable_type: 'ShiftProductionEntry' }))).toBeNull();
+    });
+
+    it('does not read source_module either — a sales row is a sales row however it is labelled', () => {
+        // source_module 'production' on a sales_invoice cannot happen off the
+        // server; it is here because the OLD resolver would have answered
+        // "production entries" to it, and the new one must answer on the key.
+        expect(sourceLink(keyed('sales_invoice', {
+            syncable_type: 'Shift',
+            category: { ...entry().category, key: 'sales_invoice', source_module: 'production' },
+        }))).toEqual({ to: '/sales/invoices?open=INV-4', label: 'Open the invoice' });
+    });
+
+    it('will not open a document page with an id that cannot address a document', () => {
+        // A page that opens ONE record is only linked with a positive whole
+        // id: "?grn=0" or "?open=INV--3" lands on a page that finds nothing,
+        // which reads as "the document is gone" rather than "the link is bad".
+        const unusable = [0, -1, -7, 2.5, Number.NaN, Number.POSITIVE_INFINITY];
+
+        for (const key of ['sales_invoice', 'delivery_note', 'receipt_note', 'purchase_order'] as const) {
+            for (const syncable_id of unusable) {
+                expect(sourceLink(keyed(key, { syncable_id })), `${key} #${syncable_id}`).toBeNull();
+            }
+
+            // Nor with something that is not a number at all — the column is
+            // typed `number`, and what arrives off the wire is not typed.
+            expect(sourceLink(keyed(key, { syncable_id: '4' as unknown as number }))).toBeNull();
+            expect(sourceLink(keyed(key, { syncable_id: null as unknown as number }))).toBeNull();
+            expect(sourceLink(keyed(key, { syncable_id: undefined as unknown as number }))).toBeNull();
+        }
+    });
+
+    it('keeps the production list whatever the id is — that destination takes none', () => {
+        for (const syncable_id of [0, -1, 2.5, Number.NaN]) {
+            expect(sourceLink(keyed('production_stock_journal_shift', { syncable_id })))
+                .toEqual({ to: '/production/shift-production', label: 'Open production entries' });
+        }
+    });
+
+    it('answers null for a key no catalogue has, and for an entry carrying no category at all', () => {
+        expect(sourceLink(keyed('not_a_category'))).toBeNull();
+        expect(sourceLink(keyed(''))).toBeNull();
+        expect(sourceLink(keyed('SALES_INVOICE'))).toBeNull();
+        expect(sourceLink(keyed(' sales_invoice '))).toBeNull();
+        expect(sourceLink(entry({ category: undefined as unknown as TallySyncEntry['category'] }))).toBeNull();
+        expect(sourceLink(entry({ category: null as unknown as TallySyncEntry['category'] }))).toBeNull();
+        // A key that is not a string cannot index the matrix into an answer.
+        expect(sourceLink(keyed(7 as unknown as string))).toBeNull();
+        // Nor can a name off Object.prototype: a plain-object lookup would
+        // answer `constructor` with a function and the resolver would throw
+        // on it rather than say "no such category".
+        for (const key of ['constructor', 'toString', 'hasOwnProperty', '__proto__', 'valueOf']) {
+            expect(sourceLink(keyed(key)), key).toBeNull();
+        }
     });
 });
 

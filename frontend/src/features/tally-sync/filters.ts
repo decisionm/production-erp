@@ -149,6 +149,82 @@ export function categoryFilterOptions(
 }
 
 /**
+ * The voucher-type dropdown's options — the RAW `tally_voucher_type`
+ * labels the queue actually holds, as the server reports them
+ * (summary.voucher_types), in the server's order.
+ *
+ * RAW, not the wire type, because that is the column the server filter
+ * matches. The two differ by design on at least one category: a batch-mode
+ * production voucher is labelled "Manufacturing Journal" on the entry and
+ * posts to Tally as a Stock Journal, so wire types offered here would be a
+ * filter that always returns nothing.
+ *
+ * Voucher TYPES only. Nothing about a party, a supplier, a rate, an amount
+ * or a payload is offered or enumerated by this control — those are FC-06
+ * questions and the filter bar does not ask them.
+ *
+ * Empty until the summary answers, so the control renders with no options
+ * rather than inventing a list the queue may not contain.
+ */
+export function voucherTypeFilterOptions(
+    types: readonly string[] | null | undefined,
+): { value: string; label: string }[] {
+    return (types ?? [])
+        .filter((type): type is string => typeof type === 'string' && type.trim() !== '')
+        .map((type) => ({ value: type, label: type }));
+}
+
+/** One business-date preset: the label a person clicks and the range it means. */
+export interface DatePreset {
+    label: string;
+    from: string;
+    to: string;
+}
+
+/**
+ * The business-date filter's presets, computed from a YYYY-MM-DD "today"
+ * the caller supplies.
+ *
+ * TODAY IS AN ARGUMENT, not something read from the clock in here, for the
+ * same reason voucherDate() does no parsing: the range is matched against
+ * payload.voucher_date, which is the FACTORY's day, and the browser's day
+ * is not necessarily it — a supervisor's tablet at 00:30 IST and the
+ * server's UTC clock disagree about what "today" is by a whole date. The
+ * page passes the factory day the summary already reports
+ * (summary.today.date), so "Today" here means the same day the counts
+ * beside it mean.
+ *
+ * "Last 7 days" INCLUDES today — seven dates ending today, the ordinary
+ * reading of the phrase on a queue where today's vouchers are the ones
+ * being chased.
+ */
+export function businessDatePresets(today: string | null | undefined): DatePreset[] {
+    if (!today || !/^\d{4}-\d{2}-\d{2}$/.test(today)) return [];
+
+    return [
+        { label: 'Today', from: today, to: today },
+        { label: 'Yesterday', from: shiftDays(today, -1), to: shiftDays(today, -1) },
+        { label: 'Last 7 days', from: shiftDays(today, -6), to: today },
+    ];
+}
+
+/**
+ * A YYYY-MM-DD date moved by whole days, staying a calendar date.
+ *
+ * Date.UTC — never the local constructor — so the arithmetic cannot be
+ * shifted by the viewer's offset or by a DST jump: a UTC day is exactly
+ * 86,400,000 ms, a local one is not, and "yesterday" landing on the wrong
+ * date twice a year is the kind of bug nobody reports and everybody
+ * mis-reconciles.
+ */
+function shiftDays(date: string, days: number): string {
+    const [year, month, day] = date.split('-').map(Number);
+    const moved = new Date(Date.UTC(year, month - 1, day + days));
+
+    return moved.toISOString().slice(0, 10);
+}
+
+/**
  * How many rows the classifier could not place — the `unknown` catalogue
  * count, which is measured like the ERP rows' (never null). 0 when the
  * catalogue has not loaded or carries no such row, so a header can render

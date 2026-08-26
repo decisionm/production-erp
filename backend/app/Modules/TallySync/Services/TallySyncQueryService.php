@@ -254,6 +254,13 @@ class TallySyncQueryService
             'all_time' => $this->counts($filtered(), $heldIds),
             'held_now' => $heldNow,
             'by_category' => $this->countsByCategory($filtered),
+            // UNFILTERED on purpose, unlike the counts above: this feeds the
+            // page's voucher-type dropdown, and a dropdown that shrinks to
+            // the one type already selected cannot be used to change the
+            // selection. Voucher TYPES only — the labels the queue
+            // dispatches on. Nothing about a party, a rate or a payload is
+            // enumerated here.
+            'voucher_types' => $this->voucherTypesInQueue(),
             'agent' => $this->lastAgentAction(),
             'last_synced_at' => TallySyncEntry::query()
                 ->whereNotNull('synced_at')
@@ -683,6 +690,40 @@ class TallySyncQueryService
             'last_action_at' => $last?->occurred_at?->toIso8601String(),
             'last_action_event' => $last?->event,
             'last_action_label' => $last?->actor_label,
+            // WHEN THE AGENT LAST CHECKED IN, which is a different question
+            // from what it last DID. An idle poll delivers nothing and so
+            // records no event — last_action_at can be hours old on an agent
+            // that is polling every 90 seconds — but Sanctum stamps the
+            // token's last_used_at on the poll itself. Null = no agent token
+            // has ever been used, which is "never", not "down"; the page
+            // keeps those apart. A timestamp only: no token id, no name, no
+            // abilities (AgentIdentity::lastCheckedAt).
+            'last_checked_at' => AgentIdentity::lastCheckedAt()?->toIso8601String(),
         ];
+    }
+
+    /**
+     * The distinct tally_voucher_type labels the queue actually holds,
+     * alphabetically.
+     *
+     * The RAW label, because that is what the filter matches
+     * (apply(): whereIn('tally_voucher_type', ...)). It is deliberately not
+     * derived from the category catalogue's wire_voucher_type: the two
+     * differ by design on at least one category — a batch-mode production
+     * voucher is labelled 'Manufacturing Journal' here and posts as a Stock
+     * Journal on the wire (TallyTransactionCategory::ProductionStockJournalBatch)
+     * — so wire types offered as filter values would silently match nothing.
+     *
+     * @return list<string>
+     */
+    private function voucherTypesInQueue(): array
+    {
+        return TallySyncEntry::query()
+            ->whereNotNull('tally_voucher_type')
+            ->where('tally_voucher_type', '!=', '')
+            ->distinct()
+            ->orderBy('tally_voucher_type')
+            ->pluck('tally_voucher_type')
+            ->all();
     }
 }
