@@ -108,6 +108,29 @@ export default function CustomersPage() {
                     { title: 'GSTIN', dataIndex: 'gstin' },
                     { title: 'State', dataIndex: 'state_code' },
                     {
+                        /*
+                         * WHICH TALLY LEDGER THIS CUSTOMER POSTS AS — read-only
+                         * and deliberately not editable anywhere on this page.
+                         * The columns are not fillable on the server: a posting
+                         * identity is imported from Tally by
+                         * `sales:import-customers-from-ledgers`, never typed,
+                         * so an edit control here would be a box the API
+                         * discards.
+                         *
+                         * "No Tally ledger" is said in full rather than left as
+                         * a dash: an unlinked customer is a real, actionable
+                         * state (run the import), and a blank cell reads as a
+                         * column that has not loaded.
+                         */
+                        title: 'Tally ledger',
+                        render: (_, row) =>
+                            row.tally_ledger_name ? (
+                                <Typography.Text>posts as {row.tally_ledger_name}</Typography.Text>
+                            ) : (
+                                <Typography.Text type="secondary">no Tally ledger</Typography.Text>
+                            ),
+                    },
+                    {
                         title: 'Status',
                         dataIndex: 'is_active',
                         render: (_: boolean, row) => <ConfigurationStatusTag entity="customer" row={row} />,

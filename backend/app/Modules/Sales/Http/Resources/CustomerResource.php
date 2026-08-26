@@ -23,6 +23,19 @@ class CustomerResource extends JsonResource
             'address' => $this->address,
             'gstin' => $this->gstin,
             'state_code' => $this->state_code,
+            /*
+             * WHICH TALLY LEDGER THIS CUSTOMER IS — read-only, both null until
+             * `sales:import-customers-from-ledgers` links the row. Deliberately
+             * NOT in Customer's #[Fillable], so no form and no request can
+             * write them: a posting identity is imported from Tally, never
+             * typed. The screen shows "posts as {tally_ledger_name}" (or that
+             * there is no ledger) and offers no edit.
+             *
+             * A CUSTOMER ledger, which is why FC-06 does not reach it: no
+             * supplier identity and no rate of any kind is exposed here.
+             */
+            'tally_ledger_guid' => $this->tally_ledger_guid,
+            'tally_ledger_name' => $this->tally_ledger_name,
             'is_active' => $this->is_active,
             // Archived-by-soft-delete, distinct from is_active — both exist
             // on this table and only the screen can say which one applied.

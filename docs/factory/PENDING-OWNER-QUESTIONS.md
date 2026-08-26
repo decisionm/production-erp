@@ -37,7 +37,9 @@ design. Q43 is claimed by the Phase 3 sync fix loop (duplicate master names).
 Q46 is claimed by the Phase 5.5 fix loop (paper-page ingest and the
 estimation version). Q53 is the Phase 7.6 configuration-lifecycle branch's
 (four selection-rule deferrals); Q54 is the Phase 7.5 material-flow branch's
-(five material-flow questions). New questions continue from Q55.
+(five material-flow questions). Q61-Q62 are claimed by the sales-order
+fulfilment branch (may the ERP emit a Tally Sales Order voucher; the
+contested-stock hold rule). New questions continue from Q63.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 DEC-20260809-002/-003 landed with PR #155 (the finance-pull discovery
@@ -1526,3 +1528,83 @@ eligibility for most of the catalogue. It does not block the 99 already
 written, which came from evidence rather than from this mapping.
 
 *Open since 2026-08-25.*
+
+## Q61 · May the ERP emit a Tally "Sales Order" voucher?
+
+DEC-20260809-003 records that ALL real sales are invoiced directly in Tally and
+that the ERP Sales module is demo-scale. That answer was given in the context of
+the finance PULL — what the ERP reads out of Tally — and the sales-order
+fulfilment work now raises the other direction, which the record does not cover:
+when the sales desk raises an order in the ERP, should anything about it be
+WRITTEN to Tally?
+
+Two things were built that a voucher would need, and neither emits one:
+
+* `customers.tally_ledger_guid` / `tally_ledger_name` — which Tally ledger a
+  customer is, written only by `sales:import-customers-from-ledgers`. It exists
+  so a screen can say "posts as {ledger}" and so a person can reconcile by eye.
+* `sales_orders.customer_po_reference` — the customer's own PO number, the
+  string that actually joins an order to an invoice in the factory's paperwork.
+
+The question is three-part, and the middle part is the one the code cannot
+guess: (a) may the ERP post a Sales Order voucher at all, or does the order book
+stay ERP-only and Tally keep receiving invoices typed by the accountant? (b) if
+it may, does the ERP become the ORIGIN of that order in Tally — with everything
+that follows about who may then edit it and what happens when the ERP cancels an
+order Tally already holds? (c) is a Sales Order voucher even wanted, given that
+Tally's own order register is not in use today as far as the evidence shows.
+
+Nothing has been assumed either way: no voucher code ships in this build, and
+`TallySyncService` and the Tally agent are untouched. The two columns are
+recorded and displayed only.
+
+**Blocks:** any ERP→Tally emission for sales orders. It does not block the
+fulfilment queue, reservations, the production queue or the planning read —
+none of those touch Tally. *Open since 2026-08-26.*
+
+## Q62 · Contested stock — who wins when two orders want the same bottles?
+
+Store fulfilment lets the store hold FG stock against a confirmed sales-order
+line. The build refuses to hold more than exists, but it does not decide WHOSE
+hold survives when the free quantity cannot cover both orders, and that is a
+commercial call, not a software one.
+
+What the code does today, stated plainly so the answer can accept or overturn
+it: the first hold placed keeps the stock, and a hold is only moved when a
+person moves it — a store user may re-point an existing hold from one line to
+another, which releases and re-takes it in one step and records the reason. So
+the current behaviour is "first come, first served, with a manual override",
+because that is the only rule that invents nothing.
+
+What the owner needs to settle:
+
+(a) Is first-hold-wins right, or should an earlier PROMISED DATE outrank an
+    earlier hold — i.e. should the ERP ever move a hold on its own?
+(b) If the store re-points a hold away from a customer, does that need anybody's
+    approval, or is the store's judgement final? Today it is final and audited.
+(c) Is there a customer priority the ERP does not know about — a party whose
+    order always takes precedence? If so it must be recorded as a rule, not
+    remembered by whoever is on shift.
+(d) When stock is short and production is asked for the shortfall, is the queue
+    strictly the order the requests were raised in (today's behaviour, with
+    manual reordering by production), or does the promised date drive it?
+(e) When is a request "answered"? Today a QUEUED request leaves the floor's
+    queue the moment the line is covered by delivered pieces plus what it
+    still holds — counted so that a delivered hold is never counted twice
+    (the design draft's literal sum would have marked a 100-piece line
+    produced at 60 delivered out of a 100-piece hold). A request the floor
+    has already STARTED is never retired by paperwork — whether a running
+    job should stop is the floor's call. If the owner's own sense of
+    "covered" differs, the formula moves to match it, not the other way
+    around.
+(f) The planning dashboard quotes dates assuming ONE production line per
+    queued product (config `production.planning.parallel_lines`, default 1,
+    printed in every payload's basis). One line is the fewest the factory can
+    run, so the quoted date is a ceiling the floor can beat — but if the real
+    number per product is known, recording it tightens every date. What is
+    it?
+
+**Blocks:** any automatic re-allocation of a hold. It does not block the manual
+flow already built — reserve, release, re-point and send-to-production all
+require a person, and every one of them records who and why.
+*Open since 2026-08-26.*

@@ -39,6 +39,22 @@ use Illuminate\Support\Facades\DB;
  * it never invents a field. A Tally ledger carries a name and a group — no
  * GSTIN, no email, no phone, no address — so those are left NULL rather than
  * fabricated (AGENTS.md: never invent a factory value).
+ *
+ * THE LEDGER LINK, AND WHY IT IS WRITTEN HERE AND NOWHERE ELSE. A created
+ * customer now records WHICH ledger it came from — `tally_ledger_guid` and
+ * `tally_ledger_name`, mirroring the ledger row. Those two columns are absent
+ * from Customer's #[Fillable] on purpose: this command is their only writer,
+ * so no request, no customer form and no future mass-assign can quietly point
+ * a customer at a different Tally ledger. The code ("TL-{id}") was never good
+ * enough for that job — it is free text a person may rename.
+ *
+ * --link-existing IS THE BACKFILL, and it is a SEPARATE run. Customers created
+ * before those columns existed carry the code and nothing else. The backfill
+ * reads the ledger id back out of the code, finds that ledger, and writes the
+ * link — dry run unless --write, like everything else here, and it NEVER
+ * overwrites a link that is already set: a row somebody or something else
+ * already linked is reported and left exactly as it is. It creates nothing and
+ * deletes nothing.
  */
 class ImportCustomersFromLedgers extends Command
 {
@@ -60,12 +76,34 @@ class ImportCustomersFromLedgers extends Command
 
     protected $signature = 'sales:import-customers-from-ledgers
         {--groups=* : Tally group name to import. Repeatable, and also accepts a comma-separated list. Required to write. Omit for a census of every group in the data.}
+        {--link-existing : Import nothing; backfill the Tally ledger link on TL- customers that have none. Dry run unless --write.}
         {--write : Actually write (default is a dry run)}';
 
     protected $description = 'Create Sales customers from pulled Tally ledgers, selected by an explicit allow-list of group names';
 
     public function handle(CustomerService $customers): int
     {
+        // THE BACKFILL BRANCHES FIRST. It imports nothing, so the group census
+        // below is noise for it and the "no --groups given" return would make
+        // the mode unreachable — and the empty-ledgers refusal is an IMPORT
+        // rule, not a backfill one: with no ledgers pulled, every TL- customer
+        // simply lands in the backfill's own "ledger not in this database"
+        // list, named one by one, which is the more useful answer.
+        //
+        // Refused together with --groups rather than silently doing one of the
+        // two: an operator who asked for both must not be left guessing which
+        // one happened.
+        if ($this->option('link-existing')) {
+            if (! empty(array_filter((array) $this->option('groups')))) {
+                $this->error('--link-existing imports nothing, so --groups has no meaning with it.');
+                $this->line('  Run the import first (--groups=... --write), then the backfill (--link-existing --write).');
+
+                return self::FAILURE;
+            }
+
+            return $this->linkExisting();
+        }
+
         // The census first, always — a person choosing groups must be able to
         // see every group that exists and how big it is, including the ones
         // they are about to leave out.
@@ -148,7 +186,9 @@ class ImportCustomersFromLedgers extends Command
         $ledgers = Ledger::query()
             ->whereIn('tally_group_name', $groups)
             ->orderBy('name')
-            ->get(['id', 'name', 'tally_group_name']);
+            // tally_guid rides along: it is half the link written on create,
+            // and leaving it out of the select would silently store NULL.
+            ->get(['id', 'tally_guid', 'name', 'tally_group_name']);
 
         $created = 0;
         $existing = 0;
@@ -198,7 +238,7 @@ class ImportCustomersFromLedgers extends Command
                     continue;
                 }
 
-                $customers->create([
+                $customer = $customers->create([
                     'code' => $code,
                     'name' => $name,
                     // Everything else a customer can carry is absent from a
@@ -210,6 +250,8 @@ class ImportCustomersFromLedgers extends Command
                     'state_code' => null,
                     'is_active' => true,
                 ]);
+
+                $this->writeLink($customer, $ledger);
 
                 $created++;
             }
@@ -261,5 +303,156 @@ class ImportCustomersFromLedgers extends Command
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * --link-existing: give the customers this command minted BEFORE the link
+     * columns existed the identity they should always have had.
+     *
+     * It creates nothing, deletes nothing and renames nothing. The only rows
+     * it considers are the ones this command itself made — code "TL-{ledger
+     * id}" — and the ledger id is read back out of that code, because it is
+     * the only trace of the ledger those rows carry.
+     *
+     * ARCHIVED CUSTOMERS ARE LEFT ALONE (the default scope, stated so it reads
+     * as a decision rather than an accident). Somebody took that row out of
+     * service; writing a Tally identity onto it would be this command touching
+     * a record a person retired, for no benefit — nothing posts against it. The
+     * report counts them so their absence is visible.
+     */
+    private function linkExisting(): int
+    {
+        $write = (bool) $this->option('write');
+
+        $linked = 0;
+        $alreadyLinked = 0;
+        $nameOnly = 0;
+        $unparseable = [];
+        $missingLedger = [];
+
+        $apply = function () use (&$linked, &$alreadyLinked, &$nameOnly, &$unparseable, &$missingLedger): void {
+            Customer::query()
+                ->where('code', 'like', self::CODE_PREFIX.'%')
+                ->orderBy('code')
+                ->each(function (Customer $customer) use (&$linked, &$alreadyLinked, &$nameOnly, &$unparseable, &$missingLedger): void {
+                    // A LINK IS A PAIR, AND HALF OF ONE IS STILL A LINK. If
+                    // either column is set this row is left exactly as it is
+                    // and reported: completing somebody else's half-link would
+                    // be this command writing over a value it did not put
+                    // there, which is the one thing --link-existing must never
+                    // do. A visible half-link is a person's decision to make.
+                    if ($customer->tally_ledger_guid !== null || $customer->tally_ledger_name !== null) {
+                        $alreadyLinked++;
+
+                        return;
+                    }
+
+                    $suffix = substr((string) $customer->code, strlen(self::CODE_PREFIX));
+
+                    // `code` is free text — "TL-" is only this command's own
+                    // convention. A hand-made "TL-ACME" casts to ledger 0,
+                    // which matches nothing, so it is refused by shape and
+                    // named in the report rather than skipped in silence.
+                    if ($suffix === '' || ! ctype_digit($suffix)) {
+                        $unparseable[] = sprintf('%s (%s) — "%s" is not a ledger id', $customer->name, $customer->code, $suffix);
+
+                        return;
+                    }
+
+                    // Plain find(), so a soft-deleted ledger does NOT match:
+                    // the mirror is re-pulled from Tally, and a ledger that is
+                    // no longer in it is a fact for a person to look at, not
+                    // an identity to attach quietly.
+                    $ledger = Ledger::find((int) $suffix);
+
+                    if ($ledger === null) {
+                        $missingLedger[] = sprintf('%s (%s) — no ledger #%s in this database', $customer->name, $customer->code, $suffix);
+
+                        return;
+                    }
+
+                    $this->writeLink($customer, $ledger);
+                    $linked++;
+
+                    // `ledgers.tally_guid` is nullable. Half an identity is
+                    // still worth recording — and counted, so the report never
+                    // implies a GUID that is not there.
+                    if ($ledger->tally_guid === null) {
+                        $nameOnly++;
+                    }
+                });
+        };
+
+        if ($write) {
+            DB::transaction($apply);
+        } else {
+            // Same mechanic as the import: a dry run does the real work inside
+            // a transaction that is always thrown away, so the counts printed
+            // are exactly what --write would do.
+            DB::beginTransaction();
+
+            try {
+                $apply();
+            } finally {
+                DB::rollBack();
+            }
+        }
+
+        $archived = Customer::onlyTrashed()->where('code', 'like', self::CODE_PREFIX.'%')->count();
+
+        $this->info($write ? 'LINKED' : 'DRY RUN — nothing written');
+        $this->newLine();
+
+        $this->table(['count', 'value'], [
+            ['TL- customers examined', $linked + $alreadyLinked + count($unparseable) + count($missingLedger)],
+            [$write ? 'ledger links written' : 'ledger links that would be written', $linked],
+            ['of those, the ledger has no Tally GUID — name only', $nameOnly],
+            ['already linked — untouched', $alreadyLinked],
+            ['code is not TL-{ledger id} — SKIPPED for review', count($unparseable)],
+            ['ledger not in this database — SKIPPED for review', count($missingLedger)],
+            ['archived customers — not examined', $archived],
+        ]);
+
+        foreach ($unparseable as $line) {
+            $this->warn('  unreadable code, not linked: '.$line);
+        }
+        foreach ($missingLedger as $line) {
+            $this->warn('  ledger missing, not linked: '.$line);
+        }
+
+        if (! $write) {
+            $this->newLine();
+            $this->line('Re-run with --link-existing --write after reading the plan above.');
+        }
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * Record WHICH Tally ledger a customer is — the ONLY writer of those two
+     * columns anywhere in the app (design brief §Schema 3).
+     *
+     * forceFill, not a mass assign: the columns are deliberately absent from
+     * Customer's #[Fillable] so that no request, form or future
+     * `Customer::create([...$input])` can ever point a customer at a different
+     * ledger. That protection applies here too, hence the explicit fill.
+     *
+     * The extra save() on a freshly created row costs one UPDATE per imported
+     * customer and writes no audit noise: RecordsConfigurationAudit logs the
+     * FILLABLE attributes only, so a change confined to these two is an empty
+     * change it does not record — and a console run has no authenticated user
+     * to stamp `updated_by` with in the first place.
+     *
+     * The ledger name is stored exactly as the mirror carries it, untrimmed.
+     * The customer's own name is the tidied, human one; this column is Tally's
+     * string, and trimming it would record a ledger name that is not the
+     * ledger's.
+     */
+    private function writeLink(Customer $customer, Ledger $ledger): void
+    {
+        $customer->forceFill([
+            'tally_ledger_guid' => $ledger->tally_guid,
+            'tally_ledger_name' => $ledger->name,
+        ])->save();
     }
 }

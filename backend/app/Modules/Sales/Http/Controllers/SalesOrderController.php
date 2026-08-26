@@ -9,6 +9,7 @@ use App\Modules\Sales\Http\Resources\SalesOrderResource;
 use App\Modules\Sales\Models\SalesOrder;
 use App\Modules\Sales\Services\SalesDocumentQuery;
 use App\Modules\Sales\Services\SalesOrderService;
+use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class SalesOrderController extends Controller
@@ -42,8 +43,13 @@ class SalesOrderController extends Controller
         return SalesOrderResource::make($this->orders->confirm($salesOrder));
     }
 
-    public function cancel(SalesOrder $salesOrder): SalesOrderResource
+    /**
+     * Cancelling also gives up the order's stock holds and withdraws its
+     * open production requests (S6), so WHO did it is recorded on every hold
+     * it released — hence the user, which a plain cancel never needed.
+     */
+    public function cancel(Request $request, SalesOrder $salesOrder): SalesOrderResource
     {
-        return SalesOrderResource::make($this->orders->cancel($salesOrder));
+        return SalesOrderResource::make($this->orders->cancel($salesOrder, $request->user()?->id));
     }
 }

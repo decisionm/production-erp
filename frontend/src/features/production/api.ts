@@ -3,6 +3,7 @@ import type { Paginated } from '@/lib/types';
 import { CORRECTION_READ_PER_PAGE, type EntryWalk, walkEntryPages } from './correctionReads';
 import type {
     ConfigurationReview,
+    ProductionRequest,
     ProductVariants,
     ProductionStandardRow,
     ProductStandardsSummary,
@@ -2028,4 +2029,64 @@ export async function savePackingMaterialMapping(
 /** Withdraw a mapping — the floor's line goes back to "choose the material". */
 export async function withdrawPackingMaterialMapping(id: number): Promise<void> {
     await api.delete(`/production/packing-material-mappings/${id}`);
+}
+
+// ----------------------------------------------------- production requests --
+
+/**
+ * THE FLOOR'S WORKLIST — what the store has asked the factory to make, in the
+ * order the factory decided to make it.
+ *
+ * TWO-SIDED (P3), like the material request: the store raises these and the
+ * floor runs them, and the read is gated `module:production,inventory` so
+ * neither desk needs the other's permission for the one piece of paper they
+ * share. The ORDER and pressing Start are the floor's alone
+ * (production.manage) — the store says WHAT is owed, not what to run first.
+ *
+ * NOTHING HERE TOUCHES A BATCH (invariant 2). `start` records that a person
+ * picked the job up; people start batches, and this API starts none.
+ */
+
+/**
+ * The whole queue, priority order, OPEN requests only.
+ *
+ * DELIBERATELY UNPAGINATED, server-side — reorder renumbers the WHOLE queue,
+ * and nobody should be asked to reorder a list they can see one page of. So
+ * the payload is a bare `{data}` with no `meta`, and the table it feeds turns
+ * pagination off rather than reading a page count that is not there.
+ */
+export async function listProductionRequests(): Promise<ProductionRequest[]> {
+    const { data } = await api.get<{ data: ProductionRequest[] }>('/production/requests');
+    return data.data;
+}
+
+/**
+ * Rewrite the queue's order in one go — production.manage.
+ *
+ * The WHOLE ordering is sent, not a "move this one up" delta: priorities are
+ * dense and the server rewrites them inside one locking transaction, so two
+ * people reordering at once end with one of the two orders rather than an
+ * interleaving of both. Answers with the requeued list.
+ */
+export async function reorderProductionRequests(orderedIds: number[]): Promise<ProductionRequest[]> {
+    const { data } = await api.post<{ data: ProductionRequest[] }>('/production/requests/reorder', {
+        ordered_ids: orderedIds,
+    });
+    return data.data;
+}
+
+/** A person picked the job up — production.manage. Starts no batch (invariant 2). */
+export async function startProductionRequest(id: number): Promise<ProductionRequest> {
+    const { data } = await api.post<{ data: ProductionRequest }>(`/production/requests/${id}/start`);
+    return data.data;
+}
+
+/**
+ * Withdraw a request, with a reason — EITHER side may (the OR gate): the store
+ * when the customer no longer wants it, the floor when it cannot be run. The
+ * row and its reason are kept; nothing is deleted.
+ */
+export async function cancelProductionRequest(id: number, reason: string): Promise<ProductionRequest> {
+    const { data } = await api.post<{ data: ProductionRequest }>(`/production/requests/${id}/cancel`, { reason });
+    return data.data;
 }

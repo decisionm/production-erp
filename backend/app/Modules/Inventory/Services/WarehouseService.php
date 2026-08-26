@@ -118,6 +118,11 @@ class WarehouseService
             DependencyCheck::table('stock_movements', 'warehouse_id')->label('stock movement'),
             DependencyCheck::table('goods_receipt_notes', 'warehouse_id')->label('goods receipt note'),
             DependencyCheck::table('deliveries', 'warehouse_id')->label('delivery'),
+            // A HOLD ON FINISHED GOODS names the warehouse it is held in,
+            // and it must: re-pointing the finished-goods SETTING may never
+            // silently move existing holds to a location the stock is not
+            // in. Deleting that warehouse would do the same thing, harder.
+            DependencyCheck::table('stock_reservations', 'warehouse_id')->label('stock reservation'),
             DependencyCheck::table('work_orders', 'warehouse_id')->label('work order'),
             DependencyCheck::table('rework_orders', 'warehouse_id')->label('rework order'),
             DependencyCheck::table('subcontract_orders', 'warehouse_id')->label('subcontract order'),

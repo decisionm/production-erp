@@ -593,4 +593,25 @@ return [
     | month is caught where a supervisor can see it rather than in a 422.
     */
     'backdate_limit' => env('PROD_BACKDATE_LIMIT', 'none'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Fulfilment planning
+    |--------------------------------------------------------------------------
+    |
+    | The ETA the planning dashboard computes for a production request
+    | (FulfilmentPlanningService). Read on every request and never stored —
+    | there is no ETA column anywhere, because a saved date is already wrong
+    | the moment the queue is reordered.
+    |
+    | parallel_lines: how many machines the factory expects to run ONE queued
+    | product on at the same time. It multiplies a shift's capacity, so it
+    | must be a promise the factory can keep — the default is 1 precisely
+    | because a conservative date the factory beats costs nothing, while an
+    | optimistic one the sales desk repeats to a customer costs a great deal.
+    | Raise it only against real shifts.
+    */
+    'planning' => [
+        'parallel_lines' => (int) env('PROD_PLANNING_PARALLEL_LINES', 1),
+    ],
 ];

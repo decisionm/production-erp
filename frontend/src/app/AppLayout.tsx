@@ -105,6 +105,14 @@ export const allNavItems: readonly NavGroup[] = [
             // fulfilled — in part or in full — here. Issuing is not
             // consuming: it moves stock into Production/WIP.
             { key: '/inventory/store-issue-queue', label: 'Store Issue Queue' },
+            // SALES ORDER FULFILMENT, the store's half: which customer lines
+            // are waiting on stock, and when the floor could have what is
+            // short. Under Inventory rather than Sales because holding stock
+            // back from a customer is the STORE's act — the sales desk sees
+            // the same figures read-only, per line, as it types the order.
+            // Neither screen moves stock and neither gates dispatch (Q27).
+            { key: '/inventory/fulfilment', label: 'Store Fulfilment' },
+            { key: '/inventory/planning', label: 'Fulfilment Planning' },
         ],
     },
     {
@@ -137,6 +145,12 @@ export const allNavItems: readonly NavGroup[] = [
             // store's half is under Inventory, because the two halves have
             // two different readers and this group is gated on production.
             { key: '/production/material-requests', label: 'Material Requests' },
+            // The floor's half of the fulfilment chain: the prioritized
+            // worklist the store raised. Gated on `production` like the rest
+            // of this group, which is the honest gate for a MENU entry — the
+            // API behind it is OR-gated so a storekeeper reaching the URL
+            // still reads the queue, without the floor's controls.
+            { key: '/production/queue', label: 'Production Queue' },
             // Bin Bay Loading is GONE, not just unlinked (DEC-20260807-006):
             // the floor's only load flow is the Shift Floor's central Load
             // Material scan into the common resin input.

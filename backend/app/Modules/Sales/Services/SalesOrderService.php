@@ -3,6 +3,8 @@
 namespace App\Modules\Sales\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
+use App\Modules\Inventory\Services\StockReservationService;
+use App\Modules\Production\Services\ProductionRequestService;
 use App\Modules\Sales\Models\Enums\SalesOrderStatus;
 use App\Modules\Sales\Models\SalesOrder;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -22,6 +24,11 @@ class SalesOrderService
     public function __construct(
         private readonly SalesDocumentQuery $query,
         private readonly SalesDocumentTraceService $trace,
+        // S6 — a cancelled order stops holding stock and stops asking the
+        // floor for pieces. Both through the owning module's own service,
+        // never its tables.
+        private readonly StockReservationService $reservations,
+        private readonly ProductionRequestService $productionRequests,
     ) {}
 
     /**
@@ -105,7 +112,7 @@ class SalesOrderService
     }
 
     /**
-     * @param  array{customer_id: int, order_date: string, expected_date?: string, notes?: string, lines: array<int, array{item_id: int, quantity: string, unit_price: string}>}  $data
+     * @param  array{customer_id: int, order_date: string, expected_date?: string, customer_po_reference?: string, notes?: string, lines: array<int, array{item_id: int, quantity: string, unit_price: string}>}  $data
      */
     public function create(array $data, ?int $createdBy): SalesOrder
     {
@@ -115,6 +122,10 @@ class SalesOrderService
                 'status' => SalesOrderStatus::Draft,
                 'order_date' => $data['order_date'],
                 'expected_date' => $data['expected_date'] ?? null,
+                // The customer's own PO number, recorded as typed — absent on
+                // the phone orders that have none, and read by nothing else in
+                // this build (no Tally voucher is emitted from it).
+                'customer_po_reference' => $data['customer_po_reference'] ?? null,
                 'notes' => $data['notes'] ?? null,
                 'created_by' => $createdBy,
             ]);
@@ -159,8 +170,18 @@ class SalesOrderService
      * voucher in the ERP's queue to withdraw (DEC-20260809-003: real sales
      * live in Tally). A cancelled order then refuses confirm, delivery and
      * invoice creation through the guards those paths already have.
+     *
+     * S6 — AND IT STOPS ASKING THE FACTORY FOR THINGS. Inside the same
+     * transaction it gives up every hold the order's lines were sitting on
+     * and withdraws every open production request behind them. Left standing,
+     * those holds would keep finished goods away from orders that can still
+     * use them and keep the floor making pieces for a customer who walked
+     * away — the two most expensive silences this build could leave. Still no
+     * stock moves: releasing a hold changes who stock is spoken for and
+     * nothing else (invariant 1), and cancelling a request writes on a piece
+     * of paper (invariant 2).
      */
-    public function cancel(SalesOrder $order): SalesOrder
+    public function cancel(SalesOrder $order, ?int $userId = null): SalesOrder
     {
         // Judged and written under a row lock, in one transaction: a
         // dispatch or an invoice committing between a plain read and the
@@ -168,7 +189,7 @@ class SalesOrderService
         // the one state the page promises cannot exist. DeliveryService and
         // InvoiceService read the order inside their own transactions, so
         // the lock here is what serialises the two.
-        $cancelled = DB::transaction(function () use ($order) {
+        $cancelled = DB::transaction(function () use ($order, $userId) {
             $fresh = SalesOrder::query()
                 ->whereKey($order->getKey())
                 ->with('lines')
@@ -185,6 +206,14 @@ class SalesOrderService
             }
 
             $fresh->update(['status' => SalesOrderStatus::Cancelled]);
+
+            // The order row is already locked, and it is the HEAD of the
+            // global lock order (sales → material_bags → stock_balances →
+            // stock_reservations → production_requests), so these two add
+            // only locks that come after it. Reservations before requests,
+            // in that order, for the same reason.
+            $this->reservations->releaseForOrder($fresh, 'so_cancelled', $userId);
+            $this->productionRequests->cancelForOrder($fresh, 'so_cancelled');
 
             return $fresh;
         });

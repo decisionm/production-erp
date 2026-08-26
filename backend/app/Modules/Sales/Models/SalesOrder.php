@@ -10,7 +10,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 
-#[Fillable(['customer_id', 'status', 'order_date', 'expected_date', 'notes', 'created_by'])]
+// `customer_po_reference` is the CUSTOMER's own purchase-order number — the
+// string that matches this order to their paperwork and to a Tally invoice.
+// Fillable because SalesOrderService::create() mass-assigns an explicit array;
+// it is recorded and displayed only, and emits no voucher in this build.
+#[Fillable(['customer_id', 'status', 'order_date', 'expected_date', 'customer_po_reference', 'notes', 'created_by'])]
 class SalesOrder extends Model
 {
     /**
@@ -23,6 +27,21 @@ class SalesOrder extends Model
      * @var array{deliveries: list<array<string, mixed>>, invoices: list<array<string, mixed>>}|null
      */
     public ?array $trace = null;
+
+    /**
+     * Whether every line of this LIVE order is covered by what has already
+     * been delivered plus what is still held for it — the list row's "Ready
+     * for dispatch" badge, computed by Inventory's FulfilmentQueueService.
+     *
+     * A plain property like `trace` above: never persisted, never serialised
+     * by toArray(). It is a STAMPING SEAM, and it is null today because
+     * nothing stamps it — SalesOrderResource falls back to asking the service
+     * per order. It exists so a future bulk read can answer a whole page in
+     * one query without touching the resource, which is the shape
+     * DeliveryService::paginate already uses for its Tally links and carton
+     * counts ("two queries for the page, never per row").
+     */
+    public ?bool $ready_for_dispatch = null;
 
     protected function casts(): array
     {
