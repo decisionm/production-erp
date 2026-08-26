@@ -39,7 +39,9 @@ estimation version). Q53 is the Phase 7.6 configuration-lifecycle branch's
 (four selection-rule deferrals); Q54 is the Phase 7.5 material-flow branch's
 (five material-flow questions). Q61-Q62 are claimed by the sales-order
 fulfilment branch (may the ERP emit a Tally Sales Order voucher; the
-contested-stock hold rule). New questions continue from Q63.
+contested-stock hold rule). Q63-Q64 are claimed by the product-identity
+branch (Tally GRN usage; purchases without POs). New questions continue
+from Q65.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 DEC-20260809-002/-003 landed with PR #155 (the finance-pull discovery
@@ -1607,4 +1609,44 @@ What the owner needs to settle:
 **Blocks:** any automatic re-allocation of a hold. It does not block the manual
 flow already built — reserve, release, re-point and send-to-production all
 require a person, and every one of them records who and why.
+*Open since 2026-08-26.*
+
+## Q63 · Does the factory use Tally Receipt Notes (GRNs) at all?
+
+The 26-Aug XML export batch from the standalone Testing company was expected
+to contain a goods-receipt-note sample (`receipt_note.xml`), but its 20
+"Receipt" vouchers are MONEY receipts — bank allocations against customer
+bills, no stock items. No GRN voucher sample exists in any export read so
+far, and the voucher-type master list in the same batch cannot prove the
+type is used, only that it is defined.
+
+What this asks: when material arrives against a purchase order, does the
+accountant book a Tally Receipt Note (and the ERP should mirror one), or is
+the purchase invoice the ONLY Tally-side arrival record (and the ERP's goods
+receipt stays ERP-only, feeding the invoice later)? Related: what Tally
+should receive when material is rejected at incoming QA is already named
+open inside DEC-20260825-001 — an answer here should settle both together.
+
+**Blocks:** the Tally-posting half of the goods-receipt flow. It does not
+block ERP-side goods receipts, quality holds, or barcode issue at
+acceptance, which carry on regardless of what Tally is later told.
+*Open since 2026-08-26.*
+
+## Q64 · May material be purchased without a purchase order?
+
+The Testing-company books say direct purchases are normal practice: of the
+17 purchase invoices in the 26-Aug export, most carry NO order reference —
+only a minority link back to a PO (via the line's `ORDERNO`). The ERP's
+procurement flow is being built to start a goods receipt from an OPEN
+purchase order.
+
+What this asks: (a) should the ERP allow an arrival/receipt with no PO
+behind it (mirroring the books as they are), or must every purchase go
+PO-first from now on (a policy change the ERP would then enforce)?
+(b) If no-PO arrivals are allowed, do they still pass incoming quality the
+same way? (Presumably yes — the material does not care what paperwork
+preceded it — but presumption is not a decision.)
+
+**Blocks:** whether the goods-receipt screen may offer "receive without
+order". Receipt AGAINST an open PO is unaffected and proceeds either way.
 *Open since 2026-08-26.*
