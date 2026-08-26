@@ -117,12 +117,28 @@ export const allNavItems: readonly NavGroup[] = [
             // Warehouses is setup and sits below them.
             { key: '/inventory/items', label: 'Item Master' },
             { key: '/inventory/stock', label: 'Stock' },
-            { key: '/inventory/material-lots', label: 'Barcode & Labels' },
+            // TWO LABEL SCREENS, AND THEY ARE NOT THE SAME SCREEN. This name
+            // used to point at /inventory/material-lots, which is a per-RECEIPT
+            // register: which GRN a lot arrived on, what it cost, how many
+            // kilograms are left. Barcode & Labels is per BAG — find the
+            // barcode in your hand, reprint the identity that bag was born
+            // with — which is what somebody standing at a printer is doing.
+            // Both stay: neither covers the other, so neither entry was
+            // dropped.
+            { key: '/inventory/barcode-labels', label: 'Barcode & Labels' },
+            { key: '/inventory/material-lots', label: 'Material Receipts & Bag Labels' },
             // The STORE's queue (Phase 7.5): what production has asked for,
             // fulfilled — in part or in full — here. Issuing is not
             // consuming: it moves stock into Production/WIP.
             { key: '/inventory/store-issue-queue', label: 'Store Issue Queue' },
             { key: '/inventory/warehouses', label: 'Warehouses' },
+            // The ledger, first-class since 27-Aug-2026. It was NOT in this
+            // menu before, and the reason recorded here was true at the time:
+            // /inventory/stock-movements was an API path with no page behind
+            // it, so the entry would have been a dead link. There is a page
+            // now (App.tsx mounts it), and AppLayout.nav.test.ts pins that this
+            // entry and that route agree.
+            { key: '/inventory/stock-movements', label: 'Stock Movements' },
             // SALES ORDER FULFILMENT, the store's half: which customer lines
             // are waiting on stock, and when the floor could have what is
             // short. Under Inventory rather than Sales because holding stock
@@ -138,11 +154,6 @@ export const allNavItems: readonly NavGroup[] = [
             // Stock page's toolbar links to both, which is where someone
             // needing a batch or a serial number already is. Do not re-add
             // them here without moving those links out of that toolbar first.
-            //
-            // NO Stock Movements entry: there is no such page. The movement
-            // ledger is read through the Stock page's per-row history drawer
-            // (/inventory/stock-movements is an API path only), and a menu
-            // line pointing at a route App.tsx does not mount is a dead link.
         ],
     },
     {
@@ -153,6 +164,15 @@ export const allNavItems: readonly NavGroup[] = [
         children: [
             // Floor-first ordering: the daily-use pages a supervisor actually
             // touches come first, setup/reference pages after.
+            //
+            // THE WORKLIST OPENS THE GROUP. It moved above Shift Floor on
+            // 27-Aug-2026: it is what the floor is asked to make, so it is the
+            // question a shift starts with, and the Shift Floor is where the
+            // answer gets entered. Gated on `production` like the rest of this
+            // group, which is the honest gate for a MENU entry — the API behind
+            // it is OR-gated so a storekeeper reaching the URL still reads the
+            // queue, without the floor's controls.
+            { key: '/production/queue', label: 'Production Queue' },
             { key: '/production/shift-production', label: 'Shift Floor' },
             // NO Day Bin entry. DEC-20260817-001 settles the inventory
             // locations as RM Store -> Production/WIP -> FG Store, and a
@@ -175,12 +195,6 @@ export const allNavItems: readonly NavGroup[] = [
             // store's half is under Inventory, because the two halves have
             // two different readers and this group is gated on production.
             { key: '/production/material-requests', label: 'Material Requests' },
-            // The floor's half of the fulfilment chain: the prioritized
-            // worklist the store raised. Gated on `production` like the rest
-            // of this group, which is the honest gate for a MENU entry — the
-            // API behind it is OR-gated so a storekeeper reaching the URL
-            // still reads the queue, without the floor's controls.
-            { key: '/production/queue', label: 'Production Queue' },
             // Bin Bay Loading is GONE, not just unlinked (DEC-20260807-006):
             // the floor's only load flow is the Shift Floor's central Load
             // Material scan into the common resin input.

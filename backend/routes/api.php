@@ -67,6 +67,7 @@ use App\Modules\Production\Http\Controllers\MrpController;
 use App\Modules\Production\Http\Controllers\PackingMaterialMappingController;
 use App\Modules\Production\Http\Controllers\PowerInterruptionLogController;
 use App\Modules\Production\Http\Controllers\ProductionConfigurationController;
+use App\Modules\Production\Http\Controllers\ProductionQueueController;
 use App\Modules\Production\Http\Controllers\ProductionReportController;
 use App\Modules\Production\Http\Controllers\ProductionRequestController;
 use App\Modules\Production\Http\Controllers\ProductionSettingsController;
@@ -462,6 +463,33 @@ Route::prefix('v1')->group(function () {
             // Either side may withdraw one, with a reason: the store when the
             // customer no longer wants it, the floor when it cannot run it.
             Route::post('requests/{production_request}/cancel', [ProductionRequestController::class, 'cancel']);
+
+            /*
+             * THE SAME QUEUE WITH THE DEMAND AND THE DATE JOINED ON — what
+             * the floor's Production Queue screen reads. Read-only, and the
+             * rows are the rows above: this adds no request and hides none.
+             *
+             * Registered here rather than composed in the browser so the one
+             * document the two desks share is ONE read, and so the queue's
+             * order and its dates cannot be fetched a moment apart and shown
+             * disagreeing.
+             *
+             * THE OR GATE SAYS WHO MAY OPEN THIS QUEUE. IT DOES NOT WIDEN
+             * WHAT THE ROW MAY CARRY. The figures this read joins on belong
+             * to other modules and are refused elsewhere — the planning block
+             * to `module:inventory` (fulfilment/planning), the order's
+             * expected date to `module:sales` — so ProductionQueueResource
+             * gates each block by the module that owns it, the way
+             * DashboardService::summary() gates its own composed blocks. A
+             * caller sees here only what they could already read elsewhere,
+             * and no 403 that stood yesterday stops standing because this
+             * route exists. Whether the FLOOR should be given more than that
+             * is the owner's call and is asked in PENDING-OWNER-QUESTIONS.
+             *
+             * A sibling SEGMENT of `requests/`, never a word under it, so
+             * `queue` can never be read as a {production_request} id.
+             */
+            Route::get('queue', [ProductionQueueController::class, 'index']);
         });
 
         // The queue's ORDER and picking a job up are the FLOOR's alone —

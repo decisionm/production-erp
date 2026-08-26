@@ -329,6 +329,18 @@ export interface SerialNumber {
 export interface StockMovement {
     id: number;
     type: StockMovementType;
+    /**
+     * WHY it moved (`StockMovementPurpose`), beside `type`, which only says
+     * which way the quantity went.
+     *
+     * Deliberately a plain string and deliberately `string | null`, both
+     * load-bearing. The enum is ADDED to — a build that types this as a closed
+     * union starts dropping purposes a newer backend sends. And the two empty
+     * answers are different facts: `'unknown'` is a real case meaning the
+     * writer did not say, while `null` is a row the backfill has not reached.
+     * See stockLedger.ts, which is where that distinction is rendered.
+     */
+    purpose?: string | null;
     item: Item;
     warehouse: Warehouse;
     batch?: Batch | null;

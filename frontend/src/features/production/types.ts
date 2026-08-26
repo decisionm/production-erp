@@ -1,6 +1,11 @@
 import type { ConfigurationAbilities } from '@/components/configuration';
 import type { Employee } from '@/features/hrms/types';
-import type { Item, Warehouse } from '@/features/inventory/types';
+import type {
+    CannotEstimateReason,
+    FulfilmentPlanningBasis,
+    Item,
+    Warehouse,
+} from '@/features/inventory/types';
 import type { Vendor } from '@/features/procurement/types';
 import type { TallyLink } from '@/features/sales/types';
 import type { TallySyncStatus } from '@/features/tally-sync/types';
@@ -1382,7 +1387,28 @@ export interface ReworkOrder {
 // Shapes mirror the design doc's data model verbatim.
 // ---------------------------------------------------------------------------
 
-export type MaterialBagStatus = 'in_store' | 'in_day_bin' | 'consumed' | 'returned';
+/**
+ * ALL SIX cases of the backend's MaterialBagStatus, and it must stay all six.
+ *
+ * It named four until 27-Aug-2026, while the enum had carried `waiting_qc` and
+ * `rejected_qc` since the owner-confirmed arrival flow: a bag's identity and
+ * label are born at arrival, and QC disposition is what releases it to
+ * production. Every consumer typed against the short union was therefore told
+ * a bag could not be in the two states it most often IS while it sits on the
+ * receiving dock — which is how a status tag rendered blank on the new bag
+ * screens rather than saying "waiting QC".
+ *
+ * A map keyed by this type is exhaustive BY CONSTRUCTION, so widening it is
+ * what makes the compiler name the places that had quietly stopped being
+ * total. Do not narrow it again to silence one.
+ */
+export type MaterialBagStatus =
+    | 'in_store'
+    | 'in_day_bin'
+    | 'consumed'
+    | 'returned'
+    | 'waiting_qc'
+    | 'rejected_qc';
 
 /** The id/name/sku slice the day-bin aggregates embed. */
 export interface ItemLite {
@@ -3239,4 +3265,85 @@ export interface ProductionRequest {
     requested_at: string | null;
     cancelled_reason: string | null;
     can: ProductionRequestAbilities;
+}
+
+/**
+ * WHEN THE FACTORY COULD HAVE IT — the planning block on a queue row, exactly
+ * as FulfilmentPlanningService computed it.
+ *
+ * NEVER PERSISTED (S11). There is no ETA column in this build: a stored date
+ * is already wrong the moment somebody reorders the queue.
+ */
+export interface ProductionQueuePlanning {
+    /**
+     * FREE FINISHED GOODS for this product. ITEM-level, not line-level — it is
+     * the same figure for every request against the same product, so a grouped
+     * screen must take it ONCE and must never sum it across sub-rows.
+     */
+    free: string | null;
+    /** How many open requests sit in front of this one. Per-request, not per-product. */
+    queued_ahead: number | null;
+    capacity_per_shift: number | null;
+    shifts_needed: number | null;
+    estimated_ready_date: string | null;
+    /**
+     * The factory cannot date this row — and the refusal CASCADES (S12): a
+     * product with no usable standard costs every job behind it its date too.
+     * A group containing one of these cannot be dated as a group.
+     */
+    cannot_estimate: boolean;
+    /** The same tokens the planning dashboard prints, widened the same way. */
+    reason: CannotEstimateReason | (string & {}) | null;
+}
+
+/** The order's identity plus its expected date — sales.view/manage only (the floor-visibility owner question). */
+export interface ProductionQueueOrderRef extends ProductionRequestOrderRef {
+    /**
+     * Present only for a login that may read it. Deliberately NOT called a
+     * promised date: Sales labels this field "Expected Date" everywhere it is
+     * authored and validates it only as after_or_equal:order_date (the floor-visibility owner question).
+     */
+    expected_date?: string | null;
+}
+
+/**
+ * One row of GET /production/queue — a production request with the demand
+ * behind it and the date in front of it.
+ *
+ * THREE KEYS ARE OPTIONAL AND THE REASON IS PERMISSION, NOT ABSENCE OF DATA
+ * (the floor-visibility owner question). The route is OR-gated so both desks can open the queue; the figures
+ * it joins on belong to other modules and each is gated by the module that
+ * owns it. `planning` and `ordered`/`delivered` are OMITTED — not nulled —
+ * for a caller who may not read them.
+ *
+ * THE DISTINCTION MATTERS AND IS EASY TO LOSE. `planning === undefined` means
+ * "not yours to read", so the column should not be drawn at all;
+ * `planning.cannot_estimate === true` means "nobody knows", which is a real
+ * factory state and must be printed as the refusal it is. Decide COLUMN
+ * PRESENCE from whether the key exists, never per-cell from a falsy check —
+ * `row.planning?.cannot_estimate` is `undefined` for the ungated caller and
+ * would render an em-dash that reads as "no date yet".
+ */
+export interface ProductionQueueRow extends Omit<ProductionRequest, 'sales_order'> {
+    sales_order: ProductionQueueOrderRef | null;
+    /** What the customer ordered — inventory.* or sales.* only (the floor-visibility owner question). */
+    ordered?: string | null;
+    /** What has already gone out against the line — inventory.* or sales.* only (the floor-visibility owner question). */
+    delivered?: string | null;
+    /** inventory.view/manage only (the floor-visibility owner question). */
+    planning?: ProductionQueuePlanning;
+}
+
+/** What the dates on a queue read were computed against. */
+/**
+ * What the dates on a queue read were computed against — the SAME basis the
+ * planning dashboard prints, because it is the same walk. Aliased rather than
+ * re-declared so the two screens cannot drift into describing one computation
+ * two ways.
+ */
+export type ProductionQueueBasis = FulfilmentPlanningBasis;
+
+export interface ProductionQueueRead {
+    data: ProductionQueueRow[];
+    basis: ProductionQueueBasis;
 }

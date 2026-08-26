@@ -1708,3 +1708,75 @@ entry and its header docblock) and `frontend/src/app/AppLayout.nav.test.ts`
 number, because this file re-mints question numbers at merge — so a re-mint
 of this entry needs no code edit.
 *Open since 2026-08-27.*
+
+## Q67 · What may the FLOOR read on a job — the ETA, the free stock, the customer's date?
+
+The Production Queue screen (`GET /api/v1/production/queue`, new on 27-Aug)
+puts a job's demand and its date on one row. Opening that queue is OR-gated
+`module:production,inventory` — the production request is a two-sided
+document, raised by the store and run by the floor, and neither desk is
+asked to hold the other's permission to read the one piece of paper they
+share.
+
+But the row JOINS ON figures that belong to other desks, and today each is
+refused elsewhere:
+
+- **the planning block** — free finished-goods stock, how many jobs are
+  queued ahead, capacity per shift, shifts needed, the estimated ready date
+  and its `cannot_estimate` refusal. Read today at
+  `/inventory/fulfilment/planning`, **`module:inventory`**.
+- **ordered / delivered** on the customer's line. Read today by the store on
+  its own fulfilment queue, and by Sales.
+- **the order's expected date.** Read today at `/sales/sales-orders` and in
+  the dashboard's `demand` block — **`module:sales`, and nowhere else.**
+
+**What ships in the meantime, and it is the conservative shape:** a caller
+sees on this row only what they could already read somewhere else. A store
+login (inventory.view) gets the worklist, the ETA, the free stock and the
+line figures. A sales login additionally gets the expected date. A login
+holding **production.view alone gets the worklist it already had** — no
+dates, no free stock, no demand denominator. No refusal that stood before
+this route existed has stopped standing.
+
+**What this asks.** A machine operator or shift in-charge whose login holds
+production.view and nothing else — should they see:
+
+1. **the ETA and free stock** for the job they are about to run? (For: the
+   floor deciding what to run first benefits from knowing what the store
+   already has and when the queue lands. Against: free FG stock and the
+   planning walk are the store's read, and the floor changes neither.)
+2. **the customer's expected date**? (For: it is the reason the job is
+   ranked where it is. Against: it is the commercial relationship, and the
+   floor is given the priority number precisely so it does not have to
+   reason about customers.)
+
+The two can be answered separately — the code already gates them
+separately.
+
+**A wording caution for whoever answers.** This document deliberately does
+NOT call `expected_date` a "promised date". Sales labels it *Expected Date*
+everywhere it is authored — the order form, `SalesOrderResource`, the
+export, the sort — and validates it only as `after_or_equal:order_date`.
+Whether it represents a commitment made to the customer, or merely the
+desk's own estimate, has never been recorded. If the answer to (2) is yes,
+saying which of the two it is would settle a second thing.
+
+**Blocks:** only which columns a production-only login sees on the
+Production Queue page. It does not block the page, the endpoint, the
+grouping, the queue's order, Start/Cancel, or any store or sales login —
+all of those work under either answer.
+
+Where the answer lands:
+`backend/app/Modules/Production/Http/Resources/ProductionQueueResource.php`
+(the `$seesStore` / `$seesSales` flags and their block spreads),
+`backend/tests/Feature/Production/ProductionQueueEndpointTest.php` (the
+three gate tests, which pin the current rule from both sides) and
+`frontend/src/features/production/pages/ProductionQueuePage.tsx` (the
+columns render only when their key is present, so a widened gate needs no
+frontend edit).
+
+Like Q66, the code refers to this question **by name** — "the
+floor-visibility owner question", and on the backend by the path of this
+file — never by its number, because this file re-mints question numbers at
+merge. A re-mint of this entry needs no code edit.
+*Open since 2026-08-27.*

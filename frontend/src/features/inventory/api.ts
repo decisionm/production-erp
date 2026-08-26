@@ -1,9 +1,11 @@
 import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
-// Production's own type for the paper the store raises — the send-to-production
-// endpoint answers with a production request, so this module states that
-// rather than shaping a second, thinner copy of it.
-import type { ProductionRequest } from '@/features/production/types';
+// Production's own types for the paper the store raises and for the physical
+// lots and bags: the send-to-production endpoint answers with a production
+// request, and MaterialLot/MaterialBag are already declared there and shared by
+// the floor's scan screens. This module states those shapes rather than shaping
+// second, thinner copies of them.
+import type { MaterialBag, MaterialLot, ProductionRequest } from '@/features/production/types';
 import { plainDecimal } from './fulfilment';
 import type {
     Batch,
@@ -187,10 +189,21 @@ export async function listItemStockBalances(itemId: number): Promise<Paginated<S
     return listStockBalances({ item_id: itemId, per_page: FULL_LIST_PER_PAGE });
 }
 
+/**
+ * THE STOCK LEDGER, a page at a time.
+ *
+ * `page` is here for the first-class Stock Movements screen: the drawer and
+ * the item detail tab ask for one big slice of ONE item and never turn a page,
+ * but a ledger over the whole factory has to. Everything this endpoint filters
+ * on is in this signature — `StockMovementController::index` reads item_id,
+ * warehouse_id and the page size and nothing else, so a caller wanting a type,
+ * a purpose or a date range has to widen the endpoint first, not the query.
+ */
 export async function listStockMovements(params?: {
     item_id?: number;
     warehouse_id?: number;
     per_page?: number;
+    page?: number;
 }): Promise<Paginated<StockMovement>> {
     const { data } = await api.get<Paginated<StockMovement>>('/inventory/stock-movements', { params });
     return data;
@@ -322,6 +335,53 @@ export async function createSerialNumber(payload: CreateSerialNumberPayload): Pr
 
 export async function getSerialNumberHistory(id: number): Promise<SerialNumber> {
     const { data } = await api.get<{ data: SerialNumber }>(`/inventory/serial-numbers/${id}/history`);
+    return data.data;
+}
+
+// -------------------------------------------------- lots, bags and labels --
+
+/**
+ * THE BAG REGISTER, a page at a time — what the Barcode & Labels bench lists.
+ *
+ * The endpoint is `/inventory/material-bags`, and it is Inventory's own
+ * surface, which is why the reader for it lives here — and, since 27-Aug,
+ * ONLY here. `features/production/api.ts` carried a second declaration of this
+ * name against the same endpoint, unpaged and with no caller; it is gone, and
+ * the paging is why this is the survivor: the bag list is ordered OLDEST
+ * FIRST, so without a page number the newest bags — the ones a label is
+ * usually reprinted for — are unreachable. The Shift Floor's scan and
+ * pick-list reads are genuinely different queries and keep their own functions.
+ *
+ * `status` is a plain string on purpose: the backend enum carries six cases and
+ * the exported union in production/types.ts names four (see bagStatus.ts).
+ *
+ * The whole surface 404s while `production.traceability_enabled` is off — with
+ * the flag down the feature does not exist, and the caller shows that rather
+ * than an empty table.
+ */
+export async function listMaterialBags(params?: {
+    item_id?: number;
+    status?: string;
+    page?: number;
+}): Promise<Paginated<MaterialBag>> {
+    const { data } = await api.get<Paginated<MaterialBag>>('/inventory/material-bags', { params });
+    return data;
+}
+
+/**
+ * ONE SUPPLIER LOT, with its bags — what a reprint needs.
+ *
+ * A bag row cannot print its own label from itself. MaterialBagLabels numbers a
+ * label "Bag N of M" from the bag's position in its LOT, so handing it a lot
+ * carrying a single bag would print "Bag 1 of M" onto physical labels — a
+ * factory value invented by the screen. The lot is fetched whole and the bag is
+ * named with `bagId`, which is how MaterialLotsPage keeps the true sequence.
+ *
+ * `MaterialLotController::show` loads `bags` (TraceabilityService::loadLot), so
+ * one call is the whole answer.
+ */
+export async function getMaterialLot(id: number): Promise<MaterialLot> {
+    const { data } = await api.get<{ data: MaterialLot }>(`/inventory/material-lots/${id}`);
     return data.data;
 }
 

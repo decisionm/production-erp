@@ -128,14 +128,38 @@ describe('the Inventory menu', () => {
     });
 
     /**
-     * Every child of this group must point at a route App.tsx actually
-     * mounts. This is the guard against the omission that came up while
-     * reordering: there is no Stock Movements page — the ledger is the Stock
-     * page's history drawer — and a menu line for one would render fine and
-     * 404 on click.
+     * THE LEDGER IS A PAGE NOW, and this assertion is the inverse of the one
+     * it replaces.
+     *
+     * The old line pinned the opposite — "lists no entry for a Stock Movements
+     * page that does not exist" — and its reasoning was correct while it
+     * stood: /inventory/stock-movements was an API path with nothing mounted
+     * on it, and a menu line pointing at a route App.tsx does not mount is a
+     * dead link that renders fine and 404s on click. A page exists as of
+     * 27-Aug-2026, so the premise is gone; the line is inverted rather than
+     * deleted, the way Shifts was in the Production group below, so the
+     * arrangement stays pinned in whichever direction it currently holds.
+     *
+     * What has NOT changed is the rule underneath: every child of this group
+     * must point at a route App.tsx actually mounts. App.routes.test.tsx pins
+     * the other half of that pair.
      */
-    it('lists no entry for a Stock Movements page that does not exist', () => {
-        expect(inventory?.children?.map((child) => child.key)).not.toContain('/inventory/stock-movements');
+    it('lists the Stock Movements ledger the app now mounts', () => {
+        expect(inventory?.children?.map((child) => child.key)).toContain('/inventory/stock-movements');
+    });
+
+    /**
+     * TWO LABEL SCREENS, BOTH LINKED. "Barcode & Labels" used to be the label
+     * on /inventory/material-lots; it now names the per-BAG bench, and the
+     * per-RECEIPT register keeps its own name and its own entry. The failure
+     * this pins is the quiet one: pointing both names at one route, or letting
+     * the receipts register lose its only link while its page stays mounted.
+     */
+    it('links the bag bench and the receipts register as two different routes', () => {
+        const byLabel = new Map(inventory?.children?.map((child) => [child.label, child.key]));
+
+        expect(byLabel.get('Barcode & Labels')).toBe('/inventory/barcode-labels');
+        expect(byLabel.get('Material Receipts & Bag Labels')).toBe('/inventory/material-lots');
     });
 });
 
@@ -144,6 +168,22 @@ describe('the Production menu', () => {
 
     it('exists with children', () => {
         expect(production?.children?.length).toBeGreaterThan(0);
+    });
+
+    /**
+     * PRODUCTION QUEUE OPENS THE GROUP (27-Aug-2026). It is what the floor has
+     * been asked to make, so it is the question a shift starts with; Shift
+     * Floor, where the answer is entered, follows it. Pinned by POSITION and
+     * not merely by presence, because "first" is the whole change — the entry
+     * was already in this menu, third, and nothing in the type system notices
+     * it sliding back down.
+     */
+    it('opens with the Production Queue, ahead of the Shift Floor', () => {
+        expect(production?.children?.[0]).toMatchObject({
+            key: '/production/queue',
+            label: 'Production Queue',
+        });
+        expect(production?.children?.[1]?.key).toBe('/production/shift-production');
     });
 
     /**
