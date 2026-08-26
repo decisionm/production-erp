@@ -1,25 +1,29 @@
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Space, Tag, Typography } from 'antd';
+import { InfoCircleOutlined } from '@ant-design/icons';
+import { Space, Tag, Tooltip, Typography } from 'antd';
 import { getTallyMirror } from '@/features/sales/api';
 
 /**
- * WHAT THESE PAGES ARE NOT — the panel above the Sales Orders and Invoices
- * lists.
+ * WHAT THESE PAGES ARE NOT — one line above the Sales Orders and Invoices
+ * lists, no more.
  *
  * Real sales are invoiced in Tally (DEC-20260809-003). The ERP has no read
  * path from Tally, so Tally-side Sales / Sales Order vouchers are NOT
  * mirrored here, and the table below is the ERP-originated subset only. An
- * empty table must never read as "no sales" — this panel is what says so.
+ * empty table must never read as "no sales" — this line is what says so.
  *
- * EVERY SENTENCE IS THE SERVER'S (GET /sales/tally-mirror). Nothing here
- * types the headline, the body, the builder note or the payments note: the
- * copy stands on a decision, and copy typed on this side is copy that
- * drifts from it. What this file adds is only the labels around those
- * sentences and the tags read off the booleans.
+ * IT USED TO BE A FOUR-SENTENCE ALERT BOX, and the owner asked why the
+ * screens carry so many notes (26-Aug, the same instruction as 573179f:
+ * "dont add text on the applicaiton, they will not sit and ready this").
+ * The honesty is not allowed to vanish — so it is now ONE line of label and
+ * tags, and the server's full sentences (the body, the unvalidated-builder
+ * note, the payments note) moved into the info tooltip for whoever asks.
+ * EVERY SENTENCE IS STILL THE SERVER'S (GET /sales/tally-mirror): nothing
+ * here types copy that could drift from the decision it stands on.
  *
- * When the endpoint cannot be read the panel says THAT, in warning colour,
- * rather than vanishing — a page with no panel over an empty table is
- * exactly the misreading the panel exists to prevent.
+ * When the endpoint cannot be read the line says THAT, in warning colour,
+ * rather than vanishing — a page with nothing over an empty table is
+ * exactly the misreading this exists to prevent.
  */
 export default function TallyMirrorPanel() {
     const { data, isError, isPending } = useQuery({
@@ -28,12 +32,9 @@ export default function TallyMirrorPanel() {
         staleTime: 5 * 60 * 1000,
     });
 
-    // Still reading (a slow network, or TanStack pausing a retry while the
-    // tab is hidden): say so, quietly. Rendering nothing here would put a
-    // bare table on the page — the exact silence this panel exists to end.
     if (isPending) {
         return (
-            <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 16, fontSize: 12 }}>
+            <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 12 }}>
                 Reading what this page mirrors from Tally…
             </Typography.Text>
         );
@@ -41,51 +42,36 @@ export default function TallyMirrorPanel() {
 
     if (isError || !data) {
         return (
-            <Alert
-                type="warning"
-                showIcon
-                style={{ marginBottom: 16 }}
-                message="Could not read what this page mirrors from Tally"
-                description="The rows below are ERP-originated documents only; whether Tally-side sales are mirrored could not be confirmed just now. Refresh, or check this login's Sales access."
-            />
+            <Typography.Text type="warning" style={{ display: 'block', marginBottom: 12, fontSize: 12 }}>
+                Could not confirm what this page mirrors from Tally — the rows below are ERP-originated documents only.
+            </Typography.Text>
         );
     }
 
     return (
-        <Alert
-            // Informational, never green: "not mirrored" is a fact about
-            // scope, not an all-clear.
-            type={data.mirrored ? 'success' : 'info'}
-            showIcon
-            style={{ marginBottom: 16 }}
-            message={
-                <Space size={8} wrap>
-                    <strong>{data.headline}</strong>
-                    {data.decision && <Tag>{data.decision}</Tag>}
-                </Space>
-            }
-            description={
-                <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                    <span>{data.body}</span>
-                    <span>
-                        <Typography.Text strong>Sales voucher builder:</Typography.Text>{' '}
-                        {/* The tag is read off the boolean; the sentence
-                            beside it is the server's note verbatim, which
-                            is where "no GST" is actually said. */}
-                        {data.erp_invoice_builder.validated ? (
-                            <Tag color="success">validated</Tag>
-                        ) : (
-                            <Tag color="warning">unvalidated, no GST</Tag>
-                        )}
-                        <Typography.Text type="secondary">{data.erp_invoice_builder.note}</Typography.Text>
-                    </span>
-                    <span>
-                        <Typography.Text strong>Payments:</Typography.Text>{' '}
-                        {!data.payments_recorded_here && <Tag>recorded in Tally, not here</Tag>}
-                        <Typography.Text type="secondary">{data.payments_note}</Typography.Text>
-                    </span>
-                </Space>
-            }
-        />
+        <Space size={8} wrap style={{ marginBottom: 12 }}>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {data.headline}
+            </Typography.Text>
+            {data.decision && <Tag style={{ marginInlineEnd: 0 }}>{data.decision}</Tag>}
+            {!data.erp_invoice_builder.validated && (
+                <Tag color="warning" style={{ marginInlineEnd: 0 }}>
+                    voucher builder unvalidated
+                </Tag>
+            )}
+            <Tooltip
+                // The server's own sentences, verbatim — the detail a reader
+                // asks for, off the page until they do.
+                title={
+                    <Space direction="vertical" size={4}>
+                        <span>{data.body}</span>
+                        <span>{data.erp_invoice_builder.note}</span>
+                        <span>{data.payments_note}</span>
+                    </Space>
+                }
+            >
+                <InfoCircleOutlined style={{ color: 'rgba(0,0,0,0.45)' }} />
+            </Tooltip>
+        </Space>
     );
 }
