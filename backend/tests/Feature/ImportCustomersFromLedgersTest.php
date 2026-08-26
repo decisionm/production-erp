@@ -140,4 +140,125 @@ class ImportCustomersFromLedgersTest extends TestCase
             ->expectsOutputToContain('No ledgers in this database')
             ->assertFailed();
     }
+
+    // ---- the Tally ledger link -------------------------------------------
+
+    public function test_an_imported_customer_records_which_ledger_it_is(): void
+    {
+        $ledger = $this->ledger('Acme Pharma', 'Sundry Debtors');
+
+        $this->artisan('sales:import-customers-from-ledgers --groups="Sundry Debtors" --write')->assertSuccessful();
+
+        $customer = Customer::first();
+        $this->assertSame($ledger->tally_guid, $customer->tally_ledger_guid);
+        $this->assertSame('Acme Pharma', $customer->tally_ledger_name);
+    }
+
+    public function test_the_link_columns_are_not_mass_assignable(): void
+    {
+        // The import is their only writer. If they were ever added to
+        // Customer's #[Fillable], any request body could re-point a customer
+        // at another party's ledger — this is the guard, not a comment.
+        $customer = Customer::create([
+            'code' => 'CUS-HAND',
+            'name' => 'Typed By A Person',
+            'tally_ledger_guid' => 'guid-someone-else',
+            'tally_ledger_name' => 'Someone Else',
+        ]);
+
+        $this->assertNull($customer->fresh()->tally_ledger_guid);
+        $this->assertNull($customer->fresh()->tally_ledger_name);
+    }
+
+    public function test_link_existing_is_a_dry_run_until_write(): void
+    {
+        $ledger = $this->ledger('Acme Pharma', 'Sundry Debtors');
+        $customer = Customer::create(['code' => 'TL-'.$ledger->id, 'name' => 'Acme Pharma', 'is_active' => true]);
+
+        $this->artisan('sales:import-customers-from-ledgers --link-existing')
+            ->expectsOutputToContain('DRY RUN — nothing written')
+            ->assertSuccessful();
+
+        $this->assertNull($customer->fresh()->tally_ledger_guid);
+    }
+
+    public function test_link_existing_backfills_a_customer_that_predates_the_columns(): void
+    {
+        $ledger = $this->ledger('Acme Pharma', 'Sundry Debtors');
+        $customer = Customer::create(['code' => 'TL-'.$ledger->id, 'name' => 'Acme Pharma', 'is_active' => true]);
+
+        $this->artisan('sales:import-customers-from-ledgers --link-existing --write')
+            ->expectsOutputToContain('LINKED')
+            ->assertSuccessful();
+
+        $customer->refresh();
+        $this->assertSame($ledger->tally_guid, $customer->tally_ledger_guid);
+        $this->assertSame('Acme Pharma', $customer->tally_ledger_name);
+    }
+
+    public function test_link_existing_never_overwrites_a_link_that_is_already_set(): void
+    {
+        $ledger = $this->ledger('Acme Pharma', 'Sundry Debtors');
+        $customer = Customer::create(['code' => 'TL-'.$ledger->id, 'name' => 'Acme Pharma', 'is_active' => true]);
+        // Pointed somewhere else on purpose — and half-linked, because half a
+        // link is still a link the backfill must not complete for anybody.
+        $customer->forceFill(['tally_ledger_name' => 'Acme Pharma (Unit 2)'])->save();
+
+        $this->artisan('sales:import-customers-from-ledgers --link-existing --write')
+            ->expectsOutputToContain('already linked')
+            ->assertSuccessful();
+
+        $customer->refresh();
+        $this->assertSame('Acme Pharma (Unit 2)', $customer->tally_ledger_name);
+        $this->assertNull($customer->tally_ledger_guid);
+    }
+
+    public function test_link_existing_reports_a_code_that_is_not_a_ledger_id(): void
+    {
+        $this->ledger('Acme Pharma', 'Sundry Debtors');
+        // A person can type anything into `code`. "TL-ACME" would cast to
+        // ledger 0 and match nothing at all.
+        $customer = Customer::create(['code' => 'TL-ACME', 'name' => 'Hand Made', 'is_active' => true]);
+
+        $this->artisan('sales:import-customers-from-ledgers --link-existing --write')
+            ->expectsOutputToContain('unreadable code, not linked')
+            ->assertSuccessful();
+
+        $this->assertNull($customer->fresh()->tally_ledger_name);
+    }
+
+    public function test_link_existing_reports_a_customer_whose_ledger_is_gone(): void
+    {
+        $ledger = $this->ledger('Acme Pharma', 'Sundry Debtors');
+        $customer = Customer::create(['code' => 'TL-'.$ledger->id, 'name' => 'Acme Pharma', 'is_active' => true]);
+        $ledger->delete();
+
+        $this->artisan('sales:import-customers-from-ledgers --link-existing --write')
+            ->expectsOutputToContain('ledger missing, not linked')
+            ->assertSuccessful();
+
+        $this->assertNull($customer->fresh()->tally_ledger_name);
+    }
+
+    public function test_link_existing_leaves_an_archived_customer_alone(): void
+    {
+        $ledger = $this->ledger('Acme Pharma', 'Sundry Debtors');
+        $customer = Customer::create(['code' => 'TL-'.$ledger->id, 'name' => 'Acme Pharma', 'is_active' => true]);
+        $customer->delete();
+
+        $this->artisan('sales:import-customers-from-ledgers --link-existing --write')->assertSuccessful();
+
+        $this->assertNull(Customer::withTrashed()->find($customer->id)->tally_ledger_name);
+    }
+
+    public function test_link_existing_refuses_to_be_combined_with_an_import(): void
+    {
+        $this->ledger('Acme Pharma', 'Sundry Debtors');
+
+        $this->artisan('sales:import-customers-from-ledgers --groups="Sundry Debtors" --link-existing --write')
+            ->expectsOutputToContain('--link-existing imports nothing')
+            ->assertFailed();
+
+        $this->assertSame(0, Customer::count());
+    }
 }

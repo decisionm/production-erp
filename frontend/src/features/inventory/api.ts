@@ -1,6 +1,24 @@
 import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
-import type { Batch, BatchLedger, Item, ItemTrackingType, SerialNumber, StockBalance, StockMovement, Warehouse } from './types';
+// Production's own type for the paper the store raises — the send-to-production
+// endpoint answers with a production request, so this module states that
+// rather than shaping a second, thinner copy of it.
+import type { ProductionRequest } from '@/features/production/types';
+import { plainDecimal } from './fulfilment';
+import type {
+    Batch,
+    BatchLedger,
+    FulfilmentPlanningResult,
+    FulfilmentQueueFilters,
+    FulfilmentQueueRow,
+    Item,
+    ItemTrackingType,
+    SerialNumber,
+    StockBalance,
+    StockMovement,
+    StockReservation,
+    Warehouse,
+} from './types';
 
 export async function listItems(): Promise<Paginated<Item>> {
     const { data } = await api.get<Paginated<Item>>('/inventory/items');
@@ -183,5 +201,111 @@ export async function createSerialNumber(payload: CreateSerialNumberPayload): Pr
 
 export async function getSerialNumberHistory(id: number): Promise<SerialNumber> {
     const { data } = await api.get<{ data: SerialNumber }>(`/inventory/serial-numbers/${id}/history`);
+    return data.data;
+}
+
+// ------------------------------------------------------- store fulfilment --
+
+/**
+ * THE STORE'S FULFILMENT QUEUE — order lines waiting on stock, and the four
+ * things the store can do about one.
+ *
+ * NONE OF THESE MOVES STOCK (invariant 1). A hold changes who stock is spoken
+ * for and nothing else; only a Delivery moves it, and when it does it SPENDS
+ * the hold on the way past. Nothing here creates, starts or cancels a batch
+ * (invariant 2) — sending a line to production writes a piece of paper.
+ *
+ * Every write posts its quantity through `plainDecimal`: `App\Rules\
+ * PlainDecimal` refuses exponential notation, and JavaScript reaches for it
+ * unprompted on small numbers.
+ */
+
+/**
+ * One page of the queue.
+ *
+ * `state` NARROWS and its absence is not "everything" — with no state the
+ * server hides `fully_allocated` lines (S16), and naming the state is how they
+ * are asked for. Over-reserved rows come first, across the whole queue rather
+ * than the page (S8), so this list arrives ORDERED and must not be re-sorted.
+ */
+export async function listFulfilmentQueue(
+    filters: FulfilmentQueueFilters = {},
+): Promise<Paginated<FulfilmentQueueRow>> {
+    const { data } = await api.get<Paginated<FulfilmentQueueRow>>('/inventory/fulfilment/queue', {
+        params: {
+            state: filters.state,
+            page: filters.page,
+            per_page: filters.per_page,
+        },
+    });
+    return data;
+}
+
+/**
+ * WHEN THE FACTORY COULD HAVE IT — every open request with its ETA or its
+ * refusal, the basis behind those numbers, and today's targets.
+ *
+ * A bare object, not a paginated collection: the payload is three things at
+ * once and the server shapes it whole. No ETA is stored anywhere (S11).
+ */
+export async function getFulfilmentPlanning(): Promise<FulfilmentPlanningResult> {
+    const { data } = await api.get<FulfilmentPlanningResult>('/inventory/fulfilment/planning');
+    return data;
+}
+
+/** HOLD free finished goods for this line. Moves no stock; returns the new hold. */
+export async function reserveForLine(lineId: number, quantity: string | number): Promise<StockReservation> {
+    const { data } = await api.post<{ data: StockReservation }>(
+        `/inventory/fulfilment/lines/${lineId}/reserve`,
+        { quantity: plainDecimal(quantity) },
+    );
+    return data.data;
+}
+
+/**
+ * ASK THE FLOOR for what the store cannot cover. The server caps the quantity
+ * at the line's real shortfall recomputed under a lock (S14) rather than
+ * refusing a round number, so what comes back may be less than what was sent.
+ */
+export async function sendLineToProduction(lineId: number, quantity: string | number): Promise<ProductionRequest> {
+    const { data } = await api.post<{ data: ProductionRequest }>(
+        `/inventory/fulfilment/lines/${lineId}/send-to-production`,
+        { quantity: plainDecimal(quantity) },
+    );
+    return data.data;
+}
+
+/**
+ * Give a hold up — the stock stays exactly where it is and stops being spoken
+ * for. A reason is required and is kept on the row: a hold is never deleted
+ * and never edited, only given up.
+ */
+export async function releaseReservation(reservationId: number, reason: string): Promise<StockReservation> {
+    const { data } = await api.post<{ data: StockReservation }>(
+        `/inventory/reservations/${reservationId}/release`,
+        { reason },
+    );
+    return data.data;
+}
+
+/**
+ * Move a hold (or part of it) to another line — release + reserve in ONE
+ * transaction under ONE balance lock (S4). The server refuses a target of a
+ * different product, the hold's own line, and more than the hold outstanding.
+ *
+ * Returns the NEW hold on the target line, not the remainder of the old one.
+ */
+export async function repointReservation(
+    reservationId: number,
+    payload: { sales_order_line_id: number; quantity: string | number; reason: string },
+): Promise<StockReservation> {
+    const { data } = await api.post<{ data: StockReservation }>(
+        `/inventory/reservations/${reservationId}/repoint`,
+        {
+            sales_order_line_id: payload.sales_order_line_id,
+            quantity: plainDecimal(payload.quantity),
+            reason: payload.reason,
+        },
+    );
     return data.data;
 }

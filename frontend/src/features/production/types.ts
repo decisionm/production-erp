@@ -3179,3 +3179,64 @@ export interface CartonInternalTrace {
         other_lines?: Array<Record<string, unknown>>;
     };
 }
+
+// ------------------------------------------------------ production request --
+
+/**
+ * WHERE A PRODUCTION REQUEST STANDS. None of these is a batch (invariant 2):
+ * `in_progress` is a PERSON saying they picked the job up, never the ERP
+ * noticing a shift entry, and nothing in this flow creates, starts or cancels
+ * a batch.
+ *
+ * The queue read (`GET production/requests`) returns the OPEN ones only —
+ * queued and in_progress. `produced` and `cancelled` exist on the type because
+ * a lifecycle action returns the row it just moved.
+ */
+export type ProductionRequestStatus = 'queued' | 'in_progress' | 'produced' | 'cancelled';
+
+/** WHY the floor is being asked — the order's identity, not its lines or totals. */
+export interface ProductionRequestOrderRef {
+    id: number;
+    document_number: string;
+    customer_name: string | null;
+}
+
+/**
+ * What the floor may do with this row, as `ProductionRequestService::abilities`
+ * decided it. The buttons read these; they never re-derive the state machine.
+ *
+ * PERMISSION IS A SECOND, SEPARATE GATE. `cancel` is two-sided
+ * (production.manage OR inventory.manage — the route's OR group), while
+ * `start` and `reorder` are the floor's alone (production.manage). A true here
+ * means the DOCUMENT allows it, never that this login does.
+ */
+export interface ProductionRequestAbilities {
+    start: boolean;
+    cancel: boolean;
+    reorder: boolean;
+}
+
+/**
+ * One production request — the two-sided piece of paper the store raises and
+ * the floor runs.
+ *
+ * FC-06: no rate, no amount, no vendor. It is about pieces and priority, so it
+ * needs no finance standing to read and grants none.
+ */
+export interface ProductionRequest {
+    id: number;
+    /** "PR-{id}" — what the store and the floor quote at each other. */
+    request_number: string;
+    /** Dense and 1-based, rewritten wholesale by reorder(). */
+    priority: number;
+    status: ProductionRequestStatus;
+    item: { id: number; sku: string | null; name: string | null } | null;
+    /** Decimal string, 4dp — the same precision the order line and its holds carry. */
+    quantity: string;
+    sales_order_line_id: number;
+    sales_order: ProductionRequestOrderRef | null;
+    requested_by: number | null;
+    requested_at: string | null;
+    cancelled_reason: string | null;
+    can: ProductionRequestAbilities;
+}

@@ -12,6 +12,15 @@ export interface Customer {
     address: string | null;
     gstin: string | null;
     state_code: string | null;
+    /*
+     * WHICH TALLY LEDGER THIS CUSTOMER IS — read-only, both null until
+     * `sales:import-customers-from-ledgers` links the row. NOT fillable on the
+     * server, so no form here may write them: a posting identity is imported
+     * from Tally, never typed. The screen says "posts as {tally_ledger_name}"
+     * or that there is no ledger, and offers no edit.
+     */
+    tally_ledger_guid?: string | null;
+    tally_ledger_name?: string | null;
     is_active: boolean;
     /** Archived-by-soft-delete, distinct from is_active. */
     archived_at?: string | null;
@@ -42,6 +51,15 @@ export interface SalesOrder {
     customer: Customer;
     order_date: string;
     expected_date: string | null;
+    /**
+     * The CUSTOMER's own purchase-order number, as they wrote it — the string
+     * that matches this order to their paperwork and to a Tally invoice. No
+     * shape is enforced and it is not unique (one PO can cover several
+     * orders). Recorded and displayed only: NO voucher is emitted from it in
+     * this build, and whether the ERP may emit Tally Sales Order vouchers at
+     * all is still an open owner question.
+     */
+    customer_po_reference: string | null;
     notes: string | null;
     lines: SalesOrderLine[];
     /** Quantities across every line, as decimal strings (4dp) — never parsed for arithmetic here. */
@@ -54,6 +72,18 @@ export interface SalesOrder {
      * button reads this; it never re-derives the rule client-side.
      */
     can_cancel: boolean;
+    /**
+     * EVERY LINE COVERED by what has already been delivered plus what is still
+     * HELD for it — Inventory's answer, computed server-side through its own
+     * service so this badge and the store's fulfilment queue cannot tell two
+     * stories about the same order.
+     *
+     * IT GATES NOTHING (Q27 untouched). Dispatch is still the Delivery flow,
+     * which refuses and permits exactly what it did before. Never re-derive it
+     * from `lines`: coverage is judged on the LINE against its holds (S1), and
+     * the list payload carries no per-line fulfilment state to judge it from.
+     */
+    ready_for_dispatch: boolean;
     created_at: string;
     /** The chain below this order — ONLY on GET /sales/sales-orders/{id}, never on the list. */
     trace?: SalesOrderTrace;
@@ -471,4 +501,30 @@ export function salesRateSourceLabel(source: string | null | undefined): string 
         default:
             return source;
     }
+}
+
+// ---------------------------------------------------------- availability --
+
+/**
+ * ONE ITEM'S FOUR FIGURES — `GET /sales/availability?item_ids[]=`.
+ *
+ * What the desk may promise, per product, as the order is being typed. On the
+ * SALES surface although every figure is Inventory's, deliberately: the desk
+ * holds no inventory permission and must not need one to answer a customer
+ * asking "do you have it?".
+ *
+ * READ-ONLY, AND IT PROMISES NOTHING. Seeing free stock does not hold it — a
+ * hold is the store's act, on the fulfilment queue — so two desks can both be
+ * told 500 are free and the first to reserve gets them.
+ *
+ * FOUR KEYS AND NO FIFTH (FC-06). `over_reserved` is printed rather than
+ * hidden: a clamped `free` alone leaves a desk wondering why a full shelf
+ * promises nothing.
+ */
+export interface ItemAvailability {
+    item_id: number;
+    on_hand: string;
+    reserved: string;
+    free: string;
+    over_reserved: string;
 }

@@ -26,6 +26,7 @@ import FactoryDayBinPage from '@/features/production/pages/FactoryDayBinPage';
 import MaterialRequestsPage from '@/features/material-flow/pages/MaterialRequestsPage';
 import StoreIssueQueuePage from '@/features/material-flow/pages/StoreIssueQueuePage';
 import MrpPage from '@/features/production/pages/MrpPage';
+import ProductionQueuePage from '@/features/production/pages/ProductionQueuePage';
 import ProductionReportsPage from '@/features/production/pages/ReportsPage';
 import ReworkOrdersPage from '@/features/production/pages/ReworkOrdersPage';
 import RoutingsPage from '@/features/production/pages/RoutingsPage';
@@ -57,7 +58,9 @@ import ItemDetailPage from '@/features/inventory/pages/ItemDetailPage';
 import ItemsPage from '@/features/inventory/pages/ItemsPage';
 import MaterialLotsPage from '@/features/inventory/pages/MaterialLotsPage';
 import SerialNumbersPage from '@/features/inventory/pages/SerialNumbersPage';
+import PlanningDashboardPage from '@/features/inventory/pages/PlanningDashboardPage';
 import StockPage from '@/features/inventory/pages/StockPage';
+import StoreFulfilmentPage from '@/features/inventory/pages/StoreFulfilmentPage';
 import WarehousesPage from '@/features/inventory/pages/WarehousesPage';
 import GoodsReceiptsPage from '@/features/procurement/pages/GoodsReceiptsPage';
 import PurchaseOrdersPage from '@/features/procurement/pages/PurchaseOrdersPage';
@@ -102,6 +105,17 @@ export default function App() {
                                         because the store is its reader — the floor's
                                         half is /production/material-requests. */}
                                     <Route path="/inventory/store-issue-queue" element={<StoreIssueQueuePage />} />
+                                    {/* SALES ORDER FULFILMENT, the store's half:
+                                        the queue of order lines waiting on stock,
+                                        and the ETA dashboard behind what the store
+                                        has sent to the floor. Under /inventory for
+                                        the same reason the store issue queue is —
+                                        the STORE is the reader, and holding stock
+                                        back from a customer is the store's act.
+                                        Neither route moves stock (invariant 1) and
+                                        neither touches a batch (invariant 2). */}
+                                    <Route path="/inventory/fulfilment" element={<StoreFulfilmentPage />} />
+                                    <Route path="/inventory/planning" element={<PlanningDashboardPage />} />
                                     {/* Work Centers is retired as a screen, not as a
                                         record: the WorkCenter rows it edited are the
                                         machine master, now shown in full on Machine
@@ -163,6 +177,14 @@ export default function App() {
                                         standing, and both name the three states in
                                         full — issued to production is NOT consumed. */}
                                     <Route path="/production/material-requests" element={<MaterialRequestsPage />} />
+                                    {/* The FLOOR's half of the fulfilment chain —
+                                        the prioritized worklist the store raised.
+                                        The API behind it is OR-gated
+                                        (production OR inventory), so a storekeeper
+                                        reaching this URL sees the queue without the
+                                        floor's controls; the page reads the two
+                                        permissions separately. */}
+                                    <Route path="/production/queue" element={<ProductionQueuePage />} />
                                     <Route path="/production/shift-summary" element={<ShiftSummaryPage />} />
                                     <Route path="/production/approve-production" element={<ApproveProductionPage />} />
                                     <Route path="/production/reports" element={<ProductionReportsPage />} />

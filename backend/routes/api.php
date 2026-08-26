@@ -23,6 +23,7 @@ use App\Modules\HRMS\Http\Controllers\LeaveBalanceController;
 use App\Modules\HRMS\Http\Controllers\LeaveRequestController;
 use App\Modules\HRMS\Http\Controllers\LeaveTypeController;
 use App\Modules\Inventory\Http\Controllers\BatchController;
+use App\Modules\Inventory\Http\Controllers\FulfilmentController;
 use App\Modules\Inventory\Http\Controllers\ItemController;
 use App\Modules\Inventory\Http\Controllers\MaterialBagController;
 use App\Modules\Inventory\Http\Controllers\MaterialLotController;
@@ -31,6 +32,7 @@ use App\Modules\Inventory\Http\Controllers\MaterialRequestController;
 use App\Modules\Inventory\Http\Controllers\SerialNumberController;
 use App\Modules\Inventory\Http\Controllers\StockBalanceController;
 use App\Modules\Inventory\Http\Controllers\StockMovementController;
+use App\Modules\Inventory\Http\Controllers\StockReservationController;
 use App\Modules\Inventory\Http\Controllers\StoreIssueController;
 use App\Modules\Inventory\Http\Controllers\WarehouseController;
 use App\Modules\Maintenance\Http\Controllers\AssetController;
@@ -65,6 +67,7 @@ use App\Modules\Production\Http\Controllers\PackingMaterialMappingController;
 use App\Modules\Production\Http\Controllers\PowerInterruptionLogController;
 use App\Modules\Production\Http\Controllers\ProductionConfigurationController;
 use App\Modules\Production\Http\Controllers\ProductionReportController;
+use App\Modules\Production\Http\Controllers\ProductionRequestController;
 use App\Modules\Production\Http\Controllers\ProductionSettingsController;
 use App\Modules\Production\Http\Controllers\ProductionStandardController;
 use App\Modules\Production\Http\Controllers\ProductionStandardPackagingController;
@@ -93,6 +96,7 @@ use App\Modules\Quality\Http\Controllers\SpcMeasurementController;
 use App\Modules\Sales\Http\Controllers\CustomerController;
 use App\Modules\Sales\Http\Controllers\DeliveryController;
 use App\Modules\Sales\Http\Controllers\InvoiceController;
+use App\Modules\Sales\Http\Controllers\SalesAvailabilityController;
 use App\Modules\Sales\Http\Controllers\SalesCostInsightController;
 use App\Modules\Sales\Http\Controllers\SalesOrderController;
 use App\Modules\Sales\Http\Controllers\SalesTallyMirrorController;
@@ -351,6 +355,107 @@ Route::prefix('v1')->group(function () {
                 ->middleware('module:production');
         });
 
+        /*
+         * SALES ORDER FULFILMENT — the STORE's half.
+         *
+         * The chain: the sales desk raises an order, its confirmed lines
+         * appear on the store's fulfilment queue, the store either HOLDS
+         * finished goods that already exist or asks the FLOOR for what does
+         * not, and the floor's half of the same chain is the production
+         * request group directly below.
+         *
+         * NONE OF IT MOVES STOCK (invariant 1). A hold changes who stock is
+         * spoken for and nothing else; the balance is read under a lock and
+         * put back exactly as it was found. Dispatch is still the Delivery
+         * flow, unchanged and ungated (Q27 untouched) — it simply SPENDS the
+         * hold it was made against on the way past.
+         *
+         * A SIBLING GROUP rather than lines inside the big inventory group
+         * above, for the same reason the store-issue and material-request
+         * blocks are siblings: one story, one comment, and the store's
+         * existing surface is not disturbed to add it. Same gate as that
+         * group (`module:inventory`) — holding stock back from a customer is
+         * the STORE's act, and EnsureModulePermission already settles that a
+         * GET needs .view while a POST needs .manage.
+         *
+         * Append-only: every action is a POST. A hold is never edited and
+         * never deleted — it is given up, with a reason, and keeps its row.
+         *
+         * `queue` and `planning` are registered under the `fulfilment/`
+         * segment, so neither word can ever be read as a line id.
+         */
+        Route::prefix('inventory')->middleware('module:inventory')->group(function () {
+            // The queue itself: every line of every live order, over-reserved
+            // rows FIRST, fully allocated ones hidden unless asked for by
+            // name (S8, S16).
+            Route::get('fulfilment/queue', [FulfilmentController::class, 'queue']);
+            // WHEN THE FACTORY COULD HAVE IT. Computed on read and never
+            // stored (S11) — there is no ETA column anywhere in this build,
+            // because a saved date is already wrong the moment somebody
+            // reorders the queue. A bare object, not a row.
+            Route::get('fulfilment/planning', [FulfilmentController::class, 'planning']);
+
+            // The two LINE-scoped acts: hold what is there, ask for what is
+            // not. Both refuse inside a transaction on figures recomputed
+            // under the balance lock, never on what this screen last saw.
+            Route::post('fulfilment/lines/{sales_order_line}/reserve', [FulfilmentController::class, 'reserve']);
+            Route::post('fulfilment/lines/{sales_order_line}/send-to-production', [FulfilmentController::class, 'sendToProduction']);
+
+            // The two HOLD-scoped acts, on a reservation by its own id.
+            // Re-pointing is release + reserve in ONE transaction under ONE
+            // balance lock (S4), so the pieces in flight are never invisible
+            // to the target line's own free-stock check.
+            Route::post('reservations/{reservation}/release', [StockReservationController::class, 'release']);
+            Route::post('reservations/{reservation}/repoint', [StockReservationController::class, 'repoint']);
+        });
+
+        /*
+         * THE PRODUCTION REQUEST — the FLOOR's half of the same chain, and
+         * the second two-sided document on this API.
+         *
+         * Gated exactly like the material request above and for the same
+         * reason (P3): the STORE raises it and the FLOOR runs it, and neither
+         * desk can be asked to hold the other's permission to read the one
+         * piece of paper they share. `module:production,inventory` means "any
+         * of these", never "both" (EnsureModulePermission).
+         *
+         * TWO SIBLING GROUPS, not one group with route-level middleware. The
+         * material-request block only reaches for route-level middleware
+         * because `own-draft` has to run BEFORE the permission check there;
+         * nothing here has that constraint, so the plain shape is the honest
+         * one: what BOTH desks may do in the OR group, what only the floor
+         * may do in its own.
+         *
+         * NOTHING HERE TOUCHES A BATCH (invariant 2). `start` records that a
+         * person picked the job up — people start batches, and this API
+         * creates, starts and cancels none.
+         *
+         * Append-only: every step is a POST, there is no PUT and no DELETE.
+         * A cancelled request keeps its row and its reason. `reorder` is
+         * registered before the {production_request} routes so the word can
+         * never be read as an id.
+         */
+        Route::prefix('production')->middleware('module:production,inventory')->group(function () {
+            // The queue, in priority order. Read by the floor that runs it
+            // (production.view) and by the store that raised it
+            // (inventory.view) — deliberately unpaginated: reorder renumbers
+            // the WHOLE queue, and nobody should reorder a list they can only
+            // see one page of.
+            Route::get('requests', [ProductionRequestController::class, 'index']);
+            // Either side may withdraw one, with a reason: the store when the
+            // customer no longer wants it, the floor when it cannot run it.
+            Route::post('requests/{production_request}/cancel', [ProductionRequestController::class, 'cancel']);
+        });
+
+        // The queue's ORDER and picking a job up are the FLOOR's alone —
+        // production.manage. The store says WHAT is owed; it does not tell
+        // the factory what to run first, and it does not press Start for
+        // somebody standing at a machine.
+        Route::prefix('production')->middleware('module:production')->group(function () {
+            Route::post('requests/reorder', [ProductionRequestController::class, 'reorder']);
+            Route::post('requests/{production_request}/start', [ProductionRequestController::class, 'start']);
+        });
+
         Route::prefix('procurement')->middleware('module:procurement')->group(function () {
             // Vendor on the Configuration Lifecycle Contract (DEC-20260817-002).
             // archive/activate are registered BEFORE the apiResource so neither
@@ -388,6 +493,16 @@ Route::prefix('v1')->group(function () {
             Route::post('customers/{customer}/archive', [CustomerController::class, 'archive']);
             Route::post('customers/{customer}/activate', [CustomerController::class, 'activate']);
             Route::apiResource('customers', CustomerController::class)->only(['index', 'store', 'update', 'show', 'destroy']);
+
+            // WHAT THE DESK MAY PROMISE, per item, as the order is typed:
+            // on_hand / reserved / free / over_reserved out of the
+            // finished-goods store. On the SALES surface although every
+            // figure is Inventory's, deliberately — the desk holds no
+            // inventory permission and must not need one to answer a
+            // customer asking "do you have it?". Read-only, and seeing free
+            // stock holds nothing: a hold is the store's act, on the
+            // fulfilment queue. FC-06: four quantity keys, no cost.
+            Route::get('availability', [SalesAvailabilityController::class, 'index']);
 
             // Phase 3.5 — the honesty statement the Sales pages render: Tally-
             // side Sales / Sales Order vouchers are NOT mirrored here

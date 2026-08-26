@@ -10,10 +10,12 @@ import { listAllItems } from '@/features/inventory/api';
 import {
     confirmSalesOrder,
     createSalesOrder,
+    getItemAvailability,
     getSalesOrderCostInsight,
     listCustomers,
     listSalesOrders,
 } from '@/features/sales/api';
+import { availabilityByItem, availabilityChips, availabilityItemIds } from '@/features/sales/availability';
 import { hasActiveFilters } from '@/features/sales/filters';
 import SalesDocumentDrawer from '@/features/sales/SalesDocumentDrawer';
 import SalesFilterBar from '@/features/sales/SalesFilterBar';
@@ -37,6 +39,13 @@ const orderSchema = z.object({
     customer_id: z.number({ error: 'Customer is required' }),
     order_date: z.string({ error: 'Order date is required' }),
     expected_date: z.string().optional(),
+    /*
+     * The customer's own PO number. No shape is validated on either side —
+     * every customer numbers their orders differently and the ERP does not get
+     * to decide what a valid one looks like — and it is not unique: one PO can
+     * cover several orders.
+     */
+    customer_po_reference: z.string().optional(),
     notes: z.string().optional(),
     lines: z
         .array(
@@ -492,11 +501,32 @@ export default function SalesOrdersPage() {
     });
     const itemOptions = items?.data.map((item) => ({ value: item.id, label: `${item.sku} — ${item.name}` })) ?? [];
 
-    const { control, handleSubmit, reset, formState: { errors } } = useForm<OrderFormValues>({
+    const { control, handleSubmit, reset, watch, formState: { errors } } = useForm<OrderFormValues>({
         resolver: zodResolver(orderSchema),
         defaultValues: { lines: [{ item_id: undefined, quantity: undefined, unit_price: undefined }] },
     });
     const { fields, append, remove } = useFieldArray({ control, name: 'lines' });
+
+    /*
+     * WHAT THE DESK MAY PROMISE, per line, as the order is typed.
+     *
+     * ONE READ FOR EVERY LINE, keyed on the sorted distinct item ids: the
+     * endpoint's own docblock names the failure this avoids — a read per row
+     * per keystroke, which is what made the modal pause. Re-ordering two lines
+     * asks no new question, so the sorted key does not refetch for it.
+     *
+     * The figures PROMISE NOTHING. Seeing free stock does not hold it: a hold
+     * is the store's act, on the fulfilment queue, and the server recomputes
+     * under a lock when somebody actually reserves.
+     */
+    const watchedLines = watch('lines') ?? [];
+    const availabilityIds = availabilityItemIds(watchedLines);
+    const { data: availabilityRows } = useQuery({
+        queryKey: ['sales', 'availability', availabilityIds],
+        queryFn: () => getItemAvailability(availabilityIds),
+        enabled: modalOpen && availabilityIds.length > 0,
+    });
+    const availability = availabilityByItem(availabilityRows);
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['sales', 'sales-orders'] });
 
@@ -548,7 +578,21 @@ export default function SalesOrdersPage() {
                     {
                         title: 'Status',
                         dataIndex: 'status',
-                        render: (status: SalesOrderStatus) => <Tag color={statusColor[status]}>{status}</Tag>,
+                        render: (status: SalesOrderStatus, row) => (
+                            <Space direction="vertical" size={2}>
+                                <Tag color={statusColor[status]}>{status}</Tag>
+                                {/* EVERY LINE COVERED by what is delivered plus
+                                    what is still held — the server's own bool
+                                    (Inventory computed it), never an ∀ over the
+                                    lines on this page, which carry no
+                                    fulfilment state.
+
+                                    IT GATES NOTHING (Q27 untouched). Dispatch
+                                    is still the Delivery flow, which refuses
+                                    and permits exactly what it did before. */}
+                                {row.ready_for_dispatch && <Tag color="green">Ready for dispatch</Tag>}
+                            </Space>
+                        ),
                     },
                     { title: 'Customer', render: (_, row) => row.customer?.name ?? '—' },
                     { title: 'Order Date', dataIndex: 'order_date' },
@@ -645,6 +689,19 @@ export default function SalesOrdersPage() {
                             )}
                         />
                     </Form.Item>
+                    {/* The customer's own PO number — the string that matches
+                        this order to their paperwork and, in Tally, to the
+                        invoice. Recorded and displayed only: no voucher is
+                        emitted from it in this build, and whether the ERP may
+                        emit Tally Sales Order vouchers at all is still an open
+                        owner question. */}
+                    <Form.Item label="Customer PO number">
+                        <Controller
+                            name="customer_po_reference"
+                            control={control}
+                            render={({ field }) => <Input {...field} value={field.value ?? ''} />}
+                        />
+                    </Form.Item>
                     <Form.Item label="Notes">
                         <Controller name="notes" control={control} render={({ field }) => <Input {...field} />} />
                     </Form.Item>
@@ -680,6 +737,22 @@ export default function SalesOrdersPage() {
                                 render={({ field }) => <InputNumber {...field} min={0} placeholder="Unit Price" />}
                             />
                             <Button danger onClick={() => remove(index)}>Remove</Button>
+                            {/* THE AVAILABILITY CHIPS — free, held, and (only
+                                once a quantity is typed) short. Nothing renders
+                                until the read answers: a "0 free" printed while
+                                a request is in flight would talk a desk out of
+                                an order the factory can fill. */}
+                            {availabilityChips(
+                                availability.get(watchedLines[index]?.item_id as number),
+                                watchedLines[index]?.quantity,
+                            ).map((chip) => (
+                                <Tag
+                                    key={chip.key}
+                                    color={chip.tone === 'success' ? 'green' : chip.tone === 'warning' ? 'orange' : 'default'}
+                                >
+                                    {chip.label}
+                                </Tag>
+                            ))}
                         </Space>
                     ))}
                     <Button

@@ -85,6 +85,12 @@ class ItemService
             DependencyCheck::table('purchase_requisition_lines', 'item_id')->label('purchase requisition line'),
             DependencyCheck::table('purchase_order_lines', 'item_id')->label('purchase order line'),
             DependencyCheck::table('sales_order_lines', 'item_id')->label('sales order line'),
+            // The two documents of the sales-order fulfilment flow: a hold
+            // on finished goods, and the shortfall handed to the floor.
+            // Transactional both, so they RESTRICT and are counted here
+            // rather than cascading away with the master.
+            DependencyCheck::table('stock_reservations', 'item_id')->label('stock reservation'),
+            DependencyCheck::table('production_requests', 'item_id')->label('production request'),
             DependencyCheck::table('quotation_lines', 'item_id')->label('quotation line'),
             DependencyCheck::table('delivery_lines', 'item_id')->label('delivery line'),
             DependencyCheck::table('invoice_lines', 'item_id')->label('invoice line'),

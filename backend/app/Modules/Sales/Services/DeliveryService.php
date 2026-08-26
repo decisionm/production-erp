@@ -5,6 +5,7 @@ namespace App\Modules\Sales\Services;
 use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Services\StockMovementService;
+use App\Modules\Inventory\Services\StockReservationService;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
 use App\Modules\Production\Models\FinishedCarton;
 use App\Modules\Sales\Events\DeliveryDispatched;
@@ -36,6 +37,9 @@ class DeliveryService
         private readonly StockMovementService $stock,
         private readonly SalesDocumentQuery $query,
         private readonly SalesDocumentTraceService $trace,
+        // The delivery is the one event that SPENDS a stock hold — see the
+        // consumeForDelivery call inside create().
+        private readonly StockReservationService $reservations,
     ) {}
 
     /**
@@ -175,6 +179,23 @@ class DeliveryService
                 );
 
                 $soLine->increment('quantity_delivered', $lineData['quantity']);
+
+                // THE HOLD THIS DISPATCH WAS MADE AGAINST IS SPENT HERE —
+                // inside the delivery's own transaction, and AFTER the
+                // increment above, because consumeForDelivery judges "is this
+                // line finished?" on the STORED quantity_delivered and would
+                // otherwise leave a shipped line's leftover holds standing
+                // (StockReservationServiceTest pins that ordering).
+                //
+                // It moves NO stock: recordIssue already did, a line above.
+                // A delivery from a warehouse this line holds nothing in
+                // spends no hold and is not an error (S3) — the holds sit in
+                // the FG store and the van may legally have loaded elsewhere.
+                $this->reservations->consumeForDelivery(
+                    $soLine,
+                    (string) $lineData['quantity'],
+                    (int) $data['warehouse_id'],
+                );
             }
 
             $this->recomputeOrderStatus($order->fresh('lines'));

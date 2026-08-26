@@ -6,6 +6,7 @@ import type {
     Customer,
     Delivery,
     Invoice,
+    ItemAvailability,
     SalesCostInsight,
     SalesListFilters,
     SalesOrder,
@@ -41,6 +42,13 @@ export async function createCustomer(payload: CreateCustomerPayload): Promise<Cu
     return data.data;
 }
 
+/*
+ * NO LEDGER KEYS HERE, and their absence is the contract. `tally_ledger_guid`
+ * and `tally_ledger_name` are not fillable on the server — a posting identity
+ * is imported from Tally by `sales:import-customers-from-ledgers`, never typed
+ * into a form — so adding them to this payload would build a control the API
+ * silently discards.
+ */
 export type UpdateCustomerPayload = Partial<CreateCustomerPayload> & { is_active?: boolean };
 
 export async function updateCustomer(id: number, payload: UpdateCustomerPayload): Promise<Customer> {
@@ -98,6 +106,12 @@ export interface CreateSalesOrderPayload {
     customer_id: number;
     order_date: string;
     expected_date?: string;
+    /**
+     * The customer's own PO number, as they wrote it. No shape is enforced —
+     * every customer numbers their orders differently — and it is not unique.
+     * Recorded only: no Tally voucher is emitted from it in this build.
+     */
+    customer_po_reference?: string;
     notes?: string;
     lines: { item_id: number; quantity: number; unit_price: number }[];
 }
@@ -193,5 +207,25 @@ export async function createInvoice(payload: CreateInvoicePayload): Promise<Invo
 
 export async function issueInvoice(id: number): Promise<Invoice> {
     const { data } = await api.post<{ data: Invoice }>(`/sales/invoices/${id}/issue`);
+    return data.data;
+}
+
+/**
+ * WHAT THE DESK MAY PROMISE, for the items on the order being typed.
+ *
+ * ONE REQUEST FOR ALL THE LINES, never one per line: the endpoint caps
+ * `item_ids` at 200 for exactly this reason, and a read per keystroke per row
+ * is what its own docblock names as the failure to avoid.
+ *
+ * An id the item master does not know comes back as four zeroes rather than a
+ * 422 — the honest answer to "how many can I promise" for a product that is
+ * not there is none, not an error in the middle of typing an order.
+ */
+export async function getItemAvailability(itemIds: number[]): Promise<ItemAvailability[]> {
+    if (itemIds.length === 0) return [];
+
+    const { data } = await api.get<{ data: ItemAvailability[] }>('/sales/availability', {
+        params: { item_ids: itemIds },
+    });
     return data.data;
 }
