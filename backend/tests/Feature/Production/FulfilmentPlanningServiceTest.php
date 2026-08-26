@@ -12,6 +12,7 @@ use App\Modules\Sales\Models\Customer;
 use App\Modules\Sales\Models\Enums\SalesOrderStatus;
 use App\Modules\Sales\Models\SalesOrder;
 use App\Modules\Sales\Models\SalesOrderLine;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -183,6 +184,51 @@ class FulfilmentPlanningServiceTest extends TestCase
             [$first->id, $second->id, $third->id],
             array_column($targets, 'request_id'),
         );
+    }
+
+    /**
+     * THE CALENDAR IS WALKED THROUGH REAL SHIFT BOUNDARIES (Codex P1 on
+     * PR #33). A two-shift job planned from the 14:00 boundary runs 14:00 to
+     * 22:00 and 22:00 to 06:00 — it is in hand at six the NEXT morning, and
+     * the old arithmetic (whole days per shifts_per_day shifts) dated it
+     * today.
+     */
+    public function test_a_job_crossing_midnight_is_dated_tomorrow(): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2026-09-01 08:00', config('tally-sync.factory_timezone')));
+
+        $bottle = $this->item('BTL-500', '10.00', 4); // 11 520 a shift
+        $this->request($bottle, '20000');             // 2 shifts
+
+        $row = app(FulfilmentPlanningService::class)->plan()['data'][0];
+
+        $this->assertSame(2, $row['shifts_needed']);
+        // Boundary 14:00 today; finishes at 06:00 on the 2nd.
+        $this->assertSame('2026-09-02', $row['estimated_ready_date']);
+    }
+
+    /**
+     * EACH SHIFT'S OWN LENGTH COUNTS (Codex P1 on PR #33). With a 10/6/8
+     * day, a 9 000-piece job starting on the SIX-hour shift does not fit in
+     * it (8 640), spills into the overnight shift, and is in hand tomorrow —
+     * the averaged shift the old walk used called it one shift, today.
+     */
+    public function test_a_short_shift_is_not_padded_to_the_average(): void
+    {
+        Shift::query()->delete();
+        Shift::create(['name' => 'Long', 'start_time' => '06:00:00', 'end_time' => '16:00:00', 'is_active' => true]);
+        Shift::create(['name' => 'Short', 'start_time' => '16:00:00', 'end_time' => '22:00:00', 'is_active' => true]);
+        Shift::create(['name' => 'Night', 'start_time' => '22:00:00', 'end_time' => '06:00:00', 'is_active' => true]);
+
+        $this->travelTo(CarbonImmutable::parse('2026-09-01 15:00', config('tally-sync.factory_timezone')));
+
+        $bottle = $this->item('BTL-500', '10.00', 4); // 6h: 8 640, 8h: 11 520
+        $this->request($bottle, '9000');
+
+        $row = app(FulfilmentPlanningService::class)->plan()['data'][0];
+
+        $this->assertSame(2, $row['shifts_needed']);
+        $this->assertSame('2026-09-02', $row['estimated_ready_date']);
     }
 
     // ---- fixtures ---------------------------------------------------------

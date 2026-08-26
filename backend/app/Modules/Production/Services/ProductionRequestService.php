@@ -175,6 +175,13 @@ class ProductionRequestService
                 ->firstOrFail();
             $fresh->setRelation('salesOrder', $order);
 
+            // GLOBAL LOCK ORDER: the line's holds are read UNDER their own
+            // locks, and BEFORE the request check takes production_requests
+            // — reservations sit above requests in the order, and an
+            // unlocked held figure could be read mid-release and undersize
+            // what the floor is asked for (Codex P1, PR #33).
+            $held = $this->reservations->heldOnLineLocked((int) $fresh->id);
+
             $existing = ProductionRequest::query()
                 ->open()
                 ->where('sales_order_line_id', $fresh->id)
@@ -187,7 +194,7 @@ class ProductionRequestService
 
             $shortfall = bcsub(
                 bcsub((string) $fresh->quantity, (string) $fresh->quantity_delivered, 4),
-                $this->reservations->heldOnLine((int) $fresh->id),
+                $held,
                 4,
             );
 
@@ -368,8 +375,13 @@ class ProductionRequestService
             return 0;
         }
 
+        // QUEUED ONLY (Codex P1, PR #33). A request the floor has already
+        // STARTED is not silently taken off its worklist by paperwork —
+        // pieces may be mid-machine, and whether a running job should stop
+        // is the floor's call (and part of open question Q62). Coverage
+        // retires only what nobody has begun.
         $open = ProductionRequest::query()
-            ->open()
+            ->where('status', ProductionRequestStatus::Queued)
             ->where('sales_order_line_id', $fresh->id)
             ->lockForUpdate()
             ->get();
@@ -384,9 +396,28 @@ class ProductionRequestService
     // ---- internals --------------------------------------------------------
 
     /** End of the queue. Dense numbering is reorder()'s job, not this one's. */
+    /**
+     * The current tail of the queue, LOCKED — two lines sent to production
+     * at the same moment lock different sales rows, so without this they
+     * both read the same maximum and land on one priority (Codex P2,
+     * PR #33). Locking the single top row serialises them; an empty queue
+     * has no row to lock and a same-instant tie there is settled by the
+     * (priority, id) display order until the next reorder renumbers.
+     *
+     * @return Builder<ProductionRequest>
+     */
+    public static function maxPriorityLockQuery()
+    {
+        return ProductionRequest::query()
+            ->open()
+            ->orderByDesc('priority')
+            ->orderByDesc('id')
+            ->lockForUpdate();
+    }
+
     private function nextPriority(): int
     {
-        $highest = ProductionRequest::query()->open()->max('priority');
+        $highest = self::maxPriorityLockQuery()->value('priority');
 
         return (int) $highest + 1;
     }

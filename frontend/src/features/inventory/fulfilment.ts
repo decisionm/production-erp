@@ -193,5 +193,14 @@ export function factoryCalendarDate(isoInstant: string): string {
 export function repointTargets(rows: FulfilmentQueueRow[], source: FulfilmentQueueRow): FulfilmentQueueRow[] {
     if (source.item === null) return [];
 
-    return rows.filter((row) => row.line_id !== source.line_id && row.item?.id === source.item?.id);
+    return rows.filter(
+        (row) =>
+            row.line_id !== source.line_id &&
+            row.item?.id === source.item?.id &&
+            // A line with no remaining demand refuses every positive
+            // re-point (the S5 cap), so offering it guarantees a 422
+            // (Codex P2, PR #33). ordered − delivered − reserved, in the
+            // payload's own 4dp strings.
+            Number(row.ordered) - Number(row.delivered) - Number(row.reserved) > 0,
+    );
 }

@@ -77,7 +77,11 @@ function Holds({ row, onRelease, onRepoint }: {
         <Space direction="vertical" size={2}>
             {row.holds.map((hold) => (
                 <Space key={hold.reservation_id} size={6} wrap>
-                    <span style={numeric}>{formatQuantity(hold.quantity)}</span>
+                    {/* OUTSTANDING, not the original quantity: a partial
+                        re-point leaves this row active with part released,
+                        and the original figure invited re-points of pieces
+                        no longer here (Codex P2, PR #33). */}
+                    <span style={numeric}>{formatQuantity(hold.outstanding_quantity ?? hold.quantity)}</span>
                     <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                         {holdSentence(hold)}
                     </Typography.Text>

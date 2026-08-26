@@ -1588,12 +1588,21 @@ What the owner needs to settle:
 (d) When stock is short and production is asked for the shortfall, is the queue
     strictly the order the requests were raised in (today's behaviour, with
     manual reordering by production), or does the promised date drive it?
-(e) When is a request "answered"? Today a request leaves the floor's queue the
-    moment the line is covered by delivered pieces plus what it still holds —
-    counted so that a delivered hold is never counted twice (the design draft's
-    literal sum would have marked a 100-piece line produced at 60 delivered
-    out of a 100-piece hold). If the owner's own sense of "covered" differs,
-    the formula moves to match it, not the other way around.
+(e) When is a request "answered"? Today a QUEUED request leaves the floor's
+    queue the moment the line is covered by delivered pieces plus what it
+    still holds — counted so that a delivered hold is never counted twice
+    (the design draft's literal sum would have marked a 100-piece line
+    produced at 60 delivered out of a 100-piece hold). A request the floor
+    has already STARTED is never retired by paperwork — whether a running
+    job should stop is the floor's call. If the owner's own sense of
+    "covered" differs, the formula moves to match it, not the other way
+    around.
+(f) The planning dashboard quotes dates assuming ONE production line per
+    queued product (config `production.planning.parallel_lines`, default 1,
+    printed in every payload's basis). One line is the fewest the factory can
+    run, so the quoted date is a ceiling the floor can beat — but if the real
+    number per product is known, recording it tightens every date. What is
+    it?
 
 **Blocks:** any automatic re-allocation of a hold. It does not block the manual
 flow already built — reserve, release, re-point and send-to-production all

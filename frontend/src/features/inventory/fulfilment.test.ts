@@ -185,4 +185,18 @@ describe('the re-point targets', () => {
     it('offers nothing at all when the hold s own row has no product on it', () => {
         expect(repointTargets([sameItem], row({ item: null }))).toEqual([]);
     });
+
+    it('never offers a line with no remaining demand', () => {
+        // A fully-served line refuses every positive re-point (the S5 cap),
+        // so offering it guarantees a 422 (Codex P2, PR #33).
+        const covered = row({
+            line_id: 4,
+            item: { id: 7, sku: 'BTL-1L', name: '1 Litre Bottle' },
+            ordered: '100.0000',
+            delivered: '40.0000',
+            reserved: '60.0000',
+        });
+
+        expect(repointTargets([source, sameItem, covered], source).map((target) => target.line_id)).toEqual([2]);
+    });
 });

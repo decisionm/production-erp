@@ -372,6 +372,11 @@ class FulfilmentQueueService
             'reservation_id' => (int) $hold->id,
             'quantity' => (string) $hold->quantity,
             'consumed_quantity' => (string) $hold->consumed_quantity,
+            // What the hold is STILL holding — a partial re-point leaves the
+            // row active with part of it released, and printing the original
+            // quantity invited re-points of pieces no longer there
+            // (Codex P2, PR #33).
+            'outstanding_quantity' => $hold->outstandingQuantity(),
             'held_since' => $hold->created_at?->toIso8601String(),
             'customer' => $customer === null ? null : ['id' => (int) $customer->id, 'name' => $customer->name],
             'sales_order_id' => (int) $line->sales_order_id,

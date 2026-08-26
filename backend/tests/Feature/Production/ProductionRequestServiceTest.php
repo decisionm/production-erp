@@ -252,10 +252,31 @@ class ProductionRequestServiceTest extends TestCase
         $this->assertSame(ProductionRequestStatus::Produced, $request->fresh()->status);
     }
 
-    /** The lock the C1 fix rides on, pinned on the builder (SQLite drops FOR UPDATE). */
+    /** The locks the fixes ride on, pinned on the builders (SQLite drops FOR UPDATE). */
     public function test_the_order_read_carries_a_real_lock(): void
     {
         $this->assertTrue(ProductionRequestService::openOrderQuery(1)->toBase()->lock);
+        // Two lines sent at the same moment must not share a priority
+        // (Codex P2, PR #33) — the tail read is a locking one.
+        $this->assertTrue(ProductionRequestService::maxPriorityLockQuery()->toBase()->lock);
+    }
+
+    /**
+     * A request the floor has STARTED is never retired by paperwork
+     * (Codex P1, PR #33): coverage flips QUEUED requests only. Whether a
+     * running job should stop is the floor's call — and part of Q62.
+     */
+    public function test_a_started_request_survives_the_line_being_covered(): void
+    {
+        $this->seedStock('100');
+        $line = $this->line('100');
+        $request = $this->service()->createFromShortfall($line->fresh(), '100', $this->store->id);
+        $this->service()->start($request);
+
+        app(StockReservationService::class)->reserve($line->fresh(), '100', $this->store->id);
+
+        $this->assertSame(0, $this->service()->markProducedIfCovered($line->fresh()));
+        $this->assertSame(ProductionRequestStatus::InProgress, $request->fresh()->status);
     }
 
     /**

@@ -200,6 +200,13 @@ export interface FulfilmentHold {
     reservation_id: number;
     quantity: string;
     consumed_quantity: string;
+    /**
+     * What the hold STILL holds — a partial re-point leaves the row active
+     * with part of it released, so the original quantity overstates it.
+     * Optional: an older backend does not send it, and the display falls
+     * back to quantity.
+     */
+    outstanding_quantity?: string;
     /** ISO instant the hold was taken. Never null in practice; typed honestly. */
     held_since: string | null;
     customer: FulfilmentParty | null;

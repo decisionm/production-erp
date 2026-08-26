@@ -537,6 +537,16 @@ class StockReservationService
             ->lockForUpdate();
     }
 
+    /**
+     * heldOnLine(), read UNDER the reservation locks — for a writer whose
+     * arithmetic must not race a release()/repoint() that only holds the
+     * reservation row (Codex P1, PR #33).
+     */
+    public function heldOnLineLocked(int $salesOrderLineId): string
+    {
+        return $this->foldOutstanding(self::activeLineHoldsLockedQuery($salesOrderLineId)->get());
+    }
+
     private function lockReservation(int $id): StockReservation
     {
         return StockReservation::query()

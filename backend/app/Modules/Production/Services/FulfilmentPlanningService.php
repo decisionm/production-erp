@@ -59,6 +59,9 @@ class FulfilmentPlanningService
         private readonly AvailabilityService $availability,
     ) {}
 
+    /** @var array<string, ?int> capacity per (item, slot length), once per plan() */
+    private array $capacityByHours = [];
+
     /**
      * The whole dashboard in one read: every open request with its ETA or
      * its refusal, the basis those numbers were computed on, and what the
@@ -76,6 +79,13 @@ class FulfilmentPlanningService
         $shifts = $this->activeShiftsWithClocks();
         $shiftsPerDay = $shifts->count();
         $shiftHours = $this->shiftHours($shifts);
+        // The REAL boundaries the walk moves through — each slot carries its
+        // own start, its own length and whether it crosses midnight. The
+        // averaged shift_hours above stays a published basis figure and the
+        // display capacity; the calendar walk below never uses it
+        // (Codex P1 ×2, PR #33: a 14:00 two-shift job is in hand at six the
+        // NEXT morning, and a six-hour shift is not padded to the average).
+        $slots = $this->slots($shifts);
 
         // PARALLEL LINES — how many machines the factory runs a queued
         // product on at once. Configuration, not a guess: it defaults to 1
@@ -108,7 +118,9 @@ class FulfilmentPlanningService
             ->orderBy('id')
             ->get();
 
-        $start = $shiftsPerDay > 0 ? $this->nextShiftBoundary($shifts, $timezone) : null;
+        $boundary = $slots === [] ? null : $this->nextBoundary($slots, $timezone);
+        $start = $boundary['date'] ?? null;
+        $startIdx = (int) ($boundary['idx'] ?? 0);
         $free = $this->freeByItem($requests);
 
         $rows = [];
@@ -147,13 +159,15 @@ class FulfilmentPlanningService
                     $reason = self::REASON_NO_STANDARD;
                     $blocked = true;
                 } else {
-                    $perShift = $capacity * $parallelLines;
-                    $shiftsNeeded = max(1, $this->shiftsFor($needed, $perShift));
-
-                    $shiftsAfter = $shiftsBefore + $shiftsNeeded;
-                    // The job finishes at the end of its last shift; whole
-                    // days elapse every shifts_per_day shifts.
-                    $readyDate = $start->addDays(intdiv($shiftsAfter - 1, $shiftsPerDay))->toDateString();
+                    [$shiftsNeeded, $readyDate] = $this->walkSlots(
+                        $request->item,
+                        $needed,
+                        $slots,
+                        $startIdx,
+                        $shiftsBefore,
+                        $start,
+                        $parallelLines,
+                    );
                 }
             }
 
@@ -237,21 +251,6 @@ class FulfilmentPlanningService
     }
 
     /**
-     * ceil(needed ÷ per-shift capacity), in decimal arithmetic rather than
-     * through a float: a part-used shift is still a whole shift on the
-     * calendar, and the suite runs on two database drivers that do not agree
-     * about float rounding.
-     */
-    private function shiftsFor(string $needed, int $perShift): int
-    {
-        $whole = (int) bcdiv($needed, (string) $perShift, 0);
-
-        return bccomp(bcmul((string) $whole, (string) $perShift, 4), $needed, 4) === 0
-            ? $whole
-            : $whole + 1;
-    }
-
-    /**
      * The active shifts that have a usable clock, earliest start first.
      *
      * A shift with no start or end time is SKIPPED, never folded in as zero
@@ -300,31 +299,126 @@ class FulfilmentPlanningService
     }
 
     /**
-     * The next time a shift actually starts, in FACTORY time.
-     *
-     * TIME columns come back as "HH:MM:SS" and compare correctly as strings
-     * — the same convention Shift::productionDateFor() relies on. Past every
-     * start today means the next boundary is the earliest start tomorrow.
+     * The day's shift slots in start order — each with its OWN length and
+     * whether its end falls past midnight. A shift whose clock cannot be
+     * read is skipped, never counted as zero hours.
      *
      * @param  Collection<int, Shift>  $shifts
+     * @return list<array{start: string, hours: string, overnight: bool}>
      */
-    private function nextShiftBoundary(Collection $shifts, string $timezone): CarbonImmutable
+    private function slots(Collection $shifts): array
+    {
+        $slots = [];
+
+        foreach ($shifts as $shift) {
+            $hours = $this->estimation->shiftLengthHours($shift);
+
+            if ($hours === null) {
+                continue;
+            }
+
+            $slots[] = [
+                'start' => (string) $shift->start_time,
+                'hours' => $hours,
+                // TIME strings compare correctly as strings — the
+                // Shift::productionDateFor() convention. End at or before
+                // start means the shift finishes on the NEXT calendar day.
+                'overnight' => (string) $shift->end_time <= (string) $shift->start_time,
+            ];
+        }
+
+        return $slots;
+    }
+
+    /**
+     * The next slot that actually starts, in FACTORY time — the datetime AND
+     * which slot of the day it is, because the calendar walk needs to know
+     * where in the day's sequence it is standing. Past every start today
+     * means the earliest start tomorrow.
+     *
+     * @param  list<array{start: string, hours: string, overnight: bool}>  $slots
+     * @return array{date: CarbonImmutable, idx: int}
+     */
+    private function nextBoundary(array $slots, string $timezone): array
     {
         $now = CarbonImmutable::now($timezone);
         $nowTime = $now->format('H:i:s');
 
-        $starts = $shifts
-            ->map(fn (Shift $shift) => (string) $shift->start_time)
-            ->sort()
-            ->values();
-
-        foreach ($starts as $start) {
-            if ($start > $nowTime) {
-                return $now->setTimeFromTimeString($start);
+        foreach ($slots as $idx => $slot) {
+            if ($slot['start'] > $nowTime) {
+                return ['date' => $now->setTimeFromTimeString($slot['start']), 'idx' => $idx];
             }
         }
 
-        return $now->addDay()->setTimeFromTimeString($starts->first());
+        return ['date' => $now->addDay()->setTimeFromTimeString($slots[0]['start']), 'idx' => 0];
+    }
+
+    /**
+     * WALK THE QUEUE THROUGH THE REAL BOUNDARIES (Codex P1 ×2, PR #33).
+     *
+     * Each consumed slot contributes ITS OWN length's capacity — a six-hour
+     * shift is never padded to the day's average — and the finish date is
+     * the calendar day the LAST slot actually ends on: an overnight slot
+     * ends tomorrow, however few shifts were counted. Decimal arithmetic
+     * end to end; the remaining figure strictly decreases because a slot
+     * whose capacity is not at least one piece refuses the estimate.
+     *
+     * @param  list<array{start: string, hours: string, overnight: bool}>  $slots
+     * @return array{0: ?int, 1: ?string} [shifts needed, ready date] — nulls when unestimable
+     */
+    private function walkSlots(
+        ?Item $item,
+        string $needed,
+        array $slots,
+        int $startIdx,
+        int $offset,
+        CarbonImmutable $start,
+        int $parallelLines,
+    ): array {
+        $perDay = count($slots);
+        $cursor = $offset;
+        $shiftsNeeded = 0;
+        $remaining = bcadd($needed, '0', 4);
+
+        while (bccomp($remaining, '0', 4) === 1) {
+            $slot = $slots[($startIdx + $cursor) % $perDay];
+            $capacity = $this->capacityForHours($item, $slot['hours']);
+
+            if ($capacity === null || $capacity < 1) {
+                return [null, null];
+            }
+
+            $remaining = bcsub($remaining, (string) ($capacity * $parallelLines), 4);
+            $shiftsNeeded++;
+            $cursor++;
+        }
+
+        $last = $startIdx + $cursor - 1;
+        $finish = $slots[$last % $perDay];
+
+        return [
+            $shiftsNeeded,
+            $start->addDays(intdiv($last, $perDay) + ($finish['overnight'] ? 1 : 0))->toDateString(),
+        ];
+    }
+
+    /**
+     * capacityPerShift(), cached per (item, slot length) — the walk asks for
+     * the same one or two durations hundreds of times.
+     */
+    private function capacityForHours(?Item $item, string $hours): ?int
+    {
+        if ($item === null) {
+            return null;
+        }
+
+        $key = $item->id.'|'.$hours;
+
+        if (! array_key_exists($key, $this->capacityByHours)) {
+            $this->capacityByHours[$key] = $this->capacityPerShift($item, $hours);
+        }
+
+        return $this->capacityByHours[$key];
     }
 
     /**
