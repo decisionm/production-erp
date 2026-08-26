@@ -33,7 +33,17 @@ export default function VendorsPage() {
     const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['procurement', 'vendors'], queryFn: listVendors });
+    // Server-side paging, the Customers table's shape. The page number is
+    // part of the query key; the key still STARTS with the prefix the
+    // invalidate below uses, so creating a vendor refreshes this table and
+    // the pickers' ['procurement','vendors','all'] alike.
+    const [page, setPage] = useState(1);
+    const [perPage, setPerPage] = useState(50);
+
+    const { data, isLoading } = useQuery({
+        queryKey: ['procurement', 'vendors', page, perPage],
+        queryFn: () => listVendors(page, perPage),
+    });
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['procurement', 'vendors'] });
 
@@ -81,7 +91,20 @@ export default function VendorsPage() {
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                pagination={{
+                    current: page,
+                    pageSize: perPage,
+                    // The server's count, not the page's length — otherwise
+                    // the pager would claim the list ends at the first screen.
+                    total: data?.meta?.total ?? data?.data?.length ?? 0,
+                    showSizeChanger: true,
+                    pageSizeOptions: [20, 50, 100, 200],
+                    showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} vendors`,
+                    onChange: (nextPage, nextSize) => {
+                        setPage(nextPage);
+                        setPerPage(nextSize);
+                    },
+                }}
                 columns={[
                     { title: 'Code', dataIndex: 'code' },
                     { title: 'Name', dataIndex: 'name' },
