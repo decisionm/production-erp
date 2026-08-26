@@ -10,8 +10,23 @@ import type {
     Vendor,
 } from './types';
 
-export async function listVendors(): Promise<Paginated<Vendor>> {
-    const { data } = await api.get<Paginated<Vendor>>('/procurement/vendors');
+/**
+ * ONE page of the vendor master, for a screen that renders its own pager.
+ *
+ * Paged on the SERVER (VendorService::paginate + Controller::perPage), not
+ * sliced in the browser: the Vendors table used to call this with no
+ * arguments and draw the answer with `pagination={false}`, so it showed the
+ * server's default first 20 and said nothing about the rest — the 21st
+ * vendor was simply not on the screen. Same defect the pickers had, same
+ * cure as the Customers table: ask for the page you are showing.
+ *
+ * The defaults keep every earlier no-argument caller working; a picker must
+ * still use listAllVendors(), which is what pickerFullList.test.ts pins.
+ */
+export async function listVendors(page = 1, perPage = 50): Promise<Paginated<Vendor>> {
+    const { data } = await api.get<Paginated<Vendor>>('/procurement/vendors', {
+        params: { page, per_page: perPage },
+    });
     return data;
 }
 
