@@ -184,11 +184,6 @@ export default function ItemDetailPage() {
             <Typography.Title level={3} style={{ marginBottom: 4 }}>
                 {item.sku} — {item.name}
             </Typography.Title>
-            <Typography.Paragraph type="secondary">
-                Inventory summary and full transaction history for this item, across every module that
-                touches stock.
-            </Typography.Paragraph>
-
             <Descriptions column={2} size="small" bordered style={{ marginBottom: 24 }}>
                 <Descriptions.Item label="SKU">{item.sku}</Descriptions.Item>
                 <Descriptions.Item label="Name">{item.name}</Descriptions.Item>
