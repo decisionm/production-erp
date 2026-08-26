@@ -5,6 +5,7 @@ namespace Tests\Feature\Inventory;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Services\ItemService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
@@ -69,6 +70,41 @@ class VariantLinkConcurrencyTest extends TestCase
         $this->expectException(ValidationException::class);
 
         $service->update($a, ['variant_of_item_id' => $c->id]);
+    }
+
+    /**
+     * The two rows are locked in ONE statement, ascending by id.
+     *
+     * Locking the target first and the item second would have the reciprocal
+     * writes this guard exists for take A-then-B and B-then-A: a deadlock,
+     * which MySQL resolves by rolling one side back with an error instead of
+     * the refusal the loser is owed (Cursor, def53c9). Ascending id is an
+     * order both sides agree on whichever way the edit points — so the query
+     * is asserted, because the ORDER is the guarantee and a same-process test
+     * cannot stage the deadlock it prevents.
+     */
+    public function test_both_rows_are_locked_in_one_statement_ordered_by_id(): void
+    {
+        $service = app(ItemService::class);
+
+        $base = $this->item('SYN-BASE');
+        $variant = $this->item('SYN-POUCH');
+
+        // The FOR UPDATE clause itself is dialect-specific — Laravel's SQLite
+        // grammar drops it — so what is asserted is the part that has to be
+        // true on every driver: ONE read of BOTH ids, ordered by id.
+        $reads = [];
+        DB::listen(function ($query) use (&$reads) {
+            $sql = strtolower($query->sql);
+            if (str_starts_with($sql, 'select') && str_contains($sql, 'from "items"') && str_contains($sql, ' in (')) {
+                $reads[] = $sql;
+            }
+        });
+
+        $service->update($variant, ['variant_of_item_id' => $base->id]);
+
+        $this->assertCount(1, $reads, 'both rows must be read for locking by a single ordered statement.');
+        $this->assertMatchesRegularExpression('/order by "?id"? asc/i', $reads[0]);
     }
 
     public function test_a_legitimate_link_still_goes_through(): void

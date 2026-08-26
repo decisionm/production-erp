@@ -263,9 +263,25 @@ class ItemService
          */
         return DB::transaction(function () use ($item, $data): Item {
             $targetId = (int) $data['variant_of_item_id'];
+            $itemId = (int) $item->getKey();
 
-            $target = Item::query()->whereKey($targetId)->lockForUpdate()->first();
-            $locked = Item::query()->whereKey($item->getKey())->lockForUpdate()->first();
+            /*
+             * BOTH ROWS, IN ONE ORDERED STATEMENT. Locking the target first
+             * and the item second would have the reciprocal writes this guard
+             * exists for take A-then-B and B-then-A — a deadlock, which MySQL
+             * resolves by rolling one side back with an error instead of the
+             * refusal the loser is owed (Cursor, def53c9). Ascending id is an
+             * order both sides agree on whichever way the edit points.
+             */
+            $rows = Item::query()
+                ->whereIn('id', array_unique([$itemId, $targetId]))
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+
+            $target = $rows->get($targetId);
+            $locked = $rows->get($itemId);
 
             if ($target === null || $locked === null) {
                 throw ValidationException::withMessages([

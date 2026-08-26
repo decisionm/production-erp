@@ -58,21 +58,27 @@ Party (vendor/customer) names appear only in local extracts, never in repo docs.
 
 Common header: DATE (YYYYMMDD), GUID, REMOTEID, VOUCHERNUMBER, VOUCHERTYPENAME,
 PARTYLEDGERNAME/PARTYNAME, REFERENCE (+REFERENCEDATE). All quantities are dual-unit
-strings (`3888.0000 Nos. =  31.104 Kgs.`) — importer must parse both.
+strings (`<count> Nos. =  <weight> Kgs.`) — importer must parse both.
+
+Field SHAPES only below. Actual voucher numbers, order references and dated
+customer PO strings are private Tally contents and stay in the external
+evidence store (AGENTS.md) — the placeholders show the format an importer has
+to read, which is the whole of what this document is for.
 
 - **Purchase Order** (7): line ALLINVENTORYENTRIES → STOCKITEMNAME, ACTUALQTY/BILLEDQTY,
   BATCHALLOCATIONS{ORDERNO=own voucher no, ORDERDUEDATE per line, GODOWNNAME}.
   Header BASICDUEDATEOFPYMT ("45 Days"), BASICORDERTERMS ("Door Delivery").
   ORDERLINESTATUS=Yes.
 - **Purchase invoice** (17): same line shape; BATCHALLOCATIONS/ORDERNO carries the PO's
-  voucher number when the purchase came from a PO ('68','69') and is ABSENT for
+  voucher number when the purchase came from a PO and is ABSENT for
   direct purchases — most of these 17 have no PO reference. Per-line
   ACCOUNTINGALLOCATIONS → "Interstate Purchase Taxable"; GST in LEDGERENTRIES.
-- **Sales Order** (34): VOUCHERNUMBER plain (481…); line ORDERNO = own SO number,
-  ORDERDUEDATE per line = promised delivery; header BASICORDERREF holds the
-  CUSTOMER'S PO ("PO NO :044 Dated 01-08-26") — the SO↔invoice join key the ERP
-  already models as customer_po_reference.
-- **Sales invoice** (55): VOUCHERNUMBER formatted "696/26-27"; dual-unit quantities;
+- **Sales Order** (34): VOUCHERNUMBER a plain integer string; line ORDERNO = own SO
+  number, ORDERDUEDATE per line = promised delivery; header BASICORDERREF holds the
+  CUSTOMER'S PO as free text in the shape `PO NO :<nnn> Dated <dd-mm-yy>` — the
+  SO↔invoice join key the ERP already models as customer_po_reference.
+- **Sales invoice** (55): VOUCHERNUMBER formatted `<n>/<fy>` (serial, slash, financial
+  year) — NOT a plain integer like the SO's; dual-unit quantities;
   "Interstate Sales Taxable" allocations; party + GST + freight in ledger entries.
 - **Stock Journal** (34, one per DAY of Jul-26): PERSISTEDVIEW="Consumption Voucher
   View", DESTINATIONGODOWN single; per voucher ~12 IN lines (finished bottle items)
