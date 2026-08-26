@@ -169,6 +169,13 @@ class FulfilmentPlanningServiceTest extends TestCase
 
     public function test_todays_targets_are_the_head_of_the_queue(): void
     {
+        // Frozen before the first shift, so all three of today's slots are
+        // still ahead — the un-frozen version of this test silently changed
+        // meaning with the wall clock (Codex P2, PR #33: "today" is the
+        // slots actually LEFT today, not a day's worth from wherever now
+        // happens to fall).
+        $this->travelTo(CarbonImmutable::parse('2026-09-01 05:00', config('tally-sync.factory_timezone')));
+
         $bottle = $this->item('BTL-500', '10.00', 4);
 
         // Each of these fits comfortably inside one shift, so the first
@@ -184,6 +191,20 @@ class FulfilmentPlanningServiceTest extends TestCase
             [$first->id, $second->id, $third->id],
             array_column($targets, 'request_id'),
         );
+    }
+
+    /** From the 22:00 boundary, today has ONE slot left — so one target. */
+    public function test_todays_targets_shrink_as_the_day_is_spent(): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2026-09-01 15:00', config('tally-sync.factory_timezone')));
+
+        $bottle = $this->item('BTL-500', '10.00', 4);
+        $first = $this->request($bottle, '1000');
+        $this->request($bottle, '1000');
+
+        $targets = app(FulfilmentPlanningService::class)->plan()['today_targets'];
+
+        $this->assertSame([$first->id], array_column($targets, 'request_id'));
     }
 
     /**

@@ -365,9 +365,13 @@ class ProductionRequestService
         // (S9); a sales-side lock taken here would be out of order.
         $fresh = SalesOrderLine::query()->findOrFail($line->getKey());
 
+        // The held figure is read UNDER the reservation locks (Codex P1,
+        // PR #33): an unlocked read here could count a hold mid-release and
+        // retire a request the line still needs. Reservations before
+        // production_requests — the global order, same as every other path.
         $coverage = bcadd(
             (string) $fresh->quantity_delivered,
-            $this->reservations->heldOnLine((int) $fresh->id),
+            $this->reservations->heldOnLineLocked((int) $fresh->id),
             4,
         );
 

@@ -168,6 +168,16 @@ class FulfilmentPlanningService
                         $start,
                         $parallelLines,
                     );
+
+                    if ($shiftsNeeded === null) {
+                        // A slot too short to make one piece refused the
+                        // walk (Codex P2, PR #33): an estimation refusal
+                        // like any other — said out loud, and cascading —
+                        // never a silent dateless row.
+                        $capacity = null;
+                        $reason = self::REASON_NO_STANDARD;
+                        $blocked = true;
+                    }
                 }
             }
 
@@ -194,7 +204,9 @@ class FulfilmentPlanningService
             // TODAY'S WORK is a priority read, not a capacity claim: a job
             // whose first shift falls inside today's shifts is on the
             // floor's list whether or not its own finish date is knowable.
-            if ($todayOpen && $shiftsBefore < $shiftsPerDay) {
+            // Only the slots actually LEFT today count as today (Codex P2,
+            // PR #33): from the 22:00 boundary there is one, not three.
+            if ($todayOpen && $shiftsBefore < count($slots) - $startIdx) {
                 $todayTargets[] = [
                     'request_id' => (int) $request->id,
                     'item' => $this->itemPayload($request->item),

@@ -528,7 +528,15 @@ export default function SalesOrdersPage() {
     });
     const availability = availabilityByItem(availabilityRows);
 
-    const invalidate = () => queryClient.invalidateQueries({ queryKey: ['sales', 'sales-orders'] });
+    const invalidate = () => {
+        queryClient.invalidateQueries({ queryKey: ['sales', 'sales-orders'] });
+        // Confirming is what puts an order's lines in front of the store,
+        // so the store queue, planning board and floor worklist change with
+        // it (Cursor review, PR #33) — and a create/cancel from this page
+        // costs the same two no-op refetches at worst.
+        queryClient.invalidateQueries({ queryKey: ['inventory', 'fulfilment'] });
+        queryClient.invalidateQueries({ queryKey: ['production', 'requests'] });
+    };
 
     const createMutation = useMutation({
         mutationFn: createSalesOrder,
