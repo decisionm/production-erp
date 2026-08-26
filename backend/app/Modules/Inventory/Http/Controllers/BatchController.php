@@ -17,9 +17,20 @@ class BatchController extends Controller
     public function __construct(private readonly BatchService $batches) {}
 
     /**
-     * `item_id` is what the per-item picker reads and is unchanged; `per_page`
-     * and `search` are new, because ignoring them capped this list at twenty
-     * with no way to ask for the rest.
+     * `item_id` is what the per-item picker reads and is unchanged; `per_page`,
+     * `search` and `code` are new, because ignoring them capped this list at
+     * twenty with no way to ask for the rest.
+     *
+     * `code` IS WHAT A SCANNER ASKS, and it is not `search` with fewer rows:
+     * `search` is a substring match served a page at a time, so a batch number
+     * that is a substring of enough newer ones is not on the page the scanner
+     * reads and its own barcode comes back unknown. `code` matches the whole
+     * number, which is an answer the page size cannot truncate.
+     *
+     * It resolves an identifier the factory already prints — it does not
+     * decide what a barcode should CONTAIN or at what granularity one is
+     * issued. That question is open in PENDING-OWNER-QUESTIONS and is not
+     * answered here.
      */
     public function index(Request $request): AnonymousResourceCollection
     {
@@ -27,6 +38,7 @@ class BatchController extends Controller
             itemId: $request->integer('item_id') ?: null,
             perPage: $this->perPage($request),
             search: $this->searchTerm($request),
+            code: $this->searchTerm($request, 'code'),
         ));
     }
 

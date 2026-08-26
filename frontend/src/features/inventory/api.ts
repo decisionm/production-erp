@@ -6,11 +6,18 @@ import type { Batch, BatchLedger, Item, ItemTrackingType, SerialNumber, StockBal
  * What every inventory list accepts. `search` is answered by the SERVER, so a
  * needle past the current page still finds its row — the whole point of these
  * being here rather than a `.filter()` over `data`.
+ *
+ * `code` is a different question, not a stricter `search`: it matches the
+ * WHOLE batch number or serial number. A substring search is still served a
+ * page at a time, so a scanned `LOT-4` behind sixty newer numbers that merely
+ * contain it is not on the page that comes back. Only the batch and serial
+ * lists answer it — see findBatchesByCode / findSerialNumbersByCode.
  */
 export interface ListParams {
     page?: number;
     per_page?: number;
     search?: string;
+    code?: string;
 }
 
 /**
@@ -187,6 +194,21 @@ export async function listAllBatches(itemId: number): Promise<Paginated<Batch>> 
     return listBatches({ item_id: itemId, per_page: FULL_LIST_PER_PAGE });
 }
 
+/**
+ * ONE SCANNED BATCH NUMBER, RESOLVED BY THE SERVER.
+ *
+ * The scanner used to ask `?search=<code>&per_page=50` and pick the exact
+ * match out of the reply, which quietly made the answer depend on how many
+ * OTHER numbers contain the scanned one. Sixty of them and the real row is on
+ * page two: "no batch matches", for a barcode this system printed.
+ *
+ * `code` matches the whole value, so a handful of rows is the most this can
+ * return; the page ceiling is passed anyway so no cap is left to reason about.
+ */
+export async function findBatchesByCode(code: string): Promise<Paginated<Batch>> {
+    return listBatches({ code, per_page: FULL_LIST_PER_PAGE });
+}
+
 export interface CreateBatchPayload {
     item_id: number;
     batch_number: string;
@@ -215,6 +237,11 @@ export async function listSerialNumbers(
 /** Every serial number of ONE item — the Stock page's Serial picker, same rule as above. */
 export async function listAllSerialNumbers(itemId: number): Promise<Paginated<SerialNumber>> {
     return listSerialNumbers({ item_id: itemId, per_page: FULL_LIST_PER_PAGE });
+}
+
+/** One scanned serial number, resolved by the server — same rule as above. */
+export async function findSerialNumbersByCode(code: string): Promise<Paginated<SerialNumber>> {
+    return listSerialNumbers({ code, per_page: FULL_LIST_PER_PAGE });
 }
 
 export interface CreateSerialNumberPayload {

@@ -3,16 +3,21 @@
 namespace Tests\Feature\Inventory;
 
 use App\Models\User;
+use App\Modules\Inventory\Http\Requests\StoreStockIssueRequest;
+use App\Modules\Inventory\Http\Requests\StoreStockTransferRequest;
 use App\Modules\Inventory\Models\Batch;
 use App\Modules\Inventory\Models\Enums\ItemTrackingType;
 use App\Modules\Inventory\Models\Enums\SerialNumberStatus;
 use App\Modules\Inventory\Models\Enums\StockMovementType;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\SerialNumber;
+use App\Modules\Inventory\Models\StockBalance;
 use App\Modules\Inventory\Models\StockMovement;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Inventory\Services\StockMovementService;
+use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Routing\Redirector;
 use Illuminate\Validation\ValidationException;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
@@ -539,6 +544,168 @@ class TrackingIdentityIntegrityTest extends TestCase
     }
 
     /**
+     * ONE PHYSICAL UNIT LEAVES A STORE ONCE — the transfer half, which the
+     * status condition alone did NOT cover.
+     *
+     * An issue flips the row to `consumed`, so a second issue finds a status
+     * that no longer matches and is refused. A transfer changes nothing about
+     * the status: the unit is `in_stock` before and `in_stock` after. So a
+     * status-only condition was satisfied by the second transfer exactly as
+     * it was by the first, and RM-STORE was decremented twice for one unit
+     * that left it once.
+     *
+     * BALANCE 5, NOT 1, ON PURPOSE — twice. The store holds four other units
+     * of the same material, so the quantity check has stock to spare and the
+     * double decrement goes through silently. At balance 1 the hole looks
+     * closed by arithmetic that has nothing to do with the unit.
+     */
+    public function test_the_writer_refuses_a_second_transfer_of_a_unit_out_of_the_store_it_has_left(): void
+    {
+        $stock = app(StockMovementService::class);
+        $serial = $this->receivedSerial('SN-TX-TWICE', $this->store);
+        $stock->recordReceipt($this->serialTracked->id, $this->store->id, '4', '500');
+
+        $stock->recordTransfer(
+            $this->serialTracked->id, $this->store->id, $this->farStore->id, '1',
+            serialNumberId: $serial->id,
+        );
+
+        try {
+            $stock->recordTransfer(
+                $this->serialTracked->id, $this->store->id, $this->farStore->id, '1',
+                serialNumberId: $serial->id,
+            );
+            $this->fail('the writer moved one physical unit out of RM-STORE twice');
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey('serial_number_id', $exception->errors());
+        }
+
+        $this->assertSame('4.0000', $this->quantityAt($this->store), 'RM-STORE was decremented twice for one unit');
+        $this->assertSame('1.0000', $this->quantityAt($this->farStore), 'FG-STORE was incremented twice for one unit');
+        $this->assertSame(
+            1,
+            $serial->movements()->where('type', StockMovementType::TransferOut)->count(),
+            'the unit picked up a second transfer-out movement',
+        );
+    }
+
+    /**
+     * THE INTERLEAVING ITSELF, in the order two concurrent requests actually
+     * hit the database: door(A), door(B), write(A), write(B).
+     *
+     * Both requests are approved BEFORE either writes, and both approvals are
+     * honest — at the moment each was judged, the unit really was in stock in
+     * RM-STORE. That is the whole reason the door cannot be the guard: what it
+     * proves is where the unit was A MOMENT AGO. Only the write, reading the
+     * row it is about to change, can prove where the unit is now.
+     *
+     * `lockForUpdate` compiles to nothing on SQLite and this suite runs on one
+     * in-memory connection, so what this test actually exercises is the
+     * conditional update and its affected-row count. Under MySQL the row lock
+     * is what serialises the two writes into this order in the first place;
+     * both are kept, because either alone would be a guard that holds on one
+     * driver.
+     */
+    public function test_two_transfers_that_both_passed_the_door_move_one_unit_once(): void
+    {
+        $stock = app(StockMovementService::class);
+        $serial = $this->receivedSerial('SN-RACE', $this->store);
+        $stock->recordReceipt($this->serialTracked->id, $this->store->id, '4', '500');
+
+        $payload = [
+            'item_id' => $this->serialTracked->id,
+            'from_warehouse_id' => $this->store->id,
+            'to_warehouse_id' => $this->farStore->id,
+            'quantity' => '1',
+            'serial_number_id' => $serial->id,
+        ];
+
+        $this->assertTrue($this->doorApproves($payload), 'the first request was refused at the door');
+        $this->assertTrue($this->doorApproves($payload), 'the second request was refused at the door before any write');
+
+        $stock->recordTransfer(
+            $this->serialTracked->id, $this->store->id, $this->farStore->id, '1',
+            serialNumberId: $serial->id,
+        );
+
+        try {
+            $stock->recordTransfer(
+                $this->serialTracked->id, $this->store->id, $this->farStore->id, '1',
+                serialNumberId: $serial->id,
+            );
+            $this->fail('two approved requests moved one physical unit twice');
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey('serial_number_id', $exception->errors());
+        }
+
+        $this->assertSame('4.0000', $this->quantityAt($this->store));
+        $this->assertSame('1.0000', $this->quantityAt($this->farStore));
+        $this->assertSame($this->farStore->id, $serial->fresh()->warehouse_id);
+    }
+
+    /**
+     * THE SAME RACE ON AN ISSUE, and the balance is the assertion.
+     *
+     * The status condition already refused the second issue; what was never
+     * pinned is that RM-STORE keeps the four units it still holds. A refusal
+     * that rolls back half a transaction is not a refusal.
+     */
+    public function test_two_issues_that_both_passed_the_door_take_one_unit_once(): void
+    {
+        $stock = app(StockMovementService::class);
+        $serial = $this->receivedSerial('SN-RACE-ISSUE', $this->store);
+        $stock->recordReceipt($this->serialTracked->id, $this->store->id, '4', '500');
+
+        $payload = [
+            'item_id' => $this->serialTracked->id,
+            'warehouse_id' => $this->store->id,
+            'quantity' => '1',
+            'serial_number_id' => $serial->id,
+        ];
+
+        $this->assertTrue($this->issueDoorApproves($payload), 'the first request was refused at the door');
+        $this->assertTrue($this->issueDoorApproves($payload), 'the second request was refused at the door before any write');
+
+        $stock->recordIssue($this->serialTracked->id, $this->store->id, '1', serialNumberId: $serial->id);
+
+        try {
+            $stock->recordIssue($this->serialTracked->id, $this->store->id, '1', serialNumberId: $serial->id);
+            $this->fail('two approved requests issued one physical unit twice');
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey('serial_number_id', $exception->errors());
+        }
+
+        $this->assertSame('4.0000', $this->quantityAt($this->store), 'the refused issue still took a unit off the balance');
+    }
+
+    /**
+     * NAMING THE SOURCE STORE MUST NOT NARROW WHAT ALREADY PASSED. judgeLeaving
+     * lets a unit with NO recorded location leave any store rather than
+     * refusing it, and the writer keeps exactly that tolerance — the guard is
+     * against a unit that has demonstrably moved elsewhere, not against a
+     * row nobody ever stamped.
+     */
+    public function test_a_unit_with_no_recorded_location_still_transfers(): void
+    {
+        $stock = app(StockMovementService::class);
+        $stock->recordReceipt($this->serialTracked->id, $this->store->id, '5', '500');
+
+        $serial = SerialNumber::create([
+            'item_id' => $this->serialTracked->id,
+            'serial_number' => 'SN-NOWHERE',
+            'status' => SerialNumberStatus::InStock,
+            'warehouse_id' => null,
+        ]);
+
+        $stock->recordTransfer(
+            $this->serialTracked->id, $this->store->id, $this->farStore->id, '1',
+            serialNumberId: $serial->id,
+        );
+
+        $this->assertSame($this->farStore->id, $serial->fresh()->warehouse_id);
+    }
+
+    /**
      * A RECEIPT IS DELIBERATELY NOT GUARDED THE SAME WAY. Whether a consumed
      * unit may come back in is an open question about returns that the factory
      * has not answered, and refusing it in the writer would be answering it.
@@ -602,6 +769,45 @@ class TrackingIdentityIntegrityTest extends TestCase
             'serial_number' => $number,
             'status' => SerialNumberStatus::Registered,
         ]);
+    }
+
+    private function quantityAt(Warehouse $warehouse): string
+    {
+        return (string) StockBalance::query()
+            ->where('item_id', $this->serialTracked->id)
+            ->where('warehouse_id', $warehouse->id)
+            ->value('quantity');
+    }
+
+    /**
+     * Runs the REAL FormRequest — rules and `withValidator` both — without a
+     * write behind it, so a test can ask "would the door have let this
+     * through at this instant" and then choose when the write lands.
+     */
+    private function doorApproves(array $payload): bool
+    {
+        return $this->doorApprovesVia(StoreStockTransferRequest::class, $payload);
+    }
+
+    private function issueDoorApproves(array $payload): bool
+    {
+        return $this->doorApprovesVia(StoreStockIssueRequest::class, $payload);
+    }
+
+    /** @param  class-string<FormRequest>  $requestClass */
+    private function doorApprovesVia(string $requestClass, array $payload): bool
+    {
+        $request = $requestClass::create('/', 'POST', $payload);
+        $request->headers->set('Accept', 'application/json');
+        $request->setContainer(app())->setRedirector(app(Redirector::class));
+
+        try {
+            $request->validateResolved();
+
+            return true;
+        } catch (ValidationException) {
+            return false;
+        }
     }
 
     private function receivedSerial(string $number, Warehouse $warehouse): SerialNumber

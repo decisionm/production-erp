@@ -65,6 +65,7 @@ class StockMovementService
         $this->assertIdentityBelongsToItem($itemId, $batchId, $serialNumberId);
 
         return DB::transaction(function () use ($itemId, $warehouseId, $quantity, $unitCost, $reference, $movementDate, $notes, $createdBy, $batchId, $serialNumberId, $purpose) {
+            $this->lockSerial($serialNumberId);
             $this->incrementBalance($itemId, $warehouseId, $quantity, $unitCost);
 
             if ($serialNumberId !== null) {
@@ -202,6 +203,7 @@ class StockMovementService
         $shortfallKg = null;
 
         return DB::transaction(function () use ($itemId, $warehouseId, $quantity, $reference, $movementDate, $notes, $createdBy, $batchId, $serialNumberId, $allowNegative, &$shortfallKg, $purpose, $honourIncomingQcHold) {
+            $this->lockSerial($serialNumberId);
             [$costAtIssue, $shortfallKg] = $this->decrementBalance($itemId, $warehouseId, $quantity, $allowNegative, $honourIncomingQcHold);
 
             if ($serialNumberId !== null) {
@@ -259,6 +261,9 @@ class StockMovementService
         $this->assertIdentityBelongsToItem($itemId, $batchId, $serialNumberId);
 
         return DB::transaction(function () use ($itemId, $fromWarehouseId, $toWarehouseId, $quantity, $reference, $movementDate, $notes, $createdBy, $batchId, $serialNumberId, $purpose) {
+            // The unit first, before either balance — see lockSerial().
+            $this->lockSerial($serialNumberId);
+
             // A transfer never runs negative: moving material you do not
             // have is not a truth about the floor, it is a typo. Nor may it
             // move kilograms the source store is holding for incoming QC —
@@ -269,7 +274,7 @@ class StockMovementService
             $this->incrementBalance($itemId, $toWarehouseId, $quantity, $costAtTransfer);
 
             if ($serialNumberId !== null) {
-                $this->relocateSerial($serialNumberId, $toWarehouseId);
+                $this->relocateSerial($serialNumberId, $fromWarehouseId, $toWarehouseId);
             }
 
             $transferGroup = (string) Str::uuid();
@@ -320,6 +325,13 @@ class StockMovementService
      * still standing there whatever the master's state, and a balance that
      * cannot be found is a balance nobody reconciles.
      *
+     * THE EAGER LOAD NEEDS `withTrashed` TOO, and this is not the same clause
+     * twice. `whereHas` decides which ROWS come back; the eager load is a
+     * separate query with its own SoftDeletes scope, so a balance of a deleted
+     * item came back on the list with `item: null` — found by a search for the
+     * very SKU that is then not on screen. Every read below that names an item
+     * carries the same clause for the same reason.
+     *
      * THE SECOND ORDER-BY IS NOT DECORATION. `order by item_id` alone ties for
      * an item held in two stores, and a tie is not a total order: the database
      * may hand back those rows in either order per query, so walking page 1
@@ -328,7 +340,7 @@ class StockMovementService
     public function paginateBalances(int $perPage = 20, ?string $search = null, ?int $itemId = null): LengthAwarePaginator
     {
         return StockBalance::query()
-            ->with(['item', 'warehouse'])
+            ->with(['item' => fn ($item) => $item->withTrashed(), 'warehouse'])
             ->when($itemId !== null, fn ($query) => $query->where('item_id', $itemId))
             ->when($search !== null, fn ($query) => $query->where(function ($outer) use ($search) {
                 $like = "%{$search}%";
@@ -350,12 +362,17 @@ class StockMovementService
      * page-1-of-N answer would understate the balance a supervisor is about
      * to consume against.
      *
+     * The `join` carries no `deleted_at` clause, so a deleted item's balance
+     * is on this list and always was — only its eager-loaded model was null.
+     * `withTrashed` on the eager load makes the row readable, it does not add
+     * a row.
+     *
      * @return Collection<int, StockBalance>
      */
     public function balancesForWarehouse(int $warehouseId): Collection
     {
         return StockBalance::query()
-            ->with('item')
+            ->with(['item' => fn ($item) => $item->withTrashed()])
             ->where('warehouse_id', $warehouseId)
             ->join('items', 'items.id', '=', 'stock_balances.item_id')
             ->orderBy('items.name')
@@ -514,7 +531,7 @@ class StockMovementService
     public function transfersIntoWarehouseOn(int $warehouseId, string $date): Collection
     {
         return StockMovement::query()
-            ->with(['item', 'createdBy'])
+            ->with(['item' => fn ($item) => $item->withTrashed(), 'createdBy'])
             ->where('warehouse_id', $warehouseId)
             ->where('type', StockMovementType::TransferIn)
             ->whereDate('movement_date', $date)
@@ -526,7 +543,7 @@ class StockMovementService
     public function paginateMovements(?int $itemId = null, ?int $warehouseId = null, int $perPage = 20): LengthAwarePaginator
     {
         return StockMovement::query()
-            ->with(['item', 'warehouse'])
+            ->with(['item' => fn ($item) => $item->withTrashed(), 'warehouse'])
             ->when($itemId, fn ($query) => $query->where('item_id', $itemId))
             ->when($warehouseId, fn ($query) => $query->where('warehouse_id', $warehouseId))
             ->orderByDesc('movement_date')
@@ -618,26 +635,75 @@ class StockMovementService
     }
 
     /**
-     * A transfer moves a unit that is in stock; same rule, same reason.
+     * A transfer moves a unit that is in stock, OUT OF THE STORE IT IS IN.
      *
-     * Status only, deliberately — not the source store. `recordReceipt` is the
-     * ONLY writer that sets `in_stock`, and it stamps `warehouse_id` in the
-     * same statement, so an in-stock unit with no location cannot arise from
-     * application code and there is no second case to guard. Which store the
-     * unit must be in to leave it stays an HTTP-layer rule (judgeLeaving),
-     * where the request naming the source is.
+     * The source store used to be an HTTP-layer rule only, on the ground that
+     * an in-stock unit always has a location. That is true and it is not
+     * enough: judgeLeaving reads the location BEFORE the transaction opens, so
+     * two transfers of one unit out of RM-STORE both saw it there, and a
+     * status-only condition is satisfied by BOTH of them — the unit stays
+     * `in_stock` across a transfer, so nothing about the row changed to make
+     * the second one false. Result: one physical unit, two transfer-out
+     * movements, RM-STORE decremented twice. The balance lock does not catch
+     * it, because a store holding other units of the same item has the
+     * quantity to spare.
+     *
+     * Naming the source in the condition is what makes the second write false:
+     * the first commits `warehouse_id = FG-STORE`, and the second no longer
+     * matches a row that has to be in RM-STORE to leave it. The `whereNull`
+     * arm keeps judgeLeaving's exact tolerance — it lets a unit with no
+     * recorded location through rather than newly refusing it here.
      */
-    private function relocateSerial(int $serialNumberId, int $toWarehouseId): void
+    private function relocateSerial(int $serialNumberId, int $fromWarehouseId, int $toWarehouseId): void
     {
         $changed = SerialNumber::whereKey($serialNumberId)
             ->where('status', SerialNumberStatus::InStock)
+            ->where(fn ($q) => $q->whereNull('warehouse_id')->orWhere('warehouse_id', $fromWarehouseId))
             ->update(['warehouse_id' => $toWarehouseId]);
 
         if ($changed === 0) {
+            // Which of the two conditions failed is the whole answer for the
+            // person holding the box: "already issued" and "already moved
+            // somewhere else" are different facts about the same barcode.
+            $stillInStock = SerialNumber::whereKey($serialNumberId)
+                ->where('status', SerialNumberStatus::InStock)
+                ->exists();
+
             throw ValidationException::withMessages([
-                'serial_number_id' => 'That serial number is not in stock, so it cannot be transferred.',
+                'serial_number_id' => $stillInStock
+                    ? 'That serial number has already left that store, so it cannot be transferred out of it.'
+                    : 'That serial number is not in stock, so it cannot be transferred.',
             ]);
         }
+    }
+
+    /**
+     * THE OUTERMOST LOCK OF EVERY WRITE THAT NAMES A UNIT.
+     *
+     * A conditional update alone decides a race only where the condition
+     * actually changes; taking the row first is what serialises two requests
+     * that both passed validation a moment apart, and what makes the loser's
+     * re-read see the winner's committed state rather than the state it
+     * validated against. `lockForUpdate` is a no-op on SQLite, which is why
+     * every guard downstream is ALSO a conditional update checked by affected
+     * rows — the refusal is provable in the test suite, and serialised for
+     * real under MySQL.
+     *
+     * IT IS TAKEN BEFORE THE QC BAGS AND BEFORE THE BALANCE, in all three
+     * writers including the receipt, and the receipt is the point. Were the
+     * receipt to keep taking the balance first and reach the serial row only
+     * at its update, a receipt and an issue of the same unit would hold each
+     * other's next lock — a real cycle. The receipt's lock adds no refusal
+     * and so decides nothing about returns (see consumeSerial); it only fixes
+     * the order.
+     */
+    private function lockSerial(?int $serialNumberId): void
+    {
+        if ($serialNumberId === null) {
+            return;
+        }
+
+        SerialNumber::whereKey($serialNumberId)->lockForUpdate()->first();
     }
 
     private function incrementBalance(int $itemId, int $warehouseId, string $quantity, string $unitCost): string
@@ -710,6 +776,8 @@ class StockMovementService
         // no hold (held = 0, which is every item that has no bags) the flag
         // behaves exactly as it always has, to the character.
         //
+        // LOCK ORDER, WHOLE: serial row → QC bags → balance.
+        //
         // BAGS ARE LOCKED BEFORE THE BALANCE, here and in every caller.
         // IncomingInspectionService::dispositionBags locks its bags and then
         // reaches the balance through its rejection issue; StoreIssueService
@@ -718,6 +786,11 @@ class StockMovementService
         // path that must not take the item-wide bag lock at all —
         // a rejection issue, which already holds one GRN line's bags — comes
         // through recordIncomingQcRejectionIssue() and passes false here.
+        //
+        // AND THE SERIAL ROW IS LOCKED BEFORE BOTH — by lockSerial(), first
+        // statement of all three writers' transactions, receipt included, so
+        // no writer reaches a serial row while already holding a balance.
+        // Callers that pass no serial number simply start one rung down.
         $held = '0.0000';
         $heldBags = 0;
 

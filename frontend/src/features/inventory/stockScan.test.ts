@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
-import { resolveStockScan, type StockScanLookups } from './stockScan';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { api } from '@/lib/api';
+import { resolveStockScan, serverScanLookups, type StockScanLookups } from './stockScan';
 import type { Batch, Item, SerialNumber, SerialNumberStatus } from './types';
 
 const item = (id: number, sku: string) => ({ id, sku, name: sku, uom: 'Nos' }) as unknown as Item;
@@ -168,5 +169,114 @@ describe('resolveStockScan', () => {
 
         expect(result.kind).toBe('none');
         expect(Object.keys(result.fill)).toHaveLength(0);
+    });
+});
+
+/**
+ * THE ADVERSARIAL CASE: A CODE HIDDEN BEHIND ITS OWN DECOYS.
+ *
+ * The scan used to ask the server `?search=<code>&per_page=50`. `LOT-4` is a
+ * substring of `LOT-4001` … `LOT-4060`, every one of them newer, and the list
+ * comes back newest first — so fifty decoys filled the reply and the real row
+ * was never in it. The floor sees "no item, batch, or serial number matches"
+ * for a barcode this system printed, with the stock standing right there.
+ *
+ * The fake server below implements BOTH semantics honestly: `search` is a
+ * substring match truncated at `per_page`, `code` is a whole-value match. The
+ * first assertion of each test shows the old wiring still fails against it —
+ * so this is not a test that passes because the fake is friendly.
+ */
+vi.mock('@/lib/api', () => ({ api: { get: vi.fn() } }));
+
+const DECOYS = 60;
+
+const decoyBatches = Array.from({ length: DECOYS }, (_, i) =>
+    batch(1000 + i, `LOT-4${String(i + 1).padStart(3, '0')}`));
+const realBatch = batch(1, 'LOT-4');
+
+const decoySerials = Array.from({ length: DECOYS }, (_, i) =>
+    serial(2000 + i, `SN-7${String(i + 1).padStart(3, '0')}`, 'in_stock'));
+const realSerial = serial(2, 'SN-7', 'in_stock');
+
+/**
+ * Newest first — `orderByDesc('id')`, exactly as the server orders these
+ * lists. The real row is the OLDEST, which is the whole shape of the defect:
+ * the code was printed before the sixty that contain it.
+ */
+const rowsFor = (url: string) =>
+    (url.includes('batches') ? [realBatch, ...decoyBatches] : [realSerial, ...decoySerials])
+        .slice()
+        .sort((a, b) => b.id - a.id);
+
+const numberOf = (row: unknown) =>
+    (row as { batch_number?: string; serial_number?: string }).batch_number
+    ?? (row as { serial_number: string }).serial_number;
+
+const fakeServer = (url: string, config?: { params?: Record<string, unknown> }) => {
+    const rows = rowsFor(url);
+    const { code, search, per_page: perPage = 20 } = config?.params ?? {};
+
+    const matched = code !== undefined && code !== ''
+        ? rows.filter((row) => numberOf(row).toLowerCase() === String(code).toLowerCase())
+        : search !== undefined && search !== ''
+            ? rows.filter((row) => numberOf(row).toLowerCase().includes(String(search).toLowerCase()))
+            : rows;
+
+    // THE CAP IS THE DEFECT. A page is a page whichever parameter narrowed it.
+    return Promise.resolve({ data: { data: matched.slice(0, Number(perPage)), meta: { total: matched.length } } });
+};
+
+describe('a scan resolves the whole identifier on the server', () => {
+    beforeEach(() => {
+        vi.mocked(api.get).mockReset();
+        vi.mocked(api.get).mockImplementation(fakeServer as never);
+    });
+
+    it('finds a batch that sixty substring decoys would have hidden', async () => {
+        // The OLD wiring, against the same server: still broken.
+        const old = await resolveStockScan('LOT-4', 'in_stock', lookups({
+            findBatches: async (code) => (await fakeServer('/inventory/batches', {
+                params: { search: code, per_page: 50 },
+            })).data.data as never,
+        }));
+        expect(old.kind, 'a capped substring search reached past its page').toBe('none');
+
+        const result = await resolveStockScan('LOT-4', 'in_stock', serverScanLookups([]));
+
+        expect(result.kind).toBe('batch');
+        expect(result.fill.batch_id).toBe(realBatch.id);
+        expect(result.ok).toBe(true);
+    });
+
+    it('finds a serial number that sixty substring decoys would have hidden', async () => {
+        const old = await resolveStockScan('SN-7', 'in_stock', lookups({
+            findSerials: async (code) => (await fakeServer('/inventory/serial-numbers', {
+                params: { search: code, per_page: 50 },
+            })).data.data as never,
+        }));
+        expect(old.kind, 'a capped substring search reached past its page').toBe('none');
+
+        const result = await resolveStockScan('SN-7', 'in_stock', serverScanLookups([]));
+
+        expect(result.kind).toBe('serial');
+        expect(result.fill.serial_number_id).toBe(realSerial.id);
+    });
+
+    it('asks the server to resolve the code, never to search for it', async () => {
+        // A green test whose lookup still sent `search` would prove nothing.
+        await resolveStockScan('LOT-4', 'in_stock', serverScanLookups([]));
+
+        for (const [, config] of vi.mocked(api.get).mock.calls) {
+            const params = (config as { params?: Record<string, unknown> } | undefined)?.params ?? {};
+            expect(params.code).toBe('LOT-4');
+            expect(params.search).toBeUndefined();
+        }
+    });
+
+    it('still answers "no match" for a code that is nobody\'s number', async () => {
+        const result = await resolveStockScan('LOT-9999', 'in_stock', serverScanLookups([]));
+
+        expect(result.kind).toBe('none');
+        expect(result.fill).toEqual({});
     });
 });

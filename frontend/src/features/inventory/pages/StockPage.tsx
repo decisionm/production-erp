@@ -12,8 +12,6 @@ import {
     listAllBatches,
     listAllItems,
     listAllSerialNumbers,
-    listBatches,
-    listSerialNumbers,
     listStockBalances,
     listStockMovements,
     listAllWarehouses,
@@ -21,7 +19,7 @@ import {
     recordReceipt,
     recordTransfer,
 } from '@/features/inventory/api';
-import { resolveStockScan } from '@/features/inventory/stockScan';
+import { resolveStockScan, serverScanLookups } from '@/features/inventory/stockScan';
 import { identityRefusal } from '@/features/inventory/trackingIdentity';
 import type { SerialNumberStatus, StockBalance } from '@/features/inventory/types';
 import { formatDateTime } from '@/lib/datetime';
@@ -137,20 +135,14 @@ export default function StockPage() {
             .map((s) => ({ value: s.id, label: s.serial_number })) ?? [];
 
     /*
-     * A SCAN IS A SERVER LOOKUP NOW, not a `.find()` over twenty rows.
-     *
-     * It used to search the default first page of the batch and serial lists,
-     * so a barcode printed by this very system answered "no match" whenever
-     * its row was not among the newest twenty. `search` is answered by the
-     * server; resolveStockScan holds the matching rules and is tested on its
-     * own. Items are already loaded in full for the picker, so a bare SKU
-     * costs no extra request.
+     * A SCAN RESOLVES THE WHOLE IDENTIFIER ON THE SERVER — not a `.find()`
+     * over twenty rows, and not a substring search over fifty either. Both of
+     * those made the answer depend on how many other numbers contain the
+     * scanned one, which is not a fact about the box in someone's hand.
+     * serverScanLookups holds the wiring and resolveStockScan the matching
+     * rules, both tested without a network.
      */
-    const scanLookups = {
-        findSerials: async (code: string) => (await listSerialNumbers({ search: code, per_page: 50 })).data,
-        findBatches: async (code: string) => (await listBatches({ search: code, per_page: 50 })).data,
-        findItems: async () => items?.data ?? [],
-    };
+    const scanLookups = serverScanLookups(items?.data ?? []);
 
     const resolveAndFillScan = (
         code: string,

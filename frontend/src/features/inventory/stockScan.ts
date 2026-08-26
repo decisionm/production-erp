@@ -1,3 +1,4 @@
+import { findBatchesByCode, findSerialNumbersByCode } from './api';
 import type { Batch, Item, SerialNumber, SerialNumberStatus } from './types';
 
 /**
@@ -10,10 +11,16 @@ import type { Batch, Item, SerialNumber, SerialNumberStatus } from './types';
  * matches" for a barcode printed by this very system — the 12-Aug-2026 picker
  * defect (see src/lib/pickerFullList.test.ts) wearing a scanner.
  *
- * The lookups are now SERVER searches, injected here so this stays testable
- * without a network. Order is most-specific first and it is load-bearing: a
- * serial or a batch match also tells us the item, but a bare SKU never tells
- * us which batch or serial.
+ * The first fix asked the server for a SUBSTRING search and took fifty rows,
+ * which moved the cliff rather than removing it: a scanned code that is a
+ * prefix of fifty newer ones is still not in the reply. The lookups now ask
+ * the server to resolve the WHOLE identifier (`?code=`), so the answer no
+ * longer depends on how many other numbers happen to contain it. They are
+ * still injected so this stays testable without a network.
+ *
+ * Order is most-specific first and it is load-bearing: a serial or a batch
+ * match also tells us the item, but a bare SKU never tells us which batch or
+ * serial.
  *
  * A serial number only counts as a match while it is in the status the action
  * can actually use — `registered` is receivable, `in_stock` is
@@ -44,6 +51,20 @@ export interface StockScanLookups {
     findSerials: (code: string) => Promise<SerialNumber[]>;
     findBatches: (code: string) => Promise<Batch[]>;
     findItems: (code: string) => Promise<Item[]>;
+}
+
+/**
+ * The real wiring, HERE rather than inline in the page, so the adversarial
+ * test can run a scan through the same code the floor does. Items are already
+ * loaded in full for the picker, so a bare SKU costs no extra request; the two
+ * identifier lookups are exact server reads.
+ */
+export function serverScanLookups(items: Item[]): StockScanLookups {
+    return {
+        findSerials: async (code: string) => (await findSerialNumbersByCode(code)).data,
+        findBatches: async (code: string) => (await findBatchesByCode(code)).data,
+        findItems: async () => items,
+    };
 }
 
 const matches = (candidate: string, code: string) => candidate.trim().toLowerCase() === code;

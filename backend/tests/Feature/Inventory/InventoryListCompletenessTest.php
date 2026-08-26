@@ -10,6 +10,7 @@ use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\SerialNumber;
 use App\Modules\Inventory\Models\StockBalance;
 use App\Modules\Inventory\Models\Warehouse;
+use App\Modules\Inventory\Services\StockMovementService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
@@ -189,6 +190,74 @@ class InventoryListCompletenessTest extends TestCase
             ->assertJsonPath('meta.total', self::ROWS);
     }
 
+    /**
+     * FINDING THE ROW IS HALF THE JOB — THE ROW HAS TO BE READABLE.
+     *
+     * `withTrashed` in the `whereHas` above decides which rows come back. The
+     * eager load is a SEPARATE query with its own SoftDeletes scope, and it
+     * did not carry the clause, so every one of these rows arrived with
+     * `item: null`: a balance found by searching for a SKU that was then not
+     * on the screen, a batch whose lot number named nothing, a serial number
+     * with no part against it. The stock is standing there either way, and
+     * tracing it is the entire reason these reads reach a deleted master.
+     *
+     * Asserting the SKU and the NAME, not the row count — the count passed
+     * before this was fixed.
+     */
+    public function test_a_deleted_items_rows_still_read_back_the_item_they_name(): void
+    {
+        $this->seedStockBalances();
+        $this->seedBatches();
+        $this->seedSerialNumbers();
+        $this->seedMovementOfADeletedItem();
+
+        Item::query()->delete();
+
+        $this->getJson('/api/v1/inventory/stock-balances?search=Filler 23')
+            ->assertSuccessful()
+            ->assertJsonPath('data.0.item.sku', 'FILLER-23')
+            ->assertJsonPath('data.0.item.name', 'Filler 23');
+
+        $this->getJson('/api/v1/inventory/batches?search=LOT-25')
+            ->assertSuccessful()
+            ->assertJsonPath('data.0.item.sku', 'BATCHES')
+            ->assertJsonPath('data.0.item.name', 'Batched Material');
+
+        $this->getJson('/api/v1/inventory/serial-numbers?search=SN-25')
+            ->assertSuccessful()
+            ->assertJsonPath('data.0.item.sku', 'SERIALS')
+            ->assertJsonPath('data.0.item.name', 'Serialised Part');
+
+        $this->getJson('/api/v1/inventory/stock-movements')
+            ->assertSuccessful()
+            ->assertJsonPath('data.0.item.sku', 'MOVED')
+            ->assertJsonPath('data.0.item.name', 'Moved Material');
+    }
+
+    /**
+     * The same read one level down: a batch's ledger and a serial number's
+     * history are the two screens someone opens BECAUSE the master is gone
+     * and they need to know what happened to the stock.
+     */
+    public function test_a_deleted_items_ledger_and_history_still_name_their_item(): void
+    {
+        $this->seedBatches();
+        $this->seedSerialNumbers();
+
+        $batch = Batch::query()->firstOrFail();
+        $serial = SerialNumber::query()->firstOrFail();
+
+        Item::query()->delete();
+
+        $this->getJson("/api/v1/inventory/batches/{$batch->id}/ledger")
+            ->assertSuccessful()
+            ->assertJsonPath('data.batch.item.sku', 'BATCHES');
+
+        $this->getJson("/api/v1/inventory/serial-numbers/{$serial->id}/history")
+            ->assertSuccessful()
+            ->assertJsonPath('data.item.sku', 'SERIALS');
+    }
+
     public function test_stock_balances_filter_by_item_for_an_items_own_page(): void
     {
         // The item detail page used to read this list unfiltered and pick its
@@ -281,6 +350,15 @@ class InventoryListCompletenessTest extends TestCase
                 'status' => SerialNumberStatus::Registered,
             ]);
         }
+    }
+
+    /** One movement of an item that is about to be deleted underneath it. */
+    private function seedMovementOfADeletedItem(): void
+    {
+        $item = Item::create(['sku' => 'MOVED', 'name' => 'Moved Material', 'uom' => 'Kgs']);
+        $store = Warehouse::create(['code' => 'MOV-STORE', 'name' => 'Movement Store', 'is_active' => true]);
+
+        app(StockMovementService::class)->recordReceipt($item->id, $store->id, '10', '100');
     }
 
     private function seedWarehouses(): void
