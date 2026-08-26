@@ -166,6 +166,49 @@ class VariantLinkConcurrencyTest extends TestCase
         $this->assertNull($created->variant_of_item_id);
     }
 
+    /**
+     * A LABEL-ONLY EDIT loses the race too.
+     *
+     * The FormRequest reads the link off the route-bound model, so a payload
+     * carrying only `variant_label` validates against the link as it was a
+     * moment ago. If another request unlinks the item in between, the
+     * label-only write commits last and leaves a base product wearing a
+     * variant label — the exact state VariantLabelLifecycleTest forbids
+     * through the front door (Codex, 2e3af77).
+     */
+    public function test_a_label_only_edit_is_refused_when_the_link_was_cleared_first(): void
+    {
+        $service = app(ItemService::class);
+
+        $base = $this->item('SYN-BASE');
+        $variant = $this->item('SYN-POUCH', [
+            'variant_of_item_id' => $base->id,
+            'variant_label' => '840/box pouch',
+        ]);
+
+        // The other editor won: the item is a base again, label cleared.
+        $variant->update(['variant_of_item_id' => null, 'variant_label' => null]);
+
+        $this->expectException(ValidationException::class);
+
+        $service->update($variant, ['variant_label' => '840/box pouch']);
+    }
+
+    public function test_a_label_only_edit_on_a_still_linked_variant_goes_through(): void
+    {
+        $service = app(ItemService::class);
+
+        $base = $this->item('SYN-BASE');
+        $variant = $this->item('SYN-POUCH', [
+            'variant_of_item_id' => $base->id,
+            'variant_label' => '840/box pouch',
+        ]);
+
+        $service->update($variant, ['variant_label' => '812/box pouch']);
+
+        $this->assertSame('812/box pouch', $variant->fresh()->variant_label);
+    }
+
     public function test_a_legitimate_link_still_goes_through(): void
     {
         $service = app(ItemService::class);

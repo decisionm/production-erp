@@ -282,6 +282,32 @@ class ItemService
         }
 
         if (! array_key_exists('variant_of_item_id', $data) || $data['variant_of_item_id'] === null) {
+            /*
+             * A LABEL WITHOUT A LINK IN THE PAYLOAD still depends on one in
+             * the database. ValidatesVariantLink reads the link off the
+             * route-bound model, so a payload carrying only `variant_label`
+             * was validated against the link as it stood a moment ago; if
+             * another request unlinked the item in between, this write would
+             * land a variant label on a base product — the state the front
+             * door refuses (Codex, 2e3af77). Re-read under the row's lock and
+             * refuse, rather than write a label about nothing.
+             */
+            if (($data['variant_label'] ?? null) !== null && ! array_key_exists('variant_of_item_id', $data)) {
+                return DB::transaction(function () use ($item, $data): Item {
+                    $locked = Item::query()->whereKey($item->getKey())->lockForUpdate()->first();
+
+                    if ($locked === null || $locked->variant_of_item_id === null) {
+                        throw ValidationException::withMessages([
+                            'variant_label' => 'This item is no longer a pack variant, so it cannot carry a pack-variant label. Point it at its base product first.',
+                        ]);
+                    }
+
+                    $item->update($data);
+
+                    return $item;
+                });
+            }
+
             $item->update($data);
 
             return $item;
