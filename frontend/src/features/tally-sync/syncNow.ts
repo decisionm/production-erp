@@ -45,7 +45,33 @@ export function canRequestSyncNow(user: User | null): boolean {
  */
 export const SYNC_NOW_CONFIRM = {
     title: 'Release queued vouchers?',
-    body: 'A running shift is released as it stands; later approvals create a follow-up voucher.',
+    // Two facts, no paragraph. The first is the one this dialog used to
+    // leave to inference: the press is QUEUE-WIDE. The server frees every
+    // voucher the shift gate is holding (TallySyncService::requestSyncNow),
+    // which is not the same set as the rows on screen — someone who has
+    // filtered to one day, or to "held only", is still releasing the rest.
+    body: 'Releases every held voucher in the queue, not only the rows your filters show. '
+        + 'A running shift is released as it stands; later approvals create a follow-up voucher.',
+    ok: 'Release now',
+    cancel: 'Not yet',
+} as const;
+
+/**
+ * The per-voucher form of the same press (DEC-20260807-011's accountant
+ * override), behind the same kind of pause.
+ *
+ * "Release now" sits in the row's action strip and in the drawer, one
+ * click from View and from Resync, and it used to fire on that click: a
+ * mis-tap put a running shift's voucher on the next poll with nothing to
+ * stop it and no way back. Naming the voucher is the whole point of the
+ * dialog — it is what tells someone they grabbed the wrong row.
+ *
+ * The consequence is the queue-wide one, minus the queue: this shift's
+ * voucher goes as it stands, and approvals after it land in a follow-up.
+ */
+export const RELEASE_ONE_CONFIRM = {
+    title: (voucher: string) => `Release ${voucher} now?`,
+    body: "This shift's voucher goes on the agent's next check; later approvals create a follow-up voucher.",
     ok: 'Release now',
     cancel: 'Not yet',
 } as const;

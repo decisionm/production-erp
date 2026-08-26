@@ -4,6 +4,7 @@ import {
     agentLiveness,
     agentLivenessLabel,
     canRequestSyncNow,
+    RELEASE_ONE_CONFIRM,
     SYNC_NOW_CONFIRM,
     syncNowMessage,
 } from './syncNow';
@@ -73,7 +74,10 @@ describe('canRequestSyncNow', () => {
 describe('SYNC_NOW_CONFIRM', () => {
     it('asks in operational words, with no explanatory paragraph', () => {
         expect(SYNC_NOW_CONFIRM.title).toBe('Release queued vouchers?');
-        expect(SYNC_NOW_CONFIRM.body).toBe('A running shift is released as it stands; later approvals create a follow-up voucher.');
+        expect(SYNC_NOW_CONFIRM.body).toBe(
+            'Releases every held voucher in the queue, not only the rows your filters show. '
+            + 'A running shift is released as it stands; later approvals create a follow-up voucher.',
+        );
     });
 
     it('warns that a running shift is sent as it stands', () => {
@@ -82,7 +86,71 @@ describe('SYNC_NOW_CONFIRM', () => {
         // approvals land in a follow-up voucher (DEC-20260807-011).
         expect(SYNC_NOW_CONFIRM.body).toContain('follow-up voucher');
     });
+
+    it('says the press is queue-wide, not what the filter bar is showing', () => {
+        // The server frees every voucher the shift gate is holding
+        // (TallySyncService::requestSyncNow) — the screen's filters are
+        // not part of that request and never were. Someone narrowed to
+        // one day, or to "held only", is releasing the rest as well, and
+        // that is the one thing about this button a person cannot infer.
+        expect(SYNC_NOW_CONFIRM.body).toContain('every held voucher in the queue');
+        expect(SYNC_NOW_CONFIRM.body).toContain('filters');
+    });
+
+    it('does not claim anything reaches Tally by pressing it', () => {
+        // The browser posts nothing: the request frees vouchers for the
+        // agent's next poll. A dialog that said "sends to Tally" would be
+        // the same lie syncNowMessage() is written to avoid.
+        expect(SYNC_NOW_CONFIRM.body).not.toMatch(/sends? to Tally|posts? to Tally|in Tally/i);
+    });
+
+    it('stays two sentences — the prose the owner rejected does not come back', () => {
+        // A guard, not a style rule. This dialog carried an operator
+        // paragraph once and the owner threw it out; the next agent to
+        // reach for "let me just explain the hold window here" fails here.
+        expect(sentences(SYNC_NOW_CONFIRM.body)).toHaveLength(2);
+        expect(SYNC_NOW_CONFIRM.body.length).toBeLessThanOrEqual(200);
+    });
 });
+
+describe('RELEASE_ONE_CONFIRM', () => {
+    it('names the voucher it is about to release', () => {
+        // The only thing that catches a wrong row: Release now sits one
+        // tap from View in a dense action strip, and in the drawer, and
+        // it used to fire the release on that tap with no way back.
+        expect(RELEASE_ONE_CONFIRM.title('SPE-42')).toBe('Release SPE-42 now?');
+        expect(RELEASE_ONE_CONFIRM.title('Stock Journal 7')).toContain('Stock Journal 7');
+    });
+
+    it('carries the same consequence as the queue-wide press, without the queue', () => {
+        expect(RELEASE_ONE_CONFIRM.body).toContain('follow-up voucher');
+        // One voucher, so it must NOT borrow the queue-wide sentence —
+        // this button releases the row it is on and nothing else.
+        expect(RELEASE_ONE_CONFIRM.body).not.toContain('every held voucher');
+    });
+
+    it('does not claim the voucher has reached Tally', () => {
+        expect(RELEASE_ONE_CONFIRM.body).toContain("agent's next check");
+        expect(RELEASE_ONE_CONFIRM.body).not.toMatch(/sends? to Tally|posts? to Tally|synced/i);
+    });
+
+    it('offers a way out that is not the default', () => {
+        // Same pair of words as the queue-wide dialog: the two releases
+        // must not read differently for the same act.
+        expect(RELEASE_ONE_CONFIRM.ok).toBe(SYNC_NOW_CONFIRM.ok);
+        expect(RELEASE_ONE_CONFIRM.cancel).toBe(SYNC_NOW_CONFIRM.cancel);
+    });
+
+    it('stays one sentence', () => {
+        expect(sentences(RELEASE_ONE_CONFIRM.body)).toHaveLength(1);
+        expect(RELEASE_ONE_CONFIRM.body.length).toBeLessThanOrEqual(140);
+    });
+});
+
+/** The body split into sentences — what "no paragraph" is measured on. */
+function sentences(body: string): string[] {
+    return body.split('.').map((part) => part.trim()).filter((part) => part !== '');
+}
 
 describe('agentLiveness', () => {
     it('is fresh inside the five-minute window and stale past it', () => {
