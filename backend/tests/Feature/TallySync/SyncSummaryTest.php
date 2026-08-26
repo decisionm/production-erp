@@ -228,7 +228,14 @@ class SyncSummaryTest extends TestCase
         $this->actAsStaff();
 
         $quiet = $this->summary();
-        $this->assertSame(['last_action_at' => null, 'last_action_event' => null, 'last_action_label' => null], $quiet['agent']);
+        $this->assertSame([
+            'last_action_at' => null,
+            'last_action_event' => null,
+            'last_action_label' => null,
+            // Nothing has polled either — "never", which the page words
+            // differently from "the agent went quiet".
+            'last_checked_at' => null,
+        ], $quiet['agent']);
         $this->assertNull($quiet['last_synced_at']);
         $this->assertNull($quiet['last_masters_pull_at']);
     }
@@ -266,12 +273,28 @@ class SyncSummaryTest extends TestCase
         $this->actAsStaff();
         $summary = $this->summary();
 
-        $this->assertSame([
-            'last_action_at' => $ackAt->toIso8601String(),
-            'last_action_event' => 'voucher.synced',
-            // The installation, by its token's NAME — never the token.
-            'last_action_label' => 'factory-pc',
-        ], $summary['agent']);
+        // The shape, pinned so a new key cannot appear unnoticed …
+        $this->assertSame(
+            ['last_action_at', 'last_action_event', 'last_action_label', 'last_checked_at'],
+            array_keys($summary['agent']),
+        );
+        $this->assertSame($ackAt->toIso8601String(), $summary['agent']['last_action_at']);
+        $this->assertSame('voucher.synced', $summary['agent']['last_action_event']);
+        // The installation, by its token's NAME — never the token.
+        $this->assertSame('factory-pc', $summary['agent']['last_action_label']);
+
+        // … and the CHECK-IN, which is a different fact from the last
+        // action: Sanctum stamps last_used_at on the agent's calls, so the
+        // agent is demonstrably here. Not pinned to an exact instant —
+        // within ONE test process the sanctum guard caches the resolved
+        // token and does not re-stamp it on the second call with the same
+        // token, which is a harness artefact and not the contract. What IS
+        // the contract: an agent that has called is not null, and the
+        // LAPTOP's later call (a token with no agent ability) did not move
+        // it past the agent's own last call.
+        $this->assertNotNull($summary['agent']['last_checked_at']);
+        $this->assertGreaterThanOrEqual($mastersAt->toIso8601String(), $summary['agent']['last_checked_at']);
+        $this->assertLessThanOrEqual($ackAt->toIso8601String(), $summary['agent']['last_checked_at']);
         $this->assertStringNotContainsString($token, json_encode($summary));
         $this->assertSame($ackAt->toIso8601String(), $summary['last_synced_at']);
         $this->assertSame($mastersAt->toIso8601String(), $summary['last_masters_pull_at']);
