@@ -70,9 +70,6 @@ class ItemResource extends JsonResource
             'hsn_sac_code' => $this->hsn_sac_code,
             'reorder_level' => $this->reorder_level,
             'nominal_weight_grams' => $this->nominal_weight_grams,
-            // Set only for masters pulled from Tally — an item without it
-            // can never appear in a voucher Tally will accept.
-            'tally_stock_item_guid' => $this->tally_stock_item_guid,
             // Product packing master — Complete Batch prefill standards.
             'nos_per_tray' => $this->nos_per_tray,
             'trays_per_box' => $this->trays_per_box,
