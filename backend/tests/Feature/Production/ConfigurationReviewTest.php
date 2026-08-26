@@ -142,12 +142,12 @@ class ConfigurationReviewTest extends TestCase
         $this->assertSame('attach_item', $rows[0]['fix_target']);
     }
 
-    public function test_a_packaging_with_its_own_good_identity_is_not_listed_even_when_the_product_lacks_one(): void
+    public function test_a_packaging_with_its_own_good_identity_is_a_separate_product_row_and_the_identity_gap_stays_at_standard_level(): void
     {
         $fixture = Item::create(['sku' => 'LOCAL-X', 'name' => 'X (LOCAL FIXTURE)', 'uom' => 'Nos', 'is_local_fixture' => true]);
         $real = $this->tallyItem('BTL-X', 'X Bottle', 'itm-x');
         $standard = $this->standard('X', $fixture);
-        $standard->packagings()->create(['mode' => 'direct_box', 'nos_per_box' => 100, 'item_id' => $real->id]);
+        $packaging = $standard->packagings()->create(['mode' => 'direct_box', 'nos_per_box' => 100, 'item_id' => $real->id]);
 
         $rows = $this->review()['rows'];
 
@@ -161,6 +161,15 @@ class ConfigurationReviewTest extends TestCase
         $this->assertCount(1, $identityRows);
         $this->assertNull($identityRows[0]['packaging']);
         $this->assertSame('attach_item', $identityRows[0]['fix_target']);
+
+        // ...and the separate-product row IS the packing's listing — asserted
+        // rather than left to the parenthesis above, because this test's old
+        // name claimed the packing was "not listed" at all, which stopped
+        // being the contract when DEC-20260821-001 landed.
+        $separate = $this->rowsOfKind($rows, 'packaging_separate_product');
+        $this->assertCount(1, $separate);
+        $this->assertSame($packaging->id, $separate[0]['packaging']['id']);
+        $this->assertSame($real->id, $separate[0]['item']['id']);
     }
 
     public function test_a_shared_tally_name_is_listed_as_ambiguous_with_the_rows_that_share_it_as_candidates(): void
@@ -318,9 +327,9 @@ class ConfigurationReviewTest extends TestCase
             'counts' => ['nos_per_pouch' => null, 'pouches_per_box' => null, 'nos_per_tray' => 98, 'trays_per_box' => 5, 'nos_per_box' => 490],
         ], $row['packaging']);
         // BOTH ends of the relation: what the packing posts as...
-        $this->assertSame(['id' => $trayItem->id, 'sku' => 'BTL-T', 'name' => 'Bottle A - Tray'], $row['item']);
+        $this->assertSame(['id' => $trayItem->id, 'sku' => 'BTL-T', 'name' => 'Bottle A - Tray', 'archived' => false], $row['item']);
         // ...and the product it is currently sitting under.
-        $this->assertSame(['id' => $pouchProduct->id, 'sku' => 'BTL-P', 'name' => 'Bottle A - Pouch'], $row['product_item']);
+        $this->assertSame(['id' => $pouchProduct->id, 'sku' => 'BTL-P', 'name' => 'Bottle A - Pouch', 'archived' => false], $row['product_item']);
         // Nothing is "missing" — the vocabulary is unchanged (P5-06); the
         // fact this row carries is its KIND.
         $this->assertSame([], $row['missing']);
@@ -472,13 +481,17 @@ class ConfigurationReviewTest extends TestCase
 
         $rows = $this->review()['rows'];
 
-        // EXACTLY ONE separate-product row, and it names the archived item.
+        // EXACTLY ONE separate-product row; it names the archived item AND
+        // says the retirement out loud (`archived` => true), because
+        // "posts as sku · name" rendered from the name alone reads as a live
+        // identity — and the packaging_no_identity row that corrects it can
+        // sit a table page away.
         $row = $this->oneRowOfKind($rows, 'packaging_separate_product');
         $this->assertSame(
-            ['id' => $archivedTray->id, 'sku' => 'BTL-G-T', 'name' => 'Bottle G - Tray'],
+            ['id' => $archivedTray->id, 'sku' => 'BTL-G-T', 'name' => 'Bottle G - Tray', 'archived' => true],
             $row['item'],
         );
-        $this->assertSame(['id' => $product->id, 'sku' => 'BTL-G', 'name' => 'Bottle G'], $row['product_item']);
+        $this->assertSame(['id' => $product->id, 'sku' => 'BTL-G', 'name' => 'Bottle G', 'archived' => false], $row['product_item']);
         $this->assertSame($packaging->id, $row['packaging']['id']);
         // Still advisory, still nothing to link.
         $this->assertSame([], $row['candidates']);
@@ -535,11 +548,11 @@ class ConfigurationReviewTest extends TestCase
         // active tray it posts as, and the ARCHIVED product it sits under.
         $row = $this->oneRowOfKind($rows, 'packaging_separate_product');
         $this->assertSame(
-            ['id' => $product->id, 'sku' => 'BTL-H', 'name' => 'Bottle H'],
+            ['id' => $product->id, 'sku' => 'BTL-H', 'name' => 'Bottle H', 'archived' => true],
             $row['product_item'],
             'the archived product must still be named — this is the fix',
         );
-        $this->assertSame(['id' => $tray->id, 'sku' => 'BTL-H-T', 'name' => 'Bottle H - Tray'], $row['item']);
+        $this->assertSame(['id' => $tray->id, 'sku' => 'BTL-H-T', 'name' => 'Bottle H - Tray', 'archived' => false], $row['item']);
         $this->assertSame($packaging->id, $row['packaging']['id']);
         // Still advisory, still nothing to link.
         $this->assertSame([], $row['candidates']);

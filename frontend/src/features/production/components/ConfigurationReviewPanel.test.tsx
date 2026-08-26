@@ -2,7 +2,7 @@ import { isValidElement } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import { Button, Select } from 'antd';
 import { describe, expect, it } from 'vitest';
-import { ConfigurationReviewFixCell, linkPlanFor, readOpenPreference } from '@/features/production/components/ConfigurationReviewPanel';
+import { ConfigurationReviewFixCell, linkPlanFor, readOpenPreference, reviewHeadline } from '@/features/production/components/ConfigurationReviewPanel';
 import type { ConfigurationReviewRow } from '@/features/production/types';
 
 /**
@@ -164,18 +164,39 @@ describe('the separate-product row (DEC-20260821-001)', () => {
         expect(words).not.toMatch(/only record|the record of what/);
     });
 
-    // NO TEST HERE FOR THE ARCHIVED IDENTITY, deliberately. The server now
-    // resolves a separate-product row's own item INCLUDING a soft-deleted one
-    // (tallyItemIncludingArchived), because the finding is about the stored
-    // column — but the panel needs NO special label for that: the item's own
-    // sku · name is the truthful answer, and the coexisting
-    // packaging_no_identity row is what says it cannot post today. There is
-    // nothing kind-specific to pin. The `Currently` column that prints it is
-    // inline in the table's `columns` array, not extracted like this cell, and
-    // extracting it purely to host a test would be a refactor nobody asked
-    // for. What the payload carries is pinned on the server
-    // (ConfigurationReviewTest::test_a_separate_product_row_names_its_identity_
-    // even_when_that_item_row_is_archived).
+    // THE ARCHIVED IDENTITY'S MARKER IS PINNED WHERE IT IS DECIDED, not
+    // here. The server says `archived` on a separate-product row's item and
+    // product_item (ConfigurationReviewTest pins both payloads), and the
+    // "(archived)" suffix it renders as belongs to
+    // tallyIdentityLabelMarkingArchived — pinned in
+    // productStandardsConfig.test.ts. The `Currently` column that prints it
+    // is inline in the table's `columns` array, not extracted like this
+    // cell; the wording is tested at the label, where it is worded once.
+    // (The earlier position — that the coexisting packaging_no_identity row
+    // made a marker unnecessary — did not survive pagination: past ten rows
+    // that row can sit on a page the reader never opens.)
+
+    it('does not claim the verdict is more settled than the stored columns make it', () => {
+        // The old sentence overclaimed ("nothing here links it") in the
+        // migration-window state, and a conditional replacement keyed on the
+        // attach row's presence in the list was broken by an adversarial
+        // pass in BOTH directions — a conflicting sibling packing (trashed
+        // ones included) makes the backend refuse every attach while the
+        // attach row still shows, and an inheriting sibling hides the attach
+        // row while the drawer's attach still closes this row. So the cell
+        // says only what is true in every state.
+        const words = textIn(cell(SEPARATE_PRODUCT));
+
+        expect(words).toContain('Nothing on this row links it');
+        expect(words).toContain('if Tally truly carries two stock items');
+        expect(words).toContain('re-judged from the stored columns on every read');
+        expect(words).toContain('the same item at both ends is one product, not two');
+        // What it must never do again: promise a close, or point at an
+        // attach row it cannot know will accept — the writers guard that.
+        expect(words).not.toContain('this row closes');
+        expect(words).not.toContain('attach row is in this same list');
+        expect(words).not.toContain('Nothing here links it');
+    });
 
     it('does not tell the reader the server refuses this — the review is read-only', () => {
         // The Start Batch modal's clause. True there, false here: these rows
@@ -367,5 +388,69 @@ describe('the collapsed-by-default preference', () => {
 
     it('is collapsed, not crashed, when storage throws', () => {
         expect(withStorage(null)).toBe(false);
+    });
+});
+
+/**
+ * THE HEADLINE COUNT (the collapsed panel's one always-visible line).
+ *
+ * A separate-product row is not a missing identity — the identity IS the
+ * finding — and the kinds deliberately coexist, so one packing can raise
+ * three rows at once. Counting them all as "packing identities still
+ * waiting on a person" inflated the number and mislabelled rows this screen
+ * offers no action for. Each kind counts once, under its own name.
+ */
+describe('the headline count', () => {
+    it('counts one packing raising three questions as one wrong-product packing and ONE identity', () => {
+        // The exact state the backend's coexistence test builds:
+        // separate-product + no-identity + ambiguous, all one packing. The
+        // no-identity and shared-name rows are two questions about the same
+        // unsettled identity, so they count once.
+        const rows = [
+            row({ kind: 'packaging_separate_product', fix_target: 'separate_product', missing: [] }),
+            row({}),
+            row({ kind: 'packaging_ambiguous', fix_target: 'name_ambiguity', ambiguity: { shared_name_count: 2 } }),
+        ];
+
+        expect(reviewHeadline(rows)).toBe('1 packing under the wrong product and 1 packing identity');
+    });
+
+    it('counts one packing whose identity is both missing and name-shared as ONE identity', () => {
+        const rows = [
+            row({}),
+            row({ kind: 'packaging_ambiguous', fix_target: 'name_ambiguity', ambiguity: { shared_name_count: 2 } }),
+        ];
+
+        expect(reviewHeadline(rows)).toBe('1 packing identity');
+    });
+
+    it('keeps the standard-level identity distinct from a packaging-level one', () => {
+        // The product's own identity and a packing's own identity are two
+        // different identities even on one standard.
+        const rows = [row({}), row({ packaging: null, fix_target: 'attach_item' })];
+
+        expect(reviewHeadline(rows)).toBe('2 packing identities');
+    });
+
+    it('names every segment that is present, plural where plural', () => {
+        const rows = [
+            row({ kind: 'packaging_separate_product', fix_target: 'separate_product' }),
+            row({ kind: 'packaging_separate_product', fix_target: 'separate_product' }),
+            row({}),
+            row({ kind: 'item_provisional_sku', standard: null, packaging: null, fix_target: 'item_sku' }),
+        ];
+
+        expect(reviewHeadline(rows)).toBe('2 packings under the wrong product, 1 packing identity and 1 provisional SKU');
+    });
+
+    it('reads exactly as it did before the new kind existed when none is present', () => {
+        // Two DIFFERENT packings — two identities. (Two rows about the same
+        // packing are the dedupe case above, not this one.)
+        const second = row({ packaging: { id: 10, mode: 'direct_box', counts: null } });
+
+        expect(reviewHeadline([row({}), second])).toBe('2 packing identities');
+        expect(
+            reviewHeadline([row({ kind: 'item_provisional_sku', standard: null, packaging: null, fix_target: 'item_sku' })]),
+        ).toBe('1 provisional SKU');
     });
 });

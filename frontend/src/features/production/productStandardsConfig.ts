@@ -333,6 +333,23 @@ export function tallyIdentityLabel(
     return bare(sku) === bare(name) ? name : `${sku} · ${name}`;
 }
 
+/**
+ * tallyIdentityLabel with a retirement said out loud — " (archived)" after
+ * the label when the row says so. Only the configuration review's
+ * separate-product rows carry the flag: they alone resolve a soft-deleted
+ * item on purpose (the finding is about the stored column), and "posts as
+ * sku · name" with no marker there reads as a live identity over an item no
+ * voucher can name any more. Everything without the flag gets the plain
+ * label, unchanged.
+ */
+export function tallyIdentityLabelMarkingArchived(
+    item: (Partial<Pick<PackagingTallyItem, 'id' | 'sku' | 'name'>> & { archived?: boolean }) | null | undefined,
+): string {
+    const label = tallyIdentityLabel(item);
+
+    return item?.archived === true ? `${label} (archived)` : label;
+}
+
 // ---------------------------------------------------------------------------
 // DEC-20260821-001 — a packing that posts as its own Tally item is a
 // separate product
