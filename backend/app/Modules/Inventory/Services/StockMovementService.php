@@ -617,7 +617,16 @@ class StockMovementService
         }
     }
 
-    /** A transfer moves a unit that is in stock; same rule, same reason. */
+    /**
+     * A transfer moves a unit that is in stock; same rule, same reason.
+     *
+     * Status only, deliberately — not the source store. `recordReceipt` is the
+     * ONLY writer that sets `in_stock`, and it stamps `warehouse_id` in the
+     * same statement, so an in-stock unit with no location cannot arise from
+     * application code and there is no second case to guard. Which store the
+     * unit must be in to leave it stays an HTTP-layer rule (judgeLeaving),
+     * where the request naming the source is.
+     */
     private function relocateSerial(int $serialNumberId, int $toWarehouseId): void
     {
         $changed = SerialNumber::whereKey($serialNumberId)
