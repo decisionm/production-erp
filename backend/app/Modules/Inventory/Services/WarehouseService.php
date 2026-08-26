@@ -175,10 +175,22 @@ class WarehouseService
         ];
     }
 
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    /**
+     * `orderBy('id')` IS THE TIEBREAKER, not an afterthought: `name` is not
+     * unique (the code is), so two stores sharing a name tie, and a tie is not
+     * a total order — walking page 1 then page 2 could serve one store twice
+     * and skip another. Archived stores stay on the list; this is the admin
+     * screen where they are reactivated from.
+     */
+    public function paginate(int $perPage = 20, ?string $search = null): LengthAwarePaginator
     {
         return Warehouse::query()
+            ->when($search !== null, function ($query) use ($search) {
+                $like = "%{$search}%";
+                $query->where(fn ($outer) => $outer->where('code', 'like', $like)->orWhere('name', 'like', $like));
+            })
             ->orderBy('name')
+            ->orderBy('id')
             ->paginate($perPage);
     }
 

@@ -2,12 +2,15 @@
 
 namespace App\Modules\Inventory\Http\Requests;
 
+use App\Modules\Inventory\Http\Requests\Concerns\ValidatesTrackingIdentity;
 use App\Rules\PlainDecimal;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 class StoreStockIssueRequest extends FormRequest
 {
+    use ValidatesTrackingIdentity;
+
     public function authorize(): bool
     {
         return true;
@@ -29,5 +32,11 @@ class StoreStockIssueRequest extends FormRequest
             'movement_date' => ['nullable', 'date'],
             'notes' => ['nullable', 'string'],
         ];
+    }
+
+    /** The store the stock leaves — where a serial number must already be. */
+    protected function currentWarehouseKey(): ?string
+    {
+        return 'warehouse_id';
     }
 }

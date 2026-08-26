@@ -20,7 +20,15 @@ export default function WarehousesPage() {
     const [editingWarehouse, setEditingWarehouse] = useState<Warehouse | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['inventory', 'warehouses'], queryFn: listWarehouses });
+    // Server-side paging. The table showed the first twenty stores and said
+    // nothing about the rest, which is the same defect the item picker had.
+    const [page, setPage] = useState(1);
+    const [perPage, setPerPage] = useState(20);
+
+    const { data, isLoading } = useQuery({
+        queryKey: ['inventory', 'warehouses', page, perPage],
+        queryFn: () => listWarehouses({ page, per_page: perPage }),
+    });
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['inventory', 'warehouses'] });
 
@@ -68,7 +76,19 @@ export default function WarehousesPage() {
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                pagination={{
+                    current: page,
+                    pageSize: perPage,
+                    // The server's count, not the page's length.
+                    total: data?.meta?.total ?? data?.data?.length ?? 0,
+                    showSizeChanger: true,
+                    pageSizeOptions: [20, 50, 100, 200],
+                    showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} warehouses`,
+                    onChange: (nextPage, nextSize) => {
+                        setPage(nextPage);
+                        setPerPage(nextSize);
+                    },
+                }}
                 columns={[
                     { title: 'Code', dataIndex: 'code' },
                     { title: 'Name', dataIndex: 'name' },

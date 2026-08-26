@@ -9,8 +9,10 @@ import BarcodeScanInput from '@/components/barcode/BarcodeScanInput';
 import { hasModuleAccess } from '@/features/auth/permissions';
 import { useAuthStore } from '@/features/auth/store';
 import {
-    listBatches,
+    listAllBatches,
     listAllItems,
+    listAllSerialNumbers,
+    listBatches,
     listSerialNumbers,
     listStockBalances,
     listStockMovements,
@@ -19,7 +21,9 @@ import {
     recordReceipt,
     recordTransfer,
 } from '@/features/inventory/api';
-import type { StockBalance } from '@/features/inventory/types';
+import { resolveStockScan } from '@/features/inventory/stockScan';
+import { identityRefusal } from '@/features/inventory/trackingIdentity';
+import type { SerialNumberStatus, StockBalance } from '@/features/inventory/types';
 import { formatDateTime } from '@/lib/datetime';
 import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { itemLabel } from '@/lib/itemLabel';
@@ -65,6 +69,11 @@ type TransferFormValues = z.infer<typeof transferSchema>;
 
 type ActiveModal = 'receipt' | 'issue' | 'transfer' | null;
 
+/** Just enough of a react-hook-form to clear an identity picker. */
+interface IdentityHolder {
+    setValue: (name: 'batch_id' | 'serial_number_id', value: undefined) => void;
+}
+
 export default function StockPage() {
     const [activeModal, setActiveModal] = useState<ActiveModal>(null);
     const [historyRow, setHistoryRow] = useState<StockBalance | null>(null);
@@ -72,9 +81,15 @@ export default function StockPage() {
     const user = useAuthStore((s) => s.user);
     const financeAccess = hasModuleAccess(user, 'finance');
 
+    // Server-side paging. This list is one row per item×warehouse and the
+    // factory's is far past a screenful, so the page number is part of the
+    // query key and the pager below reads the server's own count.
+    const [page, setPage] = useState(1);
+    const [perPage, setPerPage] = useState(50);
+
     const { data: balances, isLoading } = useQuery({
-        queryKey: ['inventory', 'stock-balances'],
-        queryFn: listStockBalances,
+        queryKey: ['inventory', 'stock-balances', page, perPage],
+        queryFn: () => listStockBalances({ page, per_page: perPage }),
     });
     const { data: history, isLoading: historyLoading } = useQuery({
         queryKey: ['inventory', 'stock-movements', historyRow?.item.id, historyRow?.warehouse.id],
@@ -84,8 +99,6 @@ export default function StockPage() {
     });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
     const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses', 'all'], queryFn: listAllWarehouses });
-    const { data: batches } = useQuery({ queryKey: ['inventory', 'batches'], queryFn: () => listBatches() });
-    const { data: serialNumbers } = useQuery({ queryKey: ['inventory', 'serial-numbers'], queryFn: () => listSerialNumbers() });
 
     // WS-B: Item and Warehouse are filtered on every stock WRITE path now
     // (receipt, issue, transfer), so the three modals below stop offering a
@@ -123,45 +136,43 @@ export default function StockPage() {
             .filter((s) => s.item.id === itemId && s.status === status)
             .map((s) => ({ value: s.id, label: s.serial_number })) ?? [];
 
-    // Serial numbers only count as a scan match while in the status that
-    // action can actually use — the same rule the dropdown pickers already
-    // follow (registered = receivable, in_stock = issuable/transferable).
-    // Checked in priority order most-specific first: a serial or batch
-    // match also tells us the item, but a bare SKU never tells us which
-    // batch/serial, so item-only has to be the fallback.
+    /*
+     * A SCAN IS A SERVER LOOKUP NOW, not a `.find()` over twenty rows.
+     *
+     * It used to search the default first page of the batch and serial lists,
+     * so a barcode printed by this very system answered "no match" whenever
+     * its row was not among the newest twenty. `search` is answered by the
+     * server; resolveStockScan holds the matching rules and is tested on its
+     * own. Items are already loaded in full for the picker, so a bare SKU
+     * costs no extra request.
+     */
+    const scanLookups = {
+        findSerials: async (code: string) => (await listSerialNumbers({ search: code, per_page: 50 })).data,
+        findBatches: async (code: string) => (await listBatches({ search: code, per_page: 50 })).data,
+        findItems: async () => items?.data ?? [],
+    };
+
     const resolveAndFillScan = (
         code: string,
-        setValue: (name: 'item_id' | 'batch_id' | 'serial_number_id', value: number) => void,
-        serialStatus: 'registered' | 'in_stock',
+        setValue: (name: 'item_id' | 'batch_id' | 'serial_number_id', value?: number) => void,
+        serialStatus: SerialNumberStatus,
     ) => {
-        const trimmed = code.trim().toLowerCase();
+        resolveStockScan(code, serialStatus, scanLookups)
+            .then((result) => {
+                // Every key the result carries, INCLUDING the ones it set to
+                // undefined — a scan names the whole selection, so an identity
+                // it did not match is cleared rather than left behind for the
+                // new item to be posted with. resolveStockScan owns that rule.
+                for (const [field, value] of Object.entries(result.fill)) {
+                    setValue(field as 'item_id' | 'batch_id' | 'serial_number_id', value as number | undefined);
+                }
 
-        const matchedSerial = serialNumbers?.data.find(
-            (s) => s.serial_number.toLowerCase() === trimmed && s.status === serialStatus,
-        );
-        if (matchedSerial) {
-            setValue('item_id', matchedSerial.item.id);
-            setValue('serial_number_id', matchedSerial.id);
-            message.success(`Matched serial ${matchedSerial.serial_number} — ${matchedSerial.item.sku}`);
-            return;
-        }
-
-        const matchedBatch = batches?.data.find((b) => b.batch_number.toLowerCase() === trimmed);
-        if (matchedBatch) {
-            setValue('item_id', matchedBatch.item.id);
-            setValue('batch_id', matchedBatch.id);
-            message.success(`Matched batch ${matchedBatch.batch_number} — ${matchedBatch.item.sku}`);
-            return;
-        }
-
-        const matchedItem = items?.data.find((i) => i.sku.toLowerCase() === trimmed);
-        if (matchedItem) {
-            setValue('item_id', matchedItem.id);
-            message.success(`Matched item ${matchedItem.sku}`);
-            return;
-        }
-
-        message.warning(`No item, batch, or serial number matches "${code}"`);
+                (result.ok ? message.success : message.warning)(result.message);
+            })
+            // The lookup is a request now, so it can fail the way requests do.
+            // Silence would read as "no such barcode", which is a different
+            // and much worse answer than "the lookup did not happen".
+            .catch(() => message.error(`Could not look up "${code}" — try the scan again.`));
     };
 
     const invalidateStock = () => {
@@ -212,6 +223,77 @@ export default function StockPage() {
         },
     });
 
+    /*
+     * THE IDENTITY PICKERS READ ONE ITEM'S SET, COMPLETE.
+     *
+     * They used to read the default first page of the WHOLE batch and serial
+     * lists — twenty rows — and then filter that by item in the browser, so a
+     * batch older than the newest twenty could not be selected at all, and
+     * nothing on screen said a row was missing. Scoped to the item the open
+     * modal has chosen and bounded by the server's own ceiling: complete for
+     * that item, never "every batch in the factory".
+     */
+    const activeItemId =
+        activeModal === 'receipt' ? receiptItemId
+            : activeModal === 'issue' ? issueItemId
+                : activeModal === 'transfer' ? transferItemId
+                    : undefined;
+    const activeTracking =
+        activeItemId === undefined ? 'none' : (itemsById.get(activeItemId)?.tracking_type ?? 'none');
+
+    const { data: batches } = useQuery({
+        queryKey: ['inventory', 'batches', 'for-item', activeItemId],
+        queryFn: () => listAllBatches(activeItemId!),
+        enabled: activeItemId !== undefined && activeTracking === 'batch',
+    });
+    const { data: serialNumbers } = useQuery({
+        queryKey: ['inventory', 'serial-numbers', 'for-item', activeItemId],
+        queryFn: () => listAllSerialNumbers(activeItemId!),
+        enabled: activeItemId !== undefined && activeTracking === 'serial',
+    });
+
+    /**
+     * CHOOSING A DIFFERENT ITEM DROPS THE IDENTITY CHOSEN FOR THE OLD ONE.
+     * Left in place it would post another item's batch, which the server
+     * refuses as cross-item corruption — a 422 for a value the form was still
+     * showing.
+     *
+     * On the Select's own onChange, and NOT in an effect watching the selected
+     * item: a scan also changes the item, and it sets the matching batch or
+     * serial number in the same breath. An effect cannot tell those two apart
+     * — it would fire on the scan's item and wipe the identity the very same
+     * scan had just filled in, leaving the barcode half-read. Clearing where
+     * the user actually picks keeps "the person changed their mind" separate
+     * from "the scanner named a whole row".
+     */
+    const onItemChange =
+        (form: IdentityHolder, field: { onChange: (value: unknown) => void }) => (value: unknown) => {
+            field.onChange(value);
+            form.setValue('batch_id', undefined);
+            form.setValue('serial_number_id', undefined);
+        };
+
+    /**
+     * Say what the server would say, before the request goes — otherwise a
+     * batch-tracked item submitted with the picker left empty comes back as an
+     * unexplained 422 on a field the form called optional.
+     */
+    const submitGuarded = <T extends { item_id: number; batch_id?: number; serial_number_id?: number }>(
+        form: { setError: (field: 'batch_id' | 'serial_number_id', error: { message: string }) => void },
+        send: (values: T) => void,
+    ) => (values: T) => {
+        const tracking = itemsById.get(values.item_id)?.tracking_type ?? 'none';
+        const refusal = identityRefusal(tracking, values);
+
+        if (refusal) {
+            form.setError(refusal.field, { message: refusal.message });
+
+            return;
+        }
+
+        send(values);
+    };
+
     return (
         <>
             <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
@@ -228,7 +310,20 @@ export default function StockPage() {
                 rowKey="id"
                 loading={isLoading}
                 dataSource={balances?.data}
-                pagination={false}
+                pagination={{
+                    current: page,
+                    pageSize: perPage,
+                    // The server's count, not the page's length — otherwise
+                    // the pager would claim the list ends at the first screen.
+                    total: balances?.meta?.total ?? balances?.data?.length ?? 0,
+                    showSizeChanger: true,
+                    pageSizeOptions: [20, 50, 100, 200],
+                    showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} balances`,
+                    onChange: (nextPage, nextSize) => {
+                        setPage(nextPage);
+                        setPerPage(nextSize);
+                    },
+                }}
                 columns={[
                     { title: 'Item', render: (_, row) => itemLabel(row.item) },
                     { title: 'Warehouse', render: (_, row) => `${row.warehouse.code} — ${row.warehouse.name}` },
@@ -250,7 +345,7 @@ export default function StockPage() {
                 title="Receive Stock"
                 open={activeModal === 'receipt'}
                 onCancel={() => setActiveModal(null)}
-                onOk={receiptForm.handleSubmit((values) => receiptMutation.mutate(values))}
+                onOk={receiptForm.handleSubmit(submitGuarded(receiptForm, receiptMutation.mutate))}
                 confirmLoading={receiptMutation.isPending}
                 destroyOnHidden
             >
@@ -265,7 +360,15 @@ export default function StockPage() {
                         <Controller
                             name="item_id"
                             control={receiptForm.control}
-                            render={({ field }) => <Select {...field} options={itemOptions} showSearch optionFilterProp="label" />}
+                            render={({ field }) => (
+                                <Select
+                                    {...field}
+                                    onChange={onItemChange(receiptForm, field)}
+                                    options={itemOptions}
+                                    showSearch
+                                    optionFilterProp="label"
+                                />
+                            )}
                         />
                     </Form.Item>
                     <Form.Item label="Warehouse">
@@ -301,7 +404,7 @@ export default function StockPage() {
                                 name="batch_id"
                                 control={receiptForm.control}
                                 render={({ field }) => (
-                                    <Select {...field} options={batchOptionsFor(receiptItemId)} showSearch optionFilterProp="label" allowClear />
+                                    <Select {...field} options={batchOptionsFor(receiptItemId)} showSearch optionFilterProp="label" />
                                 )}
                             />
                         </Form.Item>
@@ -317,7 +420,6 @@ export default function StockPage() {
                                         options={serialOptionsFor(receiptItemId, 'registered')}
                                         showSearch
                                         optionFilterProp="label"
-                                        allowClear
                                     />
                                 )}
                             />
@@ -338,7 +440,7 @@ export default function StockPage() {
                 title="Issue Stock"
                 open={activeModal === 'issue'}
                 onCancel={() => setActiveModal(null)}
-                onOk={issueForm.handleSubmit((values) => issueMutation.mutate(values))}
+                onOk={issueForm.handleSubmit(submitGuarded(issueForm, issueMutation.mutate))}
                 confirmLoading={issueMutation.isPending}
                 destroyOnHidden
             >
@@ -353,7 +455,15 @@ export default function StockPage() {
                         <Controller
                             name="item_id"
                             control={issueForm.control}
-                            render={({ field }) => <Select {...field} options={itemOptions} showSearch optionFilterProp="label" />}
+                            render={({ field }) => (
+                                <Select
+                                    {...field}
+                                    onChange={onItemChange(issueForm, field)}
+                                    options={itemOptions}
+                                    showSearch
+                                    optionFilterProp="label"
+                                />
+                            )}
                         />
                     </Form.Item>
                     <Form.Item label="Warehouse">
@@ -376,7 +486,7 @@ export default function StockPage() {
                                 name="batch_id"
                                 control={issueForm.control}
                                 render={({ field }) => (
-                                    <Select {...field} options={batchOptionsFor(issueItemId)} showSearch optionFilterProp="label" allowClear />
+                                    <Select {...field} options={batchOptionsFor(issueItemId)} showSearch optionFilterProp="label" />
                                 )}
                             />
                         </Form.Item>
@@ -387,7 +497,7 @@ export default function StockPage() {
                                 name="serial_number_id"
                                 control={issueForm.control}
                                 render={({ field }) => (
-                                    <Select {...field} options={serialOptionsFor(issueItemId)} showSearch optionFilterProp="label" allowClear />
+                                    <Select {...field} options={serialOptionsFor(issueItemId)} showSearch optionFilterProp="label" />
                                 )}
                             />
                         </Form.Item>
@@ -407,7 +517,7 @@ export default function StockPage() {
                 title="Transfer Stock"
                 open={activeModal === 'transfer'}
                 onCancel={() => setActiveModal(null)}
-                onOk={transferForm.handleSubmit((values) => transferMutation.mutate(values))}
+                onOk={transferForm.handleSubmit(submitGuarded(transferForm, transferMutation.mutate))}
                 confirmLoading={transferMutation.isPending}
                 destroyOnHidden
             >
@@ -422,7 +532,15 @@ export default function StockPage() {
                         <Controller
                             name="item_id"
                             control={transferForm.control}
-                            render={({ field }) => <Select {...field} options={itemOptions} showSearch optionFilterProp="label" />}
+                            render={({ field }) => (
+                                <Select
+                                    {...field}
+                                    onChange={onItemChange(transferForm, field)}
+                                    options={itemOptions}
+                                    showSearch
+                                    optionFilterProp="label"
+                                />
+                            )}
                         />
                     </Form.Item>
                     <Form.Item label="From Warehouse">
@@ -452,7 +570,7 @@ export default function StockPage() {
                                 name="batch_id"
                                 control={transferForm.control}
                                 render={({ field }) => (
-                                    <Select {...field} options={batchOptionsFor(transferItemId)} showSearch optionFilterProp="label" allowClear />
+                                    <Select {...field} options={batchOptionsFor(transferItemId)} showSearch optionFilterProp="label" />
                                 )}
                             />
                         </Form.Item>
@@ -463,7 +581,7 @@ export default function StockPage() {
                                 name="serial_number_id"
                                 control={transferForm.control}
                                 render={({ field }) => (
-                                    <Select {...field} options={serialOptionsFor(transferItemId)} showSearch optionFilterProp="label" allowClear />
+                                    <Select {...field} options={serialOptionsFor(transferItemId)} showSearch optionFilterProp="label" />
                                 )}
                             />
                         </Form.Item>

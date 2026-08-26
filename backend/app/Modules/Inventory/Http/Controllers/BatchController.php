@@ -16,9 +16,18 @@ class BatchController extends Controller
 {
     public function __construct(private readonly BatchService $batches) {}
 
+    /**
+     * `item_id` is what the per-item picker reads and is unchanged; `per_page`
+     * and `search` are new, because ignoring them capped this list at twenty
+     * with no way to ask for the rest.
+     */
     public function index(Request $request): AnonymousResourceCollection
     {
-        return BatchResource::collection($this->batches->paginate($request->integer('item_id') ?: null));
+        return BatchResource::collection($this->batches->paginate(
+            itemId: $request->integer('item_id') ?: null,
+            perPage: $this->perPage($request),
+            search: $this->searchTerm($request),
+        ));
     }
 
     public function store(StoreBatchRequest $request): BatchResource

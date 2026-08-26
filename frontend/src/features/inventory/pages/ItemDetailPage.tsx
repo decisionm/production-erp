@@ -4,7 +4,7 @@ import { useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { hasModuleAccess } from '@/features/auth/permissions';
 import { useAuthStore } from '@/features/auth/store';
-import { getItem, listStockBalances, listStockMovements } from '@/features/inventory/api';
+import { getItem, listItemStockBalances, listStockMovements } from '@/features/inventory/api';
 import type { ItemTrackingType, StockMovement } from '@/features/inventory/types';
 import { formatDateTime } from '@/lib/datetime';
 
@@ -120,8 +120,15 @@ export default function ItemDetailPage() {
         retry: false,
     });
 
-    const { data: balances } = useQuery({ queryKey: ['inventory', 'stock-balances'], queryFn: listStockBalances });
-    const itemBalances = balances?.data.filter((b) => b.item.id === itemId) ?? [];
+    // Asked for BY ID. This used to fetch the general balances list and pick
+    // its rows out of it in the browser — but that list is paged, so past
+    // twenty balances an item's own page showed no stock at all.
+    const { data: balances } = useQuery({
+        queryKey: ['inventory', 'stock-balances', 'for-item', itemId],
+        queryFn: () => listItemStockBalances(itemId),
+        enabled: hasValidId,
+    });
+    const itemBalances = balances?.data ?? [];
 
     const { data: movements, isLoading: movementsLoading } = useQuery({
         queryKey: ['inventory', 'stock-movements', itemId],

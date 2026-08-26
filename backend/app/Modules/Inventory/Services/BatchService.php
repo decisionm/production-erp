@@ -10,10 +10,26 @@ use Illuminate\Database\Eloquent\Collection;
 
 class BatchService
 {
-    public function paginate(?int $itemId, int $perPage = 20): LengthAwarePaginator
+    /**
+     * `$search` matches the batch number or the item it belongs to (SKU or
+     * name), and reaches archived and soft-deleted items on purpose: a batch
+     * outlives its master's retirement, and a lot that cannot be found is a
+     * lot nobody can trace.
+     *
+     * `$itemId` is what the per-item picker reads, unchanged. `orderByDesc('id')`
+     * is already a total order, so paging is stable without a tiebreaker.
+     */
+    public function paginate(?int $itemId, int $perPage = 20, ?string $search = null): LengthAwarePaginator
     {
         return Batch::query()
             ->when($itemId, fn ($query) => $query->where('item_id', $itemId))
+            ->when($search !== null, function ($query) use ($search) {
+                $like = "%{$search}%";
+                $query->where(fn ($outer) => $outer
+                    ->where('batch_number', 'like', $like)
+                    ->orWhereHas('item', fn ($item) => $item->withTrashed()
+                        ->where(fn ($q) => $q->where('sku', 'like', $like)->orWhere('name', 'like', $like))));
+            })
             ->with('item')
             ->orderByDesc('id')
             ->paginate($perPage);
