@@ -28,9 +28,10 @@ use Illuminate\Support\Facades\DB;
  *
  *   * Q43 — does a duplicate master name BLOCK approval, or only warn? OPEN.
  *   * Q59 — which categories may each document use? OPEN.
- *   * Q60 — which ItemCategory does each Tally stock group map to? OPEN, and
- *     its two hardest cases (`Caps & Closures`, 132 items, and `Scrap`, 16)
- *     are exactly the ones this class refuses to suggest for.
+ *   * Q60 — which ItemCategory does each Tally stock group map to? ANSWERED
+ *     by DEC-20260827-001, including the two cases this class used to refuse
+ *     on: `Caps & Closures` (finished good — the factory sells them) and
+ *     `Scrap` (other — produced, and sold in nothing the export shows).
  *
  * AGENTS.md: an agent proposes, the owner decides; a missing figure is
  * reported missing, never interpolated. So every class below is a
@@ -73,20 +74,23 @@ class ItemIdentityService
      * 'Bopp Tape' are the same key. Evidence: the stock-master XML read on
      * 26-Aug-2026, and the group list in Q60.
      *
-     * A `null` VALUE IS A DELIBERATE REFUSAL TO SUGGEST, and it is not the
-     * same thing as a group missing from this table:
+     * EVERY VALUE HERE IS THE OWNER'S, not an inference. The two that used to
+     * be deliberate refusals were the whole of Q60, and DEC-20260827-001
+     * answered both from the factory's own books rather than from intuition:
      *
-     *   * `Caps & Closures` (132 items — the single largest group) is what
-     *     Q60(a) is ABOUT. A cap is fitted TO the bottle and a measuring cup
-     *     is packed WITH it; `raw_material` and `packing_material` are both
-     *     defensible and only the owner may pick. Suggesting either here
-     *     would be this repo's oldest mistake — a derived factory value
-     *     reaching a screen as if it were a fact (PR #128).
-     *   * `Scrap` (16 items) is Q60(b). Scrap is PRODUCED, not purchased
-     *     (FC-02), and the consequence decides it: `sellable()` is true for
-     *     `finished_good` alone, so whether scrap may ever go on a sales
-     *     order IS the question. No suggestion.
-     *   * A group NOT IN THIS TABLE gets nothing either, and deliberately so:
+     *   * `Caps & Closures` (132 items — the single largest group) is a
+     *     FINISHED GOOD, because the factory SELLS caps: two sales invoice
+     *     lines and two sales order lines in the 26-Aug export. `sellable()`
+     *     is true for `finished_good` alone, so any other answer would
+     *     eventually refuse a real order. They are purchased as well, which
+     *     is not a contradiction — the same export shows a Finished Goods
+     *     item on a purchase invoice, and `fg_purchase_conflict` exists to
+     *     SAY that rather than to stop it.
+     *   * `Scrap` (16 items) is OTHER. It is produced and booked as stock
+     *     (33 inward journal lines) and appears in NO sale across 55 invoices
+     *     and 34 orders, so calling it a finished good would be the guess.
+     *     The day scrap is genuinely sold it becomes one by a NEW decision.
+     *   * A group NOT IN THIS TABLE still gets nothing, and deliberately so:
      *     there is no walk up to a parent group. A new Tally child group
      *     would otherwise inherit a suggestion nobody has evidence for.
      *
@@ -407,7 +411,7 @@ class ItemIdentityService
     }
 
     /**
-     * NOBODY HAS SAID WHAT THIS ITEM IS (Q60).
+     * NO CATEGORY HAS BEEN RECORDED FOR THIS ITEM YET.
      *
      * No `is_active` filter, matching the two duplicate classes below: the
      * category is what the document rules read, and a document may name an
@@ -662,8 +666,9 @@ class ItemIdentityService
                 .'masters is Tally-linked. A voucher line naming it resolves as ambiguous: Tally would match one by '
                 .'name and this ERP cannot say which.',
 
-            ItemIdentityWarning::Unclassified => 'No category recorded. Which ItemCategory each Tally stock group maps '
-                .'to is Q60, still open — including the two largest cases, Caps & Closures and Scrap.',
+            ItemIdentityWarning::Unclassified => 'No category recorded. The mapping from Tally stock group to category '
+                .'is settled (DEC-20260827-001), so this item either sits in a group the decision left unmapped, in no '
+                .'group at all, or the backfill has not been run for it yet.',
 
             ItemIdentityWarning::VariantUomConflict => 'This pack-variant group carries more than one unit of measure. '
                 .'Variants of one product are counted in one unit (DEC-20260821-001).',

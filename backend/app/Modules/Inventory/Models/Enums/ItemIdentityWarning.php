@@ -40,7 +40,7 @@ enum ItemIdentityWarning: string
     /** A shared name where at least one of the set is Tally-linked — what a voucher cannot resolve. */
     case OutboundAmbiguity = 'outbound_ambiguity';
 
-    /** No category has been recorded. Q60. */
+    /** No category has been recorded — see DEC-20260827-001 for the mapping. */
     case Unclassified = 'unclassified';
 
     /** One variant group, more than one unit of measure. */

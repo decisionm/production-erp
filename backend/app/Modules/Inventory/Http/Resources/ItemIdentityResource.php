@@ -17,11 +17,13 @@ use Illuminate\Http\Resources\Json\JsonResource;
  * and what looks wrong with that — so it renders a narrow row and the query
  * count of a page stays flat.
  *
- * `suggested_category` IS READ-ONLY AND IS NEVER PERSISTED BY ANYTHING. It
- * is Tally's stock grouping restated as a proposal (Q60 is open), with the
- * confidence attached so a judgement call cannot be mistaken for a fact.
- * `null` means no suggestion — either the group is one Q60 explicitly has
- * not answered (Caps & Closures, Scrap) or the item has no group at all.
+ * `suggested_category` IS READ-ONLY AND IS NEVER PERSISTED BY ANYTHING. It is
+ * Tally's stock grouping restated through the owner's mapping
+ * (DEC-20260827-001), with the confidence attached so a judgement call cannot
+ * be mistaken for a fact. A person still chooses: reading a suggestion here
+ * writes nothing, and `inventory:classify-items` is the deliberate,
+ * dry-run-first path that does. `null` means no suggestion — the group is one
+ * the decision left unmapped, or the item has no group at all.
  */
 class ItemIdentityResource extends JsonResource
 {

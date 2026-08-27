@@ -13,7 +13,9 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
  * THE ITEM MASTER'S IDENTITY REVIEW — two READS, and nothing else.
  *
  * There is no write action on this controller and there must not be one:
- * every answer it gives is a WARNING about an open question (Q43, Q59, Q60),
+ * every answer it gives is a WARNING, and the rules behind them are the
+ * owner's to set (Q43 and Q59 are still open; Q60 was answered by
+ * DEC-20260827-001 and this surface still only suggests),
  * and an endpoint that could act on one would be this repo deciding a
  * factory question for the owner. Reclassifying an item is what
  * `PUT /inventory/items/{item}` is for, with a person choosing.

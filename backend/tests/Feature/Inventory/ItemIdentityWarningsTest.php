@@ -219,14 +219,25 @@ class ItemIdentityWarningsTest extends TestCase
         $this->assertDoesNotWarn($wip, ItemIdentityWarning::Unclassified);
     }
 
-    public function test_the_unclassified_note_names_the_open_question_rather_than_proposing_an_answer(): void
+    /**
+     * The note has to say WHY this row is blank, and the reason changed when
+     * the owner answered. While Q60 was open, blank meant "nobody has said
+     * what this group is". Since DEC-20260827-001 the mapping is settled, so
+     * blank means something narrower and actionable — an unmapped group, no
+     * group at all, or a backfill not yet run — and a note still citing an
+     * open question would send a reviewer to look for an answer that exists.
+     */
+    public function test_the_unclassified_note_points_at_the_decision_not_a_question_that_is_closed(): void
     {
         $unsaid = $this->item('SYN-Q60', ['name' => 'Synthetic Unsaid Two']);
 
         $note = collect($this->identity()->warningsFor($unsaid))
             ->firstWhere('class', ItemIdentityWarning::Unclassified->value)['note'];
 
-        $this->assertStringContainsString('Q60', $note);
+        $this->assertStringContainsString('DEC-20260827-001', $note);
+        $this->assertStringNotContainsString('Q60', $note);
+        // And it still proposes nothing.
+        $this->assertStringNotContainsString('raw_material', $note);
     }
 
     // ---- 6. variant_uom_conflict --------------------------------------------

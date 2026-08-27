@@ -34,14 +34,17 @@ class ItemResource extends JsonResource
             // DEC-20260806-011). Both null on a base product.
             'variant_of_item_id' => $this->variant_of_item_id,
             'variant_label' => $this->variant_label,
-            // WHAT KIND OF THING THIS IS. Null is a real state — "nobody has
-            // said yet" — and is NOT ItemCategory::Other. Q60 is open.
+            // WHAT KIND OF THING THIS IS. Null is a real state — "not recorded
+            // yet" — and is NOT ItemCategory::Other. The group-to-category
+            // mapping is settled (DEC-20260827-001); which categories each
+            // DOCUMENT may use is Q59, and that is still open.
             'category' => $item->category?->value,
             /*
              * Tally's stock group, mirrored into `item_groups` and until now
              * write-only — its own migration records that "nothing in the
-             * application reads it". Now the item list does, because it is
-             * the only taxonomy the catalogue actually has (Q60).
+             * application reads it". Now the item list does, because it is the
+             * taxonomy the catalogue actually has — and since
+             * DEC-20260827-001 it is what a category is derived from.
              *
              * PRESENT ONLY WHERE IT WAS EAGER-LOADED, and that gate is the
              * whole design of this key rather than a caution. THIS RESOURCE
