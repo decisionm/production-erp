@@ -13,6 +13,7 @@ import {
     reorderProductionRequests,
     startProductionRequest,
 } from '@/features/production/api';
+import { queueEmptyText } from '@/features/production/queueEmptyText';
 import { type ProductionQueueGroup, groupQueueByProduct } from '@/features/production/queueGroups';
 import type { ProductionQueueRow, ProductionRequestStatus } from '@/features/production/types';
 import { formatDate } from '@/lib/datetime';
@@ -154,7 +155,7 @@ export default function ProductionQueuePage() {
      * same queue. A key of its own would leave this page stale after a hold
      * was placed or a request withdrawn somewhere else.
      */
-    const { data, isLoading, isError } = useQuery({
+    const { data, isLoading, isError, error } = useQuery({
         queryKey: ['production', 'requests', 'queue'],
         queryFn: readProductionQueue,
         enabled: canView,
@@ -225,7 +226,7 @@ export default function ProductionQueuePage() {
                 // one would let a reader rearrange the thing the reorder
                 // buttons write, and then write back what they were looking at.
                 pagination={false}
-                locale={{ emptyText: isError ? 'The queue could not be read.' : 'Nothing is queued for the floor.' }}
+                locale={{ emptyText: queueEmptyText(isError, error) }}
                 expandable={{
                     /*
                      * CONTROLLED, and `defaultExpandAllRows` would not do.
