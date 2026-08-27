@@ -306,6 +306,7 @@ export default function StockPage() {
             </Space>
 
             <Table<StockBalance>
+                sticky
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
@@ -325,9 +326,38 @@ export default function StockPage() {
                     },
                 }}
                 columns={[
-                    { title: 'Item', render: (_, row) => itemLabel(row.item) },
-                    { title: 'Warehouse', render: (_, row) => `${row.warehouse.code} — ${row.warehouse.name}` },
-                    { title: 'Quantity', dataIndex: 'quantity' },
+                    {
+                        /*
+                         * FIXED, for the same reason as the item catalogue: a
+                         * stock list runs to hundreds of rows, and scrolling
+                         * right to reach the actions took the product name off
+                         * the left edge, leaving a quantity belonging to
+                         * nothing.
+                         *
+                         * NOT SORTABLE, deliberately, and this is the harder
+                         * call. This list is paginated by the SERVER
+                         * (`listStockBalances({ page, per_page })`), so a
+                         * column sorter would order the fifty rows that had
+                         * arrived and present it as the order of the stock —
+                         * "the largest balance" would mean the largest on this
+                         * page. Sorting belongs here once the endpoint accepts
+                         * it; a control that quietly answers a smaller question
+                         * than it appears to does not.
+                         */
+                        title: 'Item',
+                        fixed: 'left' as const,
+                        width: 260,
+                        render: (_, row) => itemLabel(row.item),
+                    },
+                    {
+                        title: 'Warehouse',
+                        render: (_, row) => `${row.warehouse.code} — ${row.warehouse.name}`,
+                    },
+                    {
+                        title: 'Quantity',
+                        dataIndex: 'quantity',
+                        align: 'right' as const,
+                    },
                     ...(showsAverageCost ? [{ title: 'Avg. Cost', dataIndex: 'average_cost' }] : []),
                     {
                         title: 'Actions',

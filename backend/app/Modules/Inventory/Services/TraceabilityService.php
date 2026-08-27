@@ -43,8 +43,24 @@ class TraceabilityService
         private readonly MaterialCostVersionService $costVersions,
     ) {}
 
-    public function paginateLots(?int $itemId = null, ?int $grnId = null, int $perPage = 20): LengthAwarePaginator
-    {
+    /**
+     * @param  string|null  $receivedFrom  inclusive lower bound on received_date
+     * @param  string|null  $receivedTo  inclusive upper bound
+     * @param  string  $order  'newest' (default) or 'oldest'
+     */
+    public function paginateLots(
+        ?int $itemId = null,
+        ?int $grnId = null,
+        int $perPage = 20,
+        ?string $receivedFrom = null,
+        ?string $receivedTo = null,
+        string $order = 'newest',
+    ): LengthAwarePaginator {
+        // NEWEST FIRST unless asked otherwise: the receipt somebody is holding
+        // is usually the recent one. Oldest-first exists because the lot they
+        // cannot find usually is not.
+        $direction = $order === 'oldest' ? 'asc' : 'desc';
+
         return MaterialLot::query()
             // grn + goodsReceiptLine: the register shows each lot's receipt,
             // its price and the date+time it was received (read-only).
@@ -54,8 +70,12 @@ class TraceabilityService
             ->with(['item', 'bags', 'grn', 'goodsReceiptLine', 'costVersions'])
             ->when($itemId, fn ($query) => $query->where('item_id', $itemId))
             ->when($grnId, fn ($query) => $query->where('grn_id', $grnId))
-            ->orderByDesc('received_date')
-            ->orderByDesc('id')
+            ->when($receivedFrom, fn ($query) => $query->whereDate('received_date', '>=', $receivedFrom))
+            ->when($receivedTo, fn ($query) => $query->whereDate('received_date', '<=', $receivedTo))
+            // id breaks the tie in the SAME direction, so two lots received on
+            // one day read in a stable order either way round.
+            ->orderBy('received_date', $direction)
+            ->orderBy('id', $direction)
             ->paginate($perPage);
     }
 

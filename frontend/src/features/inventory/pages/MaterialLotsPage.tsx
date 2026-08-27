@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Button, Drawer, Empty, Select, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, DatePicker, Drawer, Empty, Segmented, Select, Space, Table, Tag, Typography } from 'antd';
+import dayjs from 'dayjs';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import MaterialBagLabels from '@/features/inventory/components/MaterialBagLabels';
@@ -43,6 +44,10 @@ function fmtRate(value: string | null | undefined): string {
 export default function MaterialLotsPage() {
     const [itemId, setItemId] = useState<number | null>(null);
     const [page, setPage] = useState(1);
+    /** Received-date window, YYYY-MM-DD, and which end of the register to read from. */
+    const [receivedFrom, setReceivedFrom] = useState<string | null>(null);
+    const [receivedTo, setReceivedTo] = useState<string | null>(null);
+    const [order, setOrder] = useState<'newest' | 'oldest'>('newest');
     const [labelSelection, setLabelSelection] = useState<{ lot: MaterialLot; bagId?: number } | null>(null);
     const user = useAuthStore((s) => s.user);
 
@@ -51,8 +56,16 @@ export default function MaterialLotsPage() {
         queryFn: listAllItems,
     });
     const { data, isLoading, isError, error, refetch } = useQuery({
-        queryKey: ['inventory', 'material-lots', itemId, page],
-        queryFn: () => listMaterialLots({ item_id: itemId ?? undefined, page }),
+        // Every filter is in the key, so a narrowed register is fetched rather
+        // than sliced from a page that is already here.
+        queryKey: ['inventory', 'material-lots', itemId, page, receivedFrom, receivedTo, order],
+        queryFn: () => listMaterialLots({
+            item_id: itemId ?? undefined,
+            page,
+            received_from: receivedFrom ?? undefined,
+            received_to: receivedTo ?? undefined,
+            order,
+        }),
         retry: false,
     });
 
@@ -120,19 +133,49 @@ export default function MaterialLotsPage() {
                     />
                 )}
 
-                <Select
-                    value={itemId ?? undefined}
-                    onChange={(value) => {
-                        setItemId(value ?? null);
-                        setPage(1);
-                    }}
-                    options={itemOptions}
-                    placeholder="Filter by material"
-                    showSearch
-                    optionFilterProp="label"
-                    allowClear
-                    style={{ width: 'min(100%, 420px)' }}
-                />
+                <Space wrap>
+                    <Select
+                        value={itemId ?? undefined}
+                        onChange={(value) => {
+                            setItemId(value ?? null);
+                            setPage(1);
+                        }}
+                        options={itemOptions}
+                        placeholder="Filter by material"
+                        showSearch
+                        optionFilterProp="label"
+                        allowClear
+                        style={{ width: 'min(100%, 420px)' }}
+                    />
+                    {/* "Which resin came in on the 14th" — the question this
+                        register exists to answer, asked of the whole register
+                        rather than the page in front of you. */}
+                    <DatePicker.RangePicker
+                        value={receivedFrom && receivedTo
+                            ? [dayjs(receivedFrom), dayjs(receivedTo)]
+                            : receivedFrom
+                                ? [dayjs(receivedFrom), null]
+                                : receivedTo ? [null, dayjs(receivedTo)] : null}
+                        onChange={(range) => {
+                            setReceivedFrom(range?.[0]?.format('YYYY-MM-DD') ?? null);
+                            setReceivedTo(range?.[1]?.format('YYYY-MM-DD') ?? null);
+                            setPage(1);
+                        }}
+                        allowEmpty={[true, true]}
+                        placeholder={['Received from', 'to']}
+                    />
+                    <Segmented
+                        value={order}
+                        onChange={(value) => {
+                            setOrder(value as 'newest' | 'oldest');
+                            setPage(1);
+                        }}
+                        options={[
+                            { label: 'Newest first', value: 'newest' },
+                            { label: 'Oldest first', value: 'oldest' },
+                        ]}
+                    />
+                </Space>
 
                 <Table<LotWithReceipt>
                     rowKey="id"
