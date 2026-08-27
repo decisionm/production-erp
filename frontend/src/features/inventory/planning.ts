@@ -38,6 +38,20 @@ export function cannotEstimateReason(reason: string | null | undefined): string 
     return CANNOT_ESTIMATE_REASON[reason] ?? reason;
 }
 
+/**
+ * The four fields an ETA cell is decided from — the planning dashboard's rows
+ * and the Production Queue's `planning` block both satisfy this.
+ *
+ * Narrowed to what the function READS rather than typed as the whole planning
+ * row, so the two screens computing the same cell share one implementation
+ * instead of forking the vocabulary. A second copy is how "cannot estimate"
+ * ends up worded two ways in one app.
+ */
+export type PlanningEtaSource = Pick<
+    FulfilmentPlanningRow,
+    'cannot_estimate' | 'estimated_ready_date' | 'shifts_needed' | 'reason'
+>;
+
 /** One planning row's ETA cell, as the table renders it. */
 export interface PlanningEtaCell {
     /** True when a date exists — the discriminator, never `reason === null`. */
@@ -62,7 +76,7 @@ export interface PlanningEtaCell {
  * unestimable line gets no date and no caveat-date, so a row that somehow
  * arrived with both is rendered as the refusal: the honest half wins.
  */
-export function planningEtaCell(row: FulfilmentPlanningRow): PlanningEtaCell {
+export function planningEtaCell(row: PlanningEtaSource): PlanningEtaCell {
     const dated = !row.cannot_estimate && row.estimated_ready_date !== null;
     const shifts =
         row.shifts_needed === null ? null : `${row.shifts_needed} shift${row.shifts_needed === 1 ? '' : 's'}`;
@@ -70,7 +84,13 @@ export function planningEtaCell(row: FulfilmentPlanningRow): PlanningEtaCell {
     return {
         dated,
         date: dated ? row.estimated_ready_date : null,
-        refusal: dated ? null : `cannot estimate — ${cannotEstimateReason(row.reason)}`,
+        // A refusal with NO token says the refusal once. `cannotEstimateReason`
+        // falls back to the words "cannot estimate" for its own standalone
+        // callers, and pasting that after the same phrase read "cannot
+        // estimate — cannot estimate". The planning walk always names a
+        // reason; a row it never reached at all does not, and the Production
+        // Queue's defensive branch is exactly that row.
+        refusal: dated ? null : row.reason ? `cannot estimate — ${cannotEstimateReason(row.reason)}` : 'cannot estimate',
         shifts,
     };
 }

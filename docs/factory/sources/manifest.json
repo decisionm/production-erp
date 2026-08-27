@@ -22,8 +22,8 @@
   },
   "live-erp": {
     "name": "Live ERP instance",
-    "notes": "Count on live, never on dev — dev fixture counts caused a wrong HRMS call once. Master data changes only via the manual GitHub workflows, dry-run first.",
-    "path": "https://erpdemo.amrtech.in",
+    "notes": "Count on live, never on dev — dev fixture counts caused a wrong HRMS call once. Master data changes only via the manual GitHub workflows, dry-run first. Moved from erpdemo.amrtech.in on 19-Aug-2026 (see DEPLOY.md).",
+    "path": "https://erp.actech.co.in",
     "status": "endpoint",
     "type": "live-erp"
   },
@@ -157,6 +157,15 @@
     "status": "external",
     "type": "tally-journal",
     "verified_at": "2026-08-12"
+  },
+  "tally-testing-xml-2026-08-26": {
+    "name": "Tally Testing-company XML export batch, 24-26 Aug",
+    "notes": "AT RISK - lives in ~/Downloads, same failure mode as Transactions.xml. Company 'SWAASHPET POLYMERS PVT LTD Testing'. Key files: test_stock_master.xml (624 stock items with GUIDs, 19 groups, 6 units, 1 godown; stoock_journal.xml is an identical copy), test2_purchase_order.xml (7 POs), test2_purchase.xml = test_purchase_invoice.xml (17 purchase invoices), test2_stock_journal.xml = test_stock_journal_entry.xml (34 daily consumption journals), test_sales.xml (55 sales invoices), test2_sales_order.xml (34 SOs), receipt_note.xml (20 MONEY receipts - NOT GRNs, see Q63), test_ledger_type.xml (27 voucher types - NOT ledger masters). Sanitized structural digest committed at docs/tally-sync/2026-08-26-xml-evidence.md; full extracts are session-local only.",
+    "path": "~/Downloads/test_stock_master.xml (and siblings listed in notes)",
+    "scope": "item/group/unit/godown masters with GUIDs; PO/purchase/SO/sales/stock-journal voucher shapes and join keys",
+    "status": "external",
+    "type": "tally-export",
+    "verified_at": "2026-08-26"
   },
   "tally-transactions-xml": {
     "name": "Transactions.xml — 38 real Stock Journals, SWAASHPET 26-27, exported 30 Jul",

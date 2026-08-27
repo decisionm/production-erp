@@ -2,6 +2,8 @@
 
 namespace App\Modules\Inventory\Http\Requests;
 
+use App\Modules\Inventory\Http\Requests\Concerns\ValidatesVariantLink;
+use App\Modules\Inventory\Models\Enums\ItemCategory;
 use App\Modules\Inventory\Models\Item;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -9,6 +11,8 @@ use Illuminate\Validation\Validator;
 
 class UpdateItemRequest extends FormRequest
 {
+    use ValidatesVariantLink;
+
     public function authorize(): bool
     {
         return true;
@@ -21,6 +25,17 @@ class UpdateItemRequest extends FormRequest
         return [
             'sku' => ['sometimes', 'string', 'max:64', Rule::unique('items', 'sku')->ignore($item)],
             'name' => ['sometimes', 'string', 'max:255'],
+            // Editable freely, unlike `name`: this label is the ERP's, so
+            // changing it renames nothing Tally will ever be handed.
+            'display_name' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'variant_of_item_id' => [
+                'sometimes', 'nullable', 'integer',
+                Rule::exists('items', 'id')->whereNull('deleted_at'),
+            ],
+            'variant_label' => ['sometimes', 'nullable', 'string', 'max:255'],
+            // See StoreItemRequest — accepted so a person can record what
+            // they know; Q59 is open and nothing is enforced on it here.
+            'category' => ['sometimes', 'nullable', Rule::enum(ItemCategory::class)],
             'description' => ['nullable', 'string'],
             'uom' => ['sometimes', 'string', 'max:16'],
             'hsn_sac_code' => ['nullable', 'string', 'max:20'],
@@ -47,6 +62,9 @@ class UpdateItemRequest extends FormRequest
         $validator->after(function (Validator $validator): void {
             /** @var Item $item */
             $item = $this->route('item');
+
+            // One level only, and from BOTH sides — see ValidatesVariantLink.
+            $this->validateVariantLink($validator, $item);
 
             // The NAME is the Tally wire key — every voucher line carries
             // <STOCKITEMNAME>, never the GUID — so renaming a Tally-linked item
@@ -82,5 +100,15 @@ class UpdateItemRequest extends FormRequest
                 );
             }
         });
+    }
+
+    /**
+     * @param  array<string, mixed>|int|string|null  $key
+     * @param  mixed  $default
+     * @return array<string, mixed>
+     */
+    public function validated($key = null, $default = null): array
+    {
+        return $this->prepareVariantLabelForUnlink(parent::validated($key, $default));
     }
 }

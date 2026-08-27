@@ -291,6 +291,14 @@ export default function StockPage() {
             <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
                 <Typography.Title level={3} style={{ margin: 0 }}>Stock</Typography.Title>
                 <Space>
+                    {/* The two identity registers. They left the sidebar on
+                        26-Aug-2026 and both pages are unchanged — this is the
+                        only link to them now, put where someone who needs a
+                        batch or a serial number already is (the receipt and
+                        issue modals send people to those pages by name when a
+                        tracked item has none yet). */}
+                    <Link to="/inventory/batches">Batches</Link>
+                    <Link to="/inventory/serial-numbers">Serial numbers</Link>
                     <Button onClick={() => setActiveModal('receipt')}>Receive Stock</Button>
                     <Button onClick={() => setActiveModal('issue')}>Issue Stock</Button>
                     <Button onClick={() => setActiveModal('transfer')}>Transfer Stock</Button>

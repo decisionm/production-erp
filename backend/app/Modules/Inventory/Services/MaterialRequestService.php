@@ -54,7 +54,7 @@ class MaterialRequestService
     public function queue(array $filters = [], bool $includeUnsubmitted = false): LengthAwarePaginator
     {
         $query = MaterialRequest::query()->with([
-            'lines.item:id,sku,name,uom',
+            'lines.item:id,sku,name,display_name,uom',
             'requestedBy:id,name',
             'cancelledBy:id,name',
             'shift:id,name',
@@ -93,7 +93,7 @@ class MaterialRequestService
     public function show(MaterialRequest $request): MaterialRequest
     {
         $request->load([
-            'lines.item:id,sku,name,uom',
+            'lines.item:id,sku,name,display_name,uom',
             'requestedBy:id,name',
             'cancelledBy:id,name',
             'shift:id,name',

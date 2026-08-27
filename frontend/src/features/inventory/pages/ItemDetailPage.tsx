@@ -5,6 +5,7 @@ import { Link, useParams } from 'react-router-dom';
 import { hasModuleAccess } from '@/features/auth/permissions';
 import { useAuthStore } from '@/features/auth/store';
 import { getItem, listItemStockBalances, listStockMovements } from '@/features/inventory/api';
+import { purchaseOrderIdIn } from '@/features/inventory/stockLedger';
 import type { ItemTrackingType, StockMovement } from '@/features/inventory/types';
 import { formatDateTime } from '@/lib/datetime';
 
@@ -43,14 +44,17 @@ function categorize(reference: string | null): MovementCategory {
 // it. That number is the only handle back to the document, so the reference
 // links to the goods receipts for that order. Purely a display rule — the
 // stored reference text and the tab grouping above are untouched.
-const PURCHASE_ORDER_REFERENCE = /\bPO #(\d+)/;
-
+//
+// The pattern itself lives in stockLedger.ts, with a test, and is read from
+// there rather than restated here: it has to track a reference string the
+// SERVER writes, and a second copy is a second place to forget when that
+// format changes.
 function ReferenceCell({ reference }: { reference: string | null }) {
     if (!reference) return <>—</>;
 
-    const purchaseOrder = reference.match(PURCHASE_ORDER_REFERENCE);
+    const purchaseOrder = purchaseOrderIdIn(reference);
     if (purchaseOrder) {
-        return <Link to={`/procurement/goods-receipts?po=${purchaseOrder[1]}`}>{reference}</Link>;
+        return <Link to={`/procurement/goods-receipts?po=${purchaseOrder}`}>{reference}</Link>;
     }
 
     return <>{reference}</>;
@@ -180,11 +184,6 @@ export default function ItemDetailPage() {
             <Typography.Title level={3} style={{ marginBottom: 4 }}>
                 {item.sku} — {item.name}
             </Typography.Title>
-            <Typography.Paragraph type="secondary">
-                Inventory summary and full transaction history for this item, across every module that
-                touches stock.
-            </Typography.Paragraph>
-
             <Descriptions column={2} size="small" bordered style={{ marginBottom: 24 }}>
                 <Descriptions.Item label="SKU">{item.sku}</Descriptions.Item>
                 <Descriptions.Item label="Name">{item.name}</Descriptions.Item>

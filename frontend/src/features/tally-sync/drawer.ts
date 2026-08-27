@@ -119,6 +119,13 @@ export function voucherDate(value: string | null | undefined): string {
  * deliberately not with the agent yet (DEC-20260807-011): a different claim
  * from "waiting for agent", which reads as "the factory machine should have
  * taken this already".
+ *
+ * These tags stay phase-specific ("Collecting the shift" / "Quiet period")
+ * rather than the generic "Waiting to release" the queue's filter bar and
+ * summary line use (cosmetic alignment with factory vocabulary — cf.
+ * waiting_qc, DEC-20260825-001; the stored `hold.phase` enum is unchanged
+ * either way) — a bare "Waiting" on every held row here would lose exactly
+ * the distinction the phase carries.
  */
 export function holdCopy(hold: NonNullable<TallySyncEntry['hold']>): { tag: string; detail: string } {
     return hold.phase === 'collecting'

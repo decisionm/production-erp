@@ -78,11 +78,18 @@ const fmtPct = (v: number | null | undefined): string => (v === null || v === un
  */
 const fmtPcs = fmtKg;
 
+// Keyed by the status union, so it is exhaustive by construction: the two QC
+// states were added when the union was widened to the six the backend enum has
+// always carried, and the compiler is what found this map. The wording is this
+// report's own ("At Machine" for a bag standing at a work centre) — the label
+// bench uses features/inventory/bagStatus.ts.
 const BAG_STATUS_LABEL: Record<MaterialBagStatus, string> = {
+    waiting_qc: 'Waiting QC',
     in_store: 'In Store',
     in_day_bin: 'At Machine',
     consumed: 'Consumed',
     returned: 'Returned',
+    rejected_qc: 'Rejected QC',
 };
 
 function useShiftOptions() {

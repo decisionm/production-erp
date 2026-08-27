@@ -4,8 +4,11 @@ namespace App\Console\Commands;
 
 use App\Modules\Inventory\Models\Enums\ItemCategory;
 use App\Modules\Inventory\Models\Item;
+use App\Modules\Inventory\Models\ItemGroup;
+use App\Modules\Inventory\Services\ItemIdentityService;
 use App\Modules\Production\Models\Enums\BatchStatus;
 use Illuminate\Console\Command;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -197,7 +200,73 @@ class ClassifyItems extends Command
                     ->whereNull('i.deleted_at')
                     ->whereNull('md.deleted_at')
             )
+            ->union($this->stockGroupEvidence())
             ->get();
+    }
+
+    /**
+     * THE TALLY STOCK GROUP, which the owner made evidence.
+     *
+     * Until DEC-20260827-001 this command could only classify the ~166 items
+     * the ERP's own tables happened to describe; the other 458 stayed NULL
+     * because nothing in the database could say what they were. The group
+     * tree could always say — the factory files every item under Finished
+     * Goods, Packing Material, Raw Material, Master Batch, Caps & Closures or
+     * Scrap — but which ERP category each group MEANT was Q60, an owner
+     * question, and reading it early would have been the guess this command
+     * exists to avoid.
+     *
+     * With the answer recorded the group becomes a definition like any other
+     * row in this union, and it is deliberately just one more piece of
+     * evidence: an item whose group disagrees with its production standard
+     * lands in the CONFLICTS list and is reported, never silently resolved.
+     *
+     * `ItemIdentityService` holds the same mapping for the read-only warning
+     * surface and this reads it from there, so the screen and the write can
+     * never drift into two answers. Groups the decision left unmapped — and
+     * items in no group at all — produce no row here and stay NULL.
+     */
+    private function stockGroupEvidence(): Builder
+    {
+        $identity = app(ItemIdentityService::class);
+
+        $cases = [];
+        $bindings = [];
+
+        foreach (ItemGroup::query()->get(['id', 'name']) as $group) {
+            $suggestion = $identity->suggestedCategoryForGroupName($group->name);
+
+            if ($suggestion === null) {
+                continue;
+            }
+
+            $cases[] = 'WHEN i.item_group_id = ? THEN ?';
+            $bindings[] = $group->id;
+            $bindings[] = $suggestion->value;
+        }
+
+        $query = DB::table('items as i')
+            ->join('item_groups as g', 'g.id', '=', 'i.item_group_id')
+            ->whereNull('i.deleted_at');
+
+        if ($cases === []) {
+            // No mapped group in this database — a query that selects nothing,
+            // rather than a CASE with no branches (which is a syntax error).
+            return $query->selectRaw("i.id, i.sku, ? , 'its Tally stock group'", [ItemCategory::Other->value])
+                ->whereRaw('1 = 0');
+        }
+
+        return $query
+            ->selectRaw(
+                'i.id, i.sku, CASE '.implode(' ', $cases).' END, '
+                    ."CONCAT('its Tally stock group ', g.name)",
+                $bindings,
+            )
+            ->whereIn('i.item_group_id', array_values(array_filter(
+                ItemGroup::query()->pluck('id', 'name')->all(),
+                fn ($id, $name) => $identity->suggestedCategoryForGroupName($name) !== null,
+                ARRAY_FILTER_USE_BOTH,
+            )));
     }
 
     /**

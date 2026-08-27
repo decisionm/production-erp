@@ -74,6 +74,18 @@ describe('one planning row s ETA cell', () => {
         expect(cell.shifts).toBeNull();
     });
 
+    it('says the refusal ONCE when there is no reason token', () => {
+        // A row the walk never reached carries cannot_estimate with no reason
+        // (the Production Queue's defensive branch). Pasting the fallback
+        // wording after the same phrase read "cannot estimate — cannot
+        // estimate" at a supervisor.
+        const cell = planningEtaCell(
+            planningRow({ cannot_estimate: true, reason: null, estimated_ready_date: null, shifts_needed: null }),
+        );
+
+        expect(cell.refusal).toBe('cannot estimate');
+    });
+
     it('trusts `cannot_estimate` over a date that should not be there', () => {
         // S12 says an unestimable line gets no caveat-date. A row carrying
         // both is a server that has gone wrong, and the honest half wins.

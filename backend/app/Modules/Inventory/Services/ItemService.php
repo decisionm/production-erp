@@ -11,6 +11,8 @@ use App\Support\Configuration\ManagesConfigurationLifecycle;
 use Closure;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class ItemService
 {
@@ -114,6 +116,19 @@ class ItemService
             DependencyCheck::table('day_bin_movements', 'item_id')->label('day bin movement'),
             DependencyCheck::table('material_request_lines', 'item_id')->label('material request line'),
             DependencyCheck::table('store_issue_lines', 'item_id')->label('store issue line'),
+            // A BASE PRODUCT WITH VARIANTS STILL POINTING AT IT
+            // (DEC-20260821-001). The column RESTRICTs, so the database
+            // would refuse — but as a QueryException inside the delete
+            // transaction, i.e. a 500. Declared here so the refusal is the
+            // contract's 422-with-counts, exactly as this docblock's
+            // RESTRICT paragraph requires of every referencing column.
+            // includeTrashed for the reason the ARCHIVED CHILDREN paragraph
+            // above gives: `items` soft-deletes, an archived variant is
+            // still a physical row, and a RESTRICT blocks on it just the
+            // same. Coded `pack_variants` rather than the derived `items`,
+            // because the 422's key must not read as "this item".
+            DependencyCheck::table('items', 'variant_of_item_id', 'pack_variants')
+                ->label('pack variant')->includeTrashed(),
 
             // Soft-deleting children: an archived one still blocks, because it
             // is still a physical row the database would act on.
@@ -188,6 +203,11 @@ class ItemService
     public function paginate(int $perPage = 20): LengthAwarePaginator
     {
         return Item::query()
+            // The item list renders the Tally stock group per row. Two
+            // columns, eager-loaded, so a 20-row page is two queries rather
+            // than twenty-one — the catalogue is ~644 rows and this list is
+            // the screen everybody opens first.
+            ->with('group:id,name')
             ->orderBy('name')
             ->paginate($perPage);
     }
@@ -201,12 +221,52 @@ class ItemService
     {
         // Explicit here rather than relying on the DB column default: Eloquent's
         // create() doesn't re-fetch DB-applied defaults into the returned model.
-        return Item::create([
+        $attributes = [
             'reorder_level' => 0,
             'tracking_type' => 'none',
             'is_active' => true,
             ...$data,
-        ]);
+        ];
+
+        if (($attributes['variant_of_item_id'] ?? null) === null) {
+            return Item::create($attributes);
+        }
+
+        /*
+         * A NEW VARIANT LOSES THE RACE THE SAME WAY AN EDITED ONE DOES.
+         * One request creates C -> A while another points A -> B: both
+         * validations see A as an unlinked base, and if only the update
+         * locked, the create lands afterwards and leaves C -> A -> B
+         * (Codex, 5543e21). A brand-new row has no variants of its own, so
+         * the target's own link is the whole invariant here.
+         */
+        return DB::transaction(function () use ($attributes): Item {
+            $this->assertTargetIsStillABase((int) $attributes['variant_of_item_id']);
+
+            return Item::create($attributes);
+        });
+    }
+
+    /**
+     * Re-read the base under its own lock and refuse if it stopped being one.
+     */
+    private function assertTargetIsStillABase(int $targetId): Item
+    {
+        $target = Item::query()->whereKey($targetId)->lockForUpdate()->first();
+
+        if ($target === null) {
+            throw ValidationException::withMessages([
+                'variant_of_item_id' => 'That base product no longer exists.',
+            ]);
+        }
+
+        if ($target->variant_of_item_id !== null) {
+            throw ValidationException::withMessages([
+                'variant_of_item_id' => "\"{$target->displayName()}\" became a pack variant while this was being edited. Point this item at the BASE product they both vary from.",
+            ]);
+        }
+
+        return $target;
     }
 
     public function update(Item $item, array $data): Item
@@ -221,9 +281,108 @@ class ItemService
             $data['sku_provisional'] = false;
         }
 
-        $item->update($data);
+        if (! array_key_exists('variant_of_item_id', $data) || $data['variant_of_item_id'] === null) {
+            /*
+             * A LABEL WITHOUT A LINK IN THE PAYLOAD still depends on one in
+             * the database. ValidatesVariantLink reads the link off the
+             * route-bound model, so a payload carrying only `variant_label`
+             * was validated against the link as it stood a moment ago; if
+             * another request unlinked the item in between, this write would
+             * land a variant label on a base product — the state the front
+             * door refuses (Codex, 2e3af77). Re-read under the row's lock and
+             * refuse, rather than write a label about nothing.
+             */
+            if (($data['variant_label'] ?? null) !== null && ! array_key_exists('variant_of_item_id', $data)) {
+                return DB::transaction(function () use ($item, $data): Item {
+                    $locked = Item::query()->whereKey($item->getKey())->lockForUpdate()->first();
 
-        return $item;
+                    if ($locked === null || $locked->variant_of_item_id === null) {
+                        throw ValidationException::withMessages([
+                            'variant_label' => 'This item is no longer a pack variant, so it cannot carry a pack-variant label. Point it at its base product first.',
+                        ]);
+                    }
+
+                    $item->update($data);
+
+                    return $item;
+                });
+            }
+
+            /*
+             * CLEARING THE LINK CLEARS THE LABEL, at the write. The request
+             * layer already does this (prepareVariantLabelForUnlink), but the
+             * pair is one fact and the invariant belongs to whoever writes it
+             * — a command, a sync or a future controller reaching the service
+             * directly must not be able to leave a base product wearing a
+             * variant label.
+             */
+            if (array_key_exists('variant_of_item_id', $data) && $data['variant_of_item_id'] === null) {
+                $data['variant_label'] = null;
+            }
+
+            $item->update($data);
+
+            return $item;
+        }
+
+        /*
+         * THE ONE-LEVEL RULE, RE-CHECKED UNDER A LOCK.
+         *
+         * ValidatesVariantLink refuses the three shapes that build a chain,
+         * but it reads before the write and holds nothing. Two editors
+         * submitting A -> B and B -> A at the same moment each see a target
+         * with no link and an item with no variants; both validations pass and
+         * the pair lands as a cycle, which Item::variantRootId()'s "one level,
+         * no walk" and the identity grouping both assume cannot exist.
+         *
+         * So the losing write re-reads the same two facts with the rows
+         * locked, and refuses. Only a link WRITE takes this path — clearing a
+         * link and every unrelated edit stay the plain update they were.
+         */
+        return DB::transaction(function () use ($item, $data): Item {
+            $targetId = (int) $data['variant_of_item_id'];
+            $itemId = (int) $item->getKey();
+
+            /*
+             * BOTH ROWS, IN ONE ORDERED STATEMENT. Locking the target first
+             * and the item second would have the reciprocal writes this guard
+             * exists for take A-then-B and B-then-A — a deadlock, which MySQL
+             * resolves by rolling one side back with an error instead of the
+             * refusal the loser is owed (Cursor, def53c9). Ascending id is an
+             * order both sides agree on whichever way the edit points.
+             */
+            $rows = Item::query()
+                ->whereIn('id', array_unique([$itemId, $targetId]))
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+
+            $target = $rows->get($targetId);
+            $locked = $rows->get($itemId);
+
+            if ($target === null || $locked === null) {
+                throw ValidationException::withMessages([
+                    'variant_of_item_id' => 'That base product no longer exists.',
+                ]);
+            }
+
+            if ($target->variant_of_item_id !== null) {
+                throw ValidationException::withMessages([
+                    'variant_of_item_id' => "\"{$target->displayName()}\" became a pack variant while this was being edited. Point this item at the BASE product they both vary from.",
+                ]);
+            }
+
+            if ($locked->variants()->withTrashed()->exists()) {
+                throw ValidationException::withMessages([
+                    'variant_of_item_id' => "\"{$locked->displayName()}\" became the base product for another pack variant while this was being edited, so it cannot become a variant itself.",
+                ]);
+            }
+
+            $item->update($data);
+
+            return $item;
+        });
     }
 
     /**

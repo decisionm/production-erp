@@ -2,6 +2,8 @@
 
 namespace App\Modules\Inventory\Http\Requests;
 
+use App\Modules\Inventory\Http\Requests\Concerns\ValidatesVariantLink;
+use App\Modules\Inventory\Models\Enums\ItemCategory;
 use App\Modules\Inventory\Models\Item;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -9,6 +11,8 @@ use Illuminate\Validation\Validator;
 
 class StoreItemRequest extends FormRequest
 {
+    use ValidatesVariantLink;
+
     public function authorize(): bool
     {
         return true;
@@ -19,6 +23,27 @@ class StoreItemRequest extends FormRequest
         return [
             'sku' => ['required', 'string', 'max:64', 'unique:items,sku'],
             'name' => ['required', 'string', 'max:255'],
+            // The ERP's own label for a person. `name` stays Tally's wire key.
+            'display_name' => ['sometimes', 'nullable', 'string', 'max:255'],
+            // The base product this is a pack variant of (DEC-20260821-001),
+            // and the words that tell the two apart on a picker.
+            'variant_of_item_id' => [
+                'sometimes', 'nullable', 'integer',
+                Rule::exists('items', 'id')->whereNull('deleted_at'),
+            ],
+            'variant_label' => ['sometimes', 'nullable', 'string', 'max:255'],
+            /*
+             * WHAT KIND OF THING THIS IS — accepted so a person can record
+             * what they know. It was fillable on the model and validated
+             * NOWHERE, so every category sent to this endpoint was silently
+             * dropped on the way through validated().
+             *
+             * Accepting the value is not enforcing anything: which categories
+             * each document may use is Q59 and still open, and nothing here
+             * proposes, derives or defaults a category — NULL stays the
+             * common and honest state.
+             */
+            'category' => ['sometimes', 'nullable', Rule::enum(ItemCategory::class)],
             'description' => ['nullable', 'string'],
             'uom' => ['required', 'string', 'max:16'],
             'hsn_sac_code' => ['nullable', 'string', 'max:20'],
@@ -43,6 +68,10 @@ class StoreItemRequest extends FormRequest
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator): void {
+            // One level only — on create the item does not exist yet, so the
+            // rule that bites here is "the target must be a BASE".
+            $this->validateVariantLink($validator);
+
             // Item::isLocalFixture() treats a "LOCAL-" SKU as a fixture on the
             // prefix alone, so a real item created with one would never post
             // to Tally. This endpoint cannot flag a fixture (is_local_fixture

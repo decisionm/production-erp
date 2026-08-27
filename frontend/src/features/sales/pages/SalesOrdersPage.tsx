@@ -499,7 +499,11 @@ export default function SalesOrdersPage() {
         isActive: (c) => c.is_active,
         option: (c) => ({ value: c.id, label: `${c.code} — ${c.name}` }),
     });
-    const itemOptions = items?.data.map((item) => ({ value: item.id, label: `${item.sku} — ${item.name}` })) ?? [];
+    // Through the shared helper, not a hand-built template: it prefers the
+    // ERP's display_name, and it drops a SKU that merely repeats the name —
+    // this catalogue's normal case, since the masters pull seeds one from the
+    // other.
+    const itemOptions = items?.data.map((item) => ({ value: item.id, label: itemLabel(item) })) ?? [];
 
     const { control, handleSubmit, reset, watch, formState: { errors } } = useForm<OrderFormValues>({
         resolver: zodResolver(orderSchema),

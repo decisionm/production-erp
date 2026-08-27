@@ -169,7 +169,7 @@ class FulfilmentQueueService
     private function rows(): array
     {
         $lines = SalesOrderLine::query()
-            ->with(['item:id,sku,name,uom', 'salesOrder:id,status,customer_id', 'salesOrder.customer:id,name'])
+            ->with(['item:id,sku,name,display_name,uom', 'salesOrder:id,status,customer_id', 'salesOrder.customer:id,name'])
             ->whereHas('salesOrder', fn ($order) => $order->whereIn('status', [
                 SalesOrderStatus::Confirmed,
                 SalesOrderStatus::PartiallyDelivered,
@@ -253,7 +253,10 @@ class FulfilmentQueueService
             'item' => $line->item === null ? null : [
                 'id' => (int) $line->item->id,
                 'sku' => $line->item->sku,
+                // Tally's wire name, and the ERP's own beside it — the store
+                // reads the second where the factory has set one.
                 'name' => $line->item->name,
+                'display_name' => $line->item->display_name,
             ],
             'ordered' => $ordered,
             'delivered' => $delivered,

@@ -695,8 +695,15 @@ export default function TallySyncPage() {
                         </Typography.Text>
                         {/* held_now, not today.held: the night shift's voucher is
                             dated yesterday and held until 06:00 — a state, not a
-                            window, and "0 held" over it every night was a lie. */}
-                        {' · '}<strong>{summary.held_now}</strong> held now
+                            window, and "0 held" over it every night was a lie.
+
+                            "waiting to release", not a bare "waiting": today.pending
+                            two words earlier already claims that word for "not yet
+                            collected by the agent" — a bare "waiting" here would sit
+                            beside it as the same word for a different state. Copy
+                            only (factory vocabulary — cf. waiting_qc, DEC-20260825-001);
+                            the stored enum/field stays `held_now`. */}
+                        {' · '}<strong>{summary.held_now}</strong> waiting to release
                         {unclassified > 0 && (
                             <>
                                 {' · '}
@@ -811,7 +818,11 @@ export default function TallySyncPage() {
                     checked={filters.held === true}
                     onChange={(event) => setFilter('held', event.target.checked || undefined)}
                 >
-                    Held only
+                    {/* "Waiting to release", not bare "Waiting": factory vocabulary
+                        (cf. waiting_qc, DEC-20260825-001) for what is otherwise the
+                        release gate's `held` state — the wire filter (`held=1`) and
+                        `filters.held` are untouched, this is copy only. */}
+                    Waiting to release
                 </Checkbox>
                 {filtersActive && (
                     <Button size="small" onClick={clearFilters}>
@@ -892,7 +903,12 @@ export default function TallySyncPage() {
                                     // the agent yet (DEC-20260807-011) — different
                                     // claim from "waiting for agent", which reads
                                     // as "the factory machine should have taken
-                                    // this already".
+                                    // this already". holdCopy's own tags stay
+                                    // phase-specific ("Collecting the shift" /
+                                    // "Quiet period") for that reason — the filter
+                                    // bar and summary line above use the generic
+                                    // "Waiting to release" (factory vocabulary), but
+                                    // this cell keeps the more informative wording.
                                     <Space direction="vertical" size={0}>
                                         <Tag color="blue">{holdCopy(row.hold).tag}</Tag>
                                         <Typography.Text type="secondary" style={{ fontSize: 12 }}>

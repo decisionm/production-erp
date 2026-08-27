@@ -2,6 +2,14 @@ import { PrinterOutlined } from '@ant-design/icons';
 import { Button, Card, Col, Descriptions, Empty, Row, Space, Tag, Typography } from 'antd';
 import JsBarcode from 'jsbarcode';
 import BarcodeDisplay from '@/components/barcode/BarcodeDisplay';
+// The bag's state, read as the string the server sent. This component used to
+// carry its own two maps keyed on the exported MaterialBagStatus union, which
+// names FOUR of the enum's six cases — a waiting_qc or rejected_qc bag opened
+// here rendered an empty tag with no colour, which reads as a bag in no state
+// at all. The table those states are now filtered from (BarcodeLabelsPage) made
+// that reachable in one click, so the tables were replaced by the one that
+// covers every case and falls back rather than blanking.
+import { bagStatusLabel, formatKg } from '@/features/inventory/bagStatus';
 import type { MaterialBag, MaterialLot } from '@/features/production/types';
 
 interface MaterialBagLabelsProps {
@@ -18,24 +26,18 @@ interface BagLabel {
     sequence: number;
 }
 
-const statusColour: Record<MaterialBag['status'], string> = {
-    in_store: 'success',
-    in_day_bin: 'processing',
-    consumed: 'default',
-    returned: 'warning',
-};
-
-const statusLabel: Record<MaterialBag['status'], string> = {
-    in_store: 'In store',
-    in_day_bin: 'In day bin',
-    consumed: 'Consumed',
-    returned: 'Returned',
-};
-
+/**
+ * The same figure the register prints, with the unit — a printed label is a
+ * physical object and says what its number is in.
+ *
+ * Delegates rather than restating the parse: these weights go onto labels that
+ * get stuck to bags, and two formatters drifting apart would mean the screen
+ * and the label in somebody's hand disagreeing about the same bag.
+ */
 function fmtKg(value: string | null | undefined): string {
-    if (value === null || value === undefined || value === '') return '—';
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? `${parseFloat(parsed.toFixed(4))} kg` : '—';
+    const formatted = formatKg(value);
+
+    return formatted === '—' ? formatted : `${formatted} kg`;
 }
 
 function fmtWhen(value: string | null | undefined): string {
@@ -159,12 +161,13 @@ export default function MaterialBagLabels({ lots, reprint = false, bagId }: Mate
             <Row gutter={[12, 12]}>
                 {labels.map((label) => {
                     const details = labelDetails(label);
+                    const status = bagStatusLabel(label.bag.status);
                     return (
                         <Col xs={24} md={12} xl={8} key={label.bag.id}>
                             <Card
                                 size="small"
                                 title={`Bag ${label.sequence} of ${label.lot.bag_count}`}
-                                extra={<Tag color={statusColour[label.bag.status]}>{statusLabel[label.bag.status]}</Tag>}
+                                extra={<Tag color={status.tone}>{status.text}</Tag>}
                             >
                                 <BarcodeDisplay
                                     code={label.bag.barcode}

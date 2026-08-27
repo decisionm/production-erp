@@ -65,7 +65,194 @@ export interface Item {
      * owner controls — never inferred from a name, an SKU or a unit.
      */
     is_production_input: boolean;
+    /**
+     * THE ERP-FACING LABEL. `name` is the TALLY WIRE KEY — every voucher line
+     * carries <STOCKITEMNAME> and no GUID does — so a product whose Tally name
+     * is unreadable on the floor gets a readable one HERE, never a rename that
+     * would make the next voucher name an item Tally does not have.
+     *
+     * Optional: absent on a backend that predates the identity fields, and
+     * absent is not "blank" — the screen shows `name` and says nothing.
+     */
+    display_name?: string | null;
+    /**
+     * THE BASE PRODUCT this item is a pack variant of. DEC-20260821-001: a
+     * pouch pack and a tray pack with separate Tally items are SEPARATE ERP
+     * item masters, each 1:1 with its own Tally identity, related to one base
+     * product. NULL on a base item; two levels only — a variant is never the
+     * parent of another variant.
+     */
+    variant_of_item_id?: number | null;
+    /** How this variant is packed, in the factory's own words ("840/box pouch"). */
+    variant_label?: string | null;
+    /**
+     * What kind of thing this item is, as the OWNER has classified it.
+     *
+     * `null` is a real state and the common one — "not recorded yet", never
+     * "none of the above" (that is `other`). `undefined` is a
+     * different fact again: the server did not serve the field at all, so the
+     * screen shows nothing rather than calling every row unclassified.
+     */
+    category?: ItemCategoryValue | null;
+    /**
+     * Tally's stock group. Read it through `itemGroupName()` — the shape is
+     * the server's to choose (a nested ref or a flat name) and this module
+     * reads both rather than betting on one spelling.
+     */
+    item_group?: ItemGroupRef | string | null;
+    item_group_name?: string | null;
     created_at: string;
+}
+
+/** Tally's stock group, as a nested reference. */
+export interface ItemGroupRef {
+    id?: number;
+    name: string | null;
+}
+
+/**
+ * The categories `App\Modules\Inventory\Models\Enums\ItemCategory` serves.
+ *
+ * NULL IS NOT IN THIS LIST and never should be: unclassified is the absence of
+ * a value, not a value. Nothing here classifies an item: which Tally group
+ * means which category is the owner's answer (DEC-20260827-001) applied by a
+ * person through `inventory:classify-items`, and which documents each category
+ * is eligible for is Q59, still open. This vocabulary exists to SHOW and to
+ * LET SOMEONE SET, and never to decide.
+ */
+export type ItemCategory =
+    | 'raw_material'
+    | 'packing_material'
+    | 'finished_good'
+    | 'work_in_progress'
+    | 'consumable'
+    | 'spare_tooling'
+    | 'other';
+
+/**
+ * Widened on purpose, the `CannotEstimateReason` precedent: a category a newer
+ * server knows and this build does not must reach the screen as itself rather
+ * than as a blank.
+ */
+export type ItemCategoryValue = ItemCategory | (string & {});
+
+// ------------------------------------------------------- item identity ----
+
+/**
+ * WHAT IS WRONG WITH AN ITEM MASTER, one stable key per kind of wrong.
+ *
+ * Every one of these WARNS. None of them blocks anything, and none of them
+ * changes an item: Q43 (block vs warn on a duplicate name) and Q60 (group →
+ * category) are open owner questions, so this is a list of things a person
+ * should look at, never a rule the software has decided to enforce.
+ */
+export type IdentityWarningClass =
+    | 'missing_tally_mapping'
+    | 'duplicate_name'
+    | 'possible_duplicate_master'
+    | 'outbound_ambiguity'
+    | 'unclassified'
+    | 'variant_uom_conflict'
+    | 'fg_purchase_conflict'
+    | 'inactive_referenced';
+
+/** Same widening rule: an unrecognised class from a newer server still renders. */
+export type IdentityWarningKey = IdentityWarningClass | (string & {});
+
+/**
+ * ONE WARNING ON ONE ITEM. `note` is the SERVER's sentence, with that item's
+ * own numbers in it — the screen shows it in a tooltip and never writes its
+ * own version of it.
+ */
+export interface ItemWarning {
+    class: IdentityWarningKey;
+    label: string;
+    note: string;
+}
+
+/** One class's line in the health read. Every class is reported, zeros included. */
+export interface IdentityWarningCount {
+    class: IdentityWarningKey;
+    label: string;
+    count: number;
+}
+
+/**
+ * How far the server will stand behind a category suggestion. `low` is a
+ * judgement call shown AS one — masterbatch is the case that earned it: it is
+ * a production input, and Q60 has never said an input is a raw material in a
+ * taxonomy that also has consumables.
+ */
+export type SuggestionConfidence = 'firm' | 'low' | (string & {});
+
+/** The base product a variant names, as the identity read carries it. */
+export interface IdentityItemRef {
+    id: number;
+    sku: string;
+    name: string;
+    display_name: string | null;
+}
+
+/**
+ * What the identity endpoints add to an item.
+ *
+ * `suggested_category` keeps THREE states apart and the difference is the
+ * whole point: a value is a suggestion DERIVED from the item's Tally stock
+ * group, `null` is the server declining to suggest one (Scrap and Caps &
+ * Closures are exactly the cases Q60 leaves open — no guess is offered), and
+ * `undefined` is a row that was never asked. It is never applied on its own.
+ */
+export interface ItemIdentityFacts {
+    warnings: ItemWarning[];
+    suggested_category: ItemCategoryValue | null;
+    suggested_category_confidence?: SuggestionConfidence | null;
+    variant_of?: IdentityItemRef | null;
+}
+
+/**
+ * An item as GET /inventory/identity/items serves it — deliberately NARROW,
+ * and deliberately not an `Item`. It answers who the item is and what looks
+ * wrong with that; it carries no packing standards, no reorder level and no
+ * lifecycle `can` block, because a page of them would cost a COUNT sweep per
+ * row to say so.
+ */
+export interface IdentityItem extends ItemIdentityFacts {
+    id: number;
+    sku: string;
+    name: string;
+    display_name: string | null;
+    uom: string;
+    is_active: boolean;
+    category: ItemCategoryValue | null;
+    item_group: string | null;
+    tally_stock_item_guid: string | null;
+    variant_of_item_id: number | null;
+    variant_label: string | null;
+}
+
+/**
+ * A row of the Items table. TWO reads can fill one — the items list serves a
+ * whole master, the identity read serves the narrow row above — so what only
+ * the full master carries is optional here, and every cell that shows one of
+ * those says "—" rather than inventing a value.
+ */
+export type ItemRow =
+    Pick<Item, 'id' | 'sku' | 'name' | 'uom'>
+    & Partial<Omit<Item, 'id' | 'sku' | 'name' | 'uom'>>
+    & Partial<ItemIdentityFacts>;
+
+/** GET /inventory/identity/health — every class, with the zeros. */
+export interface ItemIdentityHealth {
+    items: number;
+    items_with_any_warning: number;
+    warnings: IdentityWarningCount[];
+}
+
+/** What GET /inventory/identity/items accepts. No `warning` means every flagged item. */
+export interface ItemIdentityFilters {
+    warning?: IdentityWarningKey;
+    page?: number;
+    per_page?: number;
 }
 
 export interface Warehouse {
@@ -143,6 +330,18 @@ export interface SerialNumber {
 export interface StockMovement {
     id: number;
     type: StockMovementType;
+    /**
+     * WHY it moved (`StockMovementPurpose`), beside `type`, which only says
+     * which way the quantity went.
+     *
+     * Deliberately a plain string and deliberately `string | null`, both
+     * load-bearing. The enum is ADDED to — a build that types this as a closed
+     * union starts dropping purposes a newer backend sends. And the two empty
+     * answers are different facts: `'unknown'` is a real case meaning the
+     * writer did not say, while `null` is a row the backfill has not reached.
+     * See stockLedger.ts, which is where that distinction is rendered.
+     */
+    purpose?: string | null;
     item: Item;
     warehouse: Warehouse;
     batch?: Batch | null;

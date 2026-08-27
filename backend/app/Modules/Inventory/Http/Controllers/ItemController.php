@@ -37,17 +37,36 @@ class ItemController extends Controller
      */
     public function show(Request $request, Item $item): ItemResource
     {
-        return ItemResource::make($this->withAbilities($item, $this->items, $request));
+        return ItemResource::make($this->withGroup($this->withAbilities($item, $this->items, $request)));
     }
 
     public function store(StoreItemRequest $request): ItemResource
     {
-        return ItemResource::make($this->items->create($request->validated()));
+        return ItemResource::make($this->withGroup($this->items->create($request->validated())));
     }
 
     public function update(UpdateItemRequest $request, Item $item): ItemResource
     {
-        return ItemResource::make($this->items->update($item, $request->validated()));
+        return ItemResource::make($this->withGroup($this->items->update($item, $request->validated())));
+    }
+
+    /**
+     * Load the Tally stock group so {@see ItemResource} can state it.
+     *
+     * The resource gates `item_group` behind `whenLoaded` — it is embedded in
+     * ~35 line resources that load `item` and never `item.group`, and an
+     * ungated read there is one lazy query per line. The gate makes the key
+     * ABSENT rather than wrong, so the endpoints that owe a person the group
+     * have to ask for it: the list does so in ItemService::paginate(), and
+     * these five single-item actions do so here. One extra query on an action
+     * that already costs a lifecycle `can` sweep.
+     *
+     * loadMissing, not load: `withAbilities()` may already have the relation
+     * in hand, and re-querying it would be a second trip for the same row.
+     */
+    private function withGroup(Item $item): Item
+    {
+        return $item->loadMissing('group:id,name');
     }
 
     /**
@@ -68,7 +87,7 @@ class ItemController extends Controller
             fn () => $this->items->archive($item, $request->reason()),
         );
 
-        return ItemResource::make($this->withAbilities($archived, $this->items, $request));
+        return ItemResource::make($this->withGroup($this->withAbilities($archived, $this->items, $request)));
     }
 
     /** Put an archived item back in service. */
@@ -78,6 +97,6 @@ class ItemController extends Controller
             fn () => $this->items->activate($item, $request->reason()),
         );
 
-        return ItemResource::make($this->withAbilities($activated, $this->items, $request));
+        return ItemResource::make($this->withGroup($this->withAbilities($activated, $this->items, $request)));
     }
 }

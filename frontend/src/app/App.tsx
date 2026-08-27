@@ -53,12 +53,14 @@ import NonConformanceReportsPage from '@/features/quality/pages/NonConformanceRe
 import ProductionQcPage from '@/features/quality/pages/ProductionQcPage';
 import SpcChartPage from '@/features/quality/pages/SpcChartPage';
 import SpcCharacteristicsPage from '@/features/quality/pages/SpcCharacteristicsPage';
+import BarcodeLabelsPage from '@/features/inventory/pages/BarcodeLabelsPage';
 import BatchesPage from '@/features/inventory/pages/BatchesPage';
 import ItemDetailPage from '@/features/inventory/pages/ItemDetailPage';
 import ItemsPage from '@/features/inventory/pages/ItemsPage';
 import MaterialLotsPage from '@/features/inventory/pages/MaterialLotsPage';
 import SerialNumbersPage from '@/features/inventory/pages/SerialNumbersPage';
 import PlanningDashboardPage from '@/features/inventory/pages/PlanningDashboardPage';
+import StockMovementsPage from '@/features/inventory/pages/StockMovementsPage';
 import StockPage from '@/features/inventory/pages/StockPage';
 import StoreFulfilmentPage from '@/features/inventory/pages/StoreFulfilmentPage';
 import WarehousesPage from '@/features/inventory/pages/WarehousesPage';
@@ -96,7 +98,19 @@ export default function App() {
                                     <Route path="/inventory/items/:id" element={<ItemDetailPage />} />
                                     <Route path="/inventory/warehouses" element={<WarehousesPage />} />
                                     <Route path="/inventory/stock" element={<StockPage />} />
+                                    {/* The ledger, first-class. The Stock page's
+                                        per-row drawer and the item detail tabs
+                                        read the same endpoint per item; this is
+                                        the whole factory's movements, paged by
+                                        the server. It writes nothing. */}
+                                    <Route path="/inventory/stock-movements" element={<StockMovementsPage />} />
                                     <Route path="/inventory/material-lots" element={<MaterialLotsPage />} />
+                                    {/* The label bench: bags by barcode, and a
+                                        reprint of the identity each bag was born
+                                        with. Distinct from the lot register
+                                        above, which is per RECEIPT and carries
+                                        the GRN provenance. */}
+                                    <Route path="/inventory/barcode-labels" element={<BarcodeLabelsPage />} />
                                     <Route path="/inventory/batches" element={<BatchesPage />} />
                                     <Route path="/inventory/serial-numbers" element={<SerialNumbersPage />} />
                                     {/* The STORE's half of the Phase 7.5 material

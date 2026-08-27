@@ -42,6 +42,16 @@ const CONFIGURED_ORDER = [
     'CRM',
     'Finance',
     'Maintenance',
+    // TALLY SYNC STAYS LAST OF THE MODULES. The 26-Aug Phase 3 build spec
+    // asked for it directly after Payroll; the position it would leave is
+    // the 21-Aug owner request this file exists to pin, so that ask is a
+    // REVERSAL of an owner pin and a build spec is not owner authority
+    // (AGENTS.md). It is parked in docs/factory/PENDING-OWNER-QUESTIONS.md
+    // as "Where should Tally Sync sit in the sidebar?" — named, not
+    // numbered, because that file re-mints question numbers at merge — and
+    // NOT applied. If the owner confirms the new position, move this line to
+    // sit directly after 'Payroll' and move the entry in AppLayout.tsx with
+    // it — do not resequence either one without that answer.
     'Tally Sync',
     // Utilities, below the divider AppLayout inserts before Downloads.
     'Downloads',
@@ -95,11 +105,85 @@ describe('the sidebar', () => {
     });
 });
 
+describe('the Inventory menu', () => {
+    const inventory = allNavItems.find((item) => item.key === 'inventory');
+
+    /**
+     * Batches and Serial Numbers left this menu on 26-Aug-2026 and must not
+     * drift back: they are per-item identity registers opened from a stock
+     * line, and the Stock page's toolbar is what links to them now. Pinned the
+     * way the Production group pins its own removals — a test that goes red
+     * when the arrangement changes is the point.
+     */
+    it.each([
+        ['Batches', '/inventory/batches'],
+        ['Serial Numbers', '/inventory/serial-numbers'],
+    ])('does not list %s as a child', (label, key) => {
+        expect(inventory?.children?.map((child) => child.label)).not.toContain(label);
+        expect(inventory?.children?.map((child) => child.key)).not.toContain(key);
+    });
+
+    it('still lists the Stock page those links live on', () => {
+        expect(inventory?.children?.map((child) => child.key)).toContain('/inventory/stock');
+    });
+
+    /**
+     * THE LEDGER IS A PAGE NOW, and this assertion is the inverse of the one
+     * it replaces.
+     *
+     * The old line pinned the opposite — "lists no entry for a Stock Movements
+     * page that does not exist" — and its reasoning was correct while it
+     * stood: /inventory/stock-movements was an API path with nothing mounted
+     * on it, and a menu line pointing at a route App.tsx does not mount is a
+     * dead link that renders fine and 404s on click. A page exists as of
+     * 27-Aug-2026, so the premise is gone; the line is inverted rather than
+     * deleted, the way Shifts was in the Production group below, so the
+     * arrangement stays pinned in whichever direction it currently holds.
+     *
+     * What has NOT changed is the rule underneath: every child of this group
+     * must point at a route App.tsx actually mounts. App.routes.test.tsx pins
+     * the other half of that pair.
+     */
+    it('lists the Stock Movements ledger the app now mounts', () => {
+        expect(inventory?.children?.map((child) => child.key)).toContain('/inventory/stock-movements');
+    });
+
+    /**
+     * TWO LABEL SCREENS, BOTH LINKED. "Barcode & Labels" used to be the label
+     * on /inventory/material-lots; it now names the per-BAG bench, and the
+     * per-RECEIPT register keeps its own name and its own entry. The failure
+     * this pins is the quiet one: pointing both names at one route, or letting
+     * the receipts register lose its only link while its page stays mounted.
+     */
+    it('links the bag bench and the receipts register as two different routes', () => {
+        const byLabel = new Map(inventory?.children?.map((child) => [child.label, child.key]));
+
+        expect(byLabel.get('Barcode & Labels')).toBe('/inventory/barcode-labels');
+        expect(byLabel.get('Material Receipts & Bag Labels')).toBe('/inventory/material-lots');
+    });
+});
+
 describe('the Production menu', () => {
     const production = allNavItems.find((item) => item.key === 'production');
 
     it('exists with children', () => {
         expect(production?.children?.length).toBeGreaterThan(0);
+    });
+
+    /**
+     * PRODUCTION QUEUE OPENS THE GROUP (27-Aug-2026). It is what the floor has
+     * been asked to make, so it is the question a shift starts with; Shift
+     * Floor, where the answer is entered, follows it. Pinned by POSITION and
+     * not merely by presence, because "first" is the whole change — the entry
+     * was already in this menu, third, and nothing in the type system notices
+     * it sliding back down.
+     */
+    it('opens with the Production Queue, ahead of the Shift Floor', () => {
+        expect(production?.children?.[0]).toMatchObject({
+            key: '/production/queue',
+            label: 'Production Queue',
+        });
+        expect(production?.children?.[1]?.key).toBe('/production/shift-production');
     });
 
     /**

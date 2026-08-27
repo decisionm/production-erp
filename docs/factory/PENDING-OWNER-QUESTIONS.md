@@ -39,7 +39,9 @@ estimation version). Q53 is the Phase 7.6 configuration-lifecycle branch's
 (four selection-rule deferrals); Q54 is the Phase 7.5 material-flow branch's
 (five material-flow questions). Q61-Q62 are claimed by the sales-order
 fulfilment branch (may the ERP emit a Tally Sales Order voucher; the
-contested-stock hold rule). New questions continue from Q63.
+contested-stock hold rule). Q63-Q66 are claimed by the product-identity
+branch (Tally GRN usage; purchases without POs; sync cadence; the Tally Sync
+sidebar position). New questions continue from Q67.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 DEC-20260809-002/-003 landed with PR #155 (the finance-pull discovery
@@ -1445,7 +1447,19 @@ not block the nullable column, the honest dry-run classification report, or a
 person recording categories they actually know.
 *Open since 2026-08-21.*
 
-## Q60 · Which ItemCategory does each Tally stock group map to?
+## Q60 · Which ItemCategory does each Tally stock group map to? — RESOLVED
+
+**Resolved 2026-08-27 by DEC-20260827-001**: the category is derived from the
+Tally stock group. Finished good — the Finished Goods tree, HDPE Bottles &
+Container, and Caps & Closures (caps because the factory SELLS them: 2 sales
+invoice lines and 2 sales order lines in the 26-Aug export, and only a
+finished good is sellable). Raw material — the Raw Material tree and Master
+Batch (consumed on 10 stock-journal OUT lines beside resin). Packing material
+— the Packing Material tree, Carton Box, Tray, BOPP TAPE, SHRINK ROLLS.
+Other — Scrap (33 inward journal lines, absent from all 55 invoices and 34
+orders; if it is ever genuinely sold it becomes a finished good by a NEW
+decision). The 12 items in no group stay NULL. No enforcement is switched on
+— that is Q59, still open.
 
 `items:summary` read on live 24-Aug-2026 returned **624 active items, 624 of
 them with NO category**. That column is what three document rules read — a
@@ -1608,3 +1622,173 @@ What the owner needs to settle:
 flow already built — reserve, release, re-point and send-to-production all
 require a person, and every one of them records who and why.
 *Open since 2026-08-26.*
+
+## Q63 · Does the factory use Tally Receipt Notes (GRNs) at all?
+
+The 26-Aug XML export batch from the standalone Testing company was expected
+to contain a goods-receipt-note sample (`receipt_note.xml`), but its 20
+"Receipt" vouchers are MONEY receipts — bank allocations against customer
+bills, no stock items. No GRN voucher sample exists in any export read so
+far, and the voucher-type master list in the same batch cannot prove the
+type is used, only that it is defined.
+
+What this asks: when material arrives against a purchase order, does the
+accountant book a Tally Receipt Note (and the ERP should mirror one), or is
+the purchase invoice the ONLY Tally-side arrival record (and the ERP's goods
+receipt stays ERP-only, feeding the invoice later)? Related: what Tally
+should receive when material is rejected at incoming QA is already named
+open inside DEC-20260825-001 — an answer here should settle both together.
+
+**Blocks:** the Tally-posting half of the goods-receipt flow. It does not
+block ERP-side goods receipts, quality holds, or barcode issue at
+acceptance, which carry on regardless of what Tally is later told.
+*Open since 2026-08-26.*
+
+## Q64 · May material be purchased without a purchase order?
+
+The Testing-company books say direct purchases are normal practice: of the
+17 purchase invoices in the 26-Aug export, most carry NO order reference —
+only a minority link back to a PO (via the line's `ORDERNO`). The ERP's
+procurement flow is being built to start a goods receipt from an OPEN
+purchase order.
+
+What this asks: (a) should the ERP allow an arrival/receipt with no PO
+behind it (mirroring the books as they are), or must every purchase go
+PO-first from now on (a policy change the ERP would then enforce)?
+(b) If no-PO arrivals are allowed, do they still pass incoming quality the
+same way? (Presumably yes — the material does not care what paperwork
+preceded it — but presumption is not a decision.)
+
+**Blocks:** whether the goods-receipt screen may offer "receive without
+order". Receipt AGAINST an open PO is unaffected and proceeds either way.
+*Open since 2026-08-26.*
+
+## Q65 · Should Tally sync run on a clock (e.g. three times a day)?
+
+Sync today is CONTINUOUS: the factory-PC agent polls the ERP roughly every
+90 seconds, and shift production vouchers are additionally gated by the
+shift-end release window (with a person's Sync Now for the impatient case,
+DEC-20260825-002). A request has been made for a SCHEDULED cadence —
+three runs per day — instead.
+
+The two designs serve different instincts: continuous sync means Tally is
+never more than minutes behind and a failure surfaces the same hour it
+happens; a 3x/day clock means the accountant sees predictable batches
+arrive at known times, and nothing lands mid-entry while they work. They
+cannot both govern. Moving to a clock would also have to say what happens
+to the shift-end release gate, which currently decides WHEN a production
+voucher may leave regardless of any polling interval.
+
+**Blocks:** any change to the agent's polling design. It does not block
+the queue page, filters, retry/dismiss/release, or Sync Now, which work
+the same under either cadence.
+*Open since 2026-08-26.*
+
+## Q66 · Where should Tally Sync sit in the sidebar?
+
+On 21-Aug-2026 the owner named the module order one by one and put **Tally
+Sync LAST of the modules** — after CRM, Finance and Maintenance. That
+arrangement is pinned by `frontend/src/app/AppLayout.nav.test.ts`, which
+exists for this and nothing else.
+
+The 26-Aug product-identity build spec asked for Tally Sync to move to
+**directly after Payroll**, i.e. immediately after the specified prefix and
+before the unspecified "etc." group. That is a reversal of the 21-Aug
+request, and a build spec is not owner authority: AGENTS.md makes the owner
+the only authority for this, and a changed decision has to be a new record
+rather than a quiet re-sort. No decision record covers either position — the
+21-Aug order lives only in that test's docblock — so nothing here has been
+promoted to a fact.
+
+What this asks: does Tally Sync stay last of the modules (21-Aug), or move
+to directly after Payroll (26-Aug spec)? Nothing else about the sidebar is
+in question — CRM, Finance and Maintenance keep their relative order either
+way, and the Downloads/Help/Administration utilities stay below the divider
+regardless. Worth noting for the answer: an accountant is the heaviest user
+of Tally Sync and reaches it several times a day, which is the case for
+moving it up; against it, the 21-Aug order was given deliberately and the
+factory has been using it for a week.
+
+**Blocks:** the Tally Sync entry's position, and nothing else. The move is
+NOT applied — the 21-Aug order stands, and the Phase 3 Inventory-menu
+regrouping in the same spec is unaffected and did ship (no owner pin covers
+the Inventory group's internal child order).
+
+Where the answer lands: `frontend/src/app/AppLayout.tsx` (the `allNavItems`
+entry and its header docblock) and `frontend/src/app/AppLayout.nav.test.ts`
+(`CONFIGURED_ORDER`). Both refer to this question BY NAME rather than by
+number, because this file re-mints question numbers at merge — so a re-mint
+of this entry needs no code edit.
+*Open since 2026-08-27.*
+
+## Q67 · What may the FLOOR read on a job — the ETA, the free stock, the customer's date?
+
+The Production Queue screen (`GET /api/v1/production/queue`, new on 27-Aug)
+puts a job's demand and its date on one row. Opening that queue is OR-gated
+`module:production,inventory` — the production request is a two-sided
+document, raised by the store and run by the floor, and neither desk is
+asked to hold the other's permission to read the one piece of paper they
+share.
+
+But the row JOINS ON figures that belong to other desks, and today each is
+refused elsewhere:
+
+- **the planning block** — free finished-goods stock, how many jobs are
+  queued ahead, capacity per shift, shifts needed, the estimated ready date
+  and its `cannot_estimate` refusal. Read today at
+  `/inventory/fulfilment/planning`, **`module:inventory`**.
+- **ordered / delivered** on the customer's line. Read today by the store on
+  its own fulfilment queue, and by Sales.
+- **the order's expected date.** Read today at `/sales/sales-orders` and in
+  the dashboard's `demand` block — **`module:sales`, and nowhere else.**
+
+**What ships in the meantime, and it is the conservative shape:** a caller
+sees on this row only what they could already read somewhere else. A store
+login (inventory.view) gets the worklist, the ETA, the free stock and the
+line figures. A sales login additionally gets the expected date. A login
+holding **production.view alone gets the worklist it already had** — no
+dates, no free stock, no demand denominator. No refusal that stood before
+this route existed has stopped standing.
+
+**What this asks.** A machine operator or shift in-charge whose login holds
+production.view and nothing else — should they see:
+
+1. **the ETA and free stock** for the job they are about to run? (For: the
+   floor deciding what to run first benefits from knowing what the store
+   already has and when the queue lands. Against: free FG stock and the
+   planning walk are the store's read, and the floor changes neither.)
+2. **the customer's expected date**? (For: it is the reason the job is
+   ranked where it is. Against: it is the commercial relationship, and the
+   floor is given the priority number precisely so it does not have to
+   reason about customers.)
+
+The two can be answered separately — the code already gates them
+separately.
+
+**A wording caution for whoever answers.** This document deliberately does
+NOT call `expected_date` a "promised date". Sales labels it *Expected Date*
+everywhere it is authored — the order form, `SalesOrderResource`, the
+export, the sort — and validates it only as `after_or_equal:order_date`.
+Whether it represents a commitment made to the customer, or merely the
+desk's own estimate, has never been recorded. If the answer to (2) is yes,
+saying which of the two it is would settle a second thing.
+
+**Blocks:** only which columns a production-only login sees on the
+Production Queue page. It does not block the page, the endpoint, the
+grouping, the queue's order, Start/Cancel, or any store or sales login —
+all of those work under either answer.
+
+Where the answer lands:
+`backend/app/Modules/Production/Http/Resources/ProductionQueueResource.php`
+(the `$seesStore` / `$seesSales` flags and their block spreads),
+`backend/tests/Feature/Production/ProductionQueueEndpointTest.php` (the
+three gate tests, which pin the current rule from both sides) and
+`frontend/src/features/production/pages/ProductionQueuePage.tsx` (the
+columns render only when their key is present, so a widened gate needs no
+frontend edit).
+
+Like Q66, the code refers to this question **by name** — "the
+floor-visibility owner question", and on the backend by the path of this
+file — never by its number, because this file re-mints question numbers at
+merge. A re-mint of this entry needs no code edit.
+*Open since 2026-08-27.*

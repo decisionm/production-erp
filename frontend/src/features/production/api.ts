@@ -3,6 +3,7 @@ import type { Paginated } from '@/lib/types';
 import { CORRECTION_READ_PER_PAGE, type EntryWalk, walkEntryPages } from './correctionReads';
 import type {
     ConfigurationReview,
+    ProductionQueueRead,
     ProductionRequest,
     ProductVariants,
     ProductionStandardRow,
@@ -1350,13 +1351,17 @@ export async function createMaterialLot(payload: CreateMaterialLotPayload): Prom
     return data.data;
 }
 
-export async function listMaterialBags(params?: {
-    item_id?: number;
-    status?: MaterialBagStatus;
-}): Promise<Paginated<MaterialBag>> {
-    const { data } = await api.get<Paginated<MaterialBag>>('/inventory/material-bags', { params });
-    return data;
-}
+/*
+ * NO `listMaterialBags` HERE. `/inventory/material-bags` is Inventory's own
+ * surface and its reader lives in `features/inventory/api.ts`, which is the
+ * one that takes a `page` — the bag list is ordered OLDEST FIRST, so an
+ * unpaged read cannot reach the newest bags, which are the ones a label is
+ * usually reprinted for. This module carried a second declaration under the
+ * same name against the same endpoint with a narrower signature and NO
+ * caller; two names for one endpoint is how an importer silently gets the
+ * wrong contract. The scan and pick-list paths below are genuinely different
+ * reads and stay.
+ */
 
 /** FIFO pick list: open in-store bags for the item, oldest lot first. */
 export async function getMaterialBagPickList(itemId: number): Promise<MaterialBag[]> {
@@ -2058,6 +2063,28 @@ export async function withdrawPackingMaterialMapping(id: number): Promise<void> 
 export async function listProductionRequests(): Promise<ProductionRequest[]> {
     const { data } = await api.get<{ data: ProductionRequest[] }>('/production/requests');
     return data.data;
+}
+
+/**
+ * THE SAME QUEUE WITH THE DEMAND AND THE DATE JOINED ON — what the Production
+ * Queue screen reads. The rows are the rows `/production/requests` returns, in
+ * the same order, under the same key names: this adds the join and hides no
+ * request.
+ *
+ * ONE READ RATHER THAN THREE, deliberately. Composing this in the browser
+ * would mean the queue's order and its dates fetched a moment apart and shown
+ * disagreeing — and would need the caller to hold three modules' permissions.
+ *
+ * SOME KEYS ARRIVE ABSENT AND THAT IS THE SERVER BEING HONEST, not an error:
+ * `planning`, `ordered`, `delivered` and `sales_order.expected_date` are each
+ * gated by the module that owns them (the floor-visibility owner question). Absent means "not yours to read";
+ * `planning.cannot_estimate` means "nobody knows". See ProductionQueueRow.
+ *
+ * Unpaginated like its sibling — `{data, basis}`, no `meta`.
+ */
+export async function readProductionQueue(): Promise<ProductionQueueRead> {
+    const { data } = await api.get<ProductionQueueRead>('/production/queue');
+    return data;
 }
 
 /**
