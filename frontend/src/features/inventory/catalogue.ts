@@ -125,3 +125,71 @@ export function catalogueEmptyText(
 
     return 'The catalogue is empty.';
 }
+
+/**
+ * THE CATEGORY THE LAST PERSON PICKED, remembered per browser.
+ *
+ * A storekeeper opens this screen to find packing material and lands in a
+ * catalogue of several hundred bottles. Remembering the choice lets the
+ * store's own machine open where the store works, without anyone being given
+ * a setting to configure.
+ *
+ * PER BROWSER, DELIBERATELY, not per login: what is being remembered is where
+ * THIS machine is used — the store's PC opens on packing, the sales desk's on
+ * finished goods — and two people sharing a shift also share a screen. It is a
+ * convenience and never a permission: every category stays one click away and
+ * the count of each one is on the face of the row.
+ *
+ * A REMEMBERED FILTER MUST NEVER READ AS AN EMPTY CATALOGUE. That is the real
+ * risk here — somebody returns, sees 51 rows and believes that is all the
+ * factory has. Two things prevent it: the chosen facet is marked with "All"
+ * beside it carrying the full count, and anything unreadable or unrecognised
+ * falls back to All rather than to a filter nobody chose.
+ */
+const REMEMBERED_FACET_KEY = 'erp.inventory.items.facet';
+
+/** Every key the row can offer, so a stale or hand-edited value cannot filter the catalogue away. */
+function isKnownFacet(value: string): value is CategoryFacetKey {
+    return FACET_ORDER.some((facet) => facet.key === value);
+}
+
+/**
+ * Storage is reached through `globalThis` and wrapped, because it does not
+ * merely return null where it is unavailable — the property access itself
+ * THROWS in a private window and wherever site data is blocked. An exception
+ * here would take the whole item master down for a preference nobody asked
+ * for. Absent storage is a browser that will not remember, which is not an
+ * error worth showing anyone.
+ */
+function facetMemory(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null {
+    try {
+        return globalThis.localStorage ?? null;
+    } catch {
+        return null;
+    }
+}
+
+export function readRememberedFacet(): CategoryFacetKey {
+    try {
+        const stored = facetMemory()?.getItem(REMEMBERED_FACET_KEY);
+        return stored != null && isKnownFacet(stored) ? stored : CATEGORY_FACET_ALL;
+    } catch {
+        return CATEGORY_FACET_ALL;
+    }
+}
+
+export function rememberFacet(facet: CategoryFacetKey): void {
+    try {
+        // "All" is the absence of a preference, so it is removed rather than
+        // written: a browser that has never chosen and one that has just
+        // chosen All must open the same way.
+        if (facet === CATEGORY_FACET_ALL) {
+            facetMemory()?.removeItem(REMEMBERED_FACET_KEY);
+            return;
+        }
+        facetMemory()?.setItem(REMEMBERED_FACET_KEY, facet);
+    } catch {
+        // Storage that refuses to be written (private window, quota) leaves the
+        // screen working exactly as before; it simply opens on All next time.
+    }
+}

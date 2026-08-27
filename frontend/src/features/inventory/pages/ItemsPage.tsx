@@ -18,6 +18,8 @@ import {
     type CategoryFacetKey,
     categoryFacets,
     matchesCategoryFacet,
+    readRememberedFacet,
+    rememberFacet,
     skuPresentation,
 } from '@/features/inventory/catalogue';
 import { CategoryFacets } from '@/features/inventory/components/CategoryFacets';
@@ -65,8 +67,13 @@ export default function ItemsPage() {
     /** The health badge that is filtering the table, and the SERVER's page of it. */
     const [warning, setWarning] = useState<WarningFilter>(null);
     const [warningPage, setWarningPage] = useState(1);
-    /** Which category the catalogue is filtered to. Independent of the warning filter. */
-    const [facet, setFacet] = useState<CategoryFacetKey>(CATEGORY_FACET_ALL);
+    /**
+     * Which category the catalogue is filtered to. Independent of the warning
+     * filter, and restored from the last choice made in THIS browser so the
+     * store's machine opens on the store's material — see readRememberedFacet.
+     * Read lazily: the choice is only consulted when the page first mounts.
+     */
+    const [facet, setFacet] = useState<CategoryFacetKey>(readRememberedFacet);
     const queryClient = useQueryClient();
     const navigate = useNavigate();
 
@@ -179,6 +186,7 @@ export default function ItemsPage() {
 
     const selectFacet = (next: CategoryFacetKey) => {
         setFacet(next);
+        rememberFacet(next);
         setWarning(null);
         setWarningPage(1);
     };
