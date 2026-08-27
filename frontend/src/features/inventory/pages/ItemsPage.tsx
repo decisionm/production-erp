@@ -12,6 +12,15 @@ import {
     listIdentityItems,
     updateItem,
 } from '@/features/inventory/api';
+import {
+    CATEGORY_FACET_ALL,
+    catalogueEmptyText,
+    type CategoryFacetKey,
+    categoryFacets,
+    matchesCategoryFacet,
+    skuPresentation,
+} from '@/features/inventory/catalogue';
+import { CategoryFacets } from '@/features/inventory/components/CategoryFacets';
 import { IdentityHealthStrip } from '@/features/inventory/components/IdentityHealthStrip';
 import { ItemIdentityFields } from '@/features/inventory/components/ItemIdentityFields';
 import { VariantCell } from '@/features/inventory/components/VariantCell';
@@ -56,6 +65,8 @@ export default function ItemsPage() {
     /** The health badge that is filtering the table, and the SERVER's page of it. */
     const [warning, setWarning] = useState<WarningFilter>(null);
     const [warningPage, setWarningPage] = useState(1);
+    /** Which category the catalogue is filtered to. Independent of the warning filter. */
+    const [facet, setFacet] = useState<CategoryFacetKey>(CATEGORY_FACET_ALL);
     const queryClient = useQueryClient();
     const navigate = useNavigate();
 
@@ -121,7 +132,21 @@ export default function ItemsPage() {
         [flagged, itemsById],
     );
 
-    const rows: ItemRow[] = warning === null ? searchedItems : flaggedRows;
+    /*
+     * THE CATEGORY FILTER APPLIES TO BOTH LISTS. The warning filter answers
+     * "what is wrong"; the category answers "what kind of thing". They are
+     * different questions and a person fixing categories asks both at once —
+     * "show me the unclassified packing material" is the whole job.
+     */
+    const rows: ItemRow[] = (warning === null ? searchedItems : flaggedRows)
+        .filter((item) => matchesCategoryFacet(item, facet));
+
+    /*
+     * Counted over the WHOLE catalogue, never over the filtered rows: a count
+     * that shrinks as you filter is describing your filter, not the factory,
+     * and the number a storekeeper is deciding on is how many exist.
+     */
+    const facets = categoryFacets(allItems, facet);
 
     const selectWarning = (next: WarningFilter) => {
         setWarning(next);
@@ -196,6 +221,8 @@ export default function ItemsPage() {
                 </Space>
             </Space>
 
+            <CategoryFacets facets={facets} active={facet} onSelect={setFacet} />
+
             <IdentityHealthStrip health={health} active={warning} onSelect={selectWarning} />
 
             <Table<ItemRow>
@@ -203,6 +230,10 @@ export default function ItemsPage() {
                 rowKey="id"
                 loading={warning === null ? isLoading : flaggedFetching}
                 dataSource={rows}
+                // Two filters stack here and a search sits above both, so an
+                // empty table names the narrowest one that is on rather than
+                // leaving a person to clear all three to find out which.
+                locale={{ emptyText: catalogueEmptyText(facet, warning, search) }}
                 pagination={warning === null
                     ? { pageSize: 20, showSizeChanger: true, pageSizeOptions: [20, 50, 100], showTotal: (t) => `${t} items` }
                     : {
@@ -215,13 +246,43 @@ export default function ItemsPage() {
                     }}
                 columns={[
                     {
-                        // Q42, answered by the owner: the SKU is an internal
-                        // mapping and a lookup handle — NOT a barcode. It used
-                        // to open a barcode drawer, which is exactly the thing
-                        // it is not; it is text somebody types or copies.
+                        /*
+                         * Q42, answered by the owner: the SKU is an internal
+                         * mapping and a lookup handle — NOT a barcode. It used
+                         * to open a barcode drawer, which is exactly the thing
+                         * it is not; it is text somebody types or copies.
+                         *
+                         * AND MOST OF THEM WERE NOT CHOSEN. The masters pull
+                         * seeds a SKU from the Tally NAME and marks the row
+                         * `sku_provisional`, so a column headed "SKU" was
+                         * printing the product name again, in the voice of a
+                         * decision. Seeded ones are set quietly and marked;
+                         * chosen ones read plainly. Monospaced because these
+                         * are compared character by character down a column,
+                         * and someone types them into the delivery scanner.
+                         */
                         title: 'SKU',
                         dataIndex: 'sku',
-                        render: (sku: string) => <Typography.Text copyable={{ text: sku }}>{sku}</Typography.Text>,
+                        render: (_: string, row: ItemRow) => {
+                            const shown = skuPresentation(row);
+
+                            return (
+                                <Space size={4}>
+                                    <Typography.Text
+                                        copyable={{ text: shown.text }}
+                                        type={shown.provisional ? 'secondary' : undefined}
+                                        style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }}
+                                    >
+                                        {shown.text}
+                                    </Typography.Text>
+                                    {shown.provisional ? (
+                                        <Tooltip title="Seeded from the Tally name when this item was pulled — nobody has chosen a code yet.">
+                                            <Tag bordered={false} style={{ marginInlineEnd: 0, fontSize: 11 }}>seeded</Tag>
+                                        </Tooltip>
+                                    ) : null}
+                                </Space>
+                            );
+                        },
                     },
                     {
                         title: 'Name',
@@ -242,6 +303,14 @@ export default function ItemsPage() {
                         // `undefined` is a server that does not serve the field
                         // and `null` is nobody having said yet — one of those
                         // is a warning and the other is not this screen's news.
+                        //
+                        // ONLY WORTH A COLUMN IN "ALL". Filtered to Packing,
+                        // every row reads "Packing material" — the column then
+                        // repeats the question instead of answering anything.
+                        // Hidden rather than dimmed: a column holding one
+                        // repeated value is width taken from the names, which
+                        // are what this catalogue is genuinely hard to read.
+                        hidden: facet !== CATEGORY_FACET_ALL,
                         title: 'Category',
                         dataIndex: 'category',
                         render: (value: ItemCategoryValue | null | undefined) => {
