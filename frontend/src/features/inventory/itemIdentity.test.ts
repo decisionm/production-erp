@@ -21,8 +21,10 @@ import type { IdentityItem, IdentityWarningCount, Item } from './types';
  *  - a warning class this build does not know still reaches the screen as
  *    itself, never as a blank or a red guess;
  *  - the strip shows the classes the SERVER sent and does not invent zeros;
- *  - a warning's one sentence names the open question behind it (Q43, Q59,
- *    Q60) so nothing here reads as a rule that has been decided;
+ *  - a warning's one sentence names what is behind it — the open question
+ *    (Q43, Q59) or the decision that settled it (DEC-20260827-001,
+ *    DEC-20260819-001) — so nothing reads as a rule nobody made, and nothing
+ *    reads as unsettled once the owner has spoken;
  *  - the identity row laid over the list row keeps the lifecycle `can` block,
  *    which is the difference between an Edit button and no row actions at all.
  */
@@ -49,11 +51,14 @@ describe('warning vocabulary', () => {
         expect(warningColor('outbound_ambiguity')).toBe('volcano');
     });
 
-    it('names the open owner question behind each warning it explains', () => {
+    it('names what stands behind each warning — the open question, or the decision that closed it', () => {
         expect(warningTooltip('duplicate_name')).toContain('Q43');
-        expect(warningTooltip('unclassified')).toContain('Q60');
         expect(warningTooltip('fg_purchase_conflict')).toContain('Q59');
         expect(warningTooltip('possible_duplicate_master')).toContain('DEC-20260819-001');
+        // Q60 was answered: an unclassified item is one nobody has applied the
+        // mapping to yet, not one the factory cannot classify.
+        expect(warningTooltip('unclassified')).toContain('DEC-20260827-001');
+        expect(warningTooltip('unclassified')).not.toContain('Q60');
     });
 });
 
@@ -102,7 +107,10 @@ describe('orderedWarningCounts', () => {
 
 describe('confidenceNote', () => {
     it('says a judgement call out loud, and stays quiet otherwise', () => {
-        expect(confidenceNote('low')).toContain('Q60');
+        // No group is `low` since the mapping was settled, but the server owns
+        // the confidence, so a future judgement call must still say so.
+        expect(confidenceNote('low')).toContain('judgement call');
+        expect(confidenceNote('low')).not.toContain('Q60');
         expect(confidenceNote('firm')).toBeNull();
         expect(confidenceNote(null)).toBeNull();
         expect(confidenceNote(undefined)).toBeNull();

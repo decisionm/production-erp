@@ -88,8 +88,8 @@ export interface Item {
     /**
      * What kind of thing this item is, as the OWNER has classified it.
      *
-     * `null` is a real state and the common one — "nobody has said yet", never
-     * "none of the above" (that is `other`), and Q60 is open. `undefined` is a
+     * `null` is a real state and the common one — "not recorded yet", never
+     * "none of the above" (that is `other`). `undefined` is a
      * different fact again: the server did not serve the field at all, so the
      * screen shows nothing rather than calling every row unclassified.
      */
@@ -114,9 +114,10 @@ export interface ItemGroupRef {
  * The categories `App\Modules\Inventory\Models\Enums\ItemCategory` serves.
  *
  * NULL IS NOT IN THIS LIST and never should be: unclassified is the absence of
- * a value, not a value. Nothing here classifies an item — Q59 (which documents
- * each category is eligible for) and Q60 (which Tally group maps to which
- * category) are OPEN owner questions, so this vocabulary exists to SHOW and to
+ * a value, not a value. Nothing here classifies an item: which Tally group
+ * means which category is the owner's answer (DEC-20260827-001) applied by a
+ * person through `inventory:classify-items`, and which documents each category
+ * is eligible for is Q59, still open. This vocabulary exists to SHOW and to
  * LET SOMEONE SET, and never to decide.
  */
 export type ItemCategory =

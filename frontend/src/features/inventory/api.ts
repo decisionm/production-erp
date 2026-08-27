@@ -116,9 +116,10 @@ export async function updateItem(id: number, payload: UpdateItemPayload): Promis
 /**
  * WHAT IS WRONG WITH THE ITEM MASTER, counted per warning class.
  *
- * A READ. It classifies nothing, merges nothing and writes nothing — Q43, Q59
- * and Q60 are open, so this endpoint's whole job is to say where a person
- * should look. Every class comes back, zeros included.
+ * A READ. It classifies nothing, merges nothing and writes nothing — Q43 and
+ * Q59 are open, and even the mapping the owner has settled
+ * (DEC-20260827-001) is applied elsewhere, so this endpoint's whole job is to
+ * say where a person should look. Every class comes back, zeros included.
  */
 export async function getIdentityHealth(): Promise<ItemIdentityHealth> {
     const { data } = await api.get<{ data: ItemIdentityHealth }>('/inventory/identity/health');

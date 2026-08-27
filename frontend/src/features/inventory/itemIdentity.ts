@@ -19,8 +19,10 @@ import type {
  * batch or serial identity. This file is about the ITEM MASTER's identity.)
  *
  * Every string here WARNS. Nothing in this module classifies an item, merges
- * two masters, or decides what a document may carry: Q43, Q59 and Q60 are open
+ * two masters, or decides what a document may carry — Q43 and Q59 are open
  * owner questions and the software does not get to answer them by rendering.
+ * What an item IS was answered by DEC-20260827-001, and even that is applied
+ * by a person through `inventory:classify-items`, never by this screen.
  */
 
 /**
@@ -76,7 +78,7 @@ const WARNING_TOOLTIP: Record<IdentityWarningClass, string> = {
     outbound_ambiguity: 'Posting cannot tell which Tally item this line means.',
     duplicate_name: 'Q43 open — duplicate names warn here, they do not block.',
     possible_duplicate_master: 'Names match once case, spacing and punctuation are folded (DEC-20260819-001). A suggestion, never a merge.',
-    unclassified: 'Q60 open — no category recorded for this item.',
+    unclassified: 'No category recorded yet — the group mapping is settled (DEC-20260827-001).',
     variant_uom_conflict: 'Pack variants of one base product carry different units.',
     fg_purchase_conflict: 'Q59 open — a finished good appears on a purchase order line.',
     inactive_referenced: 'Deactivated, but open sales-order lines still name it.',
@@ -267,6 +269,10 @@ export type WarningFilter = IdentityWarningKey | typeof ANY_WARNING | null;
  * be visible or a judgement call reads as a finding.
  */
 export function confidenceNote(confidence: string | null | undefined): string | null {
-    if (confidence === 'low') return 'A judgement call, not a rule — Q60 has not answered this group.';
+    // No group carries `low` since DEC-20260827-001 settled the mapping —
+    // masterbatch, the one that did, is firm now. Kept because the SERVER
+    // decides the confidence, and a future group the owner marks as a
+    // judgement call must still say so rather than render as a bare fact.
+    if (confidence === 'low') return 'A judgement call rather than a rule — check it before applying.';
     return null;
 }

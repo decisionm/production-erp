@@ -18,15 +18,14 @@ import { itemLabel } from '@/lib/itemLabel';
  * label never costs a rename that would break posting.
  *
  * The category suggestion is DERIVED FROM THE ITEM'S TALLY STOCK GROUP and is
- * SHOWN, never applied — not pre-filled, and not one click away either. Q60
- * (which group means which category) is an open owner question, and AGENTS.md
- * puts a factory classification with the owner: an agent proposes, the owner
- * decides. A button would have let a storekeeper turn an agent's inference —
- * including the one this build itself marks low-confidence — into master data
- * without that decision (Codex, 12766d3). Reading the group and choosing the
- * category yourself is the whole difference, so the picker is the only way in.
- * The two groups Q60 explicitly leaves open, Scrap and Caps & Closures, arrive
- * here as `null` and this component shows nothing at all for them.
+ * SHOWN, never applied — not pre-filled, and not one click away either. The
+ * mapping itself is the owner's (DEC-20260827-001), but WHICH items get it
+ * written is still a person's call: a button here would have let a storekeeper
+ * apply it in bulk from an edit modal (Codex, 12766d3), while
+ * `inventory:classify-items` does it deliberately and dry-run first. Reading
+ * the group and choosing the category yourself is the whole difference, so the
+ * picker is the only way in. A group the decision left unmapped, and an item
+ * in no group, arrive here as `null` and this component shows nothing for them.
  */
 export function ItemIdentityFields({
     control,
@@ -122,7 +121,7 @@ export function ItemIdentityFields({
 
             <Form.Item
                 label="Category"
-                tooltip="Q59 and Q60 are open — this records what the item IS. It does not change what any document will accept."
+                tooltip="This records what the item IS (DEC-20260827-001). It does not change what any document will accept — that rule is Q59, still open."
             >
                 <Controller
                     name="category"
