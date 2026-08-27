@@ -280,7 +280,10 @@ export default function MaterialRequestsPage() {
                 columns={[
                     {
                         title: 'Material',
-                        render: (_, row) => itemLabel({ sku: row.sku ?? '', name: row.name ?? '' }),
+                        // display_name carried through: rebuilding the input
+                        // by hand is what kept the ERP's own name off this
+                        // table while the payload was already sending it.
+                        render: (_, row) => itemLabel({ sku: row.sku, name: row.name, display_name: row.display_name }),
                     },
                     {
                         title: `In ${LOCATION_LABEL.production_wip}`,

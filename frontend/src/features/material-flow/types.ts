@@ -248,7 +248,9 @@ export interface ReturnToStorePayload {
 export interface ProductionFloorStock {
     item_id: number;
     sku: string | null;
+    /** Tally's wire name; `display_name` is the ERP's own, null when unset. */
     name: string | null;
+    display_name?: string | null;
     uom: string | null;
     quantity: string;
     last_issued_at: string | null;
