@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Button, Drawer, Empty, Select, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Drawer, Empty, Select, Space, Table, Tabs, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { getMaterialLot, listAllItems, listMaterialBags } from '@/features/inventory/api';
 import { bagStatusLabel, bagStatusOptions, formatKg } from '@/features/inventory/bagStatus';
 import MaterialBagLabels from '@/features/inventory/components/MaterialBagLabels';
+import MaterialLotsPage from '@/features/inventory/pages/MaterialLotsPage';
 import type { MaterialBag } from '@/features/production/types';
 import { itemLabel } from '@/lib/itemLabel';
 
@@ -35,7 +36,7 @@ import { itemLabel } from '@/lib/itemLabel';
  * the flag down the feature genuinely does not exist, so the page says so
  * rather than showing an empty register that looks like a factory with no bags.
  */
-export default function BarcodeLabelsPage() {
+function BagLabelBench() {
     const [itemId, setItemId] = useState<number | null>(null);
     const [status, setStatus] = useState<string | null>(null);
     const [page, setPage] = useState(1);
@@ -73,10 +74,7 @@ export default function BarcodeLabelsPage() {
 
     if (isError && (error as { response?: { status?: number } })?.response?.status === 404) {
         return (
-            <>
-                <Typography.Title level={3}>Barcode &amp; Labels</Typography.Title>
-                <Empty description="Bag barcodes are not enabled for this deployment." />
-            </>
+            <Empty description="Bag barcodes are not enabled for this deployment." />
         );
     }
 
@@ -85,8 +83,6 @@ export default function BarcodeLabelsPage() {
 
     return (
         <>
-            <Typography.Title level={3}>Barcode &amp; Labels</Typography.Title>
-
             <Space wrap style={{ marginBottom: 16 }}>
                 <Select
                     value={itemId ?? undefined}
@@ -198,6 +194,39 @@ export default function BarcodeLabelsPage() {
                     <MaterialBagLabels lots={[reprintLot]} bagId={reprintBag.id} reprint />
                 )}
             </Drawer>
+        </>
+    );
+}
+
+
+/**
+ * ONE LABEL ENTRY IN THE MENU, TWO REGISTERS UNDER IT.
+ *
+ * They answer different questions and neither replaces the other — that is
+ * why both survive rather than one being dropped. BAGS is per bag: somebody
+ * at the printer with a torn label finds the barcode in their hand and
+ * reprints the identity that bag was born with. RECEIPTS & LOTS is per
+ * receipt: which GRN a lot arrived on, what is left of it in kilograms.
+ *
+ * They were two sidebar entries, which put the store's least-used register
+ * beside its most-used bench and made the Inventory group nine entries deep.
+ * Folding them into tabs leaves the Inventory menu at the six the factory
+ * asked for while losing no screen: /inventory/material-lots stays mounted,
+ * so every existing link and bookmark still opens the register directly.
+ *
+ * Neither tab receives material, moves stock, or posts to Tally.
+ */
+export default function BarcodeLabelsPage() {
+    return (
+        <>
+            <Typography.Title level={3}>Barcode &amp; Labels</Typography.Title>
+            <Tabs
+                defaultActiveKey="bags"
+                items={[
+                    { key: 'bags', label: 'Bags', children: <BagLabelBench /> },
+                    { key: 'lots', label: 'Receipts & lots', children: <MaterialLotsPage embedded /> },
+                ]}
+            />
         </>
     );
 }

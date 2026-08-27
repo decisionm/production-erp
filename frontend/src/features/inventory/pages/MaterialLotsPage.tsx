@@ -40,7 +40,13 @@ function fmtRate(value: string | null | undefined): string {
     return `₹${parsed.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
 }
 
-export default function MaterialLotsPage() {
+/**
+ * `embedded` is set when this register is rendered as a TAB of Barcode &
+ * Labels rather than as its own page. It suppresses the heading and the blurb
+ * only — the same data, the same actions, the same permissions. The route
+ * stays mounted so existing links and bookmarks keep working.
+ */
+export default function MaterialLotsPage({ embedded = false }: { embedded?: boolean } = {}) {
     const [itemId, setItemId] = useState<number | null>(null);
     const [page, setPage] = useState(1);
     const [labelSelection, setLabelSelection] = useState<{ lot: MaterialLot; bagId?: number } | null>(null);
@@ -59,7 +65,9 @@ export default function MaterialLotsPage() {
     if (isError && (error as any)?.response?.status === 404) {
         return (
             <>
-                <Typography.Title level={3}>Material Receipts &amp; Bag Labels</Typography.Title>
+                {embedded ? null : (
+                    <Typography.Title level={3}>Material Receipts &amp; Bag Labels</Typography.Title>
+                )}
                 <Empty
                     description="Lot and bag traceability is not enabled for this deployment. No receipt or stock is changed here."
                 />
@@ -95,12 +103,11 @@ export default function MaterialLotsPage() {
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
                 <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
                     <div>
-                        <Typography.Title level={3} style={{ marginBottom: 4 }}>
-                            Material Receipts &amp; Bag Labels
-                        </Typography.Title>
-                        <Typography.Text type="secondary">
-                            Reopen any received supplier lot to print or reprint its physical bag labels.
-                        </Typography.Text>
+                        {embedded ? null : (
+                            <Typography.Title level={3} style={{ marginBottom: 4 }}>
+                                Material Receipts &amp; Bag Labels
+                            </Typography.Title>
+                        )}
                     </div>
                     <Button onClick={() => refetch()}>Refresh</Button>
                 </Space>

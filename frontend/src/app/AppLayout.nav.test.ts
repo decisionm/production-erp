@@ -149,17 +149,65 @@ describe('the Inventory menu', () => {
     });
 
     /**
-     * TWO LABEL SCREENS, BOTH LINKED. "Barcode & Labels" used to be the label
-     * on /inventory/material-lots; it now names the per-BAG bench, and the
-     * per-RECEIPT register keeps its own name and its own entry. The failure
-     * this pins is the quiet one: pointing both names at one route, or letting
-     * the receipts register lose its only link while its page stays mounted.
+     * TWO LABEL REGISTERS, ONE ENTRY — and the register did NOT lose its way
+     * in. The earlier version of this test pinned them as two sidebar entries,
+     * and the failure it guarded against was "the receipts register loses its
+     * only link while its page stays mounted". That guard still matters and
+     * still holds: the register is the second TAB of Barcode & Labels, and
+     * /inventory/material-lots stays mounted (App.routes.test.tsx pins the
+     * route table), so bookmarks and existing links open it directly.
+     *
+     * What changed is deliberate: the store asked for the Inventory group to
+     * be the six locations it actually works in, and nine entries put the
+     * least-used register beside the most-used bench.
      */
-    it('links the bag bench and the receipts register as two different routes', () => {
+    it('carries one label entry, with the receipts register no longer a sidebar row', () => {
         const byLabel = new Map(inventory?.children?.map((child) => [child.label, child.key]));
 
         expect(byLabel.get('Barcode & Labels')).toBe('/inventory/barcode-labels');
-        expect(byLabel.get('Material Receipts & Bag Labels')).toBe('/inventory/material-lots');
+        expect(byLabel.has('Material Receipts & Bag Labels')).toBe(false);
+    });
+
+    /**
+     * THE GROUP, in the order a storekeeper works: what a product IS, what is
+     * on hand, the label bench, what production is asking for, where the stock
+     * lives, the ledger behind it all, and the two customer-fulfilment screens
+     * the store owns. Eight, down from nine — the two label registers became
+     * tabs of one entry. A ninth appearing here is the drift this pins.
+     */
+    it('is the inventory destinations, in working order', () => {
+        expect(inventory?.children?.map((child) => child.key)).toEqual([
+            '/inventory/items',
+            '/inventory/stock',
+            '/inventory/barcode-labels',
+            '/inventory/store-issue-queue',
+            '/inventory/warehouses',
+            '/inventory/stock-movements',
+            '/inventory/fulfilment',
+            '/inventory/planning',
+        ]);
+    });
+
+    /**
+     * THE FULFILMENT SCREENS STAY IN THIS GROUP, and the reason is the
+     * permission model rather than taste. `buildNavItems` gates a whole group
+     * on its parent's `module`, so under Sales a login holding inventory
+     * permissions alone would lose both entries while the routes still mount
+     * and their API still gates on `module:inventory` — permitted, existing,
+     * and unreachable from the menu. They were moved to Sales on 27-Aug for a
+     * six-entry group and moved back when review found that; this pins the
+     * result so the tidier arrangement cannot quietly return.
+     */
+    it('keeps the fulfilment screens under the module that permits them', () => {
+        const inventoryKeys = inventory?.children?.map((child) => child.key) ?? [];
+        expect(inventoryKeys).toContain('/inventory/fulfilment');
+        expect(inventoryKeys).toContain('/inventory/planning');
+        expect(inventory?.module).toBe('inventory');
+
+        const sales = allNavItems.find((item) => item.key === 'sales');
+        const salesKeys = sales?.children?.map((child) => child.key) ?? [];
+        expect(salesKeys).not.toContain('/inventory/fulfilment');
+        expect(salesKeys).not.toContain('/inventory/planning');
     });
 });
 

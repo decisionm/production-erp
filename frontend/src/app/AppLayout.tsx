@@ -117,16 +117,13 @@ export const allNavItems: readonly NavGroup[] = [
             // Warehouses is setup and sits below them.
             { key: '/inventory/items', label: 'Item Master' },
             { key: '/inventory/stock', label: 'Stock' },
-            // TWO LABEL SCREENS, AND THEY ARE NOT THE SAME SCREEN. This name
-            // used to point at /inventory/material-lots, which is a per-RECEIPT
-            // register: which GRN a lot arrived on, what it cost, how many
-            // kilograms are left. Barcode & Labels is per BAG — find the
-            // barcode in your hand, reprint the identity that bag was born
-            // with — which is what somebody standing at a printer is doing.
-            // Both stay: neither covers the other, so neither entry was
-            // dropped.
+            // TWO LABEL REGISTERS, ONE ENTRY. They are still not the same
+            // screen — per BAG (find the barcode in your hand, reprint it) and
+            // per RECEIPT (which GRN a lot arrived on, what is left of it) —
+            // and neither was dropped: they are the two tabs of Barcode &
+            // Labels now. /inventory/material-lots stays mounted, so every
+            // existing link and bookmark still opens the register directly.
             { key: '/inventory/barcode-labels', label: 'Barcode & Labels' },
-            { key: '/inventory/material-lots', label: 'Material Receipts & Bag Labels' },
             // The STORE's queue (Phase 7.5): what production has asked for,
             // fulfilled — in part or in full — here. Issuing is not
             // consuming: it moves stock into Production/WIP.
@@ -141,9 +138,15 @@ export const allNavItems: readonly NavGroup[] = [
             { key: '/inventory/stock-movements', label: 'Stock Movements' },
             // SALES ORDER FULFILMENT, the store's half: which customer lines
             // are waiting on stock, and when the floor could have what is
-            // short. Under Inventory rather than Sales because holding stock
-            // back from a customer is the STORE's act — the sales desk sees
-            // the same figures read-only, per line, as it types the order.
+            // short. These MUST stay in this group, and the reason is the
+            // permission model rather than taste: buildNavItems gates a whole
+            // group on its parent's module, so under Sales a storekeeper
+            // holding inventory permissions alone would lose both entries
+            // while /inventory/fulfilment and /inventory/planning still mount
+            // and their API still gates on module:inventory — the screens
+            // would exist, be permitted, and be unreachable from the menu.
+            // They were moved to Sales on 27-Aug for a six-entry group and
+            // moved straight back when review found that (Cursor, ac56e12).
             // Neither screen moves stock and neither gates dispatch (Q27).
             { key: '/inventory/fulfilment', label: 'Store Fulfilment' },
             { key: '/inventory/planning', label: 'Fulfilment Planning' },
