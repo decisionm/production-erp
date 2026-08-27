@@ -162,6 +162,14 @@ export default function ItemsPage() {
      */
     const facets = useMemo(() => categoryFacets(allItems, facet), [allItems, facet]);
 
+    /** The units this catalogue actually uses — never a hardcoded list. */
+    const uomFilters = useMemo(
+        () => [...new Set(allItems.map((item) => (item.uom ?? '').trim()).filter((uom) => uom !== ''))]
+            .sort((a, b) => a.localeCompare(b))
+            .map((uom) => ({ text: uom, value: uom })),
+        [allItems],
+    );
+
     const selectWarning = (next: WarningFilter) => {
         setWarning(next);
         setWarningPage(1);
@@ -248,6 +256,9 @@ export default function ItemsPage() {
             <IdentityHealthStrip health={health} active={warning} onSelect={selectWarning} />
 
             <Table<ItemRow>
+                // STICKY HEADER: at 700 rows a person scrolling the middle of
+                // the catalogue was reading unlabelled columns.
+                sticky
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={warning === null ? isLoading : flaggedFetching}
@@ -288,6 +299,14 @@ export default function ItemsPage() {
                          */
                         title: 'SKU',
                         dataIndex: 'sku',
+                        // FIXED, because this table is thirteen columns wide on
+                        // a catalogue of hundreds: scrolling right to read a
+                        // tracking type used to take the product's identity off
+                        // screen, and the row you were reading became a row of
+                        // numbers belonging to nothing.
+                        fixed: 'left' as const,
+                        width: 200,
+                        sorter: (a: ItemRow, b: ItemRow) => (a.sku ?? '').localeCompare(b.sku ?? ''),
                         render: (_: string, row: ItemRow) => {
                             const shown = skuPresentation(row);
 
@@ -312,6 +331,19 @@ export default function ItemsPage() {
                     {
                         title: 'Name',
                         dataIndex: 'name',
+                        fixed: 'left' as const,
+                        width: 260,
+                        /*
+                         * THE DEFAULT ORDER, and the one a person scanning a
+                         * catalogue expects: names, A to Z. Sorting on the ERP
+                         * name where there is one, because that is the string
+                         * the row is showing — sorting by a Tally name the
+                         * reader cannot see puts rows in an order the screen
+                         * does not explain.
+                         */
+                        defaultSortOrder: 'ascend' as const,
+                        sorter: (a: ItemRow, b: ItemRow) =>
+                            itemDisplayName(a).localeCompare(itemDisplayName(b), undefined, { numeric: true }),
                         render: (_: string, row: ItemRow) => {
                             const display = row.display_name;
                             const separate = display !== null && display !== undefined
@@ -338,21 +370,30 @@ export default function ItemsPage() {
                         hidden: facet !== CATEGORY_FACET_ALL,
                         title: 'Category',
                         dataIndex: 'category',
-                        render: (value: ItemCategoryValue | null | undefined) => {
-                            if (value === undefined) return '—';
-                            if (value === null) {
-                                return (
-                                    <Tooltip title={warningTooltip('unclassified')}>
-                                        <Tag color={warningColor('unclassified')}>{warningLabel('unclassified')}</Tag>
-                                    </Tooltip>
-                                );
-                            }
-                            return <Tag color={categoryColor(value)}>{categoryLabel(value)}</Tag>;
+                        sorter: (a: ItemRow, b: ItemRow) =>
+                            (a.category ?? '\uffff').localeCompare(b.category ?? '\uffff'),
+                        render: (value: ItemCategoryValue | null | undefined, row: ItemRow) => {
+                            const group = itemGroupName(row);
+
+                            const tag = value === undefined
+                                ? <Typography.Text type="secondary">—</Typography.Text>
+                                : value === null
+                                    ? (
+                                        <Tooltip title={warningTooltip('unclassified')}>
+                                            <Tag color={warningColor('unclassified')}>{warningLabel('unclassified')}</Tag>
+                                        </Tooltip>
+                                    )
+                                    : <Tag color={categoryColor(value)}>{categoryLabel(value)}</Tag>;
+
+                            return (
+                                <Space direction="vertical" size={0}>
+                                    {tag}
+                                    {group === null ? null : (
+                                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{group}</Typography.Text>
+                                    )}
+                                </Space>
+                            );
                         },
-                    },
-                    {
-                        title: 'Group',
-                        render: (_: unknown, row: ItemRow) => itemGroupName(row) ?? '—',
                     },
                     {
                         title: 'Variant',
@@ -381,7 +422,17 @@ export default function ItemsPage() {
                             </Space>
                         ),
                     }]),
-                    { title: 'UOM', dataIndex: 'uom' },
+                    {
+                        title: 'UOM',
+                        dataIndex: 'uom',
+                        // Built from what the catalogue actually holds rather
+                        // than a hardcoded list: this factory counts in Nos.,
+                        // Kgs., Pcs. and a compound unit, and a filter naming a
+                        // unit no item uses is a dead option.
+                        filters: uomFilters,
+                        onFilter: (value, row: ItemRow) => (row.uom ?? '') === value,
+                        sorter: (a: ItemRow, b: ItemRow) => (a.uom ?? '').localeCompare(b.uom ?? ''),
+                    },
                     { title: 'HSN/SAC', dataIndex: 'hsn_sac_code' },
                     { title: 'Reorder Level', dataIndex: 'reorder_level' },
                     {
@@ -405,6 +456,11 @@ export default function ItemsPage() {
                         // reason and left no audit line, on the most-referenced
                         // master in the schema.
                         title: 'Status',
+                        filters: [
+                            { text: 'Active', value: true },
+                            { text: 'Archived', value: false },
+                        ],
+                        onFilter: (value, row: ItemRow) => row.is_active === value,
                         dataIndex: 'is_active',
                         render: (_: boolean, row: ItemRow) => <ConfigurationStatusTag entity="item" row={row} />,
                     },
