@@ -169,13 +169,13 @@ describe('the Inventory menu', () => {
     });
 
     /**
-     * THE SIX THE FACTORY NAMED, in the order a storekeeper works: what a
-     * product IS, what is on hand, the label bench, what production is asking
-     * for, where the stock lives, and the ledger behind it all. A seventh
-     * entry appearing here is the drift this pins — the group was nine deep
-     * before, which is what prompted the consolidation.
+     * THE GROUP, in the order a storekeeper works: what a product IS, what is
+     * on hand, the label bench, what production is asking for, where the stock
+     * lives, the ledger behind it all, and the two customer-fulfilment screens
+     * the store owns. Eight, down from nine — the two label registers became
+     * tabs of one entry. A ninth appearing here is the drift this pins.
      */
-    it('is exactly the six inventory destinations, in working order', () => {
+    it('is the inventory destinations, in working order', () => {
         expect(inventory?.children?.map((child) => child.key)).toEqual([
             '/inventory/items',
             '/inventory/stock',
@@ -183,23 +183,31 @@ describe('the Inventory menu', () => {
             '/inventory/store-issue-queue',
             '/inventory/warehouses',
             '/inventory/stock-movements',
+            '/inventory/fulfilment',
+            '/inventory/planning',
         ]);
     });
 
     /**
-     * The fulfilment pair moved to Sales, and moving is all that happened:
-     * the routes are unchanged, so this pins that they left Inventory AND
-     * that they are still reachable somewhere rather than quietly orphaned.
+     * THE FULFILMENT SCREENS STAY IN THIS GROUP, and the reason is the
+     * permission model rather than taste. `buildNavItems` gates a whole group
+     * on its parent's `module`, so under Sales a login holding inventory
+     * permissions alone would lose both entries while the routes still mount
+     * and their API still gates on `module:inventory` — permitted, existing,
+     * and unreachable from the menu. They were moved to Sales on 27-Aug for a
+     * six-entry group and moved back when review found that; this pins the
+     * result so the tidier arrangement cannot quietly return.
      */
-    it('has handed the fulfilment screens to Sales without dropping them', () => {
+    it('keeps the fulfilment screens under the module that permits them', () => {
         const inventoryKeys = inventory?.children?.map((child) => child.key) ?? [];
-        expect(inventoryKeys).not.toContain('/inventory/fulfilment');
-        expect(inventoryKeys).not.toContain('/inventory/planning');
+        expect(inventoryKeys).toContain('/inventory/fulfilment');
+        expect(inventoryKeys).toContain('/inventory/planning');
+        expect(inventory?.module).toBe('inventory');
 
         const sales = allNavItems.find((item) => item.key === 'sales');
         const salesKeys = sales?.children?.map((child) => child.key) ?? [];
-        expect(salesKeys).toContain('/inventory/fulfilment');
-        expect(salesKeys).toContain('/inventory/planning');
+        expect(salesKeys).not.toContain('/inventory/fulfilment');
+        expect(salesKeys).not.toContain('/inventory/planning');
     });
 });
 

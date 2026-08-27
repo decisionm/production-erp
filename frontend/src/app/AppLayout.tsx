@@ -136,6 +136,20 @@ export const allNavItems: readonly NavGroup[] = [
             // now (App.tsx mounts it), and AppLayout.nav.test.ts pins that this
             // entry and that route agree.
             { key: '/inventory/stock-movements', label: 'Stock Movements' },
+            // SALES ORDER FULFILMENT, the store's half: which customer lines
+            // are waiting on stock, and when the floor could have what is
+            // short. These MUST stay in this group, and the reason is the
+            // permission model rather than taste: buildNavItems gates a whole
+            // group on its parent's module, so under Sales a storekeeper
+            // holding inventory permissions alone would lose both entries
+            // while /inventory/fulfilment and /inventory/planning still mount
+            // and their API still gates on module:inventory — the screens
+            // would exist, be permitted, and be unreachable from the menu.
+            // They were moved to Sales on 27-Aug for a six-entry group and
+            // moved straight back when review found that (Cursor, ac56e12).
+            // Neither screen moves stock and neither gates dispatch (Q27).
+            { key: '/inventory/fulfilment', label: 'Store Fulfilment' },
+            { key: '/inventory/planning', label: 'Fulfilment Planning' },
             // Batches and Serial Numbers are NOT children here any more, and
             // they are not withdrawn either: both routes stay mounted and both
             // pages still work. They are per-item identity registers opened
@@ -251,17 +265,6 @@ export const allNavItems: readonly NavGroup[] = [
         children: [
             { key: '/sales/customers', label: 'Customers' },
             { key: '/sales/sales-orders', label: 'Sales Orders' },
-            // SALES ORDER FULFILMENT, both halves, moved here 27-Aug so the
-            // Inventory group is the six the factory named. The earlier note
-            // argued these belong to the STORE because holding stock back from
-            // a customer is the store's act — that is still true of who DOES
-            // it, and it is why this is a menu move and nothing else: the
-            // routes, the permissions and the screens are untouched, and a
-            // storekeeper reaches them in one click from the order they are
-            // about. Neither screen moves stock and neither gates dispatch
-            // (Q27). Reversing it is moving these two lines back.
-            { key: '/inventory/fulfilment', label: 'Store Fulfilment' },
-            { key: '/inventory/planning', label: 'Fulfilment Planning' },
             { key: '/sales/deliveries', label: 'Deliveries' },
             { key: '/sales/invoices', label: 'Invoices' },
         ],
