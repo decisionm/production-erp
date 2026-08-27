@@ -130,11 +130,11 @@ export function catalogueEmptyText(
  * THE CATEGORY THE LAST PERSON PICKED, remembered per browser.
  *
  * A storekeeper opens this screen to find packing material and lands in a
- * catalogue that is mostly finished bottles. Remembering the choice lets the
- * store's own machine open where the store works, without anyone being given
- * a setting to configure. (`php artisan items:summary` is what counts the
- * catalogue — a figure written into a comment here would be a live number
- * frozen at the moment someone typed it.)
+ * catalogue where most rows are not what they came for. Remembering the choice
+ * lets the store's own machine open where the store works, without anyone being
+ * given a setting to configure. (What the catalogue actually holds is counted
+ * by `php artisan items:summary` — a figure written into a comment here would
+ * be a live number frozen at the moment someone typed it.)
  *
  * PER BROWSER, DELIBERATELY, not per login: what is being remembered is where
  * THIS machine is used — the store's PC opens on packing, the sales desk's on
@@ -157,12 +157,14 @@ function isKnownFacet(value: string): value is CategoryFacetKey {
 }
 
 /**
- * Storage is reached through `globalThis` and wrapped, because it does not
- * merely return null where it is unavailable — the property access itself
- * THROWS in a private window and wherever site data is blocked. An exception
- * here would take the whole item master down for a preference nobody asked
- * for. Absent storage is a browser that will not remember, which is not an
- * error worth showing anyone.
+ * Storage is reached through `globalThis` rather than `window`, and read
+ * inside the callers' own try/catch — THE CALL SITES BELOW ARE WHAT MAKE THIS
+ * SAFE, not this function. It matters because storage does not merely return
+ * null where it is unavailable: in a private window and wherever site data is
+ * blocked, the PROPERTY ACCESS itself throws, before any method is reached.
+ * Keep every call to this inside a try, or the item master goes down for a
+ * preference nobody asked for. Absent storage is simply a browser that will
+ * not remember, which is not an error worth showing anyone.
  */
 function facetMemory(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null {
     try {

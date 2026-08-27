@@ -157,7 +157,8 @@ describe('remembering the category', () => {
             getItem: (key: string) => held.get(key) ?? null,
             setItem: (key: string, value: string) => void held.set(key, value),
             removeItem: (key: string) => void held.delete(key),
-            held,
+            /** Only for seeding a value a previous build would have left. */
+            seed: (key: string, value: string) => void held.set(key, value),
         };
     };
 
@@ -187,7 +188,8 @@ describe('remembering the category', () => {
         rememberFacet(CATEGORY_FACET_ALL);
 
         // A browser that never chose and one that chose All must behave alike.
-        expect(storage.held.has(KEY)).toBe(false);
+        // Storing the literal 'all' would read back as 'all', not as null.
+        expect(storage.getItem(KEY)).toBeNull();
         expect(readRememberedFacet()).toBe(CATEGORY_FACET_ALL);
     });
 
@@ -195,7 +197,7 @@ describe('remembering the category', () => {
         const storage = fakeStorage();
         // A key left by an older build, or a hand-edited one. Honouring it
         // would show an empty table and read as an empty factory.
-        storage.held.set(KEY, 'obsolete_category');
+        storage.seed(KEY, 'obsolete_category');
         vi.stubGlobal('localStorage', storage);
 
         expect(readRememberedFacet()).toBe(CATEGORY_FACET_ALL);
@@ -218,6 +220,31 @@ describe('remembering the category', () => {
 
         expect(readRememberedFacet()).toBe(CATEGORY_FACET_ALL);
         expect(() => rememberFacet('packing_material')).not.toThrow();
+    });
+
+    it('survives a browser whose storage getter itself throws', () => {
+        // The case the wrapper exists for, and the one the stubs above cannot
+        // reach: where site data is blocked it is the PROPERTY ACCESS that
+        // throws, before any method is called. vi.stubGlobal can only define a
+        // value, so the getter is installed by hand and taken out again here.
+        const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+        Object.defineProperty(globalThis, 'localStorage', {
+            configurable: true,
+            get(): never {
+                throw new Error('SecurityError');
+            },
+        });
+
+        try {
+            expect(readRememberedFacet()).toBe(CATEGORY_FACET_ALL);
+            expect(() => rememberFacet('packing_material')).not.toThrow();
+        } finally {
+            if (original !== undefined) {
+                Object.defineProperty(globalThis, 'localStorage', original);
+            } else {
+                delete (globalThis as { localStorage?: unknown }).localStorage;
+            }
+        }
     });
 
     it('survives a browser with no storage at all', () => {

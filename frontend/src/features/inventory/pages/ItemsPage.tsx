@@ -68,10 +68,17 @@ export default function ItemsPage() {
     const [warning, setWarning] = useState<WarningFilter>(null);
     const [warningPage, setWarningPage] = useState(1);
     /**
-     * Which category the catalogue is filtered to. Independent of the warning
-     * filter, and restored from the last choice made in THIS browser so the
-     * store's machine opens on the store's material — see readRememberedFacet.
-     * Read lazily: the choice is only consulted when the page first mounts.
+     * Which category the catalogue is filtered to, restored from what this
+     * browser was last left showing so the store's machine opens on the
+     * store's material — see readRememberedFacet. Read lazily: the choice is
+     * only consulted when the page first mounts.
+     *
+     * THE MEMORY ALWAYS EQUALS THE FACET ON SCREEN. Every path that moves this
+     * value writes it, the warning filter's reset to All included, so what is
+     * remembered can be read off the row rather than inferred. The looser rule
+     * — remember only a deliberate category click — leaves a state nobody can
+     * see: clear a health badge, land back on All, walk into an item and out
+     * again, and the remount would restore a category you had just left.
      */
     const [facet, setFacet] = useState<CategoryFacetKey>(readRememberedFacet);
     const queryClient = useQueryClient();
@@ -180,8 +187,10 @@ export default function ItemsPage() {
     const selectWarning = (next: WarningFilter) => {
         setWarning(next);
         setWarningPage(1);
-        // Exclusive with the category filter — see the note on `rows`.
+        // Exclusive with the category filter — see the note on `rows`. The
+        // memory moves with it, so the row and the next visit agree.
         setFacet(CATEGORY_FACET_ALL);
+        rememberFacet(CATEGORY_FACET_ALL);
     };
 
     const selectFacet = (next: CategoryFacetKey) => {
