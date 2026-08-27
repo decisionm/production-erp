@@ -64,7 +64,7 @@ class ProductionFloorStockService
         }
 
         $balances = StockBalance::query()
-            ->with('item:id,sku,name,uom')
+            ->with('item:id,sku,name,display_name,uom')
             ->where('warehouse_id', $wipId)
             // NOT `> 0`. A balance of zero is genuinely not on the floor, but a
             // NEGATIVE one is a real, deliberately-unrefused state in this
@@ -115,7 +115,9 @@ class ProductionFloorStockService
                 return [
                     'item_id' => $balance->item_id,
                     'sku' => $balance->item?->sku,
+                    // Tally's wire name, and the ERP's own where it is set.
                     'name' => $balance->item?->name,
+                    'display_name' => $balance->item?->display_name,
                     'uom' => $balance->item?->uom,
                     'quantity' => (string) $balance->quantity,
                     // ISO8601 WITH ITS OFFSET, exactly as StoreIssueResource

@@ -19,10 +19,12 @@ use Illuminate\Http\Resources\Json\JsonResource;
  *   remaining_quantity  what the store still owes, floored at zero (a bag
  *                       is not divisible, so an issue may exceed the ask)
  *
- * The nested `item` is a deliberate four-field summary rather than the full
- * ItemResource: the queue needs a name and a unit, and a store or floor
- * login has no business being handed the rest of the item master through a
- * request row.
+ * The nested `item` is a deliberate summary rather than the full ItemResource:
+ * the queue needs a name and a unit, and a store or floor login has no
+ * business being handed the rest of the item master through a request row.
+ * `display_name` joins that summary because it IS the name this screen should
+ * show — the ERP's own, with Tally's underneath it — and a label the store
+ * could not see was the field doing half its job (Codex, a8fe21c).
  */
 class MaterialRequestLineResource extends JsonResource
 {
@@ -38,6 +40,7 @@ class MaterialRequestLineResource extends JsonResource
                 'id' => $line->item->id,
                 'sku' => $line->item->sku,
                 'name' => $line->item->name,
+                'display_name' => $line->item->display_name,
                 'uom' => $line->item->uom,
             ] : null,
             'quantity' => $line->quantity,

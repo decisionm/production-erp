@@ -27,12 +27,24 @@
  * ~40 table cells across the app — one absent relation used to throw here and
  * take the whole surrounding table or drawer down with it. A dash is the
  * honest render for "no product on this line".
+ *
+ * THE ERP'S OWN NAME WINS WHERE THERE IS ONE. `display_name` exists so a
+ * floor-readable label never costs a rename of the Tally wire key, and a label
+ * only the Items page and the production queue could see was the field doing
+ * half its job (Codex, a8fe21c): the store picker, the sales-order picker and
+ * the material-request screens all name products through THIS helper. It is
+ * optional and read structurally, so every caller that carries no such field —
+ * the trimmed `item:id,sku,name` stubs included — behaves exactly as before
+ * and simply shows Tally's name.
  */
-export function itemLabel(item: { sku?: string | null; name?: string | null } | null | undefined): string {
+export function itemLabel(
+    item: { sku?: string | null; name?: string | null; display_name?: string | null } | null | undefined,
+): string {
     if (item === null || item === undefined) return '—';
 
     const sku = (item.sku ?? '').trim();
-    const name = (item.name ?? '').trim();
+    const display = (item.display_name ?? '').trim();
+    const name = display !== '' ? display : (item.name ?? '').trim();
 
     if (sku === '' && name === '') return '—';
     if (sku === '') return name;
