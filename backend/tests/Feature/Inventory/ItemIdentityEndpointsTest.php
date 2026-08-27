@@ -166,9 +166,11 @@ class ItemIdentityEndpointsTest extends TestCase
         $this->assertSame('840/box pouch', $variant['variant_label']);
         $this->assertSame($base->id, $variant['variant_of']['id']);
         $this->assertSame('SYN-ROW-BASE', $variant['variant_of']['sku']);
-        // Q60(a): the largest open case gets no suggestion, ever.
-        $this->assertNull($variant['suggested_category']);
-        $this->assertNull($variant['suggested_category_confidence']);
+        // Q60's largest case, answered by DEC-20260827-001: caps are a
+        // finished good, because the factory sells them and only a finished
+        // good is sellable.
+        $this->assertSame('finished_good', $variant['suggested_category']);
+        $this->assertSame('firm', $variant['suggested_category_confidence']);
         $this->assertContains(
             ItemIdentityWarning::Unclassified->value,
             array_column($variant['warnings'], 'class'),

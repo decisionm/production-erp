@@ -96,10 +96,12 @@ class ItemIdentityService
         // --- raw material -------------------------------------------------
         'raw material' => ['category' => ItemCategory::RawMaterial, 'confidence' => self::CONFIDENCE_FIRM],
         'pet' => ['category' => ItemCategory::RawMaterial, 'confidence' => self::CONFIDENCE_FIRM],
-        // Masterbatch is the colourant dosed into a run, so it is an input —
-        // but Q60 has not said so, and "input" is not automatically "raw
-        // material" in a taxonomy that also has consumables. LOW.
-        'master batch' => ['category' => ItemCategory::RawMaterial, 'confidence' => self::CONFIDENCE_LOW],
+        // Masterbatch is the colourant dosed into a run. It read LOW while
+        // Q60 was open, because "input" is not automatically "raw material"
+        // in a taxonomy that also has consumables — DEC-20260827-001 settled
+        // it on the books: purchased, and consumed on the OUT side of ten
+        // stock-journal lines beside the resin.
+        'master batch' => ['category' => ItemCategory::RawMaterial, 'confidence' => self::CONFIDENCE_FIRM],
 
         // --- packing material ---------------------------------------------
         'packing material' => ['category' => ItemCategory::PackingMaterial, 'confidence' => self::CONFIDENCE_FIRM],
@@ -119,10 +121,19 @@ class ItemIdentityService
         'orange pet bottle' => ['category' => ItemCategory::FinishedGood, 'confidence' => self::CONFIDENCE_FIRM],
         'tablet container' => ['category' => ItemCategory::FinishedGood, 'confidence' => self::CONFIDENCE_FIRM],
         'hdpe bottles & container' => ['category' => ItemCategory::FinishedGood, 'confidence' => self::CONFIDENCE_FIRM],
+        // Caps are SOLD — two sales invoice lines and two sales order lines
+        // in the 26-Aug export — and only a finished good is sellable, so
+        // calling them an input would eventually refuse a real order.
+        // They are bought as well, which is not a contradiction: the same
+        // export shows a Finished Goods item on a purchase invoice, and the
+        // fg_purchase_conflict warning exists to SAY that, not to stop it.
+        'caps & closures' => ['category' => ItemCategory::FinishedGood, 'confidence' => self::CONFIDENCE_FIRM],
 
-        // --- the two Q60 refuses to answer, said out loud -------------------
-        'caps & closures' => ['category' => null, 'confidence' => null],
-        'scrap' => ['category' => null, 'confidence' => null],
+        // Scrap is produced and booked as stock (33 inward journal lines) and
+        // sold in NONE of 55 invoices or 34 orders. `Other` states that; the
+        // day it is genuinely sold it becomes a finished good by a NEW
+        // decision record, never a quiet edit here (DEC-20260827-001).
+        'scrap' => ['category' => ItemCategory::Other, 'confidence' => self::CONFIDENCE_FIRM],
     ];
 
     /**
@@ -254,6 +265,20 @@ class ItemIdentityService
         }
 
         return self::GROUP_SUGGESTIONS[self::foldGroupName($name)] ?? ['category' => null, 'confidence' => null];
+    }
+
+    /**
+     * The same mapping, by group NAME, for the write path.
+     *
+     * `inventory:classify-items` proposes categories from this table since
+     * DEC-20260827-001 made the stock group evidence. It reads the mapping
+     * from here rather than keeping a copy, so the warning screen and the
+     * backfill can never end up giving two different answers for one group.
+     * Null means the group is unmapped — no proposal, the item stays NULL.
+     */
+    public function suggestedCategoryForGroupName(?string $name): ?ItemCategory
+    {
+        return self::GROUP_SUGGESTIONS[self::foldGroupName($name)]['category'] ?? null;
     }
 
     /**

@@ -90,13 +90,20 @@ class VariantLinkConcurrencyTest extends TestCase
         $base = $this->item('SYN-BASE');
         $variant = $this->item('SYN-POUCH');
 
-        // The FOR UPDATE clause itself is dialect-specific — Laravel's SQLite
-        // grammar drops it — so what is asserted is the part that has to be
-        // true on every driver: ONE read of BOTH ids, ordered by id.
+        /*
+         * IDENTIFIER QUOTING IS DIALECT-SPECIFIC and so is the FOR UPDATE
+         * clause — MySQL writes `items`, SQLite writes "items", and Laravel's
+         * SQLite grammar drops the lock clause entirely. Matching either
+         * spelling literally passes on the driver it was written against and
+         * fails on the other; this test did exactly that, green on local
+         * SQLite and red on CI's MySQL 8. Quotes are stripped before matching
+         * so what is asserted is the part that must hold on every driver:
+         * ONE read of BOTH ids, ordered by id.
+         */
         $reads = [];
         DB::listen(function ($query) use (&$reads) {
-            $sql = strtolower($query->sql);
-            if (str_starts_with($sql, 'select') && str_contains($sql, 'from "items"') && str_contains($sql, ' in (')) {
+            $sql = strtolower(str_replace(['`', '"'], '', $query->sql));
+            if (str_starts_with($sql, 'select') && str_contains($sql, 'from items') && str_contains($sql, ' in (')) {
                 $reads[] = $sql;
             }
         });
@@ -104,7 +111,7 @@ class VariantLinkConcurrencyTest extends TestCase
         $service->update($variant, ['variant_of_item_id' => $base->id]);
 
         $this->assertCount(1, $reads, 'both rows must be read for locking by a single ordered statement.');
-        $this->assertMatchesRegularExpression('/order by "?id"? asc/i', $reads[0]);
+        $this->assertMatchesRegularExpression('/order by id asc/', $reads[0]);
     }
 
     /**

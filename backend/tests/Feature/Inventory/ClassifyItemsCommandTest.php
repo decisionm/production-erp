@@ -4,6 +4,7 @@ namespace Tests\Feature\Inventory;
 
 use App\Modules\Inventory\Models\Enums\ItemCategory;
 use App\Modules\Inventory\Models\Item;
+use App\Modules\Inventory\Models\ItemGroup;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
@@ -255,5 +256,83 @@ class ClassifyItemsCommandTest extends TestCase
         $this->assertNull($running->fresh()->category, 'a running batch has produced nothing yet');
         $this->assertNull($withdrawn->fresh()->category, 'a cancelled batch was withdrawn as a mistake');
         $this->assertNull($legacyWithdrawn->fresh()->category, 'cancelled_at also excludes a stale completed status');
+    }
+
+    // ---- the Tally stock group, made evidence by DEC-20260827-001 ----------
+
+    private function itemInGroup(string $sku, string $groupName): Item
+    {
+        $group = ItemGroup::firstOrCreate(
+            ['name' => $groupName],
+            ['tally_guid' => 'synthetic-'.md5($groupName), 'tally_parent_name' => ''],
+        );
+
+        return $this->item($sku, ['item_group_id' => $group->id]);
+    }
+
+    /**
+     * The four the owner settled, each proposed from its group alone — no
+     * production standard, no packing mapping, nothing else in the database
+     * saying anything about them.
+     */
+    public function test_the_stock_group_classifies_the_four_families_the_owner_settled(): void
+    {
+        $bottle = $this->itemInGroup('SYN-FG', 'Amber Pet Bottle');
+        $cap = $this->itemInGroup('SYN-CAP', 'Caps & Closures');
+        $resin = $this->itemInGroup('SYN-RM', 'Raw Material');
+        $masterbatch = $this->itemInGroup('SYN-MB', 'Master Batch');
+        $carton = $this->itemInGroup('SYN-PM', 'Carton Box');
+        $scrap = $this->itemInGroup('SYN-SCRAP', 'Scrap');
+
+        $this->artisan('inventory:classify-items', ['--write' => true])->assertExitCode(0);
+
+        $this->assertSame(ItemCategory::FinishedGood, $bottle->fresh()->category);
+        // Caps are SOLD, and only a finished good is sellable.
+        $this->assertSame(ItemCategory::FinishedGood, $cap->fresh()->category);
+        $this->assertSame(ItemCategory::RawMaterial, $resin->fresh()->category);
+        $this->assertSame(ItemCategory::RawMaterial, $masterbatch->fresh()->category);
+        $this->assertSame(ItemCategory::PackingMaterial, $carton->fresh()->category);
+        // Produced, booked as stock, sold in nothing read — `Other` says so.
+        $this->assertSame(ItemCategory::Other, $scrap->fresh()->category);
+    }
+
+    public function test_an_unmapped_group_and_no_group_at_all_both_stay_null(): void
+    {
+        $unmapped = $this->itemInGroup('SYN-ODD', 'Stationery & Sundries');
+        $groupless = $this->item('SYN-NONE');
+
+        $this->artisan('inventory:classify-items', ['--write' => true])->assertExitCode(0);
+
+        $this->assertNull($unmapped->fresh()->category, 'a group the decision never mapped is not guessed');
+        $this->assertNull($groupless->fresh()->category);
+    }
+
+    /**
+     * The group is ONE piece of evidence, not an override. An item whose
+     * group disagrees with what the factory actually does with it is a
+     * CONFLICT — reported, and left alone.
+     */
+    public function test_a_group_that_disagrees_with_production_evidence_is_reported_not_resolved(): void
+    {
+        // Filed under Carton Box, yet the factory holds a production standard
+        // for it: packing material by its group, finished good by its use.
+        $contested = $this->itemInGroup('SYN-CLASH', 'Carton Box');
+        $this->productionStandardFor($contested);
+
+        $this->artisan('inventory:classify-items', ['--write' => true])
+            ->expectsOutputToContain('SYN-CLASH')
+            ->assertExitCode(0);
+
+        $this->assertNull($contested->fresh()->category, 'a contested item is never written on a guess');
+    }
+
+    public function test_a_category_a_person_already_set_is_never_overwritten_by_a_group(): void
+    {
+        $item = $this->itemInGroup('SYN-HELD', 'Caps & Closures');
+        $item->update(['category' => ItemCategory::PackingMaterial]);
+
+        $this->artisan('inventory:classify-items', ['--write' => true])->assertExitCode(0);
+
+        $this->assertSame(ItemCategory::PackingMaterial, $item->fresh()->category);
     }
 }

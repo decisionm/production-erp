@@ -1447,7 +1447,19 @@ not block the nullable column, the honest dry-run classification report, or a
 person recording categories they actually know.
 *Open since 2026-08-21.*
 
-## Q60 · Which ItemCategory does each Tally stock group map to?
+## Q60 · Which ItemCategory does each Tally stock group map to? — RESOLVED
+
+**Resolved 2026-08-27 by DEC-20260827-001**: the category is derived from the
+Tally stock group. Finished good — the Finished Goods tree, HDPE Bottles &
+Container, and Caps & Closures (caps because the factory SELLS them: 2 sales
+invoice lines and 2 sales order lines in the 26-Aug export, and only a
+finished good is sellable). Raw material — the Raw Material tree and Master
+Batch (consumed on 10 stock-journal OUT lines beside resin). Packing material
+— the Packing Material tree, Carton Box, Tray, BOPP TAPE, SHRINK ROLLS.
+Other — Scrap (33 inward journal lines, absent from all 55 invoices and 34
+orders; if it is ever genuinely sold it becomes a finished good by a NEW
+decision). The 12 items in no group stay NULL. No enforcement is switched on
+— that is Q59, still open.
 
 `items:summary` read on live 24-Aug-2026 returned **624 active items, 624 of
 them with NO category**. That column is what three document rules read — a
