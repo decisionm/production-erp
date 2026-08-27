@@ -1,21 +1,35 @@
 import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
 import type { ShiftProductionEntry } from '@/features/production/types';
-import type { Capa, IncomingInspection, MeasuringInstrument, NonConformanceReport, SpcChart, SpcCharacteristic, SpcMeasurement } from './types';
+import type { Capa, IncomingInspection, MeasuringInstrument, NonConformanceReport, PendingInspectionLine, SpcChart, SpcCharacteristic, SpcMeasurement } from './types';
+import type { CreateIncomingInspectionPayload } from './incomingInspection';
+
+export const INCOMING_INSPECTIONS_QUERY_KEY = ['quality', 'incoming-inspections'] as const;
+
+/** The pending queue's key — exported so the mutation can invalidate the very key the query uses. */
+export const PENDING_INSPECTION_LINES_QUERY_KEY = ['quality', 'incoming-inspection-pending-lines'] as const;
 
 export async function listIncomingInspections(): Promise<Paginated<IncomingInspection>> {
     const { data } = await api.get<Paginated<IncomingInspection>>('/quality/incoming-inspections');
     return data;
 }
 
-export interface CreateIncomingInspectionPayload {
-    goods_receipt_note_line_id: number;
-    inspected_quantity: number;
-    accepted_quantity: number;
-    rejected_quantity: number;
-    inspection_date: string;
-    notes?: string;
+/**
+ * EVERY arrival line still waiting for an inspection, oldest first.
+ *
+ * NOT PAGINATED, AND THAT IS THE POINT. This picker used to be fed from
+ * `listGoodsReceipts()` — page one of twenty goods receipts, under
+ * `module:procurement`, which a quality-only login is refused outright. The
+ * server now answers the question directly and answers all of it; the
+ * response is a bare `{ data: [...] }` with no `meta`, so there is no page
+ * size here that could quietly start truncating the day a 21st line arrives.
+ */
+export async function listPendingIncomingInspectionLines(): Promise<PendingInspectionLine[]> {
+    const { data } = await api.get<{ data: PendingInspectionLine[] }>('/quality/incoming-inspections/pending');
+    return data.data ?? [];
 }
+
+export type { CreateIncomingInspectionPayload } from './incomingInspection';
 
 export async function createIncomingInspection(
     payload: CreateIncomingInspectionPayload,

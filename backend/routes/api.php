@@ -599,6 +599,10 @@ Route::prefix('v1')->group(function () {
         });
 
         Route::prefix('quality')->middleware('module:quality')->group(function () {
+            // The inspection desk's own queue — arrival lines with no
+            // disposition yet. Registered BEFORE the apiResource so the word
+            // "pending" can never be read as a resource id.
+            Route::get('incoming-inspections/pending', [IncomingInspectionController::class, 'pending']);
             Route::apiResource('incoming-inspections', IncomingInspectionController::class)->only(['index', 'store']);
 
             Route::apiResource('ncrs', NonConformanceReportController::class)->only(['index', 'store']);

@@ -2,6 +2,27 @@ import type { Item } from '@/features/inventory/types';
 
 export type InspectionResult = 'pass' | 'fail' | 'partial';
 
+/**
+ * ONE ARRIVAL LINE STILL WAITING FOR ITS INCOMING INSPECTION, exactly as
+ * GET /api/v1/quality/incoming-inspections/pending serves it.
+ *
+ * This is NOT a `GoodsReceiptNoteLine` and must not be widened into one: the
+ * server sends a hand-written whitelist so a quality login cannot be one
+ * permission-grant away from a purchase rate or a supplier name (FC-06). If a
+ * field is missing here, the answer is to ask whether quality is entitled to
+ * it — not to reach for the procurement resource instead.
+ */
+export interface PendingInspectionLine {
+    /** The goods_receipt_note_lines id — what an inspection is posted against. */
+    id: number;
+    /** "GRN-{id}", the app's own document number. Never the vendor's challan. */
+    grn_reference: string | null;
+    item: { id: number | null; sku: string | null; name: string | null };
+    /** The exact decimal string the column holds — "123450.0000", never a float. */
+    received_quantity: string;
+    uom: string | null;
+}
+
 export interface IncomingInspection {
     id: number;
     goods_receipt_note_line_id: number;
