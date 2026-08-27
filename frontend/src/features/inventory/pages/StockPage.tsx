@@ -84,10 +84,15 @@ export default function StockPage() {
     // query key and the pager below reads the server's own count.
     const [page, setPage] = useState(1);
     const [perPage, setPerPage] = useState(50);
+    /** Ordered by the SERVER — see listStockBalances. */
+    const [sort, setSort] = useState<'item' | 'warehouse' | 'quantity'>('item');
+    const [direction, setDirection] = useState<'asc' | 'desc'>('asc');
 
     const { data: balances, isLoading } = useQuery({
-        queryKey: ['inventory', 'stock-balances', page, perPage],
-        queryFn: () => listStockBalances({ page, per_page: perPage }),
+        // The sort is part of the KEY, so changing it fetches a newly ordered
+        // page rather than reordering the one already here.
+        queryKey: ['inventory', 'stock-balances', page, perPage, sort, direction],
+        queryFn: () => listStockBalances({ page, per_page: perPage, sort, direction }),
     });
     const { data: history, isLoading: historyLoading } = useQuery({
         queryKey: ['inventory', 'stock-movements', historyRow?.item.id, historyRow?.warehouse.id],
@@ -310,6 +315,23 @@ export default function StockPage() {
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
+                /*
+                 * The sort is TRANSLATED INTO THE QUERY, never applied to the
+                 * rows in hand. Clearing it (antd's third click) returns to
+                 * item-name order rather than leaving the list in whatever
+                 * order the last request happened to produce, and any change
+                 * goes back to page 1 — page 4 of one ordering is not page 4
+                 * of another.
+                 */
+                onChange={(_pagination, _filters, sorter) => {
+                    const active = Array.isArray(sorter) ? sorter[0] : sorter;
+                    const column = String(active?.column?.title ?? '').toLowerCase();
+                    const next = column === 'quantity' || column === 'warehouse' ? column : 'item';
+
+                    setSort(active?.order ? (next as typeof sort) : 'item');
+                    setDirection(active?.order === 'descend' ? 'desc' : 'asc');
+                    setPage(1);
+                }}
                 dataSource={balances?.data}
                 pagination={{
                     current: page,
@@ -334,29 +356,32 @@ export default function StockPage() {
                          * the left edge, leaving a quantity belonging to
                          * nothing.
                          *
-                         * NOT SORTABLE, deliberately, and this is the harder
-                         * call. This list is paginated by the SERVER
-                         * (`listStockBalances({ page, per_page })`), so a
-                         * column sorter would order the fifty rows that had
-                         * arrived and present it as the order of the stock —
-                         * "the largest balance" would mean the largest on this
-                         * page. Sorting belongs here once the endpoint accepts
-                         * it; a control that quietly answers a smaller question
-                         * than it appears to does not.
+                         * SORTED BY THE SERVER. Every sorter here is
+                         * `sortOrder`-controlled and re-queries: this list is
+                         * paginated, so a client-side sorter would have ordered
+                         * the fifty rows on screen and shown it as the order of
+                         * the stock. Sorting the query makes the control answer
+                         * the question it appears to answer.
                          */
                         title: 'Item',
                         fixed: 'left' as const,
                         width: 260,
+                        sorter: true,
+                        sortOrder: sort === 'item' ? (direction === 'asc' ? 'ascend' : 'descend') : null,
                         render: (_, row) => itemLabel(row.item),
                     },
                     {
                         title: 'Warehouse',
+                        sorter: true,
+                        sortOrder: sort === 'warehouse' ? (direction === 'asc' ? 'ascend' : 'descend') : null,
                         render: (_, row) => `${row.warehouse.code} — ${row.warehouse.name}`,
                     },
                     {
                         title: 'Quantity',
                         dataIndex: 'quantity',
                         align: 'right' as const,
+                        sorter: true,
+                        sortOrder: sort === 'quantity' ? (direction === 'asc' ? 'ascend' : 'descend') : null,
                     },
                     ...(showsAverageCost ? [{ title: 'Avg. Cost', dataIndex: 'average_cost' }] : []),
                     {
