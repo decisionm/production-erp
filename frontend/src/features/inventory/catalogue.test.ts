@@ -1,10 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     CATEGORY_FACET_ALL,
     catalogueEmptyText,
     CATEGORY_FACET_UNCLASSIFIED,
     categoryFacets,
     matchesCategoryFacet,
+    readRememberedFacet,
+    rememberFacet,
     skuPresentation,
 } from '@/features/inventory/catalogue';
 import type { Item, ItemCategoryValue } from '@/features/inventory/types';
@@ -142,5 +144,113 @@ describe('catalogueEmptyText', () => {
 
     it('says the catalogue itself is empty when nothing is filtering', () => {
         expect(catalogueEmptyText(CATEGORY_FACET_ALL, null, '')).toBe('The catalogue is empty.');
+    });
+});
+
+describe('remembering the category', () => {
+    const KEY = 'erp.inventory.items.facet';
+
+    /** A stand-in for the browser's own store — the suite runs without a DOM by design. */
+    const fakeStorage = () => {
+        const held = new Map<string, string>();
+        return {
+            getItem: (key: string) => held.get(key) ?? null,
+            setItem: (key: string, value: string) => void held.set(key, value),
+            removeItem: (key: string) => void held.delete(key),
+            /** Only for seeding a value a previous build would have left. */
+            seed: (key: string, value: string) => void held.set(key, value),
+        };
+    };
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it('opens where the last person left it', () => {
+        vi.stubGlobal('localStorage', fakeStorage());
+
+        rememberFacet('packing_material');
+
+        expect(readRememberedFacet()).toBe('packing_material');
+    });
+
+    it('opens on All when nothing has been chosen', () => {
+        vi.stubGlobal('localStorage', fakeStorage());
+
+        expect(readRememberedFacet()).toBe(CATEGORY_FACET_ALL);
+    });
+
+    it('forgets rather than stores when All is chosen', () => {
+        const storage = fakeStorage();
+        vi.stubGlobal('localStorage', storage);
+
+        rememberFacet('raw_material');
+        rememberFacet(CATEGORY_FACET_ALL);
+
+        // A browser that never chose and one that chose All must behave alike.
+        // Storing the literal 'all' would read back as 'all', not as null.
+        expect(storage.getItem(KEY)).toBeNull();
+        expect(readRememberedFacet()).toBe(CATEGORY_FACET_ALL);
+    });
+
+    it('ignores a value it does not recognise rather than filtering the catalogue away', () => {
+        const storage = fakeStorage();
+        // A key left by an older build, or a hand-edited one. Honouring it
+        // would show an empty table and read as an empty factory.
+        storage.seed(KEY, 'obsolete_category');
+        vi.stubGlobal('localStorage', storage);
+
+        expect(readRememberedFacet()).toBe(CATEGORY_FACET_ALL);
+    });
+
+    it('survives a browser that refuses storage entirely', () => {
+        // Private windows and blocked site data THROW on access rather than
+        // returning null; an exception would take the item master down.
+        vi.stubGlobal('localStorage', {
+            getItem: () => {
+                throw new Error('SecurityError');
+            },
+            setItem: () => {
+                throw new Error('SecurityError');
+            },
+            removeItem: () => {
+                throw new Error('SecurityError');
+            },
+        });
+
+        expect(readRememberedFacet()).toBe(CATEGORY_FACET_ALL);
+        expect(() => rememberFacet('packing_material')).not.toThrow();
+    });
+
+    it('survives a browser whose storage getter itself throws', () => {
+        // The case the wrapper exists for, and the one the stubs above cannot
+        // reach: where site data is blocked it is the PROPERTY ACCESS that
+        // throws, before any method is called. vi.stubGlobal can only define a
+        // value, so the getter is installed by hand and taken out again here.
+        const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+        Object.defineProperty(globalThis, 'localStorage', {
+            configurable: true,
+            get(): never {
+                throw new Error('SecurityError');
+            },
+        });
+
+        try {
+            expect(readRememberedFacet()).toBe(CATEGORY_FACET_ALL);
+            expect(() => rememberFacet('packing_material')).not.toThrow();
+        } finally {
+            if (original !== undefined) {
+                Object.defineProperty(globalThis, 'localStorage', original);
+            } else {
+                delete (globalThis as { localStorage?: unknown }).localStorage;
+            }
+        }
+    });
+
+    it('survives a browser with no storage at all', () => {
+        vi.stubGlobal('localStorage', undefined);
+
+        expect(readRememberedFacet()).toBe(CATEGORY_FACET_ALL);
+        expect(() => rememberFacet('packing_material')).not.toThrow();
     });
 });
