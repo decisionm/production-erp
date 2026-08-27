@@ -223,8 +223,18 @@ for seeder in PermissionSeeder ShiftSeeder ProductionConfigurationDefaultsSeeder
   $PHP artisan db:seed --class="$seeder" --force
 done
 
-# Ensure the public storage symlink exists (no-op if already linked).
-$PHP artisan storage:link || true
+# Ensure the public storage symlink exists.
+#
+# Quiet when it is ALREADY there, which is every deploy after the first. The
+# bare call prints "ERROR  The [public/storage] link already exists." each
+# time, and an ERROR line that is expected on every run is how a real one
+# stops being read. Checked rather than forced: `--force` would relink a
+# symlink somebody may have pointed somewhere deliberately.
+if [ -e public/storage ]; then
+  echo "==> public/storage link already present"
+else
+  $PHP artisan storage:link || true
+fi
 
 # Session lifetime: a factory shift plus margin (12 h). The production .env
 # predates that decision with 120 and .env is never rsynced, so normalize it
@@ -237,10 +247,58 @@ fi
 
 # Rebuild the cached config/routes/views against the new code + current .env.
 # clear first so stale caches from the previous release can't linger.
-$PHP artisan optimize:clear
-$PHP artisan config:cache
-$PHP artisan route:cache
-$PHP artisan view:cache
+#
+# RETRIED, AND NOT ALLOWED TO STRAND THE FACTORY. `optimize:clear` reaches the
+# DATABASE (the cache store is the `cache` table), and on 27-Aug-2026 that one
+# statement met a transient host refusal —
+#
+#   SQLSTATE[HY000] [2002] Operation not permitted ... delete from `cache`
+#
+# — one second after `migrate` had connected to the same database perfectly.
+# `set -e` then exited before `artisan up`, and the factory sat on 503 until a
+# human re-ran the workflow. The gate that kept the app closed was written for
+# a schema that never arrived; a cache table that would not clear is not that.
+#
+# So the distinction is made explicit here, and only here:
+#
+#   * BEFORE this point — composer, the backup gate, migrate, the seeders —
+#     a failure still exits and the app STAYS DOWN. Those decide whether the
+#     schema matches the code, and shipping past them is the 11-Aug incident.
+#   * FROM this point — the caches — the schema already matches the code. A
+#     stale or unclearable cache is a degraded app, not a wrong one, and a
+#     closed factory is worse than a warm cache. Each command is retried, and
+#     if it still fails the deploy says so loudly and carries on to `up`.
+#
+# config/route/view caching stays inside the same tolerance for the same
+# reason: with no cached config Laravel reads config/*.php directly, which is
+# slower and entirely correct.
+cache_step() {
+  local label="$1"; shift
+  local attempt
+  for attempt in 1 2 3; do
+    if "$@"; then
+      return 0
+    fi
+    if [ "$attempt" -lt 3 ]; then
+      echo "==> ${label} failed (attempt ${attempt}/3); retrying in $((attempt * 5))s" >&2
+      sleep "$((attempt * 5))"
+    fi
+  done
+
+  echo "WARNING: ${label} did not succeed after 3 attempts." >&2
+  echo "         The schema already matches the deployed code — migrations ran and passed — so" >&2
+  echo "         the app is being REOPENED rather than left closed over a cache." >&2
+  echo "         It will run with a stale or uncached value here: correct, slower. Re-run this" >&2
+  echo "         workflow when the host settles to clear it properly." >&2
+  CACHE_DEGRADED=1
+  return 0
+}
+
+CACHE_DEGRADED=0
+cache_step "artisan optimize:clear" $PHP artisan optimize:clear
+cache_step "artisan config:cache" $PHP artisan config:cache
+cache_step "artisan route:cache" $PHP artisan route:cache
+cache_step "artisan view:cache" $PHP artisan view:cache
 
 # --- Reopen the app --------------------------------------------------------
 #
@@ -256,4 +314,9 @@ $PHP artisan view:cache
 # deploy.sh by hand is still safe.
 $PHP artisan up
 
-echo "==> Deploy complete"
+if [ "${CACHE_DEGRADED:-0}" -eq 1 ]; then
+  echo "==> Deploy complete — APP IS UP, but a cache step above did not succeed."
+  echo "    Nothing is wrong with the data or the schema; re-run the workflow when convenient."
+else
+  echo "==> Deploy complete"
+fi
