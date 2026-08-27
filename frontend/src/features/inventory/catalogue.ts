@@ -130,9 +130,11 @@ export function catalogueEmptyText(
  * THE CATEGORY THE LAST PERSON PICKED, remembered per browser.
  *
  * A storekeeper opens this screen to find packing material and lands in a
- * catalogue of several hundred bottles. Remembering the choice lets the
+ * catalogue that is mostly finished bottles. Remembering the choice lets the
  * store's own machine open where the store works, without anyone being given
- * a setting to configure.
+ * a setting to configure. (`php artisan items:summary` is what counts the
+ * catalogue — a figure written into a comment here would be a live number
+ * frozen at the moment someone typed it.)
  *
  * PER BROWSER, DELIBERATELY, not per login: what is being remembered is where
  * THIS machine is used — the store's PC opens on packing, the sales desk's on
@@ -140,11 +142,12 @@ export function catalogueEmptyText(
  * convenience and never a permission: every category stays one click away and
  * the count of each one is on the face of the row.
  *
- * A REMEMBERED FILTER MUST NEVER READ AS AN EMPTY CATALOGUE. That is the real
- * risk here — somebody returns, sees 51 rows and believes that is all the
- * factory has. Two things prevent it: the chosen facet is marked with "All"
- * beside it carrying the full count, and anything unreadable or unrecognised
- * falls back to All rather than to a filter nobody chose.
+ * A REMEMBERED FILTER MUST NEVER READ AS THE WHOLE CATALOGUE. That is the real
+ * risk here — somebody returns to a narrowed list they did not narrow, and
+ * takes it for everything the factory has. Two things prevent it: the chosen
+ * facet is marked with "All" beside it carrying the full count, and anything
+ * unreadable or unrecognised falls back to All rather than to a filter nobody
+ * chose.
  */
 const REMEMBERED_FACET_KEY = 'erp.inventory.items.facet';
 
