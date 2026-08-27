@@ -24,10 +24,19 @@ class StockBalanceController extends Controller
      */
     public function index(Request $request): AnonymousResourceCollection
     {
+        $validated = $request->validate([
+            'warehouse_id' => ['nullable', 'integer', 'exists:warehouses,id'],
+            'sort' => ['nullable', 'in:item,warehouse,quantity'],
+            'direction' => ['nullable', 'in:asc,desc'],
+        ]);
+
         return StockBalanceResource::collection($this->stock->paginateBalances(
             perPage: $this->perPage($request),
             search: $this->searchTerm($request),
             itemId: $this->filterId($request, 'item_id'),
+            warehouseId: isset($validated['warehouse_id']) ? (int) $validated['warehouse_id'] : null,
+            sort: $validated['sort'] ?? 'item',
+            direction: $validated['direction'] ?? 'asc',
         ));
     }
 }

@@ -12,6 +12,7 @@ use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\SerialNumber;
 use App\Modules\Inventory\Models\StockBalance;
 use App\Modules\Inventory\Models\StockMovement;
+use App\Modules\Inventory\Models\Warehouse;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
@@ -334,11 +335,35 @@ class StockMovementService
      * may hand back those rows in either order per query, so walking page 1
      * then page 2 could serve one balance twice and skip another entirely.
      */
-    public function paginateBalances(int $perPage = 20, ?string $search = null, ?int $itemId = null): LengthAwarePaginator
-    {
+    /**
+     * @param  int|null  $warehouseId  one location, for a store person working it
+     * @param  string  $sort  'item' (default), 'warehouse' or 'quantity'
+     * @param  string  $direction  'asc' (default) or 'desc'
+     *
+     * SORTING IS DONE HERE, NOT IN THE BROWSER, and the reason is that this
+     * list is paginated. A column sorter in the table would have ordered the
+     * fifty rows that arrived and shown it as the order of the stock — "the
+     * largest balance" would have meant the largest on the page you happen to
+     * be looking at. Sorting the QUERY makes the same control answer the
+     * question it appears to answer.
+     *
+     * Quantity sorts numerically because the column is a decimal, not a
+     * string: ordered lexically, 9 kg outranks 100 kg.
+     */
+    public function paginateBalances(
+        int $perPage = 20,
+        ?string $search = null,
+        ?int $itemId = null,
+        ?int $warehouseId = null,
+        string $sort = 'item',
+        string $direction = 'asc',
+    ): LengthAwarePaginator {
+        $direction = $direction === 'desc' ? 'desc' : 'asc';
+
         return StockBalance::query()
             ->with(['item' => fn ($item) => $item->withTrashed(), 'warehouse'])
             ->when($itemId !== null, fn ($query) => $query->where('item_id', $itemId))
+            ->when($warehouseId !== null, fn ($query) => $query->where('warehouse_id', $warehouseId))
             ->when($search !== null, fn ($query) => $query->where(function ($outer) use ($search) {
                 $like = "%{$search}%";
                 $outer
@@ -347,6 +372,20 @@ class StockMovementService
                     ->orWhereHas('warehouse', fn ($warehouse) => $warehouse
                         ->where(fn ($q) => $q->where('code', 'like', $like)->orWhere('name', 'like', $like)));
             }))
+            // Ordered by the item's NAME, not its id: the screen shows names,
+            // and an id order is an order the reader cannot explain.
+            ->when($sort === 'item', fn ($query) => $query
+                ->orderBy(
+                    Item::withTrashed()->select('name')->whereColumn('items.id', 'stock_balances.item_id'),
+                    $direction,
+                ))
+            ->when($sort === 'warehouse', fn ($query) => $query
+                ->orderBy(
+                    Warehouse::select('name')->whereColumn('warehouses.id', 'stock_balances.warehouse_id'),
+                    $direction,
+                ))
+            ->when($sort === 'quantity', fn ($query) => $query->orderBy('quantity', $direction))
+            // A stable tie-break, so paging never repeats or skips a row.
             ->orderBy('item_id')
             ->orderBy('warehouse_id')
             ->paginate($perPage);

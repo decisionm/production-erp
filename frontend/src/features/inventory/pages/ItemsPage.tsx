@@ -12,6 +12,15 @@ import {
     listIdentityItems,
     updateItem,
 } from '@/features/inventory/api';
+import {
+    CATEGORY_FACET_ALL,
+    catalogueEmptyText,
+    type CategoryFacetKey,
+    categoryFacets,
+    matchesCategoryFacet,
+    skuPresentation,
+} from '@/features/inventory/catalogue';
+import { CategoryFacets } from '@/features/inventory/components/CategoryFacets';
 import { IdentityHealthStrip } from '@/features/inventory/components/IdentityHealthStrip';
 import { ItemIdentityFields } from '@/features/inventory/components/ItemIdentityFields';
 import { VariantCell } from '@/features/inventory/components/VariantCell';
@@ -56,6 +65,8 @@ export default function ItemsPage() {
     /** The health badge that is filtering the table, and the SERVER's page of it. */
     const [warning, setWarning] = useState<WarningFilter>(null);
     const [warningPage, setWarningPage] = useState(1);
+    /** Which category the catalogue is filtered to. Independent of the warning filter. */
+    const [facet, setFacet] = useState<CategoryFacetKey>(CATEGORY_FACET_ALL);
     const queryClient = useQueryClient();
     const navigate = useNavigate();
 
@@ -121,10 +132,54 @@ export default function ItemsPage() {
         [flagged, itemsById],
     );
 
-    const rows: ItemRow[] = warning === null ? searchedItems : flaggedRows;
+    /*
+     * THE TWO FILTERS ARE EXCLUSIVE, and that is a correctness rule rather
+     * than a simplification.
+     *
+     * The warning list is paginated by the SERVER; the category filter can
+     * only be applied to the page that has already arrived, because
+     * `ListItemWarningsRequest` accepts no category. Combining them therefore
+     * emptied the table while the pager underneath went on reporting the
+     * server's unfiltered total — a screen whose whole product is counts,
+     * stating one that is not true of what it is showing.
+     *
+     * Nothing is lost by refusing the combination: it is empty by
+     * construction. An unclassified item has no category, so "unclassified
+     * packing material" cannot match a row, and every other pairing is
+     * answerable by picking the category and reading the Warnings column that
+     * is already on each row.
+     */
+    const rows: ItemRow[] = warning === null
+        ? searchedItems.filter((item) => matchesCategoryFacet(item, facet))
+        : flaggedRows;
+
+    /*
+     * Counted over the WHOLE catalogue, never over the filtered rows: a count
+     * that shrinks as you filter is describing your filter, not the factory,
+     * and the number a storekeeper is deciding on is how many exist. With the
+     * filters exclusive this count also PREDICTS what clicking will show,
+     * which is how a number on a control is read whatever it was meant as.
+     */
+    const facets = useMemo(() => categoryFacets(allItems, facet), [allItems, facet]);
+
+    /** The units this catalogue actually uses — never a hardcoded list. */
+    const uomFilters = useMemo(
+        () => [...new Set(allItems.map((item) => (item.uom ?? '').trim()).filter((uom) => uom !== ''))]
+            .sort((a, b) => a.localeCompare(b))
+            .map((uom) => ({ text: uom, value: uom })),
+        [allItems],
+    );
 
     const selectWarning = (next: WarningFilter) => {
         setWarning(next);
+        setWarningPage(1);
+        // Exclusive with the category filter — see the note on `rows`.
+        setFacet(CATEGORY_FACET_ALL);
+    };
+
+    const selectFacet = (next: CategoryFacetKey) => {
+        setFacet(next);
+        setWarning(null);
         setWarningPage(1);
     };
 
@@ -196,13 +251,25 @@ export default function ItemsPage() {
                 </Space>
             </Space>
 
+            <CategoryFacets facets={facets} active={facet} onSelect={selectFacet} />
+
             <IdentityHealthStrip health={health} active={warning} onSelect={selectWarning} />
 
             <Table<ItemRow>
+                // STICKY HEADER: at 700 rows a person scrolling the middle of
+                // the catalogue was reading unlabelled columns.
+                sticky
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={warning === null ? isLoading : flaggedFetching}
                 dataSource={rows}
+                // Two filters stack here and a search sits above both, so an
+                // empty table names the narrowest one that is on rather than
+                // leaving a person to clear all three to find out which.
+                // The search box is disabled while a warning filter is on, so
+                // its text is not applied and must not be blamed for an empty
+                // table.
+                locale={{ emptyText: catalogueEmptyText(facet, warning, warning === null ? search : '') }}
                 pagination={warning === null
                     ? { pageSize: 20, showSizeChanger: true, pageSizeOptions: [20, 50, 100], showTotal: (t) => `${t} items` }
                     : {
@@ -215,17 +282,68 @@ export default function ItemsPage() {
                     }}
                 columns={[
                     {
-                        // Q42, answered by the owner: the SKU is an internal
-                        // mapping and a lookup handle — NOT a barcode. It used
-                        // to open a barcode drawer, which is exactly the thing
-                        // it is not; it is text somebody types or copies.
+                        /*
+                         * Q42, answered by the owner: the SKU is an internal
+                         * mapping and a lookup handle — NOT a barcode. It used
+                         * to open a barcode drawer, which is exactly the thing
+                         * it is not; it is text somebody types or copies.
+                         *
+                         * AND MOST OF THEM WERE NOT CHOSEN. The masters pull
+                         * seeds a SKU from the Tally NAME and marks the row
+                         * `sku_provisional`, so a column headed "SKU" was
+                         * printing the product name again, in the voice of a
+                         * decision. Seeded ones are set quietly and marked;
+                         * chosen ones read plainly. Monospaced because these
+                         * are compared character by character down a column,
+                         * and someone types them into the delivery scanner.
+                         */
                         title: 'SKU',
                         dataIndex: 'sku',
-                        render: (sku: string) => <Typography.Text copyable={{ text: sku }}>{sku}</Typography.Text>,
+                        // FIXED, because this table is thirteen columns wide on
+                        // a catalogue of hundreds: scrolling right to read a
+                        // tracking type used to take the product's identity off
+                        // screen, and the row you were reading became a row of
+                        // numbers belonging to nothing.
+                        fixed: 'left' as const,
+                        width: 200,
+                        sorter: (a: ItemRow, b: ItemRow) => (a.sku ?? '').localeCompare(b.sku ?? ''),
+                        render: (_: string, row: ItemRow) => {
+                            const shown = skuPresentation(row);
+
+                            return (
+                                <Space size={4}>
+                                    <Typography.Text
+                                        copyable={{ text: shown.text }}
+                                        type={shown.provisional ? 'secondary' : undefined}
+                                        style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }}
+                                    >
+                                        {shown.text}
+                                    </Typography.Text>
+                                    {shown.provisional ? (
+                                        <Tooltip title="Seeded from the Tally name when this item was pulled — nobody has chosen a code yet.">
+                                            <Tag bordered={false} style={{ marginInlineEnd: 0, fontSize: 11 }}>seeded</Tag>
+                                        </Tooltip>
+                                    ) : null}
+                                </Space>
+                            );
+                        },
                     },
                     {
                         title: 'Name',
                         dataIndex: 'name',
+                        fixed: 'left' as const,
+                        width: 260,
+                        /*
+                         * THE DEFAULT ORDER, and the one a person scanning a
+                         * catalogue expects: names, A to Z. Sorting on the ERP
+                         * name where there is one, because that is the string
+                         * the row is showing — sorting by a Tally name the
+                         * reader cannot see puts rows in an order the screen
+                         * does not explain.
+                         */
+                        defaultSortOrder: 'ascend' as const,
+                        sorter: (a: ItemRow, b: ItemRow) =>
+                            itemDisplayName(a).localeCompare(itemDisplayName(b), undefined, { numeric: true }),
                         render: (_: string, row: ItemRow) => {
                             const display = row.display_name;
                             const separate = display !== null && display !== undefined
@@ -242,23 +360,40 @@ export default function ItemsPage() {
                         // `undefined` is a server that does not serve the field
                         // and `null` is nobody having said yet — one of those
                         // is a warning and the other is not this screen's news.
+                        //
+                        // ONLY WORTH A COLUMN IN "ALL". Filtered to Packing,
+                        // every row reads "Packing material" — the column then
+                        // repeats the question instead of answering anything.
+                        // Hidden rather than dimmed: a column holding one
+                        // repeated value is width taken from the names, which
+                        // are what this catalogue is genuinely hard to read.
+                        hidden: facet !== CATEGORY_FACET_ALL,
                         title: 'Category',
                         dataIndex: 'category',
-                        render: (value: ItemCategoryValue | null | undefined) => {
-                            if (value === undefined) return '—';
-                            if (value === null) {
-                                return (
-                                    <Tooltip title={warningTooltip('unclassified')}>
-                                        <Tag color={warningColor('unclassified')}>{warningLabel('unclassified')}</Tag>
-                                    </Tooltip>
-                                );
-                            }
-                            return <Tag color={categoryColor(value)}>{categoryLabel(value)}</Tag>;
+                        sorter: (a: ItemRow, b: ItemRow) =>
+                            (a.category ?? '\uffff').localeCompare(b.category ?? '\uffff'),
+                        render: (value: ItemCategoryValue | null | undefined, row: ItemRow) => {
+                            const group = itemGroupName(row);
+
+                            const tag = value === undefined
+                                ? <Typography.Text type="secondary">—</Typography.Text>
+                                : value === null
+                                    ? (
+                                        <Tooltip title={warningTooltip('unclassified')}>
+                                            <Tag color={warningColor('unclassified')}>{warningLabel('unclassified')}</Tag>
+                                        </Tooltip>
+                                    )
+                                    : <Tag color={categoryColor(value)}>{categoryLabel(value)}</Tag>;
+
+                            return (
+                                <Space direction="vertical" size={0}>
+                                    {tag}
+                                    {group === null ? null : (
+                                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{group}</Typography.Text>
+                                    )}
+                                </Space>
+                            );
                         },
-                    },
-                    {
-                        title: 'Group',
-                        render: (_: unknown, row: ItemRow) => itemGroupName(row) ?? '—',
                     },
                     {
                         title: 'Variant',
@@ -287,7 +422,17 @@ export default function ItemsPage() {
                             </Space>
                         ),
                     }]),
-                    { title: 'UOM', dataIndex: 'uom' },
+                    {
+                        title: 'UOM',
+                        dataIndex: 'uom',
+                        // Built from what the catalogue actually holds rather
+                        // than a hardcoded list: this factory counts in Nos.,
+                        // Kgs., Pcs. and a compound unit, and a filter naming a
+                        // unit no item uses is a dead option.
+                        filters: uomFilters,
+                        onFilter: (value, row: ItemRow) => (row.uom ?? '') === value,
+                        sorter: (a: ItemRow, b: ItemRow) => (a.uom ?? '').localeCompare(b.uom ?? ''),
+                    },
                     { title: 'HSN/SAC', dataIndex: 'hsn_sac_code' },
                     { title: 'Reorder Level', dataIndex: 'reorder_level' },
                     {
@@ -311,6 +456,11 @@ export default function ItemsPage() {
                         // reason and left no audit line, on the most-referenced
                         // master in the schema.
                         title: 'Status',
+                        filters: [
+                            { text: 'Active', value: true },
+                            { text: 'Archived', value: false },
+                        ],
+                        onFilter: (value, row: ItemRow) => row.is_active === value,
                         dataIndex: 'is_active',
                         render: (_: boolean, row: ItemRow) => <ConfigurationStatusTag entity="item" row={row} />,
                     },

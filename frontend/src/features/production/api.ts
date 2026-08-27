@@ -1319,6 +1319,12 @@ export interface ListMaterialLotsParams {
     grn_id?: number;
     per_page?: number;
     page?: number;
+    /** Inclusive received-date bounds, YYYY-MM-DD. Applied by the SERVER: the
+     *  register is paginated, so narrowing it in the browser would filter the
+     *  page that arrived while the pager reported the whole total. */
+    received_from?: string;
+    received_to?: string;
+    order?: 'newest' | 'oldest';
 }
 
 export async function listMaterialLots(params?: ListMaterialLotsParams): Promise<Paginated<MaterialLot>> {

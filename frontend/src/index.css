@@ -49,3 +49,19 @@ body,
         transition: none;
     }
 }
+
+/* Item Master category facets (27-Aug-2026).
+
+   The same case as the floor's attention chip above: nine bare <button>s
+   sitting among AntD components that each bring their own ring. A person
+   tabbing to choose a category must be able to see where they are, in the
+   token colour the rest of the app draws, rather than relying on the browser
+   default beside controls that all draw their own.
+
+   :focus-visible, not :focus — choosing a category with a thumb on a store
+   tablet must not leave a ring behind. */
+.category-facet:focus-visible {
+    outline: 2px solid #1677ff;
+    outline-offset: -2px;
+    border-radius: 6px;
+}

@@ -174,8 +174,18 @@ export async function updateWarehouse(id: number, payload: UpdateWarehousePayloa
     return data.data;
 }
 
+/**
+ * `sort`/`direction` are SERVER-side on purpose: this list is paginated, so a
+ * column sorter in the table would order the rows already on screen and show
+ * it as the order of the factory's stock.
+ */
 export async function listStockBalances(
-    params?: ListParams & { item_id?: number },
+    params?: ListParams & {
+        item_id?: number;
+        warehouse_id?: number;
+        sort?: 'item' | 'warehouse' | 'quantity';
+        direction?: 'asc' | 'desc';
+    },
 ): Promise<Paginated<StockBalance>> {
     const { data } = await api.get<Paginated<StockBalance>>('/inventory/stock-balances', { params });
     return data;
