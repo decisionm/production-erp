@@ -133,23 +133,45 @@ export default function ItemsPage() {
     );
 
     /*
-     * THE CATEGORY FILTER APPLIES TO BOTH LISTS. The warning filter answers
-     * "what is wrong"; the category answers "what kind of thing". They are
-     * different questions and a person fixing categories asks both at once —
-     * "show me the unclassified packing material" is the whole job.
+     * THE TWO FILTERS ARE EXCLUSIVE, and that is a correctness rule rather
+     * than a simplification.
+     *
+     * The warning list is paginated by the SERVER; the category filter can
+     * only be applied to the page that has already arrived, because
+     * `ListItemWarningsRequest` accepts no category. Combining them therefore
+     * emptied the table while the pager underneath went on reporting the
+     * server's unfiltered total — a screen whose whole product is counts,
+     * stating one that is not true of what it is showing.
+     *
+     * Nothing is lost by refusing the combination: it is empty by
+     * construction. An unclassified item has no category, so "unclassified
+     * packing material" cannot match a row, and every other pairing is
+     * answerable by picking the category and reading the Warnings column that
+     * is already on each row.
      */
-    const rows: ItemRow[] = (warning === null ? searchedItems : flaggedRows)
-        .filter((item) => matchesCategoryFacet(item, facet));
+    const rows: ItemRow[] = warning === null
+        ? searchedItems.filter((item) => matchesCategoryFacet(item, facet))
+        : flaggedRows;
 
     /*
      * Counted over the WHOLE catalogue, never over the filtered rows: a count
      * that shrinks as you filter is describing your filter, not the factory,
-     * and the number a storekeeper is deciding on is how many exist.
+     * and the number a storekeeper is deciding on is how many exist. With the
+     * filters exclusive this count also PREDICTS what clicking will show,
+     * which is how a number on a control is read whatever it was meant as.
      */
-    const facets = categoryFacets(allItems, facet);
+    const facets = useMemo(() => categoryFacets(allItems, facet), [allItems, facet]);
 
     const selectWarning = (next: WarningFilter) => {
         setWarning(next);
+        setWarningPage(1);
+        // Exclusive with the category filter — see the note on `rows`.
+        setFacet(CATEGORY_FACET_ALL);
+    };
+
+    const selectFacet = (next: CategoryFacetKey) => {
+        setFacet(next);
+        setWarning(null);
         setWarningPage(1);
     };
 
@@ -221,7 +243,7 @@ export default function ItemsPage() {
                 </Space>
             </Space>
 
-            <CategoryFacets facets={facets} active={facet} onSelect={setFacet} />
+            <CategoryFacets facets={facets} active={facet} onSelect={selectFacet} />
 
             <IdentityHealthStrip health={health} active={warning} onSelect={selectWarning} />
 
@@ -233,7 +255,10 @@ export default function ItemsPage() {
                 // Two filters stack here and a search sits above both, so an
                 // empty table names the narrowest one that is on rather than
                 // leaving a person to clear all three to find out which.
-                locale={{ emptyText: catalogueEmptyText(facet, warning, search) }}
+                // The search box is disabled while a warning filter is on, so
+                // its text is not applied and must not be blamed for an empty
+                // table.
+                locale={{ emptyText: catalogueEmptyText(facet, warning, warning === null ? search : '') }}
                 pagination={warning === null
                     ? { pageSize: 20, showSizeChanger: true, pageSizeOptions: [20, 50, 100], showTotal: (t) => `${t} items` }
                     : {

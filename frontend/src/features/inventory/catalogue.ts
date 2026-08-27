@@ -3,18 +3,19 @@ import type { Item, ItemCategoryValue, ItemRow } from '@/features/inventory/type
 /**
  * THE CATALOGUE, AS A STOREKEEPER READS IT.
  *
- * 624 items, and most of the names differ by a colour word and a gram figure:
- * "B.100 Ml Round Pet Bottle Amber 12.9 Gms - 812 Nos" against the same line
- * ending "- 840 Nos". Reading a Category tag on every row to find the packing
+ * Most of the names differ by a colour word and a gram figure: "B.100 Ml
+ * Round Pet Bottle Amber 12.9 Gms - 812 Nos" against the same line ending
+ * "- 840 Nos". Reading a Category tag on every row to find the packing
  * material is work; picking the category and seeing only those is not. So the
  * category stops being a column to scan and becomes the way in, with its count
  * on the face of it — the count is what tells somebody there is nothing to
  * look for before they look.
  *
- * UNCLASSIFIED IS A FACET, NOT AN ABSENCE. 556 of the catalogue has no
- * category recorded, and that is the single largest thing a person can fix
- * here, so it is offered as a place to go rather than left as the residue of
- * filtering everything else out.
+ * UNCLASSIFIED IS A FACET, NOT AN ABSENCE. Most of this catalogue has no
+ * category recorded (no figure is quoted here on purpose — the live one moves,
+ * and `items:summary` is where it is counted), and it is the single largest
+ * thing a person can fix on this screen. So it is offered as a place to go
+ * rather than left as the residue of filtering everything else away.
  */
 
 export const CATEGORY_FACET_ALL = 'all';
@@ -43,7 +44,11 @@ const FACET_ORDER: { key: CategoryFacetKey; label: string }[] = [
 
 export function matchesCategoryFacet(item: Pick<Item, 'category'>, facet: CategoryFacetKey): boolean {
     if (facet === CATEGORY_FACET_ALL) return true;
-    if (facet === CATEGORY_FACET_UNCLASSIFIED) return item.category === null || item.category === undefined;
+    // `null` is "nobody has said yet"; `undefined` is a server that did not
+    // serve the field at all. types.ts states that three-state rule and the
+    // Category column already honours it, so the facet must not collapse the
+    // two and report a whole unserved catalogue as unclassified.
+    if (facet === CATEGORY_FACET_UNCLASSIFIED) return item.category === null;
     return item.category === facet;
 }
 
@@ -83,27 +88,16 @@ export function categoryFacets(items: Pick<Item, 'category'>[], selected: Catego
  *   * SEEDED — the pull invented it from the name. Shown quietly and marked,
  *     because a placeholder that looks like a decision is how a placeholder
  *     survives for a year.
- *
- * `redundant` says the string merely repeats the name once case and spacing
- * are folded away — this catalogue's normal case, and the reason the shared
- * item label drops it. The column keeps showing it (somebody types it into the
- * delivery scanner) but it need not shout.
  */
 export interface SkuPresentation {
     text: string;
     provisional: boolean;
-    redundant: boolean;
 }
 
-export function skuPresentation(item: Pick<ItemRow, 'sku' | 'name' | 'sku_provisional'>): SkuPresentation {
-    const sku = (item.sku ?? '').trim();
-    const name = (item.name ?? '').trim();
-    const bare = (value: string) => value.toLowerCase().replace(/\s+/g, '');
-
+export function skuPresentation(item: Pick<ItemRow, 'sku' | 'sku_provisional'>): SkuPresentation {
     return {
-        text: sku,
+        text: (item.sku ?? '').trim(),
         provisional: item.sku_provisional === true,
-        redundant: sku !== '' && name !== '' && bare(sku) === bare(name),
     };
 }
 

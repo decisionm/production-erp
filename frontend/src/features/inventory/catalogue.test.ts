@@ -36,13 +36,15 @@ describe('categoryFacets', () => {
         expect(keys).toContain('finished_good');
     });
 
-    it('keeps the SELECTED category even after its last item leaves it', () => {
+    it('keeps the SELECTED category even after its last item leaves it, showing zero', () => {
         // Reclassify the only packing item while standing in Packing: the
-        // control must not drop the option under the user's cursor.
-        const keys = categoryFacets([item('finished_good')], 'packing_material').map((f) => f.key);
+        // control must not drop the option under the user's cursor, and it
+        // must say plainly that there is now nothing in it.
+        const facets = categoryFacets([item('finished_good')], 'packing_material');
+        const packing = facets.find((f) => f.key === 'packing_material');
 
-        expect(keys).toContain('packing_material');
-        expect(new Map(keys.map((k, i) => [k, i])).get('packing_material')).toBeDefined();
+        expect(packing).toBeDefined();
+        expect(packing?.count).toBe(0);
     });
 
     it('always offers All, even for an empty catalogue', () => {
@@ -67,12 +69,20 @@ describe('categoryFacets', () => {
 });
 
 describe('matchesCategoryFacet', () => {
-    it('treats an absent category as unclassified, not as "other"', () => {
+    it('treats a null category as unclassified, not as "other"', () => {
         // The distinction the column exists for: `other` is an answer,
         // null is nobody having said yet.
         expect(matchesCategoryFacet(item(null), CATEGORY_FACET_UNCLASSIFIED)).toBe(true);
         expect(matchesCategoryFacet(item('other'), CATEGORY_FACET_UNCLASSIFIED)).toBe(false);
         expect(matchesCategoryFacet(item(null), 'other')).toBe(false);
+    });
+
+    it('does NOT report an unserved field as unclassified', () => {
+        // types.ts keeps three states apart: a value, "nobody has said yet"
+        // (null), and "the server did not serve the field" (undefined).
+        // Collapsing the last two would call a whole catalogue unclassified on
+        // a server that simply omits the column.
+        expect(matchesCategoryFacet({ category: undefined } as never, CATEGORY_FACET_UNCLASSIFIED)).toBe(false);
     });
 
     it('lets everything through All', () => {
@@ -83,40 +93,25 @@ describe('matchesCategoryFacet', () => {
 
 describe('skuPresentation', () => {
     it('marks a SKU the sync invented from the Tally name', () => {
-        const shown = skuPresentation({
-            sku: '100ML ROUND',
-            name: '100ML ROUND',
-            sku_provisional: true,
-        } as never);
+        const shown = skuPresentation({ sku: '100ML ROUND', sku_provisional: true } as never);
 
         expect(shown.provisional).toBe(true);
-        expect(shown.redundant).toBe(true);
         expect(shown.text).toBe('100ML ROUND');
     });
 
     it('leaves a SKU a person chose alone', () => {
-        const shown = skuPresentation({
-            sku: 'BTL-100-RND-840',
-            name: '100ML ROUND - 840 Nos',
-            sku_provisional: false,
-        } as never);
-
-        expect(shown.provisional).toBe(false);
-        expect(shown.redundant).toBe(false);
-    });
-
-    it('reads redundancy through case and spacing, the way this catalogue drifts', () => {
-        // '100ml' and '100 Ml' are the same thing in these books.
-        expect(skuPresentation({ sku: '100ml round', name: '100 Ml Round' } as never).redundant).toBe(true);
-    });
-
-    it('says nothing is redundant when either side is blank', () => {
-        expect(skuPresentation({ sku: '', name: 'Bottle' } as never).redundant).toBe(false);
-        expect(skuPresentation({ sku: 'BTL-1', name: '' } as never).redundant).toBe(false);
+        expect(skuPresentation({ sku: 'BTL-100-RND-840', sku_provisional: false } as never).provisional)
+            .toBe(false);
     });
 
     it('treats a missing flag as "not provisional" rather than guessing', () => {
-        expect(skuPresentation({ sku: 'BTL-1', name: 'Bottle' } as never).provisional).toBe(false);
+        // The server always sends the field, but a screen must not invent a
+        // factory fact from its absence.
+        expect(skuPresentation({ sku: 'BTL-1' } as never).provisional).toBe(false);
+    });
+
+    it('trims, so a padded code does not render as a wider one', () => {
+        expect(skuPresentation({ sku: '  BTL-1  ' } as never).text).toBe('BTL-1');
     });
 });
 
@@ -125,6 +120,14 @@ describe('catalogueEmptyText', () => {
         expect(catalogueEmptyText(CATEGORY_FACET_ALL, null, ' amber ')).toBe('Nothing matches "amber".');
         expect(catalogueEmptyText('packing_material', null, 'amber'))
             .toBe('Nothing matches "amber" in packing.');
+    });
+
+    it('puts the search ahead of the warning when both are passed', () => {
+        // The precedence the first test looks like it pins but does not: both
+        // of its cases pass `warning: null`, so it would pass against an
+        // implementation that checked the warning first.
+        expect(catalogueEmptyText(CATEGORY_FACET_ALL, 'duplicate_name', 'amber'))
+            .toBe('Nothing matches "amber".');
     });
 
     it('names the warning filter when there is no search', () => {
