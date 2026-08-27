@@ -149,17 +149,57 @@ describe('the Inventory menu', () => {
     });
 
     /**
-     * TWO LABEL SCREENS, BOTH LINKED. "Barcode & Labels" used to be the label
-     * on /inventory/material-lots; it now names the per-BAG bench, and the
-     * per-RECEIPT register keeps its own name and its own entry. The failure
-     * this pins is the quiet one: pointing both names at one route, or letting
-     * the receipts register lose its only link while its page stays mounted.
+     * TWO LABEL REGISTERS, ONE ENTRY — and the register did NOT lose its way
+     * in. The earlier version of this test pinned them as two sidebar entries,
+     * and the failure it guarded against was "the receipts register loses its
+     * only link while its page stays mounted". That guard still matters and
+     * still holds: the register is the second TAB of Barcode & Labels, and
+     * /inventory/material-lots stays mounted (App.routes.test.tsx pins the
+     * route table), so bookmarks and existing links open it directly.
+     *
+     * What changed is deliberate: the store asked for the Inventory group to
+     * be the six locations it actually works in, and nine entries put the
+     * least-used register beside the most-used bench.
      */
-    it('links the bag bench and the receipts register as two different routes', () => {
+    it('carries one label entry, with the receipts register no longer a sidebar row', () => {
         const byLabel = new Map(inventory?.children?.map((child) => [child.label, child.key]));
 
         expect(byLabel.get('Barcode & Labels')).toBe('/inventory/barcode-labels');
-        expect(byLabel.get('Material Receipts & Bag Labels')).toBe('/inventory/material-lots');
+        expect(byLabel.has('Material Receipts & Bag Labels')).toBe(false);
+    });
+
+    /**
+     * THE SIX THE FACTORY NAMED, in the order a storekeeper works: what a
+     * product IS, what is on hand, the label bench, what production is asking
+     * for, where the stock lives, and the ledger behind it all. A seventh
+     * entry appearing here is the drift this pins — the group was nine deep
+     * before, which is what prompted the consolidation.
+     */
+    it('is exactly the six inventory destinations, in working order', () => {
+        expect(inventory?.children?.map((child) => child.key)).toEqual([
+            '/inventory/items',
+            '/inventory/stock',
+            '/inventory/barcode-labels',
+            '/inventory/store-issue-queue',
+            '/inventory/warehouses',
+            '/inventory/stock-movements',
+        ]);
+    });
+
+    /**
+     * The fulfilment pair moved to Sales, and moving is all that happened:
+     * the routes are unchanged, so this pins that they left Inventory AND
+     * that they are still reachable somewhere rather than quietly orphaned.
+     */
+    it('has handed the fulfilment screens to Sales without dropping them', () => {
+        const inventoryKeys = inventory?.children?.map((child) => child.key) ?? [];
+        expect(inventoryKeys).not.toContain('/inventory/fulfilment');
+        expect(inventoryKeys).not.toContain('/inventory/planning');
+
+        const sales = allNavItems.find((item) => item.key === 'sales');
+        const salesKeys = sales?.children?.map((child) => child.key) ?? [];
+        expect(salesKeys).toContain('/inventory/fulfilment');
+        expect(salesKeys).toContain('/inventory/planning');
     });
 });
 
