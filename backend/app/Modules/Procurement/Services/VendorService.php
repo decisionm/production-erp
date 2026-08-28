@@ -24,10 +24,12 @@ class VendorService
     /**
      * The prefix and width of a minted vendor code — "V-0001".
      *
-     * `vendors.code` is unique, and `StoreVendorRequest` caps a code at 32
-     * characters (the column itself is wider). A four-digit number leaves the
-     * whole of that limit unused and simply gets longer past 9999 rather than
-     * wrapping or truncating.
+     * `vendors.code` is unique. The column itself is a plain string and far
+     * wider than 32; the 32 is `StoreVendorRequest`'s cap on a SUPPLIED code,
+     * which a minted code never passes through — it is kept as the yardstick
+     * anyway so both kinds of code fit the same column comfortably. A
+     * four-digit number leaves the whole of it unused and simply gets longer
+     * past 9999 rather than wrapping or truncating.
      */
     private const MINTED_PREFIX = 'V-';
 
@@ -46,10 +48,11 @@ class VendorService
      * NOT a slug of the name, which is what WarehouseService::uniqueCodeFrom()
      * and ItemService::uniqueSkuFrom() do, and rightly so for a handful of
      * godowns and for an item whose SKU is read on its own. Measured against
-     * this factory's live creditor ledger, a significant minority of supplier
-     * names slug past the 32 characters `StoreVendorRequest` allows, and
-     * truncating them to fit collides immediately. The names stay out of this
-     * repository (FC-06: supplier identity is Owner/Accounts only). A slug also freezes the spelling a
+     * the 633 Sundry Creditors ledgers mirrored in the rehearsal database, 48
+     * supplier names slug past 32 characters and truncating them to fit
+     * collides immediately. The counts stay and the names do not: 633 and 48
+     * are measurements, while supplier identity is Owner/Accounts (FC-06) and
+     * belongs in the ledger rather than here. A slug also freezes the spelling a
      * name had on its first day, so correcting a name leaves a code that
      * disagrees with it. Every screen showing a vendor code shows the name
      * beside it, so a code that repeats the name earns nothing.

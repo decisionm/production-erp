@@ -17,18 +17,20 @@ use Tests\TestCase;
  *
  * The vendor form used to demand a code the person filling it in had no way
  * to know. The live master shows what that produced: `V-DEMO-KPXL`, typed by
- * hand on 24-Jul against a vendor called "CHA / Clearing Agent" — a code
+ * hand on 24-Jul against a live vendor row — a code
  * carrying a random suffix because the operator had no convention to follow.
  *
  * WHY A SEQUENCE AND NOT A SLUG OF THE NAME. The two generators already in
  * this repo — WarehouseService::uniqueCodeFrom() and
  * ItemService::uniqueSkuFrom() — both slug the name, and both are right for
  * what they serve: a handful of godowns, and items whose SKU a person reads
- * on its own. Neither fits a vendor list. A slug of this factory's supplier
- * names overruns the 32 characters `StoreVendorRequest` allows, on a
- * significant minority of them, and truncating to fit collides — the
- * measurement is against the live creditor ledger and the names themselves
- * stay out of this repository (FC-06: supplier identity is Owner/Accounts).
+ * on its own. Neither fits a vendor list. Measured against the 633 Sundry
+ * Creditors ledgers mirrored in the rehearsal database, 48 supplier names
+ * slug past 32 characters, and truncating those to fit collides straight
+ * away. THE COUNTS STAY, THE NAMES DO NOT: 633 and 48 are measurements, and
+ * dropping them once left the argument unfalsifiable, which the evidence
+ * discipline forbids as squarely as FC-06 forbids the names. Supplier
+ * identity is Owner/Accounts, so the names live in the ledger, not here.
  * A slug also goes stale: it
  * records the spelling a name had on the day it was created, and a corrected
  * name leaves a code that disagrees with it for ever. Every screen that shows
@@ -86,7 +88,7 @@ class VendorCodeGenerationTest extends TestCase
     public function test_codes_that_are_not_in_the_sequence_do_not_move_it(): void
     {
         Vendor::create(['code' => 'VEN-RESIN', 'name' => 'Sri Manakula Polymers Pvt Ltd']);
-        Vendor::create(['code' => 'V-DEMO-KPXL', 'name' => 'CHA / Clearing Agent']);
+        Vendor::create(['code' => 'V-DEMO-KPXL', 'name' => 'Vendor Mike']);
 
         $this->assertSame('V-0001', $this->service()->create(['name' => 'Vendor Alpha'])->code);
     }
@@ -175,8 +177,13 @@ class VendorCodeGenerationTest extends TestCase
         return new QueryException('sqlite', 'insert into "vendors" ("code", "name") values (?, ?)', [], new PDOException($message, 23000));
     }
 
-    /** Every minted code fits the 32 characters `StoreVendorRequest` allows, with room to spare. */
-    public function test_a_minted_code_is_well_inside_the_column_limit(): void
+    /**
+     * A minted code stays well inside 32 characters — the cap
+     * `StoreVendorRequest` puts on a SUPPLIED code. A minted one never passes
+     * through that rule, so this is the yardstick a hand-typed code is held
+     * to, kept deliberately so both kinds of code fit the same column.
+     */
+    public function test_a_minted_code_is_well_inside_the_length_a_supplied_code_may_have(): void
     {
         $this->assertLessThanOrEqual(32, strlen($this->service()->create(['name' => 'Vendor Lima'])->code));
     }
