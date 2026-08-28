@@ -147,7 +147,19 @@ export default function PurchaseRequisitionsPage() {
                                         <Button
                                             size="small"
                                             danger
-                                            onClick={() => rejectMutation.mutate(row.id)}
+                                            onClick={() =>
+                                                // Rejecting is irreversible and sat one
+                                                // mis-tap from Approve. The confirm names
+                                                // the requisition so the dialog is about a
+                                                // row rather than about a verb.
+                                                Modal.confirm({
+                                                    title: `Reject requisition #${row.id}?`,
+                                                    content: 'This cannot be undone.',
+                                                    okText: 'Reject',
+                                                    okButtonProps: { danger: true },
+                                                    onOk: () => rejectMutation.mutate(row.id),
+                                                })
+                                            }
                                             loading={rejectMutation.isPending}
                                         >
                                             Reject
@@ -192,7 +204,8 @@ export default function PurchaseRequisitionsPage() {
                         <div style={{ color: '#ff4d4f', marginBottom: 8 }}>{errors.lines.root.message}</div>
                     )}
                     {fields.map((field, index) => (
-                        <Space key={field.id} align="baseline" style={{ display: 'flex', marginTop: 8 }}>
+                        <div key={field.id}>
+                        <Space align="baseline" style={{ display: 'flex', marginTop: 8 }}>
                             <Controller
                                 name={`lines.${index}.item_id`}
                                 control={control}
@@ -216,6 +229,22 @@ export default function PurchaseRequisitionsPage() {
                             />
                             <Button danger onClick={() => remove(index)}>Remove</Button>
                         </Space>
+                        {/*
+                          Only the array-level error was rendered, so a line
+                          with no item or no quantity failed validation with
+                          nothing shown against it: pressing OK appeared to do
+                          nothing and there was no way to find the bad row. The
+                          messages were already in form state.
+                        */}
+                        {(() => {
+                            const line = errors.lines?.[index];
+                            const messages = [line?.item_id?.message, line?.quantity?.message].filter(Boolean) as string[];
+
+                            return messages.length > 0 ? (
+                                <div style={{ color: '#ff4d4f', marginTop: 4 }}>{messages.join(' · ')}</div>
+                            ) : null;
+                        })()}
+                        </div>
                     ))}
                     <Button
                         type="dashed"

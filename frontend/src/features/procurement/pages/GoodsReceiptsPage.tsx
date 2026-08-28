@@ -567,7 +567,7 @@ export default function GoodsReceiptsPage() {
         resolver: zodResolver(receiptSchema),
         defaultValues: { lines: [] },
     });
-    const { fields, replace } = useFieldArray({ control, name: 'lines' });
+    const { fields, replace, remove } = useFieldArray({ control, name: 'lines' });
 
     // Persist the receipt in progress. `watch` with a callback fires on every
     // keystroke and every scan, which is exactly the granularity a trolley
@@ -996,12 +996,36 @@ export default function GoodsReceiptsPage() {
                     {fields.map((field, index) => (
                         <div key={field.id}>
                             <Space align="baseline" style={{ display: 'flex', marginTop: 8 }}>
-                                <span style={{ width: 220, display: 'inline-block' }}>{field.item_label}</span>
+                                <span style={{ width: 220, display: 'inline-block' }}>
+                                    {field.item_label}
+                                    {field.item_uom ? <span style={{ color: '#8c8c8c' }}> ({field.item_uom})</span> : null}
+                                </span>
                                 <Controller
                                     name={`lines.${index}.quantity`}
                                     control={control}
                                     render={({ field }) => <InputNumber {...field} min={0} placeholder="Quantity" />}
                                 />
+                                {/*
+                                  A PARTIAL DELIVERY MUST BE BOOKABLE. The form
+                                  rebuilds itself with EVERY line still
+                                  outstanding on the order and each one demands
+                                  a quantity above zero, so when only some of a
+                                  multi-line order turned up, the arrival
+                                  standing on the dock could not be recorded at
+                                  all until the rest of it arrived. Per-line
+                                  delivery schedules with different due dates
+                                  make that the ordinary case, not the corner.
+                                  The API has always accepted a subset of the
+                                  order's lines; only the screen could not say
+                                  it. Dropping the line takes its allocations
+                                  and lot rows with it, and the guard keeps at
+                                  least one line so the request stays valid.
+                                */}
+                                {fields.length > 1 && (
+                                    <Button size="small" danger onClick={() => remove(index)}>
+                                        Not in this delivery
+                                    </Button>
+                                )}
                                 {showsOrderRates && (
                                     <Controller
                                         name={`lines.${index}.unit_cost`}
