@@ -11,6 +11,18 @@ Nothing here is an owner decision, and severity is the reviewing agent's
 judgement. The suggested fix is recorded with the defect as a starting point,
 not an instruction — several would change behaviour a person should rule on.
 
+## Status, 28-Aug-2026
+
+**11 of the 15 are fixed** on `claude/procurement-defects` (PR 45). What remains
+is listed here with the reason, because each needs a ruling rather than a patch.
+
+| still open | why it is not fixed |
+|---|---|
+| Lot/bag capture silently off for a procurement-only login, and the receipt then lands with no incoming-QC hold | The flag lives behind the production module, so a procurement-only login cannot read it and the page reads "no settings" as "traceability off". Fixing it means either moving the flag somewhere procurement can read, or refusing the receipt outright — and refusing would stop a storekeeper receiving at all. **Which of those is right is a permissions decision, and material entering stock without a QC hold is too consequential to guess.** |
+| Incoming QC releases every non-rejected bag on the line regardless of how much was inspected | Changes what an inspection MEANS. Inspecting 10 bags of 20 currently releases all 20. Whether the rest should stay held is the quality desk's rule, not an agent's. |
+| An inspection that rejects material on a line carrying no bags records the rejection but issues no stock | Same family. The service documents "a line with no bags needs no disposition" as deliberate, so changing it reverses a stated decision. |
+| Revision-history Unit Price column shown for revision kinds that carry no rates | Cosmetic. The cell already reads "withheld" rather than showing a wrong number, so nothing misleads a reader into a wrong figure. |
+
 | # | severity | file | defect |
 |---|---|---|---|
 | 1 | high | `frontend/src/features/procurement/pages/GoodsReceiptsPage.tsx:70` | The goods-receipt form cannot record a partial delivery on a multi-line purchase order: it rebuilds the form with EVERY line that still has quantity outstanding (`replace(remainingLines)`, line 650), each line's quantity is validated `z.number().gt(0)` (line 70), and there is no per-line remove/skip control in the render (lines 963-993) — while `StoreGoodsReceiptRequest` (`'lines' => ['required','array','min:1']`, each line only tied to the order) accepts any non-empty subset, so the API allows the receipt the screen cannot express. |
