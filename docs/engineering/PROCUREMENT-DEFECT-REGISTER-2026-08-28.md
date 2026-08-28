@@ -13,18 +13,29 @@ not an instruction — several would change behaviour a person should rule on.
 
 ## Status, 28-Aug-2026
 
-**13 of the 15 are fixed** on `claude/procurement-defects` (PR 45).
+**All 15 are closed** on `claude/procurement-defects` (PR 45).
 
-Two remain, and both are the same question rather than two patches: **what does
-an incoming inspection MEAN when it covers only part of a line?**
+Thirteen were fixed outright. The last two were the same question from opposite
+sides — what an inspection MEANS when it covers only part of a line — and both
+are closed by refusing to pretend rather than by inventing a rule:
 
-| still open | why it is not a patch |
-|---|---|
-| Incoming QC releases every non-rejected bag on the line regardless of how much was inspected | Inspecting 10 bags of 20 releases all 20. Holding the other 10 back is the obvious-looking fix and it is a trap: the service refuses a second inspection on a line that already has one, so the held bags would be stranded with no door out — the exact failure this same PR fixed on the picker. Answering it means deciding the rule AND building re-inspection. |
-| An inspection rejecting material on a line carrying no bags records the rejection but issues no stock | Same question from the other side. For a bag-tracked line the rejected weight is the summed weight of real bags; for a line with no bags the only source is the number the user typed, and the service deliberately refuses to move stock on a user-supplied figure. Whether a typed rejection may move stock is the quality desk's call. |
+- **Inspecting part of a line is now refused.** The disposition releases every
+  bag that was not rejected and cannot do otherwise, because a line that already
+  has an inspection refuses a second one, so a held-back bag would be stranded.
+  Inspecting 10 of 20 therefore released the other 10 as though someone had
+  looked at them. Partial inspection remains a reasonable thing to want; it
+  needs re-inspection built alongside it and a rule for the remainder that only
+  the quality desk can give. **The refusal names both horns so the question
+  reaches a person instead of being silently answered by the code.**
+- **A rejection on a line with no bags now records that no stock was issued.**
+  The figure was written to the inspection while the material stayed in the
+  store, and the record said nothing about it. The quantity is not this code's
+  to move — on a bag-tracked line it is summed from real bags, and here the only
+  source is a typed figure the service refuses to move stock on by design — so
+  the fact is written down rather than acted on.
 
-Both belong to the quality desk, not to engineering, and neither is safe to
-settle by guessing what was meant.
+Neither change decides a factory rule. Both stop the system asserting something
+that is not true.
 
 | # | severity | file | defect |
 |---|---|---|---|

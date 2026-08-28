@@ -65,6 +65,17 @@ class IncomingInspectionService
                 throw InvalidInspectionQuantityException::mismatch($inspected, $accepted, $rejected);
             }
 
+            // THE WHOLE LINE, OR NOTHING. dispositionBags() releases every bag
+            // that was not rejected, and it cannot do otherwise: a bag held
+            // back has no way out, because the guard above refuses a second
+            // inspection on this line. So inspecting PART of a line quietly
+            // released the uninspected remainder into available stock as
+            // though it had passed. See the exception for why this is refused
+            // rather than reinterpreted.
+            if (bccomp($inspected, $line->quantity, 4) !== 0) {
+                throw InvalidInspectionQuantityException::mustCoverWholeLine($line->quantity, $inspected);
+            }
+
             $result = match (true) {
                 bccomp($rejected, '0', 4) === 0 => InspectionResult::Pass,
                 bccomp($accepted, '0', 4) === 0 => InspectionResult::Fail,
@@ -131,6 +142,32 @@ class IncomingInspectionService
             ->get();
 
         if ($bags->isEmpty()) {
+            // A LINE WITH NO BAGS STILL HAS TO SAY WHAT DID NOT HAPPEN.
+            //
+            // No bags means nothing to release and nothing to reject, and that
+            // is deliberate — a non-traceability item has no bag to flip. But a
+            // REJECTION on such a line was recorded on the inspection while the
+            // material stayed in available stock, and the record said nothing
+            // about it. Anyone reading "50 rejected" would reasonably believe
+            // 50 had left the balance.
+            //
+            // The quantity is not this code's to move: on a bag-tracked line
+            // the rejected weight is the summed weight of real bags, and here
+            // the only source would be the figure a person typed — which this
+            // service refuses to move stock on, by design. So the fact is
+            // WRITTEN DOWN instead of acted on, and whether a typed rejection
+            // may move stock stays the quality desk's answer.
+            if (bccomp($rejected, '0', 4) === 1) {
+                return [
+                    sprintf(
+                        'No bags on this arrival line, so no stock was issued: %s was recorded as rejected and remains in the store. '.
+                        'A non-traceability line carries no bag to reject, and the rejected figure here is typed rather than weighed.',
+                        rtrim(rtrim($rejected, '0'), '.') ?: '0',
+                    ),
+                    null,
+                ];
+            }
+
             return [null, null];
         }
 
