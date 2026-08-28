@@ -1639,6 +1639,20 @@ receipt stays ERP-only, feeding the invoice later)? Related: what Tally
 should receive when material is rejected at incoming QA is already named
 open inside DEC-20260825-001 — an answer here should settle both together.
 
+**New input, 2026-08-28 — NOT YET A DECISION.** Asked where in Tally the
+answer lives, the lead checked and reported back, in a Claude session on
+28-Aug-2026, the words "No Recepts notes" — i.e. the factory does not book
+Tally Receipt Notes. That is consistent with every artifact read so far:
+`receipt_note.xml` in the 26-Aug export holds money receipts, not goods
+receipts, and no GRN voucher sample exists in any export. It is recorded
+here rather than as a decision record for two reasons, and both must be
+cleared before it becomes one: the statement came from the lead in a
+session, not from the owner in a quotable dated message, and no artifact
+has been attached showing the Receipt Note voucher count — the Statistics
+screen is where that number lives. Nothing in the code may rely on this
+paragraph. `tally-sync.receipt_notes_enabled` stays OFF as the fail-closed
+reading of an OPEN question, which is what it already says.
+
 **Blocks:** the Tally-posting half of the goods-receipt flow. It does not
 block ERP-side goods receipts, quality holds, or barcode issue at
 acceptance, which carry on regardless of what Tally is later told.
