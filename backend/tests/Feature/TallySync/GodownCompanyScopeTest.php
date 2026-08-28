@@ -39,12 +39,23 @@ use Tests\TestCase;
  * first:
  *   A. a godown records the Tally company it came from, on update as well as
  *      on create;
- *   B. the sole-godown lookup counts only godowns of the BOUND company.
+ *   B. the sole-godown lookup narrows to the BOUND company's godowns.
  *
- * B fails SAFE. A warehouse whose company is unknown is not a candidate, so
- * before a fresh pull the lookup finds nothing and the order refuses exactly
- * as it does today. Nothing starts posting to a godown on this code's
- * judgement; the pull has to say which company a godown belongs to first.
+ * B NARROWS, IT DOES NOT REQUIRE, and this header used to say the opposite.
+ * It described the first design — company mandatory, anything unknown not a
+ * candidate — which was written, tested and then rejected because it broke
+ * thirty-two tests for a real reason: no godown records a company yet, so a
+ * mandatory rule resolves NOTHING until a fresh pull runs, and resolveName()
+ * then falls back to the warehouse's own name, sending Tally a godown it does
+ * not have.
+ *
+ * What ships: narrow only when at least one linked warehouse records the bound
+ * company. A table that cannot be narrowed is counted whole, exactly as
+ * before, so every previously-resolving system keeps resolving to the same
+ * godown. That is a compatibility fallback, NOT a fail-closed guarantee, and
+ * saying so plainly is the point of this paragraph — the next reader of this
+ * file must not approve it believing an unknown company can never be chosen.
+ * test_a_table_that_records_no_company_at_all_is_counted_as_before pins it.
  */
 class GodownCompanyScopeTest extends TestCase
 {
@@ -101,6 +112,34 @@ class GodownCompanyScopeTest extends TestCase
         $this->assertSame(
             self::COMPANY,
             Warehouse::where('tally_guid', 'gd-company')->value('tally_company'),
+        );
+    }
+
+    /**
+     * A PULL THAT NAMES NO COMPANY MUST NOT BLANK THE ONE ALREADY RECORDED.
+     *
+     * `company` is optional on the masters request, and the binding guard only
+     * refuses a pull naming a DIFFERENT company — a pull naming none passes
+     * straight through. The only thing standing between that and every godown
+     * losing its company is one array_filter in WarehouseService. Nothing
+     * pinned it, so deleting that filter left all the other tests here green
+     * while quietly disarming the narrowing this whole file exists to hold.
+     */
+    public function test_a_pull_that_names_no_company_leaves_the_recorded_one_alone(): void
+    {
+        $this->actAsAgent();
+
+        $this->pullGodowns([['guid' => 'gd-company', 'name' => 'SWAASHPET POLYMERS PVT LTD']]);
+        $this->assertSame(self::COMPANY, Warehouse::where('tally_guid', 'gd-company')->value('tally_company'));
+
+        $this->postJson('/api/v1/tally-sync/masters', [
+            'godowns' => [['guid' => 'gd-company', 'name' => 'SWAASHPET POLYMERS PVT LTD']],
+        ])->assertOk();
+
+        $this->assertSame(
+            self::COMPANY,
+            Warehouse::where('tally_guid', 'gd-company')->value('tally_company'),
+            'a pull carrying no company blanked the company already recorded',
         );
     }
 

@@ -128,8 +128,10 @@ class TallyGodownResolver
      * does not have. The suite caught exactly that.
      *
      * So: narrow by company only when the narrowing can be done — a company is
-     * bound AND at least one linked warehouse records one. Otherwise count as
-     * before. Every previously-resolving system keeps resolving to the same
+     * bound AND at least one linked warehouse records THAT company. A table
+     * whose rows all name some OTHER company cannot be narrowed either, and is
+     * likewise counted whole; that is a compatibility fallback rather than a
+     * guarantee, and it is the reason this is a tie-breaker and not a gate. Every previously-resolving system keeps resolving to the same
      * godown; the two-company case starts resolving once a pull records who
      * owns which. Rule 4 is untouched: two godowns of the same company are
      * still genuinely ambiguous, and still null.
