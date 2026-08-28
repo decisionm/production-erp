@@ -233,11 +233,23 @@ class WarehouseService
      */
     public function syncGodownsFromTally(array $godowns, ?string $company = null): array
     {
-        return HierarchyUpsert::sync(Warehouse::class, $godowns, fn (array $row): array => array_filter([
-            'code' => $this->uniqueCodeFrom($row['name']),
-            'is_active' => true,
-            'tally_company' => $company,
-        ], fn ($value) => $value !== null));
+        return HierarchyUpsert::sync(
+            Warehouse::class,
+            $godowns,
+            // The ERP's own columns, seeded once and never reset by a re-pull:
+            // a person may rename the code.
+            fn (array $row): array => [
+                'code' => $this->uniqueCodeFrom($row['name']),
+                'is_active' => true,
+            ],
+            // WHICH TALLY COMPANY THIS GODOWN BELONGS TO — written on every
+            // pull, not only the first. It is Tally's fact, not the ERP's, and
+            // it is what tells this company's godown apart from a row left
+            // behind by another company. Recording it on create alone left
+            // every already-pulled godown with no company, and the sole-godown
+            // lookup with nothing to discriminate by.
+            array_filter(['tally_company' => $company], fn ($value) => $value !== null),
+        );
     }
 
     private function uniqueCodeFrom(string $name): string

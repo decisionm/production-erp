@@ -2,7 +2,9 @@
 
 namespace App\Modules\Inventory\Services;
 
+use App\Modules\Core\Services\AppSettingService;
 use App\Modules\Inventory\Models\Warehouse;
+use App\Modules\TallySync\Http\Controllers\TallySettingsController;
 
 /**
  * THE one place that answers "which godown name does Tally see for this
@@ -21,15 +23,18 @@ use App\Modules\Inventory\Models\Warehouse;
  *   1. the warehouse itself, when it has a tally_guid (a real Tally godown);
  *   2. else the nearest ANCESTOR with a tally_guid (the day bin is created
  *      as a child of the company godown — its lines post under the parent);
- *   3. else, when the system has EXACTLY ONE Tally-linked warehouse, that
- *      one (this factory's reality: one godown, so there is nothing to
- *      choose between — an unparented internal bin can only mean it);
+ *   3. else, when the system has EXACTLY ONE Tally-linked warehouse OF THE
+ *      BOUND TALLY COMPANY, that one (this factory's reality: one godown, so
+ *      there is nothing to choose between — an unparented internal bin can
+ *      only mean it);
  *   4. else null — a multi-godown system with an unparented, unlinked
  *      warehouse is genuinely ambiguous, so nothing is guessed and the
  *      preview/readiness gate flags it exactly as before.
  */
 class TallyGodownResolver
 {
+    public function __construct(private readonly AppSettingService $settings) {}
+
     /** Bounded parent walk — a cyclic hierarchy must not hang a voucher build. */
     private const MAX_PARENT_DEPTH = 32;
 
@@ -102,14 +107,64 @@ class TallyGodownResolver
         return $this->soleLinkedWarehouse()?->name;
     }
 
+    /**
+     * "Exactly one" — COUNTED AMONG THIS COMPANY'S GODOWNS, once the data can
+     * say which those are.
+     *
+     * The original rule counted every Tally-linked warehouse, and was right
+     * while the table only ever held one company's godowns. It stopped being
+     * right: the rehearsal database holds seven, carrying TWO different Tally
+     * company ids — six left behind by another company, one from the company
+     * this instance is bound to. Seven is not one, so nothing resolved and
+     * every purchase order refused with `godown_unresolved`.
+     *
+     * THE COMPANY IS A TIE-BREAKER, NOT A PRECONDITION, and that distinction
+     * is the whole design. Scoping unconditionally looked correct and was
+     * not: no godown anywhere records a company yet, because the pull only
+     * ever wrote it on create. Requiring one would have resolved NOTHING on a
+     * live instance until a fresh masters pull ran — and `resolveName()` falls
+     * back to the warehouse's own name, so a work-in-progress consumption line
+     * would have quietly started naming "Work In Progress", a godown Tally
+     * does not have. The suite caught exactly that.
+     *
+     * So: narrow by company only when the narrowing can be done — a company is
+     * bound AND at least one linked warehouse records one. Otherwise count as
+     * before. Every previously-resolving system keeps resolving to the same
+     * godown; the two-company case starts resolving once a pull records who
+     * owns which. Rule 4 is untouched: two godowns of the same company are
+     * still genuinely ambiguous, and still null.
+     *
+     * KEY_COMPANY is read through Core's AppSettingService. The constant is
+     * TallySync's, named rather than copied so the key has one spelling; the
+     * masters endpoint that BINDS the company is its only writer.
+     */
     private function soleLinkedWarehouse(): ?Warehouse
     {
-        if (! $this->soleLinkedLookedUp) {
-            // limit(2): only "exactly one" matters, never the full list.
-            $linked = Warehouse::query()->whereNotNull('tally_guid')->limit(2)->get();
-            $this->soleLinked = $linked->count() === 1 ? $linked->first() : null;
-            $this->soleLinkedLookedUp = true;
+        if ($this->soleLinkedLookedUp) {
+            return $this->soleLinked;
         }
+
+        $this->soleLinkedLookedUp = true;
+
+        // The full list, not limit(2): the company narrowing below has to see
+        // every candidate before it can count what is left.
+        $linked = Warehouse::query()->whereNotNull('tally_guid')->get();
+
+        $bound = $this->settings->get(TallySettingsController::KEY_COMPANY);
+        $bound = is_string($bound) && trim($bound) !== '' ? trim($bound) : null;
+
+        $ofBoundCompany = $linked->filter(
+            fn (Warehouse $warehouse): bool => $warehouse->tally_company !== null
+                && $bound !== null
+                && trim((string) $warehouse->tally_company) === $bound,
+        );
+
+        // Narrow only where the data supports narrowing. A table whose godowns
+        // record no company at all cannot be narrowed, and is counted whole
+        // exactly as it was before.
+        $candidates = $ofBoundCompany->isNotEmpty() ? $ofBoundCompany : $linked;
+
+        $this->soleLinked = $candidates->count() === 1 ? $candidates->first() : null;
 
         return $this->soleLinked;
     }
