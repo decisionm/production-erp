@@ -68,8 +68,15 @@ export async function updateVendor(id: number, payload: UpdateVendorPayload): Pr
     return data.data;
 }
 
-export async function listPurchaseRequisitions(): Promise<Paginated<PurchaseRequisition>> {
-    const { data } = await api.get<Paginated<PurchaseRequisition>>('/procurement/purchase-requisitions');
+/**
+ * The requisition register, SERVER-PAGED. It used to take the endpoint's
+ * default page and render it with the pager switched off, so the queue showed
+ * the newest 20 and gave no sign the other rows existed.
+ */
+export async function listPurchaseRequisitions(page = 1, perPage = 50): Promise<Paginated<PurchaseRequisition>> {
+    const { data } = await api.get<Paginated<PurchaseRequisition>>('/procurement/purchase-requisitions', {
+        params: { page, per_page: perPage },
+    });
     return data;
 }
 
@@ -196,8 +203,22 @@ export async function cancelPurchaseOrder(id: number, reason: string): Promise<P
 }
 
 /** Same reason as listPurchaseOrders: links point at one specific receipt. */
-export async function listGoodsReceipts(params?: { per_page?: number }): Promise<Paginated<GoodsReceiptNote>> {
-    const { data } = await api.get<Paginated<GoodsReceiptNote>>('/procurement/goods-receipts', { params });
+/**
+ * The receipt register, plus whether THIS DEPLOYMENT captures lots and bags.
+ *
+ * The flag rides here because the receiving screen needs it and used to read it
+ * from the production module's settings — which a storekeeper holding only
+ * procurement cannot reach, so the page read the 403 as "traceability off" and
+ * booked receipts with no bags and therefore no incoming-QC hold. Deployment
+ * config, not a per-reader value, so the answer is the same for everyone.
+ */
+export async function listGoodsReceipts(
+    params?: { page?: number; per_page?: number },
+): Promise<Paginated<GoodsReceiptNote> & { traceability_enabled?: boolean }> {
+    const { data } = await api.get<Paginated<GoodsReceiptNote> & { traceability_enabled?: boolean }>(
+        '/procurement/goods-receipts',
+        { params },
+    );
     return data;
 }
 

@@ -68,6 +68,15 @@ export default function VendorsPage() {
             setModalOpen(false);
             reset();
         },
+        // The edit mutation below has surfaced its refusals all along and this
+        // one did not, so a duplicate code or a GSTIN the server rejects left
+        // the modal sitting open with nothing said. Same treatment, same
+        // wording: the server's own sentence, never genericised.
+        onError: (error: any) =>
+            Modal.error({
+                title: 'Could not create vendor',
+                content: error?.response?.data?.message ?? 'Unknown error',
+            }),
     });
 
     const {

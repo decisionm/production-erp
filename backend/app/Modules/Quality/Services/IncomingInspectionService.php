@@ -65,6 +65,17 @@ class IncomingInspectionService
                 throw InvalidInspectionQuantityException::mismatch($inspected, $accepted, $rejected);
             }
 
+            // THE WHOLE LINE, OR NOTHING. dispositionBags() releases every bag
+            // that was not rejected, and it cannot do otherwise: a bag held
+            // back has no way out, because the guard above refuses a second
+            // inspection on this line. So inspecting PART of a line quietly
+            // released the uninspected remainder into available stock as
+            // though it had passed. See the exception for why this is refused
+            // rather than reinterpreted.
+            if (bccomp($inspected, $line->quantity, 4) !== 0) {
+                throw InvalidInspectionQuantityException::mustCoverWholeLine($line->quantity, $inspected);
+            }
+
             $result = match (true) {
                 bccomp($rejected, '0', 4) === 0 => InspectionResult::Pass,
                 bccomp($accepted, '0', 4) === 0 => InspectionResult::Fail,
@@ -131,6 +142,38 @@ class IncomingInspectionService
             ->get();
 
         if ($bags->isEmpty()) {
+            // A LINE WITH NO BAGS STILL HAS TO SAY WHAT DID NOT HAPPEN.
+            //
+            // No bags means nothing to release and nothing to reject, and that
+            // is deliberate — a non-traceability item has no bag to flip. But a
+            // REJECTION on such a line was recorded on the inspection while the
+            // material stayed in available stock, and the record said nothing
+            // about it. Anyone reading "50 rejected" would reasonably believe
+            // 50 had left the balance.
+            //
+            // The quantity is not this code's to move: on a bag-tracked line
+            // the rejected weight is the summed weight of real bags, and here
+            // the only source would be the figure a person typed — which this
+            // service refuses to move stock on, by design. So the fact is
+            // WRITTEN DOWN instead of acted on, and whether a typed rejection
+            // may move stock stays the quality desk's answer.
+            if (bccomp($rejected, '0', 4) === 1) {
+                // Kept short ON PURPOSE: bag_disposition_note is varchar(200),
+                // and MySQL in strict mode REFUSES an over-long value where
+                // sqlite takes it quietly. The first draft of this sentence was
+                // 215 characters, passed locally and failed on CI's MySQL —
+                // exactly the driver gap DatabaseDriverParityTest exists for.
+                // A test below pins the worst-case length.
+                return [
+                    sprintf(
+                        'No bags on this line, so no stock was issued: %s recorded as rejected remains in the store. '.
+                        'A line with no bags has none to reject, and the figure is typed rather than weighed.',
+                        rtrim(rtrim($rejected, '0'), '.') ?: '0',
+                    ),
+                    null,
+                ];
+            }
+
             return [null, null];
         }
 

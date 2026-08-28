@@ -30,9 +30,19 @@ export default function IncomingInspectionsPage() {
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['quality', 'incoming-inspections'], queryFn: listIncomingInspections });
+    // THE WHOLE REGISTER, NOT THE FIRST PAGE. This picker is the only control
+    // anywhere that releases a bag from waiting_qc. Asking for the default page
+    // capped it at the newest 20 receipts, so material on the twenty-first
+    // oldest arrival could never be inspected: its bags stay waiting_qc, the
+    // scanner refuses them, and incoming-QC hold keeps subtracting their
+    // kilograms from every outflow of that item — permanently, with nothing on
+    // screen to say why. The 'all' key matches the request the goods-receipt
+    // page already makes for its deep-link read, so the two share a cache
+    // entry rather than collide, and it stays under the prefix that page
+    // invalidates.
     const { data: receipts } = useQuery({
-        queryKey: ['procurement', 'goods-receipts'],
-        queryFn: () => listGoodsReceipts(),
+        queryKey: ['procurement', 'goods-receipts', 'all'],
+        queryFn: () => listGoodsReceipts({ per_page: 1000 }),
     });
 
     const lineOptions = useMemo(

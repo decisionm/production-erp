@@ -171,6 +171,26 @@ export default function PurchaseOrderLinesFields<T extends LinesFormValues>({
                         />
                         <Button danger onClick={() => remove(index)}>Remove</Button>
                     </Space>
+                    {/*
+                      WHICH LINE IS WRONG, AND WHY. Only the array-level error
+                      was rendered, so a line missing an item, a quantity or a
+                      rate failed validation with nothing shown against it: OK
+                      appeared to do nothing at all and the operator had no way
+                      to find the offending row. The messages already existed in
+                      form state; nothing but the rendering was missing.
+                    */}
+                    {(() => {
+                        const line = errors.lines?.[index];
+                        const messages = [
+                            line?.item_id?.message,
+                            line?.quantity?.message,
+                            line?.unit_price?.message,
+                        ].filter(Boolean) as string[];
+
+                        return messages.length > 0 ? (
+                            <div style={{ color: '#ff4d4f', marginTop: 4 }}>{messages.join(' · ')}</div>
+                        ) : null;
+                    })()}
                     <LineSchedulesEditor control={linesControl} lineIndex={index} />
                 </div>
             ))}
