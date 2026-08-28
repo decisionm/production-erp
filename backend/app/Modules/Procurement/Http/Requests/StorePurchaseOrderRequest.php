@@ -2,6 +2,7 @@
 
 namespace App\Modules\Procurement\Http\Requests;
 
+use App\Modules\Procurement\Http\Requests\Rules\PurchasableItem;
 use App\Rules\PlainDecimal;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -60,7 +61,21 @@ class StorePurchaseOrderRequest extends FormRequest
             'expected_date' => ['nullable', 'date', 'after_or_equal:order_date'],
             'notes' => ['nullable', 'string'],
             'lines' => ['required', 'array', 'min:1'],
-            'lines.*.item_id' => ['required', 'integer', 'exists:items,id'],
+            // An item out of service — archived or trashed — is refused on a
+            // new line. The item's category is deliberately not consulted:
+            // Q59 is open and says a document must not start refusing an item
+            // on that until it is answered. See PurchasableItem.
+            //
+            // SCOPED TO ERP-ENTERED ORDERS, exactly as the vendor rule above
+            // is, and for the vendor rule's reason rather than a new one: a
+            // mirror is a read-only reflection of an order Tally already
+            // holds, and an ERP refusal cannot unmake that order — it can
+            // only leave the ERP unable to show it. Whether an archived item
+            // should also block a mirror is the same shape of owner question
+            // as Q53(c) and is not answered here.
+            'lines.*.item_id' => $this->input('source') === 'tally'
+                ? ['required', 'integer', 'exists:items,id']
+                : ['required', 'integer', 'exists:items,id', new PurchasableItem],
             'lines.*.quantity' => ['required', 'numeric', 'gt:0', 'max:99999999999', new PlainDecimal],
             'lines.*.unit_price' => ['required', 'numeric', 'min:0', 'max:99999999999', new PlainDecimal],
             // A Tally-mirror order: Tally is the PO/schedule source of truth,

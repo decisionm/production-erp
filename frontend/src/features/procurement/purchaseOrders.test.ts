@@ -18,7 +18,10 @@ import {
     loadWords,
     lotLoadSummary,
     MAX_PER_PAGE,
+    amendedItemIds,
+    isPurchasableItem,
     poNumber,
+    purchasableItemOptions,
     rateCell,
     reconcileReceipts,
     revisionLines,
@@ -31,6 +34,7 @@ import {
     unwrapTraceResponse,
 } from './purchaseOrders';
 import type { PurchaseOrder, PurchaseOrderLine, PurchaseOrderTrace, TraceConsumption, TraceLot } from './types';
+import type { Item } from '@/features/inventory/types';
 import type { TallyLink } from '@/features/sales/types';
 
 /**
@@ -746,5 +750,95 @@ describe('revisionLines', () => {
         expect(revisionLines({ id: 1, revision_no: 1, reason: null, created_at: null, lines: rows })).toBe(rows);
         expect(revisionLines({ id: 1, revision_no: 1, reason: null, created_at: null, lines_json: rows })).toBe(rows);
         expect(revisionLines({ id: 1, revision_no: 1, reason: null, created_at: null })).toEqual([]);
+    });
+});
+
+/**
+ * THE ITEM PICKER AND THE SERVER MUST AGREE.
+ *
+ * `PurchasableItem` (backend) refuses exactly one thing on a new
+ * purchase-order line: an item that is out of service. What KIND of thing it
+ * is plays no part, because Q59 is open and says a document must not start
+ * refusing an item on its category until that is answered.
+ *
+ * THAT IS NOT PINNED HERE, and cannot be: `Item` no longer carries a
+ * category, so this function has nothing to filter on and a test passing one
+ * would be asserting against a field that does not exist. The tripwires for
+ * Q59 are the backend negative controls in `InactiveMasterGuardTest`, which
+ * go over the wire — plus the fact that re-adding a category filter here
+ * would require re-adding the type and the ItemResource field, which is
+ * visible in review rather than silent.
+ *
+ * What this pins is the one input the function reads. A picker that offered
+ * more would hand the buyer a validation error for a row the screen invited;
+ * one that offered less would hide a real material and look like missing
+ * data.
+ */
+describe('isPurchasableItem', () => {
+    const item = (overrides: Partial<Item>): Item =>
+        ({ id: 1, sku: 'ITEM_A', name: 'Item A', is_active: true, ...overrides }) as Item;
+
+    it('offers an active item and refuses an archived one', () => {
+        expect(isPurchasableItem(item({}))).toBe(true);
+        expect(isPurchasableItem(item({ is_active: false }))).toBe(false);
+    });
+});
+
+describe('purchasableItemOptions', () => {
+    const RESIN = { id: 1, sku: 'RESIN', name: 'Relpet', is_active: true } as Item;
+    const BOTTLE = { id: 2, sku: 'BTL', name: 'Bottle', is_active: true } as Item;
+    const ARCHIVED = { id: 3, sku: 'OLD', name: 'Old', is_active: false } as Item;
+
+    it('offers every active item and drops only the archived one', () => {
+        expect(purchasableItemOptions([RESIN, BOTTLE, ARCHIVED]).map((o) => o.value)).toEqual([1, 2]);
+    });
+
+    it('keeps an archived item the order being amended already names — visible, marked, not choosable', () => {
+        const options = purchasableItemOptions([RESIN, BOTTLE, ARCHIVED], [3]);
+
+        expect(options.map((o) => o.value)).toEqual([1, 2, 3]);
+        // Appended last, never interleaved: the list never opens on a dead row.
+        expect(options[2].disabled).toBe(true);
+        expect(options[2].label).toContain('(Retired)');
+        // History is shown, never renamed.
+        expect(options[2].label).toContain('Old');
+    });
+
+    it('marks nothing when the kept item is still active', () => {
+        const options = purchasableItemOptions([RESIN, BOTTLE], [2]);
+
+        expect(options.map((o) => o.value)).toEqual([1, 2]);
+        expect(options.every((o) => o.disabled === undefined)).toBe(true);
+    });
+
+    it('offers nothing kept for a NEW order, and never prints a kept row twice', () => {
+        expect(purchasableItemOptions([RESIN, ARCHIVED]).map((o) => o.value)).toEqual([1]);
+        expect(purchasableItemOptions([RESIN, ARCHIVED], [3, 3]).map((o) => o.value)).toEqual([1, 3]);
+    });
+
+    it('survives a picker whose list has not loaded yet', () => {
+        expect(purchasableItemOptions(undefined)).toEqual([]);
+        expect(purchasableItemOptions(null, [1])).toEqual([]);
+    });
+});
+
+describe('amendedItemIds', () => {
+    const line = (item: unknown): PurchaseOrderLine => ({ id: 1, item, quantity: '1', quantity_received: '0' }) as PurchaseOrderLine;
+
+    it('reads the id off every line that carries an item', () => {
+        expect(amendedItemIds([line({ id: 7 }), line({ id: 9 })])).toEqual([7, 9]);
+    });
+
+    it('drops a line the payload served WITHOUT an item instead of throwing', () => {
+        // The type says `item` is always there; the wire does not promise it.
+        // A missing item must cost that one line, never the whole picker —
+        // and must never reach purchasableItemOptions as `undefined`.
+        expect(amendedItemIds([line({ id: 7 }), line(undefined), line(null), line({}), line({ id: null })])).toEqual([7]);
+    });
+
+    it('keeps nothing for a NEW order', () => {
+        expect(amendedItemIds(undefined)).toEqual([]);
+        expect(amendedItemIds(null)).toEqual([]);
+        expect(amendedItemIds([])).toEqual([]);
     });
 });
