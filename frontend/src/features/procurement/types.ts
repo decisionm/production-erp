@@ -573,3 +573,59 @@ export interface PurchaseOrderTrace {
     consumptions?: TraceConsumption[];
     production_entries?: TraceConsumption[];
 }
+
+// ---------------------------------------------------------- supplier bills --
+
+export type SupplierBillStatus = 'draft' | 'recorded' | 'cancelled';
+
+export interface SupplierBillLine {
+    id: number;
+    goods_receipt_note_line_id: number | null;
+    item: Item;
+    quantity: string;
+    rate: string;
+    amount: string;
+    /** The matched arrival's quantity, for the billed-vs-received variance. */
+    received_quantity?: string | null;
+}
+
+/**
+ * The vendor's invoice recorded in the ERP. Every figure is a purchase
+ * rate, so the whole surface is finance-gated (FC-06) — these types are
+ * only ever populated for Owner/Accounts logins. No Tally fields exist:
+ * Purchase Invoice posting is withheld while Q39/Q41/Q28 are open.
+ */
+export interface SupplierBill {
+    id: number;
+    /** "BILL-{id}" — the ERP's own reference; the vendor's is bill_number. */
+    document_number: string;
+    status: SupplierBillStatus;
+    vendor: { id: number; code: string; name: string };
+    purchase_order_id: number | null;
+    bill_number: string;
+    bill_date: string;
+    purchase_ledger_name: string | null;
+    subtotal: string;
+    cgst: string;
+    sgst: string;
+    igst: string;
+    rounding: string;
+    total: string;
+    attachment_name: string | null;
+    has_attachment: boolean;
+    notes: string | null;
+    cancelled_reason: string | null;
+    created_by?: string | null;
+    recorded_by?: string | null;
+    recorded_at?: string | null;
+    lines: SupplierBillLine[];
+    created_at: string;
+}
+
+export interface SupplierBillListFilters {
+    status?: SupplierBillStatus | '';
+    q?: string;
+    vendor_id?: number;
+    page?: number;
+    per_page?: number;
+}

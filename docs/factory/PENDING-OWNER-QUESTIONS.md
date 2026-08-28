@@ -1806,3 +1806,33 @@ floor-visibility owner question", and on the backend by the path of this
 file — never by its number, because this file re-mints question numbers at
 merge. A re-mint of this entry needs no code edit.
 *Open since 2026-08-27.*
+
+## Q68 · Does the accountant want ERP-recorded supplier bills to post to Tally as Purchase Invoices?
+
+The ERP now records supplier bills (28-Aug procurement build): the paper
+invoice's number, date, lines, GST figures as printed, rounding, and an
+attached scan — matched to purchase orders and arrivals, entered and
+recorded by Accounts only (FC-06). What is deliberately NOT built is any
+posting to Tally: the bill's Tally cell says so in one line.
+
+What this asks, distinct from its neighbours: once a bill is recorded in
+the ERP, should the ERP stage a Tally **Purchase Invoice** voucher (the
+way batches stage Stock Journals), or does the accountant keep keying
+purchase invoices into Tally directly, the ERP record being the factory's
+own reference? This is the purchase-side sibling of DEC-20260809-003,
+which settled that all real SALES are invoiced directly in Tally.
+
+It cannot be answered by building: even a yes needs Q39 first (which
+purchase ledger and rate a voucher names — the ERP holds the accountant's
+per-bill ledger SELECTION but derives nothing) and touches Q41 (where GST
+is filed from) and Q28 (whether a payments build follows). A no costs
+nothing — the screen already works as a record.
+
+Like Q66/Q67, the code refers to this question **by name** — the words
+"Purchase Invoice posting awaits the accountant's answers" in
+`frontend/src/features/procurement/supplierBills.ts` — never by number,
+because this file re-mints question numbers at merge.
+
+**Blocks:** only the enqueue path for a Purchase Invoice voucher. The
+supplier-bill screen, its arithmetic, its matching and its attachment work
+under either answer. *Open since 2026-08-28.*

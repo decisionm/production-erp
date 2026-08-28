@@ -8,6 +8,8 @@ import type {
     PurchaseOrderTrace,
     PurchaseRequisition,
     PurchaseRequisitionListFilters,
+    SupplierBill,
+    SupplierBillListFilters,
     Vendor,
 } from './types';
 
@@ -231,7 +233,7 @@ export async function cancelPurchaseOrder(id: number, reason: string): Promise<P
  * config, not a per-reader value, so the answer is the same for everyone.
  */
 export async function listGoodsReceipts(
-    params?: { page?: number; per_page?: number },
+    params?: { page?: number; per_page?: number; purchase_order_id?: number },
 ): Promise<Paginated<GoodsReceiptNote> & { traceability_enabled?: boolean }> {
     const { data } = await api.get<Paginated<GoodsReceiptNote> & { traceability_enabled?: boolean }>(
         '/procurement/goods-receipts',
@@ -287,5 +289,83 @@ export interface CreateGoodsReceiptPayload {
 
 export async function createGoodsReceipt(payload: CreateGoodsReceiptPayload): Promise<GoodsReceiptNote> {
     const { data } = await api.post<{ data: GoodsReceiptNote }>('/procurement/goods-receipts', payload);
+    return data.data;
+}
+
+// ---------------------------------------------------------- supplier bills --
+// FC-06: finance-gated server-side; these calls 403 for anyone else.
+
+export interface SupplierBillLinePayload {
+    goods_receipt_note_line_id?: number | null;
+    item_id: number;
+    quantity: number;
+    rate: number;
+    amount: number;
+}
+
+export interface SupplierBillPayload {
+    vendor_id: number;
+    purchase_order_id?: number | null;
+    bill_number: string;
+    bill_date: string;
+    purchase_ledger_name?: string | null;
+    subtotal: number;
+    cgst?: number;
+    sgst?: number;
+    igst?: number;
+    rounding?: number;
+    total: number;
+    notes?: string;
+    lines: SupplierBillLinePayload[];
+}
+
+export async function listSupplierBills(filters: SupplierBillListFilters = {}): Promise<Paginated<SupplierBill>> {
+    const { status, q, ...rest } = filters;
+    const { data } = await api.get<Paginated<SupplierBill>>('/procurement/supplier-bills', {
+        params: {
+            per_page: 50,
+            ...rest,
+            ...(status ? { status } : {}),
+            ...(q && q.trim() !== '' ? { q: q.trim() } : {}),
+        },
+    });
+    return data;
+}
+
+export async function createSupplierBill(payload: SupplierBillPayload): Promise<SupplierBill> {
+    const { data } = await api.post<{ data: SupplierBill }>('/procurement/supplier-bills', payload);
+    return data.data;
+}
+
+export async function updateSupplierBill(id: number, payload: SupplierBillPayload): Promise<SupplierBill> {
+    const { data } = await api.put<{ data: SupplierBill }>(`/procurement/supplier-bills/${id}`, payload);
+    return data.data;
+}
+
+export async function recordSupplierBill(id: number): Promise<SupplierBill> {
+    const { data } = await api.post<{ data: SupplierBill }>(`/procurement/supplier-bills/${id}/record`);
+    return data.data;
+}
+
+export async function cancelSupplierBill(id: number, reason: string): Promise<SupplierBill> {
+    const { data } = await api.post<{ data: SupplierBill }>(`/procurement/supplier-bills/${id}/cancel`, { reason });
+    return data.data;
+}
+
+export async function attachSupplierBillFile(id: number, file: File): Promise<SupplierBill> {
+    const form = new FormData();
+    form.append('file', file);
+    const { data } = await api.post<{ data: SupplierBill }>(`/procurement/supplier-bills/${id}/attachment`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data.data;
+}
+
+/** The pulled Tally ledger names for the bill's purchase-ledger picker (the accountant selects; the ERP derives nothing — Q39). */
+export async function listSupplierBillLedgerOptions(q = ''): Promise<{ name: string; group: string | null }[]> {
+    const { data } = await api.get<{ data: { name: string; group: string | null }[] }>(
+        '/procurement/supplier-bills/ledger-options',
+        { params: q.trim() !== '' ? { q: q.trim() } : {} },
+    );
     return data.data;
 }

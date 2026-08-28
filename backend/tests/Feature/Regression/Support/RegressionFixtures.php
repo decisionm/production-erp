@@ -47,6 +47,7 @@ use App\Modules\Procurement\Models\Enums\PurchaseRequisitionStatus;
 use App\Modules\Procurement\Models\GoodsReceiptNote;
 use App\Modules\Procurement\Models\PurchaseOrder;
 use App\Modules\Procurement\Models\PurchaseRequisition;
+use App\Modules\Procurement\Models\SupplierBill;
 use App\Modules\Procurement\Models\Vendor;
 use App\Modules\Production\Models\Bom;
 use App\Modules\Production\Models\DowntimeReason;
@@ -211,6 +212,17 @@ trait RegressionFixtures
         ])->assertCreated()->json('data.id');
         $grn = GoodsReceiptNote::findOrFail($grnId);
         $lot = MaterialLot::query()->firstOrFail();
+
+        // ---- a supplier bill (28-Aug) — the paper invoice, recorded ---------
+        $bill = SupplierBill::create([
+            'vendor_id' => $vendor->id, 'purchase_order_id' => $po->id,
+            'bill_number' => 'RG-INV-1', 'bill_date' => '2026-08-12',
+            'subtotal' => '50.0000', 'igst' => '9.0000', 'total' => '59.0000',
+        ]);
+        $bill->lines()->create([
+            'goods_receipt_note_line_id' => $grn->lines()->firstOrFail()->id,
+            'item_id' => $resin->id, 'quantity' => '50.0000', 'rate' => '1.0000', 'amount' => '50.0000',
+        ]);
 
         config(['production.traceability_enabled' => $flagBefore]);
 
@@ -405,7 +417,7 @@ trait RegressionFixtures
 
         return $this->fx = compact(
             'bottle', 'resin', 'masterbatch', 'carton', 'fg', 'rm', 'batch', 'serial',
-            'vendor', 'requisition', 'po', 'grn', 'lot',
+            'vendor', 'requisition', 'po', 'grn', 'lot', 'bill',
             'customer', 'order', 'delivery', 'invoice',
             'shift', 'machine', 'mold', 'standard', 'packaging', 'configuration', 'entry', 'running', 'cartonNo',
             'bom', 'routing', 'workOrder', 'subcontract', 'rework', 'scrapReason', 'downtimeReason',

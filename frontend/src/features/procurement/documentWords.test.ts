@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
+// grnQcSummary / inspectionsByLine were removed with their implementation:
+// they derived a receipt's QC state from the inspections register because
+// "the backend keeps no reverse link" — which stopped being true when GRN
+// lines gained a server-side `qc` (inspection + bag hold). grnQc.ts is the
+// one vocabulary now, pinned by grnQc.test.ts.
 import {
     bagLabelsDrawerTitle,
     grnDrawerTitle,
     grnNumber,
-    grnQcSummary,
-    inspectionsByLine,
     prDrawerTitle,
     prNumber,
     requisitionStatusTag,
@@ -82,33 +85,5 @@ describe('vendorLedgerWords', () => {
     it('shows a genuinely different ledger name in full — the row the column exists for', () => {
         expect(vendorLedgerWords({ name: 'Reliance Polymers', tally_ledger_name: 'Reliance Industries Ltd (Polymer Div)' }))
             .toEqual({ kind: 'differs', text: 'Reliance Industries Ltd (Polymer Div)' });
-    });
-});
-
-describe('grnQcSummary', () => {
-    const lines = [{ id: 1 }, { id: 2 }, { id: 3 }];
-    const byLine = (entries: [number, 'pass' | 'fail' | 'partial'][]) =>
-        inspectionsByLine(entries.map(([goods_receipt_note_line_id, result]) => ({ goods_receipt_note_line_id, result })));
-
-    it('is awaiting when no line has been inspected', () => {
-        expect(grnQcSummary(lines, byLine([]))).toEqual({ state: 'awaiting', color: 'gold', words: 'Awaiting QC' });
-    });
-
-    it('counts a part-inspected receipt honestly', () => {
-        expect(grnQcSummary(lines, byLine([[1, 'pass']])).words).toBe('QC 1 of 3 lines');
-    });
-
-    it('names the whole receipt after its worst line — fail beats partial beats pass', () => {
-        expect(grnQcSummary(lines, byLine([[1, 'pass'], [2, 'pass'], [3, 'pass']])).words).toBe('QC passed');
-        expect(grnQcSummary(lines, byLine([[1, 'pass'], [2, 'partial'], [3, 'pass']])).words).toBe('QC partial');
-        expect(grnQcSummary(lines, byLine([[1, 'pass'], [2, 'partial'], [3, 'fail']])).words).toBe('QC failed');
-    });
-
-    it('renders a dash for a receipt with no lines — not a verdict', () => {
-        expect(grnQcSummary([], byLine([])).words).toBe('—');
-    });
-
-    it('ignores an inspection of a line the receipt does not carry', () => {
-        expect(grnQcSummary(lines, byLine([[99, 'fail']])).state).toBe('awaiting');
     });
 });

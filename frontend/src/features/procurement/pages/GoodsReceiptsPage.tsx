@@ -14,6 +14,7 @@ import MaterialBagLabels from '@/features/inventory/components/MaterialBagLabels
 import { listAllWarehouses } from '@/features/inventory/api';
 import { createGoodsReceipt, listGoodsReceipts, listPurchaseOrders } from '@/features/procurement/api';
 import GoodsReceiptTallyCell from '@/features/procurement/components/GoodsReceiptTallyCell';
+import { bagLabelsDrawerTitle, grnDrawerTitle, grnNumber } from '@/features/procurement/documentWords';
 import { lineQcLine, receiptQcLine } from '@/features/procurement/grnQc';
 import { RECEIVABLE_PO_FILTERS, isReceivableOrder } from '@/features/procurement/purchaseOrders';
 import type { GoodsReceiptNote, GoodsReceiptNoteLine, PurchaseOrderSchedule } from '@/features/procurement/types';
@@ -888,7 +889,7 @@ export default function GoodsReceiptsPage() {
                           }
                 }
                 columns={[
-                    { title: 'ID', dataIndex: 'id' },
+                    { title: 'Receipt', render: (_, row) => grnNumber(row) },
                     {
                         title: 'PO',
                         render: (_, row) => (
@@ -1102,7 +1103,7 @@ export default function GoodsReceiptsPage() {
             </Modal>
 
             <Drawer
-                title={`Goods Receipt #${detailReceipt?.id}`}
+                title={grnDrawerTitle(detailReceipt)}
                 open={detailReceipt !== null}
                 onClose={() => setDetailReceipt(null)}
                 width="min(100vw, 560px)"
@@ -1184,7 +1185,7 @@ export default function GoodsReceiptsPage() {
             </Drawer>
 
             <Drawer
-                title={`Goods receipt #${createdReceipt?.id} — bag labels ready`}
+                title={bagLabelsDrawerTitle(createdReceipt)}
                 open={createdReceipt !== null}
                 onClose={() => setCreatedReceipt(null)}
                 width="min(100vw, 980px)"

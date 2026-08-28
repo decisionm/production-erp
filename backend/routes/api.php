@@ -47,6 +47,7 @@ use App\Modules\Payroll\Http\Controllers\SalaryStructureController;
 use App\Modules\Procurement\Http\Controllers\GoodsReceiptController;
 use App\Modules\Procurement\Http\Controllers\PurchaseOrderController;
 use App\Modules\Procurement\Http\Controllers\PurchaseRequisitionController;
+use App\Modules\Procurement\Http\Controllers\SupplierBillController;
 use App\Modules\Procurement\Http\Controllers\VendorController;
 use App\Modules\Production\Http\Controllers\BatchPreviewController;
 use App\Modules\Production\Http\Controllers\BinBayController;
@@ -530,6 +531,30 @@ Route::prefix('v1')->group(function () {
             Route::post('purchase-orders/{purchase_order}/cancel', [PurchaseOrderController::class, 'cancel']);
 
             Route::apiResource('goods-receipts', GoodsReceiptController::class)->only(['index', 'store', 'show']);
+        });
+
+        /*
+         * SUPPLIER BILLS — the vendor's invoice recorded (28-Aug audit
+         * finding 10). Under the procurement path but gated module:FINANCE,
+         * not procurement: every figure on a bill is a purchase rate, and
+         * FC-06 puts those with Owner/Accounts only. A procurement login
+         * without finance access must not read a bill at all, so the gate
+         * is the group's, not a per-field omission.
+         *
+         * No Tally route exists here on purpose: Purchase Invoice posting
+         * is withheld while Q39 (per-rate purchase ledger), Q41 (where GST
+         * is filed) and Q28 (does the factory want AP at all) are open.
+         * Lifecycle is append-only POSTs; a bill is cancelled with a
+         * reason, never deleted. `ledger-options` is registered before the
+         * apiResource so the word cannot be read as a {supplier_bill} id.
+         */
+        Route::prefix('procurement')->middleware('module:finance')->group(function () {
+            Route::get('supplier-bills/ledger-options', [SupplierBillController::class, 'ledgerOptions']);
+            Route::apiResource('supplier-bills', SupplierBillController::class)->only(['index', 'store', 'show', 'update']);
+            Route::post('supplier-bills/{supplier_bill}/record', [SupplierBillController::class, 'record']);
+            Route::post('supplier-bills/{supplier_bill}/cancel', [SupplierBillController::class, 'cancel']);
+            Route::post('supplier-bills/{supplier_bill}/attachment', [SupplierBillController::class, 'attach']);
+            Route::get('supplier-bills/{supplier_bill}/attachment', [SupplierBillController::class, 'download']);
         });
 
         Route::prefix('sales')->middleware('module:sales')->group(function () {

@@ -7,7 +7,6 @@
  * `#undefined`") is testable without a DOM.
  */
 
-import type { IncomingInspection, InspectionResult } from '@/features/quality/types';
 import type { GoodsReceiptNote, PurchaseRequisitionStatus } from './types';
 
 // ------------------------------------------------------------ identities --
@@ -92,53 +91,4 @@ export function vendorLedgerWords(vendor: { name: string; tally_ledger_name?: st
     return bare(ledger) === bare(vendor.name)
         ? { kind: 'same_as_name', text: 'Same as the vendor name' }
         : { kind: 'differs', text: ledger };
-}
-
-// ------------------------------------------------------- GRN ⇄ QC status --
-
-export interface GrnQcSummary {
-    state: 'no_lines' | 'awaiting' | 'in_progress' | 'done';
-    color: string;
-    words: string;
-}
-
-/**
- * Where a receipt stands with incoming inspection, derived from the
- * inspections register — the backend keeps no reverse link (a GRN cannot ask
- * "was I inspected?"), so the quality module's own list is the one honest
- * source. Grain is one inspection per GRN LINE; a receipt is done only when
- * every line has one, and the worst line's result names the whole receipt
- * (fail > partial > pass), because "QC passed" over one failed line would be
- * a lie a storekeeper acts on.
- */
-export function grnQcSummary(
-    lines: ReadonlyArray<{ id: number }>,
-    inspectionByLineId: ReadonlyMap<number, Pick<IncomingInspection, 'result'>>,
-): GrnQcSummary {
-    if (lines.length === 0) return { state: 'no_lines', color: 'default', words: '—' };
-
-    const results = lines
-        .map((line) => inspectionByLineId.get(line.id)?.result)
-        .filter((result): result is InspectionResult => result !== undefined);
-
-    if (results.length === 0) return { state: 'awaiting', color: 'gold', words: 'Awaiting QC' };
-    if (results.length < lines.length) {
-        return { state: 'in_progress', color: 'gold', words: `QC ${results.length} of ${lines.length} lines` };
-    }
-    if (results.includes('fail')) return { state: 'done', color: 'red', words: 'QC failed' };
-    if (results.includes('partial')) return { state: 'done', color: 'gold', words: 'QC partial' };
-
-    return { state: 'done', color: 'green', words: 'QC passed' };
-}
-
-/** The inspections list keyed by the GRN line each one inspected. */
-export function inspectionsByLine(
-    inspections: ReadonlyArray<Pick<IncomingInspection, 'goods_receipt_note_line_id' | 'result'>> | undefined | null,
-): Map<number, Pick<IncomingInspection, 'result'>> {
-    const map = new Map<number, Pick<IncomingInspection, 'result'>>();
-    for (const inspection of inspections ?? []) {
-        map.set(inspection.goods_receipt_note_line_id, inspection);
-    }
-
-    return map;
 }

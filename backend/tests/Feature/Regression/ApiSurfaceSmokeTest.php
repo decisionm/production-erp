@@ -57,8 +57,14 @@ class ApiSurfaceSmokeTest extends TestCase
     /** The traceability gate's answer while the flag is off. */
     private const FLAG_OFF_STATUS = 404;
 
-    /** Parameterised GET routes deliberately not read here, uri => why. None today. */
-    private const SKIPPED = [];
+    /** Parameterised GET routes deliberately not read here, uri => why. */
+    private const SKIPPED = [
+        // Answers 404 until a scan is attached, and attaching one here would
+        // write to the REAL local disk (this trait does not fake Storage).
+        // The download is exercised end-to-end in SupplierBillTest with a
+        // faked disk.
+        'api/v1/procurement/supplier-bills/{supplier_bill}/attachment' => 'no attachment on the fixture bill; covered by SupplierBillTest',
+    ];
 
     /**
      * Parameterised GETs whose answer for an id that does not exist is, by
@@ -291,6 +297,7 @@ class ApiSurfaceSmokeTest extends TestCase
             'api/v1/inventory/warehouses/{warehouse}' => "/api/v1/inventory/warehouses/{$fx['fg']->id}",
             'api/v1/payroll/payslips/{payslip}' => "/api/v1/payroll/payslips/{$fx['payslip']->id}",
             'api/v1/procurement/goods-receipts/{goods_receipt}' => "/api/v1/procurement/goods-receipts/{$fx['grn']->id}",
+            'api/v1/procurement/supplier-bills/{supplier_bill}' => "/api/v1/procurement/supplier-bills/{$fx['bill']->id}",
             // Vendor and Customer joined the Configuration Lifecycle Contract
             // on 20-Aug; their show() is what the delete confirm dialog reads
             // for the authoritative `can` block.

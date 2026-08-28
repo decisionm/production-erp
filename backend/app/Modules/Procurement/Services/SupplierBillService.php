@@ -1,0 +1,279 @@
+<?php
+
+namespace App\Modules\Procurement\Services;
+
+use App\Exceptions\InvalidStatusTransitionException;
+use App\Modules\Procurement\Models\Enums\SupplierBillStatus;
+use App\Modules\Procurement\Models\GoodsReceiptNoteLine;
+use App\Modules\Procurement\Models\SupplierBill;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
+
+/**
+ * Recording the vendor's invoice — see the migration's docblock for the
+ * boundaries (a record of the paper, never a computed tax, never a Tally
+ * voucher; Q39/Q41/Q28 open).
+ *
+ * THE ONE ARITHMETIC ENFORCED is the bill's own:
+ *   subtotal = Σ line amounts, and
+ *   total    = subtotal + CGST + SGST + IGST + rounding
+ * both to the paisa (bc math on strings, decimal columns — CLAUDE.md). A
+ * bill that does not add up is refused with the gap NAMED, because it is a
+ * typo today and a dispute in a quarter. Line amount vs qty × rate is
+ * deliberately NOT refused — vendors round per line — the screen shows the
+ * variance instead.
+ *
+ * LIFECYCLE: draft (editable) → recorded (who/when stamped, read-only) or
+ * cancelled (reason kept, row kept). Nothing is ever hard-deleted, and
+ * nothing here moves stock or queues anything for Tally.
+ */
+class SupplierBillService
+{
+    private const WITH = ['vendor', 'purchaseOrder', 'lines.item', 'lines.goodsReceiptNoteLine', 'createdBy', 'recordedBy'];
+
+    /** Attachment rules: what a scanned bill actually is, capped at 10 MB. */
+    public const ATTACHMENT_MIMES = ['pdf', 'jpg', 'jpeg', 'png', 'webp'];
+
+    public const ATTACHMENT_MAX_KB = 10240;
+
+    public function __construct(private readonly ProcurementDocumentQuery $query) {}
+
+    /**
+     * @param  array<string, mixed>  $filters
+     */
+    public function paginate(int $perPage = 20, array $filters = []): LengthAwarePaginator
+    {
+        $query = SupplierBill::query()->with(self::WITH);
+        $this->applyFilters($query, $filters);
+        $this->query->applySort($query, $filters['sort'] ?? null, ['bill_date']);
+
+        return $query->paginate($perPage)->withQueryString();
+    }
+
+    /**
+     * `q` matches "BILL-12" in any spelling, the vendor's own invoice
+     * number, or the vendor by name or code.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function applyFilters(Builder $query, array $filters): void
+    {
+        if (! empty($filters['vendor_id'])) {
+            $query->where('vendor_id', (int) $filters['vendor_id']);
+        }
+
+        if (! empty($filters['purchase_order_id'])) {
+            $query->where('purchase_order_id', (int) $filters['purchase_order_id']);
+        }
+
+        if (! empty($filters['status'])) {
+            $statuses = is_array($filters['status'])
+                ? array_values(array_filter($filters['status'], fn ($status) => $status !== null && $status !== ''))
+                : [$filters['status']];
+            if ($statuses !== []) {
+                $query->whereIn('status', $statuses);
+            }
+        }
+
+        $this->query->applyDateRange($query, 'bill_date', $filters['from'] ?? null, $filters['to'] ?? null);
+
+        if (isset($filters['q']) && trim((string) $filters['q']) !== '') {
+            $term = trim((string) $filters['q']);
+            $id = $this->query->documentId($term, 'BILL');
+
+            $query->where(function (Builder $any) use ($term, $id) {
+                if ($id !== null) {
+                    $any->orWhere('supplier_bills.id', $id);
+                }
+                $any->orWhere(fn (Builder $number) => $this->query->whereLike($number, 'bill_number', $term));
+                $any->orWhereHas('vendor', fn (Builder $vendor) => $this->query->whereVendorMatches($vendor, $term));
+            });
+        }
+    }
+
+    public function show(SupplierBill $bill): SupplierBill
+    {
+        return $bill->load(self::WITH);
+    }
+
+    /**
+     * @param  array<string, mixed>  $data  validated StoreSupplierBillRequest input
+     */
+    public function create(array $data, ?int $createdBy): SupplierBill
+    {
+        $this->guardArithmetic($data);
+        $this->guardMatching($data);
+
+        return DB::transaction(function () use ($data, $createdBy) {
+            $bill = SupplierBill::create([
+                ...collect($data)->except('lines')->all(),
+                'created_by' => $createdBy,
+            ]);
+
+            foreach ($data['lines'] as $line) {
+                $bill->lines()->create($line);
+            }
+
+            // refresh(): status comes from the column default; the in-memory
+            // model does not know it until read back.
+            return $bill->refresh()->load(self::WITH);
+        });
+    }
+
+    /**
+     * Replace the draft wholesale — the paper is the source, the draft is
+     * the typing. Refused outside Draft: a recorded bill is a record.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function update(SupplierBill $bill, array $data): SupplierBill
+    {
+        $this->guardStatus($bill, SupplierBillStatus::Draft, 'edit');
+        $this->guardArithmetic($data);
+        $this->guardMatching($data);
+
+        return DB::transaction(function () use ($bill, $data) {
+            $bill->update(collect($data)->except('lines')->all());
+            $bill->lines()->delete();
+            foreach ($data['lines'] as $line) {
+                $bill->lines()->create($line);
+            }
+
+            return $bill->load(self::WITH);
+        });
+    }
+
+    public function record(SupplierBill $bill, ?int $recordedBy): SupplierBill
+    {
+        $this->guardStatus($bill, SupplierBillStatus::Draft, 'record');
+        $bill->forceFill([
+            'status' => SupplierBillStatus::Recorded,
+            'recorded_by' => $recordedBy,
+            'recorded_at' => now(),
+        ])->save();
+
+        return $bill->load(self::WITH);
+    }
+
+    public function cancel(SupplierBill $bill, string $reason): SupplierBill
+    {
+        if ($bill->status === SupplierBillStatus::Cancelled) {
+            throw InvalidStatusTransitionException::make('supplier bill', $bill->status->value, SupplierBillStatus::Cancelled->value);
+        }
+
+        $bill->forceFill([
+            'status' => SupplierBillStatus::Cancelled,
+            'cancelled_reason' => $reason,
+        ])->save();
+
+        return $bill->load(self::WITH);
+    }
+
+    /**
+     * One attachment per bill — the scan of the paper. Replacing while
+     * Draft is ordinary (a better scan); a recorded bill keeps its file.
+     */
+    public function attach(SupplierBill $bill, UploadedFile $file): SupplierBill
+    {
+        $this->guardStatus($bill, SupplierBillStatus::Draft, 'attach a file to');
+
+        if ($bill->attachment_path !== null) {
+            Storage::disk('local')->delete($bill->attachment_path);
+        }
+
+        $path = $file->store("supplier-bills/{$bill->id}", 'local');
+        $bill->forceFill([
+            'attachment_path' => $path,
+            'attachment_name' => $file->getClientOriginalName(),
+        ])->save();
+
+        return $bill->load(self::WITH);
+    }
+
+    // ---- guards -------------------------------------------------------------
+
+    /**
+     * The bill's own arithmetic, to the paisa. The gap is NAMED in the
+     * refusal so the accountant knows which figure to re-read.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function guardArithmetic(array $data): void
+    {
+        $lineSum = '0.0000';
+        foreach ($data['lines'] as $line) {
+            $lineSum = bcadd($lineSum, (string) $line['amount'], 4);
+        }
+
+        if (bccomp($lineSum, (string) $data['subtotal'], 4) !== 0) {
+            throw ValidationException::withMessages([
+                'subtotal' => "The lines sum to {$lineSum}, not the subtotal typed ({$data['subtotal']}). One of the two is mistyped — the paper knows which.",
+            ]);
+        }
+
+        $expected = (string) $data['subtotal'];
+        foreach (['cgst', 'sgst', 'igst', 'rounding'] as $key) {
+            $expected = bcadd($expected, (string) ($data[$key] ?? '0'), 4);
+        }
+
+        if (bccomp($expected, (string) $data['total'], 4) !== 0) {
+            throw ValidationException::withMessages([
+                'total' => "Subtotal + taxes + rounding is {$expected}, not the total typed ({$data['total']}). A bill that does not add up cannot be recorded.",
+            ]);
+        }
+    }
+
+    /**
+     * A line matched to a GRN line must be matched to THIS bill's chain:
+     * the same purchase order (when the bill names one) and the same item.
+     * Nothing forces matching — a bill for something never on a PO is Q64's
+     * open territory and stays recordable unmatched.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function guardMatching(array $data): void
+    {
+        foreach ($data['lines'] as $index => $line) {
+            if (empty($line['goods_receipt_note_line_id'])) {
+                continue;
+            }
+
+            $grnLine = GoodsReceiptNoteLine::query()
+                ->with('goodsReceiptNote')
+                ->find((int) $line['goods_receipt_note_line_id']);
+
+            if ($grnLine === null) {
+                throw ValidationException::withMessages([
+                    "lines.{$index}.goods_receipt_note_line_id" => 'That receipt line does not exist.',
+                ]);
+            }
+
+            if ((int) $grnLine->item_id !== (int) $line['item_id']) {
+                throw ValidationException::withMessages([
+                    "lines.{$index}.goods_receipt_note_line_id" => 'That receipt line is for a different item than this bill line.',
+                ]);
+            }
+
+            if (! empty($data['purchase_order_id'])
+                && (int) $grnLine->goodsReceiptNote->purchase_order_id !== (int) $data['purchase_order_id']) {
+                throw ValidationException::withMessages([
+                    "lines.{$index}.goods_receipt_note_line_id" => 'That receipt line belongs to a different purchase order than this bill names.',
+                ]);
+            }
+        }
+    }
+
+    private function guardStatus(SupplierBill $bill, SupplierBillStatus $required, string $verb): void
+    {
+        if ($bill->status !== $required) {
+            throw ValidationException::withMessages([
+                'status' => "Only a draft bill can be changed — this one is {$bill->status->value}. "
+                    .($verb === 'record' ? 'It has already been recorded or cancelled.' : 'Cancel it and enter a new one if the paper says otherwise.'),
+            ]);
+        }
+    }
+}

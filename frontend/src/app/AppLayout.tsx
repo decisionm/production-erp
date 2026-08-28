@@ -40,6 +40,16 @@ interface NavLeaf {
     key: string;
     label: string;
     module?: string;
+    /**
+     * A PERMISSION gate without an ADOPTION gate: the entry belongs to an
+     * adopted group but is visible only to holders of this module's
+     * permission. Supplier Bills is the case that needed it — procurement
+     * work done by Accounts (FC-06: every figure is a purchase rate, so the
+     * API gates on module:finance), while the Finance MODULE itself stays
+     * unadopted (DEC-20260812-001) and must not become visible through a
+     * child entry.
+     */
+    permissionModule?: string;
 }
 
 interface NavGroup {
@@ -102,6 +112,8 @@ export const allNavItems: readonly NavGroup[] = [
             { key: '/procurement/purchase-requisitions', label: 'Purchase Requisitions' },
             { key: '/procurement/purchase-orders', label: 'Purchase Orders' },
             { key: '/procurement/goods-receipts', label: 'Goods Receipts' },
+            // Accounts only (permission gate, not adoption — see NavLeaf).
+            { key: '/procurement/supplier-bills', label: 'Supplier Bills', permissionModule: 'finance' },
         ],
     },
     {
@@ -405,7 +417,9 @@ export function buildNavItems(user: User | null) {
             if (item.module && !hasModuleAccess(user, item.module)) return null;
             if (item.children) {
                 const children = item.children.filter(
-                    (child) => !child.module || (ADOPTED_MODULES.has(child.module) && hasModuleAccess(user, child.module)),
+                    (child) =>
+                        (!child.module || (ADOPTED_MODULES.has(child.module) && hasModuleAccess(user, child.module)))
+                        && (!child.permissionModule || hasModuleAccess(user, child.permissionModule)),
                 );
                 if (children.length === 0) return null;
                 return { ...item, children };

@@ -9,6 +9,7 @@ import { createIncomingInspection, listIncomingInspections } from '@/features/qu
 import type { IncomingInspection, InspectionResult } from '@/features/quality/types';
 import { listGoodsReceipts } from '@/features/procurement/api';
 import { ListEmpty } from '@/lib/ListEmpty';
+import { inspectionPreview, resultTag } from '@/features/quality/words';
 
 const inspectionSchema = z.object({
     goods_receipt_note_line_id: z.number({ error: 'GRN line is required' }),
@@ -19,12 +20,6 @@ const inspectionSchema = z.object({
     notes: z.string().optional(),
 });
 type InspectionFormValues = z.infer<typeof inspectionSchema>;
-
-const resultColor: Record<InspectionResult, string> = {
-    pass: 'green',
-    fail: 'red',
-    partial: 'gold',
-};
 
 export default function IncomingInspectionsPage() {
     const [modalOpen, setModalOpen] = useState(false);
@@ -88,14 +83,12 @@ export default function IncomingInspectionsPage() {
     }, [linkedLineId]);
 
     const [inspected, accepted, rejected] = watch(['inspected_quantity', 'accepted_quantity', 'rejected_quantity']);
-    const preview = useMemo(() => {
-        const i = Number(inspected) || 0;
-        const a = Number(accepted) || 0;
-        const r = Number(rejected) || 0;
-        const balanced = Math.abs(a + r - i) < 0.0001;
-        const result: InspectionResult | null = !balanced ? null : r === 0 ? 'pass' : a === 0 ? 'fail' : 'partial';
-        return { balanced, result };
-    }, [inspected, accepted, rejected]);
+    // inspectionPreview (quality/words.ts): empty or all-zero is INCOMPLETE,
+    // never a green "pass" over material nobody has inspected (28-Aug audit).
+    const preview = useMemo(
+        () => inspectionPreview({ inspected: Number(inspected) || null, accepted: Number(accepted) || 0, rejected: Number(rejected) || 0 }),
+        [inspected, accepted, rejected],
+    );
 
     const mutation = useMutation({
         mutationFn: createIncomingInspection,
@@ -139,7 +132,10 @@ export default function IncomingInspectionsPage() {
                     {
                         title: 'Result',
                         dataIndex: 'result',
-                        render: (result: InspectionResult) => <Tag color={resultColor[result]}>{result}</Tag>,
+                        render: (result: InspectionResult) => {
+                            const tag = resultTag(result);
+                            return <Tag color={tag.color}>{tag.label}</Tag>;
+                        },
                     },
                     { title: 'Date', dataIndex: 'inspection_date' },
                     {
@@ -176,7 +172,7 @@ export default function IncomingInspectionsPage() {
                 onCancel={() => setModalOpen(false)}
                 onOk={handleSubmit((values) => mutation.mutate(values))}
                 confirmLoading={mutation.isPending}
-                okButtonProps={{ disabled: !preview.balanced }}
+                okButtonProps={{ disabled: preview.kind !== 'result' }}
                 destroyOnHidden
             >
                 <Form layout="vertical">
@@ -235,11 +231,13 @@ export default function IncomingInspectionsPage() {
                     </Form.Item>
 
                     <Alert
-                        type={preview.balanced ? 'success' : 'warning'}
+                        type={preview.kind === 'result' ? 'success' : preview.kind === 'incomplete' ? 'info' : 'warning'}
                         message={
-                            preview.balanced
-                                ? `Result: ${preview.result}`
-                                : 'Accepted + rejected must equal inspected quantity'
+                            preview.kind === 'result'
+                                ? `Result: ${resultTag(preview.result).label}`
+                                : preview.kind === 'unbalanced'
+                                    ? 'Accepted + rejected must equal inspected quantity'
+                                    : 'Type the inspected, accepted and rejected quantities — no verdict until they are in.'
                         }
                         showIcon
                     />
@@ -259,7 +257,10 @@ export default function IncomingInspectionsPage() {
                             {detailRow.item.sku} — {detailRow.item.name}
                         </Descriptions.Item>
                         <Descriptions.Item label="Result">
-                            <Tag color={resultColor[detailRow.result]}>{detailRow.result}</Tag>
+                            {(() => {
+                                const tag = resultTag(detailRow.result);
+                                return <Tag color={tag.color}>{tag.label}</Tag>;
+                            })()}
                         </Descriptions.Item>
                         <Descriptions.Item label="Inspected Quantity">{detailRow.inspected_quantity}</Descriptions.Item>
                         <Descriptions.Item label="Accepted Quantity">{detailRow.accepted_quantity}</Descriptions.Item>

@@ -14,6 +14,7 @@ import {
 } from '@/features/procurement/api';
 import type { PurchaseRequisition, PurchaseRequisitionStatus } from '@/features/procurement/types';
 import { apiMessage } from '@/features/procurement/components/apiMessage';
+import { prDrawerTitle, prNumber, requisitionStatusTag } from '@/features/procurement/documentWords';
 import { poNumber } from '@/features/procurement/purchaseOrders';
 import { instant } from '@/features/tally-sync/drawer';
 import { itemLabel } from '@/lib/itemLabel';
@@ -34,12 +35,6 @@ const requisitionSchema = z.object({
         .min(1, 'Add at least one line'),
 });
 type RequisitionFormValues = z.infer<typeof requisitionSchema>;
-
-const statusColor: Record<PurchaseRequisitionStatus, string> = {
-    draft: 'default',
-    approved: 'green',
-    rejected: 'red',
-};
 
 const STATUS_OPTIONS: { value: PurchaseRequisitionStatus | ''; label: string }[] = [
     { value: '', label: 'All statuses' },
@@ -236,15 +231,18 @@ export default function PurchaseRequisitionsPage() {
                     },
                 }}
                 columns={[
-                    { title: 'Requisition', render: (_, row) => row.document_number ?? `PR-${row.id}` },
+                    { title: 'Requisition', render: (_, row) => row.document_number ?? prNumber(row) },
                     {
                         title: 'Status',
                         dataIndex: 'status',
-                        render: (status: PurchaseRequisitionStatus, row) => (
-                            <Tooltip title={decisionLine(row)}>
-                                <Tag color={statusColor[status]}>{status}</Tag>
-                            </Tooltip>
-                        ),
+                        render: (status: PurchaseRequisitionStatus, row) => {
+                            const tag = requisitionStatusTag(status);
+                            return (
+                                <Tooltip title={decisionLine(row)}>
+                                    <Tag color={tag.color}>{tag.label}</Tag>
+                                </Tooltip>
+                            );
+                        },
                     },
                     { title: 'Requested By', dataIndex: 'requested_by' },
                     {
@@ -418,7 +416,7 @@ export default function PurchaseRequisitionsPage() {
             </Modal>
 
             <Drawer
-                title={`Purchase Requisition ${detailRequisition ? (detailRequisition.document_number ?? `PR-${detailRequisition.id}`) : ''}`}
+                title={prDrawerTitle(detailRequisition)}
                 open={detailRequisition !== null}
                 onClose={() => setDetailRequisition(null)}
                 width="min(100vw, 560px)"
@@ -428,7 +426,10 @@ export default function PurchaseRequisitionsPage() {
                     <>
                         <Descriptions column={1} size="small" bordered>
                             <Descriptions.Item label="Status">
-                                <Tag color={statusColor[detailRequisition.status]}>{detailRequisition.status}</Tag>
+                                {(() => {
+                                    const tag = requisitionStatusTag(detailRequisition.status);
+                                    return <Tag color={tag.color}>{tag.label}</Tag>;
+                                })()}
                             </Descriptions.Item>
                             <Descriptions.Item label="Requested By">
                                 {detailRequisition.requested_by ?? '—'}

@@ -208,6 +208,8 @@ class VendorService
                 ->label('purchase order'),
             DependencyCheck::table('subcontract_orders', 'vendor_id')
                 ->label('subcontract order'),
+            DependencyCheck::table('supplier_bills', 'vendor_id')
+                ->label('supplier bill'),
         ];
     }
 
