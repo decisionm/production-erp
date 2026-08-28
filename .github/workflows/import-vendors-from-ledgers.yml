@@ -38,6 +38,10 @@ on:
         description: 'Comma-separated Tally group names to import, e.g. "Sundry Creditors". Leave EMPTY to just list every group and its size.'
         type: string
         default: ''
+      backfill:
+        description: 'Import nothing; fill GSTIN and state code on vendors this command already created. Leave `groups` empty when using this.'
+        type: boolean
+        default: false
       write:
         description: 'Actually write. Leave false for a dry run that changes nothing.'
         type: boolean
@@ -100,6 +104,7 @@ jobs:
         env:
           GROUPS_RAW: ${{ inputs.groups }}
           WRITE_RAW: ${{ inputs.write }}
+          BACKFILL_RAW: ${{ inputs.backfill }}
         run: |
           set -euo pipefail
 
@@ -128,9 +133,20 @@ jobs:
           {
             echo "GROUPS=$GROUPS_RAW"
             echo "WRITE=$WRITE_RAW"
+            echo "BACKFILL=$BACKFILL_RAW"
           } >> "$GITHUB_OUTPUT"
 
-          if [ -z "$GROUPS_RAW" ]; then
+          if [ "$BACKFILL_RAW" = "true" ]; then
+            if [ -n "$GROUPS_RAW" ]; then
+              echo "::error::--backfill imports nothing, so groups has no meaning with it. Leave groups empty. Nothing was run."
+              exit 1
+            fi
+            if [ "$WRITE_RAW" = "true" ]; then
+              echo "::warning::BACKFILLING GSTIN and state code onto vendors this command already created. A value already set is never overwritten."
+            else
+              echo "Dry-run backfill — nothing will be written."
+            fi
+          elif [ -z "$GROUPS_RAW" ]; then
             echo "No groups given — listing every Tally group in the data. Nothing will be written."
           elif [ "$WRITE_RAW" = "true" ]; then
             echo "::warning::WRITING vendors to the live database from groups: $GROUPS_RAW"
@@ -143,6 +159,7 @@ jobs:
         env:
           GROUPS: ${{ steps.plan.outputs.GROUPS }}
           WRITE: ${{ steps.plan.outputs.WRITE }}
+          BACKFILL: ${{ steps.plan.outputs.BACKFILL }}
         run: |
           set -euo pipefail
           set -o pipefail
@@ -153,6 +170,10 @@ jobs:
           REMOTE="cd '${{ secrets.DEPLOY_PATH }}/backend' && \$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php) artisan procurement:import-vendors-from-ledgers"
           if [ -n "$GROUPS" ]; then
             REMOTE="$REMOTE --groups='$GROUPS'"
+          fi
+          # Literal, gated on the boolean input — same rule as --write.
+          if [ "$BACKFILL" = "true" ]; then
+            REMOTE="$REMOTE --backfill"
           fi
           # The ONLY place --write can come from is this literal, gated on the
           # boolean input. It can no longer be smuggled through a value.

@@ -58,12 +58,28 @@ class ImportVendorsFromLedgers extends Command
 
     protected $signature = 'procurement:import-vendors-from-ledgers
         {--groups=* : Tally group name to import. Repeatable, and also accepts a comma-separated list. Required to write. Omit for a census of every group in the data.}
+        {--backfill : Import nothing; fill the GSTIN and state code on vendors this command already created that have none. Dry run unless --write.}
         {--write : Actually write (default is a dry run)}';
 
     protected $description = 'Create Procurement vendors from pulled Tally ledgers, selected by an explicit allow-list of group names';
 
     public function handle(VendorService $vendors): int
     {
+        // THE BACKFILL BRANCHES FIRST, and it imports nothing, so the census
+        // below is noise for it. Refused together with --groups rather than
+        // silently doing one of the two: an operator who asked for both must
+        // not be left guessing which happened.
+        if ($this->option('backfill')) {
+            if (! empty(array_filter((array) $this->option('groups')))) {
+                $this->error('--backfill imports nothing, so --groups has no meaning with it.');
+                $this->line('  Run the import first (--groups=... --write), then the backfill (--backfill --write).');
+
+                return self::FAILURE;
+            }
+
+            return $this->backfill();
+        }
+
         $census = Ledger::query()
             // Single-quoted: a double-quoted literal is only a string while
             // MySQL is not in ANSI_QUOTES mode, where it would be read as an
@@ -185,7 +201,19 @@ class ImportVendorsFromLedgers extends Command
                     'email' => null,
                     'phone' => null,
                     'address' => null,
-                    'state_code' => null,
+                    // THE STATE COMES FROM THE GSTIN, not from the ledger's
+                    // state field. The 28-Aug ledger master export measured
+                    // why: of 620 Sundry Creditors only 22 carry a state at
+                    // all, while 307 carry a GSTIN. A GSTIN's first two
+                    // digits ARE the GST state code — that is the format's
+                    // definition, not an inference — so it is read rather
+                    // than guessed, and left null when there is no GSTIN.
+                    //
+                    // It matters beyond tidiness: the state decides local
+                    // against interstate, which decides which of the
+                    // factory's purchase ledgers a voucher names
+                    // (DEC-20260812-003).
+                    'state_code' => self::stateCodeFrom($gstin),
                     // The ledger's own name IS what a voucher must call this
                     // party, so the mapping Accounts would otherwise type in is
                     // recorded from the source it comes from.
@@ -246,6 +274,119 @@ class ImportVendorsFromLedgers extends Command
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * --backfill: give the vendors this command already created the GSTIN and
+     * state code their ledgers carry now.
+     *
+     * WHY IT IS A SEPARATE RUN. 628 vendors were imported on 28-Aug before the
+     * agent asked Tally for party details, so every one of them landed with no
+     * GSTIN. The import cannot fix them on a re-run: it matches on the ledger
+     * and skips a vendor it has already made, which is exactly the behaviour
+     * that stops a rename becoming a duplicate.
+     *
+     * It creates nothing, deletes nothing and renames nothing. The only rows it
+     * considers are the ones this command itself made — those carrying a
+     * tally_ledger_guid — and a field ALREADY SET is left alone: filling a
+     * blank is completing this command's own work, while overwriting a value a
+     * person may have typed is not this command's business.
+     */
+    private function backfill(): int
+    {
+        $write = (bool) $this->option('write');
+
+        $filled = 0;
+        $alreadySet = 0;
+        $ledgerHasNone = 0;
+        $missingLedger = [];
+
+        $apply = function () use (&$filled, &$alreadySet, &$ledgerHasNone, &$missingLedger): void {
+            Vendor::query()
+                ->whereNotNull('tally_ledger_guid')
+                ->orderBy('code')
+                ->each(function (Vendor $vendor) use (&$filled, &$alreadySet, &$ledgerHasNone, &$missingLedger): void {
+                    if (trim((string) $vendor->gstin) !== '') {
+                        $alreadySet++;
+
+                        return;
+                    }
+
+                    // Plain first(), so a soft-deleted ledger does NOT match:
+                    // the mirror is re-pulled from Tally, and a ledger no
+                    // longer in it is a fact for a person to look at.
+                    $ledger = Ledger::where('tally_guid', $vendor->tally_ledger_guid)->first();
+
+                    if ($ledger === null) {
+                        $missingLedger[] = sprintf('%s (%s)', $vendor->name, $vendor->code);
+
+                        return;
+                    }
+
+                    $gstin = trim((string) $ledger->gstin);
+
+                    if ($gstin === '') {
+                        $ledgerHasNone++;
+
+                        return;
+                    }
+
+                    $vendor->update([
+                        'gstin' => $gstin,
+                        'state_code' => $vendor->state_code ?: self::stateCodeFrom($gstin),
+                    ]);
+                    $filled++;
+                });
+        };
+
+        if ($write) {
+            DB::transaction($apply);
+        } else {
+            DB::beginTransaction();
+
+            try {
+                $apply();
+            } finally {
+                DB::rollBack();
+            }
+        }
+
+        $this->info($write ? 'BACKFILLED' : 'DRY RUN — nothing written');
+        $this->newLine();
+
+        $this->table(['count', 'value'], [
+            ['vendors this command created', $filled + $alreadySet + $ledgerHasNone + count($missingLedger)],
+            [$write ? 'GSTINs written' : 'GSTINs that would be written', $filled],
+            ['already had a GSTIN — untouched', $alreadySet],
+            ['the ledger has no GSTIN either — nothing to fill', $ledgerHasNone],
+            ['ledger not in this database — SKIPPED for review', count($missingLedger)],
+        ]);
+
+        foreach ($missingLedger as $line) {
+            $this->warn('  ledger missing, not filled: '.$line);
+        }
+
+        if (! $write) {
+            $this->newLine();
+            $this->line('Re-run with --backfill --write after reading the plan above.');
+        }
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * The GST state code a GSTIN carries in its first two digits.
+     *
+     * Not an inference: a GSTIN is defined as the two-digit state code, then
+     * the PAN, then the entity and check characters. Read only from a value
+     * that is the right length and starts with two digits, so a malformed or
+     * absent GSTIN yields null rather than a made-up code.
+     */
+    private static function stateCodeFrom(string $gstin): ?string
+    {
+        return strlen($gstin) === 15 && ctype_digit(substr($gstin, 0, 2))
+            ? substr($gstin, 0, 2)
+            : null;
     }
 
     /**

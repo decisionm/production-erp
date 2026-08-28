@@ -79,6 +79,47 @@ class ImportVendorsFromLedgersTest extends TestCase
         $this->assertTrue((bool) $vendor->is_active);
     }
 
+    /**
+     * THE STATE COMES FROM THE GSTIN. Of 620 creditor ledgers in the 28-Aug
+     * master export, only 22 carry a state field while 307 carry a GSTIN — so
+     * the GSTIN is the reliable route. Its first two digits ARE the GST state
+     * code by the format's definition, and the state decides local against
+     * interstate, which decides which purchase ledger a voucher names.
+     */
+    public function test_the_state_code_is_read_from_the_gstin(): void
+    {
+        $this->ledger('Vendor Puducherry', 'Sundry Creditors', ['gstin' => '34AARFA2721K1ZF']);
+        $this->ledger('Vendor Tamil Nadu', 'Sundry Creditors', ['gstin' => '33DVYPS7573A1ZY']);
+
+        $this->artisan('procurement:import-vendors-from-ledgers --groups="Sundry Creditors" --write')
+            ->assertSuccessful();
+
+        $this->assertSame('34', Vendor::where('name', 'Vendor Puducherry')->value('state_code'));
+        $this->assertSame('33', Vendor::where('name', 'Vendor Tamil Nadu')->value('state_code'));
+    }
+
+    /** No GSTIN means no state — never a guessed code. */
+    public function test_a_vendor_without_a_gstin_has_no_state_code(): void
+    {
+        $this->ledger('Vendor Bravo', 'Sundry Creditors');
+
+        $this->artisan('procurement:import-vendors-from-ledgers --groups="Sundry Creditors" --write')
+            ->assertSuccessful();
+
+        $this->assertNull(Vendor::where('name', 'Vendor Bravo')->value('state_code'));
+    }
+
+    /** A malformed GSTIN yields no state rather than two characters of nonsense. */
+    public function test_a_malformed_gstin_yields_no_state_code(): void
+    {
+        $this->ledger('Vendor Broken', 'Sundry Creditors', ['gstin' => 'NOTAGSTIN']);
+
+        $this->artisan('procurement:import-vendors-from-ledgers --groups="Sundry Creditors" --write')
+            ->assertSuccessful();
+
+        $this->assertNull(Vendor::where('name', 'Vendor Broken')->value('state_code'));
+    }
+
     /** A ledger Tally has no GSTIN for makes a vendor with none — never a placeholder. */
     public function test_a_ledger_without_a_gstin_makes_a_vendor_without_one(): void
     {
@@ -181,6 +222,72 @@ class ImportVendorsFromLedgersTest extends TestCase
             ->assertFailed();
 
         $this->assertSame(0, Vendor::count());
+    }
+
+    /**
+     * THE BACKFILL EXISTS BECAUSE OF A REAL EVENT. 628 vendors were imported on
+     * 28-Aug before the agent asked Tally for party details, so every one
+     * landed with no GSTIN. A re-run cannot fix them: the import matches on the
+     * ledger and skips a vendor it has already made, which is the same
+     * behaviour that stops a rename becoming a duplicate.
+     */
+    public function test_the_backfill_fills_a_gstin_the_ledger_has_now(): void
+    {
+        $ledger = $this->ledger('Vendor Alpha', 'Sundry Creditors');
+        $this->artisan('procurement:import-vendors-from-ledgers --groups="Sundry Creditors" --write')->assertSuccessful();
+        $this->assertNull(Vendor::where('name', 'Vendor Alpha')->value('gstin'));
+
+        // The masters sync later brings the party details across.
+        $ledger->update(['gstin' => '34AARFA2721K1ZF']);
+
+        $this->artisan('procurement:import-vendors-from-ledgers --backfill --write')->assertSuccessful();
+
+        $vendor = Vendor::where('name', 'Vendor Alpha')->firstOrFail();
+        $this->assertSame('34AARFA2721K1ZF', $vendor->gstin);
+        $this->assertSame('34', $vendor->state_code, 'the state code was not derived from the backfilled GSTIN');
+    }
+
+    /** A GSTIN somebody typed is this command's to read, never to overwrite. */
+    public function test_the_backfill_leaves_a_gstin_that_is_already_set(): void
+    {
+        $ledger = $this->ledger('Vendor Alpha', 'Sundry Creditors', ['gstin' => '33DVYPS7573A1ZY']);
+        $this->artisan('procurement:import-vendors-from-ledgers --groups="Sundry Creditors" --write')->assertSuccessful();
+
+        $ledger->update(['gstin' => '34AARFA2721K1ZF']);
+        $this->artisan('procurement:import-vendors-from-ledgers --backfill --write')->assertSuccessful();
+
+        $this->assertSame('33DVYPS7573A1ZY', Vendor::where('name', 'Vendor Alpha')->value('gstin'));
+    }
+
+    /** A vendor made on the form carries no ledger link, so the backfill ignores it. */
+    public function test_the_backfill_ignores_a_vendor_it_did_not_create(): void
+    {
+        Vendor::create(['code' => 'V-HAND', 'name' => 'Typed By Hand']);
+
+        $this->artisan('procurement:import-vendors-from-ledgers --backfill --write')->assertSuccessful();
+
+        $this->assertNull(Vendor::where('code', 'V-HAND')->value('gstin'));
+    }
+
+    /** A dry-run backfill reports and writes nothing. */
+    public function test_a_dry_run_backfill_writes_nothing(): void
+    {
+        $ledger = $this->ledger('Vendor Alpha', 'Sundry Creditors');
+        $this->artisan('procurement:import-vendors-from-ledgers --groups="Sundry Creditors" --write')->assertSuccessful();
+        $ledger->update(['gstin' => '34AARFA2721K1ZF']);
+
+        $this->artisan('procurement:import-vendors-from-ledgers --backfill')
+            ->expectsOutputToContain('DRY RUN')
+            ->assertSuccessful();
+
+        $this->assertNull(Vendor::where('name', 'Vendor Alpha')->value('gstin'));
+    }
+
+    /** Asking for both at once is refused, not silently resolved to one. */
+    public function test_backfill_with_groups_is_refused(): void
+    {
+        $this->artisan('procurement:import-vendors-from-ledgers --backfill --groups="Sundry Creditors" --write')
+            ->assertFailed();
     }
 
     public function test_it_refuses_when_no_ledgers_have_been_pulled(): void
