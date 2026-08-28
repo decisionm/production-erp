@@ -1,0 +1,184 @@
+name: Import vendors from Tally ledgers
+
+# Creates Procurement vendors from the Tally ledgers already pulled into the live
+# database, ON THE SERVER, over the same SSH key the deploy uses.
+#
+# Why this is a manual act and not a sync: the vendor list is the factory's
+# own commercial record. A background job that quietly invented hundreds of
+# vendors — or silently changed one — is the kind of thing nobody notices
+# until an order goes to the wrong party. So a person runs it, reads the
+# plan, and only then runs it again with write=true.
+#
+# SELECTION IS AN EXPLICIT ALLOW-LIST OF GROUP NAMES. Leave `groups` empty for
+# a census: the command prints every Tally group in the data with its ledger
+# count and writes nothing. Choose from that list.
+#
+# Sundry Creditors is NOT a list of suppliers, and the 28-Aug voucher exports
+# proved it: among the parties sat an INTEREST ledger whose name differs from a
+# real supplier's by two letters, and the company's OWN second GST
+# registration. Nothing in a voucher separates them. Deciding which creditor is
+# a vendor is the owner's call, not a filter this pipeline applies.
+#
+# Manual only — never on push. Defaults to a DRY RUN.
+
+# Least privilege: nothing here writes to the repository. Every workflow uses
+# only checkout, setup-node/php and same-run artifacts, and reaches the server
+# over SSH with a deploy key — never the GITHUB_TOKEN. Without this block the
+# token is repository-default, which on a push-triggered workflow that runs
+# `npm ci` (arbitrary lockfile postinstall) is a write-capable token one
+# compromised transitive dependency away from the pipeline that rsyncs to a
+# live factory. Read is all any of these need.
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      groups:
+        description: 'Comma-separated Tally group names to import, e.g. "Sundry Creditors". Leave EMPTY to just list every group and its size.'
+        type: string
+        default: ''
+      write:
+        description: 'Actually write. Leave false for a dry run that changes nothing.'
+        type: boolean
+        default: false
+
+concurrency:
+  group: import-vendors-from-ledgers
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Same diagnostics as the deploy workflow: ssh-keyscan can exit 0
+          # having collected nothing, so check the output rather than the code.
+          # The host intermittently answers nothing: 10 of the last 100 runs failed
+          # here, and EVERY one cleared on a re-run of the SAME commit — it is the
+          # host, not the change. Retrying in-workflow removes that manual re-run.
+          # It does NOT weaken the check: if all three attempts come back empty the
+          # step still fails loudly, which is the state that must never deploy.
+          keys=""
+          for attempt in 1 2 3; do
+            keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+            if [ -n "$keys" ]; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "ssh-keyscan attempt ${attempt} returned no host key; retrying in $((attempt * 10))s"
+              sleep "$((attempt * 10))"
+            fi
+          done
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Check hPanel → Advanced → SSH Access (it can be off or IP-restricted) and whether brute-force protection has banned the runner. Wait several minutes before re-running — retrying inside the ban window extends it."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      # INPUTS CROSS INTO SHELL ONLY VIA env:, NEVER AS ${{ }} INSIDE run:.
+      #
+      # A `${{ inputs.x }}` expression pasted into a run: body is substituted
+      # as TEXT before bash parses the script, so `$(...)` in the input
+      # executes on the runner — and the runner has already written the live
+      # server's SSH private key to disk by this point. Worse, this value is
+      # then handed to `ssh`, whose argument the REMOTE shell re-parses, so an
+      # escaped `$` reaches the factory server. Both were demonstrated against
+      # the first version of this file.
+      #
+      # env: puts the value in a variable instead of the script text, which
+      # closes the runner-side hole. It does NOT close the remote-side one on
+      # its own, so the value is also validated below before it is allowed
+      # anywhere near ssh. Same pattern as dedupe-configurations.yml.
+      - name: Validate and report what is about to run
+        id: plan
+        env:
+          GROUPS_RAW: ${{ inputs.groups }}
+          WRITE_RAW: ${{ inputs.write }}
+        run: |
+          set -euo pipefail
+
+          # Allow-list, not a block-list. Tally group names are words, digits,
+          # spaces and mild punctuation — nothing here can open a subshell,
+          # end a quote, separate a command or introduce a flag. Rejecting is
+          # the whole defence, so it is deliberately strict: a legitimate name
+          # this refuses is a five-minute conversation, a name it wrongly
+          # accepts is arbitrary code on the factory's server.
+          case "$GROUPS_RAW" in
+            *[!A-Za-z0-9\ ,.\&\(\)_/-]*)
+              echo "::error::The groups value contains a character this workflow refuses to pass to a shell. Allowed: letters, digits, space, comma, dot, ampersand, parentheses, underscore, slash, hyphen. Nothing was run."
+              exit 1
+              ;;
+          esac
+
+          # A leading dash would be read by artisan as another option rather
+          # than a value — including, say, --write.
+          case "$GROUPS_RAW" in
+            -*)
+              echo "::error::The groups value may not begin with '-'. Nothing was run."
+              exit 1
+              ;;
+          esac
+
+          {
+            echo "GROUPS=$GROUPS_RAW"
+            echo "WRITE=$WRITE_RAW"
+          } >> "$GITHUB_OUTPUT"
+
+          if [ -z "$GROUPS_RAW" ]; then
+            echo "No groups given — listing every Tally group in the data. Nothing will be written."
+          elif [ "$WRITE_RAW" = "true" ]; then
+            echo "::warning::WRITING vendors to the live database from groups: $GROUPS_RAW"
+            echo "::warning::Existing vendors are never updated or deleted. A ledger whose name is already taken is SKIPPED and reported, not merged."
+          else
+            echo "Dry run for groups: $GROUPS_RAW — nothing will be written."
+          fi
+
+      - name: Run the import
+        env:
+          GROUPS: ${{ steps.plan.outputs.GROUPS }}
+          WRITE: ${{ steps.plan.outputs.WRITE }}
+        run: |
+          set -euo pipefail
+          set -o pipefail
+
+          # Single-quoted for the REMOTE shell. This is only sound because the
+          # validation above already refused every quote, $, backtick and
+          # semicolon — so nothing in $GROUPS can terminate these quotes.
+          REMOTE="cd '${{ secrets.DEPLOY_PATH }}/backend' && \$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php) artisan procurement:import-vendors-from-ledgers"
+          if [ -n "$GROUPS" ]; then
+            REMOTE="$REMOTE --groups='$GROUPS'"
+          fi
+          # The ONLY place --write can come from is this literal, gated on the
+          # boolean input. It can no longer be smuggled through a value.
+          if [ "$WRITE" = "true" ]; then
+            REMOTE="$REMOTE --write"
+          fi
+
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "$REMOTE" \
+            2>&1 | tee import-output.txt
+
+      # `if: always()` means this runs even when the run failed — so it must
+      # be as injection-safe as the steps above, not more relaxed.
+      - name: Summarise
+        if: always()
+        env:
+          GROUPS_RAW: ${{ inputs.groups }}
+          WRITE_RAW: ${{ inputs.write }}
+        run: |
+          {
+            echo "### Vendor import from Tally ledgers"
+            echo
+            echo "groups: \`${GROUPS_RAW}\` · write: \`${WRITE_RAW}\`"
+            echo
+            echo '```'
+            cat import-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
