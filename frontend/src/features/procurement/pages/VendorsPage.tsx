@@ -48,10 +48,15 @@ export default function VendorsPage() {
     // the pickers' ['procurement','vendors','all'] alike.
     const [page, setPage] = useState(1);
     const [perPage, setPerPage] = useState(50);
+    // The typed term, and the one actually sent. Kept apart so the list is not
+    // re-fetched on every keystroke: the box updates immediately, the query
+    // moves when the person submits or clears it.
+    const [searchInput, setSearchInput] = useState('');
+    const [search, setSearch] = useState('');
 
     const { data, isLoading } = useQuery({
-        queryKey: ['procurement', 'vendors', page, perPage],
-        queryFn: () => listVendors(page, perPage),
+        queryKey: ['procurement', 'vendors', page, perPage, search],
+        queryFn: () => listVendors(page, perPage, search),
     });
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['procurement', 'vendors'] });
@@ -101,7 +106,29 @@ export default function VendorsPage() {
         <>
             <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
                 <Typography.Title level={3} style={{ margin: 0 }}>Vendors</Typography.Title>
-                <Button type="primary" onClick={() => setModalOpen(true)}>New Vendor</Button>
+                <Space>
+                    {/*
+                      628 vendors arrived from the Tally ledger import in one
+                      run, and before this the only way to a supplier was
+                      thirteen screens of paging. Searching the SERVER, not the
+                      loaded page: filtering 50 of 628 in the browser would
+                      answer "no such vendor" for one that plainly exists.
+                      Submitting resets to page 1, or the term would be applied
+                      to whatever page number happened to be showing.
+                    */}
+                    <Input.Search
+                        allowClear
+                        placeholder="Name or code"
+                        style={{ width: 260 }}
+                        value={searchInput}
+                        onChange={(event) => setSearchInput(event.target.value)}
+                        onSearch={(value) => {
+                            setPage(1);
+                            setSearch(value.trim());
+                        }}
+                    />
+                    <Button type="primary" onClick={() => setModalOpen(true)}>New Vendor</Button>
+                </Space>
             </Space>
 
             <Table<Vendor>

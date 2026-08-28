@@ -31,9 +31,18 @@ class VendorController extends Controller
 
     public function __construct(private readonly VendorService $vendors) {}
 
+    /**
+     * The vendor list. `q` narrows it by name or code — 628 vendors arrived
+     * from the Tally ledger import in one run, and a list that size without a
+     * search is thirteen screens and no way in.
+     */
     public function index(Request $request): AnonymousResourceCollection
     {
-        return VendorResource::collection($this->vendors->paginate($this->perPage($request)));
+        $search = $request->query('q');
+
+        return VendorResource::collection(
+            $this->vendors->paginate($this->perPage($request), is_string($search) ? $search : null),
+        );
     }
 
     /**
