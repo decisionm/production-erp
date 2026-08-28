@@ -37,6 +37,15 @@ export interface LedgerNode {
     name: string;
     group: string | null;
     alter_id: number | null;
+    /**
+     * The party's GSTIN and state, present ONLY when Tally returned them.
+     * Absent (not null) when it did not — the cloud reads an absent key as
+     * "leave the column alone" and an explicit null as "Tally says there is
+     * none", so a wrong guess at a Tally field name costs an empty column
+     * rather than wiping a GSTIN that is already right.
+     */
+    gstin?: string | null;
+    state_name?: string | null;
 }
 
 export interface MastersPayload {
@@ -142,15 +151,54 @@ export async function exportLedgerGroups(t: TallyTarget): Promise<MasterNode[]> 
         .filter((n) => n.guid && n.name);
 }
 
+/**
+ * Candidate Tally spellings for a ledger's GSTIN and its state, tried in order.
+ *
+ * WHY A LIST AND NOT ONE NAME. No ledger master export exists anywhere in this
+ * repository — the 26-Aug evidence report records that absence explicitly — so
+ * the field a given Tally build returns is NOT proven. Rather than assert one
+ * spelling and silently pull nothing, each candidate is read and the first
+ * non-empty one wins. A field the build does not have simply yields nothing.
+ *
+ * The failure mode is deliberate and one-directional: guess wrong and the
+ * column stays EMPTY. Nothing is ever invented, and the cloud treats an absent
+ * key as "leave alone", so a bad guess cannot wipe a GSTIN already recorded.
+ * The first real pull is the check on these names.
+ */
+const LEDGER_GSTIN_FIELDS = ['PARTYGSTIN', 'GSTIN', 'GSTREGISTRATIONNUMBER'] as const;
+const LEDGER_STATE_FIELDS = ['LEDSTATENAME', 'STATENAME', 'PRIORSTATENAME'] as const;
+
+/** The first candidate field that carries anything, or undefined when none does. */
+function firstOf(node: Record<string, unknown>, fields: readonly string[]): string | undefined {
+    for (const field of fields) {
+        const value = textOf(node[field]);
+        if (value !== '') return value;
+    }
+    return undefined;
+}
+
 export async function exportLedgers(t: TallyTarget): Promise<LedgerNode[]> {
-    // A ledger's Tally "Parent" is its ledger group.
-    return (await exportCollection(t, 'LEDGER', 'Ledger', 'Name, Parent, GUID, AlterID'))
-        .map((n) => ({
-            guid: textOf(n.GUID),
-            name: clean(n['@_NAME'] ?? textOf(n.NAME)),
-            group: normalizeParent(n.PARENT),
-            alter_id: numberOrNull(n.ALTERID),
-        }))
+    // A ledger's Tally "Parent" is its ledger group. The party fields are
+    // requested by name — Tally returns what the FETCH names and nothing more,
+    // which is why they were absent until now rather than merely unread.
+    const fetch = ['Name', 'Parent', 'GUID', 'AlterID', ...LEDGER_GSTIN_FIELDS, ...LEDGER_STATE_FIELDS].join(', ');
+
+    return (await exportCollection(t, 'LEDGER', 'Ledger', fetch))
+        .map((n) => {
+            const gstin = firstOf(n as Record<string, unknown>, LEDGER_GSTIN_FIELDS);
+            const state = firstOf(n as Record<string, unknown>, LEDGER_STATE_FIELDS);
+
+            return {
+                guid: textOf(n.GUID),
+                name: clean(n['@_NAME'] ?? textOf(n.NAME)),
+                group: normalizeParent(n.PARENT),
+                alter_id: numberOrNull(n.ALTERID),
+                // Spread, so a field Tally did not return is ABSENT from the
+                // payload rather than sent as null. Absent means "leave alone".
+                ...(gstin !== undefined ? { gstin } : {}),
+                ...(state !== undefined ? { state_name: state } : {}),
+            };
+        })
         .filter((n) => n.guid && n.name);
 }
 

@@ -43,6 +43,13 @@ class SyncMastersRequest extends FormRequest
             'ledgers.*.guid' => ['required', 'string', 'max:255'],
             'ledgers.*.name' => ['required', 'string', 'max:255'],
             'ledgers.*.group' => ['nullable', 'string', 'max:255'],
+            // Party details, ABSENT unless the agent found them. The agent
+            // sends nothing where Tally returned nothing, and the sync treats
+            // absent as "leave alone" rather than "blank it" — a wrong guess
+            // at a Tally field name must cost an empty column, never a
+            // recorded GSTIN.
+            'ledgers.*.gstin' => ['sometimes', 'nullable', 'string', 'max:15'],
+            'ledgers.*.state_name' => ['sometimes', 'nullable', 'string', 'max:255'],
 
             'items' => ['sometimes', 'array'],
             'items.*.guid' => ['required', 'string', 'max:255'],
