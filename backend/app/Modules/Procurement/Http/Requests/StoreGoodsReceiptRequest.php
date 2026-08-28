@@ -2,15 +2,48 @@
 
 namespace App\Modules\Procurement\Http\Requests;
 
+use App\Modules\Inventory\Services\ProductionWipLocationResolver;
 use App\Rules\PlainDecimal;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class StoreGoodsReceiptRequest extends FormRequest
 {
     public function authorize(): bool
     {
         return true;
+    }
+
+    /**
+     * A GOODS RECEIPT MAY NOT LAND IN PRODUCTION/WIP — not a policy this
+     * request invents, but DEC-20260817-001's own definition applied:
+     * Production/WIP is "the inventory location holding material that has
+     * been physically issued to production but is not yet consumed". A
+     * purchase arriving from a vendor has not been issued to anything, so
+     * receiving it there would book an issue that never happened, and the
+     * 28-Aug live walk found the picker offering exactly that (finding 4).
+     * Every other active warehouse stays selectable: which STORE receives
+     * which material is the receiver's call, not a rule an agent writes
+     * (Q59/Q64 territory).
+     */
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator) {
+            $warehouseId = $this->input('warehouse_id');
+            if (! is_numeric($warehouseId)) {
+                return;
+            }
+
+            $wipId = app(ProductionWipLocationResolver::class)->warehouseId();
+            if ($wipId !== null && (int) $warehouseId === $wipId) {
+                $validator->errors()->add(
+                    'warehouse_id',
+                    'Goods cannot be received into the Production/WIP location — it holds material already issued '
+                    .'to production (DEC-20260817-001). Receive into a store; the store issues to production later.',
+                );
+            }
+        });
     }
 
     public function rules(): array

@@ -532,11 +532,19 @@ export default function GoodsReceiptsPage() {
     );
     const orderOptions = receivableOrders.map((o) => ({ value: o.id, label: `PO #${o.id} — ${o.vendor.name}` }));
     // WS-B: `StoreGoodsReceiptRequest` refuses a RETIRED store, so an
-    // arrival can no longer be booked into one from this form.
-    const warehouseOptions = activePickerOptions(warehouses?.data, {
-        isActive: (w) => w.is_active,
-        option: (w) => ({ value: w.id, label: `${w.code} — ${w.name}` }),
-    });
+    // arrival can no longer be booked into one from this form. The
+    // Production/WIP row is kept out too (28-Aug audit finding 4): it holds
+    // material already issued to production (DEC-20260817-001), so a
+    // purchase cannot arrive there — the server refuses it; this offers the
+    // rule before the mistake instead of after it.
+    const wipWarehouseId = warehouses?.meta?.production_wip_warehouse_id ?? null;
+    const warehouseOptions = activePickerOptions(
+        warehouses?.data.filter((w) => w.id !== wipWarehouseId),
+        {
+            isActive: (w) => w.is_active,
+            option: (w) => ({ value: w.id, label: `${w.code} — ${w.name}` }),
+        },
+    );
 
     const receipts = data?.data ?? [];
     /**
