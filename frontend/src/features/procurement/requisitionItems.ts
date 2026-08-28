@@ -22,8 +22,14 @@ export function requisitionItemsLabel(
 ): string {
     if (lines === null || lines === undefined || lines.length === 0) return '—';
 
-    const first = itemLabel(lines[0]?.item);
+    // The first line that actually NAMES something, not simply the first line.
+    // A requisition whose opening line points at an item the master no longer
+    // serves would otherwise render "—  +2": a dash plus a count, which tells
+    // a buyer strictly less than the line count it replaced.
+    const named = lines.find((line) => itemLabel(line?.item) !== '—');
+    if (named === undefined) return '—';
+
     const rest = lines.length - 1;
 
-    return rest > 0 ? `${first}  +${rest}` : first;
+    return rest > 0 ? `${itemLabel(named.item)}  +${rest}` : itemLabel(named.item);
 }

@@ -13,6 +13,7 @@ import {
 } from '@/features/procurement/api';
 import type { PurchaseRequisition, PurchaseRequisitionStatus } from '@/features/procurement/types';
 import { itemLabel } from '@/lib/itemLabel';
+import { requisitionItemsLabel } from '@/features/procurement/requisitionItems';
 
 const requisitionSchema = z.object({
     needed_by_date: z.string().optional(),
@@ -88,7 +89,11 @@ export default function PurchaseRequisitionsPage() {
                     },
                     { title: 'Requested By', dataIndex: 'requested_by' },
                     { title: 'Needed By', dataIndex: 'needed_by_date' },
-                    { title: 'Lines', render: (_, row) => row.lines.length },
+                    // What is being asked for, which is what a buyer scans
+                    // this list to find. It showed only the line COUNT, so the
+                    // queue named every requisition by a number and the
+                    // products lived one click away in the drawer.
+                    { title: 'Items', render: (_, row) => requisitionItemsLabel(row.lines) },
                     {
                         title: 'Actions',
                         render: (_, row) => (

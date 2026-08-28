@@ -20,8 +20,24 @@ describe('requisitionItemsLabel', () => {
         expect(requisitionItemsLabel([{ item: { sku: '100 Ml Tray', name: '100Ml Tray' } }])).toBe('100Ml Tray');
     });
 
-    it('shows a dash rather than a count when a line carries no item', () => {
+    it('shows a dash rather than a count when the only line carries no item', () => {
         expect(requisitionItemsLabel([{ item: null }])).toBe('—');
+    });
+
+    /**
+     * A dash plus a count ("—  +2") tells a buyer strictly less than the line
+     * count it replaced, so the first line that actually names something wins.
+     */
+    it('skips an opening line whose item the master no longer serves', () => {
+        expect(requisitionItemsLabel([
+            { item: null },
+            { item: { sku: 'Caps', name: 'Caps' } },
+            { item: { sku: 'Cartons', name: 'Cartons' } },
+        ])).toBe('Caps  +2');
+    });
+
+    it('shows a dash when no line names anything', () => {
+        expect(requisitionItemsLabel([{ item: null }, { item: null }])).toBe('—');
     });
 
     it('shows a dash for a requisition with no lines', () => {
