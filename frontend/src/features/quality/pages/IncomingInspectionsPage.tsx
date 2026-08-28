@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { createIncomingInspection, listIncomingInspections } from '@/features/quality/api';
 import type { IncomingInspection, InspectionResult } from '@/features/quality/types';
 import { listGoodsReceipts } from '@/features/procurement/api';
+import { ListEmpty } from '@/lib/ListEmpty';
 
 const inspectionSchema = z.object({
     goods_receipt_note_line_id: z.number({ error: 'GRN line is required' }),
@@ -29,7 +30,7 @@ export default function IncomingInspectionsPage() {
     const [detailRow, setDetailRow] = useState<IncomingInspection | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['quality', 'incoming-inspections'], queryFn: listIncomingInspections });
+    const { data, isLoading, isPending, isError, error, refetch } = useQuery({ queryKey: ['quality', 'incoming-inspections'], queryFn: listIncomingInspections });
     // THE WHOLE REGISTER, NOT THE FIRST PAGE. This picker is the only control
     // anywhere that releases a bag from waiting_qc. Asking for the default page
     // capped it at the newest 20 receipts, so material on the twenty-first
@@ -96,6 +97,15 @@ export default function IncomingInspectionsPage() {
                 loading={isLoading}
                 dataSource={data?.data}
                 pagination={false}
+                locale={{
+                    emptyText: (
+                        <ListEmpty
+                            state={{ isPending, isError, error, refetch }}
+                            entity="incoming inspections"
+                            empty="No incoming inspections recorded yet."
+                        />
+                    ),
+                }}
                 columns={[
                     { title: 'Item', render: (_, row) => `${row.item.sku} — ${row.item.name}` },
                     { title: 'Inspected', dataIndex: 'inspected_quantity' },

@@ -3,6 +3,7 @@ import { Alert, Button, Card, Col, Empty, Input, InputNumber, Modal, Row, Select
 import { useMemo, useState } from 'react';
 import { listShifts, listWorkCenters, machineLabel } from '@/features/production/api';
 import { itemLabel } from '@/lib/itemLabel';
+import { ListEmpty } from '@/lib/ListEmpty';
 import {
     apiRefusalMessage,
     cancelMaterialRequest,
@@ -183,6 +184,15 @@ export default function MaterialRequestsPage() {
                 dataSource={requestsQuery.data?.data}
                 pagination={false}
                 scroll={{ x: 'max-content' }}
+                locale={{
+                    emptyText: (
+                        <ListEmpty
+                            state={requestsQuery}
+                            entity="material requests"
+                            empty="No material requests yet. Raise one to ask the store for material."
+                        />
+                    ),
+                }}
                 expandable={{
                     expandedRowRender: (request) => <RequestLinesTable lines={request.lines} />,
                 }}
@@ -260,19 +270,25 @@ export default function MaterialRequestsPage() {
                 pagination={false}
                 locale={{
                     emptyText: (
-                        <Empty
-                            image={Empty.PRESENTED_IMAGE_SIMPLE}
-                            description={
-                                // THREE different empty tables, and only ONE of
-                                // them may say the floor is clear. Reporting a
-                                // failed request or an unconfigured location as
-                                // "everything has been consumed" is a false
-                                // statement about stock.
-                                floorQuery.isError
-                                    ? 'This could not be read just now, so what is on the floor is unknown. Refresh to try again.'
-                                    : floorQuery.data?.meta.wip_configured === false
-                                        ? `No ${LOCATION_LABEL.production_wip} location has been set, so the ERP cannot say what is standing on the floor. Name it in Inventory settings.`
-                                        : `Nothing is standing in ${LOCATION_LABEL.production_wip}. Everything issued has been consumed or returned.`
+                        // THREE different empty tables, and only ONE of them
+                        // may say the floor is clear. Reporting a failed
+                        // request or an unconfigured location as "everything
+                        // has been consumed" is a false statement about stock.
+                        // ListEmpty carries the failure (with the server's own
+                        // sentence and a retry); the two READY cases stay
+                        // domain-worded here.
+                        <ListEmpty
+                            state={floorQuery}
+                            entity="the floor's stock"
+                            empty={
+                                <Empty
+                                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                                    description={
+                                        floorQuery.data?.meta.wip_configured === false
+                                            ? `No ${LOCATION_LABEL.production_wip} location has been set, so the ERP cannot say what is standing on the floor. Name it in Inventory settings.`
+                                            : `Nothing is standing in ${LOCATION_LABEL.production_wip}. Everything issued has been consumed or returned.`
+                                    }
+                                />
                             }
                         />
                     ),

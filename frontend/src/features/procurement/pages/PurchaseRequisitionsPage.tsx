@@ -14,6 +14,7 @@ import {
 import type { PurchaseRequisition, PurchaseRequisitionStatus } from '@/features/procurement/types';
 import { apiMessage } from '@/features/procurement/components/apiMessage';
 import { itemLabel } from '@/lib/itemLabel';
+import { ListEmpty } from '@/lib/ListEmpty';
 import { requisitionItemsLabel } from '@/features/procurement/requisitionItems';
 
 const requisitionSchema = z.object({
@@ -44,7 +45,7 @@ export default function PurchaseRequisitionsPage() {
     const [perPage, setPerPage] = useState(50);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({
+    const { data, isLoading, isPending, isError, error, refetch } = useQuery({
         // The page number is part of the key, and the key still STARTS with the
         // prefix the invalidate uses, so creating or approving one refreshes
         // whichever page is on screen.
@@ -103,6 +104,15 @@ export default function PurchaseRequisitionsPage() {
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
+                locale={{
+                    emptyText: (
+                        <ListEmpty
+                            state={{ isPending, isError, error, refetch }}
+                            entity="purchase requisitions"
+                            empty="No purchase requisitions yet."
+                        />
+                    ),
+                }}
                 pagination={{
                     current: page,
                     pageSize: perPage,

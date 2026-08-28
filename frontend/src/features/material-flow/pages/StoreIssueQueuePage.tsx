@@ -4,6 +4,7 @@ import type { Dayjs } from 'dayjs';
 import { useState } from 'react';
 import { listShifts, listWorkCenters, machineLabel } from '@/features/production/api';
 import { itemLabel } from '@/lib/itemLabel';
+import { ListEmpty } from '@/lib/ListEmpty';
 import {
     apiRefusalMessage,
     cancelMaterialRequest,
@@ -265,9 +266,15 @@ export default function StoreIssueQueuePage() {
                 scroll={{ x: 'max-content' }}
                 locale={{
                     emptyText: (
-                        <Empty
-                            image={Empty.PRESENTED_IMAGE_SIMPLE}
-                            description={queueEmptyText(filters.status)}
+                        <ListEmpty
+                            state={queueQuery}
+                            entity="the store's queue"
+                            empty={
+                                <Empty
+                                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                                    description={queueEmptyText(filters.status)}
+                                />
+                            }
                         />
                     ),
                 }}

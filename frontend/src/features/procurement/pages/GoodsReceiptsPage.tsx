@@ -18,6 +18,7 @@ import type { GoodsReceiptNote, GoodsReceiptNoteLine, PurchaseOrderSchedule } fr
 import { useProductionSettings } from '@/features/production/packing';
 import { TallyLinkCell } from '@/features/sales/SalesDocumentDrawer';
 import { formatDateTime } from '@/lib/datetime';
+import { ListEmpty } from '@/lib/ListEmpty';
 import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { itemLabel } from '@/lib/itemLabel';
 
@@ -486,7 +487,7 @@ export default function GoodsReceiptsPage() {
 
     // A link may point at a receipt older than the newest 20, so a linked view
     // asks for the whole register rather than the default first page.
-    const { data, isLoading } = useQuery({
+    const { data, isLoading, isPending, isError, error, refetch } = useQuery({
         // Following a ?grn= or ?po= link reads the WHOLE register and filters it
         // here, because the row being linked to may be anywhere in it. The
         // ordinary view pages the server instead: it used to take the default
@@ -851,6 +852,15 @@ export default function GoodsReceiptsPage() {
                 rowKey="id"
                 loading={isLoading}
                 dataSource={visibleReceipts}
+                locale={{
+                    emptyText: (
+                        <ListEmpty
+                            state={{ isPending, isError, error, refetch }}
+                            entity="goods receipts"
+                            empty="No goods receipts yet."
+                        />
+                    ),
+                }}
                 pagination={
                     isDeepLinked
                         ? false

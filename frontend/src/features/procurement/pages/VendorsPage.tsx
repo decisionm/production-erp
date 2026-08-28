@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/configuration';
 import { createVendor, listVendors, updateVendor } from '@/features/procurement/api';
 import type { Vendor } from '@/features/procurement/types';
+import { ListEmpty } from '@/lib/ListEmpty';
 
 // The New Vendor form does NOT ask for a code. The server mints "V-0001" and
 // steps the sequence on, so there is nothing here for a person to guess at —
@@ -54,7 +55,7 @@ export default function VendorsPage() {
     const [searchInput, setSearchInput] = useState('');
     const [search, setSearch] = useState('');
 
-    const { data, isLoading } = useQuery({
+    const { data, isLoading, isPending, isError, error, refetch } = useQuery({
         queryKey: ['procurement', 'vendors', page, perPage, search],
         queryFn: () => listVendors(page, perPage, search),
     });
@@ -136,6 +137,15 @@ export default function VendorsPage() {
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
+                locale={{
+                    emptyText: (
+                        <ListEmpty
+                            state={{ isPending, isError, error, refetch }}
+                            entity="vendors"
+                            empty={search ? 'No vendors match this search.' : 'No vendors yet.'}
+                        />
+                    ),
+                }}
                 pagination={{
                     current: page,
                     pageSize: perPage,

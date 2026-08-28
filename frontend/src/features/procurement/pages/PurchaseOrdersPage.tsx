@@ -23,22 +23,16 @@ import {
     tallyStateLine,
 } from '@/features/procurement/purchaseOrders';
 import type { PurchaseOrder } from '@/features/procurement/types';
+import { ListEmpty } from '@/lib/ListEmpty';
 import { usePurchaseOrderListParams } from '@/features/procurement/usePurchaseOrderListParams';
 
 const numeric = { fontVariantNumeric: 'tabular-nums' } as const;
 
-/**
- * What an EMPTY table says, judged on the query's state — never on the row
- * count alone (the Sales lists' rule): a list that could not be read has no
- * rows, and "No purchase orders match" over a 403 would be a permission
- * error read as an empty result.
- */
-function listEmptyText(state: { isPending: boolean; isError: boolean; error?: unknown }, filtersActive: boolean): string {
-    if (state.isError) return `Could not read purchase orders: ${apiMessage(state.error, 'unknown error')}`;
-    if (state.isPending) return 'Reading purchase orders…';
-
-    return filtersActive ? 'No purchase orders match these filters.' : 'No purchase orders yet.';
-}
+// What an EMPTY table says is judged on the query's state — never on the row
+// count alone (the Sales lists' rule): a list that could not be read has no
+// rows, and "No purchase orders match" over a 403 would be a permission
+// error read as an empty result. The judging moved to @/lib/ListEmpty so a
+// failed read also offers Try again, on every list the same way.
 
 /**
  * THE PURCHASE ORDERS LIST (Phase 6: P6-01 lifecycle, P6-02 show/trace/
@@ -59,7 +53,7 @@ export default function PurchaseOrdersPage() {
     const { filters, setFilters, setPage, openId, traceId, openDetail, openTrace, closeDrawers } = usePurchaseOrderListParams();
     const filtersActive = hasActiveFilters(filters);
 
-    const { data, isLoading, isPending, isError, error } = useQuery({
+    const { data, isLoading, isPending, isError, error, refetch } = useQuery({
         queryKey: ['procurement', 'purchase-orders', 'list', filters],
         queryFn: () => listPurchaseOrders(filters),
         placeholderData: (previous) => previous,
@@ -148,7 +142,15 @@ export default function PurchaseOrdersPage() {
                 rowKey="id"
                 loading={isLoading}
                 dataSource={orders}
-                locale={{ emptyText: listEmptyText({ isPending, isError, error }, filtersActive) }}
+                locale={{
+                    emptyText: (
+                        <ListEmpty
+                            state={{ isPending, isError, error, refetch }}
+                            entity="purchase orders"
+                            empty={filtersActive ? 'No purchase orders match these filters.' : 'No purchase orders yet.'}
+                        />
+                    ),
+                }}
                 pagination={
                     data?.meta
                         ? {
