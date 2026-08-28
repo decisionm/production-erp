@@ -13,16 +13,17 @@ import PurchaseOrderTallyCell from '@/features/procurement/components/PurchaseOr
 import PurchaseOrderTraceDrawer from '@/features/procurement/components/PurchaseOrderTraceDrawer';
 import {
     type PurchaseOrderAction,
+    amendedItemIds,
     canLabels,
     hasActiveFilters,
     poNumber,
+    purchasableItemOptions,
     reconcileReceipts,
     statusTag,
     tallyStateLine,
 } from '@/features/procurement/purchaseOrders';
 import type { PurchaseOrder } from '@/features/procurement/types';
 import { usePurchaseOrderListParams } from '@/features/procurement/usePurchaseOrderListParams';
-import { itemLabel } from '@/lib/itemLabel';
 
 const numeric = { fontVariantNumeric: 'tabular-nums' } as const;
 
@@ -76,7 +77,21 @@ export default function PurchaseOrdersPage() {
         isActive: (v) => v.is_active,
         option: (v) => ({ value: v.id, label: `${v.code} — ${v.name}` }),
     });
-    const itemOptions = items?.data.map((item) => ({ value: item.id, label: itemLabel(item) })) ?? [];
+    // The item picker applies `PurchasableItem`, the rule the server applies:
+    // no archived item, and the category is not consulted (Q59 is open — see
+    // isPurchasableItem, which also says why the trashed half of the server's
+    // refusal has nothing to match here). The order being AMENDED keeps its own
+    // items visible-but-disabled, so a draft that names a since-archived item
+    // still shows what it says instead of silently blanking the line. The
+    // FILTER bar builds its own options and is deliberately left alone: past
+    // orders must stay findable.
+    //
+    // `amendedItemIds` is what tolerates a line the payload served without an
+    // item — see its docblock.
+    const itemOptions = useMemo(
+        () => purchasableItemOptions(items?.data, amendedItemIds(amendOrder?.lines)),
+        [items, amendOrder],
+    );
 
     const orders = useMemo(() => data?.data ?? [], [data]);
     const rowFor = (id: number | null) => (id === null ? undefined : orders.find((order) => order.id === id));

@@ -1,4 +1,6 @@
+import { type PickerOption, retiredOptionLabel } from '@/components/configuration/pickerOptions';
 import { statusColor as tallyStatusColor, statusLabel as tallyStatusLabel } from '@/features/tally-sync/drawer';
+import type { Item } from '@/features/inventory/types';
 import type { TallyLink } from '@/features/sales/types';
 import { itemLabel } from '@/lib/itemLabel';
 import type {
@@ -861,6 +863,91 @@ export function consumptionRow(row: TraceConsumption): NormalisedConsumption {
         issues,
         issued_qty: fromScaled(issued),
     };
+}
+
+// ------------------------------------------------------- item eligibility --
+
+/**
+ * MAY THIS ITEM BE PUT ON A NEW PURCHASE-ORDER LINE — the picker's copy of
+ * `PurchasableItem`, the server rule it must agree with.
+ *
+ * ONE TEST: `is_active`. The server refuses an item that is archived OR
+ * soft-deleted; this checks only the first half, and that is not drift —
+ * `ItemService::paginate` queries through the SoftDeletes scope, so a trashed
+ * item never reaches this list to be offered. The server checks both because
+ * it takes an id from any client, not only from this picker.
+ *
+ * What KIND of thing the item is plays no part — a finished good, a
+ * consumable and an item nobody has classified are all offered, because Q59
+ * is open and says a document must not start refusing an item on its
+ * category until that is answered. The classification is deliberately not
+ * carried to this screen at all, so there is nothing here to filter on by
+ * accident, and re-adding the filter would mean re-adding the type.
+ *
+ * Neither direction of drift is harmless. Offering a choice the server
+ * refuses hands the buyer a validation error for a row the screen invited;
+ * refusing one the server accepts hides a real material and looks like
+ * missing data. So this moves only when `PurchasableItem` moves first.
+ */
+export function isPurchasableItem(item: Pick<Item, 'is_active'>): boolean {
+    return item.is_active;
+}
+
+/**
+ * The item ids the order being AMENDED already names — what
+ * `purchasableItemOptions` must keep visible.
+ *
+ * `PurchaseOrderLine.item` is typed as required, and on the wire it is not
+ * guaranteed: a line whose item the payload omitted has to DROP OUT here,
+ * not reach the picker as `undefined` and not throw on the way. The optional
+ * hops and the numeric filter are both load-bearing for that reason — this
+ * is not defensive noise to tidy away.
+ *
+ * `undefined`/`null` lines = a NEW order, so nothing is kept.
+ */
+export function amendedItemIds(lines: readonly PurchaseOrderLine[] | undefined | null): number[] {
+    return (lines ?? []).map((line) => line?.item?.id).filter((id): id is number => typeof id === 'number');
+}
+
+/**
+ * The item options a purchase-order line may offer: every ACTIVE item, plus
+ * — last, marked `(Retired)` and disabled — any item the lines being EDITED
+ * already name that would not be offered.
+ *
+ * This exists rather than a `keep:` on `activePickerOptions` because a
+ * purchase order has MANY lines and that helper keeps one row. The marker
+ * word is imported rather than spelled again, so the two cannot drift.
+ *
+ * `keepIds` is empty for a NEW order and holds the amended draft's current
+ * items for an amend — dropping those would blank a line and quietly edit
+ * what the draft says. They are shown, not choosable: the only thing a buyer
+ * can do about a retired line is point it at a live item, which is exactly
+ * what `AmendPurchaseOrderRequest` now enforces.
+ */
+export function purchasableItemOptions(
+    items: readonly Item[] | undefined | null,
+    keepIds: readonly number[] = [],
+): PickerOption[] {
+    const offered: PickerOption[] = [];
+    const kept: PickerOption[] = [];
+    const keep = new Set(keepIds);
+
+    for (const item of items ?? []) {
+        const option: PickerOption = { value: item.id, label: itemLabel(item) };
+
+        if (isPurchasableItem(item)) {
+            offered.push(option);
+            continue;
+        }
+
+        // Only an item a line actually names survives, and only once — a
+        // list that repeats an id must not print it twice.
+        if (keep.has(item.id) && !kept.some((row) => row.value === item.id)) {
+            kept.push({ ...option, label: retiredOptionLabel(option.label), disabled: true });
+        }
+    }
+
+    return [...offered, ...kept];
 }
 
 /** The first argument that is a non-empty string, else null. */
