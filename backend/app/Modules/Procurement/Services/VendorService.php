@@ -24,7 +24,8 @@ class VendorService
     /**
      * The prefix and width of a minted vendor code — "V-0001".
      *
-     * `vendors.code` is unique and max 32; a four-digit number leaves the
+     * `vendors.code` is unique, and `StoreVendorRequest` caps a code at 32
+     * characters (the column itself is wider). A four-digit number leaves the
      * whole of that limit unused and simply gets longer past 9999 rather than
      * wrapping or truncating.
      */
@@ -45,9 +46,10 @@ class VendorService
      * NOT a slug of the name, which is what WarehouseService::uniqueCodeFrom()
      * and ItemService::uniqueSkuFrom() do, and rightly so for a handful of
      * godowns and for an item whose SKU is read on its own. Measured against
-     * the 633 Sundry Creditors ledgers already mirrored in this database, 48
-     * supplier names slug past this column's 32 characters, and truncating
-     * them to fit collides immediately. A slug also freezes the spelling a
+     * this factory's live creditor ledger, a significant minority of supplier
+     * names slug past the 32 characters `StoreVendorRequest` allows, and
+     * truncating them to fit collides immediately. The names stay out of this
+     * repository (FC-06: supplier identity is Owner/Accounts only). A slug also freezes the spelling a
      * name had on its first day, so correcting a name leaves a code that
      * disagrees with it. Every screen showing a vendor code shows the name
      * beside it, so a code that repeats the name earns nothing.

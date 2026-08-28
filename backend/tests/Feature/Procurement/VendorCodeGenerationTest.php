@@ -24,11 +24,12 @@ use Tests\TestCase;
  * this repo — WarehouseService::uniqueCodeFrom() and
  * ItemService::uniqueSkuFrom() — both slug the name, and both are right for
  * what they serve: a handful of godowns, and items whose SKU a person reads
- * on its own. Neither fits a vendor list. Measured against the 633 Sundry
- * Creditors ledgers already mirrored in this database, 48 names slug to more
- * than `vendors.code`'s 32 characters, and truncating them to fit produces a
- * duplicate straight away ("Productivity Solutions Private Limited Chennai"
- * against another Productivity Solutions row). A slug also goes stale: it
+ * on its own. Neither fits a vendor list. A slug of this factory's supplier
+ * names overruns the 32 characters `StoreVendorRequest` allows, on a
+ * significant minority of them, and truncating to fit collides — the
+ * measurement is against the live creditor ledger and the names themselves
+ * stay out of this repository (FC-06: supplier identity is Owner/Accounts).
+ * A slug also goes stale: it
  * records the spelling a name had on the day it was created, and a corrected
  * name leaves a code that disagrees with it for ever. Every screen that shows
  * a vendor code shows the name beside it, so the code buys nothing by
@@ -63,15 +64,15 @@ class VendorCodeGenerationTest extends TestCase
 
     public function test_the_first_vendor_created_without_a_code_is_minted_one(): void
     {
-        $vendor = $this->service()->create(['name' => 'Reliance Industries Ltd']);
+        $vendor = $this->service()->create(['name' => 'Vendor Alpha']);
 
         $this->assertSame('V-0001', $vendor->code);
     }
 
     public function test_the_sequence_steps_on_for_each_vendor(): void
     {
-        $first = $this->service()->create(['name' => 'IVL Dhunseri']);
-        $second = $this->service()->create(['name' => 'JBF Industries']);
+        $first = $this->service()->create(['name' => 'Vendor Bravo']);
+        $second = $this->service()->create(['name' => 'Vendor Charlie']);
 
         $this->assertSame('V-0001', $first->code);
         $this->assertSame('V-0002', $second->code);
@@ -87,14 +88,14 @@ class VendorCodeGenerationTest extends TestCase
         Vendor::create(['code' => 'VEN-RESIN', 'name' => 'Sri Manakula Polymers Pvt Ltd']);
         Vendor::create(['code' => 'V-DEMO-KPXL', 'name' => 'CHA / Clearing Agent']);
 
-        $this->assertSame('V-0001', $this->service()->create(['name' => 'Reliance Industries Ltd'])->code);
+        $this->assertSame('V-0001', $this->service()->create(['name' => 'Vendor Alpha'])->code);
     }
 
     public function test_the_sequence_continues_from_the_highest_number_already_used(): void
     {
-        Vendor::create(['code' => 'V-0042', 'name' => 'Akash Pet Containers Pvt Ltd']);
+        Vendor::create(['code' => 'V-0042', 'name' => 'Vendor Delta']);
 
-        $this->assertSame('V-0043', $this->service()->create(['name' => 'Anil Pet Packs'])->code);
+        $this->assertSame('V-0043', $this->service()->create(['name' => 'Vendor Echo'])->code);
     }
 
     /**
@@ -103,10 +104,10 @@ class VendorCodeGenerationTest extends TestCase
      */
     public function test_an_archived_vendor_keeps_its_number_and_the_sequence_steps_past_it(): void
     {
-        $retired = Vendor::create(['code' => 'V-0007', 'name' => 'Aarti Rubber & Plastics']);
+        $retired = Vendor::create(['code' => 'V-0007', 'name' => 'Vendor Foxtrot']);
         $retired->delete();
 
-        $this->assertSame('V-0008', $this->service()->create(['name' => 'Accurate Industries'])->code);
+        $this->assertSame('V-0008', $this->service()->create(['name' => 'Vendor Golf'])->code);
     }
 
     /** A code the caller supplies is still honoured — the API contract is unchanged. */
@@ -120,24 +121,24 @@ class VendorCodeGenerationTest extends TestCase
     /** A blank code is an absent code, not a code of zero length. */
     public function test_a_blank_code_is_minted_over(): void
     {
-        $this->assertSame('V-0001', $this->service()->create(['code' => '   ', 'name' => 'Adexpress'])->code);
+        $this->assertSame('V-0001', $this->service()->create(['code' => '   ', 'name' => 'Vendor Hotel'])->code);
     }
 
     /** Past four digits the number simply gets longer; it never wraps or truncates. */
     public function test_the_sequence_grows_beyond_four_digits(): void
     {
-        Vendor::create(['code' => 'V-9999', 'name' => 'Anjaneya Beltings']);
+        Vendor::create(['code' => 'V-9999', 'name' => 'Vendor India']);
 
-        $this->assertSame('V-10000', $this->service()->create(['name' => 'Annai Enterprises'])->code);
+        $this->assertSame('V-10000', $this->service()->create(['name' => 'Vendor Juliet'])->code);
     }
 
     public function test_the_api_creates_a_vendor_with_no_code_in_the_request(): void
     {
         $this->actingAs($this->procurementUser())
-            ->postJson('/api/v1/procurement/vendors', ['name' => 'Acme Drinktec Solutions LLP'])
+            ->postJson('/api/v1/procurement/vendors', ['name' => 'Vendor Kilo'])
             ->assertCreated()
             ->assertJsonPath('data.code', 'V-0001')
-            ->assertJsonPath('data.name', 'Acme Drinktec Solutions LLP');
+            ->assertJsonPath('data.name', 'Vendor Kilo');
     }
 
     /**
@@ -174,9 +175,9 @@ class VendorCodeGenerationTest extends TestCase
         return new QueryException('sqlite', 'insert into "vendors" ("code", "name") values (?, ?)', [], new PDOException($message, 23000));
     }
 
-    /** Every minted code fits `vendors.code`'s 32 characters with room to spare. */
+    /** Every minted code fits the 32 characters `StoreVendorRequest` allows, with room to spare. */
     public function test_a_minted_code_is_well_inside_the_column_limit(): void
     {
-        $this->assertLessThanOrEqual(32, strlen($this->service()->create(['name' => 'Adithya Plastics Industries'])->code));
+        $this->assertLessThanOrEqual(32, strlen($this->service()->create(['name' => 'Vendor Lima'])->code));
     }
 }
