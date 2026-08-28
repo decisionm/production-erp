@@ -8,6 +8,7 @@ use App\Support\Configuration\HardDeleteAuthority;
 use App\Support\Configuration\ManagesConfigurationLifecycle;
 use Closure;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\QueryException;
 
 class VendorService
 {
@@ -20,12 +21,124 @@ class VendorService
             ->paginate($perPage);
     }
 
+    /**
+     * The prefix and width of a minted vendor code — "V-0001".
+     *
+     * `vendors.code` is unique. The column itself is a plain string and far
+     * wider than 32; the 32 is `StoreVendorRequest`'s cap on a SUPPLIED code,
+     * which a minted code never passes through — it is kept as the yardstick
+     * anyway so both kinds of code fit the same column comfortably. A
+     * four-digit number leaves the whole of it unused and simply gets longer
+     * past 9999 rather than wrapping or truncating.
+     */
+    private const MINTED_PREFIX = 'V-';
+
+    private const MINTED_WIDTH = 4;
+
+    /** How many times a mint may lose the race to a concurrent create before giving up. */
+    private const MINT_ATTEMPTS = 5;
+
+    /**
+     * A vendor's code is MINTED here when the caller does not bring one.
+     *
+     * The form used to demand a code from the person filling it in, who had no
+     * convention to follow — the live master records what that produced:
+     * `V-DEMO-KPXL`, hand-typed on 24-Jul with a random suffix.
+     *
+     * NOT a slug of the name, which is what WarehouseService::uniqueCodeFrom()
+     * and ItemService::uniqueSkuFrom() do, and rightly so for a handful of
+     * godowns and for an item whose SKU is read on its own. Measured against
+     * the 633 Sundry Creditors ledgers mirrored in the rehearsal database, 48
+     * supplier names slug past 32 characters and truncating them to fit
+     * collides immediately. The counts stay and the names do not: 633 and 48
+     * are measurements, while supplier identity is Owner/Accounts (FC-06) and
+     * belongs in the ledger rather than here. A slug also freezes the spelling a
+     * name had on its first day, so correcting a name leaves a code that
+     * disagrees with it. Every screen showing a vendor code shows the name
+     * beside it, so a code that repeats the name earns nothing.
+     *
+     * A code the caller DOES bring is kept exactly as given. `/api/v1` is a
+     * reusable product surface, not this SPA's private detail, so an existing
+     * client that posts its own code keeps working unchanged.
+     */
     public function create(array $data): Vendor
     {
-        return Vendor::create([
-            'is_active' => true,
-            ...$data,
-        ]);
+        $code = isset($data['code']) ? trim((string) $data['code']) : '';
+
+        if ($code !== '') {
+            return Vendor::create(['is_active' => true, ...$data, 'code' => $code]);
+        }
+
+        // Two people saving the form in the same instant would read the same
+        // highest number and mint the same code; the unique index catches the
+        // loser, who re-reads and takes the next one. Retried rather than
+        // locked because the alternative — a gap lock on a table with no
+        // counter row — does not port to the sqlite the tests run on.
+        for ($attempt = 1; ; $attempt++) {
+            try {
+                return Vendor::create(['is_active' => true, ...$data, 'code' => $this->mintCode()]);
+            } catch (QueryException $collision) {
+                if ($attempt >= self::MINT_ATTEMPTS || ! $this->isDuplicateCode($collision)) {
+                    throw $collision;
+                }
+            }
+        }
+    }
+
+    /**
+     * The next code in the sequence: one past the highest number already
+     * spoken for.
+     *
+     * withTrashed, because `vendors.code` is unique across soft-deleted rows —
+     * an archived `V-0007` still owns its number. Whether it SHOULD is
+     * PENDING Q52(b), an open owner question about every master, and a code
+     * generator is not the place to answer it: this keeps today's behaviour
+     * exactly.
+     *
+     * Only `V-` followed by digits counts. The live master's `VEN-RESIN`,
+     * `VEN-CAPS`, `VEN-LABEL` and `V-DEMO-KPXL` are outside the sequence and
+     * never shift it.
+     */
+    private function mintCode(): string
+    {
+        $highest = Vendor::withTrashed()
+            ->where('code', 'like', self::MINTED_PREFIX.'%')
+            ->pluck('code')
+            ->map(function (string $code): int {
+                $suffix = substr($code, strlen(self::MINTED_PREFIX));
+
+                return $suffix !== '' && ctype_digit($suffix) ? (int) $suffix : 0;
+            })
+            ->max() ?? 0;
+
+        return self::MINTED_PREFIX.str_pad((string) ($highest + 1), self::MINTED_WIDTH, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * Was this the unique index on `code` rejecting the mint, or something
+     * else? Anything else is re-thrown: a retry loop that swallowed every
+     * database error would turn a real fault into five silent attempts and
+     * then a misleading message.
+     *
+     * SQLSTATE 23000 covers every integrity-constraint violation, so it alone
+     * is far too wide: a NOT NULL failure on `name` carries it too, and the
+     * message carries the whole INSERT — which names the `code` column on
+     * every mint — so matching the column name alone would retry any of them
+     * five times over. The UNIQUENESS wording is what narrows it. MySQL says
+     * "Duplicate entry ... for key 'vendors.vendors_code_unique'"; sqlite says
+     * "UNIQUE constraint failed: vendors.code". A NOT NULL violation says
+     * "NOT NULL constraint failed" and matches neither. Read from the message
+     * because neither driver reports the constraint name anywhere portable.
+     */
+    private function isDuplicateCode(QueryException $exception): bool
+    {
+        $message = strtolower($exception->getMessage());
+
+        // Cast: PDO sets the SQLSTATE as a string, but a driver or a wrapper
+        // that hands it back as an int must not slip past the check.
+        return (string) $exception->getCode() === '23000'
+            && str_contains($message, 'code')
+            && (str_contains($message, 'duplicate entry') || str_contains($message, 'unique constraint'));
     }
 
     public function update(Vendor $vendor, array $data): Vendor

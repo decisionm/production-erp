@@ -14,7 +14,11 @@ class StoreVendorRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'code' => ['required', 'string', 'max:32', 'unique:vendors,code'],
+            // Optional: VendorService mints "V-0001" when none is sent. Still
+            // accepted and still unique when a caller brings its own — /api/v1
+            // is a reusable surface, and an existing client that posts a code
+            // keeps working.
+            'code' => ['sometimes', 'nullable', 'string', 'max:32', 'unique:vendors,code'],
             'name' => ['required', 'string', 'max:255'],
             'email' => ['nullable', 'email', 'max:255'],
             'phone' => ['nullable', 'string', 'max:32'],
