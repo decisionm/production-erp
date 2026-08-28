@@ -48,6 +48,17 @@ const PAGED_LIST_FUNCTIONS = [
     // matches" for a batch that plainly exists.
     'listBatches',
     'listSerialNumbers',
+    // Added 28-Aug-2026, and the worst instance of this defect found so far.
+    // The incoming-inspection screen built its GRN-line picker from the default
+    // first page. That picker is the ONLY control anywhere that releases a bag
+    // from waiting_qc, so material on any arrival older than the newest twenty
+    // receipts could never be inspected: its bags stayed waiting_qc, the
+    // scanner refused them, and the incoming-QC hold kept subtracting their
+    // kilograms from every outflow of that item — permanently, with nothing on
+    // screen to say why. Same shape as the batch picker above; far longer
+    // teeth.
+    'listPurchaseRequisitions',
+    'listGoodsReceipts',
 ];
 
 /**

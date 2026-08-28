@@ -12,6 +12,7 @@ import {
     rejectPurchaseRequisition,
 } from '@/features/procurement/api';
 import type { PurchaseRequisition, PurchaseRequisitionStatus } from '@/features/procurement/types';
+import { apiMessage } from '@/features/procurement/components/apiMessage';
 import { itemLabel } from '@/lib/itemLabel';
 
 const requisitionSchema = z.object({
@@ -38,11 +39,16 @@ const statusColor: Record<PurchaseRequisitionStatus, string> = {
 export default function PurchaseRequisitionsPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [detailRequisition, setDetailRequisition] = useState<PurchaseRequisition | null>(null);
+    const [page, setPage] = useState(1);
+    const [perPage, setPerPage] = useState(50);
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({
-        queryKey: ['procurement', 'purchase-requisitions'],
-        queryFn: listPurchaseRequisitions,
+        // The page number is part of the key, and the key still STARTS with the
+        // prefix the invalidate uses, so creating or approving one refreshes
+        // whichever page is on screen.
+        queryKey: ['procurement', 'purchase-requisitions', page, perPage],
+        queryFn: () => listPurchaseRequisitions(page, perPage),
     });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
     const itemOptions = items?.data.map((item) => ({ value: item.id, label: itemLabel(item) })) ?? [];
@@ -55,6 +61,15 @@ export default function PurchaseRequisitionsPage() {
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['procurement', 'purchase-requisitions'] });
 
+    // A REFUSAL MUST REACH THE PERSON WHO CAUSED IT. These three had onSuccess
+    // and nothing else, and the shared axios instance installs no global error
+    // toast — only a 401 redirect. So a server refusal was swallowed whole: the
+    // row simply stayed as it was and the operator was left to guess whether
+    // the click had registered. The server's own sentence is shown, never
+    // genericised, because the refusal names the rule.
+    const refused = (fallback: string) => (error: unknown) =>
+        Modal.error({ title: fallback, content: apiMessage(error, fallback) });
+
     const createMutation = useMutation({
         mutationFn: createPurchaseRequisition,
         onSuccess: () => {
@@ -62,9 +77,18 @@ export default function PurchaseRequisitionsPage() {
             setModalOpen(false);
             reset();
         },
+        onError: refused('Could not create the requisition'),
     });
-    const approveMutation = useMutation({ mutationFn: approvePurchaseRequisition, onSuccess: invalidate });
-    const rejectMutation = useMutation({ mutationFn: rejectPurchaseRequisition, onSuccess: invalidate });
+    const approveMutation = useMutation({
+        mutationFn: approvePurchaseRequisition,
+        onSuccess: invalidate,
+        onError: refused('Could not approve the requisition'),
+    });
+    const rejectMutation = useMutation({
+        mutationFn: rejectPurchaseRequisition,
+        onSuccess: invalidate,
+        onError: refused('Could not reject the requisition'),
+    });
 
     return (
         <>
@@ -78,7 +102,22 @@ export default function PurchaseRequisitionsPage() {
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                pagination={{
+                    current: page,
+                    pageSize: perPage,
+                    // The server's count, not this page's length — otherwise
+                    // the pager claims the queue ends at the first screen,
+                    // which is exactly how the newest 20 came to look like all
+                    // of them.
+                    total: data?.meta?.total ?? data?.data?.length ?? 0,
+                    showSizeChanger: true,
+                    pageSizeOptions: [20, 50, 100, 200],
+                    showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} requisitions`,
+                    onChange: (nextPage, nextSize) => {
+                        setPage(nextPage);
+                        setPerPage(nextSize);
+                    },
+                }}
                 columns={[
                     { title: 'ID', dataIndex: 'id' },
                     {

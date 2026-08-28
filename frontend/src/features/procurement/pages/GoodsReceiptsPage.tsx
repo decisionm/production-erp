@@ -481,12 +481,19 @@ export default function GoodsReceiptsPage() {
     const focusGrnId = Number(searchParams.get('grn')) || null;
     const focusPoId = Number(searchParams.get('po')) || null;
     const isDeepLinked = focusGrnId !== null || focusPoId !== null;
+    const [page, setPage] = useState(1);
+    const [perPage, setPerPage] = useState(50);
 
     // A link may point at a receipt older than the newest 20, so a linked view
     // asks for the whole register rather than the default first page.
     const { data, isLoading } = useQuery({
-        queryKey: ['procurement', 'goods-receipts', isDeepLinked ? 'all' : 'first-page'],
-        queryFn: () => listGoodsReceipts(isDeepLinked ? { per_page: 1000 } : undefined),
+        // Following a ?grn= or ?po= link reads the WHOLE register and filters it
+        // here, because the row being linked to may be anywhere in it. The
+        // ordinary view pages the server instead: it used to take the default
+        // page and render it with the pager off, so the register showed the
+        // newest 20 and said nothing about the rest.
+        queryKey: ['procurement', 'goods-receipts', ...(isDeepLinked ? ['all'] : [page, perPage])],
+        queryFn: () => listGoodsReceipts(isDeepLinked ? { per_page: 1000 } : { page, per_page: perPage }),
     });
     // The picker's orders are narrowed SERVER-side (RECEIVABLE_PO_FILTERS) and
     // asked for at the list's ceiling, not one page. Asked unfiltered, this
@@ -824,7 +831,23 @@ export default function GoodsReceiptsPage() {
                 rowKey="id"
                 loading={isLoading}
                 dataSource={visibleReceipts}
-                pagination={false}
+                pagination={
+                    isDeepLinked
+                        ? false
+                        : {
+                              current: page,
+                              pageSize: perPage,
+                              // The server's count, never this page's length.
+                              total: data?.meta?.total ?? visibleReceipts.length,
+                              showSizeChanger: true,
+                              pageSizeOptions: [20, 50, 100, 200],
+                              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} receipts`,
+                              onChange: (nextPage, nextSize) => {
+                                  setPage(nextPage);
+                                  setPerPage(nextSize);
+                              },
+                          }
+                }
                 columns={[
                     { title: 'ID', dataIndex: 'id' },
                     {
