@@ -158,10 +158,16 @@ class IncomingInspectionService
             // WRITTEN DOWN instead of acted on, and whether a typed rejection
             // may move stock stays the quality desk's answer.
             if (bccomp($rejected, '0', 4) === 1) {
+                // Kept short ON PURPOSE: bag_disposition_note is varchar(200),
+                // and MySQL in strict mode REFUSES an over-long value where
+                // sqlite takes it quietly. The first draft of this sentence was
+                // 215 characters, passed locally and failed on CI's MySQL —
+                // exactly the driver gap DatabaseDriverParityTest exists for.
+                // A test below pins the worst-case length.
                 return [
                     sprintf(
-                        'No bags on this arrival line, so no stock was issued: %s was recorded as rejected and remains in the store. '.
-                        'A non-traceability line carries no bag to reject, and the rejected figure here is typed rather than weighed.',
+                        'No bags on this line, so no stock was issued: %s recorded as rejected remains in the store. '.
+                        'A line with no bags has none to reject, and the figure is typed rather than weighed.',
                         rtrim(rtrim($rejected, '0'), '.') ?: '0',
                     ),
                     null,

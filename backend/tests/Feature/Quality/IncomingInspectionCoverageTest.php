@@ -136,6 +136,26 @@ class IncomingInspectionCoverageTest extends TestCase
         $this->assertNull($inspection->rejections_out_reference, 'no stock moved, so there is no Rejections Out reference');
     }
 
+    /**
+     * THE NOTE MUST FIT ITS COLUMN. `bag_disposition_note` is varchar(200), and
+     * MySQL in strict mode refuses an over-long value where sqlite takes it
+     * quietly — so the first draft of this sentence passed locally and failed
+     * on CI. Asserted against a deliberately wide quantity, because the number
+     * is the only part that varies.
+     */
+    public function test_the_bagless_note_fits_the_column(): void
+    {
+        $line = $this->line('99999999.9999');
+
+        $inspection = $this->inspect($line, '99999999.9999', '0.0000', '99999999.9999');
+
+        $this->assertLessThanOrEqual(
+            200,
+            strlen((string) $inspection->bag_disposition_note),
+            'the disposition note is longer than bag_disposition_note allows — MySQL will refuse it',
+        );
+    }
+
     /** A clean pass on a bagless line needs no such note — nothing failed to happen. */
     public function test_a_bagless_pass_records_no_note(): void
     {
