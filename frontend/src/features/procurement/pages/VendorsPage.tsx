@@ -8,8 +8,12 @@ import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/c
 import { createVendor, listVendors, updateVendor } from '@/features/procurement/api';
 import type { Vendor } from '@/features/procurement/types';
 
+// The New Vendor form does NOT ask for a code. The server mints "V-0001" and
+// steps the sequence on, so there is nothing here for a person to guess at —
+// which is what produced the live master's hand-typed `V-DEMO-KPXL`. Editing
+// an existing vendor still shows its code, because by then there is a real
+// value to correct.
 const vendorSchema = z.object({
-    code: z.string().min(1, 'Code is required').max(32),
     name: z.string().min(1, 'Name is required').max(255),
     email: z.string().email('Enter a valid email').optional().or(z.literal('')),
     phone: z.string().optional(),
@@ -26,7 +30,12 @@ const vendorSchema = z.object({
     tally_ledger_name: z.string().trim().max(255).optional().or(z.literal('')),
 });
 
+const editVendorSchema = vendorSchema.extend({
+    code: z.string().min(1, 'Code is required').max(32),
+});
+
 type VendorFormValues = z.infer<typeof vendorSchema>;
+type EditVendorFormValues = z.infer<typeof editVendorSchema>;
 
 export default function VendorsPage() {
     const [modalOpen, setModalOpen] = useState(false);
@@ -49,7 +58,7 @@ export default function VendorsPage() {
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<VendorFormValues>({
         resolver: zodResolver(vendorSchema),
-        defaultValues: { code: '', name: '', email: '', phone: '', gstin: '', state_code: '', tally_ledger_name: '' },
+        defaultValues: { name: '', email: '', phone: '', gstin: '', state_code: '', tally_ledger_name: '' },
     });
 
     const mutation = useMutation({
@@ -66,10 +75,10 @@ export default function VendorsPage() {
         handleSubmit: handleEditSubmit,
         reset: resetEdit,
         formState: { errors: editErrors },
-    } = useForm<VendorFormValues>({ resolver: zodResolver(vendorSchema) });
+    } = useForm<EditVendorFormValues>({ resolver: zodResolver(editVendorSchema) });
 
     const editMutation = useMutation({
-        mutationFn: ({ id, ...payload }: { id: number } & VendorFormValues) => updateVendor(id, payload),
+        mutationFn: ({ id, ...payload }: { id: number } & EditVendorFormValues) => updateVendor(id, payload),
         onSuccess: () => {
             invalidate();
             setEditingVendor(null);
@@ -169,9 +178,6 @@ export default function VendorsPage() {
                 destroyOnHidden
             >
                 <Form layout="vertical">
-                    <Form.Item label="Code" validateStatus={errors.code ? 'error' : ''} help={errors.code?.message}>
-                        <Controller name="code" control={control} render={({ field }) => <Input {...field} />} />
-                    </Form.Item>
                     <Form.Item label="Name" validateStatus={errors.name ? 'error' : ''} help={errors.name?.message}>
                         <Controller name="name" control={control} render={({ field }) => <Input {...field} />} />
                     </Form.Item>

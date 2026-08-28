@@ -44,7 +44,8 @@ export async function listAllVendors(): Promise<Paginated<Vendor>> {
 }
 
 export interface CreateVendorPayload {
-    code: string;
+    /** Omitted by the form: the server mints "V-0001" and steps the sequence on. */
+    code?: string;
     name: string;
     email?: string;
     phone?: string;
