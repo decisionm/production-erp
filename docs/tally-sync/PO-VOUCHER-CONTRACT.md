@@ -192,15 +192,24 @@ write.
 | Name | Source | Missing → cloud refusal reason (recorded on the PO, `tally_staging.state = 'refused'`) |
 |---|---|---|
 | party ledger | `vendors.tally_ledger_name` — typed by Accounts, never populated from Tally (no Tally read) | `party_unmapped` |
-| purchase ledger | `TallyLedgerRole::Purchase` via `TallyLedgerMappingService` (Settings → Ledger Mappings) — ONE role for now, **not** an env key, **no default** | `purchase_ledger_unmapped` |
+| purchase ledger | `TallyLedgerRole::Purchase` via `TallyLedgerMappingService` (Settings → Ledger Mappings) — ONE role for now, **not** an env key, **no default**, and **TESTING-ONLY**: DEC-20260812-003 measured that real Tally posts through FOUR purchase ledgers (local × interstate × rate); this single mapping backs the staging gate only and is never the production ledger scheme (Q39 still open) | `purchase_ledger_unmapped` |
 | stock item | the item's exact name, only for a Tally-sourced item (`Item::isTallySourced()`, GUID recorded by the masters pull) that is not a local fixture | `item_unmapped` (item id + name) |
 | godown | the ONE Tally-linked warehouse (`TallyGodownResolver::soleTallyGodownName()`); a PO names no receiving store until its GRN | `godown_unresolved` |
 | lines | — | `no_lines` |
 | flag | `tally-sync.purchase_orders_enabled` | `purchase_orders_disabled` (the listener records `state: 'disabled'` without calling the enqueue; the enqueue itself refuses too if called directly) |
+| allowed Testing Tally company | `tally-sync.purchase_orders_allowed_company` — a plain config value, never a secret, never guessed; checked ONLY once the flag above is on | `testing_company_unconfigured` (blank) |
 
 All reasons are collected before refusing. The agent is the second lock: a
 payload without a party ledger, a purchase ledger or a godown throws — there
-is no default ledger, no default godown.
+is no default ledger, no default godown. The agent's `buildPurchaseOrderXml`
+checks `allowed_company` FIRST, before any other field: it must equal, BYTE-
+FOR-BYTE, the agent's own configured `tallyCompanyName`. The cloud trims
+surrounding whitespace from `purchase_orders_allowed_company` once, before
+treating it as configured/blank and before writing it to the payload — the
+agent does not repeat that trim or fold case, so a blank value or any
+difference that survives the cloud's one normalization (internal whitespace,
+case, or whitespace this agent did not itself introduce) is a PERMANENT
+refusal for that voucher, never something the sync loop retries on its own.
 
 ### VOUCHERNUMBER — Q35(c) is pending
 
@@ -216,10 +225,15 @@ number is authoritative — may change this BEFORE the first live write.
 
 ```
 voucher_type 'Purchase Order' · voucher_date (ISO; the agent writes yyyymmdd) · voucher_number "PO-{id}" ·
-voucher_number_source 'erp' · party_ledger · party_gstin · purchase_ledger · godown · reference (= voucher_number) ·
+voucher_number_source 'erp' · party_ledger · party_gstin · purchase_ledger · allowed_company · godown · reference (= voucher_number) ·
 narration (the PO's notes) · total_amount ·
 lines[] { item, quantity, rate, amount, schedules[] { due_date (ISO), quantity, amount } }
 ```
+
+`allowed_company` is `tally-sync.purchase_orders_allowed_company` — the exact
+Testing Tally company this voucher may post against. It never reaches the
+XML; it exists only so the agent can refuse, byte-for-byte, before it builds
+anything (see the refusal table above).
 
 `schedules[]` mirror `PurchaseOrderSchedule` (Tally's ORDERDUEDATE
 allocations); a line with no schedule gets ONE allocation for the whole line

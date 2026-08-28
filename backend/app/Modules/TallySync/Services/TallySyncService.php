@@ -14,6 +14,7 @@ use App\Modules\Production\Services\ShiftProductionEntryService;
 use App\Modules\Sales\Models\Delivery;
 use App\Modules\Sales\Models\Invoice;
 use App\Modules\TallySync\Exceptions\PurchaseOrderNotPostable;
+use App\Modules\TallySync\Exceptions\ReceiptNoteNotPostable;
 use App\Modules\TallySync\Models\Enums\TallyLedgerRole;
 use App\Modules\TallySync\Models\Enums\TallySyncEventKind;
 use App\Modules\TallySync\Models\Enums\TallySyncStatus;
@@ -122,9 +123,21 @@ class TallySyncService
      * Raw material received against a PO → Tally Receipt Note (increases RM
      * stock). Party is the supplier; godown is the receiving warehouse. The
      * agent translates this to the Receipt Note voucher XML.
+     *
+     * tally-sync.receipt_notes_enabled is checked HERE too, not only by the
+     * event listener that is today's one caller — this is the service-level
+     * lock so a future or direct caller cannot create a Receipt Note queue
+     * row while the flag is off, whether or not it goes through that
+     * listener. See ReceiptNoteNotPostable's docblock for the other two
+     * locks (the listener never calling this; pending() withholding a row
+     * that already exists despite this one).
      */
     public function enqueueGoodsReceiptNote(GoodsReceiptNote $note): TallySyncEntry
     {
+        if (! config('tally-sync.receipt_notes_enabled')) {
+            throw ReceiptNoteNotPostable::disabled();
+        }
+
         $note->loadMissing(['lines.item', 'lines.scheduleAllocations.schedule', 'warehouse', 'purchaseOrder.vendor']);
 
         $lines = $note->lines->map(fn ($line) => [
@@ -222,7 +235,10 @@ class TallySyncService
      *   is PENDING and may change this before the first live write) ·
      *   voucher_number_source 'erp' (tally_order_no is a MIRROR's field and
      *   is never used for an ERP-raised order) · party_ledger · party_gstin ·
-     *   purchase_ledger · godown · reference (the same ERP reference — on the
+     *   purchase_ledger · allowed_company (tally-sync.purchase_orders_allowed_company,
+     *   trimmed here — the agent then compares it verbatim, byte-for-byte and
+     *   with no trim/case-fold of its own, against its configured
+     *   tallyCompanyName before it builds or posts) · godown · reference (the same ERP reference — on the
      *   real exports REFERENCE equals VOUCHERNUMBER) · narration (notes) ·
      *   lines[]{item, quantity, rate, amount, schedules[]{due_date, quantity,
      *   amount}} · total_amount.
@@ -255,10 +271,25 @@ class TallySyncService
 
         $reasons = [];
 
-        if (! config('tally-sync.purchase_orders_enabled')) {
+        $ordersEnabled = (bool) config('tally-sync.purchase_orders_enabled');
+        if (! $ordersEnabled) {
             $reasons[] = [
                 'code' => 'purchase_orders_disabled',
                 'detail' => 'PO posting to Tally is disabled (tally-sync.purchase_orders_enabled = false; owner gate Q35).',
+            ];
+        }
+
+        // The allowed TESTING Tally company (tally-sync.purchase_orders_allowed_company)
+        // is fail-closed and checked only once the feature itself is on — an
+        // order refused solely for 'purchase_orders_disabled' must not also
+        // carry a second, misleading reason about a company nobody has
+        // configured yet.
+        $allowedCompany = config('tally-sync.purchase_orders_allowed_company');
+        $allowedCompany = is_string($allowedCompany) && trim($allowedCompany) !== '' ? trim($allowedCompany) : null;
+        if ($ordersEnabled && $allowedCompany === null) {
+            $reasons[] = [
+                'code' => 'testing_company_unconfigured',
+                'detail' => 'tally-sync.purchase_orders_allowed_company is blank — PO posting is enabled but there is no allowed Testing Tally company to check the agent against.',
             ];
         }
 
@@ -379,6 +410,12 @@ class TallySyncService
             'party_ledger' => $partyLedger,
             'party_gstin' => $order->vendor?->gstin,
             'purchase_ledger' => $purchaseLedger,
+            // The allowed Testing Tally company (tally-sync.purchase_orders_allowed_company,
+            // fail-closed above, TRIMMED above too) — the agent compares this
+            // verbatim, byte-for-byte, with no further trim/case-fold of its
+            // own, against its configured tallyCompanyName before it builds
+            // or posts anything; never a secret, never guessed.
+            'allowed_company' => $allowedCompany,
             'godown' => $godown,
             'reference' => $reference,
             'narration' => $order->notes,
@@ -1196,6 +1233,18 @@ class TallySyncService
                 // stays open (DEC-20260807-011). Batch vouchers and anything
                 // already delivered pass untouched — see ShiftVoucherReleaseGate.
                 ->reject(fn (TallySyncEntry $entry) => $this->releaseGate->withholds($entry))
+                // tally-sync.receipt_notes_enabled is the second lock, not just
+                // the first: TallySyncEventServiceProvider's listener already
+                // refuses to CREATE a Receipt Note row while this is off, but
+                // that alone does not cover a row that already existed when the
+                // flag was turned off, or a failed one a human RETRIED — retry()
+                // re-queues the entry's frozen payload directly (regeneratePayload()
+                // has no Receipt Note case) without going through the listener or
+                // this config at all. Withheld exactly like the release gate above:
+                // the row is left untouched (still Pending, delivered_at whatever
+                // it already was) and simply not handed out this poll — turning the
+                // flag back on is enough to let it flow again later.
+                ->reject(fn (TallySyncEntry $entry) => $entry->tally_voucher_type === 'Receipt Note' && ! config('tally-sync.receipt_notes_enabled'))
                 ->values();
 
             // First delivery closes the merge window (see the shift-voucher

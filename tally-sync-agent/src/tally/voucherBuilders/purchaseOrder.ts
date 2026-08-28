@@ -52,6 +52,19 @@ export interface PurchaseOrderPayload {
     party_gstin: string | null;
     /** TallyLedgerRole::Purchase's mapped ledger — REQUIRED, never defaulted. */
     purchase_ledger: string | null;
+    /**
+     * The one Tally company (tally-sync.purchase_orders_allowed_company on
+     * the cloud, fail-closed there if blank — surrounding whitespace is
+     * trimmed there, once, before it is treated as configured or written
+     * here) this voucher may be built and posted against — REQUIRED. This
+     * agent does NOT repeat that trim or fold case: whatever arrives here is
+     * checked verbatim, BYTE-FOR-BYTE, against this agent's own configured
+     * `tallyCompanyName` before the XML is built at all — a blank value or
+     * any mismatch is a PERMANENT failure for this voucher, never retried
+     * automatically, because posting to the wrong Tally company is not a
+     * transient error to recover from.
+     */
+    allowed_company: string | null;
     /** The one Tally godown every allocation sits under — REQUIRED. */
     godown: string | null;
     reference: string | null;
@@ -177,6 +190,7 @@ export interface PurchaseOrderPayload {
  * the second lock on the same door.
  */
 export function buildPurchaseOrderXml(payload: PurchaseOrderPayload, companyName: string): string {
+    requireAllowedCompany(payload.allowed_company, companyName);
     const partyLedger = required(payload.party_ledger, 'party_ledger (the vendor\'s Tally ledger name)');
     const purchaseLedger = required(payload.purchase_ledger, 'purchase_ledger (the Purchase ledger role mapping)');
     const godown = required(payload.godown, 'godown (the Tally godown the order allocates to)');
@@ -401,6 +415,45 @@ function sameDecimal(a: string, b: string): boolean {
     );
 
     return toScaled(a, scale) === toScaled(b, scale);
+}
+
+/**
+ * The last lock before a Purchase Order voucher is built at all: this
+ * agent's `tallyCompanyName` (its own local settings — the company its
+ * local Tally is actually open on) must equal, BYTE-FOR-BYTE, the
+ * `allowed_company` the cloud staged on this voucher.
+ *
+ * The cloud trims SURROUNDING WHITESPACE from `purchase_orders_allowed_company`
+ * exactly once, before treating it as configured/blank and before writing it
+ * to the payload (config-authoring convenience, not a relaxed match) — this
+ * function does not repeat that trim, and does no case-folding either: what
+ * arrives HERE is compared verbatim against `companyName`. So a difference
+ * that survives the cloud's one trim — internal whitespace, a case
+ * difference, or (if either config value happens to carry one) leading/
+ * trailing whitespace this agent did not itself add — is still the wrong
+ * name to build a voucher against, never a "close enough" match. This is not
+ * a claim that raw, un-normalized env-file bytes are what reach here; it is
+ * that once the cloud's one normalization has run, nothing softens the
+ * comparison further.
+ *
+ * Blank/missing `allowed_company` and any mismatch are BOTH permanent
+ * failures for this voucher: the sync loop reports them as a rejection
+ * (never "unverified"), so nothing here is retried automatically — a person
+ * has to fix the cloud config, the agent config, or both.
+ */
+export function requireAllowedCompany(allowedCompany: string | null | undefined, companyName: string): void {
+    if (typeof allowedCompany !== 'string' || allowedCompany.trim() === '') {
+        throw new Error(
+            'Purchase Order payload has no allowed_company (the allowed Testing Tally company) — refusing to build: '
+            + 'this agent never posts a Purchase Order without the cloud naming the one Tally company it may post to',
+        );
+    }
+    if (allowedCompany !== companyName) {
+        throw new Error(
+            `Purchase Order payload's allowed_company ("${allowedCompany}") does not match this agent's configured `
+            + `Tally company ("${companyName}") — refusing to build: never posting a Purchase Order to the wrong Tally company`,
+        );
+    }
 }
 
 function required(value: string | null | undefined, what: string): string {

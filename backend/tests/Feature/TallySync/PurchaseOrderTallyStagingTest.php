@@ -147,7 +147,7 @@ class PurchaseOrderTallyStagingTest extends TestCase
         $payload = $entry->payload;
         $this->assertSame([
             'voucher_type', 'voucher_date', 'voucher_number', 'voucher_number_source', 'party_ledger', 'party_gstin',
-            'purchase_ledger', 'godown', 'reference', 'narration', 'lines', 'total_amount',
+            'purchase_ledger', 'allowed_company', 'godown', 'reference', 'narration', 'lines', 'total_amount',
         ], array_keys($payload));
         $this->assertSame('Purchase Order', $payload['voucher_type']);
         $this->assertSame('2026-08-20', $payload['voucher_date']);
@@ -156,6 +156,7 @@ class PurchaseOrderTallyStagingTest extends TestCase
         $this->assertSame(self::VENDOR_LEDGER, $payload['party_ledger'], 'the vendor\'s recorded Tally ledger — never the raw name');
         $this->assertSame(self::VENDOR_GSTIN, $payload['party_gstin']);
         $this->assertSame(self::PURCHASE_LEDGER, $payload['purchase_ledger'], 'TallyLedgerRole::Purchase via the mappings');
+        $this->assertSame(config('tally-sync.purchase_orders_allowed_company'), $payload['allowed_company'], 'the configured Testing Tally company, carried for the agent\'s own byte-for-byte check');
         $this->assertSame(self::GODOWN, $payload['godown'], 'the one Tally-linked godown');
         $this->assertSame("PO-{$po->id}", $payload['reference']);
         $this->assertSame('September resin', $payload['narration']);
@@ -355,6 +356,78 @@ class PurchaseOrderTallyStagingTest extends TestCase
         $this->assertSame(0, TallySyncEvent::query()->count());
         $this->assertSame(array_diff_key($before, ['purchase_orders' => 0]), array_diff_key($this->tableCounts(), ['purchase_orders' => 0]));
         $this->assertStaging($po, 'disabled', ['purchase_orders_disabled']);
+    }
+
+    // ---- the allowed Testing Tally company, fail-closed ------------------------
+
+    public function test_with_the_flag_on_but_the_allowed_company_blank_the_order_is_refused_before_any_queue_row(): void
+    {
+        config([
+            'tally-sync.purchase_orders_enabled' => true,
+            'tally-sync.purchase_orders_allowed_company' => null,
+        ]);
+        $po = $this->sentOrder([['item' => $this->itemA, 'quantity' => '10.0000', 'rate' => '1.0000', 'schedules' => []]]);
+
+        $refusal = $this->assertRefused($po, ['testing_company_unconfigured']);
+        $this->assertStringContainsString('purchase_orders_allowed_company is blank', $refusal->reasons[0]['detail']);
+    }
+
+    public function test_a_whitespace_only_allowed_company_is_treated_as_blank(): void
+    {
+        config([
+            'tally-sync.purchase_orders_enabled' => true,
+            'tally-sync.purchase_orders_allowed_company' => '   ',
+        ]);
+        $po = $this->sentOrder([['item' => $this->itemA, 'quantity' => '10.0000', 'rate' => '1.0000', 'schedules' => []]]);
+
+        $this->assertRefused($po, ['testing_company_unconfigured']);
+    }
+
+    public function test_with_the_flag_off_a_blank_allowed_company_does_not_add_a_second_reason(): void
+    {
+        config(['tally-sync.purchase_orders_allowed_company' => null]);
+        $po = $this->sentOrder([['item' => $this->itemA, 'quantity' => '10.0000', 'rate' => '1.0000', 'schedules' => []]]);
+
+        // Only 'purchase_orders_disabled' — the company gate is checked only
+        // once the feature itself is on, so a fresh install with everything
+        // off is not reported as two separate misconfigurations.
+        $this->assertRefused($po, ['purchase_orders_disabled']);
+    }
+
+    public function test_with_the_flag_on_and_the_allowed_company_configured_it_rides_the_payload_verbatim(): void
+    {
+        config([
+            'tally-sync.purchase_orders_enabled' => true,
+            'tally-sync.purchase_orders_allowed_company' => ' Testing Tally Company Beta ',
+        ]);
+        $po = $this->sentOrder([['item' => $this->itemA, 'quantity' => '10.0000', 'rate' => '1.0000', 'schedules' => []]]);
+
+        $payload = app(TallySyncService::class)->enqueuePurchaseOrder($po)->payload;
+
+        $this->assertSame('Testing Tally Company Beta', $payload['allowed_company'], 'trimmed, never re-guessed');
+    }
+
+    /**
+     * The REAL road (PurchaseOrderService::send() → event → listener), not
+     * the direct enqueue: the order is sent regardless, nothing is queued,
+     * and the refusal lands on the order's own tally_staging — exactly the
+     * shape every other refusal reason already proves via this road
+     * (test_the_listener_records_a_refusal_on_the_order_and_never_throws_out_of_the_event),
+     * now for the allowed-company gate specifically.
+     */
+    public function test_with_the_flag_on_but_the_allowed_company_blank_the_real_send_stages_nothing_and_records_the_refusal(): void
+    {
+        config([
+            'tally-sync.purchase_orders_enabled' => true,
+            'tally-sync.purchase_orders_allowed_company' => null,
+        ]);
+        $po = $this->draftOrder([['item' => $this->itemA, 'quantity' => '10.0000', 'rate' => '1.0000', 'schedules' => []]]);
+
+        app(PurchaseOrderService::class)->send($po);
+
+        $this->assertSame(PurchaseOrderStatus::Sent, $po->fresh()->status, 'the order IS sent — Tally staging never blocks it');
+        $this->assertSame(0, TallySyncEntry::query()->count(), 'nothing is queued when the company gate refuses');
+        $this->assertStaging($po, 'refused', ['testing_company_unconfigured']);
     }
 
     public function test_with_the_flag_on_the_real_send_enqueues_once_and_records_enqueued(): void

@@ -17,6 +17,7 @@ use RuntimeException;
  * Reason codes (the whole set — WS-C ↔ WS-A contract):
  *
  *   purchase_orders_disabled   the flag (tally-sync.purchase_orders_enabled) is off
+ *   testing_company_unconfigured  the flag is on but tally-sync.purchase_orders_allowed_company is blank
  *   party_unmapped             the vendor has no tally_ledger_name
  *   item_unmapped              a line's item is not Tally-sourced (no tally_stock_item_guid)
  *   purchase_ledger_unmapped   TallyLedgerRole::Purchase has no mapping

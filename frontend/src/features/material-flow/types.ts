@@ -152,7 +152,13 @@ export interface StoreIssue {
     cancellation_reason: string | null;
     notes: string | null;
     lines: StoreIssueLine[];
-    bag_scans: StoreIssueBagScan[];
+    /**
+     * Absent, not empty, when the endpoint didn't load the relation — the
+     * resource wraps it in `whenLoaded('bagScans')`, and the list endpoint
+     * behind the queue doesn't eager-load it. Absent means "no scans shown
+     * here", never "safe to read .length".
+     */
+    bag_scans?: StoreIssueBagScan[];
 }
 
 /** The store queue's filters — every one of them applied in SQL, not here. */

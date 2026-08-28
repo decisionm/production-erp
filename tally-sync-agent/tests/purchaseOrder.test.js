@@ -39,6 +39,7 @@ const {
     negate,
     sumDecimals,
     quantity,
+    requireAllowedCompany,
 } = require('../dist/tally/voucherBuilders/purchaseOrder.js');
 const { buildVoucherXml } = require('../dist/tally/voucherBuilders/index.js');
 
@@ -54,6 +55,7 @@ function payload(overrides = {}) {
         party_ledger: 'Vendor Alpha',
         party_gstin: '00AAAAA0000A0Z0',
         purchase_ledger: 'Purchase Ledger Alpha',
+        allowed_company: COMPANY,
         godown: 'Godown Alpha',
         reference: 'PO-7',
         narration: 'Synthetic golden — Phase 6',
@@ -549,6 +551,55 @@ test('a missing godown throws — every real allocation sits under one, and none
 
 test('an order with no lines throws', () => {
     assert.throws(() => buildPurchaseOrderXml(payload({ lines: [] }), COMPANY), /no lines/);
+});
+
+/* ── The allowed Testing Tally company: checked BEFORE anything is built ──── */
+
+test('a missing or blank allowed_company throws — this agent never guesses which Tally company a PO belongs in', () => {
+    for (const allowed_company of [null, undefined, '', '   ']) {
+        assert.throws(
+            () => buildPurchaseOrderXml(payload({ allowed_company }), COMPANY),
+            /no allowed_company/,
+        );
+    }
+});
+
+test('an allowed_company that does not match this agent\'s configured Tally company throws', () => {
+    assert.throws(
+        () => buildPurchaseOrderXml(payload({ allowed_company: 'Some Other Company' }), COMPANY),
+        /does not match this agent's configured Tally company/,
+    );
+});
+
+// The cloud trims surrounding whitespace from purchase_orders_allowed_company
+// exactly once, before treating it as configured and before writing the
+// payload — this is NOT a test of what the cloud sends in the ordinary
+// path. It proves this function's OWN defense-in-depth: it repeats none of
+// that normalization, so whatever it is actually given — a stray trailing
+// space, a case difference — is compared verbatim, never softened here too.
+test('the comparison is byte-for-byte, with no trim or case-fold of its own — a value this function receives with whitespace or a case difference is still a mismatch', () => {
+    assert.throws(() => buildPurchaseOrderXml(payload({ allowed_company: `${COMPANY} ` }), COMPANY), /does not match/);
+    assert.throws(() => buildPurchaseOrderXml(payload({ allowed_company: COMPANY.toUpperCase() }), COMPANY), /does not match/);
+});
+
+test('a matching allowed_company builds normally — the exact configured company name is allowed', () => {
+    const xml = buildPurchaseOrderXml(payload({ allowed_company: COMPANY }), COMPANY);
+    assert.match(xml, /<VOUCHER VCHTYPE="Purchase Order"/);
+});
+
+test('requireAllowedCompany is a pure, exported guard — the same rules as above without building anything', () => {
+    assert.throws(() => requireAllowedCompany(null, COMPANY), /no allowed_company/);
+    assert.throws(() => requireAllowedCompany('', COMPANY), /no allowed_company/);
+    assert.throws(() => requireAllowedCompany('   ', COMPANY), /no allowed_company/);
+    assert.throws(() => requireAllowedCompany('Wrong Co', COMPANY), /does not match/);
+    assert.doesNotThrow(() => requireAllowedCompany(COMPANY, COMPANY));
+});
+
+test('the allowed_company check runs before any other required field — a blank company is reported even when the rest of the payload is also incomplete', () => {
+    assert.throws(
+        () => buildPurchaseOrderXml(payload({ allowed_company: null, party_ledger: null, purchase_ledger: null, godown: null }), COMPANY),
+        /no allowed_company/,
+    );
 });
 
 /* ── Escaping ────────────────────────────────────────────────────────────── */
