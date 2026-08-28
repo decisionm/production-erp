@@ -14,9 +14,33 @@ class VendorService
 {
     use ManagesConfigurationLifecycle;
 
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    public function __construct(private readonly ProcurementDocumentQuery $query) {}
+
+    /**
+     * The vendor list, optionally narrowed by a search term.
+     *
+     * SEARCH IS NOT OPTIONAL FURNITURE HERE. The master held four demo rows for
+     * months, so paging alone looked sufficient; the import from Tally ledgers
+     * took it to 628 in a single run and the page became a wall — thirteen
+     * screens and no way to type a supplier's name.
+     *
+     * The clause is ProcurementDocumentQuery::whereVendorMatches, already "the
+     * one vendor clause every list's `q` shares", so this page and the
+     * purchase-order filter can never disagree about what matching a vendor
+     * means. Name OR code, because the code is what the printed paperwork
+     * carries.
+     *
+     * Server-side, deliberately: filtering the current page in the browser
+     * would search 50 rows out of 628 and answer "no such vendor" for one that
+     * plainly exists — the defect four pickers in this repo were just fixed
+     * for. A blank or whitespace term is NO search, not a search for nothing.
+     */
+    public function paginate(int $perPage = 20, ?string $search = null): LengthAwarePaginator
     {
+        $term = $search !== null ? trim($search) : '';
+
         return Vendor::query()
+            ->when($term !== '', fn ($vendors) => $this->query->whereVendorMatches($vendors, $term))
             ->orderBy('name')
             ->paginate($perPage);
     }

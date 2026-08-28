@@ -23,9 +23,17 @@ import type {
  * The defaults keep every earlier no-argument caller working; a picker must
  * still use listAllVendors(), which is what pickerFullList.test.ts pins.
  */
-export async function listVendors(page = 1, perPage = 50): Promise<Paginated<Vendor>> {
+/**
+ * The vendor list, optionally narrowed by `q` (name or code).
+ *
+ * Searching is SERVER-SIDE. Filtering the loaded page in the browser would
+ * search 50 rows out of 628 and answer "no such vendor" for one that plainly
+ * exists — the defect four pickers in this app were fixed for.
+ */
+export async function listVendors(page = 1, perPage = 50, search?: string): Promise<Paginated<Vendor>> {
+    const term = search?.trim() ?? '';
     const { data } = await api.get<Paginated<Vendor>>('/procurement/vendors', {
-        params: { page, per_page: perPage },
+        params: { page, per_page: perPage, ...(term !== '' ? { q: term } : {}) },
     });
     return data;
 }

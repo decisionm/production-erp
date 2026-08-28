@@ -144,12 +144,31 @@ describe('the vendors screen draws a real pager', () => {
     });
 
     it('passes its page state to the query instead of calling the paged function bare', () => {
-        expect(VENDORS_PAGE).toMatch(/queryFn:\s*\(\)\s*=>\s*listVendors\(page,\s*perPage\)/);
+        // The search term joined page and perPage when the Tally ledger import
+        // took this table from four rows to 628; a bare call would be the
+        // unpaged read this whole file exists to prevent.
+        expect(VENDORS_PAGE).toMatch(/queryFn:\s*\(\)\s*=>\s*listVendors\(page,\s*perPage(,\s*search)?\)/);
         expect(VENDORS_PAGE).not.toMatch(/queryFn:\s*listVendors\b/);
     });
 
     it('keys the query by page so a page change refetches', () => {
-        expect(VENDORS_PAGE).toMatch(/queryKey:\s*\['procurement',\s*'vendors',\s*page,\s*perPage\]/);
+        expect(VENDORS_PAGE).toMatch(/queryKey:\s*\['procurement',\s*'vendors',\s*page,\s*perPage(,\s*search)?\]/);
+    });
+
+    it('searches the SERVER, and keys the query by the term so a search refetches', () => {
+        // Filtering the loaded page in the browser would search 50 rows out of
+        // 628 and answer "no such vendor" for one that plainly exists — the
+        // defect four pickers in this app were fixed for. The term has to reach
+        // the query key too, or typing one would show the previous results.
+        expect(VENDORS_PAGE).toMatch(/queryKey:\s*\['procurement',\s*'vendors',\s*page,\s*perPage,\s*search\]/);
+        expect(VENDORS_PAGE).toMatch(/listVendors\(page,\s*perPage,\s*search\)/);
+        expect(VENDORS_PAGE).toContain('Input.Search');
+    });
+
+    it('resets to the first page when a search is submitted', () => {
+        // Otherwise the term is applied to whatever page number was showing,
+        // and a search from page 7 of the old list looks like no matches.
+        expect(VENDORS_PAGE).toMatch(/onSearch=\{\(value\)\s*=>\s*\{[\s\S]{0,120}setPage\(1\)/);
     });
 
     it('still invalidates on the shared prefix, so the PO pickers refresh with the table', () => {
