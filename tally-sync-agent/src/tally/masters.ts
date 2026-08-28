@@ -166,7 +166,20 @@ export async function exportLedgerGroups(t: TallyTarget): Promise<MasterNode[]> 
  * The first real pull is the check on these names.
  */
 const LEDGER_GSTIN_FIELDS = ['PARTYGSTIN', 'GSTIN', 'GSTREGISTRATIONNUMBER'] as const;
-const LEDGER_STATE_FIELDS = ['LEDSTATENAME', 'STATENAME', 'PRIORSTATENAME'] as const;
+
+/**
+ * MEASURED, no longer guessed. The 28-Aug ledger master export ("All Masters",
+ * 1742 ledgers from the live company) settles the order: PRIORSTATENAME
+ * appears 176 times, STATENAME 38, and LEDSTATENAME NEVER. The first draft of
+ * this list led with LEDSTATENAME, which was wrong and cost nothing only
+ * because the reader takes the first candidate that carries a value.
+ *
+ * The same export shows why the state is a weak source anyway: of 620 Sundry
+ * Creditors, only 22 carry a state at all, while 307 carry a GSTIN. The GSTIN
+ * is therefore the reliable route to the state, and the cloud derives it —
+ * see ImportVendorsFromLedgers.
+ */
+const LEDGER_STATE_FIELDS = ['PRIORSTATENAME', 'STATENAME', 'LEDSTATENAME'] as const;
 
 /** The first candidate field that carries anything, or undefined when none does. */
 function firstOf(node: Record<string, unknown>, fields: readonly string[]): string | undefined {
