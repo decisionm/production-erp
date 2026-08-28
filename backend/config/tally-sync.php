@@ -181,10 +181,12 @@ return [
     |--------------------------------------------------------------------------
     |
     | Whether a goods receipt (GoodsReceiptNoteReceived) stages a Tally
-    | 'Receipt Note' voucher at all. The owner has confirmed the ERP's own
-    | GRN/inward screen is the factory's real record and the factory does not
-    | use Tally Receipt Notes for it — so a fresh deployment must not stage
-    | one silently. OFF here means the TallySyncEventServiceProvider listener
+    | 'Receipt Note' voucher at all. WHETHER THE FACTORY USES TALLY RECEIPT
+    | NOTES IS PENDING Q63, open since 26-Aug-2026 and unanswered: no export
+    | read so far contains a GRN voucher sample, and no decision record
+    | settles it. OFF is therefore the fail-closed reading of an OPEN
+    | question, not a decision that has been taken — a fresh deployment must
+    | not stage one silently on an assumption. OFF here means the TallySyncEventServiceProvider listener
     | no-ops (logs and returns) rather than calling
     | TallySyncService::enqueueGoodsReceiptNote() — no new queue row is
     | created. Existing/historical rows are never deleted or altered by

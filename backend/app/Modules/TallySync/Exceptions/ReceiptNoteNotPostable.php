@@ -7,9 +7,9 @@ use RuntimeException;
 
 /**
  * TallySyncService::enqueueGoodsReceiptNote() REFUSED to stage a Tally
- * 'Receipt Note' voucher — the owner has confirmed the ERP's own GRN/inward
- * screen is the factory's real record and the factory does not use Tally
- * Receipt Notes for it (tally-sync.receipt_notes_enabled, OFF by default).
+ * 'Receipt Note' voucher — whether the factory uses Tally Receipt Notes at
+ * all is PENDING Q63 and unanswered, so tally-sync.receipt_notes_enabled is
+ * OFF by default as the fail-closed reading of an open question.
  *
  * The event listener (TallySyncEventServiceProvider) already checks this
  * config itself and never calls enqueueGoodsReceiptNote() while it is off,
