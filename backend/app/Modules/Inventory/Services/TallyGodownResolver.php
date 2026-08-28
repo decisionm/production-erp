@@ -23,10 +23,12 @@ use App\Modules\TallySync\Http\Controllers\TallySettingsController;
  *   1. the warehouse itself, when it has a tally_guid (a real Tally godown);
  *   2. else the nearest ANCESTOR with a tally_guid (the day bin is created
  *      as a child of the company godown — its lines post under the parent);
- *   3. else, when the system has EXACTLY ONE Tally-linked warehouse OF THE
- *      BOUND TALLY COMPANY, that one (this factory's reality: one godown, so
+ *   3. else the sole Tally-linked warehouse, counted among the BOUND Tally
+ *      company's godowns where the data allows that and among ALL linked
+ *      warehouses where it does not (this factory's reality: one godown, so
  *      there is nothing to choose between — an unparented internal bin can
- *      only mean it);
+ *      only mean it). The company is a tie-breaker, never a requirement;
+ *      soleLinkedWarehouse() below says why, and it is load-bearing;
  *   4. else null — a multi-godown system with an unparented, unlinked
  *      warehouse is genuinely ambiguous, so nothing is guessed and the
  *      preview/readiness gate flags it exactly as before.
@@ -95,11 +97,11 @@ class TallyGodownResolver
      * The godown NAME for a voucher that has NO warehouse of its own — an
      * ERP-raised Purchase Order names no receiving store until its GRN,
      * yet Tally's order allocations (BATCHALLOCATIONS / ORDERDUEDATE) sit
-     * under a godown. Rule 3 above, applied without a warehouse: when the
-     * system has EXACTLY ONE Tally-linked warehouse it is that one (this
-     * factory's reality: one company godown); otherwise null — a
-     * multi-godown system has nothing to choose by, so nothing is guessed
-     * and the caller refuses to stage. Additive (Phase 6, WS-C); the
+     * under a godown. Rule 3 above, applied without a warehouse: the sole
+     * Tally-linked warehouse, counted among the bound company's godowns where
+     * the data allows that narrowing and among all of them where it does not
+     * (this factory's reality: one company godown). Null when that count is
+     * anything but one — nothing is guessed and the caller refuses to stage. Additive (Phase 6, WS-C); the
      * warehouse-bearing paths above are untouched.
      */
     public function soleTallyGodownName(): ?string
