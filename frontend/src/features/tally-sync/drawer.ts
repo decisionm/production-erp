@@ -435,6 +435,25 @@ export function showsFixedAfterFailures(entry: {
     return entry.status !== 'failed' && (entry.resolution_log?.length ?? 0) > 0 && !entry.error_message;
 }
 
+/**
+ * How "What Tally said" is coloured for one entry (28-Aug audit, item 11).
+ *
+ * A DISMISSED voucher deliberately keeps its last error — dismissal is not a
+ * repair — but printing that error in red beside a grey "Dismissed — never
+ * sent" tag, under a green "no failed vouchers" banner, made one row assert
+ * a live problem and a resolved one at once. The error is HISTORY there: it
+ * explains why the voucher was written off, so it renders muted with words
+ * saying so. A failed row's error stays red — that one still needs a person.
+ */
+export function saidPresentation(entry: { status: string }): {
+    tone: 'danger' | 'secondary';
+    prefix: string | null;
+} {
+    return entry.status === 'dismissed'
+        ? { tone: 'secondary', prefix: 'Before it was dismissed: ' }
+        : { tone: 'danger', prefix: null };
+}
+
 // ---- snapshots (Phase 4: what the agent sent / what Tally answered) --------
 
 const XML_INDENT = '  ';

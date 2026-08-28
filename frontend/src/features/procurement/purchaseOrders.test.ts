@@ -99,17 +99,17 @@ describe('statusTag', () => {
             expect(tag.color).not.toBe('');
             expect(tag.label).not.toContain('_');
         }
-        expect(statusTag('partially_received')).toEqual({ color: 'gold', label: 'partially received' });
-        expect(statusTag('cancelled')).toEqual({ color: 'red', label: 'cancelled' });
+        expect(statusTag('partially_received')).toEqual({ color: 'gold', label: 'Partially received' });
+        expect(statusTag('cancelled')).toEqual({ color: 'red', label: 'Cancelled' });
     });
 
     it('falls through with an unknown status rather than throwing — the row is still worth reading', () => {
-        expect(statusTag('something_new' as never)).toEqual({ color: 'default', label: 'something new' });
+        expect(statusTag('something_new' as never)).toEqual({ color: 'default', label: 'Something new' });
     });
 
     it('offers all five statuses to the filter, spelled for people', () => {
         expect(statusOptions().map((o) => o.value)).toEqual(PURCHASE_ORDER_STATUSES);
-        expect(statusOptions().find((o) => o.value === 'partially_received')?.label).toBe('partially received');
+        expect(statusOptions().find((o) => o.value === 'partially_received')?.label).toBe('Partially received');
     });
 });
 

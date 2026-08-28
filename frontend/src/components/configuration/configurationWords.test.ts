@@ -8,6 +8,7 @@ import {
     blockingSentence,
     canOfferArchive,
     configurationActions,
+    splitConfigurationActions,
     configurationInUse,
     deleteConfirmBody,
     deleteModalTitle,
@@ -395,5 +396,39 @@ describe('the reason prompt words', () => {
      */
     it('keeps the refusal offer worded the way the server sentence ends', () => {
         expect(ARCHIVE_INSTEAD_LABEL).toBe('Deactivate instead');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// The overflow split — presentation only, the contract untouched
+// ---------------------------------------------------------------------------
+
+describe('splitConfigurationActions', () => {
+    it('keeps Edit inline and moves the lifecycle acts behind the overflow', () => {
+        const { inline, overflow } = splitConfigurationActions(
+            configurationActions(abilities({ activate: true })),
+        );
+        expect(inline.map((a) => a.key)).toEqual(['edit']);
+        expect(overflow.map((a) => a.key)).toEqual(['activate', 'archive', 'delete']);
+    });
+
+    it('drops a DISABLED Reactivate/Archive from the overflow — an act the record cannot take answers nothing', () => {
+        const { overflow } = splitConfigurationActions(
+            configurationActions(abilities({ activate: false, archive: true, delete: null })),
+        );
+        expect(overflow.map((a) => a.key)).toEqual(['archive', 'delete']);
+    });
+
+    it('keeps a refused Delete, disabled with its reason — the refusal is the information', () => {
+        const { overflow } = splitConfigurationActions(
+            configurationActions(abilities({ activate: false, archive: true, delete: false })),
+        );
+        const del = overflow.find((a) => a.key === 'delete')!;
+        expect(del.enabled).toBe(false);
+        expect(del.reason).toBe('Something already uses this record. Archive it instead.');
+    });
+
+    it('splits an empty list into two empty lists — no `can`, nothing offered anywhere', () => {
+        expect(splitConfigurationActions([])).toEqual({ inline: [], overflow: [] });
     });
 });

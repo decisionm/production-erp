@@ -44,12 +44,29 @@ export interface PurchaseRequisitionLine {
 
 export interface PurchaseRequisition {
     id: number;
+    /** "PR-{id}" — the list's `q` grammar; absent on an older backend. */
+    document_number?: string;
     status: PurchaseRequisitionStatus;
     requested_by: string | null;
+    /** The decision trail — null on a requisition decided before the stamps existed. */
+    approved_by?: string | null;
+    approved_at?: string | null;
+    rejected_by?: string | null;
+    rejected_at?: string | null;
     needed_by_date: string | null;
     notes: string | null;
     lines: PurchaseRequisitionLine[];
+    /** The orders raised FROM this requisition — id + status only. */
+    purchase_orders?: { id: number; status: PurchaseOrderStatus }[];
     created_at: string;
+}
+
+/** The list's server-side filters (ListPurchaseRequisitionsRequest). */
+export interface PurchaseRequisitionListFilters {
+    status?: PurchaseRequisitionStatus | '';
+    q?: string;
+    page?: number;
+    per_page?: number;
 }
 
 export type PurchaseOrderStatus = 'draft' | 'sent' | 'partially_received' | 'closed' | 'cancelled';

@@ -1,6 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation } from '@tanstack/react-query';
 import { Alert, DatePicker, Form, Input, Modal, Select, Space, Switch } from 'antd';
+import { useEffect } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { createPurchaseOrder } from '@/features/procurement/api';
@@ -24,12 +25,22 @@ const orderSchema = z.object({
 );
 type OrderFormValues = z.infer<typeof orderSchema>;
 
+/** A requisition's handoff — items and quantities prefilled; vendor and rates typed here. */
+export interface RaiseFromRequisition {
+    purchase_requisition_id: number;
+    /** "PR-{id}", shown so the buyer knows what this order answers. */
+    document_number: string;
+    lines: { item_id: number; quantity: number }[];
+}
+
 interface CreatePurchaseOrderModalProps {
     open: boolean;
     onClose: () => void;
     onCreated: (order: PurchaseOrder) => void;
     vendorOptions: { value: number; label: string }[];
     itemOptions: { value: number; label: string }[];
+    /** When set, the form opens prefilled from an approved requisition. */
+    raiseFrom?: RaiseFromRequisition | null;
 }
 
 /**
@@ -38,12 +49,32 @@ interface CreatePurchaseOrderModalProps {
  * switch, a read-only mirror of an order that lives in Tally, which arrives
  * already Sent). Nothing here moves stock or queues anything for Tally:
  * Tally staging happens on Send, and only when the owner's gate is open.
+ *
+ * Opened with `raiseFrom`, the lines arrive from an approved requisition
+ * (PR→PO, audit finding 8) and the created order carries
+ * purchase_requisition_id, so the requisition's row can list it. The vendor
+ * and every rate are still typed here — a requisition names neither
+ * (FC-06: no money on the requisition surface).
  */
-export default function CreatePurchaseOrderModal({ open, onClose, onCreated, vendorOptions, itemOptions }: CreatePurchaseOrderModalProps) {
+export default function CreatePurchaseOrderModal({ open, onClose, onCreated, vendorOptions, itemOptions, raiseFrom = null }: CreatePurchaseOrderModalProps) {
     const { control, handleSubmit, reset, formState: { errors } } = useForm<OrderFormValues>({
         resolver: zodResolver(orderSchema),
         defaultValues: { lines: [emptyPurchaseOrderLine()] },
     });
+
+    // Prefill exactly once per opening: the requisition's items and
+    // quantities, each line's rate left for the buyer.
+    useEffect(() => {
+        if (open && raiseFrom) {
+            reset({
+                lines: raiseFrom.lines.map((line) => ({
+                    ...emptyPurchaseOrderLine(),
+                    item_id: line.item_id,
+                    quantity: line.quantity,
+                })),
+            });
+        }
+    }, [open, raiseFrom, reset]);
 
     const createMutation = useMutation({
         mutationFn: createPurchaseOrder,
@@ -56,12 +87,13 @@ export default function CreatePurchaseOrderModal({ open, onClose, onCreated, ven
     return (
         <Modal
             maskClosable={false}
-            title="New Purchase Order"
+            title={raiseFrom ? `New Purchase Order — from ${raiseFrom.document_number}` : 'New Purchase Order'}
             open={open}
             onCancel={onClose}
             onOk={handleSubmit(({ is_tally_mirror, tally_order_no, ...values }) =>
                 createMutation.mutate({
                     ...values,
+                    ...(raiseFrom ? { purchase_requisition_id: raiseFrom.purchase_requisition_id } : {}),
                     ...(is_tally_mirror ? { source: 'tally' as const, tally_order_no } : {}),
                 }),
             )}

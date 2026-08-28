@@ -279,6 +279,40 @@ export function configurationActions(
         });
 }
 
+/**
+ * The row's acts split for rendering: Edit stays an inline button, everything
+ * else moves behind an overflow ("⋯") menu (28-Aug audit, item 6 — Delete and
+ * Archive as always-visible row buttons put the two rarest, most consequential
+ * acts one mis-tap from the one act used daily).
+ *
+ * Inside the overflow, a DISABLED Reactivate or Archive is dropped rather
+ * than shown greyed: on an active record "Reactivate — not available" answers
+ * a question nobody asked, and hiding an act a screen cannot perform is
+ * exactly what the contract permits ("a screen may hide an act; it may never
+ * enable one"). Delete is the exception and is kept even when refused,
+ * because its refusal carries the one fact worth reading — something already
+ * uses the record — and hiding it would make "why can't I delete this?"
+ * unanswerable from the screen.
+ */
+export function splitConfigurationActions(actions: ConfigurationAction[]): {
+    inline: ConfigurationAction[];
+    overflow: ConfigurationAction[];
+} {
+    const inline: ConfigurationAction[] = [];
+    const overflow: ConfigurationAction[] = [];
+
+    for (const action of actions) {
+        if (action.key === 'edit') {
+            inline.push(action);
+            continue;
+        }
+        if (!action.enabled && action.key !== 'delete') continue;
+        overflow.push(action);
+    }
+
+    return { inline, overflow };
+}
+
 // ---------------------------------------------------------------------------
 // The delete confirm's own words
 // ---------------------------------------------------------------------------

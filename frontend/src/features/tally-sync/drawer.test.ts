@@ -6,6 +6,7 @@ import {
     instant,
     mappingBadge,
     payloadColumns,
+    saidPresentation,
     showsFixedAfterFailures,
     snapshotAnswer,
     snapshotHeadline,
@@ -679,5 +680,19 @@ describe('snapshotAnswer', () => {
             { color: 'default', text: 'no verdict' },
             { color: 'default', text: 'created 0' },
         ]);
+    });
+});
+
+describe('saidPresentation', () => {
+    it("keeps a failed row's error red — that one still needs a person", () => {
+        expect(saidPresentation({ status: 'failed' })).toEqual({ tone: 'danger', prefix: null });
+        expect(saidPresentation({ status: 'pending' })).toEqual({ tone: 'danger', prefix: null });
+    });
+
+    it("mutes a dismissed row's error and words it as history — a written-off voucher is not a live problem", () => {
+        expect(saidPresentation({ status: 'dismissed' })).toEqual({
+            tone: 'secondary',
+            prefix: 'Before it was dismissed: ',
+        });
     });
 });

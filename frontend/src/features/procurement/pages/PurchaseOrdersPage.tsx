@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { listAllItems } from '@/features/inventory/api';
 import { listAllVendors, listPurchaseOrders, sendPurchaseOrder } from '@/features/procurement/api';
 import { apiMessage } from '@/features/procurement/components/apiMessage';
-import CreatePurchaseOrderModal from '@/features/procurement/components/CreatePurchaseOrderModal';
+import CreatePurchaseOrderModal, { type RaiseFromRequisition } from '@/features/procurement/components/CreatePurchaseOrderModal';
 import PurchaseOrderDetailDrawer from '@/features/procurement/components/PurchaseOrderDetailDrawer';
 import PurchaseOrderFilterBar from '@/features/procurement/components/PurchaseOrderFilterBar';
 import { AmendPurchaseOrderModal, PurchaseOrderReasonModal, type ReasonAction } from '@/features/procurement/components/PurchaseOrderLifecycleModals';
@@ -46,6 +47,20 @@ const numeric = { fontVariantNumeric: 'tabular-nums' } as const;
  */
 export default function PurchaseOrdersPage() {
     const [createOpen, setCreateOpen] = useState(false);
+    // A requisition's Raise PO arrives as router state (no refetch, no
+    // extra endpoint): open the create form prefilled, once, and clear the
+    // state so a later back/refresh does not reopen it.
+    const location = useLocation();
+    const navigate = useNavigate();
+    const [raiseFrom, setRaiseFrom] = useState<RaiseFromRequisition | null>(null);
+    useEffect(() => {
+        const arrived = (location.state as { raiseFromRequisition?: RaiseFromRequisition } | null)?.raiseFromRequisition;
+        if (arrived) {
+            setRaiseFrom(arrived);
+            setCreateOpen(true);
+            navigate(location.pathname + location.search, { replace: true, state: null });
+        }
+    }, [location, navigate]);
     const [reasonAction, setReasonAction] = useState<{ action: ReasonAction; order: PurchaseOrder } | null>(null);
     const [amendOrder, setAmendOrder] = useState<PurchaseOrder | null>(null);
     const queryClient = useQueryClient();
@@ -228,14 +243,20 @@ export default function PurchaseOrdersPage() {
 
             <CreatePurchaseOrderModal
                 open={createOpen}
-                onClose={() => setCreateOpen(false)}
+                onClose={() => {
+                    setCreateOpen(false);
+                    setRaiseFrom(null);
+                }}
                 onCreated={(order) => {
                     invalidate();
+                    queryClient.invalidateQueries({ queryKey: ['procurement', 'purchase-requisitions'] });
                     setCreateOpen(false);
+                    setRaiseFrom(null);
                     message.success(`${poNumber(order)} created as a draft.`);
                 }}
                 vendorOptions={vendorOptions}
                 itemOptions={itemOptions}
+                raiseFrom={raiseFrom}
             />
 
             <PurchaseOrderReasonModal

@@ -7,6 +7,7 @@ import type {
     PurchaseOrderListFilters,
     PurchaseOrderTrace,
     PurchaseRequisition,
+    PurchaseRequisitionListFilters,
     Vendor,
 } from './types';
 
@@ -81,9 +82,18 @@ export async function updateVendor(id: number, payload: UpdateVendorPayload): Pr
  * default page and render it with the pager switched off, so the queue showed
  * the newest 20 and gave no sign the other rows existed.
  */
-export async function listPurchaseRequisitions(page = 1, perPage = 50): Promise<Paginated<PurchaseRequisition>> {
+export async function listPurchaseRequisitions(
+    filters: PurchaseRequisitionListFilters = {},
+): Promise<Paginated<PurchaseRequisition>> {
+    // '' means "no filter" to the select; the server should not see the key.
+    const { status, q, ...rest } = filters;
     const { data } = await api.get<Paginated<PurchaseRequisition>>('/procurement/purchase-requisitions', {
-        params: { page, per_page: perPage },
+        params: {
+            per_page: 50,
+            ...rest,
+            ...(status ? { status } : {}),
+            ...(q && q.trim() !== '' ? { q: q.trim() } : {}),
+        },
     });
     return data;
 }

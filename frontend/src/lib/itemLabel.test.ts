@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { itemLabel, uomOf } from '@/lib/itemLabel';
+import { itemLabel, itemPickerLabel, uomOf } from '@/lib/itemLabel';
 
 /**
  * The one helper that names a product on ~40 screens.
@@ -50,5 +50,22 @@ describe('uomOf', () => {
         expect(uomOf({ uom: 'Nos.' })).toBe('Nos.');
         expect(uomOf({ uom: '  ' })).toBeNull();
         expect(uomOf(null)).toBeNull();
+    });
+});
+
+describe('itemPickerLabel', () => {
+    it('appends the unit, which is the honest discriminator between near-duplicate names', () => {
+        expect(itemPickerLabel({ sku: 'SR-01', name: 'Shrink Roll', uom: 'kg' })).toBe('SR-01 — Shrink Roll · kg');
+        expect(itemPickerLabel({ sku: 'Shrink Roll', name: 'Shrink Roll', uom: 'Nos.' })).toBe('Shrink Roll · Nos.');
+    });
+
+    it('stays the plain label when the master carries no unit — a blank is not a licence to guess one', () => {
+        expect(itemPickerLabel({ sku: 'SR-01', name: 'Shrink Roll', uom: '  ' })).toBe('SR-01 — Shrink Roll');
+        expect(itemPickerLabel({ sku: 'SR-01', name: 'Shrink Roll' })).toBe('SR-01 — Shrink Roll');
+    });
+
+    it('renders a missing item as the same dash itemLabel does, with no unit dangling after it', () => {
+        expect(itemPickerLabel(null)).toBe('—');
+        expect(itemPickerLabel({ uom: 'kg' })).toBe('—');
     });
 });
