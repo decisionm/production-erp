@@ -198,4 +198,24 @@ return [
 
     'receipt_notes_enabled' => (bool) env('TALLY_SYNC_RECEIPT_NOTES_ENABLED', false),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Receipt Note → Tally: the allowed Tally company (fail-closed)
+    |--------------------------------------------------------------------------
+    |
+    | The Purchase Order rule (`purchase_orders_allowed_company` above),
+    | applied to the Receipt Note path for the same reason it was applied
+    | there: during the 28-Aug rehearsal a Receipt Note failed at the agent
+    | because the voucher reached a Tally company the payload was never meant
+    | for — an obsolete company identity nothing had checked. Trimmed once
+    | here; blank-after-trim or unset REFUSES staging while
+    | receipt_notes_enabled is true (fail closed, never defaulted); the
+    | trimmed value rides every staged Receipt Note's payload
+    | (`allowed_company`) and the desktop agent compares it byte-for-byte
+    | against its configured tallyCompanyName before building anything.
+    |
+    */
+
+    'receipt_notes_allowed_company' => env('TALLY_SYNC_RECEIPT_NOTES_ALLOWED_COMPANY'),
+
 ];

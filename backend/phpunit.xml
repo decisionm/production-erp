@@ -52,6 +52,10 @@
              OFF, per the owner's confirmation that the factory does not use Tally Receipt
              Notes; ReceiptNoteFeatureFlagTest exercises that OFF behaviour explicitly. -->
         <env name="TALLY_SYNC_RECEIPT_NOTES_ENABLED" value="true"/>
+        <!-- Same rule as the PO allowed-company pin above: synthetic, FC-06-safe,
+             so the suite's staged Receipt Notes pass the fail-closed company gate
+             without every fixture configuring it. -->
+        <env name="TALLY_SYNC_RECEIPT_NOTES_ALLOWED_COMPANY" value="Testing Tally Company Alpha"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>

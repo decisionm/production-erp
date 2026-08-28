@@ -192,7 +192,7 @@ class GodownAliasingTest extends TestCase
         // Same rule on the procurement voucher — the resolver is not a
         // production-only patch.
         $po = new PurchaseOrder;
-        $po->setRelation('vendor', new Vendor(['name' => 'Reliance Industries']));
+        $po->setRelation('vendor', new Vendor(['name' => 'Reliance Industries', 'tally_ledger_name' => 'Reliance Industries']));
 
         $line = new GoodsReceiptNoteLine(['quantity' => '100.0000', 'unit_cost' => '118.5000']);
         $line->setRelation('item', $this->resin);

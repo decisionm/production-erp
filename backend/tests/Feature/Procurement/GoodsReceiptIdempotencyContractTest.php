@@ -67,7 +67,7 @@ class GoodsReceiptIdempotencyContractTest extends TestCase
 
         config(['production.traceability_enabled' => true]);
 
-        $this->vendor = Vendor::create(['code' => 'VND-A', 'name' => 'Vendor Alpha']);
+        $this->vendor = Vendor::create(['code' => 'VND-A', 'name' => 'Vendor Alpha', 'tally_ledger_name' => 'Vendor Alpha']);
         $this->resin = Item::create(['sku' => 'ITEM_A', 'name' => 'ITEM_A', 'uom' => 'Kgs', 'is_active' => true, 'tally_stock_item_guid' => 'guid-item-a']);
         $this->store = Warehouse::create(['code' => 'WH-A', 'name' => 'Warehouse A', 'is_active' => true, 'tally_guid' => 'guid-wh-a']);
 

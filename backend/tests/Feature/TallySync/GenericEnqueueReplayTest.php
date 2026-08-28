@@ -128,7 +128,7 @@ class GenericEnqueueReplayTest extends TestCase
 
     private function receive(): GoodsReceiptNote
     {
-        $vendor = Vendor::create(['code' => 'SUP-1', 'name' => 'Reliance Industries', 'gstin' => '27AAACR1234A1Z5']);
+        $vendor = Vendor::create(['code' => 'SUP-1', 'name' => 'Reliance Industries', 'gstin' => '27AAACR1234A1Z5', 'tally_ledger_name' => 'Reliance Industries']);
         $po = PurchaseOrder::create(['vendor_id' => $vendor->id, 'status' => PurchaseOrderStatus::Sent, 'order_date' => '2026-08-01']);
         $poLine = $po->lines()->create(['item_id' => $this->resin->id, 'quantity' => '12000', 'unit_price' => '85', 'quantity_received' => '0']);
 

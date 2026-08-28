@@ -505,10 +505,13 @@ class EntryPresenterTest extends TestCase
         ?string $dueDate = null,
     ): TallySyncEntry {
         $po = new PurchaseOrder(['tally_order_no' => $tallyOrderNo]);
-        $po->setRelation('vendor', new Vendor(['name' => 'Reliance Industries', 'gstin' => '27AAACR1234A1Z5']));
+        // tally_ledger_name / tally_stock_item_guid / tally_guid: the enqueue
+        // refuses unmapped identities since the 28-Aug rehearsal fix, so a
+        // postable fixture carries them (the guid values are synthetic).
+        $po->setRelation('vendor', new Vendor(['name' => 'Reliance Industries', 'gstin' => '27AAACR1234A1Z5', 'tally_ledger_name' => 'Reliance Industries']));
 
         $line = new GoodsReceiptNoteLine(['quantity' => $quantity, 'unit_cost' => $rate]);
-        $line->setRelation('item', new Item(['sku' => 'RES-1', 'name' => 'PET Resin']));
+        $line->setRelation('item', new Item(['sku' => 'RES-1', 'name' => 'PET Resin', 'tally_stock_item_guid' => 'guid-res-1']));
 
         $allocations = collect();
         if ($dueDate !== null) {
@@ -520,7 +523,7 @@ class EntryPresenterTest extends TestCase
 
         $grn = $this->existing(new GoodsReceiptNote(['received_date' => '2026-08-04']), 7);
         $grn->setRelation('lines', collect([$line]));
-        $grn->setRelation('warehouse', new Warehouse(['name' => 'RM Store']));
+        $grn->setRelation('warehouse', new Warehouse(['name' => 'RM Store', 'tally_guid' => 'guid-wh-rm']));
         $grn->setRelation('purchaseOrder', $po);
 
         event(new GoodsReceiptNoteReceived($grn));

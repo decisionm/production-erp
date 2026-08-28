@@ -309,6 +309,13 @@ export interface GoodsReceiptNote {
     material_lots?: MaterialLot[];
     /** The Receipt Note's queue entry (status + flags + link only), null when none exists; absent on an older backend. */
     tally?: TallyLink | null;
+    /**
+     * What staging concluded at arrival (goods_receipt_notes.tally_staging,
+     * written ONLY by GoodsReceiptService::recordTallyStaging — the PO
+     * record's shape without 'dismissed'). NULL on receipts that predate the
+     * column; absent on an older backend.
+     */
+    tally_staging?: TallyStaging | null;
     created_at: string;
 }
 

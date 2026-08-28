@@ -91,6 +91,11 @@ export function tallyReasonWords(reason: TallyStagingReason): string {
             return 'no lines';
         case 'purchase_orders_disabled':
             return DISABLED_WORDS;
+        case 'receipt_notes_disabled':
+            return RECEIPT_NOTES_DISABLED_WORDS;
+        case 'testing_company_unconfigured':
+        case 'allowed_company_unconfigured':
+            return 'no allowed Tally company is configured';
         case 'cancelled_before_delivery':
             return 'cancelled before the agent collected it';
         case 'closed_before_delivery':
@@ -122,6 +127,8 @@ export function tallyAfterWords(after: TallyStagingAfter | string | null | undef
 
 const AFTER_TAIL = 'in the ERP after Tally received it (owner question)';
 const DISABLED_WORDS = 'PO posting is disabled (owner gate Q35)';
+/** Exported for grnTally.ts — the GRN cell's disabled line uses the same words. */
+export const RECEIPT_NOTES_DISABLED_WORDS = 'Receipt Note posting is off (open question Q63)';
 const NOT_SENT = 'Not sent to Tally';
 
 export type TallyStateKind = 'mirror' | 'link' | 'enqueued' | 'refused' | 'disabled' | 'dismissed' | 'draft' | 'cancelled';

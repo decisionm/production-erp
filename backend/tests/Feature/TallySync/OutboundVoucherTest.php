@@ -32,16 +32,16 @@ class OutboundVoucherTest extends TestCase
 
     public function test_goods_receipt_enqueues_a_receipt_note(): void
     {
-        $vendor = new Vendor(['name' => 'Reliance Industries', 'gstin' => '27AAACR1234A1Z5']);
+        $vendor = new Vendor(['name' => 'Reliance Industries', 'gstin' => '27AAACR1234A1Z5', 'tally_ledger_name' => 'Reliance Industries']);
         $po = new PurchaseOrder;
         $po->setRelation('vendor', $vendor);
 
         $line = new GoodsReceiptNoteLine(['quantity' => '100.0000', 'unit_cost' => '85.0000']);
-        $line->setRelation('item', new Item(['sku' => 'RES-1', 'name' => 'PET Resin']));
+        $line->setRelation('item', new Item(['sku' => 'RES-1', 'name' => 'PET Resin', 'tally_stock_item_guid' => 'itm-resin']));
 
         $grn = $this->existing(new GoodsReceiptNote(['received_date' => now(), 'notes' => 'Lorry TN01']), 7);
         $grn->setRelation('lines', collect([$line]));
-        $grn->setRelation('warehouse', new Warehouse(['name' => 'RM Store']));
+        $grn->setRelation('warehouse', new Warehouse(['name' => 'RM Store', 'tally_guid' => 'gd-rm']));
         $grn->setRelation('purchaseOrder', $po);
 
         event(new GoodsReceiptNoteReceived($grn));
@@ -84,7 +84,7 @@ class OutboundVoucherTest extends TestCase
         config(['tally-sync.voucher_granularity' => 'batch']);
 
         $consumption = new ShiftMaterialConsumption(['quantity_issued_kg' => '250.0000']);
-        $consumption->setRelation('item', new Item(['sku' => 'RES-1', 'name' => 'PET Resin']));
+        $consumption->setRelation('item', new Item(['sku' => 'RES-1', 'name' => 'PET Resin', 'tally_stock_item_guid' => 'itm-resin']));
         $consumption->setRelation('warehouse', new Warehouse(['name' => 'Raw Material Store']));
 
         $spe = $this->existing(new ShiftProductionEntry([

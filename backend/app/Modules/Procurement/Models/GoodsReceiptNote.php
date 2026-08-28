@@ -37,6 +37,9 @@ class GoodsReceiptNote extends Model
     {
         return [
             'received_date' => 'datetime',
+            // Written only by GoodsReceiptService::recordTallyStaging() —
+            // deliberately NOT in Fillable, exactly as purchase_orders'.
+            'tally_staging' => 'array',
         ];
     }
 

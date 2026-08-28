@@ -8,7 +8,9 @@ use App\Modules\Procurement\Events\GoodsReceiptNoteReceived;
 use App\Modules\Procurement\Events\PurchaseOrderCancelled;
 use App\Modules\Procurement\Events\PurchaseOrderClosed;
 use App\Modules\Procurement\Events\PurchaseOrderSent;
+use App\Modules\Procurement\Models\GoodsReceiptNote;
 use App\Modules\Procurement\Models\PurchaseOrder;
+use App\Modules\Procurement\Services\GoodsReceiptService;
 use App\Modules\Procurement\Services\PurchaseOrderService;
 use App\Modules\Production\Events\ShiftProductionEntryApproved;
 use App\Modules\Production\Models\ShiftProductionEntry;
@@ -17,6 +19,7 @@ use App\Modules\Sales\Events\DeliveryDispatched;
 use App\Modules\Sales\Models\Enums\InvoiceStatus;
 use App\Modules\Sales\Models\Invoice;
 use App\Modules\TallySync\Exceptions\PurchaseOrderNotPostable;
+use App\Modules\TallySync\Exceptions\ReceiptNoteNotPostable;
 use App\Modules\TallySync\Models\Enums\TallySyncStatus;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Services\TallySyncService;
@@ -55,19 +58,17 @@ class TallySyncEventServiceProvider extends ServiceProvider
         // Gated on tally-sync.receipt_notes_enabled, OFF by default —
         // whether the factory uses Tally Receipt Notes at all is PENDING Q63
         // and unanswered, so off is the fail-closed reading of an open
-        // question rather than a decision anyone has taken. OFF means this no-ops rather than staging anything —
-        // no queue row, no XML, and nothing about a past GRN or a past
-        // Receipt Note voucher is touched.
+        // question rather than a decision anyone has taken. OFF means this
+        // stages nothing — no queue row, no XML, and nothing about a past
+        // GRN or a past Receipt Note voucher is touched — and, like the PO
+        // listener, what staging concluded is RECORDED on the receipt
+        // (tally_staging) so the receiving desk reads the state instead of
+        // silence. A refusal (an unmapped item, an unmapped vendor ledger,
+        // no allowed company) is likewise recorded, never thrown onward:
+        // the material HAS arrived and the stock HAS posted — an arrival
+        // must not fail because Tally staging refused.
         Event::listen(GoodsReceiptNoteReceived::class, function (GoodsReceiptNoteReceived $event) {
-            if (! config('tally-sync.receipt_notes_enabled')) {
-                Log::debug('Goods receipt received; Tally Receipt Note staging disabled (tally-sync.receipt_notes_enabled = false — the factory does not use Tally Receipt Notes for GRN/inward).', [
-                    'goods_receipt_note_id' => $event->note->id,
-                ]);
-
-                return;
-            }
-
-            $this->app->make(TallySyncService::class)->enqueueGoodsReceiptNote($event->note);
+            $this->stageGoodsReceiptNote($event->note);
         });
 
         Event::listen(DeliveryDispatched::class, function (DeliveryDispatched $event) {
@@ -155,6 +156,57 @@ class TallySyncEventServiceProvider extends ServiceProvider
                 default => null,
             };
         });
+    }
+
+    /**
+     * The GoodsReceiptNoteReceived listener's body — stagePurchaseOrder()'s
+     * shape on the receipt. Every branch ends in ONE recordTallyStaging()
+     * call with the state the receipt should show; the enqueue itself never
+     * touches the receipt.
+     */
+    private function stageGoodsReceiptNote(GoodsReceiptNote $note): void
+    {
+        $at = now()->toIso8601String();
+        $receipts = $this->app->make(GoodsReceiptService::class);
+
+        if (! config('tally-sync.receipt_notes_enabled')) {
+            Log::debug('Goods receipt received; Tally Receipt Note staging disabled (tally-sync.receipt_notes_enabled = false — PENDING Q63).', [
+                'goods_receipt_note_id' => $note->id,
+            ]);
+            $receipts->recordTallyStaging($note, [
+                'state' => 'disabled',
+                'reasons' => [[
+                    'code' => 'receipt_notes_disabled',
+                    'detail' => 'Receipt Note posting to Tally is off (whether the factory books Tally Receipt Notes is open — Q63). Nothing was staged.',
+                ]],
+                'at' => $at,
+            ]);
+
+            return;
+        }
+
+        try {
+            $entry = $this->app->make(TallySyncService::class)->enqueueGoodsReceiptNote($note);
+        } catch (ReceiptNoteNotPostable $refusal) {
+            Log::info('Goods receipt not staged for Tally — refused with named reasons.', [
+                'goods_receipt_note_id' => $note->id,
+                'reasons' => $refusal->codes(),
+            ]);
+            $receipts->recordTallyStaging($note, [
+                'state' => 'refused',
+                'reasons' => $refusal->reasons,
+                'at' => $at,
+            ]);
+
+            return;
+        }
+
+        $receipts->recordTallyStaging($note, [
+            'state' => 'enqueued',
+            'reasons' => [],
+            'entry_id' => $entry->id,
+            'at' => $at,
+        ]);
     }
 
     /**

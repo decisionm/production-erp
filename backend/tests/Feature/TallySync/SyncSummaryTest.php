@@ -426,15 +426,15 @@ class SyncSummaryTest extends TestCase
     private function goodsReceipt(int $id, string $date, string $vendor): GoodsReceiptNote
     {
         $po = new PurchaseOrder;
-        $po->setRelation('vendor', new Vendor(['name' => $vendor, 'gstin' => '27AAACR1234A1Z5']));
+        $po->setRelation('vendor', new Vendor(['name' => $vendor, 'gstin' => '27AAACR1234A1Z5', 'tally_ledger_name' => $vendor]));
 
         $line = new GoodsReceiptNoteLine(['quantity' => '100.0000', 'unit_cost' => '85.0000']);
-        $line->setRelation('item', new Item(['sku' => 'RES-1', 'name' => 'PET Resin']));
+        $line->setRelation('item', new Item(['sku' => 'RES-1', 'name' => 'PET Resin', 'tally_stock_item_guid' => 'itm-resin']));
         $line->setRelation('scheduleAllocations', collect());
 
         $grn = $this->existing(new GoodsReceiptNote(['received_date' => $date]), $id);
         $grn->setRelation('lines', collect([$line]));
-        $grn->setRelation('warehouse', new Warehouse(['name' => 'RM Store']));
+        $grn->setRelation('warehouse', new Warehouse(['name' => 'RM Store', 'tally_guid' => 'gd-rm']));
         $grn->setRelation('purchaseOrder', $po);
 
         return $grn;

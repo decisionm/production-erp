@@ -234,17 +234,20 @@ class ReceiptNoteFeatureFlagTest extends TestCase
     private function note(): GoodsReceiptNote
     {
         // Unmistakably synthetic (FC-06): no real vendor, GSTIN, item or
-        // warehouse name — this test never touches the factory's data.
+        // warehouse name — this test never touches the factory's data. The
+        // Tally identities (ledger name, item guid, godown guid) are carried
+        // because the enqueue refuses unmapped ones since the 28-Aug
+        // rehearsal fix — this suite is about the FLAG, not the identities.
         $po = new PurchaseOrder;
-        $po->setRelation('vendor', new Vendor(['name' => 'Vendor Alpha', 'gstin' => '00AAAAA0000A0Z0']));
+        $po->setRelation('vendor', new Vendor(['name' => 'Vendor Alpha', 'gstin' => '00AAAAA0000A0Z0', 'tally_ledger_name' => 'Vendor Alpha']));
 
         $line = new GoodsReceiptNoteLine(['quantity' => '100.0000', 'unit_cost' => '85.0000']);
-        $line->setRelation('item', new Item(['sku' => 'ITEM-A', 'name' => 'Item Alpha']));
+        $line->setRelation('item', new Item(['sku' => 'ITEM-A', 'name' => 'Item Alpha', 'tally_stock_item_guid' => 'itm-alpha']));
         $line->setRelation('scheduleAllocations', collect());
 
         $note = $this->existing(new GoodsReceiptNote(['received_date' => '2026-08-10']), 501);
         $note->setRelation('lines', collect([$line]));
-        $note->setRelation('warehouse', new Warehouse(['name' => 'Warehouse Alpha']));
+        $note->setRelation('warehouse', new Warehouse(['name' => 'Warehouse Alpha', 'tally_guid' => 'gd-alpha']));
         $note->setRelation('purchaseOrder', $po);
 
         return $note;

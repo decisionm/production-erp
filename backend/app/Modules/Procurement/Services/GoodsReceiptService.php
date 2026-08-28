@@ -21,6 +21,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\LazyCollection;
 use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
 
 /**
  * Posting a GRN is the one place Procurement actually moves stock. It never
@@ -677,5 +678,53 @@ class GoodsReceiptService
         if ($anyReceived) {
             $order->update(['status' => PurchaseOrderStatus::PartiallyReceived]);
         }
+    }
+
+    /**
+     * The states goods_receipt_notes.tally_staging may carry —
+     * PurchaseOrderService::STAGING_STATES minus 'dismissed': a receipt has
+     * no cancel/close lifecycle to withdraw a staged voucher for.
+     */
+    public const STAGING_STATES = ['disabled', 'refused', 'enqueued'];
+
+    /**
+     * The ONLY writer of goods_receipt_notes.tally_staging — the mirror of
+     * PurchaseOrderService::recordTallyStaging(), and called by the same
+     * listener family (TallySyncEventServiceProvider): disabled (the flag
+     * is off; PENDING Q63) / refused (named reasons — an unmapped item, an
+     * unmapped vendor ledger, no allowed company) / enqueued (entry_id).
+     * Writes this one column and nothing else — no Tally, no stock, no
+     * status change.
+     *
+     * @param  array{state: string, reasons?: list<array{code: string, detail?: ?string}>, entry_id?: ?int, at?: ?string}  $staging
+     */
+    public function recordTallyStaging(GoodsReceiptNote $note, array $staging): void
+    {
+        $state = (string) ($staging['state'] ?? '');
+        if (! in_array($state, self::STAGING_STATES, true)) {
+            throw new InvalidArgumentException(
+                'tally_staging.state must be one of '.implode('|', self::STAGING_STATES).", got \"{$state}\".",
+            );
+        }
+
+        $reasons = [];
+        foreach ($staging['reasons'] ?? [] as $reason) {
+            $reasons[] = [
+                'code' => (string) ($reason['code'] ?? 'unknown'),
+                'detail' => isset($reason['detail']) ? (string) $reason['detail'] : null,
+            ];
+        }
+
+        $record = [
+            'state' => $state,
+            'reasons' => $reasons,
+            'at' => isset($staging['at']) ? (string) $staging['at'] : now()->toIso8601String(),
+        ];
+        if (isset($staging['entry_id'])) {
+            $record['entry_id'] = (int) $staging['entry_id'];
+        }
+
+        // One column, nothing else on the receipt changes.
+        $note->forceFill(['tally_staging' => $record])->save();
     }
 }

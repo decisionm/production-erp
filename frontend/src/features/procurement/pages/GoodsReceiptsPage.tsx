@@ -13,10 +13,10 @@ import { useAuthStore } from '@/features/auth/store';
 import MaterialBagLabels from '@/features/inventory/components/MaterialBagLabels';
 import { listAllWarehouses } from '@/features/inventory/api';
 import { createGoodsReceipt, listGoodsReceipts, listPurchaseOrders } from '@/features/procurement/api';
+import GoodsReceiptTallyCell from '@/features/procurement/components/GoodsReceiptTallyCell';
 import { RECEIVABLE_PO_FILTERS, isReceivableOrder } from '@/features/procurement/purchaseOrders';
 import type { GoodsReceiptNote, GoodsReceiptNoteLine, PurchaseOrderSchedule } from '@/features/procurement/types';
 import { useProductionSettings } from '@/features/production/packing';
-import { TallyLinkCell } from '@/features/sales/SalesDocumentDrawer';
 import { formatDateTime } from '@/lib/datetime';
 import { ListEmpty } from '@/lib/ListEmpty';
 import { activePickerOptions } from '@/components/configuration/pickerOptions';
@@ -896,6 +896,13 @@ export default function GoodsReceiptsPage() {
                     { title: 'Reference', dataIndex: 'reference' },
                     { title: 'Lines', render: (_, row) => row.lines.length },
                     {
+                        // Audit finding 5 (28-Aug live walk): the register said
+                        // nothing about a Receipt Note's fate — a failure was
+                        // invisible until someone opened Tally Sync.
+                        title: 'Tally',
+                        render: (_, row) => <GoodsReceiptTallyCell receipt={row} compact />,
+                    },
+                    {
                         title: 'Actions',
                         render: (_, row) => (
                             <Button size="small" onClick={() => setDetailReceipt(row)}>
@@ -1108,13 +1115,13 @@ export default function GoodsReceiptsPage() {
                             </Descriptions.Item>
                             <Descriptions.Item label="Reference">{detailReceipt.reference ?? '—'}</Descriptions.Item>
                             <Descriptions.Item label="Notes">{detailReceipt.notes ?? '—'}</Descriptions.Item>
-                            {/* The Receipt Note's queue entry — the same cell
-                                the Sales pages render (status + link only). */}
-                            {detailReceipt.tally !== undefined && (
-                                <Descriptions.Item label="Tally">
-                                    <TallyLinkCell link={detailReceipt.tally} />
-                                </Descriptions.Item>
-                            )}
+                            {/* Where the Receipt Note stands — the queue entry
+                                when one exists, else the staging record's own
+                                sentence (refused with reasons / posting off /
+                                predates staging). Never a bare dash. */}
+                            <Descriptions.Item label="Tally">
+                                <GoodsReceiptTallyCell receipt={detailReceipt} />
+                            </Descriptions.Item>
                         </Descriptions>
 
                         <Typography.Title level={5} style={{ marginTop: 24 }}>
