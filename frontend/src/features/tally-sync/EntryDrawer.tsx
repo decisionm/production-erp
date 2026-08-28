@@ -11,6 +11,7 @@ import {
     mappingStateShort,
     payloadColumns,
     payloadText,
+    saidPresentation,
     snapshotAnswer,
     snapshotHeadline,
     snapshotXmlDecision,
@@ -461,7 +462,19 @@ function EntryBody({
                             <div style={{ whiteSpace: 'normal' }}>
                                 {entry.error_message ? (
                                     <>
-                                        <Typography.Text type="danger">{entry.error_message}</Typography.Text>
+                                        {/* saidPresentation: a dismissed voucher's
+                                            error is HISTORY (why it was written
+                                            off), not a live problem — muted, with
+                                            words saying so. A failed row stays red. */}
+                                        {(() => {
+                                            const said = saidPresentation(entry);
+                                            return (
+                                                <Typography.Text type={said.tone}>
+                                                    {said.prefix}
+                                                    {entry.error_message}
+                                                </Typography.Text>
+                                            );
+                                        })()}
                                         {entry.fix && (
                                             <div style={{ marginTop: 4 }}>
                                                 <Typography.Text style={{ fontSize: 12 }}>
