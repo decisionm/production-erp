@@ -25,9 +25,10 @@ class HierarchyUpsert
      * @param  class-string<Model>  $modelClass
      * @param  array<int, array{guid: string, name: string, parent?: string|null}>  $rows
      * @param  (callable(array): array<string, mixed>)|null  $defaultsForCreate  extra attributes when inserting a new node
+     * @param  array<string, mixed>  $alwaysFill  attributes of the PULL ITSELF, written on create AND on update
      * @return array{created: int, updated: int, total: int}
      */
-    public static function sync(string $modelClass, array $rows, ?callable $defaultsForCreate = null): array
+    public static function sync(string $modelClass, array $rows, ?callable $defaultsForCreate = null, array $alwaysFill = []): array
     {
         $created = 0;
         $updated = 0;
@@ -39,7 +40,15 @@ class HierarchyUpsert
             $node = $modelClass::withTrashed()->where('tally_guid', $row['guid'])->first();
 
             if ($node !== null) {
-                $node->fill(['name' => $row['name'], 'tally_parent_name' => $parentName]);
+                // $alwaysFill and NOT $defaultsForCreate: the difference is who
+                // owns the value. A default is the ERP's own (a warehouse code
+                // a person may rename), so a re-pull must never reset it.
+                // $alwaysFill describes the PULL — which Tally company these
+                // godowns came from — and that is Tally's fact, true on every
+                // pull, not only the first. Godowns pulled before this recorded
+                // no company at all, which is what left the sole-godown lookup
+                // unable to tell one company's godown from another's.
+                $node->fill(['name' => $row['name'], 'tally_parent_name' => $parentName] + $alwaysFill);
                 if ($node->trashed()) {
                     $node->restore();
                 }
@@ -49,7 +58,7 @@ class HierarchyUpsert
                 continue;
             }
 
-            $attributes = ['tally_guid' => $row['guid'], 'name' => $row['name'], 'tally_parent_name' => $parentName];
+            $attributes = ['tally_guid' => $row['guid'], 'name' => $row['name'], 'tally_parent_name' => $parentName] + $alwaysFill;
             if ($defaultsForCreate !== null) {
                 // Union keeps the Tally-sourced keys above authoritative; defaults
                 // only fill columns they don't already set (e.g. warehouses' code).
