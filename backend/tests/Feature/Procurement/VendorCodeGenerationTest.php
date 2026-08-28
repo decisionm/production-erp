@@ -5,7 +5,10 @@ namespace Tests\Feature\Procurement;
 use App\Models\User;
 use App\Modules\Procurement\Models\Vendor;
 use App\Modules\Procurement\Services\VendorService;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use PDOException;
+use ReflectionMethod;
 use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
 
@@ -135,6 +138,40 @@ class VendorCodeGenerationTest extends TestCase
             ->assertCreated()
             ->assertJsonPath('data.code', 'V-0001')
             ->assertJsonPath('data.name', 'Acme Drinktec Solutions LLP');
+    }
+
+    /**
+     * THE RETRY IS FOR A LOST RACE, NOT FOR EVERY DATABASE ERROR.
+     *
+     * A mint that loses to the unique index is re-read and tried again.
+     * Anything else must surface on the first attempt. The two are easy to
+     * confuse: both arrive as SQLSTATE 23000, and the message carries the
+     * whole INSERT — which names the `code` column on every mint — so a check
+     * matching only the column name would retry a NOT NULL failure five times
+     * before telling anyone. The classifier is read directly because the
+     * exception that finally escapes the loop looks identical either way,
+     * and a failing query fires no query-log event to count.
+     */
+    public function test_only_a_duplicate_code_counts_as_a_lost_race(): void
+    {
+        $classify = new ReflectionMethod(VendorService::class, 'isDuplicateCode');
+
+        $mysqlDuplicate = "SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'V-0001' for key 'vendors.vendors_code_unique'";
+        $sqliteDuplicate = 'SQLSTATE[23000]: Integrity constraint violation: 19 UNIQUE constraint failed: vendors.code';
+        $notNull = 'SQLSTATE[23000]: Integrity constraint violation: 19 NOT NULL constraint failed: vendors.name (insert into "vendors" ("code", "name") values (V-0001, ))';
+
+        $this->assertTrue($classify->invoke($this->service(), $this->constraintViolation($mysqlDuplicate)));
+        $this->assertTrue($classify->invoke($this->service(), $this->constraintViolation($sqliteDuplicate)));
+        $this->assertFalse(
+            $classify->invoke($this->service(), $this->constraintViolation($notNull)),
+            'a NOT NULL failure was read as a lost race and would be retried five times',
+        );
+    }
+
+    /** A QueryException shaped the way a driver raises an integrity-constraint violation. */
+    private function constraintViolation(string $message): QueryException
+    {
+        return new QueryException('sqlite', 'insert into "vendors" ("code", "name") values (?, ?)', [], new PDOException($message, 23000));
     }
 
     /** Every minted code fits `vendors.code`'s 32 characters with room to spare. */

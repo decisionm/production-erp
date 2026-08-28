@@ -115,15 +115,25 @@ class VendorService
      * database error would turn a real fault into five silent attempts and
      * then a misleading message.
      *
-     * SQLSTATE 23000 is integrity-constraint violation across both drivers;
-     * the column name narrows it to this index rather than, say, a foreign
-     * key. Matched on the message because neither MySQL nor sqlite reports
-     * the constraint name in a portable place.
+     * SQLSTATE 23000 covers every integrity-constraint violation, so it alone
+     * is far too wide: a NOT NULL failure on `name` carries it too, and the
+     * message carries the whole INSERT — which names the `code` column on
+     * every mint — so matching the column name alone would retry any of them
+     * five times over. The UNIQUENESS wording is what narrows it. MySQL says
+     * "Duplicate entry ... for key 'vendors.vendors_code_unique'"; sqlite says
+     * "UNIQUE constraint failed: vendors.code". A NOT NULL violation says
+     * "NOT NULL constraint failed" and matches neither. Read from the message
+     * because neither driver reports the constraint name anywhere portable.
      */
     private function isDuplicateCode(QueryException $exception): bool
     {
-        return $exception->getCode() === '23000'
-            && str_contains(strtolower($exception->getMessage()), 'code');
+        $message = strtolower($exception->getMessage());
+
+        // Cast: PDO sets the SQLSTATE as a string, but a driver or a wrapper
+        // that hands it back as an int must not slip past the check.
+        return (string) $exception->getCode() === '23000'
+            && str_contains($message, 'code')
+            && (str_contains($message, 'duplicate entry') || str_contains($message, 'unique constraint'));
     }
 
     public function update(Vendor $vendor, array $data): Vendor
