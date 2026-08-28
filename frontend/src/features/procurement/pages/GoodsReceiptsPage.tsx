@@ -14,6 +14,7 @@ import MaterialBagLabels from '@/features/inventory/components/MaterialBagLabels
 import { listAllWarehouses } from '@/features/inventory/api';
 import { createGoodsReceipt, listGoodsReceipts, listPurchaseOrders } from '@/features/procurement/api';
 import GoodsReceiptTallyCell from '@/features/procurement/components/GoodsReceiptTallyCell';
+import { lineQcLine, receiptQcLine } from '@/features/procurement/grnQc';
 import { RECEIVABLE_PO_FILTERS, isReceivableOrder } from '@/features/procurement/purchaseOrders';
 import type { GoodsReceiptNote, GoodsReceiptNoteLine, PurchaseOrderSchedule } from '@/features/procurement/types';
 import { useProductionSettings } from '@/features/production/packing';
@@ -904,6 +905,15 @@ export default function GoodsReceiptsPage() {
                     { title: 'Reference', dataIndex: 'reference' },
                     { title: 'Lines', render: (_, row) => row.lines.length },
                     {
+                        // Audit finding 9: is this arrival usable yet? The
+                        // register answers without a walk to the Quality menu.
+                        title: 'QC',
+                        render: (_, row) => {
+                            const qc = receiptQcLine(row.lines);
+                            return <Tag color={qc.color} style={{ marginInlineEnd: 0 }}>{qc.text}</Tag>;
+                        },
+                    },
+                    {
                         // Audit finding 5 (28-Aug live walk): the register said
                         // nothing about a Receipt Note's fate — a failure was
                         // invisible until someone opened Tally Sync.
@@ -1147,6 +1157,26 @@ export default function GoodsReceiptsPage() {
                                 ...(showsRates
                                     ? [{ title: 'Unit Cost', render: (_: unknown, line: GoodsReceiptNoteLine) => line.unit_cost ?? '—' }]
                                     : []),
+                                {
+                                    // The road from the arrival to its inspection
+                                    // (audit finding 9): the line's QC standing,
+                                    // and — while nothing is recorded — the way
+                                    // to record one, pre-selected.
+                                    title: 'Incoming QC',
+                                    render: (_: unknown, line: GoodsReceiptNoteLine) => {
+                                        const qc = lineQcLine(line.qc);
+                                        return (
+                                            <Space direction="vertical" size={2}>
+                                                <Tag color={qc.color} style={{ marginInlineEnd: 0 }}>{qc.text}</Tag>
+                                                {qc.offerInspection && (
+                                                    <Link to={`/quality/incoming-inspections?line=${line.id}`}>
+                                                        Record inspection
+                                                    </Link>
+                                                )}
+                                            </Space>
+                                        );
+                                    },
+                                },
                             ]}
                         />
                     </>

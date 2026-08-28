@@ -299,6 +299,21 @@ export interface PurchaseOrderListFilters {
     per_page?: number;
 }
 
+/** One arrival line's standing with Incoming QC — quantities only, never rates. */
+export interface GoodsReceiptLineQc {
+    /** The line's disposition when one exists (the quality service refuses a second, so 0..1). */
+    inspection: {
+        id: number;
+        result: 'pass' | 'fail' | 'partial' | string;
+        inspected_quantity: string;
+        accepted_quantity: string;
+        rejected_quantity: string;
+        inspection_date: string | null;
+    } | null;
+    /** The physical hold, counted from the line's lots; null when the line has no bag-tracked lots. */
+    bags: { waiting_qc: number; rejected_qc: number; total: number } | null;
+}
+
 export interface GoodsReceiptNoteLine {
     id: number;
     purchase_order_line_id: number;
@@ -307,6 +322,8 @@ export interface GoodsReceiptNoteLine {
     /** Same rule as PurchaseOrderLine.unit_price: absent (not null) without finance access. */
     unit_cost?: string;
     material_lots?: MaterialLot[];
+    /** Absent on an older backend. */
+    qc?: GoodsReceiptLineQc;
 }
 
 export interface GoodsReceiptNote {

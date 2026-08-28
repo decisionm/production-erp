@@ -34,6 +34,7 @@ class GoodsReceiptService
     /** Loaded on every receipt the list hands back, so the resource never lazy-loads. */
     private const WITH = [
         'lines.item',
+        'lines.incomingInspections',
         'lines.materialLots.item',
         'lines.materialLots.bags',
         'lines.materialLots.costVersions',
@@ -642,6 +643,7 @@ class GoodsReceiptService
     {
         $receipt->load([
             'lines.item',
+            'lines.incomingInspections',
             'lines.materialLots.item',
             'lines.materialLots.bags',
             'lines.materialLots.costVersions',

@@ -4,6 +4,7 @@ namespace App\Modules\Procurement\Http\Resources;
 
 use App\Modules\Inventory\Http\Resources\ItemResource;
 use App\Modules\Inventory\Http\Resources\MaterialLotResource;
+use App\Modules\Inventory\Models\Enums\MaterialBagStatus;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -41,6 +42,38 @@ class GoodsReceiptNoteLineResource extends JsonResource
             'stock_movement_id' => $this->stock_movement_id,
             ...($showsCost ? ['unit_cost' => $this->unit_cost] : []),
             'material_lots' => MaterialLotResource::collection($this->whenLoaded('materialLots')),
+            // WHERE THIS LINE STANDS WITH INCOMING QC (28-Aug audit finding
+            // 9: the receipt and the inspection lived on two screens with no
+            // road between them). Two facts, both quantities and never rates
+            // (FC-06 untouched):
+            //   inspection — the line's disposition when one exists (the
+            //     quality service refuses a second, so 0..1);
+            //   bags — the physical hold, counted from the loaded lots: how
+            //     many bags still stand in waiting_qc, and how many QC
+            //     rejected. Null for a line with no bag-tracked lots (counted
+            //     packaging has no hold by construction — DEC-20260825-001).
+            'qc' => $this->when($this->relationLoaded('incomingInspections'), function () {
+                $inspection = $this->incomingInspections->first();
+                $bags = $this->relationLoaded('materialLots')
+                    ? $this->materialLots->flatMap(fn ($lot) => $lot->relationLoaded('bags') ? $lot->bags : collect())
+                    : collect();
+
+                return [
+                    'inspection' => $inspection === null ? null : [
+                        'id' => $inspection->id,
+                        'result' => $inspection->result->value,
+                        'inspected_quantity' => $inspection->inspected_quantity,
+                        'accepted_quantity' => $inspection->accepted_quantity,
+                        'rejected_quantity' => $inspection->rejected_quantity,
+                        'inspection_date' => $inspection->inspection_date?->toDateString(),
+                    ],
+                    'bags' => $bags->isEmpty() ? null : [
+                        'waiting_qc' => $bags->where('status', MaterialBagStatus::WaitingQc)->count(),
+                        'rejected_qc' => $bags->where('status', MaterialBagStatus::RejectedQc)->count(),
+                        'total' => $bags->count(),
+                    ],
+                ];
+            }),
         ];
     }
 }

@@ -1,8 +1,9 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
+import { useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import { createIncomingInspection, listIncomingInspections } from '@/features/quality/api';
 import type { IncomingInspection, InspectionResult } from '@/features/quality/types';
@@ -29,6 +30,10 @@ export default function IncomingInspectionsPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [detailRow, setDetailRow] = useState<IncomingInspection | null>(null);
     const queryClient = useQueryClient();
+    // ?line={grn_line_id}: the goods-receipt drawer's "Record inspection"
+    // road (audit finding 9) — the modal opens with that line pre-selected.
+    const [searchParams, setSearchParams] = useSearchParams();
+    const linkedLineId = Number(searchParams.get('line')) || null;
 
     const { data, isLoading, isPending, isError, error, refetch } = useQuery({ queryKey: ['quality', 'incoming-inspections'], queryFn: listIncomingInspections });
     // THE WHOLE REGISTER, NOT THE FIRST PAGE. This picker is the only control
@@ -61,6 +66,26 @@ export default function IncomingInspectionsPage() {
         resolver: zodResolver(inspectionSchema),
         defaultValues: { inspected_quantity: 0, accepted_quantity: 0, rejected_quantity: 0 },
     });
+
+    // Arriving via ?line=: open the modal with the line chosen, then clear
+    // the param so closing the modal does not reopen it. Runs once per link.
+    useEffect(() => {
+        if (linkedLineId !== null) {
+            reset({
+                goods_receipt_note_line_id: linkedLineId,
+                inspected_quantity: 0,
+                accepted_quantity: 0,
+                rejected_quantity: 0,
+            });
+            setModalOpen(true);
+            setSearchParams((current) => {
+                const next = new URLSearchParams(current);
+                next.delete('line');
+                return next;
+            }, { replace: true });
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [linkedLineId]);
 
     const [inspected, accepted, rejected] = watch(['inspected_quantity', 'accepted_quantity', 'rejected_quantity']);
     const preview = useMemo(() => {

@@ -5,6 +5,7 @@ namespace App\Modules\Procurement\Models;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\MaterialLot;
 use App\Modules\Inventory\Models\StockMovement;
+use App\Modules\Quality\Models\IncomingInspection;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -55,5 +56,19 @@ class GoodsReceiptNoteLine extends Model
     public function scheduleAllocations(): HasMany
     {
         return $this->hasMany(GrnScheduleAllocation::class, 'goods_receipt_note_line_id');
+    }
+
+    /**
+     * The Quality module's disposition of this arrival line — the mirror of
+     * IncomingInspection::goodsReceiptNoteLine(), which crossed the module
+     * seam first. In practice 0..1: the quality service refuses a second
+     * inspection on a line (partial inspection is an open design question,
+     * refused rather than half-answered — see the 28-Aug defect register),
+     * but the shape stays HasMany because that refusal is the service's rule,
+     * not the schema's.
+     */
+    public function incomingInspections(): HasMany
+    {
+        return $this->hasMany(IncomingInspection::class, 'goods_receipt_note_line_id');
     }
 }
