@@ -13,15 +13,18 @@ not an instruction — several would change behaviour a person should rule on.
 
 ## Status, 28-Aug-2026
 
-**11 of the 15 are fixed** on `claude/procurement-defects` (PR 45). What remains
-is listed here with the reason, because each needs a ruling rather than a patch.
+**13 of the 15 are fixed** on `claude/procurement-defects` (PR 45).
 
-| still open | why it is not fixed |
+Two remain, and both are the same question rather than two patches: **what does
+an incoming inspection MEAN when it covers only part of a line?**
+
+| still open | why it is not a patch |
 |---|---|
-| Lot/bag capture silently off for a procurement-only login, and the receipt then lands with no incoming-QC hold | The flag lives behind the production module, so a procurement-only login cannot read it and the page reads "no settings" as "traceability off". Fixing it means either moving the flag somewhere procurement can read, or refusing the receipt outright — and refusing would stop a storekeeper receiving at all. **Which of those is right is a permissions decision, and material entering stock without a QC hold is too consequential to guess.** |
-| Incoming QC releases every non-rejected bag on the line regardless of how much was inspected | Changes what an inspection MEANS. Inspecting 10 bags of 20 currently releases all 20. Whether the rest should stay held is the quality desk's rule, not an agent's. |
-| An inspection that rejects material on a line carrying no bags records the rejection but issues no stock | Same family. The service documents "a line with no bags needs no disposition" as deliberate, so changing it reverses a stated decision. |
-| Revision-history Unit Price column shown for revision kinds that carry no rates | Cosmetic. The cell already reads "withheld" rather than showing a wrong number, so nothing misleads a reader into a wrong figure. |
+| Incoming QC releases every non-rejected bag on the line regardless of how much was inspected | Inspecting 10 bags of 20 releases all 20. Holding the other 10 back is the obvious-looking fix and it is a trap: the service refuses a second inspection on a line that already has one, so the held bags would be stranded with no door out — the exact failure this same PR fixed on the picker. Answering it means deciding the rule AND building re-inspection. |
+| An inspection rejecting material on a line carrying no bags records the rejection but issues no stock | Same question from the other side. For a bag-tracked line the rejected weight is the summed weight of real bags; for a line with no bags the only source is the number the user typed, and the service deliberately refuses to move stock on a user-supplied figure. Whether a typed rejection may move stock is the quality desk's call. |
+
+Both belong to the quality desk, not to engineering, and neither is safe to
+settle by guessing what was meant.
 
 | # | severity | file | defect |
 |---|---|---|---|

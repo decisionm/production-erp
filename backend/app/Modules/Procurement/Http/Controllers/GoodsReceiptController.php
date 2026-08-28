@@ -28,7 +28,21 @@ class GoodsReceiptController extends Controller
     {
         $filters = $request->validated();
 
-        return GoodsReceiptNoteResource::collection($this->receipts->paginate($this->query->perPage($filters), $filters));
+        return GoodsReceiptNoteResource::collection($this->receipts->paginate($this->query->perPage($filters), $filters))
+            // WHETHER THIS DEPLOYMENT CAPTURES LOTS AND BAGS, served to the
+            // screen that captures them. The receiving form used to read this
+            // from /production/settings, which sits behind the production
+            // module — so a storekeeper holding procurement and not production
+            // got a 403, the page read that as "traceability off", and every
+            // receipt they booked landed with no bags and therefore no
+            // incoming-QC hold. The same screen, the same deployment, a
+            // different answer depending on who was looking at it.
+            //
+            // It is deployment config and names nothing about the reader, so
+            // serving it here reveals nothing. Added as a TOP-LEVEL key, not
+            // into `meta`, which belongs to the paginator: overwriting that
+            // would take the register's page count with it.
+            ->additional(['traceability_enabled' => (bool) config('production.traceability_enabled', true)]);
     }
 
     /** One receipt with its lines, lots, bags and Receipt Note link (Phase 6, P6-02). */

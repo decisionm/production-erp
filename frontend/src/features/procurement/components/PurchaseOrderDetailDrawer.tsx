@@ -397,7 +397,21 @@ function RevisionsList({ revisions, showsRates }: { revisions: PurchaseOrderRevi
                                           { title: 'Remaining at close', align: 'right' as const, render: (_: unknown, row: PurchaseOrderRevisionLine) => <span style={numeric}>{row.remaining ?? '—'}</span> },
                                       ]
                                     : []),
-                                ...(showsRates
+                                // ONLY WHERE THIS REVISION KIND CARRIES A RATE.
+                                // The column was added whenever the reader may
+                                // see rates, so a short-close revision — whose
+                                // lines record what REMAINED and never carried
+                                // a unit price — showed "withheld" in every
+                                // row. To a finance reader, who may see rates,
+                                // that reads as FC-06 suppressing something,
+                                // when in truth there is nothing to suppress.
+                                // Decided from the data rather than from the
+                                // kind string, so a future kind that does carry
+                                // rates gets the column without being listed.
+                                ...(showsRates &&
+                                revisionLines(revision).some(
+                                    (line) => 'unit_price' in line || 'rate_withheld' in line,
+                                )
                                     ? [{ title: 'Unit Price', align: 'right' as const, render: (_: unknown, row: PurchaseOrderRevisionLine) => rateCell(row, 'unit_price') }]
                                     : []),
                                 {

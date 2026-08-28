@@ -508,8 +508,19 @@ export default function GoodsReceiptsPage() {
     const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses', 'all'], queryFn: listAllWarehouses });
     // Phase 6 lot/bag intake renders only when the backend flag is on — with
     // it off (or an older backend) this page is exactly the pre-traceability UI.
+    //
+    // READ FROM THE PROCUREMENT ENDPOINT THIS PAGE ALREADY CALLS, not from the
+    // production module's settings. That route is behind `module:production`,
+    // so a storekeeper holding procurement and NOT production got a 403, the
+    // hook turned it into null, and this line read null as "traceability off".
+    // Their receipts were then booked with no lots, so no bags were created,
+    // so nothing entered waiting_qc and the incoming-QC hold never applied —
+    // material reached available stock without passing quality, silently, and
+    // only for some logins. The production settings are still read for
+    // everything else on this page that legitimately belongs to that module.
     const settings = useProductionSettings();
-    const traceabilityEnabled = settings?.traceability_enabled === true;
+    const traceabilityEnabled =
+        data?.traceability_enabled ?? settings?.traceability_enabled === true;
 
     // The same predicate the server was asked for, kept as a guard: an older
     // backend that ignores `status[]` must still never offer a closed or
