@@ -11,6 +11,12 @@ namespace App\Modules\TallySync\Models\Enums;
 enum TallyLedgerRole: string
 {
     case Sales = 'sales';
+    // ONE global ledger for every Purchase Order line, and TESTING-ONLY: the
+    // factory's real Tally actually posts through FOUR purchase ledgers
+    // (local × interstate × rate — DEC-20260812-003), and which rate/ledger
+    // applies is still open (Q39). This mapping backs the OFF-by-default
+    // tally-sync.purchase_orders_enabled staging gate — it is never the
+    // production ledger scheme and must not be widened into one on a guess.
     case Purchase = 'purchase';
     case Cgst = 'cgst';
     case Sgst = 'sgst';

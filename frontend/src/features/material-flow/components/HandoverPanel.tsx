@@ -32,6 +32,13 @@ import {
  * table says so in plain words. Nothing here shows what a bag was bought for
  * or who supplied it — FC-06 keeps that away from a store screen.
  */
+/**
+ * The queue's list endpoint doesn't load the scans relation, so `bag_scans`
+ * arrives absent — not empty — on a freshly issued handover. An absent list
+ * is shown as no scans; it is never read for `.length` directly.
+ */
+export const bagScansOf = (issue: Pick<StoreIssue, 'bag_scans'>): StoreIssueBagScan[] => issue.bag_scans ?? [];
+
 export default function HandoverPanel({ issue, onChanged }: { issue: StoreIssue; onChanged: () => void }) {
     const [receivedBy, setReceivedBy] = useState<number | null>(issue.received_by);
     const [quantityKg, setQuantityKg] = useState<number | null>(null);
@@ -74,6 +81,7 @@ export default function HandoverPanel({ issue, onChanged }: { issue: StoreIssue;
     });
 
     const lineItemLabel = (line: StoreIssueLine) => itemLabel({ sku: line.item_sku, name: line.item_name });
+    const bagScans = bagScansOf(issue);
 
     return (
         <Card
@@ -170,14 +178,14 @@ export default function HandoverPanel({ issue, onChanged }: { issue: StoreIssue;
                 </Space>
             ) : null}
 
-            {issue.bag_scans.length === 0 ? (
+            {bagScans.length === 0 ? (
                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No bags scanned against this handover yet." />
             ) : (
                 <Table<StoreIssueBagScan>
                     size="small"
                     rowKey="id"
                     pagination={false}
-                    dataSource={issue.bag_scans}
+                    dataSource={bagScans}
                     scroll={{ x: 'max-content' }}
                     columns={[
                         { title: 'Time', render: (_, scan) => scan.scanned_at ?? '—' },

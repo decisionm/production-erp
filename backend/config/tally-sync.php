@@ -135,8 +135,65 @@ return [
     | only). Refusals are recorded on the PO (tally_staging.state 'refused'),
     | never thrown out of send().
     |
+    | TESTING-ONLY MAPPING, NOT A PRODUCTION ANSWER. TallyLedgerRole::Purchase
+    | is ONE global ledger for every line on every order. DEC-20260812-003
+    | measured that the factory's real Tally actually posts through FOUR
+    | purchase ledgers (local × interstate × rate), and Q39 (which rate
+    | applies, and by what rule) is still open — so this single mapping is a
+    | staging/testing simplification for the OFF-by-default gate above, never
+    | the factory's production ledger scheme. It must not be read as "the"
+    | purchase ledger, extended to production, or relied on as evidence of
+    | how many ledgers real postings need.
+    |
     */
 
     'purchase_orders_enabled' => (bool) env('TALLY_SYNC_PURCHASE_ORDERS_ENABLED', false),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Purchase Order → Tally: the allowed Testing Tally company (fail-closed)
+    |--------------------------------------------------------------------------
+    |
+    | The exact company name of the factory's TESTING Tally instance — never
+    | a secret, but never guessed or hardcoded either: a purchase-order
+    | voucher may only be staged for the company the owner has actually
+    | opened for testing. Surrounding whitespace is trimmed once, here, before
+    | this is treated as configured or blank and before it is written to the
+    | payload — a config-authoring convenience only, never a relaxation of the
+    | match itself. A blank (after trimming) or unset value means there is
+    | nothing to check a staged voucher's destination company against, so
+    | TallySyncService::enqueuePurchaseOrder() REFUSES to stage anything
+    | while purchase_orders_enabled is true and this is blank — fail closed,
+    | never defaulted to the ERP's own name or any other guess. The (already
+    | trimmed) value is carried on every staged PO's payload
+    | (`allowed_company`) so the desktop agent — which alone knows which
+    | company its local Tally has open — can compare it, verbatim and
+    | byte-for-byte with no further normalization of its own, against its
+    | configured `tallyCompanyName` before it ever builds or posts anything.
+    |
+    */
+
+    'purchase_orders_allowed_company' => env('TALLY_SYNC_PURCHASE_ORDERS_ALLOWED_COMPANY'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Receipt Note → Tally (GRN/inward) — OFF by default
+    |--------------------------------------------------------------------------
+    |
+    | Whether a goods receipt (GoodsReceiptNoteReceived) stages a Tally
+    | 'Receipt Note' voucher at all. The owner has confirmed the ERP's own
+    | GRN/inward screen is the factory's real record and the factory does not
+    | use Tally Receipt Notes for it — so a fresh deployment must not stage
+    | one silently. OFF here means the TallySyncEventServiceProvider listener
+    | no-ops (logs and returns) rather than calling
+    | TallySyncService::enqueueGoodsReceiptNote() — no new queue row is
+    | created. Existing/historical rows are never deleted or altered by
+    | turning this off, but TallySyncService::pending() also withholds any
+    | already-pending or retried Receipt Note rows from agent delivery while
+    | the flag is off, until it is re-enabled.
+    |
+    */
+
+    'receipt_notes_enabled' => (bool) env('TALLY_SYNC_RECEIPT_NOTES_ENABLED', false),
 
 ];

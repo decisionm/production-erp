@@ -42,6 +42,16 @@
         <env name="PROD_TRACEABILITY" value="false"/>
         <env name="PROD_READINESS_ENFORCED" value="false"/>
         <env name="TALLY_SYNC_PURCHASE_ORDERS_ENABLED" value="false"/>
+        <!-- Synthetic, FC-06-safe (no real Tally company name) — lets any test that
+             flips purchase_orders_enabled on exercise the staged payload without also
+             having to configure the allowed-company gate itself. -->
+        <env name="TALLY_SYNC_PURCHASE_ORDERS_ALLOWED_COMPANY" value="Testing Tally Company Alpha"/>
+        <!-- Pinned ON: most of the existing TallySync suite fires GoodsReceiptNoteReceived
+             directly and asserts a Receipt Note voucher is staged from it — the pre-existing,
+             tested contract. The application default (config/tally-sync.php, no env set) is
+             OFF, per the owner's confirmation that the factory does not use Tally Receipt
+             Notes; ReceiptNoteFeatureFlagTest exercises that OFF behaviour explicitly. -->
+        <env name="TALLY_SYNC_RECEIPT_NOTES_ENABLED" value="true"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>

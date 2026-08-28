@@ -52,7 +52,21 @@ class TallySyncEventServiceProvider extends ServiceProvider
         // explicit domain events (not model events) because the receipt/delivery
         // are posted at creation — after their lines exist — and production
         // approval is an atomic query update that fires no model event.
+        // Gated: the owner has confirmed the ERP's own GRN/inward screen is
+        // the factory's real record and the factory does not use Tally
+        // Receipt Notes for it (tally-sync.receipt_notes_enabled, OFF by
+        // default). OFF means this no-ops rather than staging anything —
+        // no queue row, no XML, and nothing about a past GRN or a past
+        // Receipt Note voucher is touched.
         Event::listen(GoodsReceiptNoteReceived::class, function (GoodsReceiptNoteReceived $event) {
+            if (! config('tally-sync.receipt_notes_enabled')) {
+                Log::debug('Goods receipt received; Tally Receipt Note staging disabled (tally-sync.receipt_notes_enabled = false — the factory does not use Tally Receipt Notes for GRN/inward).', [
+                    'goods_receipt_note_id' => $event->note->id,
+                ]);
+
+                return;
+            }
+
             $this->app->make(TallySyncService::class)->enqueueGoodsReceiptNote($event->note);
         });
 

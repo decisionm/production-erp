@@ -683,12 +683,21 @@ export default function GoodsReceiptsPage() {
                     // Send the edited preview only when windows exist; rows
                     // moved to zero are dropped (a zero allocation is not an
                     // allocation). The server re-validates the exact sum.
-                    schedule_allocations: (l.schedule_allocations ?? [])
-                        .filter((row) => row.quantity > 0)
-                        .map((row) => ({
-                            purchase_order_schedule_id: row.purchase_order_schedule_id,
-                            quantity: row.quantity,
-                        })),
+                    // An empty result (no delivery schedules on this line, or
+                    // every row zeroed) omits the key entirely — the request
+                    // schema treats a present-but-empty array as an error and
+                    // expects the server's oldest-due default instead.
+                    ...(() => {
+                        const positiveAllocations = (l.schedule_allocations ?? [])
+                            .filter((row) => row.quantity > 0)
+                            .map((row) => ({
+                                purchase_order_schedule_id: row.purchase_order_schedule_id,
+                                quantity: row.quantity,
+                            }));
+                        return positiveAllocations.length > 0
+                            ? { schedule_allocations: positiveAllocations }
+                            : {};
+                    })(),
                     lots:
                         traceabilityEnabled && (l.lots?.length ?? 0) > 0
                             ? l.lots!.map((lot) => ({
