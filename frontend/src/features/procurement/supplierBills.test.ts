@@ -29,6 +29,12 @@ describe('billArithmetic', () => {
     it('paise precision — 0.1 + 0.2 style float dust does not unbalance a bill', () => {
         expect(billArithmetic({ lines: [{ amount: 0.1 }, { amount: 0.2 }], subtotal: 0.3, cgst: null, sgst: null, igst: null, rounding: null, total: 0.3 })).toEqual({ kind: 'balanced' });
     });
+
+    it('compares at the server’s four decimals — sub-paisa dust is a real gap, not "balanced"', () => {
+        // 0.0004 short: whole-paise rounding would hide this and the server
+        // (bc scale 4) would then refuse what the preview blessed.
+        expect(billArithmetic({ ...base, lines: [{ amount: 999.9996 }] })).toEqual({ kind: 'lines_mismatch', linesSum: '999.9996' });
+    });
 });
 
 describe('billStatusTag', () => {

@@ -8,6 +8,7 @@ use App\Modules\Procurement\Models\GoodsReceiptNoteLine;
 use App\Modules\Procurement\Models\SupplierBill;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -108,20 +109,34 @@ class SupplierBillService
         $this->guardArithmetic($data);
         $this->guardMatching($data);
 
-        return DB::transaction(function () use ($data, $createdBy) {
-            $bill = SupplierBill::create([
-                ...collect($data)->except('lines')->all(),
-                'created_by' => $createdBy,
-            ]);
+        try {
+            return DB::transaction(function () use ($data, $createdBy) {
+                $bill = SupplierBill::create([
+                    ...collect($data)->except('lines')->all(),
+                    'created_by' => $createdBy,
+                ]);
 
-            foreach ($data['lines'] as $line) {
-                $bill->lines()->create($line);
+                foreach ($data['lines'] as $line) {
+                    $bill->lines()->create($line);
+                }
+
+                // refresh(): status comes from the column default; the
+                // in-memory model does not know it until read back.
+                return $bill->refresh()->load(self::WITH);
+            });
+        } catch (QueryException $exception) {
+            // Two simultaneous POSTs can both pass the request's unique rule
+            // before either row exists; the schema's (vendor_id, bill_number)
+            // unique then throws here. The refusal must reach the accountant
+            // in the same words the sequential path uses — never a 500.
+            if ($this->isDuplicateBillNumber($exception)) {
+                throw ValidationException::withMessages([
+                    'bill_number' => 'This vendor already has a bill with this invoice number — the double-payment path this screen exists to refuse.',
+                ]);
             }
 
-            // refresh(): status comes from the column default; the in-memory
-            // model does not know it until read back.
-            return $bill->refresh()->load(self::WITH);
-        });
+            throw $exception;
+        }
     }
 
     /**
@@ -265,6 +280,20 @@ class SupplierBillService
                 ]);
             }
         }
+    }
+
+    /**
+     * Was this QueryException the (vendor_id, bill_number) unique index?
+     * SQLSTATE 23000 (MySQL/SQLite) / 23505 (Postgres) narrowed to OUR index
+     * by the message naming bill_number — a different integrity error still
+     * surfaces as itself.
+     */
+    private function isDuplicateBillNumber(QueryException $exception): bool
+    {
+        $sqlState = (string) ($exception->errorInfo[0] ?? '');
+
+        return in_array($sqlState, ['23000', '23505'], true)
+            && str_contains($exception->getMessage(), 'bill_number');
     }
 
     private function guardStatus(SupplierBill $bill, SupplierBillStatus $required, string $verb): void

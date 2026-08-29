@@ -18,7 +18,7 @@ import { prDrawerTitle, prNumber, requisitionStatusTag } from '@/features/procur
 import { poNumber } from '@/features/procurement/purchaseOrders';
 import { instant } from '@/features/tally-sync/drawer';
 import { itemLabel } from '@/lib/itemLabel';
-import { ListEmpty } from '@/lib/ListEmpty';
+import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
 import { requisitionItemsLabel } from '@/features/procurement/requisitionItems';
 
 const requisitionSchema = z.object({
@@ -197,6 +197,10 @@ export default function PurchaseRequisitionsPage() {
                     onChange={(value) => writeParams({ status: value })}
                 />
             </Space>
+
+            {/* placeholderData keeps stale rows on a failed refetch, so
+                emptyText never shows the failure — this line does. */}
+            <ListReadAlert state={{ isPending, isError, error, refetch }} entity="purchase requisitions" />
 
             <Table<PurchaseRequisition>
                 scroll={{ x: 'max-content' }}

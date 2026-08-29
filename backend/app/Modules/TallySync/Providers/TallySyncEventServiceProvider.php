@@ -166,6 +166,23 @@ class TallySyncEventServiceProvider extends ServiceProvider
      */
     private function stageGoodsReceiptNote(GoodsReceiptNote $note): void
     {
+        // Belt and braces (withdrawStagedPurchaseOrder's rule): the arrival
+        // is a physical fact — no staging surprise may escape this listener.
+        // The event now arrives after commit, so an escape could no longer
+        // roll the arrival back, but it would still turn a recorded receipt
+        // into a 500 for the person who booked it.
+        try {
+            $this->stageGoodsReceiptNoteUnguarded($note);
+        } catch (Throwable $exception) {
+            Log::error('Tally staging for a goods receipt failed unexpectedly — the arrival stands; the receipt records nothing new.', [
+                'goods_receipt_note_id' => $note->id,
+                'exception' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    private function stageGoodsReceiptNoteUnguarded(GoodsReceiptNote $note): void
+    {
         $at = now()->toIso8601String();
         $receipts = $this->app->make(GoodsReceiptService::class);
 

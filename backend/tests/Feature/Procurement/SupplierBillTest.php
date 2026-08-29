@@ -10,10 +10,12 @@ use App\Modules\Procurement\Models\GoodsReceiptNote;
 use App\Modules\Procurement\Models\PurchaseOrder;
 use App\Modules\Procurement\Models\SupplierBill;
 use App\Modules\Procurement\Models\Vendor;
+use App\Modules\Procurement\Services\SupplierBillService;
 use App\Modules\TallySync\Models\Ledger;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
@@ -104,7 +106,47 @@ class SupplierBillTest extends TestCase
         $this->actAsAccounts();
 
         $this->postJson('/api/v1/procurement/supplier-bills', $this->payload())->assertSuccessful();
-        // A schema-level unique lands as a QueryException today; one bill stands.
+
+        // Refused in words (422 from the request rule), and one bill stands.
+        $this->postJson('/api/v1/procurement/supplier-bills', $this->payload())
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['bill_number']);
+        $this->assertSame(1, SupplierBill::query()->count());
+
+        // A DIFFERENT vendor with the same invoice number is ordinary.
+        $other = Vendor::create(['code' => 'VND-B', 'name' => 'Vendor Beta']);
+        $this->postJson('/api/v1/procurement/supplier-bills', $this->payload(['vendor_id' => $other->id]))
+            ->assertSuccessful();
+    }
+
+    public function test_a_concurrent_duplicate_that_slips_past_validation_is_still_a_422_not_a_500(): void
+    {
+        $this->actAsAccounts();
+        $this->postJson('/api/v1/procurement/supplier-bills', $this->payload())->assertSuccessful();
+
+        // The race: both requests pass the unique RULE before either row
+        // exists. Reproduced by calling the service directly, past the rule —
+        // the schema unique throws and the service must translate it.
+        try {
+            app(SupplierBillService::class)->create([
+                'vendor_id' => $this->vendor->id,
+                'bill_number' => 'INV/2026/077',
+                'bill_date' => '2026-08-28',
+                'subtotal' => '1000.0000',
+                'igst' => '180.0000',
+                'total' => '1180.0000',
+                'lines' => [[
+                    'item_id' => $this->resin->id,
+                    'quantity' => '100.0000',
+                    'rate' => '10.0000',
+                    'amount' => '1000.0000',
+                ]],
+            ], null);
+            $this->fail('expected the duplicate to be refused');
+        } catch (ValidationException $refusal) {
+            $this->assertArrayHasKey('bill_number', $refusal->errors());
+        }
+
         $this->assertSame(1, SupplierBill::query()->count());
     }
 

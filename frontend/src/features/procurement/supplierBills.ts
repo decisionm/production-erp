@@ -59,20 +59,29 @@ export function billArithmetic(values: {
     if (values.subtotal === null || values.total === null) return { kind: 'incomplete' };
     if (values.lines.length === 0 || values.lines.some((line) => line.amount === null)) return { kind: 'incomplete' };
 
-    const paise = (value: number) => Math.round(value * 100);
+    // Scale 4, matching the server's bc math exactly (guardArithmetic
+    // compares at four decimals): a preview that rounded to whole paise
+    // could claim "balanced" over sub-paisa dust the server then refuses.
+    const scaled = (value: number) => Math.round(value * 10_000);
+    // Whole-paisa figures print as money (999.00); sub-paisa dust keeps its
+    // four decimals so the named gap is visibly a real gap.
+    const words = (units: number) => {
+        const value = units / 10_000;
+        return Number.isInteger(units / 100) ? value.toFixed(2) : value.toFixed(4);
+    };
 
-    const linesSum = values.lines.reduce((sum, line) => sum + paise(line.amount as number), 0);
-    if (linesSum !== paise(values.subtotal)) {
-        return { kind: 'lines_mismatch', linesSum: (linesSum / 100).toFixed(2) };
+    const linesSum = values.lines.reduce((sum, line) => sum + scaled(line.amount as number), 0);
+    if (linesSum !== scaled(values.subtotal)) {
+        return { kind: 'lines_mismatch', linesSum: words(linesSum) };
     }
 
-    const expected = paise(values.subtotal)
-        + paise(values.cgst ?? 0)
-        + paise(values.sgst ?? 0)
-        + paise(values.igst ?? 0)
-        + paise(values.rounding ?? 0);
-    if (expected !== paise(values.total)) {
-        return { kind: 'total_mismatch', expectedTotal: (expected / 100).toFixed(2) };
+    const expected = scaled(values.subtotal)
+        + scaled(values.cgst ?? 0)
+        + scaled(values.sgst ?? 0)
+        + scaled(values.igst ?? 0)
+        + scaled(values.rounding ?? 0);
+    if (expected !== scaled(values.total)) {
+        return { kind: 'total_mismatch', expectedTotal: words(expected) };
     }
 
     return { kind: 'balanced' };

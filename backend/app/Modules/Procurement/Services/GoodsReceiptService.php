@@ -237,7 +237,7 @@ class GoodsReceiptService
         }
 
         try {
-            return DB::transaction(function () use ($data, $createdBy, $receiptKey, $payloadHash) {
+            $receipt = DB::transaction(function () use ($data, $createdBy, $receiptKey, $payloadHash) {
                 if ($receiptKey !== null) {
                     $existing = GoodsReceiptNote::query()
                         ->where('receipt_key', $receiptKey)
@@ -389,12 +389,26 @@ class GoodsReceiptService
 
                 $this->recomputeOrderStatus($order->fresh('lines'));
 
-                // Announce the receipt only after the line and all its physical
-                // bags exist. A replay returns above and emits nothing.
-                event(new GoodsReceiptNoteReceived($grn));
+                // Announce the receipt only after COMMIT (DB::afterCommit —
+                // exactly as PurchaseOrderService::send() announces
+                // PurchaseOrderSent). Inside the transaction, any unexpected
+                // throwable from a listener would roll back stock, lots and
+                // the PO's received counters — undoing a physical arrival
+                // because paperwork hiccuped, which the Tally listener
+                // explicitly promises must never happen. A replay returns
+                // above and emits nothing.
+                DB::afterCommit(fn () => event(new GoodsReceiptNoteReceived($grn)));
 
-                return $this->loadReceipt($grn);
+                // Loaded OUTSIDE the transaction (below): afterCommit fires
+                // at commit, before DB::transaction() returns, so the load
+                // sees whatever the listener recorded (tally_staging, the
+                // queue entry) — the store response stays complete.
+                return $grn;
             });
+
+            // Fresh receipt AND replay land here (a replay's second load is
+            // an idempotent read) — loaded after commit, listener included.
+            return $this->loadReceipt($receipt);
         } catch (QueryException $exception) {
             // Concurrent retries may both miss the first read. The unique
             // receipt_key makes one transaction win and rolls the other back
@@ -654,8 +668,9 @@ class GoodsReceiptService
             'purchaseOrder',
         ]);
         // The store response and a replay carry the link too: for a fresh
-        // receipt the Receipt Note listener has already run (the event is
-        // in-transaction), so the row exists by the time this loads.
+        // receipt the Receipt Note listener has already run — the event is
+        // dispatched DB::afterCommit, which fires at commit, before create()
+        // loads the receipt — so the row exists by the time this loads.
         $this->trace->decorateReceipts([$receipt]);
 
         return $receipt;

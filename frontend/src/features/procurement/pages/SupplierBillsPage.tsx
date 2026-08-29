@@ -25,7 +25,7 @@ import { billArithmetic, billStatusTag, billTallyLine } from '@/features/procure
 import { instant } from '@/features/tally-sync/drawer';
 import { itemLabel, itemPickerLabel } from '@/lib/itemLabel';
 import { listAllItems } from '@/features/inventory/api';
-import { ListEmpty } from '@/lib/ListEmpty';
+import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
 
 const numeric = { fontVariantNumeric: 'tabular-nums' } as const;
 
@@ -309,6 +309,10 @@ export default function SupplierBillsPage() {
                     ]}
                 />
             </Space>
+
+            {/* placeholderData keeps stale rows on a failed refetch, so
+                emptyText never shows the failure — this line does. */}
+            <ListReadAlert state={billsQuery} entity="supplier bills" />
 
             <Table<SupplierBill>
                 scroll={{ x: 'max-content' }}

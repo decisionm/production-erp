@@ -24,7 +24,7 @@ import {
     tallyStateLine,
 } from '@/features/procurement/purchaseOrders';
 import type { PurchaseOrder } from '@/features/procurement/types';
-import { ListEmpty } from '@/lib/ListEmpty';
+import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
 import { usePurchaseOrderListParams } from '@/features/procurement/usePurchaseOrderListParams';
 
 const numeric = { fontVariantNumeric: 'tabular-nums' } as const;
@@ -151,6 +151,10 @@ export default function PurchaseOrdersPage() {
                     description={apiMessage(sendMutation.error, 'The order could not be sent.')}
                 />
             )}
+
+            {/* placeholderData keeps stale rows on a failed refetch, so
+                emptyText never shows the failure — this line does. */}
+            <ListReadAlert state={{ isPending, isError, error, refetch }} entity="purchase orders" />
 
             <Table<PurchaseOrder>
                 scroll={{ x: 'max-content' }}
