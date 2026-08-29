@@ -10,6 +10,7 @@ import {
     listAllVendors,
     listGoodsReceipts,
     listPurchaseOrders,
+    listSupplierBillItemOptions,
     listSupplierBillLedgerOptions,
     listSupplierBills,
     recordSupplierBill,
@@ -24,7 +25,6 @@ import type { SupplierBill, SupplierBillStatus } from '@/features/procurement/ty
 import { billArithmetic, billStatusTag, billTallyLine } from '@/features/procurement/supplierBills';
 import { instant } from '@/features/tally-sync/drawer';
 import { itemLabel, itemPickerLabel } from '@/lib/itemLabel';
-import { listAllItems } from '@/features/inventory/api';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
 
 const numeric = { fontVariantNumeric: 'tabular-nums' } as const;
@@ -108,7 +108,14 @@ export default function SupplierBillsPage() {
         placeholderData: (previous) => previous,
     });
     const vendorsQuery = useQuery({ queryKey: ['procurement', 'vendors', 'all'], queryFn: listAllVendors });
-    const itemsQuery = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
+    // Items through the FINANCE gate, not /inventory/items: an Accounts
+    // login holds no inventory permission and got an empty picker there.
+    const [itemSearch, setItemSearch] = useState('');
+    const itemsQuery = useQuery({
+        queryKey: ['procurement', 'supplier-bill-items', itemSearch],
+        queryFn: () => listSupplierBillItemOptions(itemSearch),
+        enabled: formOpen,
+    });
     // The chosen vendor's orders, for the optional PO reference.
     const ordersQuery = useQuery({
         queryKey: ['procurement', 'purchase-orders', 'for-bill', vendorId],
@@ -128,7 +135,7 @@ export default function SupplierBillsPage() {
     });
 
     const vendorOptions = (vendorsQuery.data?.data ?? []).map((vendor) => ({ value: vendor.id, label: `${vendor.code} — ${vendor.name}` }));
-    const itemOptions = (itemsQuery.data?.data ?? []).map((item) => ({ value: item.id, label: itemPickerLabel(item) }));
+    const itemOptions = (itemsQuery.data ?? []).map((item) => ({ value: item.id, label: itemPickerLabel(item) }));
     const grnLineOptions = useMemo(
         () =>
             (receiptsQuery.data?.data ?? []).flatMap((grn) =>
@@ -460,7 +467,9 @@ export default function SupplierBillsPage() {
                         <Space key={line.key} wrap align="baseline">
                             <Select
                                 showSearch
-                                optionFilterProp="label"
+                                filterOption={false}
+                                onSearch={setItemSearch}
+                                loading={itemsQuery.isLoading}
                                 placeholder="Item"
                                 style={{ width: 280 }}
                                 value={line.item_id}

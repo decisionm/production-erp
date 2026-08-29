@@ -166,6 +166,89 @@ class SupplierBillTest extends TestCase
             ->assertJsonValidationErrors(['lines.0.goods_receipt_note_line_id']);
     }
 
+    public function test_rounding_in_exponent_notation_is_a_422_not_a_500(): void
+    {
+        $this->actAsAccounts();
+
+        $this->postJson('/api/v1/procurement/supplier-bills', $this->payload(['rounding' => '1e-1']))
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['rounding']);
+    }
+
+    public function test_precision_beyond_the_columns_four_decimals_is_refused(): void
+    {
+        $this->actAsAccounts();
+
+        // 1.00009 would pass bc-math at scale 4 and then round to 1.0001 in
+        // the column — a stored bill that no longer adds up.
+        $payload = $this->payload();
+        $payload['lines'][0]['amount'] = '1000.00009';
+
+        $this->postJson('/api/v1/procurement/supplier-bills', $payload)
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['lines.0.amount']);
+    }
+
+    public function test_a_purchase_ledger_name_must_exist_in_the_pulled_ledger_master(): void
+    {
+        $this->actAsAccounts();
+
+        $this->postJson('/api/v1/procurement/supplier-bills', $this->payload(['purchase_ledger_name' => 'Imagined Ledger']))
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['purchase_ledger_name']);
+
+        Ledger::create(['tally_guid' => 'g-lp', 'name' => 'Local Purchase Taxable @ 18%', 'tally_group_name' => 'Purchase Accounts']);
+        $this->postJson('/api/v1/procurement/supplier-bills', $this->payload(['purchase_ledger_name' => 'Local Purchase Taxable @ 18%']))
+            ->assertSuccessful();
+    }
+
+    public function test_the_item_picker_is_served_inside_the_finance_gate(): void
+    {
+        // Accounts holds NO inventory permission — /inventory/items answers
+        // 403; this endpoint must not.
+        $this->actAsAccounts();
+        Item::create(['sku' => 'ITEM_C', 'name' => 'Another Item', 'uom' => 'Nos', 'is_active' => true]);
+        Item::create(['sku' => 'ITEM_D', 'name' => 'Retired Item', 'uom' => 'Nos', 'is_active' => false]);
+
+        $names = collect($this->getJson('/api/v1/procurement/supplier-bills/item-options')->assertOk()->json('data'))
+            ->pluck('name');
+
+        $this->assertContains('Another Item', $names);
+        $this->assertNotContains('Retired Item', $names, 'inactive items are not offered');
+
+        $searched = collect($this->getJson('/api/v1/procurement/supplier-bills/item-options?q=ITEM_C')->assertOk()->json('data'))
+            ->pluck('sku');
+        $this->assertSame(['ITEM_C'], $searched->all());
+    }
+
+    public function test_a_draft_update_that_collides_on_the_unique_index_is_a_422(): void
+    {
+        $this->actAsAccounts();
+        $this->postJson('/api/v1/procurement/supplier-bills', $this->payload())->assertSuccessful();
+        $second = $this->postJson('/api/v1/procurement/supplier-bills', $this->payload(['bill_number' => 'INV/2026/078']))->json('data.id');
+
+        // Past the request rule, straight at the service — the race window.
+        try {
+            app(SupplierBillService::class)->update(SupplierBill::findOrFail($second), [
+                'vendor_id' => $this->vendor->id,
+                'bill_number' => 'INV/2026/077',
+                'bill_date' => '2026-08-28',
+                'subtotal' => '1000.0000',
+                'igst' => '180.0000',
+                'total' => '1180.0000',
+                'lines' => [[
+                    'item_id' => $this->resin->id,
+                    'quantity' => '100.0000',
+                    'rate' => '10.0000',
+                    'amount' => '1000.0000',
+                ]],
+            ]);
+            $this->fail('expected the duplicate to be refused');
+        } catch (ValidationException $refusal) {
+            $this->assertArrayHasKey('bill_number', $refusal->errors());
+        }
+    }
+
     public function test_a_grn_line_for_another_item_cannot_be_matched(): void
     {
         $this->actAsAccounts();

@@ -150,23 +150,37 @@ class SupplierBillService
         $this->guardArithmetic($data);
         $this->guardMatching($data);
 
-        return DB::transaction(function () use ($bill, $data) {
-            // Re-read UNDER A ROW LOCK (Codex round 1): a concurrent record()
-            // or cancel() between an out-of-transaction status check and this
-            // write would let a draft edit rewrite a bill that is already a
-            // record. The guard runs on what the lock sees, not on what the
-            // route model saw.
-            $locked = SupplierBill::query()->lockForUpdate()->findOrFail($bill->id);
-            $this->guardStatus($locked, SupplierBillStatus::Draft, 'edit');
+        try {
+            return DB::transaction(function () use ($bill, $data) {
+                // Re-read UNDER A ROW LOCK (Codex round 1): a concurrent
+                // record() or cancel() between an out-of-transaction status
+                // check and this write would let a draft edit rewrite a bill
+                // that is already a record. The guard runs on what the lock
+                // sees, not on what the route model saw.
+                $locked = SupplierBill::query()->lockForUpdate()->findOrFail($bill->id);
+                $this->guardStatus($locked, SupplierBillStatus::Draft, 'edit');
 
-            $locked->update(collect($data)->except('lines')->all());
-            $locked->lines()->delete();
-            foreach ($data['lines'] as $line) {
-                $locked->lines()->create($line);
+                $locked->update(collect($data)->except('lines')->all());
+                $locked->lines()->delete();
+                foreach ($data['lines'] as $line) {
+                    $locked->lines()->create($line);
+                }
+
+                return $locked->load(self::WITH);
+            });
+        } catch (QueryException $exception) {
+            // The same race create() translates (Codex round 2): two draft
+            // edits can concurrently move DIFFERENT bills onto the same
+            // (vendor, bill_number) — both pass the request rule, the schema
+            // unique throws for the loser, and a 500 is not an answer.
+            if ($this->isDuplicateBillNumber($exception)) {
+                throw ValidationException::withMessages([
+                    'bill_number' => 'This vendor already has a bill with this invoice number — the double-payment path this screen exists to refuse.',
+                ]);
             }
 
-            return $locked->load(self::WITH);
-        });
+            throw $exception;
+        }
     }
 
     public function record(SupplierBill $bill, ?int $recordedBy): SupplierBill
@@ -207,19 +221,26 @@ class SupplierBillService
      */
     public function attach(SupplierBill $bill, UploadedFile $file): SupplierBill
     {
-        $this->guardStatus($bill, SupplierBillStatus::Draft, 'attach a file to');
+        return DB::transaction(function () use ($bill, $file) {
+            // The update()/record() lock, for the same reason (Codex round
+            // 2): an upload racing record() must not replace the scan on a
+            // bill that just became read-only — the guard runs on what the
+            // lock sees.
+            $locked = SupplierBill::query()->lockForUpdate()->findOrFail($bill->id);
+            $this->guardStatus($locked, SupplierBillStatus::Draft, 'attach a file to');
 
-        if ($bill->attachment_path !== null) {
-            Storage::disk('local')->delete($bill->attachment_path);
-        }
+            if ($locked->attachment_path !== null) {
+                Storage::disk('local')->delete($locked->attachment_path);
+            }
 
-        $path = $file->store("supplier-bills/{$bill->id}", 'local');
-        $bill->forceFill([
-            'attachment_path' => $path,
-            'attachment_name' => $file->getClientOriginalName(),
-        ])->save();
+            $path = $file->store("supplier-bills/{$locked->id}", 'local');
+            $locked->forceFill([
+                'attachment_path' => $path,
+                'attachment_name' => $file->getClientOriginalName(),
+            ])->save();
 
-        return $bill->load(self::WITH);
+            return $locked->load(self::WITH);
+        });
     }
 
     // ---- guards -------------------------------------------------------------

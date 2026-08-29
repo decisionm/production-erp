@@ -361,6 +361,20 @@ export async function attachSupplierBillFile(id: number, file: File): Promise<Su
     return data.data;
 }
 
+/**
+ * Item identities for the bill's line picker, served inside the finance
+ * gate: an Accounts login holds no inventory permission, and /inventory/items
+ * answered it 403 — an empty picker on a screen that expressly supports
+ * unmatched bills.
+ */
+export async function listSupplierBillItemOptions(q = ''): Promise<{ id: number; sku: string; name: string; uom: string | null }[]> {
+    const { data } = await api.get<{ data: { id: number; sku: string; name: string; uom: string | null }[] }>(
+        '/procurement/supplier-bills/item-options',
+        { params: q.trim() !== '' ? { q: q.trim() } : {} },
+    );
+    return data.data;
+}
+
 /** The pulled Tally ledger names for the bill's purchase-ledger picker (the accountant selects; the ERP derives nothing — Q39). */
 export async function listSupplierBillLedgerOptions(q = ''): Promise<{ name: string; group: string | null }[]> {
     const { data } = await api.get<{ data: { name: string; group: string | null }[] }>(
