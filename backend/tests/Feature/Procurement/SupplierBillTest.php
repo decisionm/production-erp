@@ -193,6 +193,32 @@ class SupplierBillTest extends TestCase
             ->assertJsonValidationErrors(['lines.0.amount']);
     }
 
+    public function test_a_soft_deleted_vendor_or_item_cannot_be_billed(): void
+    {
+        $this->actAsAccounts();
+        $this->vendor->delete(); // soft delete — the row remains
+
+        $this->postJson('/api/v1/procurement/supplier-bills', $this->payload())
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['vendor_id']);
+
+        $this->vendor->restore();
+        $this->resin->delete();
+        $this->postJson('/api/v1/procurement/supplier-bills', $this->payload())
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['lines.0.item_id']);
+    }
+
+    public function test_surrounding_whitespace_cannot_sidestep_the_duplicate_guard(): void
+    {
+        $this->actAsAccounts();
+        $this->postJson('/api/v1/procurement/supplier-bills', $this->payload())->assertSuccessful();
+
+        $this->postJson('/api/v1/procurement/supplier-bills', $this->payload(['bill_number' => '  INV/2026/077  ']))
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['bill_number']);
+    }
+
     public function test_a_figure_beyond_the_columns_ten_integer_digits_is_a_422_not_a_500(): void
     {
         $this->actAsAccounts();

@@ -22,10 +22,29 @@ class StoreSupplierBillRequest extends FormRequest
         return true;
     }
 
+    /**
+     * The vendor's invoice number identifies a PRINTED document; two
+     * spellings differing only by surrounding whitespace are one invoice,
+     * and the unique guard must see them as one (Codex on dbe988c). The
+     * SPA trims; a direct client might not.
+     */
+    protected function prepareForValidation(): void
+    {
+        foreach (['bill_number', 'purchase_ledger_name'] as $key) {
+            if (is_string($this->input($key))) {
+                $this->merge([$key => trim($this->input($key))]);
+            }
+        }
+    }
+
     public function rules(): array
     {
         return [
-            'vendor_id' => ['required', 'integer', Rule::exists('vendors', 'id')],
+            // whereNull deleted_at on both master checks: Vendor and Item soft-
+            // delete, and a bare exists() accepts the trashed row — the bill
+            // then commits pointing at a vendor its own page can no longer
+            // resolve (Codex on dbe988c).
+            'vendor_id' => ['required', 'integer', Rule::exists('vendors', 'id')->whereNull('deleted_at')],
             'purchase_order_id' => ['nullable', 'integer', Rule::exists('purchase_orders', 'id')->where('vendor_id', $this->input('vendor_id'))],
             // Unique PER VENDOR (the schema enforces it too): the same
             // vendor's invoice number twice is the double-payment path. The
@@ -56,7 +75,7 @@ class StoreSupplierBillRequest extends FormRequest
             'notes' => ['nullable', 'string'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.goods_receipt_note_line_id' => ['nullable', 'integer'],
-            'lines.*.item_id' => ['required', 'integer', Rule::exists('items', 'id')],
+            'lines.*.item_id' => ['required', 'integer', Rule::exists('items', 'id')->whereNull('deleted_at')],
             'lines.*.quantity' => ['required', 'numeric', 'gt:0', 'max:9999999999.9999', 'decimal:0,4', new PlainDecimal],
             'lines.*.rate' => ['required', 'numeric', 'min:0', 'max:9999999999.9999', 'decimal:0,4', new PlainDecimal],
             'lines.*.amount' => ['required', 'numeric', 'min:0', 'max:9999999999.9999', 'decimal:0,4', new PlainDecimal],
