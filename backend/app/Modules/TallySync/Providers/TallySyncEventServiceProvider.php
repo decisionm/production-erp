@@ -174,10 +174,30 @@ class TallySyncEventServiceProvider extends ServiceProvider
         try {
             $this->stageGoodsReceiptNoteUnguarded($note);
         } catch (Throwable $exception) {
-            Log::error('Tally staging for a goods receipt failed unexpectedly — the arrival stands; the receipt records nothing new.', [
+            Log::error('Tally staging for a goods receipt failed unexpectedly — the arrival stands.', [
                 'goods_receipt_note_id' => $note->id,
                 'exception' => $exception->getMessage(),
             ]);
+
+            // A crash must not read as silence at the receiving desk
+            // (Cursor final pass): best-effort refused record with a
+            // GENERIC reason — the exception's own words stay in the log,
+            // never on the receipt (they can carry anything). If even this
+            // write fails, the log line above already tells the story.
+            try {
+                $this->app->make(GoodsReceiptService::class)->recordTallyStaging($note, [
+                    'state' => 'refused',
+                    'reasons' => [[
+                        'code' => 'staging_error',
+                        'detail' => 'Tally staging failed unexpectedly — the arrival stands; ask an administrator to check the server log.',
+                    ]],
+                ]);
+            } catch (Throwable $recordFailure) {
+                Log::error('Recording the staging failure on the receipt also failed.', [
+                    'goods_receipt_note_id' => $note->id,
+                    'exception' => $recordFailure->getMessage(),
+                ]);
+            }
         }
     }
 
@@ -232,6 +252,36 @@ class TallySyncEventServiceProvider extends ServiceProvider
      * order should show; the enqueue itself never touches the order.
      */
     private function stagePurchaseOrder(PurchaseOrder $order): void
+    {
+        // The GRN listener's belt and braces, mirrored (Cursor final pass):
+        // the order is already Sent when this runs — a staging surprise must
+        // not turn a sent order into a 500.
+        try {
+            $this->stagePurchaseOrderUnguarded($order);
+        } catch (Throwable $exception) {
+            Log::error('Tally staging for a sent purchase order failed unexpectedly — the order stands.', [
+                'purchase_order_id' => $order->id,
+                'exception' => $exception->getMessage(),
+            ]);
+
+            try {
+                $this->app->make(PurchaseOrderService::class)->recordTallyStaging($order, [
+                    'state' => 'refused',
+                    'reasons' => [[
+                        'code' => 'staging_error',
+                        'detail' => 'Tally staging failed unexpectedly — the order stands; ask an administrator to check the server log.',
+                    ]],
+                ]);
+            } catch (Throwable $recordFailure) {
+                Log::error('Recording the staging failure on the order also failed.', [
+                    'purchase_order_id' => $order->id,
+                    'exception' => $recordFailure->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    private function stagePurchaseOrderUnguarded(PurchaseOrder $order): void
     {
         $at = now()->toIso8601String();
 

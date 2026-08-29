@@ -98,6 +98,8 @@ export function tallyReasonWords(reason: TallyStagingReason): string {
         case 'testing_company_unconfigured':
         case 'allowed_company_unconfigured':
             return 'no allowed Tally company is configured';
+        case 'staging_error':
+            return 'Tally staging failed unexpectedly — ask an administrator to check the server log';
         case 'cancelled_before_delivery':
             return 'cancelled before the agent collected it';
         case 'closed_before_delivery':

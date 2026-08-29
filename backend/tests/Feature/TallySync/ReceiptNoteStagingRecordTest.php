@@ -10,6 +10,7 @@ use App\Modules\Procurement\Models\GoodsReceiptNote;
 use App\Modules\Procurement\Models\PurchaseOrder;
 use App\Modules\Procurement\Models\Vendor;
 use App\Modules\TallySync\Models\TallySyncEntry;
+use App\Modules\TallySync\Services\TallySyncService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
@@ -107,6 +108,28 @@ class ReceiptNoteStagingRecordTest extends TestCase
         $this->assertStringNotContainsString('Vendor Alpha', $party['detail']);
 
         $this->assertSame(0, TallySyncEntry::query()->count(), 'a refusal stages nothing');
+    }
+
+    public function test_an_unexpected_staging_crash_is_recorded_on_the_receipt_and_never_fails_the_arrival(): void
+    {
+        config(['tally-sync.receipt_notes_enabled' => true]);
+
+        // An unexpected throwable — not a refusal — from the enqueue: the
+        // catch-all must log, record a GENERIC refused state (the crash's
+        // own words stay in the log, never on the receipt), and let the
+        // arrival succeed.
+        $this->mock(TallySyncService::class, function ($mock) {
+            $mock->shouldReceive('enqueueGoodsReceiptNote')
+                ->andThrow(new \RuntimeException('database exploded: secret rate 92.0000'));
+        });
+
+        $grn = $this->receive();
+
+        $this->assertNotNull($grn->id, 'the arrival posted despite the crash');
+        $staging = $grn->fresh()->tally_staging;
+        $this->assertSame('refused', $staging['state']);
+        $this->assertSame('staging_error', $staging['reasons'][0]['code']);
+        $this->assertStringNotContainsString('92.0000', $staging['reasons'][0]['detail'], 'the crash message never reaches the receipt');
     }
 
     public function test_a_blank_allowed_company_refuses_while_the_flag_is_on(): void

@@ -203,16 +203,24 @@ class SupplierBillService
 
     public function cancel(SupplierBill $bill, string $reason): SupplierBill
     {
-        if ($bill->status === SupplierBillStatus::Cancelled) {
-            throw InvalidStatusTransitionException::make('supplier bill', $bill->status->value, SupplierBillStatus::Cancelled->value);
-        }
+        return DB::transaction(function () use ($bill, $reason) {
+            // The same lock update()/record()/attach() take (Cursor final
+            // pass): cancel() racing record() must not overwrite `recorded`
+            // on what the route model still saw as a draft — the guard runs
+            // on what the lock sees.
+            $locked = SupplierBill::query()->lockForUpdate()->findOrFail($bill->id);
 
-        $bill->forceFill([
-            'status' => SupplierBillStatus::Cancelled,
-            'cancelled_reason' => $reason,
-        ])->save();
+            if ($locked->status === SupplierBillStatus::Cancelled) {
+                throw InvalidStatusTransitionException::make('supplier bill', $locked->status->value, SupplierBillStatus::Cancelled->value);
+            }
 
-        return $bill->load(self::WITH);
+            $locked->forceFill([
+                'status' => SupplierBillStatus::Cancelled,
+                'cancelled_reason' => $reason,
+            ])->save();
+
+            return $locked->load(self::WITH);
+        });
     }
 
     /**
