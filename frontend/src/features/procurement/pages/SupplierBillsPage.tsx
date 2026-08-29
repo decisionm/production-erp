@@ -111,9 +111,13 @@ export default function SupplierBillsPage() {
     // (Codex on 073a8c2): the general procurement endpoints 403 an Accounts
     // login that holds finance permissions alone, leaving required pickers
     // empty on the one screen built for that login.
+    const [vendorSearch, setVendorSearch] = useState('');
     const vendorsQuery = useQuery({
-        queryKey: ['procurement', 'supplier-bill-vendors'],
-        queryFn: () => listSupplierBillVendorOptions(),
+        // The search rides to the SERVER: the endpoint caps at 200 of 628
+        // vendors, so client-side filtering made the tail unselectable on a
+        // REQUIRED field (Codex final pass).
+        queryKey: ['procurement', 'supplier-bill-vendors', vendorSearch],
+        queryFn: () => listSupplierBillVendorOptions(vendorSearch),
         enabled: formOpen,
     });
     // Items through the FINANCE gate, not /inventory/items: an Accounts
@@ -413,7 +417,8 @@ export default function SupplierBillsPage() {
                     <Space wrap>
                         <Select
                             showSearch
-                            optionFilterProp="label"
+                            filterOption={false}
+                            onSearch={setVendorSearch}
                             loading={vendorsQuery.isLoading}
                             placeholder="Vendor"
                             style={{ width: 320 }}

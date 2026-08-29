@@ -273,3 +273,41 @@ describe('the Production menu', () => {
         expect(gated).toEqual(['/production/carton-trace']);
     });
 });
+
+/**
+ * SUPPLIER BILLS is procurement work done by Accounts: the API gates it on
+ * module:finance (FC-06 — every figure on a bill is a purchase rate), the
+ * Finance MODULE stays unadopted, and the sidebar therefore carries the one
+ * permissionModule child. Two logins pin the geometry from both sides:
+ * finance-only must REACH the page (the group surfaces with just that
+ * child, even though the group's own module rejects the login — Codex on
+ * 073a8c2), and procurement-only must NOT see it.
+ */
+describe('the Supplier Bills entry (permissionModule)', () => {
+    const user = (permissions: string[]): User => ({
+        id: 9,
+        name: 'Gate probe',
+        email: 'probe@example.test',
+        is_active: true,
+        permissions,
+    });
+
+    it('surfaces the Procurement group, with only Supplier Bills, for a finance-only login', () => {
+        const items = buildNavItems(user(['finance.view', 'finance.manage']));
+        const procurement = items.find((item) => item.key === 'procurement');
+
+        expect(procurement?.children?.map((child) => child.key)).toEqual(['/procurement/supplier-bills']);
+    });
+
+    it('hides Supplier Bills from a procurement-only login, whose other entries are untouched', () => {
+        const items = buildNavItems(user(['procurement.view', 'procurement.manage']));
+        const procurement = items.find((item) => item.key === 'procurement');
+
+        expect(procurement?.children?.map((child) => child.key)).toEqual([
+            '/procurement/vendors',
+            '/procurement/purchase-requisitions',
+            '/procurement/purchase-orders',
+            '/procurement/goods-receipts',
+        ]);
+    });
+});

@@ -249,7 +249,12 @@ class SupplierBillService
             ])->save();
 
             if ($previous !== null && $previous !== $path) {
-                Storage::disk('local')->delete($previous);
+                // AFTER COMMIT (Codex final pass): a rollback between the
+                // delete and the commit would put the OLD path back on the
+                // row with its file already gone. Deferred, a rollback
+                // leaves both files and the row consistent; the orphaned
+                // new file is the cheap failure.
+                DB::afterCommit(fn () => Storage::disk('local')->delete($previous));
             }
 
             return $locked->load(self::WITH);

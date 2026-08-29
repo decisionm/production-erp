@@ -428,8 +428,9 @@ export function buildNavItems(user: User | null) {
             if (item.children) {
                 const children = item.children.filter((child) => {
                     if (child.permissionModule) {
-                        return hasModuleAccess(user, child.permissionModule)
-                            && (reachesGroup || true); // its own permission is the whole gate
+                        // Its own permission is the whole gate — deliberately
+                        // NOT conditioned on reachesGroup.
+                        return hasModuleAccess(user, child.permissionModule);
                     }
                     if (!reachesGroup) return false;
                     return !child.module || (ADOPTED_MODULES.has(child.module) && hasModuleAccess(user, child.module));
