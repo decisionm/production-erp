@@ -48,3 +48,8 @@ lives where it is pointed to, once, and nowhere else.
 - Do not put secrets, tokens, purchase rates, or private Tally contents in
   documentation. Purchase rates are Owner/Accounts only (FC-06).
 - A resin bag belongs to no machine and no batch (FC-01).
+
+## Review chain for agent-built work
+
+Builder (with testing evidence) → Cursor review → Codex verification →
+owner. Work lands on a branch and is not merged before that chain completes.
