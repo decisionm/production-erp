@@ -237,15 +237,20 @@ class SupplierBillService
             $locked = SupplierBill::query()->lockForUpdate()->findOrFail($bill->id);
             $this->guardStatus($locked, SupplierBillStatus::Draft, 'attach a file to');
 
-            if ($locked->attachment_path !== null) {
-                Storage::disk('local')->delete($locked->attachment_path);
-            }
-
+            // Store the NEW scan first, delete the old one only after the
+            // row points at the replacement (Codex on 073a8c2): deleting
+            // first left a rolled-back bill advertising a scan that no
+            // longer existed.
+            $previous = $locked->attachment_path;
             $path = $file->store("supplier-bills/{$locked->id}", 'local');
             $locked->forceFill([
                 'attachment_path' => $path,
                 'attachment_name' => $file->getClientOriginalName(),
             ])->save();
+
+            if ($previous !== null && $previous !== $path) {
+                Storage::disk('local')->delete($previous);
+            }
 
             return $locked->load(self::WITH);
         });

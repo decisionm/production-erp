@@ -414,16 +414,31 @@ export function buildNavItems(user: User | null) {
             // Administrator holds every permission and would otherwise see every
             // module regardless of whether the factory uses it.
             if (item.module && !ADOPTED_MODULES.has(item.module)) return null;
-            if (item.module && !hasModuleAccess(user, item.module)) return null;
+
+            // Whether this user reaches the group through its OWN module.
+            // A group they do not reach that way can still surface — with
+            // ONLY those children — when a child carries a permissionModule
+            // the user holds (Codex on 073a8c2: a finance-only Accounts
+            // login is accepted by every supplier-bill route yet had no
+            // sidebar path to the page, because Procurement was rejected
+            // before its children were looked at). Adoption stays the hard
+            // gate above; this only widens the PERMISSION half.
+            const reachesGroup = !item.module || hasModuleAccess(user, item.module);
+
             if (item.children) {
-                const children = item.children.filter(
-                    (child) =>
-                        (!child.module || (ADOPTED_MODULES.has(child.module) && hasModuleAccess(user, child.module)))
-                        && (!child.permissionModule || hasModuleAccess(user, child.permissionModule)),
-                );
+                const children = item.children.filter((child) => {
+                    if (child.permissionModule) {
+                        return hasModuleAccess(user, child.permissionModule)
+                            && (reachesGroup || true); // its own permission is the whole gate
+                    }
+                    if (!reachesGroup) return false;
+                    return !child.module || (ADOPTED_MODULES.has(child.module) && hasModuleAccess(user, child.module));
+                });
                 if (children.length === 0) return null;
                 return { ...item, children };
             }
+
+            if (!reachesGroup) return null;
             return item;
         })
         .filter((item): item is NavGroup => item !== null);

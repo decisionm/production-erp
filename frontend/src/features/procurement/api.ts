@@ -361,6 +361,35 @@ export async function attachSupplierBillFile(id: number, file: File): Promise<Su
     return data.data;
 }
 
+/** Vendor identities for the bill's header picker — finance-gated; identity only (id, code, name). */
+export async function listSupplierBillVendorOptions(q = ''): Promise<{ id: number; code: string; name: string }[]> {
+    const { data } = await api.get<{ data: { id: number; code: string; name: string }[] }>(
+        '/procurement/supplier-bills/vendor-options',
+        { params: q.trim() !== '' ? { q: q.trim() } : {} },
+    );
+    return data.data;
+}
+
+/** A vendor's orders for the bill's optional PO reference — finance-gated; id, date, status only. */
+export async function listSupplierBillOrderOptions(vendorId: number): Promise<{ id: number; order_date: string | null; status: string }[]> {
+    const { data } = await api.get<{ data: { id: number; order_date: string | null; status: string }[] }>(
+        '/procurement/supplier-bills/order-options',
+        { params: { vendor_id: vendorId } },
+    );
+    return data.data;
+}
+
+/** An order's arrival lines for the bill's optional matching — finance-gated. */
+export async function listSupplierBillReceiptLineOptions(
+    purchaseOrderId: number,
+): Promise<{ id: number; goods_receipt_note_id: number; item: { id: number; sku: string; name: string; uom: string | null } | null; quantity: string }[]> {
+    const { data } = await api.get<{ data: { id: number; goods_receipt_note_id: number; item: { id: number; sku: string; name: string; uom: string | null } | null; quantity: string }[] }>(
+        '/procurement/supplier-bills/receipt-line-options',
+        { params: { purchase_order_id: purchaseOrderId } },
+    );
+    return data.data;
+}
+
 /**
  * Item identities for the bill's line picker, served inside the finance
  * gate: an Accounts login holds no inventory permission, and /inventory/items

@@ -7,11 +7,11 @@ import {
     attachSupplierBillFile,
     cancelSupplierBill,
     createSupplierBill,
-    listAllVendors,
-    listGoodsReceipts,
-    listPurchaseOrders,
     listSupplierBillItemOptions,
     listSupplierBillLedgerOptions,
+    listSupplierBillOrderOptions,
+    listSupplierBillReceiptLineOptions,
+    listSupplierBillVendorOptions,
     listSupplierBills,
     recordSupplierBill,
     updateSupplierBill,
@@ -107,7 +107,15 @@ export default function SupplierBillsPage() {
         queryFn: () => listSupplierBills(filters),
         placeholderData: (previous) => previous,
     });
-    const vendorsQuery = useQuery({ queryKey: ['procurement', 'vendors', 'all'], queryFn: listAllVendors });
+    // Every reference picker on this form reads through the FINANCE gate
+    // (Codex on 073a8c2): the general procurement endpoints 403 an Accounts
+    // login that holds finance permissions alone, leaving required pickers
+    // empty on the one screen built for that login.
+    const vendorsQuery = useQuery({
+        queryKey: ['procurement', 'supplier-bill-vendors'],
+        queryFn: () => listSupplierBillVendorOptions(),
+        enabled: formOpen,
+    });
     // Items through the FINANCE gate, not /inventory/items: an Accounts
     // login holds no inventory permission and got an empty picker there.
     const [itemSearch, setItemSearch] = useState('');
@@ -118,14 +126,14 @@ export default function SupplierBillsPage() {
     });
     // The chosen vendor's orders, for the optional PO reference.
     const ordersQuery = useQuery({
-        queryKey: ['procurement', 'purchase-orders', 'for-bill', vendorId],
-        queryFn: () => listPurchaseOrders({ vendor_id: vendorId as number, per_page: 200 }),
+        queryKey: ['procurement', 'supplier-bill-orders', vendorId],
+        queryFn: () => listSupplierBillOrderOptions(vendorId as number),
         enabled: formOpen && vendorId !== null,
     });
     // The chosen order's receipts, for the optional GRN-line match.
     const receiptsQuery = useQuery({
-        queryKey: ['procurement', 'goods-receipts', 'for-bill', purchaseOrderId],
-        queryFn: () => listGoodsReceipts({ purchase_order_id: purchaseOrderId as number, per_page: 200 }),
+        queryKey: ['procurement', 'supplier-bill-receipt-lines', purchaseOrderId],
+        queryFn: () => listSupplierBillReceiptLineOptions(purchaseOrderId as number),
         enabled: formOpen && purchaseOrderId !== null,
     });
     const ledgersQuery = useQuery({
@@ -134,17 +142,15 @@ export default function SupplierBillsPage() {
         enabled: formOpen,
     });
 
-    const vendorOptions = (vendorsQuery.data?.data ?? []).map((vendor) => ({ value: vendor.id, label: `${vendor.code} — ${vendor.name}` }));
+    const vendorOptions = (vendorsQuery.data ?? []).map((vendor) => ({ value: vendor.id, label: `${vendor.code} — ${vendor.name}` }));
     const itemOptions = (itemsQuery.data ?? []).map((item) => ({ value: item.id, label: itemPickerLabel(item) }));
     const grnLineOptions = useMemo(
         () =>
-            (receiptsQuery.data?.data ?? []).flatMap((grn) =>
-                grn.lines.map((line) => ({
-                    value: line.id,
-                    label: `${grnNumber(grn)} · ${itemLabel(line.item)} · received ${line.quantity}`,
-                    item_id: line.item?.id,
-                })),
-            ),
+            (receiptsQuery.data ?? []).map((line) => ({
+                value: line.id,
+                label: `${grnNumber({ id: line.goods_receipt_note_id })} · ${itemLabel(line.item)} · received ${line.quantity}`,
+                item_id: line.item?.id,
+            })),
         [receiptsQuery.data],
     );
 
@@ -408,6 +414,7 @@ export default function SupplierBillsPage() {
                         <Select
                             showSearch
                             optionFilterProp="label"
+                            loading={vendorsQuery.isLoading}
                             placeholder="Vendor"
                             style={{ width: 320 }}
                             value={vendorId}
@@ -427,7 +434,7 @@ export default function SupplierBillsPage() {
                             disabled={vendorId === null}
                             loading={ordersQuery.isLoading}
                             onChange={(value) => setPurchaseOrderId(value ?? null)}
-                            options={(ordersQuery.data?.data ?? []).map((order) => ({
+                            options={(ordersQuery.data ?? []).map((order) => ({
                                 value: order.id,
                                 label: `${poNumber(order)} · ${order.order_date ?? ''}`,
                             }))}

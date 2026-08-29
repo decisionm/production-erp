@@ -551,6 +551,9 @@ Route::prefix('v1')->group(function () {
         Route::prefix('procurement')->middleware('module:finance')->group(function () {
             Route::get('supplier-bills/ledger-options', [SupplierBillController::class, 'ledgerOptions']);
             Route::get('supplier-bills/item-options', [SupplierBillController::class, 'itemOptions']);
+            Route::get('supplier-bills/vendor-options', [SupplierBillController::class, 'vendorOptions']);
+            Route::get('supplier-bills/order-options', [SupplierBillController::class, 'orderOptions']);
+            Route::get('supplier-bills/receipt-line-options', [SupplierBillController::class, 'receiptLineOptions']);
             Route::apiResource('supplier-bills', SupplierBillController::class)->only(['index', 'store', 'show', 'update']);
             Route::post('supplier-bills/{supplier_bill}/record', [SupplierBillController::class, 'record']);
             Route::post('supplier-bills/{supplier_bill}/cancel', [SupplierBillController::class, 'cancel']);

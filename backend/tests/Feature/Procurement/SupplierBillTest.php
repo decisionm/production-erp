@@ -2,14 +2,18 @@
 
 namespace Tests\Feature\Procurement;
 
+use App\Exceptions\InvalidStatusTransitionException;
 use App\Models\User;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Procurement\Models\Enums\PurchaseOrderStatus;
+use App\Modules\Procurement\Models\Enums\PurchaseRequisitionStatus;
 use App\Modules\Procurement\Models\GoodsReceiptNote;
 use App\Modules\Procurement\Models\PurchaseOrder;
+use App\Modules\Procurement\Models\PurchaseRequisition;
 use App\Modules\Procurement\Models\SupplierBill;
 use App\Modules\Procurement\Models\Vendor;
+use App\Modules\Procurement\Services\PurchaseRequisitionService;
 use App\Modules\Procurement\Services\SupplierBillService;
 use App\Modules\TallySync\Models\Ledger;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -219,6 +223,47 @@ class SupplierBillTest extends TestCase
         $searched = collect($this->getJson('/api/v1/procurement/supplier-bills/item-options?q=ITEM_C')->assertOk()->json('data'))
             ->pluck('sku');
         $this->assertSame(['ITEM_C'], $searched->all());
+    }
+
+    public function test_every_reference_picker_is_served_inside_the_finance_gate(): void
+    {
+        // Finance-only — the login shape this screen exists for.
+        $grnLineId = $this->receiveLine();
+        $this->actAsAccounts();
+
+        $vendors = collect($this->getJson('/api/v1/procurement/supplier-bills/vendor-options')->assertOk()->json('data'));
+        $this->assertContains('Vendor Alpha', $vendors->pluck('name'));
+
+        $orders = collect($this->getJson('/api/v1/procurement/supplier-bills/order-options?vendor_id='.$this->vendor->id)->assertOk()->json('data'));
+        $this->assertNotEmpty($orders);
+
+        $lines = collect($this->getJson('/api/v1/procurement/supplier-bills/receipt-line-options?purchase_order_id='.$orders[0]['id'])->assertOk()->json('data'));
+        $this->assertSame($grnLineId, $lines[0]['id']);
+        $this->assertSame('100.0000', $lines[0]['quantity']);
+        $this->assertArrayNotHasKey('unit_cost', $lines[0], 'identity and quantity only');
+    }
+
+    public function test_approve_and_reject_racing_on_one_requisition_cannot_both_stamp(): void
+    {
+        // The requisition sibling of the bill locks (Codex on 073a8c2):
+        // the second decision must be refused as the status transition it
+        // is, not stamped beside the first.
+        $this->actAsAccounts();
+        $requisition = PurchaseRequisition::create([
+            'status' => PurchaseRequisitionStatus::Draft,
+        ]);
+        $service = app(PurchaseRequisitionService::class);
+        $service->approve($requisition, null);
+
+        try {
+            $service->reject(PurchaseRequisition::findOrFail($requisition->id), null);
+            $this->fail('expected the second decision to be refused');
+        } catch (InvalidStatusTransitionException) {
+            // refused — and the trail carries exactly one decision:
+            $fresh = $requisition->fresh();
+            $this->assertSame('approved', $fresh->status->value);
+            $this->assertNull($fresh->rejected_at);
+        }
     }
 
     public function test_a_draft_update_that_collides_on_the_unique_index_is_a_422(): void

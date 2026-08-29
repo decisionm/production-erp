@@ -117,26 +117,39 @@ class PurchaseRequisitionService
      */
     public function approve(PurchaseRequisition $requisition, ?int $approvedBy = null): PurchaseRequisition
     {
-        $this->guardStatus($requisition, PurchaseRequisitionStatus::Draft, PurchaseRequisitionStatus::Approved);
-        $requisition->forceFill([
-            'status' => PurchaseRequisitionStatus::Approved,
+        return $this->decide($requisition, PurchaseRequisitionStatus::Approved, [
             'approved_by' => $approvedBy,
             'approved_at' => now(),
-        ])->save();
-
-        return $requisition->load(['lines.item', 'requestedBy', 'approvedBy', 'rejectedBy', 'purchaseOrders']);
+        ]);
     }
 
     public function reject(PurchaseRequisition $requisition, ?int $rejectedBy = null): PurchaseRequisition
     {
-        $this->guardStatus($requisition, PurchaseRequisitionStatus::Draft, PurchaseRequisitionStatus::Rejected);
-        $requisition->forceFill([
-            'status' => PurchaseRequisitionStatus::Rejected,
+        return $this->decide($requisition, PurchaseRequisitionStatus::Rejected, [
             'rejected_by' => $rejectedBy,
             'rejected_at' => now(),
-        ])->save();
+        ]);
+    }
 
-        return $requisition->load(['lines.item', 'requestedBy', 'approvedBy', 'rejectedBy', 'purchaseOrders']);
+    /**
+     * ONE decision per requisition (Codex on 073a8c2): Approve and Reject
+     * racing on the same draft both passed the route-model guard, and the
+     * loser's stamps landed beside the winner's — a row claiming both
+     * decisions. The guard now runs on a row lock, so the second decision
+     * is refused as the status transition it actually is.
+     *
+     * @param  array<string, mixed>  $stamps
+     */
+    private function decide(PurchaseRequisition $requisition, PurchaseRequisitionStatus $target, array $stamps): PurchaseRequisition
+    {
+        return DB::transaction(function () use ($requisition, $target, $stamps) {
+            $locked = PurchaseRequisition::query()->lockForUpdate()->findOrFail($requisition->id);
+            $this->guardStatus($locked, PurchaseRequisitionStatus::Draft, $target);
+
+            $locked->forceFill(['status' => $target, ...$stamps])->save();
+
+            return $locked->load(['lines.item', 'requestedBy', 'approvedBy', 'rejectedBy', 'purchaseOrders']);
+        });
     }
 
     private function guardStatus(

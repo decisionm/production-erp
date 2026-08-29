@@ -7,7 +7,10 @@ use App\Modules\Inventory\Models\Item;
 use App\Modules\Procurement\Http\Requests\ListSupplierBillsRequest;
 use App\Modules\Procurement\Http\Requests\StoreSupplierBillRequest;
 use App\Modules\Procurement\Http\Resources\SupplierBillResource;
+use App\Modules\Procurement\Models\GoodsReceiptNoteLine;
+use App\Modules\Procurement\Models\PurchaseOrder;
 use App\Modules\Procurement\Models\SupplierBill;
+use App\Modules\Procurement\Models\Vendor;
 use App\Modules\Procurement\Services\ProcurementDocumentQuery;
 use App\Modules\Procurement\Services\SupplierBillService;
 use App\Modules\TallySync\Models\Ledger;
@@ -84,6 +87,81 @@ class SupplierBillController extends Controller
             $supplierBill->attachment_path,
             $supplierBill->attachment_name ?? basename($supplierBill->attachment_path),
         );
+    }
+
+    /**
+     * Vendor identities for the bill's header picker, inside the finance
+     * gate (Codex on 073a8c2): the general vendor endpoints live under
+     * module:procurement, so an Accounts login holding only finance
+     * permissions got a 403 and an empty REQUIRED picker — no bill could be
+     * entered at all. FC-06 is untouched: supplier identity belongs to
+     * Owner/Accounts, which is exactly who module:finance admits. Identity
+     * only — id, code, name; no contacts, no terms.
+     */
+    public function vendorOptions(Request $request): JsonResponse
+    {
+        $q = trim((string) $request->query('q', ''));
+        $limit = 200;
+
+        $query = Vendor::query()
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->limit($limit);
+
+        if ($q !== '') {
+            app(ProcurementDocumentQuery::class)->whereVendorMatches($query, $q);
+        }
+
+        $vendors = $query->get(['id', 'code', 'name']);
+
+        return response()->json([
+            'data' => $vendors,
+            'meta' => ['limit' => $limit, 'truncated' => $vendors->count() === $limit],
+        ]);
+    }
+
+    /**
+     * A vendor's purchase orders, for the bill's optional PO reference —
+     * same finance-gate reasoning as vendorOptions. Identity only: id and
+     * order date; the order's money lives on its own finance-gated reads.
+     */
+    public function orderOptions(Request $request): JsonResponse
+    {
+        $validated = $request->validate(['vendor_id' => ['required', 'integer', 'min:1']]);
+
+        $orders = PurchaseOrder::query()
+            ->where('vendor_id', (int) $validated['vendor_id'])
+            ->orderByDesc('id')
+            ->limit(200)
+            ->get(['id', 'order_date', 'status']);
+
+        return response()->json(['data' => $orders]);
+    }
+
+    /**
+     * An order's arrival lines, for the bill's optional matching — same
+     * finance-gate reasoning. Each option is the line's identity plus the
+     * received quantity the variance column compares against.
+     */
+    public function receiptLineOptions(Request $request): JsonResponse
+    {
+        $validated = $request->validate(['purchase_order_id' => ['required', 'integer', 'min:1']]);
+
+        $lines = GoodsReceiptNoteLine::query()
+            ->whereHas('goodsReceiptNote', fn ($grn) => $grn->where('purchase_order_id', (int) $validated['purchase_order_id']))
+            ->with(['item:id,sku,name,uom', 'goodsReceiptNote:id'])
+            ->orderByDesc('id')
+            ->limit(500)
+            ->get()
+            ->map(fn ($line) => [
+                'id' => $line->id,
+                'goods_receipt_note_id' => $line->goods_receipt_note_id,
+                'item' => $line->item ? ['id' => $line->item->id, 'sku' => $line->item->sku, 'name' => $line->item->name, 'uom' => $line->item->uom] : null,
+                'quantity' => $line->quantity,
+            ])
+            ->values();
+
+        return response()->json(['data' => $lines]);
     }
 
     /**
