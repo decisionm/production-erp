@@ -384,9 +384,17 @@ its VENDORS and when, has no module behind it: nothing tracks vendor
 bills, due dates or payments made, so no figure was faked onto the
 dashboard (PR #151 review, 09-Aug). If the owner wants vendor payments
 visible, that is a real Finance-module build to scope — bills against
-POs/GRNs, due dates, payment recording — not a dashboard cell. **Blocks:**
-nothing — the dashboard stays receivables-only until answered. *Open
-since 2026-08-09.*
+POs/GRNs, due dates, payment recording — not a dashboard cell.
+
+**Narrowed 2026-08-29 — the BILLS half landed by lead instruction.** The
+28-Aug procurement brief from the lead directed an ERP-side supplier-bill
+screen, and it shipped (PR #49): bills against POs/GRNs, recorded by
+Accounts, finance-gated (FC-06), no Tally posting (that half is the
+question below Q67). What THIS question still asks is the rest of
+accounts payable — due dates, payment recording, and any dashboard
+figure for what the factory owes. Nothing tracks a payment yet, and no
+figure was added to the dashboard. **Blocks:** nothing — the dashboard
+stays receivables-only until answered. *Open since 2026-08-09.*
 
 ## Q29 · Are the regional ledger groups all customers under Sundry Debtors? — RESOLVED
 

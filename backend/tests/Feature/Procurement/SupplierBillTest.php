@@ -150,6 +150,22 @@ class SupplierBillTest extends TestCase
         $this->assertSame(1, SupplierBill::query()->count());
     }
 
+    public function test_another_vendors_receipt_line_cannot_be_matched_even_on_a_bill_with_no_po(): void
+    {
+        $this->actAsAccounts();
+        $grnLineId = $this->receiveLine(); // vendor A's arrival
+        $other = Vendor::create(['code' => 'VND-B', 'name' => 'Vendor Beta']);
+
+        // Vendor B's bill, NO purchase order named — the gap Codex found:
+        // the PO consistency check only ran when the bill named one.
+        $payload = $this->payload(['vendor_id' => $other->id]);
+        $payload['lines'][0]['goods_receipt_note_line_id'] = $grnLineId;
+
+        $this->postJson('/api/v1/procurement/supplier-bills', $payload)
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['lines.0.goods_receipt_note_line_id']);
+    }
+
     public function test_a_grn_line_for_another_item_cannot_be_matched(): void
     {
         $this->actAsAccounts();

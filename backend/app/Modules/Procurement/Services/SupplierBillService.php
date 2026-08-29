@@ -147,31 +147,44 @@ class SupplierBillService
      */
     public function update(SupplierBill $bill, array $data): SupplierBill
     {
-        $this->guardStatus($bill, SupplierBillStatus::Draft, 'edit');
         $this->guardArithmetic($data);
         $this->guardMatching($data);
 
         return DB::transaction(function () use ($bill, $data) {
-            $bill->update(collect($data)->except('lines')->all());
-            $bill->lines()->delete();
+            // Re-read UNDER A ROW LOCK (Codex round 1): a concurrent record()
+            // or cancel() between an out-of-transaction status check and this
+            // write would let a draft edit rewrite a bill that is already a
+            // record. The guard runs on what the lock sees, not on what the
+            // route model saw.
+            $locked = SupplierBill::query()->lockForUpdate()->findOrFail($bill->id);
+            $this->guardStatus($locked, SupplierBillStatus::Draft, 'edit');
+
+            $locked->update(collect($data)->except('lines')->all());
+            $locked->lines()->delete();
             foreach ($data['lines'] as $line) {
-                $bill->lines()->create($line);
+                $locked->lines()->create($line);
             }
 
-            return $bill->load(self::WITH);
+            return $locked->load(self::WITH);
         });
     }
 
     public function record(SupplierBill $bill, ?int $recordedBy): SupplierBill
     {
-        $this->guardStatus($bill, SupplierBillStatus::Draft, 'record');
-        $bill->forceFill([
-            'status' => SupplierBillStatus::Recorded,
-            'recorded_by' => $recordedBy,
-            'recorded_at' => now(),
-        ])->save();
+        return DB::transaction(function () use ($bill, $recordedBy) {
+            // Same lock as update() — record() and a draft edit must
+            // serialise, whichever lands first.
+            $locked = SupplierBill::query()->lockForUpdate()->findOrFail($bill->id);
+            $this->guardStatus($locked, SupplierBillStatus::Draft, 'record');
 
-        return $bill->load(self::WITH);
+            $locked->forceFill([
+                'status' => SupplierBillStatus::Recorded,
+                'recorded_by' => $recordedBy,
+                'recorded_at' => now(),
+            ])->save();
+
+            return $locked->load(self::WITH);
+        });
     }
 
     public function cancel(SupplierBill $bill, string $reason): SupplierBill
@@ -258,7 +271,7 @@ class SupplierBillService
             }
 
             $grnLine = GoodsReceiptNoteLine::query()
-                ->with('goodsReceiptNote')
+                ->with('goodsReceiptNote.purchaseOrder')
                 ->find((int) $line['goods_receipt_note_line_id']);
 
             if ($grnLine === null) {
@@ -270,6 +283,18 @@ class SupplierBillService
             if ((int) $grnLine->item_id !== (int) $line['item_id']) {
                 throw ValidationException::withMessages([
                     "lines.{$index}.goods_receipt_note_line_id" => 'That receipt line is for a different item than this bill line.',
+                ]);
+            }
+
+            // The VENDOR check runs whether or not the bill names a PO
+            // (Codex round 1): a bill with no order reference could
+            // otherwise match another vendor's arrival — and paying vendor A
+            // against vendor B's receipt is precisely the confusion the
+            // matching column exists to prevent.
+            $receiptVendorId = $grnLine->goodsReceiptNote?->purchaseOrder?->vendor_id;
+            if ($receiptVendorId !== null && (int) $receiptVendorId !== (int) $data['vendor_id']) {
+                throw ValidationException::withMessages([
+                    "lines.{$index}.goods_receipt_note_line_id" => 'That receipt line belongs to a different vendor than this bill names.',
                 ]);
             }
 

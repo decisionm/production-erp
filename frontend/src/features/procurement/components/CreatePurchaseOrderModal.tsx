@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation } from '@tanstack/react-query';
 import { Alert, DatePicker, Form, Input, Modal, Select, Space, Switch } from 'antd';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { createPurchaseOrder } from '@/features/procurement/api';
@@ -63,9 +63,18 @@ export default function CreatePurchaseOrderModal({ open, onClose, onCreated, ven
     });
 
     // Prefill exactly once per opening: the requisition's items and
-    // quantities, each line's rate left for the buyer.
+    // quantities, each line's rate left for the buyer. The ref remembers
+    // whether the CURRENT form contents came from a requisition (Codex
+    // round 1): the form's hooks outlive destroyOnHidden, so without the
+    // reset below, closing a Raise PO half-way and then clicking New
+    // Purchase Order re-offered the requisition's items on what claims to
+    // be a blank order.
+    const formCameFromRequisition = useRef(false);
     useEffect(() => {
-        if (open && raiseFrom) {
+        if (!open) return;
+
+        if (raiseFrom) {
+            formCameFromRequisition.current = true;
             reset({
                 lines: raiseFrom.lines.map((line) => ({
                     ...emptyPurchaseOrderLine(),
@@ -73,6 +82,9 @@ export default function CreatePurchaseOrderModal({ open, onClose, onCreated, ven
                     quantity: line.quantity,
                 })),
             });
+        } else if (formCameFromRequisition.current) {
+            formCameFromRequisition.current = false;
+            reset({ lines: [emptyPurchaseOrderLine()] });
         }
     }, [open, raiseFrom, reset]);
 
