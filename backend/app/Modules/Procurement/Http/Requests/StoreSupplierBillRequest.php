@@ -43,23 +43,23 @@ class StoreSupplierBillRequest extends FormRequest
             // ledger the masters pull actually brought over: an invented
             // Tally name is exactly what AGENTS.md forbids recording.
             'purchase_ledger_name' => ['nullable', 'string', 'max:255', Rule::exists('ledgers', 'name')->whereNull('deleted_at')],
-            'subtotal' => ['required', 'numeric', 'min:0', 'max:99999999999', 'decimal:0,4', new PlainDecimal],
-            'cgst' => ['sometimes', 'numeric', 'min:0', 'max:99999999999', 'decimal:0,4', new PlainDecimal],
-            'sgst' => ['sometimes', 'numeric', 'min:0', 'max:99999999999', 'decimal:0,4', new PlainDecimal],
-            'igst' => ['sometimes', 'numeric', 'min:0', 'max:99999999999', 'decimal:0,4', new PlainDecimal],
+            'subtotal' => ['required', 'numeric', 'min:0', 'max:9999999999.9999', 'decimal:0,4', new PlainDecimal],
+            'cgst' => ['sometimes', 'numeric', 'min:0', 'max:9999999999.9999', 'decimal:0,4', new PlainDecimal],
+            'sgst' => ['sometimes', 'numeric', 'min:0', 'max:9999999999.9999', 'decimal:0,4', new PlainDecimal],
+            'igst' => ['sometimes', 'numeric', 'min:0', 'max:9999999999.9999', 'decimal:0,4', new PlainDecimal],
             // Signed, small: a rounding line larger than a rupee either way
             // is not rounding — it is a figure on the wrong row. PlainDecimal
             // besides `numeric`: `1e-1` satisfies numeric and then throws
             // inside bcadd — a 500 for a typo.
             'rounding' => ['sometimes', 'numeric', 'between:-0.99,0.99', 'decimal:0,4', new PlainDecimal],
-            'total' => ['required', 'numeric', 'min:0', 'max:99999999999', 'decimal:0,4', new PlainDecimal],
+            'total' => ['required', 'numeric', 'min:0', 'max:9999999999.9999', 'decimal:0,4', new PlainDecimal],
             'notes' => ['nullable', 'string'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.goods_receipt_note_line_id' => ['nullable', 'integer'],
             'lines.*.item_id' => ['required', 'integer', Rule::exists('items', 'id')],
-            'lines.*.quantity' => ['required', 'numeric', 'gt:0', 'max:99999999999', 'decimal:0,4', new PlainDecimal],
-            'lines.*.rate' => ['required', 'numeric', 'min:0', 'max:99999999999', 'decimal:0,4', new PlainDecimal],
-            'lines.*.amount' => ['required', 'numeric', 'min:0', 'max:99999999999', 'decimal:0,4', new PlainDecimal],
+            'lines.*.quantity' => ['required', 'numeric', 'gt:0', 'max:9999999999.9999', 'decimal:0,4', new PlainDecimal],
+            'lines.*.rate' => ['required', 'numeric', 'min:0', 'max:9999999999.9999', 'decimal:0,4', new PlainDecimal],
+            'lines.*.amount' => ['required', 'numeric', 'min:0', 'max:9999999999.9999', 'decimal:0,4', new PlainDecimal],
         ];
     }
 }

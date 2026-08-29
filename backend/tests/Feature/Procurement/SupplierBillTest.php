@@ -193,6 +193,20 @@ class SupplierBillTest extends TestCase
             ->assertJsonValidationErrors(['lines.0.amount']);
     }
 
+    public function test_a_figure_beyond_the_columns_ten_integer_digits_is_a_422_not_a_500(): void
+    {
+        $this->actAsAccounts();
+
+        // decimal(14,4) holds at most 9999999999.9999; the old bound let one
+        // more digit through to MySQL strict mode as an out-of-range 500.
+        $payload = $this->payload(['subtotal' => '10000000000', 'total' => '10000000180']);
+        $payload['lines'][0]['amount'] = '10000000000';
+
+        $this->postJson('/api/v1/procurement/supplier-bills', $payload)
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['subtotal']);
+    }
+
     public function test_a_purchase_ledger_name_must_exist_in_the_pulled_ledger_master(): void
     {
         $this->actAsAccounts();
