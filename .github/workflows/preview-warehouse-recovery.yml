@@ -1,0 +1,93 @@
+name: Preview warehouse stock recovery
+
+# Lists the stock standing in warehouses no picker offers, says which single
+# Store each row would move to, and classifies every row from the evidence in
+# its own movement history. It answers the question DEC-20260817-001 insists is
+# answered per row — dependency and stock history proven — BEFORE anything is
+# merged, deactivated or moved.
+#
+# THERE IS NO WRITE MODE, and that is deliberate rather than unfinished. Its
+# siblings take a `write: true` input because they have a write to offer; this
+# one has none to offer, so it takes no input at all and there is no flag a
+# tired thumb can set. Recovering the stock is a separate, explicitly-designed
+# act that does not exist yet and must not be reachable from a report.
+#
+# PRODUCTION/WIP IS NOT LISTED. It is retired only in the sense that no picker
+# offers it: it is the location holding material issued to production and not
+# yet consumed, which is what makes "issued to production" a real stock state.
+# The command excludes it through ProductionWipLocationResolver — the same
+# resolver the issue path asks — so this report can never disagree with the
+# floor about which row is WIP.
+
+# Least privilege: nothing here writes to the repository. Every workflow uses
+# only checkout, setup-node/php and same-run artifacts, and reaches the server
+# over SSH with a deploy key — never the GITHUB_TOKEN. Read is all this needs,
+# and this one does not even read the repository beyond checking itself out.
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: preview-warehouse-recovery
+  cancel-in-progress: false
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # The host intermittently answers nothing and every such failure has
+          # cleared on a re-run of the same commit — it is the host, not the
+          # change. Retrying here removes that manual re-run without weakening
+          # anything: three empty attempts still fail the step loudly.
+          keys=""
+          for attempt in 1 2 3; do
+            keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+            if [ -n "$keys" ]; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "ssh-keyscan attempt ${attempt} returned no host key; retrying in $((attempt * 10))s"
+              sleep "$((attempt * 10))"
+            fi
+          done
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Check hPanel → Advanced → SSH Access, and whether brute-force protection has banned the runner. Re-running often clears a transient failure."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      # No inputs to sanitise: this workflow takes none, so nothing crosses
+      # into the shell from a form field at all.
+      - name: Run the preview
+        run: |
+          set -o pipefail
+
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && \$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php) artisan inventory:preview-warehouse-recovery" \
+            2>&1 | tee output.txt
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo '### Warehouse stock recovery — preview only'
+            echo ''
+            echo 'Read-only. Nothing was changed, and this workflow has no write mode.'
+            echo 'Production/WIP is excluded by design — it holds material issued to production but not yet consumed.'
+            echo ''
+            echo 'A row in the PILOT or TEST bucket is stock the factory never received. Moving those into the'
+            echo 'Store would credit it with material that does not exist; what happens to them is an owner decision.'
+            echo ''
+            echo '```'
+            tail -c 60000 output.txt 2>/dev/null || echo '(no output captured)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
